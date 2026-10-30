@@ -10,9 +10,7 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// One tab per retained result dataset.
-pub(in crate::workbench) fn result_documents(
-    simulation: &SimulationState,
-) -> Vec<WorkspaceDocument> {
+pub fn result_documents(simulation: &SimulationState) -> Vec<WorkspaceDocument> {
     simulation
         .retained
         .runs
@@ -37,7 +35,7 @@ pub(in crate::workbench) fn active_result_document(
 }
 
 /// Show a saved result document.
-pub(in crate::workbench) fn activate_visualization_document(
+pub fn activate_visualization_document(
     state: &mut ResultsParts<'_>,
     document_id: &crate::product::ResultDocumentId,
 ) -> bool {
@@ -61,7 +59,7 @@ pub(in crate::workbench) fn show_visualization_document(
 }
 
 /// Show a retained result dataset.
-pub(in crate::workbench) fn activate_result_dataset(
+pub fn activate_result_dataset(
     simulation: &mut SimulationState,
     dataset_id: &crate::product::DatasetId,
 ) -> bool {

@@ -27,21 +27,21 @@ use super::results_actions::{
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
 use rspice_app_workbench::workbench::docks::navigator::muted;
 
-pub(super) const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
-pub(super) const SIGNAL_ROW_HEIGHT: f32 = 30.0;
+pub const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
+pub const SIGNAL_ROW_HEIGHT: f32 = 30.0;
 // The results browser's two-register quantity row and its group head, from
 // the mockup's `.result-browser-quantity` / `.result-browser-analysis-head`.
-pub(super) const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
+pub const RESULT_QUANTITY_ROW_HEIGHT: f32 = 36.0;
 const RESULT_ANALYSIS_HEAD_HEIGHT: f32 = 31.0;
 const RESULT_BROWSER_VIRTUALIZATION_THRESHOLD: usize = 250;
 const RESULT_BROWSER_RENDER_WINDOW_ROWS: usize = 120;
 const RESULT_BROWSER_OVERSCAN_ROWS: usize = 20;
 const RESULT_MANIFEST_ROW_HEIGHT: f32 = 26.0;
-pub(super) const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
+pub const TOUCH_TARGET_HEIGHT: f32 = crate::ui::tokens::TOUCH_TARGET;
 
 /// A result control's height: its own desktop height, or in a touch
 /// composition the theme's touch target, which Accessibility may raise.
-pub(super) fn responsive_result_control_height(desktop_height: f32, control_height: f32) -> f32 {
+pub fn responsive_result_control_height(desktop_height: f32, control_height: f32) -> f32 {
     if control_height >= TOUCH_TARGET_HEIGHT {
         control_height
     } else {
@@ -49,7 +49,7 @@ pub(super) fn responsive_result_control_height(desktop_height: f32, control_heig
     }
 }
 
-pub(super) fn retained_result_artifacts(
+pub fn retained_result_artifacts(
     analysis: &crate::state::AnalysisResult,
     presentation_key: AnalysisPresentationKey,
 ) -> Vec<ResultArtifact> {
@@ -1038,7 +1038,7 @@ fn result_browser_virtual_omission(ui: &mut Ui, text: &str, row_height: f32) {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub(super) enum ResultCompletenessClass {
+pub enum ResultCompletenessClass {
     Complete,
     Partial,
     Loading,
@@ -1181,7 +1181,7 @@ fn sweep_endpoint(value: f64, unit: &str) -> String {
 /// Human name for a retained quantity's kind, read from the same accessor
 /// authority the browser's units come from. The metadata line states it once
 /// per row so no row needs a repeated kind chip.
-pub(super) fn result_quantity_kind_label(name: &str, unit: &str) -> &'static str {
+pub fn result_quantity_kind_label(name: &str, unit: &str) -> &'static str {
     if crate::workbench::documents::result_document::browser_signal_is_current(name) {
         return if unit == "°" {
             "Current phase"

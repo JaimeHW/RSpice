@@ -184,7 +184,7 @@ fn device_target(state: ResultsReads<'_>, name: &str) -> Option<u64> {
     )
     .map(|component| component.id)
 }
-pub(crate) fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
+pub fn apply_action(state: &mut ResultsParts<'_>, action: OpAction) {
     match action {
         OpAction::LocateNode(name) => {
             let signal = if name

@@ -59,7 +59,7 @@ pub(super) fn structure_is_renderable(analysis: &crate::state::AnalysisResult) -
 /// Rebuild the mutable drawing cache solely from the selected immutable
 /// result. Cache provenance makes repeated frames a no-op and prevents a
 /// same-shape result from inheriting another run's RF traces.
-pub(crate) fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
+pub fn synchronize_active_analysis(state: &mut ResultsParts<'_>) -> bool {
     if state
         .results_reads()
         .viewer_capability(ActiveViewer::SmithChart)

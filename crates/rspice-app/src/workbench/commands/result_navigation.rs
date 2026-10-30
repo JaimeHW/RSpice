@@ -94,7 +94,7 @@ fn show_session_line(model: &Model, workbench: &mut WorkbenchSession, log_id: u6
 /// Callers offer this only for a run the session still holds; a run dropped
 /// between the offer and the click is reported rather than opened as an empty
 /// channel.
-pub(crate) fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_sequence: u64) {
+pub fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_sequence: u64) {
     if model
         .simulation
         .retained
@@ -115,7 +115,7 @@ pub(crate) fn open_run_log(model: &Model, workbench: &mut WorkbenchSession, run_
 ///
 /// A run dropped since the finding was made is reported rather than opened
 /// as an empty channel.
-pub(crate) fn show_run_line(
+pub fn show_run_line(
     model: &Model,
     workbench: &mut WorkbenchSession,
     run_sequence: u64,
@@ -142,7 +142,7 @@ pub(crate) fn show_run_line(
 }
 
 /// The run that produced dataset `dataset`, while the session still holds it.
-pub(crate) fn producing_run(
+pub fn producing_run(
     runs: &[crate::state::SimulationRun],
     dataset: crate::product::DatasetId,
 ) -> Option<u64> {

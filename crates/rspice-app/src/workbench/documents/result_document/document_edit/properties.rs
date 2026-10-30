@@ -11,7 +11,7 @@ use crate::results::visualization_document::VisualizationPresentationPolicy;
 use crate::workbench::ScalarPreference;
 
 /// Open Plot properties on what the Results workspace is showing.
-pub(crate) fn open_properties(state: &mut ResultsParts<'_>) {
+pub fn open_properties(state: &mut ResultsParts<'_>) {
     let draft = match active_document_id(state.results_reads()).and_then(|document_id| {
         state
             .model

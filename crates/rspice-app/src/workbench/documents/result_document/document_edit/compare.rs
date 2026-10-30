@@ -44,14 +44,14 @@ fn run_label(run: &SimulationRun) -> String {
 }
 
 /// Whether Compare datasets has a candidate and a baseline to compare it with.
-pub(crate) fn compare_available(state: ResultsReads<'_>) -> bool {
+pub fn compare_available(state: ResultsReads<'_>) -> bool {
     reading_analysis(state).is_ok_and(|(run, analysis)| !baselines(state, run, analysis).is_empty())
 }
 
 /// Whether Compare datasets can run here, and why not: away from Results
 /// there is no active result document, and in it a second compatible run is
 /// missing.
-pub(crate) fn compare_availability(
+pub fn compare_availability(
     state: ResultsReads<'_>,
 ) -> crate::workbench::framework::command_registry::CommandAvailability {
     use crate::workbench::framework::command_registry::CommandAvailability;
@@ -67,7 +67,7 @@ pub(crate) fn compare_availability(
 
 /// Open Compare datasets on the result the reader is looking at, against the
 /// first compatible baseline.
-pub(crate) fn open_compare(state: &mut ResultsParts<'_>) {
+pub fn open_compare(state: &mut ResultsParts<'_>) {
     let baseline = match reading_analysis(state.results_reads()) {
         Ok((run, analysis)) => baselines(state.results_reads(), run, analysis)
             .first()
@@ -130,7 +130,7 @@ fn numbers(draft: &CompareDraft) -> Result<CompareNumbers, String> {
 
 /// Resolve the form's choices against the retained datasets, moving a
 /// baseline or signal that no longer exists onto the first one that does.
-pub(crate) fn choices(state: ResultsReads<'_>, draft: &mut CompareDraft) -> CompareChoices {
+pub fn choices(state: ResultsReads<'_>, draft: &mut CompareDraft) -> CompareChoices {
     let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {

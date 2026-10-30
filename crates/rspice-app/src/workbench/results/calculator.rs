@@ -123,11 +123,7 @@ fn body(ui: &mut Ui, cx: &mut Cx<'_, ResultsFeature>) {
 ///
 /// The tool stays open: plotting is a step in composing an expression, not
 /// the end of the task.
-pub(crate) fn plot_expression(
-    results: &mut ResultsState,
-    model: &mut Model,
-    wb: &mut WorkbenchSession,
-) {
+pub fn plot_expression(results: &mut ResultsState, model: &mut Model, wb: &mut WorkbenchSession) {
     let expression = results.calculator_panel.expression.trim().to_owned();
     if expression.is_empty() {
         return;

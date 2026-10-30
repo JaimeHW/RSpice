@@ -19,9 +19,7 @@ use rspice_formats::waveform_io::result::{
 use rspice_results_ui::eye_diagram::EyeTimebaseProvenance;
 use typed_csv::prepare_typed_result_csv;
 
-pub(crate) use format_picker::{
-    DatasetExportPicker, dataset_export_picker, show_dataset_export_picker,
-};
+pub use format_picker::{DatasetExportPicker, dataset_export_picker, show_dataset_export_picker};
 
 const NO_ACTIVE_ANALYSIS_MESSAGE: &str = "No active result analysis is selected for export.";
 const NO_SAMPLES_MESSAGE: &str = "No waveform samples available to export.";
@@ -154,7 +152,7 @@ enum TabularExportFormat {
 
 /// Export the exact dataset-bound Data Browser selection, never whatever
 /// payload the currently visible sheet happens to choose as its default.
-pub(crate) fn action_export_result_selection_with_io(
+pub fn action_export_result_selection_with_io(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
     keys: &[rspice_results_ui::selection::ResultBrowserSelectionKey],
@@ -230,7 +228,7 @@ pub(crate) fn action_export_result_selection_with_io(
     }
 }
 
-pub(crate) fn action_export_csv_with_io(
+pub fn action_export_csv_with_io(
     state: &mut ResultsParts<'_>,
     io: &(impl ExportWorkflowIo + ?Sized),
 ) {

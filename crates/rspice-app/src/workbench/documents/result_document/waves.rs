@@ -27,7 +27,7 @@ pub(super) use rspice_results_ui::waves::{FamilyTraceVisibilityKey, StripModel, 
 use rspice_results_ui::waves::{StripTrace, anchor_key, family_color};
 #[cfg(test)]
 use rspice_results_ui::waves::{TraceKind, fmt_in_unit, trace_key};
-pub(crate) use rspice_results_ui::waves::{
+pub use rspice_results_ui::waves::{
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 mod expression_evaluation;
@@ -40,6 +40,7 @@ mod readout;
 mod viewport;
 
 use expression_evaluation::{evaluate_expression, evaluate_expression_with_policy};
+pub use expressions::toggle_visibility;
 pub(crate) use expressions::*;
 pub(crate) use readout::*;
 pub(crate) use viewport::*;
@@ -109,7 +110,7 @@ pub(super) fn build_models(
     )
 }
 
-pub(crate) fn source_waveform_anchor(
+pub fn source_waveform_anchor(
     state: &mut ResultsParts<'_>,
     source_name: &str,
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {
@@ -483,7 +484,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome:
 /// The pane's identity, scale and limit binding live behind this module's
 /// privacy, so the inspector asks for them rather than reaching in — and the
 /// scale reader sits beside the header toggle that writes it.
-pub(crate) struct ActivePaneFacts {
+pub struct ActivePaneFacts {
     /// The unit that names the pane in a unit-scoped stack.
     pub unit: Option<String>,
     /// The unit the strip's shared X axis is measured in.
@@ -500,7 +501,7 @@ pub(crate) struct ActivePaneFacts {
     pub y_extent: Option<(f64, f64)>,
 }
 
-pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> ActivePaneFacts {
+pub fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -> ActivePaneFacts {
     let x_unit = active_pane_x_unit(tokens, state);
     let (x_extent, y_extent) = active_pane_extents(tokens, state);
     let analysis = active_pane_analysis(tokens, state);
@@ -532,7 +533,7 @@ pub(crate) fn active_pane_facts(tokens: &Tokens, state: &mut ResultsParts<'_>) -
 }
 
 /// What the status bar reports about the sheet on the Results workspace.
-pub(crate) struct SharedXStatus {
+pub struct SharedXStatus {
     /// The X interval the panes are showing.
     pub span: String,
     /// How far that interval is magnified from the full retained sweep.
@@ -545,7 +546,7 @@ pub(crate) struct SharedXStatus {
 /// coordinate segment states the view rather than triplicating the cursors —
 /// and its zoom chip reports this magnification instead of a canvas scale no
 /// waveform sheet has.
-pub(crate) fn active_shared_x_status(
+pub fn active_shared_x_status(
     tokens: &Tokens,
     state: &mut ResultsParts<'_>,
 ) -> Option<SharedXStatus> {

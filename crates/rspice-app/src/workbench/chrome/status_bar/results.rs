@@ -5,7 +5,7 @@ use crate::state::SimulationState;
 
 /// The zoom chip's waveform form: whole numbers once the magnification is
 /// deep, one decimal while it is shallow enough for the fraction to matter.
-pub(crate) fn format_plot_zoom(zoom: f64) -> String {
+pub fn format_plot_zoom(zoom: f64) -> String {
     if zoom >= 10.0 {
         return format!("{zoom:.0}×");
     }
@@ -18,7 +18,7 @@ pub(crate) fn format_plot_zoom(zoom: f64) -> String {
 /// The instrument bar already carries the A/B cursor readout, so this states
 /// the interval the panes are showing. Sheets with no plotted interval — a
 /// table, or a run that has not been opened yet — name the dataset instead.
-pub(crate) fn results_view_summary(
+pub fn results_view_summary(
     simulation: &SimulationState,
     results_view: Option<&crate::workbench::documents::result_document::SharedXStatus>,
 ) -> String {

@@ -65,13 +65,13 @@ fn current_policy(state: ResultsReads<'_>, scope: Scope) -> Option<FamilyPresent
 }
 
 /// Whether the result the reader is looking at holds a family to slice.
-pub(crate) fn family_available(state: ResultsReads<'_>) -> bool {
+pub fn family_available(state: ResultsReads<'_>) -> bool {
     reading_analysis(state).is_ok_and(|(_, analysis)| manifest(analysis).is_ok())
 }
 
 /// Open Family slicing on the result the reader is looking at, seeded with
 /// the policy already in force or, without one, the family's defaults.
-pub(crate) fn open_family(state: &mut ResultsParts<'_>) {
+pub fn open_family(state: &mut ResultsParts<'_>) {
     let draft = scope(state.results_reads()).and_then(|(scope, _, analysis)| {
         let manifest = manifest(analysis)?;
         Ok(initial_draft(
@@ -89,14 +89,14 @@ pub(crate) fn open_family(state: &mut ResultsParts<'_>) {
 
 /// Narrow the open Family slicing form to `filter`, as a hop that carries a
 /// point into the family does.
-pub(crate) fn set_family_filter(dialog: &mut Option<ResultDocumentDialog>, filter: String) {
+pub fn set_family_filter(dialog: &mut Option<ResultDocumentDialog>, filter: String) {
     if let Some(ResultDocumentDialog::Family(draft)) = dialog {
         draft.filter = filter;
     }
 }
 
 /// Resolve the form's choices against the family's manifest.
-pub(crate) fn choices(state: ResultsReads<'_>, draft: &FamilyDraft) -> FamilyChoices {
+pub fn choices(state: ResultsReads<'_>, draft: &FamilyDraft) -> FamilyChoices {
     let refused = |refusal: String| FamilyChoices {
         scope: String::new(),
         x_dimensions: Vec::new(),

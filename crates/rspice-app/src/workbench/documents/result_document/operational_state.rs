@@ -152,7 +152,7 @@ impl ResultsState {
 
 /// Source relationship published by the Data Browser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResultCurrentness {
+pub enum ResultCurrentness {
     Current,
     Stale,
     Partial,
@@ -163,7 +163,7 @@ pub(crate) enum ResultCurrentness {
 }
 
 impl ResultCurrentness {
-    pub(crate) const ALL: [Self; 7] = [
+    pub const ALL: [Self; 7] = [
         Self::Current,
         Self::Stale,
         Self::Partial,
@@ -684,7 +684,7 @@ pub(super) fn show_result_operational_status(
 /// evidence, not about the schematic: whether the marking will land is
 /// `AppState::highlight_active_failure_sites`'s answer, and it is a
 /// different question with a different sentence.
-pub(crate) fn active_failure_names_objects(model: &Model) -> bool {
+pub fn active_failure_names_objects(model: &Model) -> bool {
     model
         .simulation
         .active_analysis()

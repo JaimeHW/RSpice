@@ -264,7 +264,7 @@ pub(super) fn expr_cache_key(analysis: AnalysisPresentationKey, text: &str) -> u
 }
 
 /// Flip a source waveform's quick-view visibility without mutating result data.
-pub(crate) fn toggle_visibility(
+pub fn toggle_visibility(
     state: &mut crate::workbench::documents::result_document::ResultsParts<'_>,
     analysis_index: usize,
     waveform_index: usize,

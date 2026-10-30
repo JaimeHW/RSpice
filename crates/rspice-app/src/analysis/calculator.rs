@@ -14,7 +14,7 @@ pub(crate) use rspice_results::calculator::{ast, evaluator, value};
 use rspice_results::calculator::retained::{
     canonical_ground_value, find_waveform, reject_unbound_dataset,
 };
-pub(crate) use rspice_results::calculator::retained::{magnitude_value, waveform_value};
+pub use rspice_results::calculator::retained::{magnitude_value, waveform_value};
 use rspice_results::waveform::RetainedWaveform;
 
 pub use evaluator::{CalcValue, EvaluationContext, EvaluationError};

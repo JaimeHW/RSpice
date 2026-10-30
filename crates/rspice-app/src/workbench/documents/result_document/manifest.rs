@@ -9,7 +9,7 @@ use egui::Ui;
 use rspice_results::manifest::ManifestViewModel;
 use rspice_results_ui::manifest as viewer;
 use std::sync::Arc;
-pub(crate) fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
+pub fn manifest_for_run(run: &SimulationRun) -> ManifestViewModel {
     frame_work::note(DatasetWalk::ManifestViewModel);
     frame_work::note(DatasetWalk::DatasetDigest);
     ManifestViewModel::from_run(run, |analysis| analysis.is_live_partial())

@@ -67,7 +67,7 @@ pub(crate) use specs::export_csv as export_specs_csv;
 /// surface nobody is looking at. Three call sites had written those three
 /// steps out identically, which is three places for the route to drift from
 /// the one editor it is supposed to protect.
-pub(crate) fn open_specification_editor(state: &mut ResultsParts<'_>) {
+pub fn open_specification_editor(state: &mut ResultsParts<'_>) {
     // Route transitions and persistent-document activation are reconciled at
     // frame boundaries. Carry a one-shot intent separately from `viewer` and
     // the draft rows so those projections cannot erase the requested editor
@@ -85,7 +85,7 @@ pub(crate) fn open_specification_editor(state: &mut ResultsParts<'_>) {
 /// This deliberately reconstructs both projections after document/viewer
 /// reconciliation. Returning `true` lets the surface give the editor
 /// precedence over an active persistent result document in the same frame.
-pub(crate) fn consume_pending_specification_editor(state: &mut ResultsParts<'_>) -> bool {
+pub fn consume_pending_specification_editor(state: &mut ResultsParts<'_>) -> bool {
     if !std::mem::take(state.specification_editor_route_pending) {
         return false;
     }
@@ -141,14 +141,14 @@ pub(crate) fn add_selected_result_as_pane(state: &mut ResultsParts<'_>) {
     }
 }
 
-pub(crate) use document_edit::{
+pub use document_edit::{
     add_pane_available, compare_availability, family_available, linked_cursors, open_add_pane,
     open_compare, open_family, open_measurement, open_properties, set_family_filter,
     toggle_linked_cursors,
 };
 
 #[cfg(test)]
-pub(crate) fn visualization_source_dataset(
+pub fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
     analysis: &crate::state::AnalysisResult,
 ) -> Result<crate::results::visualization_document::SourceDataset, String> {
@@ -157,12 +157,12 @@ pub(crate) fn visualization_source_dataset(
 
 pub(crate) mod waves;
 pub(crate) use waves::copy_cursor_text;
-pub(crate) use waves::{
+pub use waves::{
     ActivePaneFacts, SharedXStatus, active_pane_facts, active_shared_x_status,
     analysis_default_unit, browser_signal_is_current, browser_signal_unit,
 };
 
-pub(crate) use waves::toggle_visibility;
+pub use waves::toggle_visibility;
 
 use bars::show as show_sheet_bar;
 use retained_memo::RetainedMemo;
@@ -172,9 +172,7 @@ use egui::{Ui, WidgetInfo, WidgetType};
 
 #[cfg(test)]
 pub(crate) use crate::state::result_presentation::TracePresentationKey;
-pub(crate) use crate::state::result_presentation::{
-    AnalysisPresentationKey, WaveformPresentationKey,
-};
+pub use crate::state::result_presentation::{AnalysisPresentationKey, WaveformPresentationKey};
 pub use crate::state::result_presentation::{
     ExprTrace, MarkerKind, ResultMarker, WavePanePresentationKey,
 };
@@ -228,7 +226,7 @@ pub(crate) enum ExpressionSource {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct ExpressionWaveform {
+pub struct ExpressionWaveform {
     pub(crate) source: ExpressionSource,
     pub(crate) waveform: crate::state::RetainedTrace,
 }
@@ -300,7 +298,7 @@ pub(crate) fn result_signal_stable_path(
 /// A signal's last retained sample as "Copy value" puts it on the clipboard:
 /// its name, then x and y with their units in the format Copied values
 /// chose, at full precision.
-pub(crate) fn exact_result_signal_last_sample(
+pub fn exact_result_signal_last_sample(
     key: &SourceWaveformPresentationKey,
     runs: &[SimulationRun],
     policy: crate::quantity::QuantityPresentationPolicy,
@@ -363,7 +361,7 @@ fn copied_sample_value(
     }
 }
 
-pub(crate) fn exact_result_signal_tsv(
+pub fn exact_result_signal_tsv(
     key: &SourceWaveformPresentationKey,
     runs: &[SimulationRun],
 ) -> Result<String, String> {
@@ -437,7 +435,7 @@ pub(crate) fn result_browser_selection_canonical_name(
 }
 
 /// Deterministic exact bundle used by batch clipboard and export actions.
-pub(crate) fn exact_result_browser_selection_bundle(
+pub fn exact_result_browser_selection_bundle(
     keys: &[ResultBrowserSelectionKey],
     runs: &[SimulationRun],
 ) -> Result<String, String> {
@@ -466,7 +464,7 @@ pub(crate) use test_host::ResultsTestHost;
 /// This is the single adapter used by clipboard, exact-table, and file-export
 /// workflows. Keeping those actions on one projection prevents a viewer from
 /// displaying one retained entity while exporting another analysis payload.
-pub(crate) fn exact_result_artifact_text(
+pub fn exact_result_artifact_text(
     key: &ResultArtifactPresentationKey,
     runs: &[SimulationRun],
 ) -> Result<String, String> {
@@ -554,9 +552,9 @@ pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut ResultsParts<'_>) 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ViewerAvailability {
-    pub(crate) available: bool,
-    pub(crate) reason: &'static str,
+pub struct ViewerAvailability {
+    pub available: bool,
+    pub reason: &'static str,
 }
 
 impl ViewerAvailability {
@@ -608,7 +606,7 @@ impl<'a> SheetContext<'a> {
 /// four parts alone, so the predicates take them rather than the application
 /// state, and a feature's availability can answer them from what it reads.
 #[derive(Clone, Copy)]
-pub(crate) struct ResultsReads<'a> {
+pub struct ResultsReads<'a> {
     pub(crate) results: &'a ResultsState,
     pub(crate) analysis: &'a AnalysisWorkspaceState,
     pub(crate) model: &'a Model,
@@ -624,7 +622,7 @@ pub(crate) struct ResultsReads<'a> {
 /// Opening a form, importing a dataset or linking cursors reads and writes
 /// those parts alone, so the operations take them rather than the
 /// application state, and a feature's command can run them in its context.
-pub(crate) struct ResultsParts<'a> {
+pub struct ResultsParts<'a> {
     pub(crate) results: &'a mut ResultsState,
     pub(crate) analysis: &'a mut AnalysisWorkspaceState,
     pub(crate) result_document_dialog: &'a mut Option<ResultDocumentDialog>,
@@ -645,7 +643,7 @@ pub(crate) struct ResultsParts<'a> {
 impl ResultsReads<'_> {
     /// The reader's result presentation, with the significant digits of the
     /// project result document the workspace is showing, if any.
-    pub(crate) fn presentation_policy(
+    pub fn presentation_policy(
         self,
     ) -> rspice_app_state::workbench::preferences::ResultPresentationPolicy {
         let policy = self.model.preferences.result_presentation_policy();
@@ -694,7 +692,7 @@ impl ResultsParts<'_> {
 }
 
 /// How a retained plot-marker kind reads as a Results marker kind.
-pub(crate) const fn marker_kind_of_retained(
+pub const fn marker_kind_of_retained(
     kind: crate::results::visualization_document::PlotMarkerKind,
 ) -> MarkerKind {
     use crate::results::visualization_document::PlotMarkerKind;
@@ -718,7 +716,7 @@ pub(crate) const fn retained_kind_of_marker(
 }
 
 /// One requested marker placement, as the drawn pane knows it.
-pub(crate) struct MarkerPlacement<'a> {
+pub struct MarkerPlacement<'a> {
     pub analysis: AnalysisPresentationKey,
     pub anchor: WaveformPresentationKey,
     pub trace_name: String,
@@ -767,7 +765,7 @@ fn retained_marker_label<'a>(note: &'a str, trace_name: &'a str) -> &'a str {
 /// retain the clicked trace (an expression trace, or one family member of a
 /// swept trace), or it declines the placement outright — falls back to a quick
 /// marker and says why, rather than dropping the reader's click.
-pub(crate) fn place_marker(
+pub fn place_marker(
     state: &mut ResultsParts<'_>,
     placement: MarkerPlacement<'_>,
 ) -> Option<MarkerSelector> {
@@ -886,7 +884,7 @@ pub(crate) fn place_marker(
 }
 
 /// Remove one marker from whichever store owns it.
-pub(crate) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
+pub fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
     match selector {
         MarkerSelector::Quick(id) => state.results.session.remove_marker(id),
         MarkerSelector::Document {
@@ -943,7 +941,7 @@ pub(crate) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelect
 /// The retained coordinate, scope and source specification are read back from
 /// the live document rather than from the projection, so an edit of the label
 /// or kind can never restate a stale position as if the reader had moved it.
-pub(crate) fn commit_marker_edit(
+pub fn commit_marker_edit(
     state: &mut ResultsParts<'_>,
     selector: MarkerSelector,
     note: &str,
@@ -1036,7 +1034,7 @@ pub(crate) fn commit_marker_edit(
 /// discriminator this cannot know; this exists so persistence tests can name
 /// a signal without standing up a whole strip.
 #[cfg(test)]
-pub(crate) fn marker_anchor_for(
+pub fn marker_anchor_for(
     analysis: AnalysisPresentationKey,
     source_name: &str,
 ) -> WaveformPresentationKey {
@@ -1052,7 +1050,7 @@ pub(crate) fn marker_anchor_for(
 
 /// Restore authored presentation only after its datasets and visualization
 /// documents have been loaded. Exhaustive ownership covers every durable field.
-pub(crate) fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
+pub fn restore_presentation(state: &mut ResultsParts<'_>, presentation: ResultPresentation) {
     let ResultPresentation {
         markers,
         marker_id_high_water,
@@ -1075,7 +1073,7 @@ pub(crate) fn restore_presentation(state: &mut ResultsParts<'_>, presentation: R
 /// position, label and kind — is dropped in favour of the document's. The
 /// match is content-shaped, not id-shaped: the two stores never shared an id
 /// space that could be compared.
-pub(crate) fn restore_markers(
+pub fn restore_markers(
     state: &mut ResultsParts<'_>,
     markers: Vec<ResultMarker>,
     high_water: Option<u32>,
@@ -1154,10 +1152,7 @@ fn is_document_marker_projection(state: ResultsReads<'_>, marker: &ResultMarker)
 ///
 /// Same rule as the markers above: a presentation decision that cannot find
 /// the dataset it was made about is not a decision about anything.
-pub(crate) fn restore_log_y_panes(
-    state: &mut ResultsParts<'_>,
-    panes: Vec<WavePanePresentationKey>,
-) {
+pub fn restore_log_y_panes(state: &mut ResultsParts<'_>, panes: Vec<WavePanePresentationKey>) {
     state.results.session.log_y_panes = panes
         .into_iter()
         .filter(|pane| {
@@ -1175,10 +1170,7 @@ pub(crate) fn restore_log_y_panes(
 /// Restore project-owned expression definitions after their immutable result
 /// datasets have been loaded. Stale groups fail closed instead of attaching
 /// their text to whichever analysis happens to occupy an old ordinal.
-pub(crate) fn restore_expression_groups(
-    state: &mut ResultsParts<'_>,
-    groups: Vec<ResultExpressionGroup>,
-) {
+pub fn restore_expression_groups(state: &mut ResultsParts<'_>, groups: Vec<ResultExpressionGroup>) {
     state.results.session.analysis_exprs.clear();
     state.results.session.exprs.clear();
     state.results.session.expr_projection_keys.clear();
@@ -1386,13 +1378,13 @@ pub(crate) fn histogram_is_available(state: ResultsReads<'_>) -> bool {
 }
 
 /// Shared bins for the sheet and exact CSV export.
-pub(crate) fn active_histogram(
+pub fn active_histogram(
     state: ResultsReads<'_>,
 ) -> Option<std::sync::Arc<rspice_results::histogram::Histogram>> {
     hist::active_histogram(state)
 }
 
-pub(crate) fn active_histogram_display(
+pub fn active_histogram_display(
     state: ResultsReads<'_>,
 ) -> Option<std::sync::Arc<rspice_results_ui::histogram::display::HistogramDisplay>> {
     hist::active_histogram_display(state)
@@ -1456,7 +1448,7 @@ pub struct ResultsState {
     seen_version: u64,
     /// Evaluated expression series, keyed by (stable analysis, expression);
     /// refreshed when the simulation data version advances.
-    pub(crate) analysis_expr_cache:
+    pub analysis_expr_cache:
         std::collections::HashMap<(AnalysisPresentationKey, String), ExprSeries>,
     /// The run whose attributed failure sites are currently marked on the
     /// drawing, if any.
@@ -1464,7 +1456,7 @@ pub struct ResultsState {
     /// Held so the control that marked them can offer to take them back, and
     /// keyed by run so selecting a different dataset does not leave a stale
     /// "Clear" offering to unmark objects another run named. Transient.
-    pub(crate) marked_failure_run: Option<u64>,
+    pub marked_failure_run: Option<u64>,
     /// Merged event order for the analysis the EVENTS sheet last drew.
     pub(super) event_order_cache: Option<EventOrderCache>,
     /// Source-aware retained-evidence verdict per analysis; see
@@ -1485,7 +1477,7 @@ pub struct ResultsState {
 
 /// One evaluated expression series (owned arrays, cheap to clone).
 #[derive(Debug, Clone)]
-pub(crate) struct ExprSeries {
+pub struct ExprSeries {
     /// `simulation.data_version` the series was computed against.
     pub version: u64,
     /// Evaluation result, or the error to show on the strip.
@@ -1695,7 +1687,7 @@ fn hide_selected_trace(state: &mut ResultsParts<'_>) {
 /// Unlike the dataset quick-view, this projection is driven by the exact
 /// pages, panes, viewer identities, and immutable bindings retained in the
 /// project document.
-pub(crate) fn show_persistent_document(
+pub fn show_persistent_document(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
@@ -1720,7 +1712,7 @@ pub(crate) fn show_persistent_document(
 /// Document-tab activation and post-create activation share this path so a
 /// document can never select one retained result when created and a different
 /// one when reopened.
-pub(crate) fn activate_persistent_document(
+pub fn activate_persistent_document(
     state: &mut ResultsParts<'_>,
     document_id: crate::product::ResultDocumentId,
 ) -> bool {
@@ -1898,7 +1890,7 @@ pub(crate) fn viewer_unavailability_reason(
 /// change of selection clears the session's cursors and hidden family
 /// members, which here were projected from this pane's own document state
 /// and have to survive it, or capturing the pane would delete them.
-pub(crate) fn show_persistent_pane_viewer(
+pub fn show_persistent_pane_viewer(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
@@ -1932,7 +1924,7 @@ pub(crate) fn show_persistent_pane_viewer(
     );
 }
 
-pub(crate) fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
+pub fn prepare_viewer_state(state: &mut ResultsParts<'_>) {
     synchronize_quick_view_dataset_authority(state);
     state
         .results
@@ -2007,7 +1999,7 @@ pub(super) fn record_drawn_axes(
 }
 
 /// The interval the active sheet's axis is showing, pinned or fitted.
-pub(crate) fn active_axis_range(
+pub fn active_axis_range(
     state: ResultsReads<'_>,
     facts: &waves::ActivePaneFacts,
     axis: PaneAxis,
@@ -2029,7 +2021,7 @@ pub(crate) fn active_axis_range(
 
 /// Whether the active sheet's axis is pinned to an explicit interval rather
 /// than fitting its data.
-pub(crate) fn active_axis_is_pinned(state: ResultsReads<'_>, axis: PaneAxis) -> bool {
+pub fn active_axis_is_pinned(state: ResultsReads<'_>, axis: PaneAxis) -> bool {
     let viewer = state.results.session.viewer;
     if viewer_uses_wave_stack(viewer) {
         return waves::active_pane_axis_is_pinned(state.results, axis);
@@ -2047,7 +2039,7 @@ pub(crate) fn active_axis_is_pinned(state: ResultsReads<'_>, axis: PaneAxis) -> 
 /// Routes on [`viewer_uses_wave_stack`] for the same reason every other
 /// viewport gesture does: the stack keys its viewports by analysis, and a
 /// write to the single-canvas store would land where the sheet never reads.
-pub(crate) fn set_active_axis_range(
+pub fn set_active_axis_range(
     tokens: &Tokens,
     state: &mut ResultsParts<'_>,
     axis: PaneAxis,
@@ -2294,7 +2286,7 @@ fn memoized_incomplete_evidence_reason(
 }
 
 /// The same question for whichever analysis the active sheet is speaking for.
-pub(crate) fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static str> {
+pub fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static str> {
     let run = state.model.simulation.active_run()?;
     if viewer_uses_wave_stack(state.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
@@ -2311,7 +2303,7 @@ pub(crate) fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Opti
     )
 }
 
-pub(crate) fn sheet_purpose(state: ResultsReads<'_>) -> String {
+pub fn sheet_purpose(state: ResultsReads<'_>) -> String {
     let viewer = state.results.session.viewer;
     let detail = viewer_availability(state, viewer).reason;
     match active_incomplete_evidence_reason(state) {
@@ -2361,10 +2353,7 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
     }
 }
 
-pub(crate) fn viewer_availability(
-    state: ResultsReads<'_>,
-    viewer: ResultViewer,
-) -> ViewerAvailability {
+pub fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
     let active_run = state.model.simulation.active_run();
     match viewer {
         ResultViewer::Waves => {

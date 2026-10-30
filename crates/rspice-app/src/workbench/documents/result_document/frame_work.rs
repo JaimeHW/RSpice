@@ -23,7 +23,7 @@
 /// Ordinal values index the counter table, so variants are appended rather
 /// than reordered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub(crate) enum DatasetWalk {
+pub enum DatasetWalk {
     /// `AnalysisResult::validate_retained_evidence` — walks every retained
     /// sample of every waveform in one analysis.
     EvidenceValidation,
@@ -184,7 +184,7 @@ thread_local! {
 /// Counted whole-dataset work, as a snapshot that arithmetic can be done on.
 #[cfg(test)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct WorkCounts {
+pub struct WorkCounts {
     walks: [u64; DatasetWalk::ALL.len()],
     samples: [u64; FrameSampleRead::ALL.len()],
 }
@@ -197,7 +197,7 @@ impl WorkCounts {
     };
 
     /// The counts accumulated so far on this thread.
-    pub(crate) fn read() -> Self {
+    pub fn read() -> Self {
         Self {
             walks: COUNTS.with(|counts| {
                 let mut walks = *counts.borrow();
@@ -211,7 +211,7 @@ impl WorkCounts {
     }
 
     /// Reset the counters and return a zero snapshot to measure against.
-    pub(crate) fn reset() -> Self {
+    pub fn reset() -> Self {
         COUNTS.with(|counts| *counts.borrow_mut() = Self::ZERO.walks);
         rspice_results_ui::waves::extent::ExtentWork::reset();
         SAMPLES.with(|samples| *samples.borrow_mut() = Self::ZERO.samples);
@@ -219,7 +219,7 @@ impl WorkCounts {
     }
 
     /// Work counted since `self` was taken.
-    pub(crate) fn since(self) -> Self {
+    pub fn since(self) -> Self {
         let now = Self::read();
         let mut delta = Self::ZERO;
         for (index, slot) in delta.walks.iter_mut().enumerate() {
@@ -232,13 +232,13 @@ impl WorkCounts {
     }
 
     /// Count for one class of work.
-    pub(crate) const fn get(self, walk: DatasetWalk) -> u64 {
+    pub const fn get(self, walk: DatasetWalk) -> u64 {
         self.walks[walk as usize]
     }
 
     /// The classes that counted anything, for a failure message that names
     /// the offending surface instead of only its total.
-    pub(crate) fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
+    pub fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
         DatasetWalk::ALL
             .into_iter()
             .filter(|walk| self.get(*walk) > 0)

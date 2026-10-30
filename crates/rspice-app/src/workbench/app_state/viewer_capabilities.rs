@@ -19,11 +19,11 @@ use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseKey};
 
 /// Provenance for the mutable specialized result caches.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub(crate) struct SpecializedViewerCacheAuthority {
+pub struct SpecializedViewerCacheAuthority {
     pub(crate) bode: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) nyquist: Option<SpecializedViewerCacheProvenance>,
+    pub nyquist: Option<SpecializedViewerCacheProvenance>,
     pub(crate) smith: Option<SpecializedViewerCacheProvenance>,
-    pub(crate) fft: Option<SpecializedViewerCacheProvenance>,
+    pub fft: Option<SpecializedViewerCacheProvenance>,
     pub(crate) eye: Option<SpecializedViewerCacheProvenance>,
 }
 
@@ -31,19 +31,19 @@ pub(crate) struct SpecializedViewerCacheAuthority {
 #[derive(Debug, Clone, Default)]
 pub struct AnalysisWorkspaceState {
     /// Bode viewer state
-    pub(crate) bode_plot_state: rspice_results_ui::bode::BodePlotState,
+    pub bode_plot_state: rspice_results_ui::bode::BodePlotState,
     /// Nyquist viewer state
-    pub(crate) nyquist_state: rspice_results_ui::nyquist::NyquistState,
+    pub nyquist_state: rspice_results_ui::nyquist::NyquistState,
     /// Eye diagram viewer state
-    pub(crate) eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
+    pub eye_diagram_state: rspice_results_ui::eye_diagram::EyeDiagramState,
     /// FFT viewer state
-    pub(crate) fft_state: rspice_results_ui::fft::FftState,
+    pub fft_state: rspice_results_ui::fft::FftState,
     /// Smith chart viewer state
-    pub(crate) smith_chart_state: rspice_results_ui::smith_chart::SmithChartState,
+    pub smith_chart_state: rspice_results_ui::smith_chart::SmithChartState,
     /// Histogram viewer state
-    pub(crate) histogram_state: rspice_results_ui::histogram::HistogramState,
+    pub histogram_state: rspice_results_ui::histogram::HistogramState,
     /// Exact immutable result that owns each mutable viewer cache.
-    pub(crate) cache_authority: SpecializedViewerCacheAuthority,
+    pub cache_authority: SpecializedViewerCacheAuthority,
 }
 
 /// Availability metadata for a specialized viewer.
@@ -57,7 +57,7 @@ pub struct ViewerCapability {
 
 impl AnalysisWorkspaceState {
     /// Clear transient-derived viewer caches without disturbing AC/RF state.
-    pub(crate) fn clear_transient_specialized_viewer_data(&mut self) {
+    pub fn clear_transient_specialized_viewer_data(&mut self) {
         self.fft_state.clear();
         self.eye_diagram_state
             .load_data(rspice_results_ui::eye_diagram::EyeData::default());
@@ -69,7 +69,7 @@ impl AnalysisWorkspaceState {
     ///
     /// Use when result selection changes in a way that can invalidate
     /// cached analysis-specific visualizations.
-    pub(crate) fn clear_specialized_viewer_data(&mut self) {
+    pub fn clear_specialized_viewer_data(&mut self) {
         self.clear_transient_specialized_viewer_data();
         self.histogram_state.clear_selection();
         self.bode_plot_state
@@ -115,10 +115,7 @@ impl ResultsState {
     /// Lives with the Results document that offers the control rather than in
     /// the simulation controller, because the choice is the reader's and the
     /// controller must not reach up into `workbench::documents` to read it.
-    pub(crate) fn eye_timebase_for(
-        &self,
-        provenance: SpecializedViewerCacheProvenance,
-    ) -> EyeTimebase {
+    pub fn eye_timebase_for(&self, provenance: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.session
             .eye_timebase
             .get(&eye_timebase_key(provenance))
@@ -131,7 +128,7 @@ impl ResultsState {
     /// Setting it back to [`EyeTimebase::Auto`] forgets the entry rather than
     /// storing a default, so a session file carries only the rates a reader
     /// actually stated.
-    pub(crate) fn set_eye_timebase(
+    pub fn set_eye_timebase(
         &mut self,
         provenance: SpecializedViewerCacheProvenance,
         timebase: EyeTimebase,
@@ -150,7 +147,7 @@ impl ResultsState {
 
 impl AnalysisWorkspaceState {
     /// Bind a freshly populated mutable viewer cache to its immutable owner.
-    pub(crate) fn bind_specialized_viewer_cache(
+    pub fn bind_specialized_viewer_cache(
         &mut self,
         viewer: ActiveViewer,
         provenance: SpecializedViewerCacheProvenance,
@@ -245,7 +242,7 @@ impl AnalysisWorkspaceState {
 
 impl ResultsParts<'_> {
     /// Clear user-visible simulation result history and derived result viewers.
-    pub(crate) fn clear_simulation_results(&mut self) {
+    pub fn clear_simulation_results(&mut self) {
         if self.model.simulation.execution.has_active_execution() {
             return;
         }
@@ -262,7 +259,7 @@ impl ResultsReads<'_> {
     }
 
     /// Resolve whether a viewer can currently be opened with meaningful data.
-    pub(crate) fn viewer_capability(self, viewer: ActiveViewer) -> ViewerCapability {
+    pub fn viewer_capability(self, viewer: ActiveViewer) -> ViewerCapability {
         match viewer {
             ActiveViewer::Waveform => ViewerCapability::available("Always available"),
             ActiveViewer::SmithChart => {

@@ -16,7 +16,7 @@ use crate::workbench::localization::OPEN_TASK_DECK;
 
 /// One command of the results feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResultsCommand {
+pub enum ResultsCommand {
     ImportResultDataset,
     ExportWaveformsCsv,
     ClearResults,
@@ -82,7 +82,7 @@ const PROJECT_TRANSACTION: CommandFlags =
 
 impl ResultsCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 44] = [
+    pub const ALL: [Self; 44] = [
         Self::ImportResultDataset,
         Self::ExportWaveformsCsv,
         Self::ResultViewer(ResultViewer::Waves),
@@ -130,12 +130,12 @@ impl ResultsCommand {
     ];
 
     /// The command `key` names, if the feature declares one.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.key() == key)
     }
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::ImportResultDataset => CommandKey::new("import-dataset"),
             Self::ExportWaveformsCsv => ids::EXPORT_RESULTS,
@@ -162,7 +162,7 @@ impl ResultsCommand {
 
     /// What the command declares about itself. Every one is listed in the
     /// palette.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, flags, context, bindings) = match self {
             Self::ImportResultDataset => (
                 "Import result dataset…",

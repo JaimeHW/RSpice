@@ -15,7 +15,7 @@ use super::{AnalysisPresentationKey, ResultViewer, ResultsReads};
 
 /// The document presentation that owns a resolved result view.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ResultViewOwner {
+pub enum ResultViewOwner {
     /// A retained dataset opened directly in the Results workspace.
     Dataset,
     /// One exact pane in a project-owned visualization document.
@@ -33,7 +33,7 @@ pub(crate) enum ResultViewOwner {
 /// exporter that silently collapses that stack to the simulation selector is
 /// not exporting the displayed result.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct ResolvedResultView {
+pub struct ResolvedResultView {
     pub owner: ResultViewOwner,
     pub dataset_id: DatasetId,
     pub dataset_digest: ContentDigest,
@@ -46,7 +46,7 @@ pub(crate) struct ResolvedResultView {
 impl ResolvedResultView {
     /// Resolve the retained run after state changes without trusting an old
     /// vector ordinal on its own.
-    pub(crate) fn run<'a>(&self, reads: ResultsReads<'a>) -> Option<&'a SimulationRun> {
+    pub fn run<'a>(&self, reads: ResultsReads<'a>) -> Option<&'a SimulationRun> {
         reads
             .model
             .simulation
@@ -78,7 +78,7 @@ impl ResolvedResultView {
 }
 
 /// Resolve the exact active Results document, viewer, and retained analyses.
-pub(crate) fn resolve_displayed_result_view(
+pub fn resolve_displayed_result_view(
     reads: ResultsReads<'_>,
 ) -> Result<ResolvedResultView, String> {
     let document = reads

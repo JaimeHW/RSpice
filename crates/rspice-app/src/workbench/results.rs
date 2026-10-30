@@ -42,13 +42,13 @@ use rspice_results_ui::session::ViewGesture;
 use commands::ResultsCommand;
 
 /// The results feature.
-pub(crate) struct ResultsFeature;
+pub struct ResultsFeature;
 
 impl ResultsFeature {
     /// Open Results on the newest run that holds a dataset, as the status
     /// bar's engine chip asks; false when there is none. The shell answers
     /// the command it raises straight after.
-    pub(in crate::workbench) fn open_newest_retained_run(cx: &mut Cx<'_, Self>) -> bool {
+    pub fn open_newest_retained_run(cx: &mut Cx<'_, Self>) -> bool {
         let selected = select_newest_retained_run(&mut cx.model.simulation);
         if selected {
             cx.execute(ids::OPEN_RUN_IN_RESULTS);
@@ -59,10 +59,7 @@ impl ResultsFeature {
     /// Take the navigation offer a notice carried: open Results on the run
     /// it names, or the Console on the line it names. The shell answers the
     /// command it raises straight after.
-    pub(in crate::workbench) fn perform_notification_action(
-        cx: &mut Cx<'_, Self>,
-        action: NotificationAction,
-    ) {
+    pub fn perform_notification_action(cx: &mut Cx<'_, Self>, action: NotificationAction) {
         if follow_notification_action(cx.model, cx.wb, action) {
             cx.execute(ids::OPEN_RUN_IN_RESULTS);
         }

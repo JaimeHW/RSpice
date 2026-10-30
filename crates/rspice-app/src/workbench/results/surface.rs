@@ -55,6 +55,6 @@ pub(super) fn show(
     );
 }
 
-pub(crate) fn specification_editor_open(state: ResultsReads<'_>) -> bool {
+pub fn specification_editor_open(state: ResultsReads<'_>) -> bool {
     state.results.session.spec_drafts.is_some()
 }

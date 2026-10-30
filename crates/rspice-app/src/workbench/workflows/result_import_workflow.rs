@@ -53,11 +53,10 @@ pub(crate) const RESULT_DATASET_FILTER: (&str, &[&str]) = (
         "fst",
     ],
 );
-pub(crate) const MAX_RESULT_COLUMNS: usize = 1_024;
-pub(crate) const MAX_RESULT_ROWS: usize = 1_000_000;
+pub const MAX_RESULT_COLUMNS: usize = 1_024;
+pub const MAX_RESULT_ROWS: usize = 1_000_000;
 const MAX_SIGNAL_NAME_BYTES: usize = 1_024;
-pub(crate) const MAX_RESULT_VALUES: usize =
-    MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
+pub const MAX_RESULT_VALUES: usize = MAX_RESULT_DATASET_BYTES as usize / std::mem::size_of::<f64>();
 
 /// Shared admission policy for imports and exports intended to reopen here.
 pub(crate) fn waveform_import_limits()
@@ -105,13 +104,13 @@ const RESULT_IMPORT_WINDOW_MARGIN: f32 = 24.0;
 const RESULT_IMPORT_FOOTER_RESERVE: f32 = 82.0;
 
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) struct ParsedResultDataset {
+pub struct ParsedResultDataset {
     pub(crate) source_format: ResultImportFormat,
-    pub(crate) analysis_type: AnalysisType,
+    pub analysis_type: AnalysisType,
     pub(crate) coordinate_name: String,
-    pub(crate) coordinate_unit: Option<String>,
+    pub coordinate_unit: Option<String>,
     pub(crate) sample_count: usize,
-    pub(crate) waveforms: Vec<RetainedTrace>,
+    pub waveforms: Vec<RetainedTrace>,
     pub(crate) family_metadata: Option<AnalysisResultFamilyMetadata>,
     pub(crate) delimiter: u8,
     /// What the adapter had to decide that the source did not state, in the
@@ -234,7 +233,7 @@ fn read_native_file_bounded(path: &Path) -> Result<Vec<u8>, String> {
 
 /// Parse a selected file into a reviewable draft without mutating retained
 /// simulation history.
-pub(crate) fn stage_imported_result_dataset(
+pub fn stage_imported_result_dataset(
     state: &mut ResultsParts<'_>,
     source_name: &str,
     bytes: &[u8],
@@ -371,7 +370,7 @@ fn parsed_result_from_draft(
 /// Atomically commit the currently reviewed draft into retained result
 /// history. Any failure restores the simulation and workbench selections that
 /// existed before the transaction.
-pub(crate) fn commit_result_import_draft(state: &mut ResultsParts<'_>) -> Result<(), String> {
+pub fn commit_result_import_draft(state: &mut ResultsParts<'_>) -> Result<(), String> {
     if let Some(reason) = result_import_block_reason(state.model, state.platform) {
         return Err(reason);
     }
@@ -628,7 +627,7 @@ fn result_import_dialog_geometry(available: egui::Vec2) -> (egui::Vec2, f32) {
     (maximum, body_height)
 }
 
-pub(crate) fn discard_result_import_draft(state: &mut ResultsParts<'_>) {
+pub fn discard_result_import_draft(state: &mut ResultsParts<'_>) {
     *state.result_import = ResultImportDialogState::default();
 }
 
@@ -904,7 +903,7 @@ fn analysis_domain_label(analysis_type: AnalysisType) -> &'static str {
     }
 }
 
-pub(crate) fn parse_result_dataset(
+pub fn parse_result_dataset(
     source_name: &str,
     bytes: &[u8],
 ) -> Result<ParsedResultDataset, String> {
@@ -1093,7 +1092,7 @@ fn start_browser_result_dataset_import() -> Result<(), String> {
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_result_dataset_import(state: &mut ResultsParts<'_>) -> bool {
+pub fn poll_browser_result_dataset_import(state: &mut ResultsParts<'_>) -> bool {
     let Some(completion) =
         BROWSER_RESULT_DATASET_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
     else {

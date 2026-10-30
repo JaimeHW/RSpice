@@ -536,7 +536,7 @@ fn schematic_cross_probe_unavailability(
 /// explanation. On success, the Design surface opens once the inspector
 /// returns; a remembered split remains active and projects Design + the same
 /// canonical Results document.
-pub(crate) fn cross_probe_trace_to_design(
+pub fn cross_probe_trace_to_design(
     state: &mut ResultsParts<'_>,
     signal: &str,
 ) -> Result<String, String> {

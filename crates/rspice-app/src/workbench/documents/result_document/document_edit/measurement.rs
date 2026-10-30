@@ -15,14 +15,14 @@ use crate::results::visualization_document::TraceId;
 const QUICK_VIEW: &str = "Create a result document to keep measurements.";
 
 /// Open Add measurement on the result the reader is looking at.
-pub(crate) fn open_measurement(state: &mut ResultsParts<'_>) {
+pub fn open_measurement(state: &mut ResultsParts<'_>) {
     *state.result_document_dialog = Some(ResultDocumentDialog::Measurement(
         MeasurementDraft::default(),
     ));
 }
 
 /// What the form shows for `draft` on this frame.
-pub(crate) fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
+pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
     let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {

@@ -25,9 +25,9 @@ use rspice_app_workbench::workbench::docks::inspector::engineering_readout;
 /// The run Run details… is open on, with its manifest taken once when the
 /// dialog opened: projecting a run digests every sample it retained.
 #[derive(Debug, Clone)]
-pub(crate) struct RunDetailsDialogState {
-    pub(crate) run_id: u64,
-    pub(crate) manifest: rspice_results::manifest::ManifestViewModel,
+pub struct RunDetailsDialogState {
+    pub run_id: u64,
+    pub manifest: rspice_results::manifest::ManifestViewModel,
 }
 
 /// At most this many significant digits for the times a convergence record
@@ -39,7 +39,7 @@ const FORCED_LIST_HEIGHT: f32 = 160.0;
 
 /// Open Run details… on the retained run `run_id`. A run that is no longer
 /// retained opens nothing.
-pub(crate) fn open(
+pub fn open(
     run_details: &mut Option<Box<RunDetailsDialogState>>,
     simulation: &SimulationState,
     run_id: u64,
@@ -54,7 +54,7 @@ pub(crate) fn open(
 /// The routes out of Run details… the reader took this frame. Each is a
 /// button of the dialog, and taking either closes it.
 #[derive(Debug, Default, PartialEq, Eq)]
-pub(crate) struct RunDetailsRoutes {
+pub struct RunDetailsRoutes {
     /// Open the producing plan's Analyses page.
     pub(crate) open_plan: bool,
     /// Open the deck the engine executed for this run.
@@ -64,7 +64,7 @@ pub(crate) struct RunDetailsRoutes {
 /// Draw Run details… while it is open, and return the routes the reader
 /// took, for the caller to follow once the borrow of the run it describes
 /// is done.
-pub(crate) fn show(
+pub fn show(
     ctx: &Context,
     run_details: &mut Option<Box<RunDetailsDialogState>>,
     model: &Model,

@@ -19,7 +19,7 @@ use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 
 impl ResultsReads<'_> {
     /// What the transient viewers hold now.
-    pub(crate) fn viewer_reading(self) -> ViewerReading {
+    pub fn viewer_reading(self) -> ViewerReading {
         let analysis = self.analysis;
         ViewerReading {
             eye_has_traces: analysis.eye_diagram_state.trace_count() > 0,
@@ -32,12 +32,12 @@ impl ResultsReads<'_> {
 
     /// How the FFT prepares the input it is given over `time`, as the reader
     /// set it.
-    pub(crate) fn fft_input_options(self, time: &[f64]) -> FftInputOptions {
+    pub fn fft_input_options(self, time: &[f64]) -> FftInputOptions {
         self.analysis.fft_state.input_options_for_waveform(time)
     }
 
     /// The bit period the reader chose for this result's eye.
-    pub(crate) fn eye_timebase_for(self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
+    pub fn eye_timebase_for(self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase {
         self.results.eye_timebase_for(owner)
     }
 }

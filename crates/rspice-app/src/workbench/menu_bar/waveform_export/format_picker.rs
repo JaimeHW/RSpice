@@ -18,9 +18,9 @@ use crate::workbench::preferences::UserPreferences;
 /// its stored index, and whether the view it exports shows more than one
 /// analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct DatasetExportPicker {
-    pub(crate) format: usize,
-    pub(crate) several_analyses: bool,
+pub struct DatasetExportPicker {
+    pub format: usize,
+    pub several_analyses: bool,
 }
 
 /// Every format the export writes, in the order the stored choice numbers
@@ -44,9 +44,7 @@ const ONE_ANALYSIS_REASON: &str = "Exports one analysis. Maximize one strip to u
 /// The picker for the view that is showing, open on the format used last, or
 /// on CSV when that one cannot export the view. The error says why no view
 /// can be exported.
-pub(crate) fn dataset_export_picker(
-    state: ResultsReads<'_>,
-) -> Result<DatasetExportPicker, String> {
+pub fn dataset_export_picker(state: ResultsReads<'_>) -> Result<DatasetExportPicker, String> {
     let displayed =
         crate::workbench::documents::result_document::view_context::resolve_displayed_result_view(
             state,
@@ -71,7 +69,7 @@ pub(crate) fn dataset_export_picker(
 /// Show the picker while it is open. Returns `true` on the frame the reader
 /// chooses Export, with the chosen format already stored as the one the
 /// export writes and the one the picker offers next time.
-pub(crate) fn show_dataset_export_picker(
+pub fn show_dataset_export_picker(
     ctx: &Context,
     dataset_export: &mut Option<DatasetExportPicker>,
     preferences: &mut UserPreferences,

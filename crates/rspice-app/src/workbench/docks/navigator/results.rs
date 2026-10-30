@@ -41,7 +41,7 @@ use rspice_app_workbench::workbench::docks::navigator::{
 /// every ordinary dock width. Below it — the tablet and phone drawers — they
 /// stack, so a right-to-left row can never enlarge beyond its host and resize
 /// stays monotonic.
-pub(super) const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 204.0;
+pub const RESULT_BROWSER_STACKED_FACET_MAX_WIDTH: f32 = 204.0;
 /// Clipboard generation is synchronous on every supported target. Keep the
 /// operation bounded and direct larger evidence sets to the streaming export
 /// workflow instead of allocating an unbounded browser/WASM string.
@@ -52,7 +52,7 @@ const RESULT_BROWSER_CLIPBOARD_BYTE_LIMIT: usize = 8_000_000;
 /// exactly the band, so they sit hard against the toolbar rule above them.
 const RESULT_BROWSER_BAND_PAD_Y: f32 = 3.0;
 
-pub(super) fn result_browser_facets_stack(available_width: f32) -> bool {
+pub fn result_browser_facets_stack(available_width: f32) -> bool {
     available_width < RESULT_BROWSER_STACKED_FACET_MAX_WIDTH
 }
 
@@ -1016,7 +1016,7 @@ enum ResultsBrowserTab {
 /// artifacts carry their own scalar/array/event/contribution classification,
 /// so those facets never guess from a display label.
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
-pub(super) enum ResultsBrowserKind {
+pub enum ResultsBrowserKind {
     #[default]
     All,
     Voltage,
@@ -1047,7 +1047,7 @@ impl ResultsBrowserKind {
     /// The base electrical dimensions. The facet closes with one negation over
     /// this set, so "anything that is not a volt, an amp, a watt, or a noise
     /// density" stays askable without a second unit control beside this one.
-    pub(super) const BASE_UNITS: [&'static str; 15] = [
+    pub const BASE_UNITS: [&'static str; 15] = [
         "V", "A", "W", "ns/√Hz", "s/√Hz", "s²/Hz", "s^2/Hz", "nV/√Hz", "nA/√Hz", "V/√Hz", "A/√Hz",
         "V^2/Hz", "A^2/Hz", "V²/Hz", "A²/Hz",
     ];
@@ -1068,7 +1068,7 @@ impl ResultsBrowserKind {
     }
 
     /// Whether a signal reading in `unit` belongs to this kind.
-    pub(super) fn admits(self, unit: &str) -> bool {
+    pub fn admits(self, unit: &str) -> bool {
         match self {
             Self::All => true,
             Self::Voltage => unit == "V",
@@ -1096,7 +1096,7 @@ impl ResultsBrowserKind {
 
     /// A typed artifact answers to its own shape class, and to the closing
     /// negation through the unit it carries.
-    pub(super) fn admits_artifact(self, kind: ResultArtifactKind, unit: &str) -> bool {
+    pub fn admits_artifact(self, kind: ResultArtifactKind, unit: &str) -> bool {
         match self {
             Self::All => true,
             Self::Scalar => kind == ResultArtifactKind::Scalar,
@@ -1157,9 +1157,9 @@ pub(super) enum ResultsBrowserScope {
 /// The word and its consequence travel together, so no caller can look one up
 /// from the other's display text.
 #[derive(Clone, Copy)]
-pub(super) struct ResultAnalysisDataState {
-    pub(super) word: &'static str,
-    pub(super) note: &'static str,
+pub struct ResultAnalysisDataState {
+    pub word: &'static str,
+    pub note: &'static str,
 }
 
 /// A dataset row's state word, only when the data is not current: a current
@@ -1172,7 +1172,7 @@ pub(super) fn data_state_meta(state: ResultAnalysisDataState) -> &'static str {
     }
 }
 
-pub(super) const fn result_analysis_data_state(
+pub const fn result_analysis_data_state(
     currentness: crate::workbench::documents::result_document::operational_state::ResultCurrentness,
     completeness: ResultCompletenessClass,
 ) -> ResultAnalysisDataState {
@@ -1493,7 +1493,7 @@ fn results_browser_active_tab(ctx: &egui::Context) -> ResultsBrowserTab {
     .unwrap_or_default()
 }
 
-pub(super) fn result_browser_dataset_expanded(
+pub fn result_browser_dataset_expanded(
     ctx: &egui::Context,
     dataset: DatasetId,
     default_open: bool,
@@ -1507,7 +1507,7 @@ pub(super) fn result_browser_dataset_expanded(
     .unwrap_or(default_open)
 }
 
-pub(super) fn set_result_browser_dataset_expanded(
+pub fn set_result_browser_dataset_expanded(
     ctx: &egui::Context,
     dataset: DatasetId,
     expanded: bool,
@@ -1523,7 +1523,7 @@ pub(super) fn set_result_browser_dataset_expanded(
 /// Disclosure state for one analysis group, defaulting to open for the
 /// active analysis and closed for the rest: a run with a hundred retained
 /// quantities should open as an index of its analyses, not one long list.
-pub(super) fn result_browser_group_expanded(
+pub fn result_browser_group_expanded(
     ctx: &egui::Context,
     analysis: AnalysisPresentationKey,
     active: bool,
@@ -1534,7 +1534,7 @@ pub(super) fn result_browser_group_expanded(
     .unwrap_or(active)
 }
 
-pub(super) fn set_result_browser_group_expanded(
+pub fn set_result_browser_group_expanded(
     ctx: &egui::Context,
     analysis: AnalysisPresentationKey,
     expanded: bool,
@@ -1862,7 +1862,7 @@ pub(super) struct ResultSignal {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum ResultArtifactKind {
+pub enum ResultArtifactKind {
     Scalar,
     Array,
     EventStream,
@@ -1880,14 +1880,14 @@ impl ResultArtifactKind {
     }
 }
 
-pub(super) struct ResultArtifact {
-    pub(super) identity: ResultArtifactPresentationKey,
-    pub(super) name: String,
-    pub(super) kind: ResultArtifactKind,
+pub struct ResultArtifact {
+    pub identity: ResultArtifactPresentationKey,
+    pub name: String,
+    pub kind: ResultArtifactKind,
     pub(super) unit: String,
-    pub(super) meta: String,
-    pub(super) value: Option<String>,
-    pub(super) viewer: crate::workbench::ResultViewer,
+    pub meta: String,
+    pub value: Option<String>,
+    pub viewer: crate::workbench::ResultViewer,
 }
 
 #[derive(Clone, Copy)]

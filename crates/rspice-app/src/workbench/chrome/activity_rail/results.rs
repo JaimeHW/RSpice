@@ -5,7 +5,7 @@ use crate::workbench::state::Workspace;
 
 /// The badge on a workspace's button: one on Results while it is not showing
 /// and its results have changed since it last was, nothing anywhere else.
-pub(in crate::workbench) fn unseen_result_count(
+pub fn unseen_result_count(
     seen_version: u64,
     simulation: &SimulationState,
     workspace: Workspace,
@@ -20,9 +20,6 @@ pub(in crate::workbench) fn unseen_result_count(
 }
 
 /// Results as they stand are seen: the badge stays off until they change.
-pub(in crate::workbench) fn mark_results_seen(
-    seen_version: &mut u64,
-    simulation: &SimulationState,
-) {
+pub fn mark_results_seen(seen_version: &mut u64, simulation: &SimulationState) {
     *seen_version = simulation.view.data_version;
 }

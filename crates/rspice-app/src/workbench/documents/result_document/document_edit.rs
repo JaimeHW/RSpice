@@ -47,7 +47,7 @@ fn project_document(
 }
 
 /// Commit `edits` against the document's current revision.
-pub(crate) fn transact(
+pub fn transact(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     edits: Vec<DocumentEdit>,
@@ -107,7 +107,7 @@ fn report(state: &mut ResultsParts<'_>, result: Result<(), String>) {
 }
 
 /// Draw the open form, if any, and commit what it asks for.
-pub(crate) fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
+pub fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
     let Some(dialog) = state.result_document_dialog.clone() else {
         return;
     };
@@ -154,7 +154,7 @@ pub(crate) fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
 
 /// Commit the open form's draft. The form closes when its edit lands, or
 /// moves on to what it shows next.
-pub(crate) fn commit_open_dialog(state: &mut ResultsParts<'_>) {
+pub fn commit_open_dialog(state: &mut ResultsParts<'_>) {
     let result = match state.result_document_dialog.clone() {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
@@ -175,13 +175,13 @@ pub(crate) fn commit_open_dialog(state: &mut ResultsParts<'_>) {
 
 /// Whether a pane can be added: a project result document is open and a
 /// retained dataset exists to bind the pane to.
-pub(crate) fn add_pane_available(state: ResultsReads<'_>) -> bool {
+pub fn add_pane_available(state: ResultsReads<'_>) -> bool {
     active_document_id(state).is_some() && state.model.simulation.retained.has_results()
 }
 
 /// Open the Add pane form, seeded with the dataset, analysis and sheet the
 /// selected pane shows.
-pub(crate) fn open_add_pane(state: &mut ResultsParts<'_>) {
+pub fn open_add_pane(state: &mut ResultsParts<'_>) {
     if !add_pane_available(state.results_reads()) {
         return;
     }
@@ -222,10 +222,7 @@ fn pane_viewers(analysis: &AnalysisResult) -> Vec<(ResultViewer, String)> {
 
 /// Resolve the form's choices against the retained datasets, moving any
 /// selection that no longer exists onto the first one that does.
-pub(crate) fn add_pane_choices(
-    state: ResultsReads<'_>,
-    draft: &mut AddPaneDraft,
-) -> AddPaneChoices {
+pub fn add_pane_choices(state: ResultsReads<'_>, draft: &mut AddPaneDraft) -> AddPaneChoices {
     let runs = &state.model.simulation.retained.runs;
     let datasets = runs
         .iter()
@@ -377,7 +374,7 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
 }
 
 /// The context-menu edits one pane's header offers.
-pub(crate) fn pane_menu(
+pub fn pane_menu(
     state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
@@ -414,7 +411,7 @@ pub(super) fn toggle_pane_x_link(
 /// Link or unlink A/B cursors. Over a project result document the document
 /// keeps the links, so they hold across panes and through a save; over a
 /// quick view the session's toggle links the viewer's own cursor rows.
-pub(crate) fn toggle_linked_cursors(state: &mut ResultsParts<'_>) {
+pub fn toggle_linked_cursors(state: &mut ResultsParts<'_>) {
     let Some(document_id) = active_document_id(state.results_reads()) else {
         state.results.session.toggle_linked_cursors();
         return;
@@ -428,7 +425,7 @@ pub(crate) fn toggle_linked_cursors(state: &mut ResultsParts<'_>) {
 /// Whether A/B cursors are linked where [`toggle_linked_cursors`] would
 /// switch them: the document's links over a project result document, the
 /// session's toggle over a quick view.
-pub(crate) fn linked_cursors(state: ResultsReads<'_>) -> bool {
+pub fn linked_cursors(state: ResultsReads<'_>) -> bool {
     match active_document_id(state) {
         None => state.results.session.linked_cursors,
         Some(document_id) => project_document(state, document_id).is_ok_and(links::cursors_linked),
@@ -452,14 +449,14 @@ fn page_order(document: &VisualizationDocument, pane_id: PaneId) -> Option<(usiz
 
 /// Which way a pane moves in its page's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum PaneMove {
+pub enum PaneMove {
     Earlier,
     Later,
 }
 
 /// Change places with the pane's neighbour in its page's order. The page
 /// keeps its layout; the panes fill its slots in the new order.
-pub(crate) fn move_pane(
+pub fn move_pane(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
@@ -503,11 +500,7 @@ fn move_pane_edit(
 /// Take one pane out of the document, with its axes, traces, cursors,
 /// markers, measurements and notes. Link groups lose the pane's members in
 /// the same transaction, and a group left with one member goes too.
-pub(crate) fn remove_pane(
-    state: &mut ResultsParts<'_>,
-    document_id: ResultDocumentId,
-    pane_id: PaneId,
-) {
+pub fn remove_pane(state: &mut ResultsParts<'_>, document_id: ResultDocumentId, pane_id: PaneId) {
     let result = remove_pane_edits(state.results_reads(), document_id, pane_id)
         .and_then(|edits| transact(state, document_id, edits).map(|_| ()));
     report(state, result);
@@ -568,7 +561,7 @@ pub(crate) mod links;
 pub(crate) mod measurement;
 mod properties;
 
-pub(crate) use compare::{compare_availability, open_compare};
-pub(crate) use family::{family_available, open_family, set_family_filter};
-pub(crate) use measurement::open_measurement;
-pub(crate) use properties::open_properties;
+pub use compare::{compare_availability, open_compare};
+pub use family::{family_available, open_family, set_family_filter};
+pub use measurement::open_measurement;
+pub use properties::open_properties;

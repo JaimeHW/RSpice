@@ -22,7 +22,7 @@ impl ResultsState {
 
     /// Return the selection only while it resolves to the exact active
     /// retained dataset and source waveform that created it.
-    pub(crate) fn valid_selected_trace<'a>(
+    pub fn valid_selected_trace<'a>(
         &'a self,
         simulation: &crate::state::SimulationState,
     ) -> Option<&'a SelectedResultTrace> {
@@ -60,7 +60,7 @@ impl ResultsState {
     }
 
     /// Reveal a stored output's members through presentation state only.
-    pub(crate) fn reveal_waveforms(
+    pub fn reveal_waveforms(
         &mut self,
         waveforms: impl IntoIterator<Item = (SourceWaveformPresentationKey, bool)>,
     ) {
@@ -237,7 +237,7 @@ impl ResultsState {
             .unwrap_or_default()
     }
 
-    pub(crate) fn add_expression_trace(
+    pub fn add_expression_trace(
         &mut self,
         simulation: &crate::state::SimulationState,
         key: AnalysisPresentationKey,
@@ -351,7 +351,7 @@ impl ResultsState {
     }
 
     /// Deterministic project projection of every stable expression trace.
-    pub(crate) fn project_expression_groups(
+    pub fn project_expression_groups(
         &self,
         simulation: &crate::state::SimulationState,
     ) -> Vec<ResultExpressionGroup> {
@@ -419,10 +419,7 @@ impl ResultsState {
     /// has no reach into presentation state at all. Reconciling against the
     /// retained set here gives that one owner. Unchanged history is checked
     /// through its mutation revision without allocating another dataset set.
-    pub(crate) fn reconcile_retained_datasets(
-        &mut self,
-        simulation: &crate::state::SimulationState,
-    ) {
+    pub fn reconcile_retained_datasets(&mut self, simulation: &crate::state::SimulationState) {
         let revision = simulation.retained.runs.revision();
         if self.retained_history_revision.as_ref() == Some(&revision) {
             return;
@@ -445,7 +442,7 @@ impl ResultsState {
 
     /// The standing reason one document's Latest retarget onto this exact
     /// candidate was refused, if it already was.
-    pub(crate) fn latest_retarget_failure(
+    pub fn latest_retarget_failure(
         &self,
         document_id: crate::product::ResultDocumentId,
         candidate: DatasetId,
@@ -476,7 +473,7 @@ impl ResultsState {
     /// Restore a strip addressed by the current run's transient ordinal.
     /// Command/search integrations may still produce an ordinal, but the
     /// retained presentation state is removed by its stable identity.
-    pub(crate) fn restore_analysis_strip(
+    pub fn restore_analysis_strip(
         &mut self,
         simulation: &crate::state::SimulationState,
         analysis_index: usize,

@@ -10,12 +10,12 @@ use crate::workbench::state::WorkbenchSession;
 
 /// What the results feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ResultsState {
+pub struct ResultsState {
     /// The format question "Export dataset…" asks, while it is open.
-    pub(crate) dataset_export: Option<crate::workbench::menu_bar::DatasetExportPicker>,
+    pub dataset_export: Option<crate::workbench::menu_bar::DatasetExportPicker>,
     /// Run details…: the provenance of one retained run. Boxed: the
     /// manifest it carries would otherwise outgrow the slot's stack budget.
-    pub(crate) run_details: Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
+    pub run_details: Option<Box<crate::workbench::docks::RunDetailsDialogState>>,
 
     /// Waveform calculator dialog open
     pub waveform_calculator_dialog: bool,
@@ -32,7 +32,7 @@ pub(crate) struct ResultsState {
     /// Runtime-only and owned by navigation rather than Results presentation:
     /// activating the destination document is allowed to reconcile viewer UI,
     /// but must not erase the route that caused that activation.
-    pub(crate) specification_editor_route_pending: bool,
+    pub specification_editor_route_pending: bool,
     /// Runtime-only draft for the project-owned result-document transaction.
     pub create_result_document: rspice_results_ui::create_document::CreateResultDocumentDialogState,
     /// Runtime-only draft of the form open over a project result document.
@@ -42,17 +42,16 @@ pub(crate) struct ResultsState {
     pub result_import:
         crate::workbench::documents::result_document::import::ResultImportDialogState,
     /// Calculator panel state
-    pub(crate) calculator_panel: crate::workbench::app_state::session::calculator::CalculatorPanel,
+    pub calculator_panel: crate::workbench::app_state::session::calculator::CalculatorPanel,
     /// Specialized analysis viewer state grouped by analysis workspace.
     /// Boxed: six viewers' state and their caches.
-    pub(crate) analysis:
-        Box<crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState>,
+    pub analysis: Box<crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState>,
 }
 
 impl ResultsState {
     /// What the results workspace's predicates read: this slot's viewer
     /// state, the model and the session.
-    pub(crate) fn reads<'a>(
+    pub fn reads<'a>(
         &'a self,
         model: &'a Model,
         workbench: &'a WorkbenchSession,
@@ -68,7 +67,7 @@ impl ResultsState {
     /// What the results workspace's commands write: this slot's viewer state
     /// and drafts, the model, the session, the platform state, and the run
     /// preflight, beside the application's command registry.
-    pub(crate) fn parts<'a>(
+    pub fn parts<'a>(
         &'a mut self,
         model: &'a mut Model,
         workbench: &'a mut WorkbenchSession,
@@ -112,7 +111,7 @@ impl ResultsState {
     /// The results frame hook. How AC traces are drawn has no control but
     /// Preferences, so the viewer takes it from there on every frame and never
     /// drifts from the page.
-    pub(crate) fn follow_preferences(
+    pub fn follow_preferences(
         &mut self,
         preferences: &crate::workbench::preferences::UserPreferences,
     ) {
@@ -122,7 +121,7 @@ impl ResultsState {
     /// Start the session's waveform viewer from Results ▸ Waveform defaults:
     /// wrapped or unwrapped phase, and the minor grid. Its own toggles change
     /// both afterwards.
-    pub(crate) fn start_waveform_viewer_session(
+    pub fn start_waveform_viewer_session(
         &mut self,
         preferences: &crate::workbench::preferences::UserPreferences,
     ) {
@@ -143,7 +142,7 @@ impl ResultsState {
     /// The results feature's part of replacing the design the session
     /// executes against: nothing seen, viewed or routed to under the previous
     /// design survives it.
-    pub(crate) fn clear_design_scoped(
+    pub fn clear_design_scoped(
         &mut self,
         preferences: &crate::workbench::preferences::UserPreferences,
     ) {
@@ -155,7 +154,7 @@ impl ResultsState {
 
     /// The results feature's part of replacing the project: its
     /// project-owned presentation goes as well.
-    pub(crate) fn clear_project_scoped(
+    pub fn clear_project_scoped(
         &mut self,
         preferences: &crate::workbench::preferences::UserPreferences,
     ) {

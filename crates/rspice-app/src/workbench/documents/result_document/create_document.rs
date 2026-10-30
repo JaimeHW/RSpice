@@ -33,7 +33,7 @@ use super::{ResultsParts, ResultsReads};
 const MAX_DOCUMENT_NAME_BYTES: usize = 120;
 
 #[derive(Debug, thiserror::Error)]
-pub(crate) enum CreateResultDocumentError {
+pub enum CreateResultDocumentError {
     #[error("{0}")]
     InvalidDraft(String),
     #[error(transparent)]
@@ -43,17 +43,17 @@ pub(crate) enum CreateResultDocumentError {
 }
 
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ResolvedDraft<'a> {
+pub struct ResolvedDraft<'a> {
     name: &'a str,
     run: &'a SimulationRun,
     analysis: &'a AnalysisResult,
-    pub(crate) viewer: &'static ViewerDocumentDefinition,
+    pub viewer: &'static ViewerDocumentDefinition,
     family: ResultDocumentFamily,
     layout: ResultDocumentLayout,
 }
 
 /// Open a fresh, dataset-aware transaction draft.
-pub(crate) fn open(state: &mut ResultsParts<'_>) {
+pub fn open(state: &mut ResultsParts<'_>) {
     let dataset_id = state
         .model
         .simulation
@@ -105,7 +105,7 @@ pub(crate) fn show(ctx: &egui::Context, state: &mut ResultsParts<'_>) {
     }
 }
 
-pub(crate) struct CreateDocumentSources<'a>(pub(crate) ResultsReads<'a>);
+pub struct CreateDocumentSources<'a>(pub ResultsReads<'a>);
 
 impl CreateDocumentHost for CreateDocumentSources<'_> {
     fn validation_message(&self, draft: &CreateResultDocumentDialogState) -> Option<String> {
@@ -287,7 +287,7 @@ pub(super) const fn analysis_manifest_id(analysis: AnalysisType) -> &'static str
     }
 }
 
-pub(crate) fn first_compatible_viewer(
+pub fn first_compatible_viewer(
     state: ResultsReads<'_>,
     dataset_id: Option<DatasetId>,
     family: ResultDocumentFamily,
@@ -300,7 +300,7 @@ pub(crate) fn first_compatible_viewer(
         .map(|viewer| viewer.id)
 }
 
-pub(crate) fn viewer_is_creatable(
+pub fn viewer_is_creatable(
     state: ResultsReads<'_>,
     dataset_id: Option<DatasetId>,
     family: ResultDocumentFamily,
@@ -354,7 +354,7 @@ fn next_document_name(state: ResultsReads<'_>, family: ResultDocumentFamily) -> 
     family.label().to_owned()
 }
 
-pub(crate) fn resolve_draft<'a>(
+pub fn resolve_draft<'a>(
     state: ResultsReads<'a>,
     draft: &'a CreateResultDocumentDialogState,
 ) -> Result<ResolvedDraft<'a>, CreateResultDocumentError> {
@@ -487,7 +487,7 @@ pub(crate) fn resolve_draft<'a>(
     })
 }
 
-pub(crate) fn source_analysis_identity(
+pub fn source_analysis_identity(
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> AnalysisInstanceId {
@@ -1021,9 +1021,7 @@ fn document_tracking(
 }
 
 /// Revalidate and commit the current draft into the project authority.
-pub(crate) fn commit(
-    state: &mut ResultsParts<'_>,
-) -> Result<ResultDocumentId, CreateResultDocumentError> {
+pub fn commit(state: &mut ResultsParts<'_>) -> Result<ResultDocumentId, CreateResultDocumentError> {
     let resolved = resolve_draft(state.results_reads(), state.create_result_document)?;
     let tracking = document_tracking(
         &state.model.simulation.retained.runs,

@@ -176,7 +176,7 @@ pub(super) fn handle_result_artifact_keyboard(
         .memory_mut(|memory| memory.request_focus(result_signal_row_id(next)));
 }
 
-pub(super) fn set_checked_signal_visibility(
+pub fn set_checked_signal_visibility(
     state: &mut ResultsParts<'_>,
     checked: &std::collections::HashSet<ResultBrowserSelectionKey>,
     visible: bool,
@@ -227,7 +227,7 @@ pub(super) fn toggle_result_signal_visibility(
     true
 }
 
-pub(super) fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> bool {
+pub fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usize) -> bool {
     let Some(dataset_id) = state
         .model
         .simulation
@@ -250,7 +250,7 @@ pub(super) fn select_result_dataset(state: &mut ResultsParts<'_>, run_index: usi
     true
 }
 
-pub(super) fn select_result_analysis(
+pub fn select_result_analysis(
     state: &mut ResultsParts<'_>,
     run_index: usize,
     analysis_index: usize,
@@ -298,7 +298,7 @@ pub(super) fn select_result_analysis_by_key(
     select_result_analysis(state, run_index, analysis_index)
 }
 
-pub(super) fn select_result_signal(
+pub fn select_result_signal(
     state: &mut ResultsParts<'_>,
     run_index: usize,
     analysis_index: usize,

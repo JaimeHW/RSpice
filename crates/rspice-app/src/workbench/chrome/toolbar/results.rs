@@ -51,9 +51,7 @@ const DATASET: ToolGroup = &[
 /// The Results toolbar's groups, in the order it lays them out: the linked
 /// cursors, the calculator, which a historical document is not offered, and
 /// the dataset's commands.
-pub(in crate::workbench) fn offered_tool_groups(
-    state: ResultsReads<'_>,
-) -> impl Iterator<Item = ToolGroup> + use<> {
+pub fn offered_tool_groups(state: ResultsReads<'_>) -> impl Iterator<Item = ToolGroup> + use<> {
     let historical = results_document_is_historical(state);
     [
         Some(LINKED_CURSORS),
@@ -67,7 +65,7 @@ pub(in crate::workbench) fn offered_tool_groups(
 /// The tracking control of the saved result document Results shows: Historical
 /// when no completed run matches the current design, otherwise the Latest /
 /// Pinned toggle. Whether it drew anything, for the rule after it.
-pub(in crate::workbench) fn results_tracking_button(
+pub fn results_tracking_button(
     ui: &mut egui::Ui,
     state: &mut ResultsParts<'_>,
     layout: LayoutSpec,
@@ -177,7 +175,7 @@ fn current_result_source_digest(model: &Model) -> Option<ContentDigest> {
     .then(|| crate::state::content_digest(&model.simulation.source.netlist_content))
 }
 
-pub(crate) fn run_has_current_success_authority(
+pub fn run_has_current_success_authority(
     run: &crate::state::SimulationRun,
     project_revision: ObjectRevision,
     source_digest: Option<ContentDigest>,
@@ -190,7 +188,7 @@ pub(crate) fn run_has_current_success_authority(
         })
 }
 
-pub(crate) fn results_document_is_historical(state: ResultsReads<'_>) -> bool {
+pub fn results_document_is_historical(state: ResultsReads<'_>) -> bool {
     use crate::workbench::state::WorkspaceDocumentId;
 
     let project_revision = state.model.workspace.content.project.revision();
