@@ -195,9 +195,12 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                 },
                 |ui| {
                     let selected = paper_label(&draft.paper);
+                    // A narrow cell: a long choice ends in an ellipsis rather
+                    // than widening the column into the page desk beside it.
                     egui::ComboBox::from_id_salt("hardcopy-paper")
                         .selected_text(selected)
                         .width(ui.available_width())
+                        .truncate()
                         .show_ui(ui, |ui| {
                             if schematic_sheet_output {
                                 ui.selectable_value(
@@ -268,6 +271,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                 egui::ComboBox::from_id_salt("hardcopy-scale")
                     .selected_text(selected)
                     .width(ui.available_width())
+                    .truncate()
                     .show_ui(ui, |ui| {
                         for key in 0..4 {
                             ui.selectable_value(&mut scale_kind, key, scale_label(key));

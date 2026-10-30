@@ -649,22 +649,11 @@ pub fn apply_open_resolved(
     } else {
         None
     };
-    let seeded = if saved.is_none() {
-        schematic_authority
-            .as_ref()
-            .map(|authority| {
-                authored_sheet_format(parts.model, authority)
-                    .and_then(setup_seeded_from_sheet_format)
-            })
-            .transpose()?
-    } else {
-        None
-    };
     let metadata = metadata_for(parts, &resolved).map_err(|error| error.to_string())?;
     let source_candidates = parts.dialog.source_candidates.clone();
     parts
         .dialog
-        .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
+        .open_resolved(workflow, resolved, saved.as_ref())
         .map_err(|error| error.to_string())?;
     parts.dialog.schematic_page_authority = schematic_authority;
     parts.dialog.metadata = Some(metadata);
@@ -697,22 +686,11 @@ fn apply_selected_resolved(
         .setup_for(resolved.authority())
         .map_err(|error| error.to_string())?
         .map(|saved| saved.setup().clone());
-    let seeded = if saved.is_none() {
-        schematic_authority
-            .as_ref()
-            .map(|authority| {
-                authored_sheet_format(parts.model, authority)
-                    .and_then(setup_seeded_from_sheet_format)
-            })
-            .transpose()?
-    } else {
-        None
-    };
     let metadata = metadata_for(parts, &resolved).map_err(|error| error.to_string())?;
     let source_candidates = parts.dialog.source_candidates.clone();
     parts
         .dialog
-        .open_resolved(workflow, resolved, saved.as_ref().or(seeded.as_ref()))
+        .open_resolved(workflow, resolved, saved.as_ref())
         .map_err(|error| error.to_string())?;
     parts.dialog.schematic_page_authority = schematic_authority;
     parts.dialog.metadata = Some(metadata);
@@ -823,125 +801,6 @@ pub fn validate_schematic_page_authority(
         return Err("The governed active sheet changed. Close and reopen Page Setup.".to_owned());
     }
     authority.edit.validate(model, "Page Setup")
-}
-
-fn authored_sheet_format(
-    model: &crate::workbench::app_state::Model,
-    authority: &super::SchematicPageSetupAuthority,
-) -> Result<crate::state::SchematicSheetFormat, String> {
-    validate_schematic_page_authority(model, authority)?;
-    if let Some(governed) = &authority.governed_sheet {
-        return model
-            .workspace
-            .content
-            .design_management
-            .sheet_catalog(&governed.cell_view_key)
-            .and_then(|catalog| catalog.find(governed.sheet_id))
-            .map(|sheet| sheet.page_format().clone())
-            .ok_or_else(|| "The governed active sheet is unavailable.".to_owned());
-    }
-    let policy = model.schematic.document().document_policy;
-    if let Some(custom) = policy.custom_page_size {
-        return crate::state::SchematicSheetFormat::try_custom(
-            "Custom",
-            custom.portrait_width_um,
-            custom.portrait_height_um,
-            policy.page_orientation,
-        )
-        .map_err(|error| error.to_string());
-    }
-    Ok(crate::state::SchematicSheetFormat::standard(
-        policy.page_size,
-        policy.page_orientation,
-    ))
-}
-
-pub fn setup_seeded_from_sheet_format(
-    format: crate::state::SchematicSheetFormat,
-) -> Result<rspice_hardcopy_contract::HardcopySetup, String> {
-    use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetSize};
-    use rspice_hardcopy_contract::{
-        CustomPaper, HardcopySetup, Length, LengthUnit, Orientation, PaperSize, PhysicalPageSetup,
-        StandardPaper,
-    };
-
-    let default = HardcopySetup::default();
-    let paper = match format.size {
-        SchematicSheetSize::Standard { size } => PaperSize::Standard(match size {
-            SchematicPageSize::A4 => StandardPaper::A4,
-            SchematicPageSize::A3 => StandardPaper::A3,
-            SchematicPageSize::UsLetter => StandardPaper::Letter,
-            SchematicPageSize::UsLedger => StandardPaper::Tabloid,
-        }),
-        SchematicSheetSize::Custom {
-            name,
-            portrait_width_um,
-            portrait_height_um,
-        } => PaperSize::Custom(
-            CustomPaper::try_new(
-                name,
-                Length::from_micrometres(portrait_width_um),
-                Length::from_micrometres(portrait_height_um),
-                LengthUnit::Millimetres,
-            )
-            .map_err(|error| error.to_string())?,
-        ),
-    };
-    let orientation = match format.orientation {
-        SchematicPageOrientation::Portrait => Orientation::Portrait,
-        SchematicPageOrientation::Landscape => Orientation::Landscape,
-    };
-    // A sheet saved with an export bleed of its own, before bleed became the
-    // print setup's alone, starts its first print setup with that bleed when
-    // the page's margins can hold it.
-    let sheet_bleed = format
-        .retired_export_bleed
-        .micrometres()
-        .map(|bleed_um| {
-            rspice_hardcopy_contract::Bleed::Uniform(Length::from_micrometres(bleed_um))
-        })
-        .and_then(|bleed| {
-            PhysicalPageSetup::try_new(
-                paper.clone(),
-                default.physical_page().margins(),
-                bleed,
-                orientation,
-            )
-            .ok()
-        });
-    let physical_page = match sheet_bleed {
-        Some(physical_page) => physical_page,
-        None => PhysicalPageSetup::try_new(
-            paper,
-            default.physical_page().margins(),
-            default.physical_page().bleed(),
-            orientation,
-        )
-        .map_err(|error| error.to_string())?,
-    };
-    // The paper is the sheet, so the output is already trimmed to it and
-    // trimming marks would only mark its edge.
-    let sheet_output = default.schematic();
-    let schematic = rspice_hardcopy_contract::SchematicHardcopySetup::new(
-        sheet_output.extent(),
-        sheet_output.outside_content(),
-        false,
-        sheet_output.includes_paper(),
-        sheet_output.includes_border(),
-        sheet_output.includes_title_block(),
-        sheet_output.includes_zones(),
-        sheet_output.includes_grid(),
-    );
-    HardcopySetup::try_new_with_schematic(
-        physical_page,
-        default.scale(),
-        default.tiling(),
-        default.render().clone(),
-        default.decorations().clone(),
-        schematic,
-        default.print_mapping().clone(),
-    )
-    .map_err(|error| error.to_string())
 }
 
 pub(crate) fn active_retained_source_selection(

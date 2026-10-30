@@ -116,11 +116,17 @@ fn draft() -> HardcopyDialogState {
 }
 
 /// The dialog as the Export workflow opens it on `document`, the way
-/// [`draft`] opens it on its sheet.
+/// [`draft`] opens it on its sheet, with the general default saved for it:
+/// a sheet with nothing saved opens as drawn, at 1:1 on its own paper with no
+/// margin, where most page settings would have nothing to move.
 fn draft_on(document: ResolvedHardcopyDocument) -> HardcopyDialogState {
     let mut draft = HardcopyDialogState::default();
     draft
-        .open_resolved(HardcopyWorkflow::Export, document, None)
+        .open_resolved(
+            HardcopyWorkflow::Export,
+            document,
+            Some(&HardcopySetup::default()),
+        )
         .expect("the drawing sheet opens");
     draft.outside_sheet_content = OutsideSheetContentPolicy::ExtendOutput;
     draft.format = OutputFormat::SvgVector;

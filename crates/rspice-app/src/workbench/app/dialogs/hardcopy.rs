@@ -700,7 +700,8 @@ impl HardcopyDialogState {
             || Ok(document.default_print_mapping().clone()),
             |setup| merge_print_mapping(document.default_print_mapping(), setup.print_mapping()),
         )?;
-        self.open(workflow, authority, extent, saved);
+        let unsaved = saved.is_none().then(|| unsaved_setup(&document));
+        self.open(workflow, authority, extent, saved.or(unsaved.as_ref()));
         self.resolved_document = Some(std::sync::Arc::new(document));
         self.print_mapping = mapping;
         self.refresh_preview();
@@ -1105,6 +1106,18 @@ impl HardcopyDialogState {
         self.source_resolution_generation = self.source_resolution_generation.saturating_add(1);
         self.source_resolution_generation
     }
+}
+
+/// The setup a source starts from when nothing is saved for it. An authored
+/// drawing sheet prints as drawn, on its own paper at 1:1: its title block
+/// already says what it is. Every other source (a selection, a symbol, a plot,
+/// results or a report) starts from the general default.
+fn unsaved_setup(document: &ResolvedHardcopyDocument) -> HardcopySetup {
+    document
+        .authored_sheet_output_media()
+        .ok()
+        .and_then(|media| HardcopySetup::for_authored_sheets(media).ok())
+        .unwrap_or_default()
 }
 
 fn merge_print_mapping(
@@ -1837,5 +1850,115 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// With nothing saved, an authored drawing sheet opens on its own paper
+    /// at 1:1, with no margin, bleed or decoration band, whatever its size or
+    /// orientation. A sheet still carrying an export bleed from before bleed
+    /// was the print setup's starts without it: a page that is the sheet has
+    /// no margin to hold one. A source without a sheet starts from the
+    /// general default.
+    #[test]
+    fn a_sheet_with_nothing_saved_opens_on_its_own_paper_at_one_to_one() {
+        use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetFormat};
+        use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+        use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
+
+        let open = |format: Option<&SchematicSheetFormat>| {
+            let identity = HardcopySourceIdentity::try_new(
+                "unsaved-sheet",
+                HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x5345_4544)).unwrap(),
+                ObjectRevision::INITIAL,
+                "Unsaved sheet",
+            )
+            .unwrap();
+            let sheet = resolve_blank_schematic_sheet_with_format(
+                identity,
+                HardcopyScope::CurrentSheet,
+                format,
+            )
+            .unwrap();
+            let mut draft = HardcopyDialogState::default();
+            draft
+                .open_resolved(HardcopyWorkflow::Export, sheet, None)
+                .unwrap();
+            draft.build_setup().expect("the seeded draft compiles")
+        };
+        let with_retired_bleed = {
+            let mut saved = serde_json::to_value(SchematicSheetFormat::default()).unwrap();
+            saved["bleed_um"] = serde_json::json!(3_175);
+            serde_json::from_value::<SchematicSheetFormat>(saved).unwrap()
+        };
+        let mut formats = vec![
+            with_retired_bleed,
+            SchematicSheetFormat::try_custom(
+                "Review board",
+                304_800,
+                457_200,
+                SchematicPageOrientation::Landscape,
+            )
+            .unwrap(),
+        ];
+        for size in [
+            SchematicPageSize::A4,
+            SchematicPageSize::A3,
+            SchematicPageSize::UsLetter,
+            SchematicPageSize::UsLedger,
+        ] {
+            for orientation in [
+                SchematicPageOrientation::Portrait,
+                SchematicPageOrientation::Landscape,
+            ] {
+                formats.push(SchematicSheetFormat::standard(size, orientation));
+            }
+        }
+        for format in &formats {
+            let name = format.display();
+            let setup = open(Some(format));
+            let (width, height) = format.oriented_dimensions_um();
+            let PaperSize::MatchAuthoredSheets(media) = setup.physical_page().paper() else {
+                panic!("{name} did not open on its own paper");
+            };
+            assert_eq!(
+                media
+                    .iter()
+                    .map(AuthoredSheetMedia::dimensions)
+                    .collect::<Vec<_>>(),
+                [(
+                    Length::from_micrometres(width),
+                    Length::from_micrometres(height)
+                )],
+                "{name}"
+            );
+            assert_eq!(
+                setup.physical_page().orientation(),
+                if width > height {
+                    Orientation::Landscape
+                } else {
+                    Orientation::Portrait
+                },
+                "{name}"
+            );
+            assert_eq!(setup.scale(), ScaleMode::EngineeringOneToOne, "{name}");
+            assert_eq!(
+                setup.physical_page().margins(),
+                PageMargins::uniform(Length::ZERO),
+                "{name}"
+            );
+            assert_eq!(setup.physical_page().bleed(), Bleed::None, "{name}");
+            let decorations = setup.decorations();
+            assert!(
+                !decorations.includes_header()
+                    && !decorations.includes_legends()
+                    && !decorations.includes_provenance(),
+                "{name} opened with a decoration band its title block repeats"
+            );
+        }
+
+        let unsheeted = open(None);
+        let default = HardcopySetup::default();
+        assert_eq!(unsheeted.physical_page(), default.physical_page());
+        assert_eq!(unsheeted.scale(), default.scale());
+        assert_eq!(unsheeted.decorations(), default.decorations());
     }
 }

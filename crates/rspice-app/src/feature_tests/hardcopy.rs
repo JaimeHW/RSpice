@@ -4,6 +4,8 @@
 //! the hardcopy's own state.
 
 #[cfg(not(target_arch = "wasm32"))]
+mod authored_sheet_output;
+#[cfg(not(target_arch = "wasm32"))]
 mod content_options;
 mod exports;
 #[cfg(not(target_arch = "wasm32"))]

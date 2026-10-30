@@ -21,6 +21,24 @@ use rspice_hardcopy_contract::HardcopyReceipt;
 use rspice_hardcopy_contract::PrinterJobSettings;
 use rspice_hardcopy_contract::PrinterMediaSource;
 
+/// The setup a sheet of `format` prints with: its own paper at 1:1.
+fn sheet_output_setup(
+    format: &crate::state::SchematicSheetFormat,
+) -> rspice_hardcopy_contract::HardcopySetup {
+    use rspice_hardcopy_contract::{AuthoredSheetMedia, HardcopySetup, Length};
+    let (width, height) = format.oriented_dimensions_um();
+    HardcopySetup::for_authored_sheets(vec![
+        AuthoredSheetMedia::try_new(
+            0,
+            format.display(),
+            Length::from_micrometres(width),
+            Length::from_micrometres(height),
+        )
+        .unwrap(),
+    ])
+    .unwrap()
+}
+
 #[test]
 fn results_export_selects_the_active_project_document_pane_authority() {
     use crate::product::{AnalysisInstanceId, ContentDigest, DatasetBinding, DatasetId};
@@ -176,7 +194,7 @@ fn governed_output_page_setup_preserves_authored_sheet_and_saves_hardcopy() {
         SchematicPageOrientation::Landscape,
     )
     .unwrap();
-    let setup = setup_seeded_from_sheet_format(format.clone()).unwrap();
+    let setup = sheet_output_setup(&format);
     let pending = PendingPageSetup {
         opened_source: std::sync::Arc::new(resolved.clone()),
         setup: setup.clone(),
@@ -248,7 +266,7 @@ fn legacy_output_page_setup_does_not_rewrite_document_policy() {
     .unwrap();
     let pending = PendingPageSetup {
         opened_source: std::sync::Arc::new(resolved.clone()),
-        setup: setup_seeded_from_sheet_format(format).unwrap(),
+        setup: sheet_output_setup(&format),
         staged_mapping: StagedPrintMappingPersistence::Document,
         schematic_authority: Some(SchematicPageSetupAuthority {
             edit: crate::workbench::app::SchematicEditAuthority::capture(&app.state),
@@ -301,11 +319,10 @@ fn page_setup_rejects_late_read_only_authority_without_partial_commit() {
     );
     let pending = PendingPageSetup {
         opened_source: std::sync::Arc::new(resolved.clone()),
-        setup: setup_seeded_from_sheet_format(SchematicSheetFormat::standard(
+        setup: sheet_output_setup(&SchematicSheetFormat::standard(
             SchematicPageSize::A3,
             SchematicPageOrientation::Portrait,
-        ))
-        .unwrap(),
+        )),
         staged_mapping: StagedPrintMappingPersistence::Document,
         schematic_authority: Some(authority),
     };
