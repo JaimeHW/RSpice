@@ -221,7 +221,7 @@ fn real_position(cursor: &Cursor) -> Option<f64> {
 /// The edits that put `pane_id`'s A and B cursors at `desired`, carrying
 /// every cursor linked with them along. A cursor that is cleared takes its
 /// links and every cursor in them with it.
-pub(in crate::workbench::documents::result_document) fn cursor_pair_edits(
+pub(crate) fn cursor_pair_edits(
     document: &VisualizationDocument,
     pane_id: PaneId,
     desired: (Option<f64>, Option<f64>),

@@ -10,7 +10,7 @@ mod bars;
 mod bode;
 mod box_violin;
 pub(crate) mod create_document;
-mod document_edit;
+pub(crate) mod document_edit;
 pub(crate) use document_edit::show as show_document_dialog;
 mod events;
 mod eye;
@@ -717,7 +717,7 @@ pub(crate) const fn retained_kind_of_marker(
 }
 
 /// One requested marker placement, as the drawn pane knows it.
-pub(super) struct MarkerPlacement<'a> {
+pub(crate) struct MarkerPlacement<'a> {
     pub analysis: AnalysisPresentationKey,
     pub anchor: WaveformPresentationKey,
     pub trace_name: String,
@@ -766,7 +766,7 @@ fn retained_marker_label<'a>(note: &'a str, trace_name: &'a str) -> &'a str {
 /// retain the clicked trace (an expression trace, or one family member of a
 /// swept trace), or it declines the placement outright — falls back to a quick
 /// marker and says why, rather than dropping the reader's click.
-pub(super) fn place_marker(
+pub(crate) fn place_marker(
     state: &mut ResultsParts<'_>,
     placement: MarkerPlacement<'_>,
 ) -> Option<MarkerSelector> {
@@ -885,7 +885,7 @@ pub(super) fn place_marker(
 }
 
 /// Remove one marker from whichever store owns it.
-pub(super) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
+pub(crate) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelector) {
     match selector {
         MarkerSelector::Quick(id) => state.results.session.remove_marker(id),
         MarkerSelector::Document {
@@ -942,7 +942,7 @@ pub(super) fn remove_marker(state: &mut ResultsParts<'_>, selector: MarkerSelect
 /// The retained coordinate, scope and source specification are read back from
 /// the live document rather than from the projection, so an edit of the label
 /// or kind can never restate a stale position as if the reader had moved it.
-pub(super) fn commit_marker_edit(
+pub(crate) fn commit_marker_edit(
     state: &mut ResultsParts<'_>,
     selector: MarkerSelector,
     note: &str,

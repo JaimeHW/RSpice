@@ -25,26 +25,26 @@ use crate::state::{AnalysisResult, AnalysisType, SimulationRun};
 use super::{ResultViewer, ResultsParts, ResultsReads};
 
 #[derive(Debug, Clone)]
-struct DocumentProjection {
-    pages: Vec<PageProjection>,
+pub(crate) struct DocumentProjection {
+    pub(crate) pages: Vec<PageProjection>,
 }
 
 #[derive(Debug, Clone)]
-struct PageProjection {
+pub(crate) struct PageProjection {
     page: Page,
-    panes: Vec<PaneProjection>,
+    pub(crate) panes: Vec<PaneProjection>,
 }
 
 #[derive(Debug, Clone)]
-struct PaneProjection {
+pub(crate) struct PaneProjection {
     document_id: ResultDocumentId,
     pane: Pane,
-    axes: Vec<Axis>,
-    traces: Vec<Trace>,
-    cursors: Vec<Cursor>,
-    markers: Vec<Marker>,
-    measurements: Vec<Measurement>,
-    annotations: Vec<Annotation>,
+    pub(crate) axes: Vec<Axis>,
+    pub(crate) traces: Vec<Trace>,
+    pub(crate) cursors: Vec<Cursor>,
+    pub(crate) markers: Vec<Marker>,
+    pub(crate) measurements: Vec<Measurement>,
+    pub(crate) annotations: Vec<Annotation>,
 }
 
 impl std::ops::Deref for PaneProjection {
@@ -273,7 +273,7 @@ pub(crate) fn show(
 
 /// Show the document's page at `index`, in document order, from the next
 /// frame. The pane the reader works in moves to that page's first pane.
-pub(super) fn select_page(
+pub(crate) fn select_page(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     index: usize,
@@ -625,7 +625,7 @@ pub(super) fn activate(state: &mut ResultsParts<'_>, document_id: ResultDocument
     true
 }
 
-fn projection(
+pub(crate) fn projection(
     state: ResultsReads<'_>,
     document_id: ResultDocumentId,
 ) -> Option<DocumentProjection> {
@@ -688,7 +688,7 @@ fn projection(
     Some(DocumentProjection { pages })
 }
 
-pub(super) fn ordered_page_panes<'a>(panes: &'a [Pane], page: &Page) -> Vec<&'a Pane> {
+pub(crate) fn ordered_page_panes<'a>(panes: &'a [Pane], page: &Page) -> Vec<&'a Pane> {
     let mut panes = panes
         .iter()
         .filter(|pane| pane.page_id == page.id)
@@ -937,7 +937,7 @@ fn render_pane_viewer(
     capture_pane_presentation(state, pane, viewer);
 }
 
-fn project_pane_presentation(
+pub(crate) fn project_pane_presentation(
     state: &mut ResultsParts<'_>,
     pane: &PaneProjection,
     viewer: ResultViewer,
@@ -1056,7 +1056,7 @@ fn project_pane_presentation(
 /// the frame may already have moved this pane's X range or cursors. Writing
 /// the stale snapshot back would undo that link. An X range or cursor the
 /// reader did change carries every axis or cursor linked with it along.
-fn capture_pane_presentation(
+pub(crate) fn capture_pane_presentation(
     state: &mut ResultsParts<'_>,
     pane: &PaneProjection,
     viewer: ResultViewer,
@@ -1184,7 +1184,7 @@ fn bound_viewer_projection(state: ResultsReads<'_>, viewer: ResultViewer) -> Res
 /// active one — so an unguarded re-selection made all of those states
 /// impossible to hold at all while a project-owned document was open. The
 /// document bar's dataset activation carries the identical guard.
-fn select_pane_binding(state: &mut ResultsParts<'_>, pane: &Pane) -> Result<(), String> {
+pub(crate) fn select_pane_binding(state: &mut ResultsParts<'_>, pane: &Pane) -> Result<(), String> {
     let binding = pane
         .binding
         .ok_or_else(|| "This result pane is not bound to a run.".to_owned())?;

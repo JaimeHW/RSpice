@@ -4,6 +4,7 @@
 
 mod availability;
 mod commands;
+mod document_edit;
 pub(super) mod histogram_publication;
 mod inspector;
 mod navigation;

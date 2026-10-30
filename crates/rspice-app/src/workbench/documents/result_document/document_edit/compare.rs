@@ -130,7 +130,7 @@ fn numbers(draft: &CompareDraft) -> Result<CompareNumbers, String> {
 
 /// Resolve the form's choices against the retained datasets, moving a
 /// baseline or signal that no longer exists onto the first one that does.
-pub(super) fn choices(state: ResultsReads<'_>, draft: &mut CompareDraft) -> CompareChoices {
+pub(crate) fn choices(state: ResultsReads<'_>, draft: &mut CompareDraft) -> CompareChoices {
     let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {

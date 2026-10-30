@@ -1,10 +1,22 @@
 //! Pins for the edits the result viewer makes to a project result document.
 
-use super::super::RSpiceApp;
-use super::*;
+use crate::product::DatasetBinding;
+use crate::product::ResultDocumentId;
+use crate::results::visualization_document::DocumentEdit;
+use crate::results::visualization_document::EntityRef;
+use crate::results::visualization_document::PageLayout;
+use crate::results::visualization_document::PaneDataBinding;
+use crate::results::visualization_document::VisualizationDocument;
 use crate::results::visualization_document::{LinkKind, Pane};
+use crate::state::AnalysisResult;
 use crate::state::{AnalysisType, RetainedTrace, SimulationRun, SimulationRunLifecycle};
+use crate::workbench::RSpiceApp;
+use crate::workbench::documents::result_document::ResultViewer;
+use crate::workbench::documents::result_document::document_edit::*;
+use crate::workbench::state::Workspace;
+use crate::workbench::state::WorkspaceDocumentId;
 use rspice_results_ui::create_document::CreateResultDocumentDialogState;
+use rspice_results_ui::document_dialogs::ResultDocumentDialog;
 
 fn transient_run(id: u64) -> SimulationRun {
     let mut run = SimulationRun::new(id);
@@ -37,8 +49,10 @@ fn document_fixture(layout_id: &str) -> (RSpiceApp, ResultDocumentId) {
         layout_id: layout_id.to_owned(),
         validation_error: None,
     };
-    let document_id = super::super::create_document::commit(&mut app.state.results_parts())
-        .expect("the document commits");
+    let document_id = crate::workbench::documents::result_document::create_document::commit(
+        &mut app.state.results_parts(),
+    )
+    .expect("the document commits");
     (app, document_id)
 }
 
@@ -54,10 +68,13 @@ fn retained(app: &RSpiceApp, document_id: ResultDocumentId) -> &VisualizationDoc
 fn ordered_panes(app: &RSpiceApp, document_id: ResultDocumentId) -> Vec<Pane> {
     let document = retained(app, document_id);
     let page = &document.pages()[0];
-    super::super::persistent_document::ordered_page_panes(document.panes(), page)
-        .into_iter()
-        .cloned()
-        .collect()
+    crate::workbench::documents::result_document::persistent_document::ordered_page_panes(
+        document.panes(),
+        page,
+    )
+    .into_iter()
+    .cloned()
+    .collect()
 }
 
 /// Drive one whole frame with the product theme applied.
@@ -73,7 +90,7 @@ fn show_document(app: &mut RSpiceApp, document_id: ResultDocumentId) {
         crate::workbench::documents::result_document::with_surface_parts(
             app,
             |state, run_controller, selected_specification| {
-                super::super::show_persistent_document(
+                crate::workbench::documents::result_document::show_persistent_document(
                     ui,
                     state,
                     run_controller,
@@ -235,7 +252,11 @@ fn reload(app: &mut RSpiceApp, document_id: ResultDocumentId) {
 fn fixture_binding(app: &RSpiceApp) -> PaneDataBinding {
     let run = &app.state.model.simulation.retained.runs[0];
     PaneDataBinding {
-        analysis_id: super::super::create_document::source_analysis_identity(run, &run.analyses[0]),
+        analysis_id:
+            crate::workbench::documents::result_document::create_document::source_analysis_identity(
+                run,
+                &run.analyses[0],
+            ),
         dataset: DatasetBinding::new(run.dataset_id, run.dataset_content_digest()),
     }
 }
@@ -285,7 +306,11 @@ fn a_saved_document_shows_the_second_page_once_it_is_picked() {
         Some(second_page)
     );
 
-    super::super::persistent_document::select_page(&mut app.state.results_parts(), document_id, 1);
+    crate::workbench::documents::result_document::persistent_document::select_page(
+        &mut app.state.results_parts(),
+        document_id,
+        1,
+    );
     show_document(&mut app, document_id);
 
     let session = &app.state.results.results.session;
@@ -701,7 +726,12 @@ fn a_family_slice_over_a_quick_view_draws_only_the_rows_it_keeps() {
         crate::workbench::documents::result_document::with_surface_parts(
             &mut app,
             |state, run_controller, selected_specification| {
-                super::super::show(ui, state, run_controller, selected_specification)
+                crate::workbench::documents::result_document::show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                )
             },
         )
     });
@@ -717,7 +747,10 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
     let run = &app.state.model.simulation.retained.runs[0];
     let binding = DatasetBinding::new(run.dataset_id, run.dataset_content_digest());
     let analysis_id =
-        super::super::create_document::source_analysis_identity(run, &run.analyses[0]);
+        crate::workbench::documents::result_document::create_document::source_analysis_identity(
+            run,
+            &run.analyses[0],
+        );
     let column = |key: &str, label: &str, value_type, role, unit: Option<&str>| {
         SourceColumn::new(key, label, value_type, role, unit.map(str::to_owned))
             .expect("the column is valid")
@@ -782,10 +815,12 @@ fn family_document(app: &mut RSpiceApp) -> ResultDocumentId {
         .insert_visualization_document(document)
         .expect("the project keeps the document");
     app.state.workbench.activate(Workspace::Results);
-    assert!(super::super::activate_persistent_document(
-        &mut app.state.results_parts(),
-        document_id
-    ));
+    assert!(
+        crate::workbench::documents::result_document::activate_persistent_document(
+            &mut app.state.results_parts(),
+            document_id
+        )
+    );
     app.state
         .workbench
         .documents
@@ -965,7 +1000,12 @@ fn a_document_s_digits_and_phase_are_applied_as_saved() {
         crate::workbench::documents::result_document::with_surface_parts(
             &mut app,
             |state, run_controller, selected_specification| {
-                super::super::show(ui, state, run_controller, selected_specification)
+                crate::workbench::documents::result_document::show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                )
             },
         )
     });

@@ -109,7 +109,7 @@ pub(super) fn build_models(
     )
 }
 
-pub(super) fn source_waveform_anchor(
+pub(crate) fn source_waveform_anchor(
     state: &mut ResultsParts<'_>,
     source_name: &str,
 ) -> Option<(AnalysisPresentationKey, WaveformPresentationKey)> {

@@ -22,7 +22,7 @@ pub(crate) fn open_measurement(state: &mut ResultsParts<'_>) {
 }
 
 /// What the form shows for `draft` on this frame.
-pub(super) fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
+pub(crate) fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> MeasurementPreview {
     let (run, analysis) = match reading_analysis(state) {
         Ok(found) => found,
         Err(refusal) => {

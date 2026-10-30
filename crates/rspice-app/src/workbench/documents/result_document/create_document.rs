@@ -487,7 +487,7 @@ fn resolve_draft<'a>(
     })
 }
 
-pub(super) fn source_analysis_identity(
+pub(crate) fn source_analysis_identity(
     run: &SimulationRun,
     analysis: &AnalysisResult,
 ) -> AnalysisInstanceId {

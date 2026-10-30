@@ -96,7 +96,7 @@ pub(crate) fn set_family_filter(dialog: &mut Option<ResultDocumentDialog>, filte
 }
 
 /// Resolve the form's choices against the family's manifest.
-pub(super) fn choices(state: ResultsReads<'_>, draft: &FamilyDraft) -> FamilyChoices {
+pub(crate) fn choices(state: ResultsReads<'_>, draft: &FamilyDraft) -> FamilyChoices {
     let refused = |refusal: String| FamilyChoices {
         scope: String::new(),
         x_dimensions: Vec::new(),

@@ -47,7 +47,7 @@ fn project_document(
 }
 
 /// Commit `edits` against the document's current revision.
-fn transact(
+pub(crate) fn transact(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     edits: Vec<DocumentEdit>,
@@ -154,7 +154,7 @@ pub(crate) fn show(ctx: &Context, state: &mut ResultsParts<'_>) {
 
 /// Commit the open form's draft. The form closes when its edit lands, or
 /// moves on to what it shows next.
-fn commit_open_dialog(state: &mut ResultsParts<'_>) {
+pub(crate) fn commit_open_dialog(state: &mut ResultsParts<'_>) {
     let result = match state.result_document_dialog.clone() {
         Some(ResultDocumentDialog::AddPane(draft)) => add_pane(state, &draft).map(|()| None),
         Some(ResultDocumentDialog::Compare(draft)) => compare::commit(state, draft),
@@ -222,7 +222,10 @@ fn pane_viewers(analysis: &AnalysisResult) -> Vec<(ResultViewer, String)> {
 
 /// Resolve the form's choices against the retained datasets, moving any
 /// selection that no longer exists onto the first one that does.
-fn add_pane_choices(state: ResultsReads<'_>, draft: &mut AddPaneDraft) -> AddPaneChoices {
+pub(crate) fn add_pane_choices(
+    state: ResultsReads<'_>,
+    draft: &mut AddPaneDraft,
+) -> AddPaneChoices {
     let runs = &state.model.simulation.retained.runs;
     let datasets = runs
         .iter()
@@ -374,7 +377,7 @@ fn add_pane(state: &mut ResultsParts<'_>, draft: &AddPaneDraft) -> Result<(), St
 }
 
 /// The context-menu edits one pane's header offers.
-pub(super) fn pane_menu(
+pub(crate) fn pane_menu(
     state: ResultsReads<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
@@ -449,14 +452,14 @@ fn page_order(document: &VisualizationDocument, pane_id: PaneId) -> Option<(usiz
 
 /// Which way a pane moves in its page's order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PaneMove {
+pub(crate) enum PaneMove {
     Earlier,
     Later,
 }
 
 /// Change places with the pane's neighbour in its page's order. The page
 /// keeps its layout; the panes fill its slots in the new order.
-pub(super) fn move_pane(
+pub(crate) fn move_pane(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
@@ -500,7 +503,7 @@ fn move_pane_edit(
 /// Take one pane out of the document, with its axes, traces, cursors,
 /// markers, measurements and notes. Link groups lose the pane's members in
 /// the same transaction, and a group left with one member goes too.
-pub(super) fn remove_pane(
+pub(crate) fn remove_pane(
     state: &mut ResultsParts<'_>,
     document_id: ResultDocumentId,
     pane_id: PaneId,
@@ -559,16 +562,13 @@ fn remove_pane_edits(
     Ok(edits)
 }
 
-mod compare;
-pub(super) mod family;
-pub(super) mod links;
-mod measurement;
+pub(crate) mod compare;
+pub(crate) mod family;
+pub(crate) mod links;
+pub(crate) mod measurement;
 mod properties;
 
 pub(crate) use compare::{compare_availability, open_compare};
 pub(crate) use family::{family_available, open_family, set_family_filter};
 pub(crate) use measurement::open_measurement;
 pub(crate) use properties::open_properties;
-
-#[cfg(test)]
-mod tests;
