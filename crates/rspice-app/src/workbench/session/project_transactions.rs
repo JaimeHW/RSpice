@@ -14,7 +14,7 @@ use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, has_unsaved_changes,
 };
-use crate::workbench::live_session::{CloudHandles, DiscardMirror, MirrorApply};
+use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::workflows::project_workflow::{
     LiveProjectApply, apply_live_project_snapshot, close_project_discard,
 };
@@ -55,15 +55,15 @@ pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) 
         account,
         live_session,
     } = cloud;
-    if let Some(DiscardMirror) = live_session.reconcile_role(state, account) {
+    if let Some(DiscardMirror) = live_session.reconcile_role(&mut live_host(state), account) {
         let closed = close_project_discard(state, ProjectCloseDestination::EmptyWorkbench);
         live_session.mirror_retired(closed);
     }
-    if let Some(DiscardMirror) = live_session.mirror_discard_due(state) {
+    if let Some(DiscardMirror) = live_session.mirror_discard_due(&live_host(state)) {
         let closed = close_project_discard(state, ProjectCloseDestination::EmptyWorkbench);
         live_session.mirror_discard_settled(closed);
     }
-    if !live_session.pump_inbound(state, account) {
+    if !live_session.pump_inbound(&mut live_host(state), account) {
         return;
     }
     requests::drain(
@@ -80,9 +80,23 @@ pub(crate) fn pump_live_session(state: &mut AppState, cloud: &mut CloudHandles) 
                 LiveProjectApply::RetryLater => MirrorApply::RetryLater,
                 LiveProjectApply::Rejected => MirrorApply::Rejected,
             };
-        live_session.mirror_snapshot_applied(state, snapshot, outcome);
+        live_session.mirror_snapshot_applied(&mut live_host(state), snapshot, outcome);
     }
-    live_session.pump_outbound(state);
+    live_session.pump_outbound(&mut live_host(state));
+}
+
+/// What the live session's engine reads and writes of `state` in one phase
+/// of the pump. A project snapshot reads the same four parts from it as from
+/// `state` itself.
+fn live_host(state: &mut AppState) -> LiveHost<'_> {
+    LiveHost {
+        model: &mut state.model,
+        workbench: &mut state.workbench,
+        platform: &state.platform,
+        presentation: &state.results.results,
+        design: &*state.design,
+        code: &*state.code,
+    }
 }
 
 #[cfg(test)]

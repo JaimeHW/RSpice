@@ -618,7 +618,7 @@ const LIVE_SESSION_PUMP: &[Step] = &[
     (
         "1",
         &[
-            "live_session.reconcile_role(state, account)",
+            "live_session.reconcile_role(&mut live_host(state), account)",
             "close_project_discard(state, ProjectCloseDestination::EmptyWorkbench)",
             "live_session.mirror_retired(closed)",
         ],
@@ -626,12 +626,15 @@ const LIVE_SESSION_PUMP: &[Step] = &[
     (
         "2",
         &[
-            "live_session.mirror_discard_due(state)",
+            "live_session.mirror_discard_due(&live_host(state))",
             "close_project_discard(state, ProjectCloseDestination::EmptyWorkbench)",
             "live_session.mirror_discard_settled(closed)",
         ],
     ),
-    ("3", &["if !live_session.pump_inbound(state, account) {"]),
+    (
+        "3",
+        &["if !live_session.pump_inbound(&mut live_host(state), account) {"],
+    ),
     (
         "4",
         &[
@@ -645,10 +648,10 @@ const LIVE_SESSION_PUMP: &[Step] = &[
         &[
             "live_session.take_mirror_snapshot()",
             "apply_live_project_snapshot(state, snapshot.bytes(), snapshot.host_label())",
-            "live_session.mirror_snapshot_applied(state, snapshot, outcome)",
+            "live_session.mirror_snapshot_applied(&mut live_host(state), snapshot, outcome)",
         ],
     ),
-    ("6", &["live_session.pump_outbound(state)"]),
+    ("6", &["live_session.pump_outbound(&mut live_host(state))"]),
 ];
 
 /// The body of the one function `signature` opens in `source`'s shipped half,

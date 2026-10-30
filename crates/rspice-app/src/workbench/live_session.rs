@@ -30,12 +30,14 @@ use crate::services::live_protocol::{
 use crate::state::SchematicState;
 use crate::state::write_policy::LiveWriteLocks;
 use crate::time_compat::Instant;
-use crate::workbench::AppState;
 use crate::workbench::app_state::model::LiveOwnedSource;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::feature::{CodePort, DesignPort};
 use crate::workbench::framework::requests::{
     AdoptLiveOwnedSource, CloseForLiveMirror, LiveMirrorEntry, Outbox,
+};
+use crate::workbench::lifecycle::project_lifecycle::{
+    LifecycleSource, LifecycleView, ResultPresentationSource,
 };
 use crate::workbench::state::WorkbenchSession;
 
@@ -202,6 +204,32 @@ pub(crate) struct CloudHandles {
     pub(crate) live_session: LiveSessionEngine,
 }
 
+/// What the engine reads and writes of the application in one phase of its
+/// pump: the model, the session, and what a project snapshot reads beside
+/// the model, with what the design and code features show. The shell lends
+/// them for the one call.
+pub(crate) struct LiveHost<'a> {
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub(crate) design: &'a dyn DesignPort,
+    pub(crate) code: &'a dyn CodePort,
+}
+
+/// A host's whole-project snapshot reads the project from the parts the
+/// shell lent.
+impl LifecycleSource for LiveHost<'_> {
+    fn lifecycle_view(&self) -> LifecycleView<'_> {
+        LifecycleView {
+            model: &*self.model,
+            platform: self.platform,
+            workspace: self.workbench.workspace,
+            presentation: self.presentation,
+        }
+    }
+}
+
 /// The mirrored project closed out of this install, asked of the shell
 /// between the pump's phases: the session that mirrored it is over and its
 /// policy keeps no copy.
@@ -288,7 +316,7 @@ impl LiveSessionEngine {
     /// left behind is dropped; the frame's pump stops there.
     pub(crate) fn pump_inbound(
         &mut self,
-        state: &mut AppState,
+        state: &mut LiveHost<'_>,
         cloud: &mut CloudAccountService,
     ) -> bool {
         if matches!(self.role, Role::Idle) {
@@ -296,7 +324,7 @@ impl LiveSessionEngine {
                 // The close-to-mirror transaction outlived its session. Its
                 // close already left the no-project landing in place, and a
                 // closed project never raises the project launcher.
-                state.record(
+                state.model.record(
                     LogSeverity::Warning,
                     LogSource::Studio,
                     "The live session ended before the host's project arrived.",
@@ -315,7 +343,7 @@ impl LiveSessionEngine {
                 .strip_prefix(SCHEMATIC_DOC_PREFIX)
                 .unwrap_or(&doc)
                 .to_owned();
-            state.prompt(format!(
+            state.workbench.prompt(format!(
                 "{holder} holds the write lease on {doc}; ask again once it is released."
             ));
         }
@@ -325,11 +353,11 @@ impl LiveSessionEngine {
     /// The session's outbound half for one frame: broadcast local changes,
     /// stream the run's status, keep presence and the cursor current, retire
     /// quiet peers, and project write locks.
-    pub(crate) fn pump_outbound(&mut self, state: &mut AppState) {
+    pub(crate) fn pump_outbound(&mut self, state: &mut LiveHost<'_>) {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
-        self.send_cursor_update(&state.model, &state.workbench, &*state.design, &*state.code);
+        self.send_cursor_update(&*state.model, &*state.workbench, state.design, state.code);
         self.prune_peers();
         self.project_locks(state);
     }
@@ -483,7 +511,7 @@ impl LiveSessionEngine {
 
     /// Complete mirror adoption after the close-to-mirror transaction:
     /// from here every host document applies, starting with a full resync.
-    fn finish_mirror_entry(&mut self, state: &mut AppState) {
+    fn finish_mirror_entry(&mut self, state: &mut LiveHost<'_>) {
         if state.workbench.outbox.take::<LiveMirrorEntry>().is_none() {
             return;
         }
@@ -497,7 +525,7 @@ impl LiveSessionEngine {
         for mirror in guest.mirror_docs.values_mut() {
             mirror.digest.clear();
         }
-        state.record(
+        state.model.record(
             LogSeverity::Info,
             LogSource::Studio,
             "Joined the live session; the host's project opens when its snapshot arrives.",
@@ -531,7 +559,7 @@ impl LiveSessionEngine {
     /// lifecycle transaction owns the project.
     pub(crate) fn mirror_snapshot_applied(
         &mut self,
-        state: &mut AppState,
+        state: &mut LiveHost<'_>,
         snapshot: MirrorSnapshot,
         outcome: MirrorApply,
     ) {
@@ -574,7 +602,7 @@ impl LiveSessionEngine {
                 guest.pending_project = Some(pending);
             }
             MirrorApply::Rejected => {
-                state.record(
+                state.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     "The host's project could not be mirrored on this build.",
@@ -585,7 +613,7 @@ impl LiveSessionEngine {
 
     /// Whether a mirror teardown that waited for the local run to stop can
     /// close the mirrored project now.
-    pub(crate) fn mirror_discard_due(&self, state: &AppState) -> Option<DiscardMirror> {
+    pub(crate) fn mirror_discard_due(&self, state: &LiveHost<'_>) -> Option<DiscardMirror> {
         (self.mirror_discard_pending && !state.model.simulation.execution.has_active_execution())
             .then_some(DiscardMirror)
     }
@@ -614,7 +642,7 @@ impl LiveSessionEngine {
     /// it once this returns.
     pub(crate) fn reconcile_role(
         &mut self,
-        state: &mut AppState,
+        state: &mut LiveHost<'_>,
         cloud: &CloudAccountService,
     ) -> Option<DiscardMirror> {
         let session = cloud.snapshot().live_session.clone();
@@ -683,7 +711,7 @@ impl LiveSessionEngine {
         discard
     }
 
-    fn leave_session(&mut self, state: &mut AppState) -> Option<DiscardMirror> {
+    fn leave_session(&mut self, state: &mut LiveHost<'_>) -> Option<DiscardMirror> {
         let previous = std::mem::replace(&mut self.role, Role::Idle);
         let discard = if let Role::Guest(guest) = previous
             && guest.mirroring
@@ -711,18 +739,18 @@ impl LiveSessionEngine {
     /// shell once the local run has stopped.
     fn retire_mirror(
         &mut self,
-        state: &mut AppState,
+        state: &mut LiveHost<'_>,
         save_copy_allowed: bool,
     ) -> Option<DiscardMirror> {
         if save_copy_allowed {
-            state.record(
+            state.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 "The live session ended. The mirrored project stays open; save it to keep a copy.",
             );
             return None;
         }
-        state.record(
+        state.model.record(
             LogSeverity::Warning,
             LogSource::Studio,
             "The live session ended; its policy does not allow keeping a copy, so the mirrored \
@@ -732,7 +760,7 @@ impl LiveSessionEngine {
             if state.model.simulation.can_request_abort_active_run()
                 && let Err(error) = state.model.simulation.request_abort_active_run()
             {
-                state.record(
+                state.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("The mirrored project's run could not be stopped: {error}"),
@@ -744,7 +772,7 @@ impl LiveSessionEngine {
         Some(DiscardMirror)
     }
 
-    fn adopt_port(&mut self, state: &mut AppState, cloud: &mut CloudAccountService) {
+    fn adopt_port(&mut self, state: &mut LiveHost<'_>, cloud: &mut CloudAccountService) {
         if self.connection.as_ref().is_some_and(|c| c.dead) {
             self.connection = None;
         }
@@ -822,7 +850,7 @@ impl LiveSessionEngine {
 
     // -- inbound ---------------------------------------------------------------
 
-    fn drain_inbound(&mut self, state: &mut AppState) {
+    fn drain_inbound(&mut self, state: &mut LiveHost<'_>) {
         loop {
             let Some(connection) = self.connection.as_ref() else {
                 return;
@@ -841,7 +869,7 @@ impl LiveSessionEngine {
                 Err(LiveProtocolError::UnsupportedVersion(version)) => {
                     if !self.incompatible_peer {
                         self.incompatible_peer = true;
-                        state.record(
+                        state.model.record(
                             LogSeverity::Warning,
                             LogSource::Studio,
                             format!(
@@ -926,7 +954,7 @@ impl LiveSessionEngine {
         }
     }
 
-    fn handle_message(&mut self, state: &mut AppState, message: LiveMessage) {
+    fn handle_message(&mut self, state: &mut LiveHost<'_>, message: LiveMessage) {
         match message {
             LiveMessage::Presence(payload) => {
                 let entry = self
@@ -969,7 +997,7 @@ impl LiveSessionEngine {
                     && self.pending_run_requests.len() < MAX_PENDING_RUN_REQUESTS
                 {
                     let requester = self.display_name(&payload.sender);
-                    state.record(
+                    state.model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         format!(
@@ -1002,7 +1030,7 @@ impl LiveSessionEngine {
 
     // -- host ------------------------------------------------------------------
 
-    fn host_handle_document(&mut self, state: &mut AppState, message: DocumentMessage) {
+    fn host_handle_document(&mut self, state: &mut LiveHost<'_>, message: DocumentMessage) {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
@@ -1084,7 +1112,7 @@ impl LiveSessionEngine {
 
     /// Apply a leaseholder's completed proposal onto the host working copy
     /// and rebroadcast it with host authority.
-    fn host_apply_proposal(&mut self, state: &mut AppState, completed: CompletedContent) {
+    fn host_apply_proposal(&mut self, state: &mut LiveHost<'_>, completed: CompletedContent) {
         let applied = if completed.doc == NETLIST_DOC {
             match String::from_utf8(completed.bytes.clone()) {
                 Ok(source) => apply_owned_source(state, source),
@@ -1142,7 +1170,7 @@ impl LiveSessionEngine {
 
     /// Reconcile the host's tracked set with the workspace: sync the active
     /// buffer, admit new documents, and retire deleted ones.
-    fn refresh_host_documents(&mut self, state: &mut AppState, announce_removals: bool) {
+    fn refresh_host_documents(&mut self, state: &mut LiveHost<'_>, announce_removals: bool) {
         self.sync_active_buffer(state);
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
@@ -1202,11 +1230,13 @@ impl LiveSessionEngine {
 
     /// Keep the workspace buffer map current with the active working copy,
     /// but only when its content actually moved.
-    fn sync_active_buffer(&mut self, state: &mut AppState) {
+    fn sync_active_buffer(&mut self, state: &mut LiveHost<'_>) {
         let key = state.model.workspace.content.active_key();
         let version = state.model.schematic.content_version();
         if self.active_synced_version != Some((key.clone(), version)) {
-            state.sync_active_schematic_to_workspace();
+            if let Some(prompt) = state.model.sync_active_schematic_to_workspace() {
+                state.workbench.prompt(prompt);
+            }
             self.active_synced_version = Some((key, version));
         }
     }
@@ -1235,7 +1265,7 @@ impl LiveSessionEngine {
         }));
     }
 
-    fn broadcast_all_documents(&mut self, state: &mut AppState) {
+    fn broadcast_all_documents(&mut self, state: &mut LiveHost<'_>) {
         let docs: Vec<String> = match &self.role {
             Role::Host(host) => host.tracked.keys().cloned().collect(),
             _ => return,
@@ -1247,7 +1277,7 @@ impl LiveSessionEngine {
 
     /// Serialize one document and broadcast it when it moved (or always,
     /// for sync responses re-serving current content).
-    fn broadcast_document(&mut self, state: &mut AppState, doc: &str, only_if_changed: bool) {
+    fn broadcast_document(&mut self, state: &mut LiveHost<'_>, doc: &str, only_if_changed: bool) {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
@@ -1289,7 +1319,7 @@ impl LiveSessionEngine {
         }
     }
 
-    fn broadcast_local_changes(&mut self, state: &mut AppState) {
+    fn broadcast_local_changes(&mut self, state: &mut LiveHost<'_>) {
         match &self.role {
             Role::Host(_) => {
                 let before: Vec<String> = match &self.role {
@@ -1319,7 +1349,7 @@ impl LiveSessionEngine {
         }
     }
 
-    fn stream_run_status(&mut self, state: &mut AppState) {
+    fn stream_run_status(&mut self, state: &mut LiveHost<'_>) {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
@@ -1375,7 +1405,7 @@ impl LiveSessionEngine {
 
     // -- guest -------------------------------------------------------------------
 
-    fn guest_handle_document(&mut self, state: &mut AppState, message: DocumentMessage) {
+    fn guest_handle_document(&mut self, state: &mut LiveHost<'_>, message: DocumentMessage) {
         let Some(identity) = self.connection.as_ref().map(|c| c.identity) else {
             return;
         };
@@ -1456,7 +1486,7 @@ impl LiveSessionEngine {
         }
     }
 
-    fn guest_apply_document(&mut self, state: &mut AppState, completed: CompletedContent) {
+    fn guest_apply_document(&mut self, state: &mut LiveHost<'_>, completed: CompletedContent) {
         let Role::Guest(guest) = &mut self.role else {
             return;
         };
@@ -1533,7 +1563,7 @@ impl LiveSessionEngine {
     }
 
     /// Send this guest's edits to documents it holds leases on.
-    fn guest_send_proposals(&mut self, state: &mut AppState) {
+    fn guest_send_proposals(&mut self, state: &mut LiveHost<'_>) {
         let held_docs: Vec<String> = match &self.role {
             // Leases exist only on an adopted mirror; anything else here
             // would propose unrelated local work at the host.
@@ -1581,7 +1611,7 @@ impl LiveSessionEngine {
 
     // -- shared frame upkeep -----------------------------------------------------
 
-    fn send_presence_heartbeat(&mut self, state: &AppState) {
+    fn send_presence_heartbeat(&mut self, state: &LiveHost<'_>) {
         let due = self
             .presence_sent_at
             .is_none_or(|sent| sent.elapsed() >= PRESENCE_PERIOD);
@@ -1713,7 +1743,7 @@ impl LiveSessionEngine {
     }
 
     /// Project lease state onto the UI's write gates.
-    fn project_locks(&mut self, state: &mut AppState) {
+    fn project_locks(&mut self, state: &mut LiveHost<'_>) {
         let identity = self.connection.as_ref().map(|c| c.identity);
         let mut locks = LiveWriteLocks::default();
         match &self.role {
@@ -1763,7 +1793,7 @@ impl LiveSessionEngine {
 
 /// Apply a participant's netlist source as the project's own, and have the
 /// netlist editor adopt what changed. `false` when it could not be applied.
-fn apply_owned_source(state: &mut AppState, source: String) -> bool {
+fn apply_owned_source(state: &mut LiveHost<'_>, source: String) -> bool {
     let shows_owned_root = state.code.shows_owned_root();
     match state
         .model
@@ -1786,7 +1816,7 @@ fn apply_owned_source(state: &mut AppState, source: String) -> bool {
 /// the buffer dirty (host adopting a proposal owns saving it); mirrors stay
 /// clean because saving them is governed by the session policy.
 fn install_schematic_buffer(
-    state: &mut AppState,
+    state: &mut LiveHost<'_>,
     cell_key: &str,
     mut prepared: SchematicState,
     remote_is_unsaved: bool,
@@ -1817,7 +1847,7 @@ fn content_type_for(doc: &str) -> &'static str {
 }
 
 /// The document's own change counter, host- and guest-side alike.
-fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
+fn host_document_version(state: &LiveHost<'_>, doc: &str) -> Option<u64> {
     if doc == NETLIST_DOC {
         state
             .model
@@ -1838,12 +1868,12 @@ fn host_document_version(state: &AppState, doc: &str) -> Option<u64> {
     }
 }
 
-fn guest_document_version(state: &AppState, doc: &str) -> Option<u64> {
+fn guest_document_version(state: &LiveHost<'_>, doc: &str) -> Option<u64> {
     host_document_version(state, doc)
 }
 
 /// Serialize one document's current content for the wire.
-fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
+fn serialize_host_document(state: &LiveHost<'_>, doc: &str) -> Option<Vec<u8>> {
     if doc == PROJECT_DOC {
         let mut project = match crate::workbench::lifecycle::project_lifecycle::snapshot(state) {
             Ok(project) => project,
@@ -1890,6 +1920,78 @@ fn serialize_host_document(state: &AppState, doc: &str) -> Option<Vec<u8>> {
 mod tests {
     use super::*;
     use crate::services::live_protocol::LiveRelayIdentity;
+    use crate::state::SimulationState;
+    use crate::state::pdk_config::PdkConfig;
+    use crate::state::result_presentation::ResultPresentation;
+    use rspice_app_state::workbench::workspace::restore_model_library_manager;
+    use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+
+    /// A fresh session's model, session and platform state, which the
+    /// engine's cases lend it as the shell does.
+    struct Session {
+        model: Model,
+        workbench: WorkbenchSession,
+        platform: PlatformState,
+    }
+
+    impl Session {
+        fn new() -> Self {
+            Self {
+                model: Model::session_start(
+                    PdkConfig::default(),
+                    None,
+                    restore_model_library_manager,
+                ),
+                workbench: WorkbenchSession::default(),
+                platform: PlatformState::default(),
+            }
+        }
+
+        fn host(&mut self) -> LiveHost<'_> {
+            LiveHost {
+                model: &mut self.model,
+                workbench: &mut self.workbench,
+                platform: &self.platform,
+                presentation: &NoReads,
+                design: &NoReads,
+                code: &NoReads,
+            }
+        }
+    }
+
+    /// What a fresh session's other features show: no hover, no netlist
+    /// caret, and no presented results.
+    struct NoReads;
+
+    impl DesignPort for NoReads {
+        fn review_markers(&self) -> SchematicReviewMarkerVisibility {
+            SchematicReviewMarkerVisibility::default()
+        }
+
+        fn canvas_hover(&self) -> Option<(f64, f64)> {
+            None
+        }
+    }
+
+    impl CodePort for NoReads {
+        fn owned_source_active(&self) -> bool {
+            false
+        }
+
+        fn shows_owned_root(&self) -> bool {
+            false
+        }
+
+        fn netlist_cursor_line(&self) -> usize {
+            0
+        }
+    }
+
+    impl ResultPresentationSource for NoReads {
+        fn project_presentation(&self, _simulation: &SimulationState) -> ResultPresentation {
+            ResultPresentation::default()
+        }
+    }
 
     fn identity(principal: u128, client: u128) -> PeerIdentity {
         PeerIdentity {
@@ -1952,7 +2054,8 @@ mod tests {
             ))
             .expect("test relay remains attached");
 
-        let mut state = AppState::default();
+        let mut session = Session::new();
+        let mut state = session.host();
         engine.drain_inbound(&mut state);
 
         assert!(engine.pending_run_requests.is_empty());
@@ -1982,7 +2085,8 @@ mod tests {
             ))
             .expect("test relay remains attached");
 
-        let mut state = AppState::default();
+        let mut session = Session::new();
+        let mut state = session.host();
         engine.drain_inbound(&mut state);
 
         assert_eq!(engine.pending_run_requests.len(), 1);
@@ -2022,7 +2126,8 @@ mod tests {
             ))
             .expect("test relay remains attached");
 
-        let mut state = AppState::default();
+        let mut session = Session::new();
+        let mut state = session.host();
         engine.drain_inbound(&mut state);
 
         assert!(engine.guest_run_status().is_none());
