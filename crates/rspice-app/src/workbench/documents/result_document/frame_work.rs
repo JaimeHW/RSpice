@@ -7,11 +7,11 @@
 //! here before doing it.
 //!
 //! The accounting lives beside the Results workspace because that is where
-//! the walks and their memos are, but it is crate-visible rather than
-//! Results-private: the same retained datasets are read by other workspaces,
-//! and a walk they perform costs the reader exactly what one here does.
+//! the walks and their memos are, but it is not Results-private: the same
+//! retained datasets are read by other workspaces, and a walk they perform
+//! costs the reader exactly what one here does.
 //!
-//! The counters exist only under `cfg(test)`; in a shipped build [`note`] is
+//! The counters exist only in test builds; in a shipped build [`note`] is
 //! an empty function and the call sites optimize away. What ships is the
 //! discipline: a new whole-dataset walk on any surface is expected to name
 //! itself in [`DatasetWalk`], and the idle-frame gates then hold it to being
@@ -236,6 +236,20 @@ impl WorkCounts {
         self.walks[walk as usize]
     }
 
+    /// The classes that counted anything, for a failure message that names
+    /// the offending surface instead of only its total.
+    pub(crate) fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
+        DatasetWalk::ALL
+            .into_iter()
+            .filter(|walk| self.get(*walk) > 0)
+            .map(|walk| (walk, self.get(walk)))
+            .collect()
+    }
+}
+
+/// The totals and the painting breakdown, which only this feature's own tests read.
+#[cfg(test)]
+impl WorkCounts {
     /// Retained samples read by one class of per-frame painting work.
     pub(super) const fn samples(self, read: FrameSampleRead) -> u64 {
         self.samples[read as usize]
@@ -261,16 +275,6 @@ impl WorkCounts {
             index += 1;
         }
         total
-    }
-
-    /// The classes that counted anything, for a failure message that names
-    /// the offending surface instead of only its total.
-    pub(crate) fn nonzero(self) -> Vec<(DatasetWalk, u64)> {
-        DatasetWalk::ALL
-            .into_iter()
-            .filter(|walk| self.get(*walk) > 0)
-            .map(|walk| (walk, self.get(walk)))
-            .collect()
     }
 
     /// The painting classes that read anything, on the same terms.
