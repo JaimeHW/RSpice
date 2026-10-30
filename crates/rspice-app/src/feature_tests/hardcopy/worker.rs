@@ -1,11 +1,11 @@
 //! The hardcopy worker's operations over sources resolved from the session:
 //! resolution, preview and publication, each bound to its request.
 
+use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::state::{Point, Wire};
 use crate::workbench::AppState;
 use crate::workbench::hardcopy_adapters::sources::{
-    PreparedRetainedHardcopyResolution, SourceReads, prepare_retained_hardcopy_resolution,
-    resolve_retained_hardcopy_source,
+    PreparedRetainedHardcopyResolution, prepare_retained_hardcopy_resolution,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_formats::zip::deterministic_stored_zip;
@@ -68,7 +68,7 @@ fn worker_fixture_with_wire_endpoint(endpoint_x: i32) -> WorkerFixture {
     let source = resolve_retained_hardcopy_source(&state, &source_key, scope.clone())
         .expect("fixture source resolves");
     let prepared =
-        prepare_retained_hardcopy_resolution(SourceReads::of(&state), &source_key, scope.clone())
+        prepare_retained_hardcopy_resolution(source_reads(&state), &source_key, scope.clone())
             .expect("fixture source prepares");
     WorkerFixture {
         prepared,

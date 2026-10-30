@@ -9,16 +9,6 @@ use rspice_hardcopy::sources::resolve_semantic_source;
 const BLANK_SCHEMATIC_SHEET_WIDTH_UM: i64 = 279_400;
 const BLANK_SCHEMATIC_SHEET_HEIGHT_UM: i64 = 215_900;
 
-/// Resolve `source_key` the way the hardcopy dialog's worker does: prepare
-/// the exact retained owner, then resolve that owned snapshot.
-pub(crate) fn resolve_retained_hardcopy_source(
-    state: &AppState,
-    source_key: &str,
-    scope: HardcopyScope,
-) -> Result<ResolvedHardcopyDocument, HardcopySourceError> {
-    prepare_retained_hardcopy_resolution(SourceReads::of(state), source_key, scope)?.resolve_owned()
-}
-
 /// A resolved schematic sheet with nothing authored on it, for tests that
 /// need a document of a given identity and not any particular content.
 pub(crate) fn resolve_blank_schematic_sheet(

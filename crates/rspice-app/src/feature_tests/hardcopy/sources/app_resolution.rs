@@ -2,6 +2,7 @@
 //! which result document the Results workspace has open.
 
 use super::*;
+use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::state::DrawingSheetTitleFieldId;
 use crate::state::SheetId;
 use rspice_hardcopy_contract::HardcopyDocumentKind;
@@ -196,7 +197,7 @@ fn ungoverned_current_sheet_and_worker_use_the_canvas_project_default() {
     );
 
     let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::CurrentSheet,
     )
@@ -232,7 +233,7 @@ fn prepared_resolution_is_send_owned_and_snapshot_isolated() {
         resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::ActiveDocument)
             .unwrap();
     let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::ActiveDocument,
     )
@@ -298,7 +299,7 @@ fn enumeration_exposes_all_sheets_exact_members_and_available_named_sets() {
         .save_hardcopy_source_set(source_set)
         .unwrap();
 
-    let descriptors = enumerate_retained_hardcopy_sources(SourceReads::of(&state));
+    let descriptors = enumerate_retained_hardcopy_sources(source_reads(&state));
     let base = descriptors
         .iter()
         .find(|descriptor| descriptor.source_key == base_key)
@@ -386,7 +387,7 @@ fn printed_wire_ids(resolved: &ResolvedHardcopyDocument) -> Vec<Vec<u64>> {
 #[test]
 fn a_multi_sheet_cell_view_prints_every_sheet_on_its_own_page() {
     let (mut state, base_key, [first, second]) = two_sheets_drawn_at_the_same_place();
-    let base = enumerate_retained_hardcopy_sources(SourceReads::of(&state))
+    let base = enumerate_retained_hardcopy_sources(source_reads(&state))
         .into_iter()
         .find(|descriptor| descriptor.source_key == base_key)
         .unwrap();

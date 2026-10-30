@@ -63,20 +63,6 @@ impl HardcopyParts<'_> {
     }
 }
 
-/// The workflow's parts over `app`, for a test that drives the workflow
-/// without the feature's context.
-#[cfg(test)]
-pub(crate) fn hardcopy_parts(app: &mut crate::workbench::app::RSpiceApp) -> HardcopyParts<'_> {
-    HardcopyParts {
-        dialog: &mut app.state.hardcopy.hardcopy,
-        report_authoring: &app.state.hardcopy.report_authoring,
-        model: &mut app.state.model,
-        workbench: &mut app.state.workbench,
-        results: &*app.state.results,
-        export_io: app.export_workflow_io.as_ref(),
-    }
-}
-
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum HardcopyDialogPage {
     #[default]

@@ -1,6 +1,7 @@
 //! The publication snapshot built from the session's open project: its
 //! sheets, engineering projection, run results and deck.
 
+use crate::feature_tests::hardcopy::publication_reads;
 use crate::state::AnalysisResult;
 use crate::state::AnalysisType;
 use crate::state::RetainedTrace;
@@ -57,7 +58,7 @@ fn deck_line_endings_normalize_to_canonical_form() {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content =
         "* RSpice Netlist\r\nR1 a b 1k\r\n.end".to_string();
-    let deck = effective_deck(PublicationReads::of(&state))
+    let deck = effective_deck(publication_reads(&state))
         .expect("deck")
         .deck;
     assert!(!deck.contains('\r'));
@@ -69,7 +70,7 @@ fn authored_presentation_and_disclosure_choices_are_sealed() {
     let mut state = AppState::default();
     state.model.simulation.source.netlist_content = "* Filter\nR1 in out 1k\n.end".to_string();
     let snapshot = build_publication_snapshot(
-        PublicationReads::of(&state),
+        publication_reads(&state),
         &PublicationDraft {
             title: "Filter".to_string(),
             description: "Short page description".to_string(),
@@ -104,7 +105,7 @@ fn authored_presentation_and_disclosure_choices_are_sealed() {
 
     assert!(matches!(
         build_publication_snapshot(
-            PublicationReads::of(&state),
+            publication_reads(&state),
             &PublicationDraft {
                 title: "Withheld".to_string(),
                 author_display: "Test".to_string(),
@@ -122,7 +123,7 @@ fn empty_projects_report_nothing_to_publish() {
     let state = AppState::default();
     assert!(matches!(
         build_publication_snapshot(
-            PublicationReads::of(&state),
+            publication_reads(&state),
             &PublicationDraft {
                 title: "Empty".to_string(),
                 description: String::new(),
@@ -182,7 +183,7 @@ fn a_multi_sheet_cell_view_publishes_each_sheet_once() {
         .assign_objects(catalog.revision(), second, [22])
         .unwrap();
 
-    let (sheets, plots) = collect_scenes(PublicationReads::of(&state)).unwrap();
+    let (sheets, plots) = collect_scenes(publication_reads(&state)).unwrap();
     let path = state.model.workspace.content.active_display_path();
     assert_eq!(
         sheets
@@ -202,7 +203,7 @@ fn native_engineering_projection_preserves_components_nets_and_signal_identity()
         crate::state::Point::new(0, 0),
     );
 
-    let projected = engineering_publication(PublicationReads::of(&state), true, None)
+    let projected = engineering_publication(publication_reads(&state), true, None)
         .expect("the fixture design resolves");
     assert_eq!(projected.components.len(), 1);
     let resistor = &projected.components[0];
@@ -264,7 +265,7 @@ fn native_engineering_projection_preserves_components_nets_and_signal_identity()
         measurements: Vec::new(),
     };
 
-    let projected = engineering_publication(PublicationReads::of(&state), true, Some(&results))
+    let projected = engineering_publication(publication_reads(&state), true, Some(&results))
         .expect("the fixture design resolves");
     assert!(matches!(
         &projected.signals[0].target,
@@ -279,7 +280,7 @@ fn native_engineering_projection_preserves_components_nets_and_signal_identity()
         SignalTarget::Expression { label } if label == "V(out) - V(in)"
     ));
 
-    let withheld = engineering_publication(PublicationReads::of(&state), false, Some(&results))
+    let withheld = engineering_publication(publication_reads(&state), false, Some(&results))
         .expect("a withheld schematic needs no design at all");
     assert!(withheld.components.is_empty());
     assert!(withheld.nets.is_empty());
@@ -322,7 +323,7 @@ fn run_results_and_deck_build_a_valid_snapshot() {
     state.model.simulation.view.active_run_idx = Some(0);
 
     let snapshot = build_publication_snapshot(
-        PublicationReads::of(&state),
+        publication_reads(&state),
         &PublicationDraft {
             title: "RC deck".to_string(),
             description: String::new(),

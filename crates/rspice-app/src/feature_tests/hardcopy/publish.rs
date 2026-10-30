@@ -1,12 +1,12 @@
 //! The publish dialog's output contract, in the case that exports the pane
 //! the Results workspace has selected.
 
+use crate::feature_tests::hardcopy::{hardcopy_parts, resolve_retained_hardcopy_source};
 use crate::product::ContentDigest;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::hardcopy::GovernedSheetPageAuthority;
 use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
 use crate::workbench::app::dialogs::hardcopy::SchematicPageSetupAuthority;
-use crate::workbench::app::dialogs::hardcopy::hardcopy_parts;
 use crate::workbench::app::dialogs::hardcopy::publish::active_retained_source_selection;
 use crate::workbench::app::dialogs::hardcopy::publish::*;
 use crate::workbench::app::dialogs::hardcopy::render_hardcopy_dialog;
@@ -93,12 +93,8 @@ fn results_export_selects_the_active_project_document_pane_authority() {
 /// selection, resolved through the retained path its worker runs.
 fn resolve_active_source(app: &mut RSpiceApp) -> Result<ResolvedHardcopyDocument, String> {
     let (source_key, scope) = active_retained_source_selection(&hardcopy_parts(app))?;
-    crate::workbench::hardcopy_adapters::sources::resolve_retained_hardcopy_source(
-        &app.state,
-        &source_key,
-        scope,
-    )
-    .map_err(|error| error.to_string())
+    resolve_retained_hardcopy_source(&app.state, &source_key, scope)
+        .map_err(|error| error.to_string())
 }
 
 #[test]

@@ -33,8 +33,6 @@ use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisResultPayload, AnalysisType,
     SheetCatalog, SheetId, SimulationRun, ViewType,
 };
-#[cfg(test)]
-use crate::workbench::AppState;
 
 use crate::workbench::SurfaceId;
 use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyDocumentKind, HardcopyScope};
@@ -67,19 +65,6 @@ pub(crate) struct SourceReads<'a> {
     pub(crate) workbench: &'a WorkbenchSession,
     pub(crate) report_authoring: &'a ReportAuthoringState,
     pub(crate) results: &'a dyn ResultsPort,
-}
-
-#[cfg(test)]
-impl<'a> SourceReads<'a> {
-    /// The reads `state` holds.
-    pub(crate) fn of(state: &'a AppState) -> Self {
-        Self {
-            model: &state.model,
-            workbench: &state.workbench,
-            report_authoring: &state.hardcopy.report_authoring,
-            results: &*state.results,
-        }
-    }
 }
 
 /// Cheap, semantic-free descriptor used by command enablement and the
@@ -1183,7 +1168,6 @@ mod test_support;
 #[cfg(test)]
 pub(crate) use test_support::{
     resolve_blank_schematic_sheet, resolve_blank_schematic_sheet_with_format,
-    resolve_retained_hardcopy_source,
 };
 #[cfg(test)]
 mod tests;

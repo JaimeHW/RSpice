@@ -1,5 +1,6 @@
 //! Distribution selection and publication through the actual worker and renderer.
 
+use crate::feature_tests::hardcopy::source_reads;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, MonteCarloVariableMetadata,
     SimulationRunLifecycle, SimulationRunProvenance,
@@ -7,7 +8,7 @@ use crate::state::{
 use crate::workbench::ResultViewer;
 use crate::workbench::app_state::AppState;
 use crate::workbench::hardcopy_adapters::sources::{
-    HardcopySemanticDocument, SourceReads, prepare_retained_hardcopy_resolution,
+    HardcopySemanticDocument, prepare_retained_hardcopy_resolution,
 };
 use crate::workbench::state::WorkspaceDocumentId;
 use rspice_hardcopy_contract::{
@@ -113,7 +114,7 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     };
     variables.reverse();
     let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -142,7 +143,7 @@ fn histogram_publication_keeps_the_named_measurement_after_reorder_and_rejects_r
     );
     assert!(
         prepare_retained_hardcopy_resolution(
-            SourceReads::of(&state),
+            source_reads(&state),
             &key,
             HardcopyScope::ActivePlotDocument
         )

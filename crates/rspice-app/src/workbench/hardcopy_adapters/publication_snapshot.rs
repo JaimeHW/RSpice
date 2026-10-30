@@ -22,8 +22,6 @@ use rspice_publication_contract::{
 
 use crate::quantity::engineering::format_engineering_value;
 use crate::state::{AnalysisResult, AnalysisType, SimulationRun, SpecEntry};
-#[cfg(test)]
-use crate::workbench::app_state::AppState;
 use crate::workbench::framework::feature::PublicationDraft;
 use crate::workbench::hardcopy_adapters::sources::{
     HardcopySemanticDocument, SourceReads, enumerate_retained_hardcopy_sources,
@@ -111,17 +109,6 @@ impl std::fmt::Display for PublicationBuildError {
 pub(crate) struct PublicationReads<'a> {
     pub(crate) sources: SourceReads<'a>,
     pub(crate) runs: &'a RunsState,
-}
-
-#[cfg(test)]
-impl<'a> PublicationReads<'a> {
-    /// The reads `state` holds.
-    pub(crate) fn of(state: &'a AppState) -> Self {
-        Self {
-            sources: SourceReads::of(state),
-            runs: &state.runs,
-        }
-    }
 }
 
 /// Build a complete, validated publication snapshot from the open project:

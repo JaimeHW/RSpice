@@ -1,12 +1,13 @@
 //! The Hardcopy Studio's content options drawn in a whole application: the
 //! raster resolution a page publishes is the one its field shows.
 
+use crate::feature_tests::hardcopy::hardcopy_parts;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::hardcopy::render::content_options::*;
 use crate::workbench::app::dialogs::hardcopy::render::output_summary;
 use crate::workbench::app::dialogs::hardcopy::{
-    DEFAULT_RASTER_DPI, HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft,
-    hardcopy_parts, publish, render_hardcopy_dialog,
+    DEFAULT_RASTER_DPI, HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
+    render_hardcopy_dialog,
 };
 use egui::accesskit::Role;
 use egui::{Context, Rect, Vec2, vec2};

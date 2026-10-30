@@ -1,13 +1,13 @@
 //! The Hardcopy Studio drawn in a whole application: its sections, rail and
 //! strip at every viewport, and the widget identities they keep.
 
+use crate::feature_tests::hardcopy::hardcopy_parts;
 use crate::ui::tokens;
 use crate::ui::tokens::Tokens;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::hardcopy::HardcopyRegion;
 use crate::workbench::app::dialogs::hardcopy::HardcopySection;
 use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
-use crate::workbench::app::dialogs::hardcopy::hardcopy_parts;
 use crate::workbench::app::dialogs::hardcopy::publish;
 use crate::workbench::app::dialogs::hardcopy::render::*;
 use egui::Align;

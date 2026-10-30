@@ -845,7 +845,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // tests run against, as the session does.
     ("documents/result_document", "slots", 1),
     ("documents/netlist_document", "app_state", 2),
-    ("hardcopy_adapters/sources", "app_state", 2),
     // Upward: fields whose types live in the feature that renders them, plus
     // gating methods that query a module above; `-> app` also counts the
     // session wire naming the bulk-edit filters it keeps, which live with the

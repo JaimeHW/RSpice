@@ -4,6 +4,7 @@
 mod app_resolution;
 mod quick_view;
 
+use crate::feature_tests::hardcopy::{resolve_retained_hardcopy_source, source_reads};
 use crate::product::ContentDigest;
 use crate::product::DatasetBinding;
 use crate::product::DatasetId;
@@ -54,14 +55,12 @@ use crate::state::Wire;
 use crate::workbench::AppState;
 use crate::workbench::documents::result_document::ResultViewer;
 use crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceAvailability;
-use crate::workbench::hardcopy_adapters::sources::SourceReads;
 use crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available;
 use crate::workbench::hardcopy_adapters::sources::active_visualization_document_pane;
 use crate::workbench::hardcopy_adapters::sources::enumerate_retained_hardcopy_sources;
 use crate::workbench::hardcopy_adapters::sources::prepare_retained_hardcopy_resolution;
 use crate::workbench::hardcopy_adapters::sources::quick_result_analysis_index;
 use crate::workbench::hardcopy_adapters::sources::quick_result_availability;
-use crate::workbench::hardcopy_adapters::sources::resolve_retained_hardcopy_source;
 use crate::workbench::hardcopy_adapters::sources::*;
 use crate::workbench::state::Workspace;
 use crate::workbench::state::WorkspaceDocumentId;
@@ -309,13 +308,13 @@ fn production_figure_preparation_uses_the_open_dataset_not_the_global_run_select
         state.model.workspace.content.project.id().as_uuid(),
         displayed_dataset
     );
-    let descriptors = enumerate_retained_hardcopy_sources(SourceReads::of(&state));
+    let descriptors = enumerate_retained_hardcopy_sources(source_reads(&state));
     assert!(descriptors.iter().any(|descriptor| {
         descriptor.source_key == source_key && descriptor.availability.is_available()
     }));
 
     let resolved = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -376,7 +375,7 @@ fn production_manifest_hardcopy_retains_the_complete_displayed_dataset_through_w
         displayed_dataset
     );
     let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -430,7 +429,7 @@ fn production_stacked_results_hardcopy_retains_every_displayed_analysis() {
     );
 
     let worker_bytes = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -519,7 +518,7 @@ fn production_specs_hardcopy_judges_the_complete_dataset() {
     );
 
     let worker_bytes = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -630,7 +629,7 @@ fn printed_specification_bounds(
     source_key: &str,
 ) -> (String, HardcopyDocumentId) {
     let resolved = prepare_retained_hardcopy_resolution(
-        SourceReads::of(state),
+        source_reads(state),
         source_key,
         HardcopyScope::ActivePlotDocument,
     )
@@ -1022,12 +1021,9 @@ fn linked_report_table_requires_exact_source_and_dataset_inventory() {
         .report_documents
         .push(report.clone());
     app.hardcopy.report_authoring.selected_document = Some(report_id);
-    let app_resolved = report_inventory::resolve(
-        SourceReads::of(&app),
-        &report,
-        HardcopyScope::CompleteReport,
-    )
-    .expect("the retained dataset must authenticate the linked report table");
+    let app_resolved =
+        report_inventory::resolve(source_reads(&app), &report, HardcopyScope::CompleteReport)
+            .expect("the retained dataset must authenticate the linked report table");
     let HardcopySemanticDocument::Report(app_semantic) = app_resolved.semantic_document() else {
         panic!("expected semantic report")
     };
@@ -1228,7 +1224,7 @@ fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snap
     );
 
     let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
+        source_reads(&state),
         &source_key,
         HardcopyScope::CompleteReport,
     )

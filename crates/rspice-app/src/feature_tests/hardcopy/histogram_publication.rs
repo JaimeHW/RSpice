@@ -1,10 +1,11 @@
 //! Histogram publication, in the case that renders every display mode the
 //! results feature's histogram takes.
 
+use crate::feature_tests::hardcopy::source_reads;
 use crate::feature_tests::results::histogram_publication::{distribution, setup};
 use crate::workbench::ResultViewer;
 use crate::workbench::hardcopy_adapters::sources::{
-    HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind, SourceReads,
+    HardcopySemanticDocument, PreparedRetainedHardcopyResolution, SemanticAxisKind,
     prepare_retained_hardcopy_resolution,
 };
 use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopyRenderer};
@@ -24,7 +25,7 @@ fn histogram_publication_renders_every_mode_after_worker_transfer() {
             .plot_view_mut(ResultViewer::Hist, 0)
             .x = Some((-1.5, 1.5));
         let prepared = prepare_retained_hardcopy_resolution(
-            SourceReads::of(&state),
+            source_reads(&state),
             &key,
             HardcopyScope::ActivePlotDocument,
         )
