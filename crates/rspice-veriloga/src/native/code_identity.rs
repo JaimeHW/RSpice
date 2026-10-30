@@ -46,6 +46,15 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// between the attempts. Every module differs from the Windows value by the
 /// ABI alone, so that is the attribution for this move.
 ///
+/// `11fc2b41…` is the census of `e8719cbdcd`, read from nightly 40873100255.
+/// Ten modules moved and thirty-three are digest identical. The four VBIC
+/// 1.3 modules moved at `0b4a5360f4`, whose directory profile defines
+/// `__NGSPICE__` and so compiles `vbic_1p3.va`'s `$limit pnjlim` branch
+/// (`vbic13_4t` 724 to 1,568 helper calls). `asmhemt`, `EPFL_HEMT_10a`,
+/// `bsimsoi` 4.7.0 and the three `hisimsoi_va` variants moved at
+/// `b7f8dc59ee`, which ties to ground an internal node that no contribution
+/// reaches (2 to 8 helper calls each).
+///
 /// # How it is re-baselined
 ///
 /// Only with evidence that names the modules that moved and why. The census
@@ -340,7 +349,7 @@ const SHIPPED_CENSUS_MODELS: usize = 43;
 /// `hicumL2va` `flicker_Pwr`, `r3_cmc` `gc`) — and the other thirty-five were
 /// digest identical (measured 2026-09-03 on `1ba20f27c`, peers idle, 893 s).
 const SHIPPED_CENSUS_DIGEST: &str =
-    "8ca457415cc38caee07a8db140e6b9f1dd18501a4d5f5409a67be564a64e5094";
+    "11fc2b411d93478014208e775acf009372eb7862b74817bbb66dbb5efa772ee7";
 
 /// One shipped module's compiled machine-code digest.
 struct ModelImageDigest {
