@@ -13,7 +13,6 @@ mod code_pages;
 mod design_menu;
 mod drawing_sheets;
 mod execution;
-mod models;
 mod project;
 mod rows;
 mod schematic_editing;

@@ -5,7 +5,13 @@
 //! an ambiguous selection, on a source the project does not own, or on a
 //! selection retained from a project that has since closed.
 
-use super::*;
+use crate::workbench::RSpiceApp;
+use crate::workbench::commands::vocabulary::{self, Command};
+use crate::workbench::commands::{
+    ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow,
+    selected_project_model_for_editor,
+};
+use crate::workbench::framework::command_registry::CommandAvailability;
 
 #[test]
 fn model_editor_command_has_fail_closed_selection_authority() {

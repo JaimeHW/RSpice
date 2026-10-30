@@ -8,6 +8,7 @@ mod cloud;
 mod framework;
 mod hardcopy;
 mod model;
+mod models;
 mod results;
 mod run;
 mod services;

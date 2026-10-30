@@ -163,7 +163,7 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
 /// Command enablement is deliberately fail-closed. A stale catalog selection,
 /// mismatched retained bytes, or a partial source closure must never expose an
 /// editor command that can only fail after navigation.
-fn selected_project_model_for_editor<'a>(
+pub(crate) fn selected_project_model_for_editor<'a>(
     reads: ModelEditorReads<'a>,
 ) -> Result<(&'a str, &'a str), &'static str> {
     if !reads.platform.project_lifecycle.is_open() {
