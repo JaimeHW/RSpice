@@ -1159,12 +1159,12 @@ fn merge_print_mapping(
         .entries()
         .iter()
         .map(|entry| {
-            (
+            Ok((
                 (entry.object().kind(), entry.object().stable_id().to_owned()),
-                entry.clone(),
-            )
+                with_current_form_ink(entry)?,
+            ))
         })
-        .collect::<std::collections::BTreeMap<_, _>>();
+        .collect::<Result<std::collections::BTreeMap<_, _>, HardcopyError>>()?;
     let entries = current
         .entries()
         .iter()
@@ -1176,6 +1176,35 @@ fn merge_print_mapping(
         })
         .collect();
     PrintMappingTable::try_new(saved.save_scope().clone(), entries)
+}
+
+/// The drawing form, its frame and its title block, prints black, as ISO
+/// 128-20 and ASME Y14.2 draw every line and letter of a drawing. It printed
+/// 60 % grey by default before, so a saved entry still at that old default is
+/// the default rather than a choice, and loads as black. Any other ink the
+/// user gave the form stays.
+fn with_current_form_ink(
+    entry: &rspice_hardcopy_contract::PrintMappingEntry,
+) -> Result<rspice_hardcopy_contract::PrintMappingEntry, HardcopyError> {
+    use rspice_hardcopy_contract::{PrintColor, PrintMappingEntry, PrintObjectKind};
+    const FORM_LAYERS: [&str; 2] = [
+        "layer:drawing-sheet-frame",
+        "layer:drawing-sheet-title-block",
+    ];
+    let object = entry.object();
+    if object.kind() == PrintObjectKind::Layer
+        && FORM_LAYERS.contains(&object.stable_id())
+        && entry.print_color() == PrintColor::GrayPercent(60)
+    {
+        PrintMappingEntry::try_new(
+            object.clone(),
+            PrintColor::Black,
+            entry.redundancy(),
+            entry.include_in_legend(),
+        )
+    } else {
+        Ok(entry.clone())
+    }
 }
 
 #[cfg(target_os = "windows")]
@@ -1991,5 +2020,90 @@ mod tests {
         assert_eq!(unsheeted.physical_page(), default.physical_page());
         assert_eq!(unsheeted.scale(), default.scale());
         assert_eq!(unsheeted.decorations(), default.decorations());
+    }
+
+    /// The frame and title block print black now. A setup saved while they
+    /// printed 60 % grey by default loads with them black; a 40 % grey the
+    /// user chose stays. The setup goes through RON, as the session keeps it.
+    #[test]
+    fn a_saved_form_ink_at_the_old_default_loads_as_black() {
+        use crate::state::SchematicSheetFormat;
+        use crate::workbench::hardcopy_adapters::sources::resolve_blank_schematic_sheet_with_format;
+        use rspice_hardcopy_contract::sources::HardcopySourceIdentity;
+        use rspice_hardcopy_contract::{PrintColor, PrintMappingEntry};
+
+        const FRAME: &str = "layer:drawing-sheet-frame";
+        const TITLE_BLOCK: &str = "layer:drawing-sheet-title-block";
+        let sheet = || {
+            resolve_blank_schematic_sheet_with_format(
+                HardcopySourceIdentity::try_new(
+                    "saved-form-ink",
+                    HardcopyDocumentId::try_from_uuid(uuid::Uuid::from_u128(0x464f_524d)).unwrap(),
+                    ObjectRevision::INITIAL,
+                    "Saved form ink",
+                )
+                .unwrap(),
+                HardcopyScope::CurrentSheet,
+                Some(&SchematicSheetFormat::default()),
+            )
+            .unwrap()
+        };
+        let ink = |mapping: &PrintMappingTable, stable_id: &str| {
+            mapping
+                .entries()
+                .iter()
+                .find(|entry| entry.object().stable_id() == stable_id)
+                .map(PrintMappingEntry::print_color)
+                .unwrap_or_else(|| panic!("the sheet's mapping has no {stable_id} entry"))
+        };
+        let current = sheet().default_print_mapping().clone();
+        assert_eq!(ink(&current, FRAME), PrintColor::Black);
+        assert_eq!(ink(&current, TITLE_BLOCK), PrintColor::Black);
+
+        let saved_ink = |stable_id: &str| match stable_id {
+            FRAME => Some(PrintColor::GrayPercent(60)),
+            TITLE_BLOCK => Some(PrintColor::GrayPercent(40)),
+            _ => None,
+        };
+        let entries = current
+            .entries()
+            .iter()
+            .map(|entry| match saved_ink(entry.object().stable_id()) {
+                Some(color) => PrintMappingEntry::try_new(
+                    entry.object().clone(),
+                    color,
+                    entry.redundancy(),
+                    entry.include_in_legend(),
+                )
+                .unwrap(),
+                None => entry.clone(),
+            })
+            .collect();
+        let default = HardcopySetup::default();
+        let saved = HardcopySetup::try_new(
+            default.physical_page().clone(),
+            default.scale(),
+            default.tiling(),
+            default.render().clone(),
+            default.decorations().clone(),
+            PrintMappingTable::try_new(current.save_scope().clone(), entries).unwrap(),
+        )
+        .unwrap();
+        let session = ron::to_string(&saved).unwrap();
+        let loaded: HardcopySetup = ron::from_str(&session).unwrap();
+        assert_eq!(
+            ink(loaded.print_mapping(), FRAME),
+            PrintColor::GrayPercent(60)
+        );
+
+        let mut draft = HardcopyDialogState::default();
+        draft
+            .open_resolved(HardcopyWorkflow::Export, sheet(), Some(&loaded))
+            .unwrap();
+        assert_eq!(ink(&draft.print_mapping, FRAME), PrintColor::Black);
+        assert_eq!(
+            ink(&draft.print_mapping, TITLE_BLOCK),
+            PrintColor::GrayPercent(40)
+        );
     }
 }
