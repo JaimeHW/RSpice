@@ -8,10 +8,12 @@
 //! behavior.
 
 mod authored_sheets;
+mod faces;
 mod legend;
 mod mapping;
 mod page_setup;
 
+pub use faces::{HardcopyFace, HardcopyFaceSource};
 pub use legend::*;
 pub use mapping::*;
 pub use page_setup::*;
@@ -26,6 +28,10 @@ use uuid::Uuid;
 use rspice_vocabulary::product::{ContentDigest, ObjectRevision, RevisionError};
 
 const HARDCOPY_SCHEMA_VERSION: u32 = 1;
+/// Receipts gained the faces their text was lettered in at schema 2; a
+/// schema-1 receipt still reads, naming no faces.
+const RECEIPT_SCHEMA_VERSION: u32 = 2;
+const LEGACY_RECEIPT_SCHEMA_VERSION: u32 = 1;
 const SETUP_STORE_SCHEMA_VERSION: u32 = 1;
 const MAX_TEXT_BYTES: usize = 256;
 const MAX_OUTCOME_MESSAGE_BYTES: usize = 2_048;
@@ -1987,6 +1993,9 @@ pub struct HardcopyReceipt {
     plan_content_digest: ContentDigest,
     source_content_digest: ContentDigest,
     outcome: HardcopyOutcome,
+    /// Absent from a schema-1 receipt, which names no faces.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    faces_used: Vec<HardcopyFace>,
     content_digest: ContentDigest,
 }
 
@@ -1998,7 +2007,20 @@ struct HardcopyReceiptWire {
     plan_content_digest: ContentDigest,
     source_content_digest: ContentDigest,
     outcome: HardcopyOutcome,
+    #[serde(default)]
+    faces_used: Vec<HardcopyFace>,
     content_digest: ContentDigest,
+}
+
+/// What a schema-1 receipt's digest covers.
+#[derive(Serialize)]
+struct LegacyHardcopyReceiptMaterial<'a> {
+    schema_version: u32,
+    id: HardcopyReceiptId,
+    plan_id: HardcopyPlanId,
+    plan_content_digest: ContentDigest,
+    source_content_digest: ContentDigest,
+    outcome: &'a HardcopyOutcome,
 }
 
 #[derive(Serialize)]
@@ -2009,56 +2031,88 @@ struct HardcopyReceiptMaterial<'a> {
     plan_content_digest: ContentDigest,
     source_content_digest: ContentDigest,
     outcome: &'a HardcopyOutcome,
+    faces_used: &'a [HardcopyFace],
 }
 
 impl HardcopyReceipt {
-    pub fn record(plan: &HardcopyPlan, outcome: HardcopyOutcome) -> Result<Self, HardcopyError> {
-        Self::record_with_id(HardcopyReceiptId::new(), plan, outcome)
+    /// Records `outcome` of `plan`, with the faces its text was lettered in:
+    /// none for an outcome that lettered nothing.
+    pub fn record(
+        plan: &HardcopyPlan,
+        outcome: HardcopyOutcome,
+        faces_used: Vec<HardcopyFace>,
+    ) -> Result<Self, HardcopyError> {
+        Self::record_with_id(HardcopyReceiptId::new(), plan, outcome, faces_used)
     }
 
     pub fn record_with_id(
         id: HardcopyReceiptId,
         plan: &HardcopyPlan,
         outcome: HardcopyOutcome,
+        faces_used: Vec<HardcopyFace>,
     ) -> Result<Self, HardcopyError> {
         outcome.validate(plan)?;
-        let material = HardcopyReceiptMaterial {
-            schema_version: HARDCOPY_SCHEMA_VERSION,
-            id,
-            plan_id: plan.id,
-            plan_content_digest: plan.content_digest,
-            source_content_digest: plan.source.content_digest,
-            outcome: &outcome,
-        };
-        let content_digest = canonical_digest(b"rspice-hardcopy-receipt-v1", &material)?;
-        Ok(Self {
-            schema_version: HARDCOPY_SCHEMA_VERSION,
+        let mut receipt = Self {
+            schema_version: RECEIPT_SCHEMA_VERSION,
             id,
             plan_id: plan.id,
             plan_content_digest: plan.content_digest,
             source_content_digest: plan.source.content_digest,
             outcome,
-            content_digest,
-        })
+            faces_used: faces::canonical_faces(faces_used)?,
+            content_digest: ContentDigest::from_bytes([0; 32]),
+        };
+        receipt.content_digest = receipt.expected_digest()?;
+        Ok(receipt)
+    }
+
+    /// The digest the receipt's schema seals its contents under. A schema-1
+    /// receipt names no faces, and its digest never covered any.
+    fn expected_digest(&self) -> Result<ContentDigest, HardcopyError> {
+        match self.schema_version {
+            LEGACY_RECEIPT_SCHEMA_VERSION if self.faces_used.is_empty() => canonical_digest(
+                b"rspice-hardcopy-receipt-v1",
+                &LegacyHardcopyReceiptMaterial {
+                    schema_version: self.schema_version,
+                    id: self.id,
+                    plan_id: self.plan_id,
+                    plan_content_digest: self.plan_content_digest,
+                    source_content_digest: self.source_content_digest,
+                    outcome: &self.outcome,
+                },
+            ),
+            RECEIPT_SCHEMA_VERSION => canonical_digest(
+                b"rspice-hardcopy-receipt-v2",
+                &HardcopyReceiptMaterial {
+                    schema_version: self.schema_version,
+                    id: self.id,
+                    plan_id: self.plan_id,
+                    plan_content_digest: self.plan_content_digest,
+                    source_content_digest: self.source_content_digest,
+                    outcome: &self.outcome,
+                    faces_used: &self.faces_used,
+                },
+            ),
+            LEGACY_RECEIPT_SCHEMA_VERSION => {
+                Err(HardcopyError::PersistedReceiptDigestMismatch(self.id))
+            }
+            schema => Err(HardcopyError::UnsupportedReceiptSchema(schema)),
+        }
     }
 
     fn validate_integrity(&self) -> Result<(), HardcopyError> {
-        if self.schema_version != HARDCOPY_SCHEMA_VERSION {
-            return Err(HardcopyError::UnsupportedReceiptSchema(self.schema_version));
-        }
-        let material = HardcopyReceiptMaterial {
-            schema_version: self.schema_version,
-            id: self.id,
-            plan_id: self.plan_id,
-            plan_content_digest: self.plan_content_digest,
-            source_content_digest: self.source_content_digest,
-            outcome: &self.outcome,
-        };
-        let expected = canonical_digest(b"rspice-hardcopy-receipt-v1", &material)?;
-        if expected != self.content_digest {
+        if faces::canonical_faces(self.faces_used.clone())? != self.faces_used
+            || self.expected_digest()? != self.content_digest
+        {
             return Err(HardcopyError::PersistedReceiptDigestMismatch(self.id));
         }
         Ok(())
+    }
+
+    /// The faces the hardcopy's text was lettered in, in canonical order.
+    #[must_use]
+    pub fn faces_used(&self) -> &[HardcopyFace] {
+        &self.faces_used
     }
 
     #[must_use]
@@ -2105,6 +2159,7 @@ impl<'de> Deserialize<'de> for HardcopyReceipt {
             plan_content_digest: wire.plan_content_digest,
             source_content_digest: wire.source_content_digest,
             outcome: wire.outcome,
+            faces_used: wire.faces_used,
             content_digest: wire.content_digest,
         };
         receipt
@@ -2235,6 +2290,10 @@ pub enum HardcopyError {
     UnsupportedSetupStoreSchema(u32),
     #[error("unsupported persisted hardcopy receipt schema {0}")]
     UnsupportedReceiptSchema(u32),
+    #[error("face weight class {0} is outside 1 to 1000")]
+    InvalidFaceWeight(u16),
+    #[error("a hardcopy receipt names {0} faces, above the hard limit")]
+    TooManyFaces(usize),
     #[error("persisted hardcopy receipt {0} has a mismatched digest")]
     PersistedReceiptDigestMismatch(HardcopyReceiptId),
     #[error("hardcopy receipt history contains duplicate identity {0}")]

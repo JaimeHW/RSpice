@@ -109,7 +109,8 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
                 .map_err(|error| record_print_failure(parts, &plan, error, 0));
             outcome.and_then(|outcome| {
                 let receipt =
-                    HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
+                    HardcopyReceipt::record(&plan, outcome, rendered.faces_used().to_vec())
+                        .map_err(|error| error.to_string())?;
                 retain_hardcopy_receipt(parts, receipt)?;
                 commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 let pages = rendered.page_count();
@@ -129,6 +130,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
                 super::super::worker::decode_packaged_publication(&plan, &source, buffers)
                     .map_err(|error| record_render_failure(parts, &plan, error))
                     .and_then(|packaged| {
+                        let faces_used = packaged.faces_used().to_vec();
                         let (bytes, artifact, page_count) = packaged.into_parts();
                         parts
                             .export_io
@@ -143,6 +145,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
                         let receipt = HardcopyReceipt::record(
                             &plan,
                             HardcopyOutcome::ArtifactExported { artifact },
+                            faces_used,
                         )
                         .map_err(|error| error.to_string())?;
                         retain_hardcopy_receipt(parts, receipt)?;
@@ -176,6 +179,7 @@ pub(in crate::workbench::app::dialogs::hardcopy) fn poll_publication(
                             let receipt = HardcopyReceipt::record(
                                 &plan,
                                 HardcopyOutcome::ArtifactExported { artifact },
+                                rendered.faces_used().to_vec(),
                             )
                             .map_err(|error| error.to_string())?;
                             retain_hardcopy_receipt(parts, receipt)?;

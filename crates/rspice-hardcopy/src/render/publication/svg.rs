@@ -94,6 +94,24 @@ pub(super) fn render_page_svg(
     Ok(output)
 }
 
+/// Adds to `faces` every face `page`'s text is lettered in. It is the walk the
+/// page's SVG makes, writing nothing: every backend letters a run through the
+/// same chain, so the faces are the same whatever the format.
+pub(super) fn add_page_faces(
+    faces: &mut BTreeSet<Face>,
+    plan: &HardcopyPlan,
+    scene: &HardcopyScene,
+    page: &PreviewPage,
+) -> Result<(), HardcopyRenderError> {
+    let mut discarded = String::new();
+    let transform = page_transform(page);
+    for primitive in page_primitives(scene, page)? {
+        write_svg_primitive(&mut discarded, faces, plan, transform, primitive);
+        discarded.clear();
+    }
+    write_svg_decorations(&mut discarded, faces, plan, scene, page)
+}
+
 /// An `@font-face` rule, with the face's data inline, for each face in
 /// `faces`.
 pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<Face>) {

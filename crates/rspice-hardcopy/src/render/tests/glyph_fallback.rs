@@ -14,7 +14,7 @@ const FONTS: [SceneFont; 4] = [
     SceneFont::MonospaceMedium,
 ];
 
-fn text(font: SceneFont, value: &str, y_um: u64) -> ScenePrimitive {
+pub(super) fn text(font: SceneFont, value: &str, y_um: u64) -> ScenePrimitive {
     ScenePrimitive::Text {
         origin: ScenePoint::new(
             Length::from_micrometres(5_000),
@@ -29,7 +29,7 @@ fn text(font: SceneFont, value: &str, y_um: u64) -> ScenePrimitive {
     }
 }
 
-fn text_scene(content: ContentExtent, primitives: Vec<ScenePrimitive>) -> HardcopyScene {
+pub(super) fn text_scene(content: ContentExtent, primitives: Vec<ScenePrimitive>) -> HardcopyScene {
     // The title is uncovered on purpose: it once refused the whole document.
     let metadata = HardcopySceneMetadata::try_new("10 kΩ 中", "RSpice hardcopy tests").unwrap();
     HardcopyScene::try_new(content, metadata, primitives, Vec::new()).unwrap()
@@ -214,7 +214,15 @@ fn a_borrowed_glyph_prints_as_its_lending_face_letters_it() {
 /// The SVG of `primitives` on a page with no title strip, footer or
 /// watermark, so the only text is the scene's own.
 fn undecorated_svg(primitives: Vec<ScenePrimitive>) -> String {
-    let base = setup(OutputFormat::SvgVector, false);
+    let content = extent(150_000, 80_000);
+    let plan = undecorated_plan(OutputFormat::SvgVector, content);
+    let publication = HardcopyRenderer::render(&plan, &text_scene(content, primitives)).unwrap();
+    String::from_utf8(publication.single_part().unwrap().bytes().to_vec()).unwrap()
+}
+
+/// A plan in `format` with no title strip, footer or watermark.
+pub(super) fn undecorated_plan(format: OutputFormat, content: ContentExtent) -> HardcopyPlan {
+    let base = setup(format, false);
     let setup = HardcopySetup::try_new(
         base.physical_page().clone(),
         base.scale(),
@@ -224,10 +232,7 @@ fn undecorated_svg(primitives: Vec<ScenePrimitive>) -> String {
         PrintMappingTable::default(),
     )
     .unwrap();
-    let content = extent(150_000, 80_000);
-    let plan = plan_from_setup(setup, content);
-    let publication = HardcopyRenderer::render(&plan, &text_scene(content, primitives)).unwrap();
-    String::from_utf8(publication.single_part().unwrap().bytes().to_vec()).unwrap()
+    plan_from_setup(setup, content)
 }
 
 /// The family, style and weight of each face `svg` embeds, in order.

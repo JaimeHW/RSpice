@@ -8,6 +8,7 @@ mod legend;
 mod plot_overlay;
 mod printer_margin;
 mod provenance;
+mod receipt_faces;
 mod schematic_labels;
 mod sheet_frame;
 mod title_lettering;
@@ -75,6 +76,7 @@ fn reseal_publication_worker_manifest(manifest: &mut PublicationWorkerManifest) 
         page_count: manifest.page_count,
         pdf_conformance: manifest.pdf_conformance,
         parts: &manifest.parts,
+        faces_used: &manifest.faces_used,
     };
     manifest.transport_digest = publication_worker_manifest_digest(&material).unwrap();
     serde_json::to_vec(manifest).unwrap()

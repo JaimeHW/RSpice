@@ -876,12 +876,14 @@ fn success_receipt_binds_exact_plan_artifact_and_digest() {
         HardcopyOutcome::ArtifactExported {
             artifact: artifact.clone(),
         },
+        Vec::new(),
     )
     .unwrap();
     let second = HardcopyReceipt::record_with_id(
         receipt_id,
         &plan,
         HardcopyOutcome::ArtifactExported { artifact },
+        Vec::new(),
     )
     .unwrap();
     assert_eq!(first.content_digest(), second.content_digest());
@@ -891,6 +893,138 @@ fn success_receipt_binds_exact_plan_artifact_and_digest() {
         first.source_content_digest(),
         plan.source().content_digest()
     );
+}
+
+/// A plan and the export of it, for receipts that differ only in their faces.
+fn exported() -> (HardcopyPlan, HardcopyOutcome) {
+    let plan = HardcopyPlan::compile(
+        source(),
+        HardcopySetup::default(),
+        ContentExtent::try_new(
+            Length::from_micrometres(100_000),
+            Length::from_micrometres(100_000),
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let artifact = HardcopyArtifactIdentity::try_new(
+        digest(0x77),
+        12_345,
+        plan.pagination().pages().len() as u32,
+        OutputFormat::PdfVector,
+    )
+    .unwrap();
+    (plan, HardcopyOutcome::ArtifactExported { artifact })
+}
+
+fn bundled(family: &str, weight: u16, sha256: u8) -> HardcopyFace {
+    HardcopyFace::try_new(
+        family,
+        weight,
+        "Version 1.1",
+        digest(sha256),
+        HardcopyFaceSource::Bundled,
+    )
+    .unwrap()
+}
+
+#[test]
+fn a_receipt_records_each_face_its_text_was_lettered_in_once() {
+    let (plan, outcome) = exported();
+    let sans = bundled("IBM Plex Sans", 400, 0x51);
+    let symbols = bundled("RSpice Symbols", 400, 0x52);
+    let installed = HardcopyFace::try_new(
+        "Microsoft YaHei UI",
+        400,
+        "Version 6.23",
+        digest(0x53),
+        HardcopyFaceSource::System {
+            path: r"C:\Windows\Fonts\msyh.ttc".to_owned(),
+        },
+    )
+    .unwrap();
+    let receipt = HardcopyReceipt::record(
+        &plan,
+        outcome.clone(),
+        vec![
+            symbols.clone(),
+            installed.clone(),
+            sans.clone(),
+            sans.clone(),
+        ],
+    )
+    .unwrap();
+    assert_eq!(receipt.faces_used(), [sans.clone(), installed, symbols]);
+
+    let json = serde_json::to_value(&receipt).unwrap();
+    assert_eq!(json["schema_version"], 2);
+    let read: HardcopyReceipt = serde_json::from_value(json.clone()).unwrap();
+    assert_eq!(read, receipt);
+
+    let fewer = HardcopyReceipt::record_with_id(receipt.id(), &plan, outcome, vec![sans]).unwrap();
+    assert_ne!(
+        fewer.content_digest(),
+        receipt.content_digest(),
+        "the digest covers the faces"
+    );
+    let mut altered = json;
+    altered["faces_used"][0]["version"] = "Version 9".into();
+    assert!(serde_json::from_value::<HardcopyReceipt>(altered).is_err());
+}
+
+#[test]
+fn a_schema_1_receipt_still_reads_and_names_no_faces() {
+    let (plan, outcome) = exported();
+    let current = HardcopyReceipt::record(&plan, outcome, Vec::new()).unwrap();
+    // The receipt as schema 1 wrote it: the same fields, sealed under the
+    // schema-1 domain without faces.
+    let sealed = canonical_digest(
+        b"rspice-hardcopy-receipt-v1",
+        &LegacyHardcopyReceiptMaterial {
+            schema_version: 1,
+            id: current.id(),
+            plan_id: current.plan_id(),
+            plan_content_digest: current.plan_content_digest(),
+            source_content_digest: current.source_content_digest(),
+            outcome: current.outcome(),
+        },
+    )
+    .unwrap();
+    let mut legacy = serde_json::to_value(&current).unwrap();
+    assert!(legacy.get("faces_used").is_none());
+    legacy["schema_version"] = 1.into();
+    legacy["content_digest"] = serde_json::to_value(sealed).unwrap();
+    let read: HardcopyReceipt = serde_json::from_value(legacy.clone()).unwrap();
+    assert!(read.faces_used().is_empty());
+    assert_eq!(read.content_digest(), sealed);
+
+    // A schema-1 receipt cannot claim faces it never sealed.
+    legacy["faces_used"] = serde_json::to_value([bundled("IBM Plex Sans", 400, 0x51)]).unwrap();
+    assert!(serde_json::from_value::<HardcopyReceipt>(legacy.clone()).is_err());
+    legacy["schema_version"] = 3.into();
+    assert!(serde_json::from_value::<HardcopyReceipt>(legacy).is_err());
+}
+
+#[test]
+fn a_face_names_its_family_version_and_a_plausible_weight() {
+    for (family, weight, version) in [
+        ("", 400, "Version 1.1"),
+        ("IBM Plex Sans", 400, ""),
+        ("IBM Plex Sans", 0, "Version 1.1"),
+        ("IBM Plex Sans", 1_001, "Version 1.1"),
+    ] {
+        assert!(
+            HardcopyFace::try_new(
+                family,
+                weight,
+                version,
+                digest(1),
+                HardcopyFaceSource::Bundled
+            )
+            .is_err(),
+            "{family:?} {weight} {version:?}"
+        );
+    }
 }
 
 #[test]
@@ -912,7 +1046,8 @@ fn success_receipt_rejects_wrong_page_count_or_format() {
             &plan,
             HardcopyOutcome::ArtifactExported {
                 artifact: wrong_pages
-            }
+            },
+            Vec::new()
         ),
         Err(HardcopyError::ArtifactPageCountMismatch { .. })
     ));
@@ -928,7 +1063,8 @@ fn success_receipt_rejects_wrong_page_count_or_format() {
             &plan,
             HardcopyOutcome::ArtifactExported {
                 artifact: wrong_format
-            }
+            },
+            Vec::new()
         ),
         Err(HardcopyError::ArtifactFormatMismatch)
     ));
@@ -970,6 +1106,7 @@ fn native_spool_acceptance_is_truthful_and_device_bound() {
             pages_accepted: pages,
             source_artifact_digest: digest(0x81),
         },
+        Vec::new(),
     )
     .unwrap();
     assert!(matches!(
@@ -985,6 +1122,7 @@ fn native_spool_acceptance_is_truthful_and_device_bound() {
                 pages_accepted: pages,
                 source_artifact_digest: digest(0x82),
             },
+            Vec::new(),
         ),
         Err(HardcopyError::SpoolDeviceMismatch)
     ));
@@ -1023,6 +1161,7 @@ fn browser_print_handoff_is_distinct_from_artifact_export() {
                 pages_accepted: pages,
                 source_artifact_digest: digest(0x90),
             },
+            Vec::new(),
         )
         .is_ok()
     );
@@ -1034,7 +1173,11 @@ fn browser_print_handoff_is_distinct_from_artifact_export() {
     )
     .unwrap();
     assert!(matches!(
-        HardcopyReceipt::record(&plan, HardcopyOutcome::ArtifactExported { artifact },),
+        HardcopyReceipt::record(
+            &plan,
+            HardcopyOutcome::ArtifactExported { artifact },
+            Vec::new(),
+        ),
         Err(HardcopyError::OutcomeRenderTargetMismatch)
     ));
     assert!(matches!(
@@ -1045,6 +1188,7 @@ fn browser_print_handoff_is_distinct_from_artifact_export() {
                 pages_accepted: pages + 1,
                 source_artifact_digest: digest(0x92),
             },
+            Vec::new(),
         ),
         Err(HardcopyError::AcceptedPageCountMismatch { .. })
     ));
@@ -1056,6 +1200,7 @@ fn browser_print_handoff_is_distinct_from_artifact_export() {
                 pages_accepted: pages,
                 source_artifact_digest: digest(0x93),
             },
+            Vec::new(),
         )
         .is_ok()
     );
@@ -1081,6 +1226,7 @@ fn cancellation_and_failure_are_explicit_validated_outcomes() {
                 pages_completed: 0,
                 reason: Some("Cancelled by user".to_owned()),
             },
+            Vec::new(),
         )
         .is_ok()
     );
@@ -1093,6 +1239,7 @@ fn cancellation_and_failure_are_explicit_validated_outcomes() {
                 pages_completed: 0,
                 retryable: true,
             },
+            Vec::new(),
         )
         .is_ok()
     );
@@ -1105,6 +1252,7 @@ fn cancellation_and_failure_are_explicit_validated_outcomes() {
                 pages_completed: 0,
                 retryable: false,
             },
+            Vec::new(),
         ),
         Err(HardcopyError::InvalidText { .. })
     ));
@@ -1129,6 +1277,7 @@ fn receipt_ledger_round_trips_and_rejects_tampered_entries() {
             pages_completed: 0,
             reason: Some("operator cancelled preview".to_owned()),
         },
+        Vec::new(),
     )
     .unwrap();
     let receipt_id = receipt.id();

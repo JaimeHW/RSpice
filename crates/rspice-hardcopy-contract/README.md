@@ -47,7 +47,8 @@ winit, wgpu and rfd in its closure.
 - `HardcopySetup::try_new` (or `try_new_with_schematic`) from its parts, then
   `HardcopyPlan::compile(source, setup, content_extent)`.
 - `HardcopyPlan::pagination` for the plan's pages.
-- `HardcopyReceipt::record(&plan, outcome)`, then
+- `HardcopyReceipt::record(&plan, outcome, faces_used)`, with the
+  `HardcopyFace`s the output's text was lettered in, then
   `HardcopyReceiptLedger::append`.
 - `HardcopySetupStore::save(&source, setup)` and `setup_for` for per-document
   Page Setup.

@@ -62,7 +62,7 @@ use rspice_hardcopy_contract::{
     PageRect, PreviewPage, PrintColor, PrintMappingTable, PrintObjectKind, PrintRedundancy,
     ResolvedOrientation, ScaleRatio, SchematicHardcopyExtent, SchematicHardcopySetup, Watermark,
 };
-use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyPlanId};
+use rspice_hardcopy_contract::{HardcopyDocumentId, HardcopyFace, HardcopyPlanId};
 use rspice_results::report_document::{FigureSizing, ReportBlock, ReportBlockKind, TableCell};
 use rspice_vocabulary::product::ContentDigest;
 use rspice_vocabulary::product::ObjectRevision;
@@ -84,7 +84,7 @@ const PREVIEW_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
 pub const MAX_PREVIEW_WORKER_MANIFEST_BYTES: usize = 16 * 1_024;
 pub const MAX_PREVIEW_WORKER_RGBA_BYTES: usize = 48 * 1_048_576;
 const MAX_PREVIEW_WORKER_TRANSFER_BYTES: usize = 48 * 1_048_576 + 16 * 1_024;
-const PUBLICATION_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 1;
+const PUBLICATION_WORKER_MANIFEST_SCHEMA_VERSION: u32 = 2;
 pub const MAX_PUBLICATION_WORKER_MANIFEST_BYTES: usize = 4 * 1_048_576;
 const MAX_RASTER_PIXELS_PER_PAGE: u64 = 150_000_000;
 const MAX_RASTER_PIXELS_TOTAL: u64 = 300_000_000;

@@ -16,8 +16,8 @@ use crate::render::{
 use crate::sources::{MAX_WORKER_SNAPSHOT_BYTES, ResolvedHardcopyDocument};
 use rspice_formats::zip::deterministic_stored_zip;
 use rspice_hardcopy_contract::{
-    HardcopyArtifactIdentity, HardcopyPlan, HardcopyPlanId, HardcopyScope, HardcopySetup,
-    MAX_PREVIEW_PAGES, OutputFormat,
+    HardcopyArtifactIdentity, HardcopyFace, HardcopyPlan, HardcopyPlanId, HardcopyScope,
+    HardcopySetup, MAX_PREVIEW_PAGES, OutputFormat,
 };
 use rspice_vocabulary::product::ContentDigest;
 
@@ -27,7 +27,7 @@ pub const MAX_REQUEST_BUFFERS: usize = 2;
 const MAX_RESPONSE_BUFFERS: usize = MAX_PREVIEW_PAGES as usize + 1;
 const MAX_RESPONSE_TOTAL_BYTES: usize =
     MAX_PUBLICATION_WORKER_MANIFEST_BYTES + MAX_PUBLICATION_BYTES as usize;
-const PACKAGED_PUBLICATION_SCHEMA_VERSION: u32 = 1;
+const PACKAGED_PUBLICATION_SCHEMA_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -253,15 +253,24 @@ struct PackagedPublicationManifest {
     plan_content_digest: ContentDigest,
     source_content_digest: ContentDigest,
     artifact: HardcopyArtifactIdentity,
+    faces_used: Vec<HardcopyFace>,
 }
 
 pub struct PackagedHardcopyPublication {
     bytes: Vec<u8>,
     artifact: HardcopyArtifactIdentity,
     page_count: u32,
+    faces_used: Vec<HardcopyFace>,
 }
 
 impl PackagedHardcopyPublication {
+    /// Every face the package's text is lettered in, as the receipt records
+    /// it.
+    #[must_use]
+    pub fn faces_used(&self) -> &[HardcopyFace] {
+        &self.faces_used
+    }
+
     pub fn into_parts(self) -> (Vec<u8>, HardcopyArtifactIdentity, u32) {
         (self.bytes, self.artifact, self.page_count)
     }
@@ -564,6 +573,7 @@ fn package_publication(
         plan_content_digest: plan.content_digest(),
         source_content_digest: source.authority().content_digest(),
         artifact,
+        faces_used: publication.faces_used().to_vec(),
     })
     .map_err(|error| format!("Could not encode packaged publication manifest: {error}"))?;
     if manifest.len() > MAX_PUBLICATION_WORKER_MANIFEST_BYTES {
@@ -609,6 +619,7 @@ pub fn decode_packaged_publication(
         bytes,
         artifact: manifest.artifact,
         page_count: expected_pages,
+        faces_used: manifest.faces_used,
     })
 }
 

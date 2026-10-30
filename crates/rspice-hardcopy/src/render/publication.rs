@@ -481,12 +481,19 @@ impl PrinterRasterPage {
 pub struct RenderedPrinterPages {
     pages: Vec<PrinterRasterPage>,
     digest: ContentDigest,
+    faces_used: Vec<HardcopyFace>,
 }
 
 impl RenderedPrinterPages {
     #[must_use]
     pub fn pages(&self) -> &[PrinterRasterPage] {
         &self.pages
+    }
+
+    /// Every face the pages' text is lettered in, as the receipt records it.
+    #[must_use]
+    pub fn faces_used(&self) -> &[HardcopyFace] {
+        &self.faces_used
     }
 
     #[must_use]
@@ -552,6 +559,7 @@ pub struct RenderedHardcopyPublication {
     format: OutputFormat,
     page_count: u32,
     pdf_conformance: Option<PdfConformance>,
+    faces_used: Vec<HardcopyFace>,
 }
 
 /// Transferable browser-worker envelope. Artifact payloads remain distinct
@@ -579,6 +587,7 @@ pub(super) struct PublicationWorkerManifest {
     pub(super) page_count: u32,
     pub(super) pdf_conformance: Option<PdfConformance>,
     pub(super) parts: Vec<PublicationWorkerPartManifest>,
+    pub(super) faces_used: Vec<HardcopyFace>,
     pub(super) transport_digest: ContentDigest,
 }
 
@@ -605,6 +614,7 @@ pub(super) struct PublicationWorkerManifestMaterial<'a> {
     pub(super) page_count: u32,
     pub(super) pdf_conformance: Option<PdfConformance>,
     pub(super) parts: &'a [PublicationWorkerPartManifest],
+    pub(super) faces_used: &'a [HardcopyFace],
 }
 
 impl RenderedHardcopyPublication {
@@ -631,6 +641,13 @@ impl RenderedHardcopyPublication {
     #[must_use]
     pub const fn page_count(&self) -> u32 {
         self.page_count
+    }
+
+    /// Every face the publication's text is lettered in, as the receipt
+    /// records it.
+    #[must_use]
+    pub fn faces_used(&self) -> &[HardcopyFace] {
+        &self.faces_used
     }
 
     #[must_use]
@@ -683,6 +700,7 @@ impl RenderedHardcopyPublication {
             page_count: self.page_count,
             pdf_conformance: self.pdf_conformance,
             parts: &parts,
+            faces_used: &self.faces_used,
         };
         let transport_digest = publication_worker_manifest_digest(&material)?;
         let manifest = PublicationWorkerManifest {
@@ -694,6 +712,7 @@ impl RenderedHardcopyPublication {
             page_count: material.page_count,
             pdf_conformance: material.pdf_conformance,
             parts,
+            faces_used: self.faces_used.clone(),
             transport_digest,
         };
         let manifest_json = serde_json::to_vec(&manifest)
@@ -755,6 +774,7 @@ impl RenderedHardcopyPublication {
             page_count: manifest.page_count,
             pdf_conformance: manifest.pdf_conformance,
             parts: &manifest.parts,
+            faces_used: &manifest.faces_used,
         };
         if publication_worker_manifest_digest(&material)? != manifest.transport_digest {
             return Err(HardcopyRenderError::PublicationWorkerTransfer(
@@ -823,6 +843,7 @@ impl RenderedHardcopyPublication {
             format: manifest.format,
             page_count: manifest.page_count,
             pdf_conformance: manifest.pdf_conformance,
+            faces_used: manifest.faces_used,
         };
         validate_publication_worker_contract(&publication, plan, source)?;
         Ok(publication)
@@ -1444,6 +1465,7 @@ impl HardcopyRenderer {
             format,
             page_count,
             pdf_conformance: conformance,
+            faces_used: lettered_faces(plan, scene)?,
         })
     }
 
@@ -1569,8 +1591,21 @@ impl HardcopyRenderer {
         Ok(RenderedPrinterPages {
             pages,
             digest: ContentDigest::from_bytes(publication_digest.finalize().into()),
+            faces_used: lettered_faces(plan, scene)?,
         })
     }
+}
+
+/// The receipt entries of every face the plan's pages letter text in.
+fn lettered_faces(
+    plan: &HardcopyPlan,
+    scene: &HardcopyScene,
+) -> Result<Vec<HardcopyFace>, HardcopyRenderError> {
+    let mut faces = std::collections::BTreeSet::new();
+    for page in plan.pagination().pages() {
+        add_page_faces(&mut faces, plan, scene, page)?;
+    }
+    super::glyph_runs::receipt_faces(&faces)
 }
 
 fn render_browser_print_html(

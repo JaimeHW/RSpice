@@ -105,3 +105,46 @@ impl PrintFaces {
         value * primary / u64::from(self.face(face).units_per_em())
     }
 }
+
+/// The receipt's entries for `faces`, in the receipt's own order: each face's
+/// family, weight and version, and the SHA-256 of the bytes the binary
+/// embeds, worked out once per process.
+pub(crate) fn receipt_faces(
+    faces: &std::collections::BTreeSet<Face>,
+) -> Result<Vec<HardcopyFace>, HardcopyRenderError> {
+    use rspice_hardcopy_contract::HardcopyFaceSource;
+
+    static ENTRIES: OnceLock<Result<Vec<HardcopyFace>, &'static str>> = OnceLock::new();
+    let entries = ENTRIES
+        .get_or_init(|| {
+            Face::ALL
+                .into_iter()
+                .map(|face| {
+                    let parsed =
+                        ttf_parser::Face::parse(face.bytes(), 0).map_err(|_| face.name())?;
+                    let version = parsed
+                        .names()
+                        .into_iter()
+                        .filter(|name| name.name_id == ttf_parser::name_id::VERSION)
+                        .find_map(|name| name.to_string())
+                        .ok_or(face.name())?;
+                    HardcopyFace::try_new(
+                        face.family(),
+                        face.weight(),
+                        version.trim(),
+                        ContentDigest::from_bytes(Sha256::digest(face.bytes()).into()),
+                        HardcopyFaceSource::Bundled,
+                    )
+                    .map_err(|_| face.name())
+                })
+                .collect()
+        })
+        .as_ref()
+        .map_err(|name| HardcopyRenderError::InvalidEmbeddedFont(name))?;
+    let mut recorded = faces
+        .iter()
+        .map(|&face| entries[face as usize].clone())
+        .collect::<Vec<_>>();
+    recorded.sort();
+    Ok(recorded)
+}

@@ -1819,6 +1819,7 @@ mod tests {
                 )
                 .unwrap(),
             },
+            Vec::new(),
         )
         .expect("an outcome that matches its plan is recordable");
 
@@ -1874,6 +1875,7 @@ mod tests {
                 )
                 .unwrap(),
             },
+            Vec::new(),
         );
         assert!(matches!(
             overclaimed,

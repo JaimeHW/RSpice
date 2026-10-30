@@ -27,8 +27,8 @@ use crate::workbench::workflows::export_workflow::{
 };
 use rspice_hardcopy::render::{RenderedHardcopyPublication, RenderedPrinterPages};
 use rspice_hardcopy_contract::{
-    CancellationPhase, HardcopyArtifactIdentity, HardcopyFailureCode, HardcopyOutcome,
-    HardcopyPlan, OutputFormat, RenderTarget,
+    CancellationPhase, HardcopyArtifactIdentity, HardcopyFace, HardcopyFailureCode,
+    HardcopyOutcome, HardcopyPlan, OutputFormat, RenderTarget,
 };
 
 const NATIVE_FINALIZATION_THREAD_NAME: &str = "rspice-hardcopy-finalize";
@@ -77,22 +77,26 @@ pub(crate) struct FinalizationTicket {
     pub(crate) operation_digest: ContentDigest,
 }
 
-/// Successful result returned after the irreversible boundary completes.
+/// Successful result returned after the irreversible boundary completes,
+/// with the faces the published text was lettered in for its receipt.
 #[derive(Debug)]
 pub(crate) enum FinalizationPayload {
     Export {
         artifact: HardcopyArtifactIdentity,
         page_count: u32,
         format: OutputFormat,
+        faces_used: Vec<HardcopyFace>,
     },
     Print {
         outcome: HardcopyOutcome,
         accepted: usize,
         display_name: String,
+        faces_used: Vec<HardcopyFace>,
     },
     DesktopPrintHandoff {
         outcome: HardcopyOutcome,
         accepted: usize,
+        faces_used: Vec<HardcopyFace>,
     },
 }
 
@@ -401,6 +405,7 @@ fn execute_owned(
                 artifact,
                 page_count,
                 format,
+                faces_used: publication.faces_used().to_vec(),
             })
         }
         FinalizationOperation::Print {
@@ -470,6 +475,7 @@ fn execute_owned(
                 outcome,
                 accepted,
                 display_name,
+                faces_used: pages.faces_used().to_vec(),
             })
         }
         FinalizationOperation::DesktopPrintHandoff { publication } => {
@@ -500,7 +506,11 @@ fn execute_owned(
                 }
                 _ => 0,
             };
-            Ok(FinalizationPayload::DesktopPrintHandoff { outcome, accepted })
+            Ok(FinalizationPayload::DesktopPrintHandoff {
+                outcome,
+                accepted,
+                faces_used: publication.faces_used().to_vec(),
+            })
         }
     }
 }

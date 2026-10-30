@@ -1848,6 +1848,7 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
                     outcome,
                     accepted,
                     display_name,
+                    faces_used,
                 },
             ) => (|| {
                 let (message, commit_mapping) = match &outcome {
@@ -1878,8 +1879,8 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
                         );
                     }
                 };
-                let receipt =
-                    HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
+                let receipt = HardcopyReceipt::record(&plan, outcome, faces_used)
+                    .map_err(|error| error.to_string())?;
                 retain_hardcopy_receipt(parts, receipt)?;
                 if commit_mapping {
                     commit_print_mapping_persistence(parts, publication.staged_mapping)?;
@@ -1888,7 +1889,11 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
             })(),
             (
                 NativePublicationDestination::DesktopPrintHandoff,
-                super::finalize::FinalizationPayload::DesktopPrintHandoff { outcome, accepted },
+                super::finalize::FinalizationPayload::DesktopPrintHandoff {
+                    outcome,
+                    accepted,
+                    faces_used,
+                },
             ) => (|| {
                 let HardcopyOutcome::DesktopPrintHandoffAccepted { pages_accepted, .. } = &outcome
                 else {
@@ -1903,8 +1908,8 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
                             .to_owned(),
                     );
                 }
-                let receipt =
-                    HardcopyReceipt::record(&plan, outcome).map_err(|error| error.to_string())?;
+                let receipt = HardcopyReceipt::record(&plan, outcome, faces_used)
+                    .map_err(|error| error.to_string())?;
                 retain_hardcopy_receipt(parts, receipt)?;
                 commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 Ok(format!(
@@ -1920,11 +1925,15 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
                     artifact,
                     page_count,
                     format,
+                    faces_used,
                 },
             ) => (|| {
-                let receipt =
-                    HardcopyReceipt::record(&plan, HardcopyOutcome::ArtifactExported { artifact })
-                        .map_err(|error| error.to_string())?;
+                let receipt = HardcopyReceipt::record(
+                    &plan,
+                    HardcopyOutcome::ArtifactExported { artifact },
+                    faces_used,
+                )
+                .map_err(|error| error.to_string())?;
                 retain_hardcopy_receipt(parts, receipt)?;
                 commit_print_mapping_persistence(parts, publication.staged_mapping)?;
                 Ok(export_completion_message(
@@ -2003,7 +2012,7 @@ fn record_native_finalization_failure(
             | NativePublicationDestination::DesktopPrintHandoff
     ) && let Some(outcome) = error.hardcopy_outcome()
     {
-        return match HardcopyReceipt::record(plan, outcome) {
+        return match HardcopyReceipt::record(plan, outcome, Vec::new()) {
             Ok(receipt) => match retain_hardcopy_receipt(parts, receipt) {
                 Ok(()) => error.to_string(),
                 Err(receipt_error) => {
@@ -2139,7 +2148,9 @@ fn record_print_failure(
     pages_completed: u32,
 ) -> String {
     let message = error.to_string();
-    if let Ok(receipt) = HardcopyReceipt::record(plan, error.failure_outcome(pages_completed)) {
+    if let Ok(receipt) =
+        HardcopyReceipt::record(plan, error.failure_outcome(pages_completed), Vec::new())
+    {
         let _ = retain_hardcopy_receipt(parts, receipt);
     }
     message
@@ -2172,7 +2183,7 @@ fn record_failure(
         pages_completed: 0,
         retryable,
     };
-    if let Ok(receipt) = HardcopyReceipt::record(plan, outcome) {
+    if let Ok(receipt) = HardcopyReceipt::record(plan, outcome, Vec::new()) {
         let _ = retain_hardcopy_receipt(parts, receipt);
     }
     message

@@ -532,6 +532,7 @@ fn app_state_clone_drops_runtime_hardcopy_authority_and_payloads() {
                 pages_completed: 0,
                 retryable: false,
             },
+            Vec::new(),
         )
         .expect("receipt"),
     );
