@@ -566,24 +566,36 @@ impl DrawingSheetPreset {
     }
 }
 
+/// Refuse a size name the way the person naming the size reads it: which
+/// characters it cannot hold, or how long it can be.
 pub(in crate::design_management) fn validate_drawing_sheet_preset_label(
     name: &str,
 ) -> Result<(), DesignManagementError> {
-    if name.chars().count() > MAX_DRAWING_SHEET_PRESET_NAME_CHARS
-        || name.chars().any(|character| {
-            matches!(
-                character,
-                '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
-            )
-        })
-    {
-        return Err(DesignManagementError::InvalidText {
-            field: "drawing sheet preset name",
-            value: name.to_owned(),
-        });
+    if name.chars().any(|character| {
+        matches!(
+            character,
+            '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|'
+        )
+    }) {
+        return Err(DesignManagementError::DocumentControl(
+            "A size name cannot contain \\ / : * ? \" < > or |.",
+        ));
+    }
+    if name.chars().count() > MAX_DRAWING_SHEET_PRESET_NAME_CHARS {
+        return Err(DesignManagementError::DocumentControl(
+            SIZE_NAME_LENGTH_REFUSAL,
+        ));
     }
     Ok(())
 }
+
+/// The refusal of a size name longer than
+/// [`MAX_DRAWING_SHEET_PRESET_NAME_CHARS`], which it states in words.
+const SIZE_NAME_LENGTH_REFUSAL: &str = "A size name can be at most 48 characters long.";
+const _: () = assert!(
+    MAX_DRAWING_SHEET_PRESET_NAME_CHARS == 48,
+    "SIZE_NAME_LENGTH_REFUSAL states the limit"
+);
 
 #[must_use]
 pub fn drawing_sheet_preset_key(value: &str) -> String {

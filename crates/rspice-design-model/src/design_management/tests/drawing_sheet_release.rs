@@ -98,3 +98,24 @@ fn drawing_sheet_document_control_is_backward_compatible_and_calendar_strict() {
         ));
     }
 }
+
+/// A size name is refused in the words the person naming the size can act
+/// on: which characters it cannot hold, or how long it can be.
+#[test]
+fn a_size_name_is_refused_in_plain_words() {
+    let named = |name: &str| {
+        SchematicSheetFormat::try_custom(name, 300_000, 500_000, SchematicPageOrientation::Portrait)
+            .map(|_| ())
+            .map_err(|error| error.to_string())
+    };
+    assert_eq!(
+        named("Panel A/B"),
+        Err(r#"A size name cannot contain \ / : * ? " < > or |."#.to_owned())
+    );
+    let longest = "P".repeat(MAX_DRAWING_SHEET_PRESET_NAME_CHARS);
+    assert_eq!(named(&longest), Ok(()));
+    assert_eq!(
+        named(&format!("{longest}Q")),
+        Err("A size name can be at most 48 characters long.".to_owned())
+    );
+}
