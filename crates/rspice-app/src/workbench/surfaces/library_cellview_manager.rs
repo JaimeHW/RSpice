@@ -27,7 +27,8 @@ use crate::workbench::app::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{Problem, paint_problem_mark, problem_line};
-use crate::workbench::state::{LibraryCellviewPage, Workspace};
+use crate::workbench::project::workspace_state::LibraryCellviewPage;
+use crate::workbench::state::Workspace;
 
 use super::project;
 

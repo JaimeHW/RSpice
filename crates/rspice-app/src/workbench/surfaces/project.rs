@@ -32,7 +32,8 @@ use crate::workbench::app_state::DesignCheckStatus;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
-use super::super::state::{ProjectPage, Workspace};
+use super::super::state::Workspace;
+use crate::workbench::project::workspace_state::ProjectPage;
 use recovery::recovery;
 use technology::{open_technology_attachment_dialog, show_technology_attachment_dialog};
 #[cfg(target_arch = "wasm32")]

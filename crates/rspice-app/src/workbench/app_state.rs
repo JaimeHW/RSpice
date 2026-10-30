@@ -542,7 +542,8 @@ impl AppState {
             return;
         }
         self.project.project_launcher_open = true;
-        self.project.project_launcher_page = crate::workbench::state::ProjectLauncherPage::Projects;
+        self.project.project_launcher_page =
+            crate::workbench::project::workspace_state::ProjectLauncherPage::Projects;
         self.platform.recovery_catalog.request_refresh();
         self.workbench
             .outbox

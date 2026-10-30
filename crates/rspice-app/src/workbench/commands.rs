@@ -20,9 +20,8 @@ use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 use std::cell::RefCell;
 
-use super::state::{
-    ConsoleChannel, ConsolePage, ProjectLauncherFilter, SpecificationEvidenceFilter, Workspace,
-};
+use super::state::{ConsoleChannel, ConsolePage, SpecificationEvidenceFilter, Workspace};
+use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 
 pub(crate) mod code_context;
 mod enablement;

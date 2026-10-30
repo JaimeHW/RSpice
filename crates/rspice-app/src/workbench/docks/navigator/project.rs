@@ -7,8 +7,8 @@ use crate::workbench::RSpiceApp;
 
 use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{WorkbenchIcon, section_header};
-use super::super::super::state::ProjectPage;
 use super::{muted, nav_row};
+use crate::workbench::project::workspace_state::ProjectPage;
 
 pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     ScrollArea::vertical()

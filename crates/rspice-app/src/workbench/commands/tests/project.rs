@@ -377,7 +377,7 @@ fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
     );
     assert_eq!(
         state.project.project_launcher_page,
-        crate::workbench::state::ProjectLauncherPage::Projects
+        crate::workbench::project::workspace_state::ProjectLauncherPage::Projects
     );
     assert_eq!(
         state.project.project_launcher_filter,

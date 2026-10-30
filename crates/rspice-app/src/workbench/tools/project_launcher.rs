@@ -36,9 +36,10 @@ use crate::workbench::lifecycle::recovery::{
     discard_checkpoint, open_diagnostics_folder, recovery_replacement_block_reason,
     refresh_catalog_if_requested, software_rendering_supported,
 };
-use crate::workbench::state::{
-    ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort, Workspace,
+use crate::workbench::project::workspace_state::{
+    ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
 };
+use crate::workbench::state::Workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ProjectGroup {

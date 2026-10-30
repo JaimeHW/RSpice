@@ -618,6 +618,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // holds it and the session wire persists it, so it ranks below both; it
     // names only the session's vocabulary and lower crates.
     "models/workspace_state",
+    // What the Project workspace and the project launcher keep between
+    // frames. The project slot holds it and the session wire persists it, so
+    // it ranks below both; it names nothing of the workbench.
+    "project/workspace_state",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the
@@ -734,6 +738,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "cloud",
     // The models feature's home.
     "models",
+    // The project feature's home.
+    "project",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",

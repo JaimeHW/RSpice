@@ -22,7 +22,8 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_problem};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
-use crate::workbench::state::{ModelsCatalogScope, ProjectPage, Workspace};
+use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::state::{ModelsCatalogScope, Workspace};
 use rspice_design::drc::DrcSeverity;
 
 use super::page::{

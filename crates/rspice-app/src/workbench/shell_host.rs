@@ -46,12 +46,11 @@ use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
+use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
-use crate::workbench::state::{
-    ProjectPage, VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId,
-};
+use crate::workbench::state::{VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 

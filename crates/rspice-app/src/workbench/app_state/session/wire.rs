@@ -30,16 +30,16 @@ use crate::workbench::models::workspace_state::{
     ModelsWorkbenchViewState, PdkTechnologyAuthoringRecovery,
 };
 use crate::workbench::preferences::UserPreferences;
+use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::slots::{
     CodeState, DesignState, HardcopyState, ModelsState, PlatformState, ProjectState, ResultsState,
     SettingsState, SimulateState,
 };
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, LibraryCellviewPage, ProjectPage, SimulationPage,
-    SpecialistToolBrowserState, VerificationPage, VerificationSessionState, WorkbenchSession,
-    Workspace, WorkspaceDocumentId, WorkspaceDocumentRegistry, WorkspaceLayoutState,
-    default_analysis_index, default_console_height, default_inspector_width,
-    default_navigator_width,
+    ConsolePage, DesignPanel, SimulationPage, SpecialistToolBrowserState, VerificationPage,
+    VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
+    WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
+    default_console_height, default_inspector_width, default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 

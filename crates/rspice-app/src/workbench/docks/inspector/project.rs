@@ -11,7 +11,8 @@ use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 
 use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{property_row, property_row_problem};
-use super::super::super::state::{ProjectPage, Workspace};
+use super::super::super::state::Workspace;
+use crate::workbench::project::workspace_state::ProjectPage;
 
 pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.project.project_page {

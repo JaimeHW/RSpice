@@ -32,10 +32,11 @@ use crate::state::{
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt,
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
-use crate::workbench::state::{ProjectPage, SimulationPage, VerificationPage};
+use crate::workbench::state::{SimulationPage, VerificationPage};
 
 fn app_with_selected_authored_symbol() -> RSpiceApp {
     use crate::state::{

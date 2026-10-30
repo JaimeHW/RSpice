@@ -17,7 +17,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
-use crate::workbench::state::{ProjectLauncherFilter, ProjectLauncherPage};
+use crate::workbench::project::workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 const HEADER_HEIGHT: f32 = 116.0;
 const CONTENT_MAX_WIDTH: f32 = 1240.0;

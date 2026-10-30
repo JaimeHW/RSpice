@@ -142,14 +142,14 @@ pub(crate) struct ProjectState {
     pub project_launcher_open: bool,
     /// Search text is transient and never becomes project state.
     pub project_launcher_query: String,
-    pub project_launcher_sort: crate::workbench::state::ProjectLauncherSort,
-    pub project_launcher_filter: crate::workbench::state::ProjectLauncherFilter,
+    pub project_launcher_sort: crate::workbench::project::workspace_state::ProjectLauncherSort,
+    pub project_launcher_filter: crate::workbench::project::workspace_state::ProjectLauncherFilter,
     /// Selected startup page and scanned native checkpoint catalog are
     /// application-modal runtime state, never project or user preferences.
-    pub project_launcher_page: crate::workbench::state::ProjectLauncherPage,
+    pub project_launcher_page: crate::workbench::project::workspace_state::ProjectLauncherPage,
     /// The Examples dialog, while it is open: the example chosen in it.
     pub(crate) examples_selection: Option<usize>,
-    pub project_page: crate::workbench::state::ProjectPage,
+    pub project_page: crate::workbench::project::workspace_state::ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
     /// They affect presentation only and never participate in project
     /// revisioning, execution snapshots, or recovery checkpoints.
@@ -160,7 +160,7 @@ pub(crate) struct ProjectState {
     /// Device-local projection retained by the Library/Cellview specialist
     /// route. Authoritative library, cellview, symbol, and form records remain
     /// in the project domains.
-    pub library_cellview_page: crate::workbench::state::LibraryCellviewPage,
+    pub library_cellview_page: crate::workbench::project::workspace_state::LibraryCellviewPage,
 }
 
 impl ProjectState {
