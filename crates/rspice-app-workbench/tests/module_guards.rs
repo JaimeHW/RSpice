@@ -38,6 +38,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "retired_documents"),
     ("lib.rs", "review_primitives"),
     ("lib.rs", "routing"),
+    ("lib.rs", "schematic_command"),
     ("lib.rs", "session"),
     ("lib.rs", "shortcuts"),
     ("lib.rs", "specialist_tool_browser"),

@@ -59,6 +59,7 @@ pub mod workbench {
             pub mod model_browser;
             pub mod operation_primitives;
             pub mod review_primitives;
+            pub mod schematic_command;
             pub mod window_session;
         }
     }
