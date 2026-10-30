@@ -454,3 +454,54 @@ fn capacitor_current_rows_keep_physical_charge_and_exclusive_ownership() {
         .unwrap();
     assert!(failure.to_string().contains("multiple owners"), "{failure}");
 }
+
+#[test]
+fn source_event_classification_settles_regular_rlc_storage_by_topology() {
+    // No budget for the exact descriptor: a regular network never needs one.
+    let mut restricted = options();
+    restricted.limits.max_matrix_unknowns = 1;
+    let mut ladder = String::from("RLC ladder\nVs n0 0 SIN(0 10 60 0 0)\n");
+    for section in 0..300 {
+        let next = section + 1;
+        ladder.push_str(&format!(
+            "R{section} n{section} m{section} 10\nL{section} m{section} n{next} 1n\nC{section} n{next} 0 1p\n"
+        ));
+    }
+    ladder.push_str("Rbig n300 0 1k\n.end\n");
+    let ladder = build(&ladder);
+    assert!(
+        !PreparedEventCircuit::has_linear_events(&ladder, 1e-20, &restricted, &NoAbort).unwrap()
+    );
+    // A CV-loop or an LI-cutset constrains storage and keeps the exact
+    // classification; on a regular ladder the descriptor agrees.
+    for (deck, impulses) in [
+        (
+            "CV loop\nV1 a 0 1\nC1 a 0 1p\nR1 a b 1k\nC2 b 0 1p\n.end\n",
+            true,
+        ),
+        (
+            "LI cutset\nI1 0 a 1m\nL1 a 0 1n\nR1 a b 1k\nL2 b 0 1n\n.end\n",
+            true,
+        ),
+        (
+            "RLC sections\nV1 a 0 1\nR1 a b 10\nL1 b c 1n\nC1 c 0 1p\nR2 c d 10\nL2 d e 1n\nC2 e 0 1p\n.end\n",
+            false,
+        ),
+    ] {
+        let circuit = build(deck);
+        assert_eq!(
+            PreparedEventCircuit::has_linear_events(&circuit, 1e-20, &restricted, &NoAbort)
+                .is_err(),
+            impulses,
+            "{deck}"
+        );
+        let descriptor = PreparedEventCircuit::new(&circuit, 1e-20, &options(), &NoAbort).unwrap();
+        assert_eq!(
+            descriptor
+                .linear_descriptor()
+                .is_some_and(|descriptor| descriptor.has_impulses()),
+            impulses,
+            "{deck}"
+        );
+    }
+}

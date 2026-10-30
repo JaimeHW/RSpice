@@ -7,6 +7,38 @@ fn aligned(name: &str, count: usize, lengths: &[usize]) -> Result<()> {
     Ok(())
 }
 
+/// Disjoint node sets. A node outside the circuit answers `None`.
+struct NodeSets(Vec<usize>);
+
+impl NodeSets {
+    fn new(nodes: usize) -> Self {
+        Self((0..nodes).collect())
+    }
+
+    fn root(&mut self, node: usize) -> Option<usize> {
+        let mut root = node;
+        while *self.0.get(root)? != root {
+            root = self.0[root];
+        }
+        let mut node = node;
+        while self.0[node] != root {
+            node = std::mem::replace(&mut self.0[node], root);
+        }
+        Some(root)
+    }
+
+    fn joined(&mut self, a: usize, b: usize) -> Option<bool> {
+        Some(self.root(a)? == self.root(b)?)
+    }
+
+    /// Joins the sets of `a` and `b`; `false` when they were already one.
+    fn join(&mut self, a: usize, b: usize) -> Option<bool> {
+        let (a, b) = (self.root(a)?, self.root(b)?);
+        self.0[a] = b;
+        Some(a != b)
+    }
+}
+
 /// Nodes fixed for the entire transient by independent constant voltage
 /// constraints. This is an authored topology proof, not a zero sampled slope.
 /// It is used only to reduce charge incidence; physical Q and its audits stay.
@@ -221,6 +253,100 @@ impl<'a> PreparedEventCircuit<'a> {
                 .value_expressions
                 .iter()
                 .all(Option::is_none)
+    }
+
+    /// Whether a transient source event can force charge or flux, which the
+    /// distributional event owner must then carry. The topology settles a
+    /// regular network; the exact descriptor settles everything else.
+    pub(in crate::engine::transient) fn has_linear_events(
+        circuit: &'a crate::CircuitData,
+        flux_tolerance: Value,
+        options: &EventOptions,
+        abort: &dyn AbortSignal,
+    ) -> Result<bool> {
+        if !Self::supports_linear_events(circuit) || Self::has_regular_storage(circuit) {
+            return Ok(false);
+        }
+        Ok(Self::new(circuit, flux_tolerance, options, abort)?
+            .linear_descriptor()
+            .is_some_and(|descriptor| descriptor.has_impulses()))
+    }
+
+    /// Positive R, C and uncoupled L with independent sources form an index-1
+    /// MNA descriptor, whose storage no source event can force, unless
+    /// capacitors and voltage sources close a loop through a source (CV-loop)
+    /// or inductors and current sources form a cutset (LI-cutset). Shunts can
+    /// only remove such a cutset, so ignoring them errs toward the descriptor.
+    fn has_regular_storage(circuit: &crate::CircuitData) -> bool {
+        use PeriodicDeviceFamily::{
+            Capacitor, CurrentSource, Inductor, Resistor, ResistorBranch, VoltageSource,
+        };
+        let positive =
+            |values: &[Value]| values.iter().all(|value| *value > 0.0 && value.is_finite());
+        let capacitors = &circuit.capacitors;
+        let inductors = &circuit.inductors;
+        let branches = &circuit.resistor_branches;
+        let resistors = &circuit.resistors;
+        let voltages = &circuit.voltage_sources;
+        let currents = &circuit.current_sources;
+        let regular = PeriodicDeviceFamily::ALL.into_iter().all(|family| {
+            family.instance_count(circuit) == 0
+                || matches!(
+                    family,
+                    Resistor
+                        | ResistorBranch
+                        | Capacitor
+                        | Inductor
+                        | VoltageSource
+                        | CurrentSource
+                )
+        }) && positive(&capacitors.capacitances)
+            && positive(&inductors.inductances)
+            && positive(&branches.resistances)
+            && positive(&resistors.conductances)
+            && capacitors.ic_branch_indices.iter().all(Option::is_none);
+        if !regular {
+            return false;
+        }
+        let pairs = |positive: &[usize], negative: &[usize]| {
+            positive
+                .iter()
+                .copied()
+                .zip(negative.iter().copied())
+                .collect::<Vec<_>>()
+        };
+        let capacitors = capacitors
+            .stamps
+            .iter()
+            .map(|stamp| (stamp.pp.row, stamp.nn.row))
+            .collect::<Vec<_>>();
+        let resistors = resistors
+            .stamps
+            .iter()
+            .map(|stamp| (stamp.pp.row, stamp.nn.row))
+            .chain(pairs(&branches.node_pos, &branches.node_neg))
+            .collect::<Vec<_>>();
+        let voltages = pairs(&voltages.node_pos, &voltages.node_neg);
+        let flux = pairs(&inductors.node_pos, &inductors.node_neg)
+            .into_iter()
+            .chain(pairs(&currents.node_pos, &currents.node_neg))
+            .collect::<Vec<_>>();
+        let nodes = circuit.num_nodes().saturating_add(1);
+        let mut loops = NodeSets::new(nodes);
+        let mut joined = NodeSets::new(nodes);
+        // A voltage source whose terminals capacitors and earlier sources
+        // already join closes a CV-loop. A flux branch whose terminals no
+        // resistive, capacitive or voltage branch joins lies on an LI-cutset.
+        capacitors.iter().all(|&(p, n)| loops.join(p, n).is_some())
+            && voltages
+                .iter()
+                .all(|&(p, n)| loops.join(p, n) == Some(true))
+            && resistors
+                .iter()
+                .chain(&capacitors)
+                .chain(&voltages)
+                .all(|&(p, n)| joined.join(p, n).is_some())
+            && flux.iter().all(|&(p, n)| joined.joined(p, n) == Some(true))
     }
 
     /// The ordinary line path can opt into physical events only when every

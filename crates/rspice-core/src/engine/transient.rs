@@ -6765,19 +6765,12 @@ impl Engine {
         let physical_flux_tolerance = self.config.transient_event_flux_abstol;
         // Only constrained charge/flux needs distributional event ownership.
         // A regular linear ODE retains the ordinary integration/grid contract.
-        let has_linear_events =
-            if charge_event::circuit::PreparedEventCircuit::supports_linear_events(&circuit) {
-                charge_event::circuit::PreparedEventCircuit::new(
-                    &circuit,
-                    physical_flux_tolerance,
-                    &physical_options,
-                    abort,
-                )?
-                .linear_descriptor()
-                .is_some_and(|descriptor| descriptor.has_impulses())
-            } else {
-                false
-            };
+        let has_linear_events = charge_event::circuit::PreparedEventCircuit::has_linear_events(
+            &circuit,
+            physical_flux_tolerance,
+            &physical_options,
+            abort,
+        )?;
         let has_line_events =
             charge_event::circuit::PreparedEventCircuit::supports_scalar_line_events(&circuit)
                 && bjt_history.weil_phase.iter().all(Option::is_none);
