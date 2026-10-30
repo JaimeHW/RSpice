@@ -12,7 +12,6 @@ use rspice_results::result_presentation::ResultArtifactPresentationKey;
 use rspice_results_ui::selection::ResultBrowserSelectionKey;
 
 use super::super::super::design_system::WorkbenchIcon;
-use super::muted;
 use super::results::{
     ResultArtifact, ResultArtifactKind, ResultRun, ResultSignalVirtualRow, ResultsBrowserKind,
     ResultsBrowserScope, data_state_meta, result_browser_dataset_expanded,
@@ -26,6 +25,7 @@ use super::results_actions::{
     toggle_result_signal_visibility, update_result_browser_multi_selection,
 };
 use rspice_app_workbench::workbench::docks::navigator::grouped_count;
+use rspice_app_workbench::workbench::docks::navigator::muted;
 
 pub(super) const EXPRESSION_HEADER_HEIGHT: f32 = 28.0;
 pub(super) const SIGNAL_ROW_HEIGHT: f32 = 30.0;

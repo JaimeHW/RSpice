@@ -2,7 +2,7 @@
 
 pub mod rail;
 
-use egui::{Key, Modifiers, Response, ScrollArea, Sense, Ui};
+use egui::{Align, Key, Modifiers, Response, ScrollArea, Sense, Ui};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -44,6 +44,29 @@ pub const NETLIST_OUTLINE_ICON_GAP: f32 = 7.0;
 
 pub fn panel_search_field_width(available_width: f32) -> f32 {
     (available_width - PANEL_SEARCH_MARGIN_X * 2.0).max(1.0)
+}
+
+pub fn muted(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    egui::Frame::new()
+        .inner_margin(egui::Margin {
+            left: EMPTY_HINT_PADDING_X,
+            right: EMPTY_HINT_PADDING_X,
+            top: EMPTY_HINT_PADDING_Y,
+            bottom: EMPTY_HINT_PADDING_Y,
+        })
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width().max(1.0));
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(text)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .color(t.color.text_faint),
+                )
+                .wrap()
+                .halign(Align::Center),
+            );
+        });
 }
 
 pub fn show(ui: &mut Ui, app: &mut impl WorkbenchHost) {

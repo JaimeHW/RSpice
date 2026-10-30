@@ -20,7 +20,6 @@ use rspice_results_ui::selection::{ResultBrowserSelectionKey, ResultExpressionPr
 
 use super::super::super::commands::result_navigation::open_run_log;
 use super::super::super::design_system::WorkbenchIcon;
-use super::muted;
 use super::results_actions::{
     compare_enabled, execute, locate_on_schematic_menu, select_result_analysis_by_key,
     select_result_browser_key, select_result_dataset, set_checked_signal_visibility,
@@ -31,6 +30,7 @@ use super::results_rows::{
     result_quantity_kind_label, result_run_completeness, result_run_operational_label,
     retained_result_artifacts, show_virtualized_result_signals, signal_row,
 };
+use rspice_app_workbench::workbench::docks::navigator::muted;
 use rspice_app_workbench::workbench::docks::navigator::{
     PANEL_SEARCH_MARGIN_X, panel_search_field_width, search_focus_requested,
 };

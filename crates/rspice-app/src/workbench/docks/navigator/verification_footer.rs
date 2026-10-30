@@ -2,7 +2,7 @@
 
 use super::verify::VerificationFlowPresentation;
 use super::*;
-use egui::{Align, Ui};
+use egui::Ui;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -148,29 +148,6 @@ pub(super) fn flow_row(ui: &mut Ui, flow: &VerificationFlowPresentation, selecte
     }
     theme::paint_focus_ring(ui, &response, rect);
     response.clicked()
-}
-
-pub(super) fn muted(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    egui::Frame::new()
-        .inner_margin(egui::Margin {
-            left: EMPTY_HINT_PADDING_X,
-            right: EMPTY_HINT_PADDING_X,
-            top: EMPTY_HINT_PADDING_Y,
-            bottom: EMPTY_HINT_PADDING_Y,
-        })
-        .show(ui, |ui| {
-            ui.set_width(ui.available_width().max(1.0));
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(text)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                        .color(t.color.text_faint),
-                )
-                .wrap()
-                .halign(Align::Center),
-            );
-        });
 }
 
 #[cfg(test)]
