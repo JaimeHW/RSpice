@@ -71,6 +71,22 @@ fn unchanged_dirty_queries_do_not_rebuild_validate_or_hash_retained_results() {
     }
 }
 
+/// The counters the test above reads count in this build: a results sheet's
+/// first evidence check of a retained analysis is counted, so each zero above
+/// is a measurement rather than a counter that never moves.
+#[test]
+fn the_frame_work_counters_count_in_the_build_these_tests_read() {
+    let (state, _) = super::durable_content::retained_results();
+    let work = WorkCounts::reset();
+    assert_eq!(
+        crate::workbench::documents::result_document::active_incomplete_evidence_reason(
+            state.results_reads()
+        ),
+        None
+    );
+    assert_eq!(work.since().get(DatasetWalk::EvidenceValidation), 1);
+}
+
 #[test]
 fn every_persisted_result_input_invalidates_the_snapshot_and_matches_fresh_capture() {
     let (mut base, _) = super::durable_content::retained_results();
