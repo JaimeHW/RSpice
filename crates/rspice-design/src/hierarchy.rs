@@ -21,8 +21,8 @@
 //! would be a second answer to the same question.
 
 use crate::configuration_set::{
-    ConfigurationPlatform, ConfigurationSet, ConfigurationSetId, ConfigurationSetOverride,
-    UnresolvedBindingPolicy,
+    ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSet, ConfigurationSetId,
+    ConfigurationSetOverride, UnresolvedBindingPolicy, cell_binding_key,
 };
 use crate::library::{Cell, Library, LibraryCatalog, View, ViewType};
 use crate::project_sources::{ProjectSourceId, ProjectSourceOwner, ProjectSourceRegistry};
@@ -533,6 +533,9 @@ struct HierarchyResolver<'a, D, F> {
     /// The active configuration's overrides with their patterns canonicalized,
     /// so selection compares one grammar against itself.
     overrides: Vec<ConfigurationSetOverride>,
+    /// The active configuration's cell bindings, keyed by the folded cell
+    /// each one names.
+    cell_bindings: HashMap<(String, String), &'a ConfigurationCellBinding>,
     rows: Vec<ResolvedHierarchyBinding>,
     row_indices: HashMap<String, usize>,
     /// Occurrences merged into each row, keyed by [`InstancePath::fold_key`]
@@ -581,6 +584,15 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                         .overrides()
                         .iter()
                         .map(canonical_override)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            cell_bindings: configuration
+                .map(|configuration| {
+                    configuration
+                        .cell_bindings()
+                        .iter()
+                        .map(|binding| (cell_binding_key(&binding.library, &binding.cell), binding))
                         .collect()
                 })
                 .unwrap_or_default(),
@@ -789,7 +801,8 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             return;
         }
 
-        let search_order = self.view_search_order(&requested.view, is_root, instance_path);
+        let search_order =
+            self.view_search_order(&requested, &requested.view, is_root, instance_path);
         let configured_model_section = self.configured_model_section(instance_path);
         let (master, resolution_error) = match self.resolve_master(
             &requested,
@@ -806,7 +819,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             .unwrap_or_else(|| requested.clone());
         let used_review_fallback = master.is_some()
             && self.used_review_fallback(
-                &requested.view,
+                &requested,
                 &resolved_reference.view,
                 is_root,
                 instance_path,
@@ -934,7 +947,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         };
 
         let resolved_view_type = master.as_ref().and_then(|value| value.view_type);
-        let matched_stop = self.matched_stop_view(instance_path, &resolved_reference.view);
+        let matched_stop = self.matched_stop_view(&resolved_reference, instance_path);
         // A stop is executable only when the selected view is itself a
         // materialized terminal implementation. Treating a schematic as a black
         // box would emit an X-instance without any defining source, so the walk
@@ -1226,6 +1239,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
             diagnostic,
         } = outcome;
         let search_order = self.view_search_order(
+            &reference,
             binding.map_or(reference.view.as_str(), |value| value.view.as_str()),
             is_root,
             instance_path,
@@ -1254,7 +1268,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // the view it spells, and an unresolved row still shows which stop its
         // ordered search would reach.
         let stop_view = if self.configuration.is_some() {
-            self.configured_stop_views(instance_path)
+            self.configured_stop_views(&reference, instance_path)
                 .into_iter()
                 .find(|stop| {
                     stop.eq_ignore_ascii_case(&reference.view)
@@ -1288,8 +1302,41 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         }
     }
 
+    /// The ordered view list that governs one instance: its own override,
+    /// then a cell binding for its master's library and cell, then the
+    /// configuration's global view list.
+    fn configured_view_list(
+        &self,
+        configuration: &'a ConfigurationSet,
+        master: &CellViewRef,
+        instance_path: &InstancePath,
+    ) -> &[String] {
+        if let Some(scoped) = self.configured_override(instance_path) {
+            return &scoped.executable_views;
+        }
+        if let Some(binding) = self.configured_cell_binding(master) {
+            return &binding.executable_views;
+        }
+        configuration.executable_view_policy()
+    }
+
+    /// The cell binding for one master's library and cell, matched the way
+    /// the catalog folds those names.
+    fn configured_cell_binding(
+        &self,
+        master: &CellViewRef,
+    ) -> Option<&'a ConfigurationCellBinding> {
+        if self.cell_bindings.is_empty() {
+            return None;
+        }
+        self.cell_bindings
+            .get(&cell_binding_key(&master.library, &master.cell))
+            .copied()
+    }
+
     fn configured_primary_views(
         &self,
+        master: &CellViewRef,
         requested: &str,
         is_root: bool,
         instance_path: &InstancePath,
@@ -1305,18 +1352,18 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 requested.to_ascii_lowercase()
             });
         }
-        let configured = self
-            .configured_override(instance_path)
-            .map_or(configuration.executable_view_policy(), |scoped| {
-                scoped.executable_views.as_slice()
-            });
-        order.extend(configured.iter().cloned());
+        order.extend(
+            self.configured_view_list(configuration, master, instance_path)
+                .iter()
+                .cloned(),
+        );
         deduplicate_view_order(&mut order);
         order
     }
 
     fn view_search_order(
         &self,
+        master: &CellViewRef,
         requested: &str,
         is_root: bool,
         instance_path: &InstancePath,
@@ -1324,7 +1371,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         let Some(configuration) = self.configuration else {
             return hierarchy_view_search_order(requested, is_root);
         };
-        let mut order = self.configured_primary_views(requested, is_root, instance_path);
+        let mut order = self.configured_primary_views(master, requested, is_root, instance_path);
         if configuration.definition().unresolved_policy
             == UnresolvedBindingPolicy::ExplicitFallbackWithReview
         {
@@ -1336,7 +1383,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
 
     fn used_review_fallback(
         &self,
-        requested: &str,
+        requested: &CellViewRef,
         resolved: &str,
         is_root: bool,
         instance_path: &InstancePath,
@@ -1347,17 +1394,29 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         configuration.definition().unresolved_policy
             == UnresolvedBindingPolicy::ExplicitFallbackWithReview
             && !self
-                .configured_primary_views(requested, is_root, instance_path)
+                .configured_primary_views(requested, &requested.view, is_root, instance_path)
                 .iter()
                 .any(|candidate| candidate.eq_ignore_ascii_case(resolved))
     }
 
-    fn configured_stop_views(&self, instance_path: &InstancePath) -> Vec<String> {
+    /// The configured stops for one instance, in the precedence its view list
+    /// follows: the override's stop view, then its master's cell binding's,
+    /// then the configuration's global stop views.
+    fn configured_stop_views(
+        &self,
+        master: &CellViewRef,
+        instance_path: &InstancePath,
+    ) -> Vec<String> {
         let Some(configuration) = self.configuration else {
             return Vec::new();
         };
-        if let Some(scoped) = self.configured_override(instance_path)
-            && let Some(stop_view) = &scoped.stop_view
+        if let Some(stop_view) = self
+            .configured_override(instance_path)
+            .and_then(|scoped| scoped.stop_view.as_ref())
+            .or_else(|| {
+                self.configured_cell_binding(master)
+                    .and_then(|binding| binding.stop_view.as_ref())
+            })
         {
             return vec![stop_view.clone()];
         }
@@ -1372,12 +1431,12 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
     /// [`hierarchy_stop_view`] is the one authority on it.
     fn matched_stop_view(
         &self,
+        resolved: &CellViewRef,
         instance_path: &InstancePath,
-        resolved_view: &str,
     ) -> Option<String> {
-        self.configured_stop_views(instance_path)
+        self.configured_stop_views(resolved, instance_path)
             .into_iter()
-            .find(|stop| stop.eq_ignore_ascii_case(resolved_view))
+            .find(|stop| stop.eq_ignore_ascii_case(&resolved.view))
     }
 
     fn model_section(

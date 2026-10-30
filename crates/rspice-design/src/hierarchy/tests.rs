@@ -1,6 +1,10 @@
 //! Headless hierarchy resolution using borrowed design documents.
 
 use super::*;
+use crate::configuration_set::{
+    ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationSetCatalog,
+    ConfigurationSetDefinition,
+};
 use crate::schematic::component::Component;
 use rspice_design_model::Point;
 
@@ -267,4 +271,211 @@ fn an_unconfigured_veriloga_instance_runs_the_bundle_its_view_owns() {
         Some(owned.netlist_alias())
     );
     assert_eq!(materialized.terminal_order, ["p", "n"]);
+}
+
+/// `work/top` places `X1`, `X2` and `X4` of `work/amp` and `X3` of `work/buf`.
+/// Every view is a schematic with a document, so the view each row selects
+/// is visible without a source file and every listed name can resolve.
+fn bound_design() -> (Documents, LibraryCatalog) {
+    let mut documents = HashMap::new();
+    let mut library = Library::new("work");
+    let cells: [(&str, &[&str]); 3] = [
+        ("top", &["schematic"]),
+        ("amp", &["schematic", "fast", "slow"]),
+        ("buf", &["schematic", "fast"]),
+    ];
+    for (name, views) in cells {
+        let mut cell = Cell::new(name);
+        for &view in views {
+            cell.add_view(View::new(view, ViewType::Schematic));
+            documents.insert(
+                CellViewRef::new("work", name, view).key(),
+                (SchematicDocument::default(), false),
+            );
+        }
+        library.add_cell(cell);
+    }
+    let mut top = SchematicDocument::default();
+    for (id, instance, cell) in [
+        (1, "X1", "amp"),
+        (2, "X2", "amp"),
+        (3, "X3", "buf"),
+        (4, "X4", "amp"),
+    ] {
+        top.components.push(
+            Component::new(id, ComponentType::CellInstance, Point::new(0, 0))
+                .with_library_cell(LibraryCellInstance::new("work", cell, "schematic"))
+                .with_name_value(instance, cell),
+        );
+    }
+    documents.insert(
+        CellViewRef::new("work", "top", "schematic").key(),
+        (top, false),
+    );
+    let mut libraries = LibraryCatalog::default();
+    libraries.add_library(library);
+    (Documents(documents), libraries)
+}
+
+fn views(names: &[&str]) -> Vec<String> {
+    names.iter().map(|name| (*name).to_owned()).collect()
+}
+
+fn bound_configuration(global: &[&str], stops: &[&str]) -> ConfigurationSetDefinition {
+    ConfigurationSetDefinition {
+        name: "Bindings".to_owned(),
+        root: CellViewRef::new("work", "top", "schematic"),
+        dut_path: "/".to_owned(),
+        executable_view_policy: views(global),
+        stop_views: views(stops),
+        unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
+        black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
+        overrides: Vec::new(),
+        cell_bindings: Vec::new(),
+        model_profile: ConfigurationModelProfile::ProjectRunSetSections,
+        owner: "Design".to_owned(),
+    }
+}
+
+fn instance_binding(path: &str, list: &[&str], stop: Option<&str>) -> ConfigurationSetOverride {
+    ConfigurationSetOverride {
+        instance_path: path.to_owned(),
+        executable_views: views(list),
+        stop_view: stop.map(str::to_owned),
+        model_section: None,
+        eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+    }
+}
+
+fn cell_binding(cell: &str, list: &[&str], stop: Option<&str>) -> ConfigurationCellBinding {
+    ConfigurationCellBinding {
+        library: "work".to_owned(),
+        cell: cell.to_owned(),
+        executable_views: views(list),
+        stop_view: stop.map(str::to_owned),
+    }
+}
+
+fn resolve_bound(definition: Option<ConfigurationSetDefinition>) -> HierarchyResolution {
+    let (documents, libraries) = bound_design();
+    let mut catalog = ConfigurationSetCatalog::default();
+    let configuration = definition.map(|definition| {
+        catalog
+            .create(definition)
+            .expect("the configuration validates")
+    });
+    let sources = ProjectSourceRegistry::default();
+    let context = HierarchyContext {
+        documents: &documents,
+        libraries: &libraries,
+        project_id: ProjectId::new(),
+        project_sources: &sources,
+        source_files: &NoSourceFiles,
+    };
+    let configuration = configuration.and_then(|id| catalog.find(id));
+    resolve_hierarchy(
+        context,
+        CellViewRef::new("work", "top", "schematic"),
+        configuration,
+    )
+    .0
+}
+
+fn row<'r>(resolution: &'r HierarchyResolution, path: &str) -> &'r ResolvedHierarchyBinding {
+    resolution
+        .bindings
+        .iter()
+        .find(|row| row.instance_paths.iter().any(|candidate| candidate == path))
+        .unwrap_or_else(|| panic!("a row for {path}: {:#?}", resolution.bindings))
+}
+
+/// The configuration the precedence tests share: `amp` is bound to `fast`,
+/// `X2` and `X4` are bound by instance, and `buf` has only the global list.
+fn layered_configuration() -> ConfigurationSetDefinition {
+    let mut definition = bound_configuration(&["schematic"], &["schematic"]);
+    definition.cell_bindings = vec![cell_binding("AMP", &["fast", "schematic"], Some("fast"))];
+    definition.overrides = vec![
+        instance_binding("/X2", &["slow"], Some("slow")),
+        instance_binding("/X4", &["slow", "fast"], None),
+    ];
+    definition
+}
+
+#[test]
+fn an_instance_binding_beats_a_cell_binding_which_beats_the_view_list() {
+    let resolution = resolve_bound(Some(layered_configuration()));
+    assert!(resolution.is_valid(), "{:#?}", resolution.bindings);
+
+    // The cell binding governs the instance no override names, view and stop.
+    let bound = row(&resolution, "/X1");
+    assert_eq!(bound.reference, CellViewRef::new("work", "amp", "fast"));
+    assert_eq!(bound.view_search_order, ["fast", "schematic"]);
+    assert_eq!(bound.stop_view.as_deref(), Some("fast"));
+    assert!(
+        bound
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("'fast'")),
+        "the cell binding's stop is the one matched against the selected view: {:?}",
+        bound.warnings
+    );
+
+    // An instance binding beats it for both.
+    let named = row(&resolution, "/X2");
+    assert_eq!(named.reference, CellViewRef::new("work", "amp", "slow"));
+    assert_eq!(named.view_search_order, ["slow"]);
+    assert_eq!(named.stop_view.as_deref(), Some("slow"));
+
+    // An instance binding without a stop view takes the cell binding's stop,
+    // not the global one.
+    let unstopped = row(&resolution, "/X4");
+    assert_eq!(unstopped.reference, CellViewRef::new("work", "amp", "slow"));
+    assert_eq!(unstopped.view_search_order, ["slow", "fast"]);
+    assert_eq!(unstopped.stop_view.as_deref(), Some("fast"));
+
+    // A cell without a binding keeps the global view list and stop views.
+    let global = row(&resolution, "/X3");
+    assert_eq!(
+        global.reference,
+        CellViewRef::new("work", "buf", "schematic")
+    );
+    assert_eq!(global.view_search_order, ["schematic"]);
+    assert_eq!(global.stop_view.as_deref(), Some("schematic"));
+}
+
+#[test]
+fn reviewed_fallback_follows_the_cell_binding_that_won() {
+    let mut definition = bound_configuration(&["schematic"], &[]);
+    definition.cell_bindings = vec![cell_binding("amp", &["absent"], None)];
+
+    let blocked = resolve_bound(Some(definition.clone()));
+    let unresolved = row(&blocked, "/X1");
+    assert_eq!(unresolved.status, HierarchyBindingStatus::Unresolved);
+    assert_eq!(unresolved.view_search_order, ["absent"]);
+    assert_eq!(unresolved.instance_paths, ["/X1", "/X2", "/X4"]);
+    assert_eq!(
+        row(&blocked, "/X3").status,
+        HierarchyBindingStatus::Resolved
+    );
+
+    definition.unresolved_policy = UnresolvedBindingPolicy::ExplicitFallbackWithReview;
+    let reviewed = resolve_bound(Some(definition));
+    let fallback = row(&reviewed, "/X1");
+    assert_eq!(
+        fallback.reference,
+        CellViewRef::new("work", "amp", "schematic")
+    );
+    assert_eq!(
+        fallback.view_search_order,
+        ["absent", "schematic", "extracted", "spice"],
+        "the default search order follows the cell binding's list"
+    );
+    assert!(fallback.used_review_fallback);
+    assert_eq!(fallback.status, HierarchyBindingStatus::Modified);
+    let listed = row(&reviewed, "/X3");
+    assert!(
+        !listed.used_review_fallback,
+        "a view the global list names is not a fallback"
+    );
+    assert_eq!(listed.status, HierarchyBindingStatus::Resolved);
 }
