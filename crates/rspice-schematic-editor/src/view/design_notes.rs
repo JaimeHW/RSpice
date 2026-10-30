@@ -6,7 +6,9 @@ use egui::{Color32, Context, Galley, Painter, Pos2, Rect, Stroke, vec2};
 
 use rspice_design::schematic::design_note::{DesignNote, DesignNoteKind, DesignNoteRenderContext};
 use rspice_design_model::Point;
+use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::Tokens;
 
 use super::viewport::Viewport;
 
@@ -76,8 +78,7 @@ fn screen_layout(
 
 /// A note's ink. Selection never recolours it: text never takes the
 /// selection colour, and a selected note gets the selection rect instead.
-fn note_color(kind: DesignNoteKind) -> Color32 {
-    let palette = rspice_ui_kit::tokens::active_palette();
+fn note_color(kind: DesignNoteKind, palette: &Palette) -> Color32 {
     match kind {
         DesignNoteKind::PlainText => palette.text_dim,
         DesignNoteKind::PropertyDisplay => palette.net_label,
@@ -93,9 +94,9 @@ pub fn draw_design_note(
     context: &DesignNoteRenderContext<'_>,
     selected: bool,
     hovered: bool,
+    palette: &Palette,
 ) {
-    let palette = rspice_ui_kit::tokens::active_palette();
-    let color = note_color(note.kind);
+    let color = note_color(note.kind, palette);
     let text = note.rendered_text(context);
     let Some(layout) = screen_layout(painter.ctx(), viewport, note, &text, color) else {
         return;
@@ -169,9 +170,10 @@ pub fn design_note_at(
     context: &DesignNoteRenderContext<'_>,
     pointer: Pos2,
 ) -> Option<u64> {
+    let palette = Tokens::get(ctx).color;
     notes.iter().rev().find_map(|note| {
         let text = note.rendered_text(context);
-        screen_layout(ctx, viewport, note, &text, note_color(note.kind))
+        screen_layout(ctx, viewport, note, &text, note_color(note.kind, &palette))
             .filter(|layout| {
                 layout.bounds.contains(pointer)
                     || Rect::from_center_size(layout.anchor, egui::Vec2::splat(9.0))
@@ -226,7 +228,8 @@ fn hit_bounds(
     context: &DesignNoteRenderContext<'_>,
 ) -> Option<Rect> {
     let text = note.rendered_text(context);
-    screen_layout(ctx, viewport, note, &text, note_color(note.kind)).map(|layout| layout.bounds)
+    let color = note_color(note.kind, &Tokens::get(ctx).color);
+    screen_layout(ctx, viewport, note, &text, color).map(|layout| layout.bounds)
 }
 
 #[cfg(test)]

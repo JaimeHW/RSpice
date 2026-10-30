@@ -459,7 +459,7 @@ pub(super) fn draw_operating_point_annotations(
         return;
     };
     let size_pt = size_pt.min(BADGE_CEILING_PT);
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::Tokens::get(painter.ctx()).color;
     let galleys: Vec<_> = annotations
         .iter()
         .map(|annotation| {

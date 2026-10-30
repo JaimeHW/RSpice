@@ -1070,7 +1070,9 @@ fn grid_dots_register_with_the_content_lattice() {
         &test_sheet(),
         Vec::new,
     );
-    let grid_ink = rspice_ui_kit::tokens::active_palette().canvas_grid;
+    let grid_ink = rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+        .color
+        .canvas_grid;
     let origin = viewport.schematic_to_screen(Point::new(0, 0));
     let mut dots = 0;
     painter.for_each_shape(|shape| {

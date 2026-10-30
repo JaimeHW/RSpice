@@ -24,6 +24,7 @@ use rspice_design::schematic::{
     net_label::{Junction, NetLabel},
     wire::Wire,
 };
+use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 use std::collections::HashMap;
 
 pub struct TransformPreviewStyle<'a> {
@@ -94,7 +95,9 @@ pub fn draw_move_diff(
     style: &TransformPreviewStyle<'_>,
     view_path: impl Fn() -> String,
 ) {
-    draw_changed_conductors(painter, viewport, diff);
+    let tokens = Tokens::get(painter.ctx());
+    let palette = &tokens.color;
+    draw_changed_conductors(painter, viewport, diff, palette);
 
     for component in &diff.components {
         draw_component(
@@ -105,6 +108,7 @@ pub fn draw_move_diff(
             style.symbol_library,
             style.symbol_context,
             style.parameter_labels,
+            palette,
         );
     }
     for junction in &diff.junctions {
@@ -118,25 +122,27 @@ pub fn draw_move_diff(
                 // A preview draws its conductors selected.
                 incident: ConductorInk::Selected,
             },
+            palette,
         );
     }
     for label in &diff.net_labels {
-        draw_net_label(painter, viewport, label, true, false, true);
+        draw_net_label(painter, viewport, label, true, false, true, palette);
     }
     if !diff.design_notes.is_empty() {
         let path = view_path();
         let context = DesignNoteRenderContext::for_document(view.design.document, &path);
         for note in &diff.design_notes {
-            draw_design_note(painter, viewport, note, &context, true, false);
+            draw_design_note(painter, viewport, note, &context, true, false, palette);
         }
     }
-    draw_changed_documentation_shapes(painter, viewport, diff);
+    draw_changed_documentation_shapes(painter, viewport, diff, palette);
 }
 
 /// Paint what a stretch changes, over the unchanged drawing.
 pub fn draw_stretch_diff(painter: &Painter, viewport: &Viewport, diff: &TransformCandidateDiff) {
-    draw_changed_conductors(painter, viewport, diff);
-    draw_changed_documentation_shapes(painter, viewport, diff);
+    let tokens = Tokens::get(painter.ctx());
+    draw_changed_conductors(painter, viewport, diff, &tokens.color);
+    draw_changed_documentation_shapes(painter, viewport, diff, &tokens.color);
 }
 
 pub fn draw_array_candidate(
@@ -147,14 +153,16 @@ pub fn draw_array_candidate(
     style: &TransformPreviewStyle<'_>,
     view_path: impl Fn() -> String,
 ) {
+    let tokens = Tokens::get(painter.ctx());
+    let palette = &tokens.color;
     for wire in preview.wires() {
-        draw_wire(painter, viewport, wire, ConductorInk::Selected);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected, palette);
     }
     for bus in preview.buses() {
-        draw_bus(painter, viewport, bus, true);
+        draw_bus(painter, viewport, bus, true, palette);
     }
     for tap in preview.bus_taps() {
-        draw_bus_tap(painter, viewport, tap, true);
+        draw_bus_tap(painter, viewport, tap, true, palette);
     }
     for component in preview.components() {
         draw_component(
@@ -165,6 +173,7 @@ pub fn draw_array_candidate(
             style.symbol_library,
             style.symbol_context,
             style.parameter_labels,
+            palette,
         );
     }
     for junction in preview.junctions() {
@@ -177,10 +186,11 @@ pub fn draw_array_candidate(
                 hovered: style.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
                 incident: ConductorInk::Selected,
             },
+            palette,
         );
     }
     for label in preview.net_labels() {
-        draw_net_label(painter, viewport, label, true, false, true);
+        draw_net_label(painter, viewport, label, true, false, true, palette);
     }
     for note in preview.design_notes() {
         draw_design_note(
@@ -190,22 +200,28 @@ pub fn draw_array_candidate(
             &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
             true,
             false,
+            palette,
         );
     }
     for shape in preview.documentation_shapes() {
-        draw_documentation_shape(painter, viewport, shape, true, false);
+        draw_documentation_shape(painter, viewport, shape, true, false, palette);
     }
 }
 
-fn draw_changed_conductors(painter: &Painter, viewport: &Viewport, diff: &TransformCandidateDiff) {
+fn draw_changed_conductors(
+    painter: &Painter,
+    viewport: &Viewport,
+    diff: &TransformCandidateDiff,
+    palette: &Palette,
+) {
     for wire in &diff.wires {
-        draw_wire(painter, viewport, wire, ConductorInk::Selected);
+        draw_wire(painter, viewport, wire, ConductorInk::Selected, palette);
     }
     for bus in &diff.buses {
-        draw_bus(painter, viewport, bus, true);
+        draw_bus(painter, viewport, bus, true, palette);
     }
     for tap in &diff.bus_taps {
-        draw_bus_tap(painter, viewport, tap, true);
+        draw_bus_tap(painter, viewport, tap, true, palette);
     }
 }
 
@@ -213,9 +229,10 @@ fn draw_changed_documentation_shapes(
     painter: &Painter,
     viewport: &Viewport,
     diff: &TransformCandidateDiff,
+    palette: &Palette,
 ) {
     for shape in &diff.documentation_shapes {
-        draw_documentation_shape(painter, viewport, shape, true, false);
+        draw_documentation_shape(painter, viewport, shape, true, false, palette);
     }
 }
 
@@ -225,7 +242,7 @@ pub fn draw_transform_feedback(
     valid: bool,
     detail: String,
 ) {
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = Tokens::get(painter.ctx()).color;
     let color = if valid { palette.ok } else { palette.err };
     let clip = painter.clip_rect();
     let tooltip_width = (clip.width() * 0.7).clamp(80.0, 300.0);

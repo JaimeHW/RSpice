@@ -22,6 +22,7 @@ use rspice_design_model::{
     Point,
     port::{PortDirection, PortSpec},
 };
+use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 
 use super::super::symbols::{SymbolLibrary, draw_baked};
 use super::lod::{self, Emphasis, StrokeRole, TextClass, TextLod};
@@ -53,8 +54,14 @@ pub(crate) const fn layout_pos(point: LayoutPoint) -> Pos2 {
 }
 
 /// Draw a wire on the canvas
-pub fn draw_wire(painter: &Painter, viewport: &Viewport, wire: &Wire, ink: ConductorInk) {
-    draw_conductor(painter, viewport, &wire.points, ink);
+pub fn draw_wire(
+    painter: &Painter,
+    viewport: &Viewport,
+    wire: &Wire,
+    ink: ConductorInk,
+    palette: &Palette,
+) {
+    draw_conductor(painter, viewport, &wire.points, ink, palette);
 }
 
 /// The state a conductor is drawn in. Variants are in precedence order: when
@@ -114,8 +121,13 @@ impl ConductorInk {
 
 /// Draw one conductor polyline: a wire, or several wires chained end to end
 /// by [`chain_conductors`].
-pub fn draw_conductor(painter: &Painter, viewport: &Viewport, points: &[Point], ink: ConductorInk) {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn draw_conductor(
+    painter: &Painter,
+    viewport: &Viewport,
+    points: &[Point],
+    ink: ConductorInk,
+    palette: &Palette,
+) {
     let width = conductor_width_pt(
         viewport.zoom,
         painter.pixels_per_point(),
@@ -126,7 +138,7 @@ pub fn draw_conductor(painter: &Painter, viewport: &Viewport, points: &[Point], 
         .iter()
         .map(|point| viewport.schematic_to_screen(*point))
         .collect();
-    paint_conductor(painter, points, Stroke::new(width, ink.colour(&palette)));
+    paint_conductor(painter, points, Stroke::new(width, ink.colour(palette)));
 }
 
 /// The drawn width of a wire, in points: raised when it is selected or its
@@ -329,8 +341,13 @@ fn folds_back(a: Point, b: Point, c: Point) -> bool {
 /// Draw a typed multi-conductor bus. Buses deliberately use the same
 /// conductor color as scalar nets, with the mockup's three parallel strokes
 /// so type remains legible in monochrome exports and color-vision variants.
-pub fn draw_bus(painter: &Painter, viewport: &Viewport, bus: &Bus, selected: bool) {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn draw_bus(
+    painter: &Painter,
+    viewport: &Viewport,
+    bus: &Bus,
+    selected: bool,
+    palette: &Palette,
+) {
     let color = if selected {
         palette.canvas_select
     } else {
@@ -422,8 +439,13 @@ fn draw_small_electrical_text(
 
 /// Draw a typed bus breakout. The selector is part of the durable electrical
 /// intent and therefore appears beside the tap in the canvas and SVG.
-pub fn draw_bus_tap(painter: &Painter, viewport: &Viewport, tap: &BusTap, selected: bool) {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn draw_bus_tap(
+    painter: &Painter,
+    viewport: &Viewport,
+    tap: &BusTap,
+    selected: bool,
+    palette: &Palette,
+) {
     let color = if selected {
         palette.canvas_select
     } else {
@@ -482,8 +504,8 @@ pub fn draw_probe(
     status: ProbeVisualStatus,
     selected: bool,
     hovered: bool,
+    palette: &Palette,
 ) {
-    let palette = rspice_ui_kit::tokens::active_palette();
     let status_color = match status {
         ProbeVisualStatus::Materialized => palette.ok,
         ProbeVisualStatus::Hidden => palette.text_faint,
@@ -772,6 +794,10 @@ pub fn bus_tap_at(taps: &[BusTap], requested: Point, radius: i32) -> Option<u64>
 }
 
 /// Draw a component on the canvas
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, symbol source, and paint inputs."
+)]
 pub fn draw_component(
     painter: &Painter,
     viewport: &Viewport,
@@ -780,6 +806,7 @@ pub fn draw_component(
     symbol_library: Option<&SymbolLibrary>,
     symbol_context: &SchematicSymbolContext,
     parameter_labels: SchematicParameterLabelVisibility,
+    palette: &Palette,
 ) {
     // Component uses `pos` not `position`, `kind` not `component_type`
     let pos = viewport.schematic_to_screen(component.pos);
@@ -787,7 +814,6 @@ pub fn draw_component(
 
     // Grid lines now visible through components (no opaque background)
 
-    let palette = rspice_ui_kit::tokens::active_palette();
     let outline_color = if selected {
         palette.canvas_select
     } else {
@@ -847,6 +873,7 @@ pub fn draw_component(
                 symbol,
                 stroke,
                 parameter_labels,
+                palette,
             );
             true
         } else {
@@ -904,7 +931,7 @@ pub fn draw_component(
     // states use the ordinary instance labels here.
     if !symbol_drew_its_own_labels && parameter_labels != SchematicParameterLabelVisibility::Hidden
     {
-        draw_component_labels(painter, pos, scale, component, parameter_labels);
+        draw_component_labels(painter, pos, scale, component, parameter_labels, palette);
     }
 }
 
@@ -1077,6 +1104,7 @@ fn draw_component_labels(
     scale: f32,
     component: &Component,
     visibility: SchematicParameterLabelVisibility,
+    palette: &Palette,
 ) {
     // Skip labels for Ground (too small, clutters schematic)
     if matches!(component.kind, ComponentType::Ground) {
@@ -1087,7 +1115,6 @@ fn draw_component_labels(
     // EDA tools hide them; so do we, and zoomed-out paint cost drops with them.
     let ppp = painter.pixels_per_point();
     let layout = compute_label_layout(pos, scale, component);
-    let palette = rspice_ui_kit::tokens::active_palette();
 
     // Draw component name (reference designator)
     if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
@@ -1222,6 +1249,7 @@ pub fn draw_junction(
     viewport: &Viewport,
     position: Point,
     paint: JunctionPaint,
+    palette: &Palette,
 ) {
     let ppp = painter.pixels_per_point();
     let pos = viewport.schematic_to_screen(position);
@@ -1232,7 +1260,6 @@ pub fn draw_junction(
     );
     let radius = lod::junction_radius_pt(viewport.zoom, incident_width);
 
-    let palette = rspice_ui_kit::tokens::active_palette();
     if paint.selected {
         painter.circle_stroke(
             pos,
@@ -1247,7 +1274,7 @@ pub fn draw_junction(
         );
     }
 
-    painter.circle_filled(pos, radius, paint.fill(&palette));
+    painter.circle_filled(pos, radius, paint.fill(palette));
 }
 
 /// How far a hover outline stands off what it outlines, in points.
@@ -1275,7 +1302,8 @@ pub fn draw_hover_outline(painter: &Painter, rect: Rect) {
     );
     let stroke = Stroke::new(
         1.0 / ppp,
-        rspice_ui_kit::tokens::active_palette()
+        Tokens::get(painter.ctx())
+            .color
             .canvas_select
             .gamma_multiply(HOVER_ALPHA),
     );
@@ -1305,7 +1333,8 @@ pub fn draw_hover_halo(painter: &Painter, viewport: &Viewport, points: &[Point],
         points,
         Stroke::new(
             width_pt + HOVER_HALO_WIDEN,
-            rspice_ui_kit::tokens::active_palette()
+            Tokens::get(painter.ctx())
+                .color
                 .canvas_select
                 .gamma_multiply(HOVER_HALO_ALPHA),
         ),
@@ -1402,7 +1431,7 @@ mod tests {
         };
         let wire = Wire::segment(1, Point::new(0, 0), Point::new(10, 0));
 
-        draw_wire(&painter, &viewport, &wire, ink);
+        draw_wire(&painter, &viewport, &wire, ink, &Tokens::default().color);
 
         let mut widths = Vec::new();
         painter.for_each_shape(|shape| {
@@ -1496,6 +1525,7 @@ mod tests {
             &viewport,
             Point::new(0, 0),
             paint(false, ConductorInk::Selected),
+            &palette,
         );
         let mut dots = Vec::new();
         painter.for_each_shape(|shape| {
@@ -1509,10 +1539,7 @@ mod tests {
             2.0 * dots[0].0 >= 2.5 * selected_wire,
             "{dots:?} on {selected_wire}"
         );
-        assert_eq!(
-            dots[0].1,
-            rspice_ui_kit::tokens::active_palette().canvas_select
-        );
+        assert_eq!(dots[0].1, palette.canvas_select);
     }
 
     #[test]
@@ -1521,7 +1548,7 @@ mod tests {
         // different whole device pixels (5 against 4).
         let (zoom, ppp) = (2.0, 2.0);
         let width = lod::stroke_pt(StrokeRole::Symbol, zoom, ppp, Emphasis::Plain);
-        let symbol = Stroke::new(width, rspice_ui_kit::tokens::active_palette().symbol);
+        let symbol = Stroke::new(width, Tokens::default().color.symbol);
         let spec = |name: &str| PortSpec {
             name: name.to_owned(),
             direction: PortDirection::InOut,

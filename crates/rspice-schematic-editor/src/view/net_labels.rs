@@ -23,7 +23,9 @@ use rspice_design::schematic::{
     net_label::NetLabel,
 };
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
+use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::theme::{self, FontWeight};
+use rspice_ui_kit::tokens::Tokens;
 
 use super::drawing::{ConductorInk, draw_hover_outline, layout_pos};
 use super::lod::{self, TextClass, TextLod};
@@ -247,6 +249,7 @@ pub fn draw_net_label(
     selected: bool,
     hovered: bool,
     preview: bool,
+    palette: &Palette,
 ) {
     draw_net_label_attached(
         painter,
@@ -258,6 +261,7 @@ pub fn draw_net_label(
             preview,
             attachment: None,
         },
+        palette,
     );
 }
 
@@ -282,6 +286,7 @@ pub fn draw_net_label_attached(
     viewport: &Viewport,
     label: &NetLabel,
     paint: NetLabelPaint,
+    palette: &Palette,
 ) {
     let NetLabelPaint {
         selected,
@@ -289,7 +294,6 @@ pub fn draw_net_label_attached(
         preview,
         attachment,
     } = paint;
-    let palette = rspice_ui_kit::tokens::active_palette();
     // Text never takes the selection colour: a selected label keeps its
     // text colour and gets the selection rect.
     let text_color = if label.name.trim().is_empty() {
@@ -319,7 +323,7 @@ pub fn draw_net_label_attached(
 
     let attachment_radius = layout.attachment_radius;
     let diamond = match attachment {
-        Some(ink) if !preview => ink.colour(&palette),
+        Some(ink) if !preview => ink.colour(palette),
         Some(_) | None => text_color,
     };
     painter.add(egui::Shape::convex_polygon(
@@ -363,7 +367,7 @@ pub fn net_label_at(
     labels: &[NetLabel],
     pointer: Pos2,
 ) -> Option<u64> {
-    let color = rspice_ui_kit::tokens::active_palette().net_label;
+    let color = Tokens::get(ctx).color.net_label;
     labels.iter().rev().find_map(|label| {
         let layout = screen_layout(ctx, viewport, label, color);
         (layout.decoration_rect.contains(pointer) || layout.attachment_hit_rect.contains(pointer))
@@ -373,12 +377,7 @@ pub fn net_label_at(
 
 #[cfg(any(test, feature = "test-support"))]
 pub fn hit_bounds(ctx: &Context, viewport: &Viewport, label: &NetLabel) -> Option<Rect> {
-    let layout = screen_layout(
-        ctx,
-        viewport,
-        label,
-        rspice_ui_kit::tokens::active_palette().net_label,
-    );
+    let layout = screen_layout(ctx, viewport, label, Tokens::get(ctx).color.net_label);
     Some(layout.decoration_rect.union(layout.attachment_hit_rect))
 }
 
@@ -429,7 +428,7 @@ mod tests {
         let ctx = initialized_context();
         let viewport = viewport();
         let label = NetLabel::new(41, Point::new(40, 30), "afe_out");
-        let color = rspice_ui_kit::tokens::active_palette().net_label;
+        let color = Tokens::get(&ctx).color.net_label;
         let layout = screen_layout(&ctx, &viewport, &label, color);
         let hit_bounds = layout.decoration_rect.union(layout.attachment_hit_rect);
 
@@ -475,9 +474,10 @@ mod tests {
                 .frame(egui::Frame::NONE.fill(background))
                 .show(ui, |ui| {
                     let painter = ui.painter();
-                    let color = rspice_ui_kit::tokens::active_palette().net_label;
+                    let palette = Tokens::get(painter.ctx()).color;
+                    let color = palette.net_label;
                     layout = Some(screen_layout(painter.ctx(), &viewport, &label, color));
-                    draw_net_label(painter, &viewport, &label, false, false, false);
+                    draw_net_label(painter, &viewport, &label, false, false, false, &palette);
                 });
         });
         let layout = layout.expect("laid out");
@@ -524,9 +524,10 @@ mod tests {
             viewport.bounds,
         );
         let before = hit_bounds(&ctx, &viewport, &label).expect("visible label");
+        let palette = Tokens::get(&ctx).color;
 
-        draw_net_label(&painter, &viewport, &label, true, false, false);
-        draw_net_label(&painter, &viewport, &label, false, false, true);
+        draw_net_label(&painter, &viewport, &label, true, false, false, &palette);
+        draw_net_label(&painter, &viewport, &label, false, false, true, &palette);
 
         let after = hit_bounds(&ctx, &viewport, &label).expect("visible label");
         assert_eq!(before, after);
@@ -572,7 +573,7 @@ mod tests {
             "BIAS",
             rspice_design_model::design_management::CrossSheetPortDirection::Output,
         );
-        let color = rspice_ui_kit::tokens::active_palette().net_label;
+        let color = Tokens::get(&ctx).color.net_label;
         let layout = screen_layout(&ctx, &viewport, &connector, color);
         let (tab, _) = layout
             .connector_tab
@@ -640,12 +641,19 @@ mod tests {
                         .frame(egui::Frame::NONE.fill(background))
                         .show(ui, |ui| {
                             let painter = ui.painter();
-                            let color = rspice_ui_kit::tokens::active_palette().net_label;
-                            tab = screen_layout(painter.ctx(), &viewport, &connector, color)
-                                .connector_tab
-                                .expect("an off-sheet connector has a tab")
-                                .0;
-                            draw_net_label(painter, &viewport, &connector, false, false, false);
+                            let palette = Tokens::get(painter.ctx()).color;
+                            tab = screen_layout(
+                                painter.ctx(),
+                                &viewport,
+                                &connector,
+                                palette.net_label,
+                            )
+                            .connector_tab
+                            .expect("an off-sheet connector has a tab")
+                            .0;
+                            draw_net_label(
+                                painter, &viewport, &connector, false, false, false, &palette,
+                            );
                         });
                 });
 

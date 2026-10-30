@@ -39,7 +39,8 @@ pub fn draw_wire_preview(
         let route: Vec<Pos2> = drawing.get_full_path().iter().map(to_screen).collect();
 
         if let Some(start) = committed.first().copied() {
-            let wire_color = rspice_ui_kit::tokens::active_palette()
+            let wire_color = rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+                .color
                 .canvas_select
                 .gamma_multiply(ROUTE_PREVIEW_ALPHA);
             // The route being drawn is a raised wire: the width it would
@@ -145,7 +146,7 @@ fn draw_wire_snap_feedback(
         return;
     };
 
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::Tokens::get(painter.ctx()).color;
     let center = viewport.schematic_to_screen(result.snapped_position);
     let mark = palette.canvas_select.gamma_multiply(ROUTE_PREVIEW_ALPHA);
     painter.circle_stroke(center, 5.0, Stroke::new(1.25, mark));

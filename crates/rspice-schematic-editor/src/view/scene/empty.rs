@@ -18,10 +18,10 @@ const EMPTY_HINT_MOBILE_LINES: [&str; 4] = [
 pub fn draw_empty_hint(painter: &Painter, available: Rect) {
     use rspice_ui_kit::theme::{self, FontWeight};
 
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::Tokens::get(painter.ctx()).color;
     let center = available.center();
     if available.width() < EMPTY_HINT_MOBILE_BREAKPOINT {
-        draw_empty_hint_mobile(painter, center);
+        draw_empty_hint_mobile(painter, center, &palette);
         return;
     }
     painter.text(
@@ -47,10 +47,13 @@ pub fn draw_empty_hint(painter: &Painter, available: Rect) {
     );
 }
 
-fn draw_empty_hint_mobile(painter: &Painter, center: egui::Pos2) {
+fn draw_empty_hint_mobile(
+    painter: &Painter,
+    center: egui::Pos2,
+    palette: &rspice_ui_kit::palette::Palette,
+) {
     use rspice_ui_kit::theme::{self, FontWeight};
 
-    let palette = rspice_ui_kit::tokens::active_palette();
     let lines = &EMPTY_HINT_MOBILE_LINES;
     let line_height = 20.0;
     let first_y = center.y - (lines.len().saturating_sub(1) as f32 * line_height) * 0.5;

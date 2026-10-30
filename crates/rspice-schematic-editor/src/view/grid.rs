@@ -91,7 +91,9 @@ pub fn draw_grid(
     // Dots and rules share the authored canvas-grid token. The style changes
     // geometry only; silently dimming one mode makes the same visibility
     // preference produce two different contrast contracts.
-    let color = rspice_ui_kit::tokens::active_palette().canvas_grid;
+    let color = rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+        .color
+        .canvas_grid;
 
     // Lattice extent: cover the bounds plus one period on each side; the
     // painter's clip rect trims the overhang.

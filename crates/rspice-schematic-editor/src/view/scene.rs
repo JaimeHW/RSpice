@@ -27,6 +27,7 @@ use egui::{Painter, Rect, Stroke};
 use rspice_design::schematic::design_note::DesignNoteRenderContext;
 use rspice_design::schematic::probe::SchematicProbe;
 use rspice_design_model::Point;
+use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 use std::collections::{BTreeMap, HashMap};
 
 mod annotations;
@@ -87,6 +88,10 @@ pub fn draw_content(
 ) {
     let symbol_library = symbols.library;
     let symbol_context = symbols.context;
+    // Read once a frame: every element below paints from this context's
+    // palette.
+    let tokens = Tokens::get(painter.ctx());
+    let palette = &tokens.color;
     // A live rubber band draws what its release will select, through the
     // same window and the same selection filter.
     let band = view.editor.selection_rect.is_active().then(|| {
@@ -131,7 +136,7 @@ pub fn draw_content(
         }
         let selected = view.editor.selection.has_bus(bus.id)
             || band_wires.is_some_and(|band| band.takes_polyline(&bus.points));
-        draw_bus(painter, viewport, bus, selected);
+        draw_bus(painter, viewport, bus, selected, palette);
     }
 
     // Wires of one style that meet end to end are painted as one path, so the
@@ -213,7 +218,7 @@ pub fn draw_content(
     };
     for (ink, chains) in chains.iter() {
         for chain in chains {
-            draw_conductor(painter, viewport, chain, *ink);
+            draw_conductor(painter, viewport, chain, *ink, palette);
         }
     }
 
@@ -241,7 +246,7 @@ pub fn draw_content(
         }
         let selected = view.editor.selection.has_bus_tap(tap.id)
             || band_wires.is_some_and(|band| band.takes_polyline(&route));
-        draw_bus_tap(painter, viewport, tap, selected);
+        draw_bus_tap(painter, viewport, tap, selected, palette);
     }
 
     for component in &view.design.document.components {
@@ -267,9 +272,9 @@ pub fn draw_content(
             symbol_library,
             symbol_context,
             view.parameter_labels,
+            palette,
         );
         if let Some(open) = overlays.open_pins.get(&component.id) {
-            let palette = rspice_ui_kit::tokens::active_palette();
             draw_open_pin_marks(
                 painter,
                 viewport,
@@ -312,6 +317,7 @@ pub fn draw_content(
                     || view.hover_wire_vertex == Some((junction.pos.x, junction.pos.y)),
                 incident: incident_ink(view, cache, &inked_wires, junction.pos),
             },
+            palette,
         );
     }
 
@@ -347,6 +353,7 @@ pub fn draw_content(
             shape,
             selected,
             view.hover == Some(PointerTarget::DocumentationShape(shape.id)),
+            palette,
         );
     }
 
@@ -383,6 +390,7 @@ pub fn draw_content(
                 preview: false,
                 attachment: (attachment != ConductorInk::Plain).then_some(attachment),
             },
+            palette,
         );
     }
 
@@ -412,6 +420,7 @@ pub fn draw_content(
             &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
             selected,
             view.hover == Some(PointerTarget::DesignNote(note.id)),
+            palette,
         );
     }
 
@@ -451,6 +460,7 @@ pub fn draw_content(
             (overlays.probe_status)(probe),
             selected,
             view.hover == Some(PointerTarget::Probe(probe.id)),
+            palette,
         );
     }
 
@@ -462,10 +472,7 @@ pub fn draw_content(
             painter.circle_stroke(
                 viewport.schematic_to_screen(hover_pos),
                 VERTEX_HANDLE_RADIUS,
-                Stroke::new(
-                    1.0 / painter.pixels_per_point(),
-                    rspice_ui_kit::tokens::active_palette().canvas_select,
-                ),
+                Stroke::new(1.0 / painter.pixels_per_point(), palette.canvas_select),
             );
         }
     }
@@ -574,8 +581,7 @@ pub fn normalized_probe_expression(expression: &str) -> String {
 /// declares no class and is painted as a wire: a net colour is an explicit
 /// assignment, and a hash of the name lands on the wire, selection and class
 /// hues as often as not.
-pub fn named_net_class_color(name: &str) -> Option<egui::Color32> {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn named_net_class_color(name: &str, palette: &Palette) -> Option<egui::Color32> {
     let normalized = name.trim().to_ascii_lowercase();
     if matches!(
         normalized.as_str(),
@@ -602,18 +608,25 @@ mod net_class_tests {
 
     #[test]
     fn only_ground_supply_and_clock_names_carry_a_class_colour() {
-        let palette = rspice_ui_kit::tokens::active_palette();
-        assert_eq!(named_net_class_color("GND"), Some(palette.net_class_ground));
+        let palette = rspice_ui_kit::palette::INSTRUMENT_DARK;
         assert_eq!(
-            named_net_class_color("vdd_core"),
+            named_net_class_color("GND", &palette),
+            Some(palette.net_class_ground)
+        );
+        assert_eq!(
+            named_net_class_color("vdd_core", &palette),
             Some(palette.net_class_supply)
         );
         assert_eq!(
-            named_net_class_color("sys_clk"),
+            named_net_class_color("sys_clk", &palette),
             Some(palette.net_class_clock)
         );
         for unclassified in ["VOUT", "afe_in", "bias_n", "D3"] {
-            assert_eq!(named_net_class_color(unclassified), None, "{unclassified}");
+            assert_eq!(
+                named_net_class_color(unclassified, &palette),
+                None,
+                "{unclassified}"
+            );
         }
     }
 }
@@ -674,7 +687,7 @@ mod band_tests {
             },
             String::new,
         );
-        let select = rspice_ui_kit::tokens::active_palette().canvas_select;
+        let select = Tokens::get(painter.ctx()).color.canvas_select;
         let mut count = 0;
         painter.for_each_shape(|shape| {
             if let egui::Shape::Path(path) = &shape.shape
@@ -810,9 +823,7 @@ mod hover_tests {
     /// The dashes of a hover outline: 1-dpx segments in the selection
     /// colour at alpha 0.85.
     fn outline_dashes(shapes: &[egui::Shape]) -> Vec<[egui::Pos2; 2]> {
-        let ink = rspice_ui_kit::tokens::active_palette()
-            .canvas_select
-            .gamma_multiply(0.85);
+        let ink = Tokens::default().color.canvas_select.gamma_multiply(0.85);
         shapes
             .iter()
             .filter_map(|shape| match shape {
@@ -915,7 +926,7 @@ mod hover_tests {
                 })
                 .collect()
         };
-        let palette = rspice_ui_kit::tokens::active_palette();
+        let palette = Tokens::default().color;
         let editor = EditorSession::default();
         let marks = squares(&paint_with_open_pins(&document, &editor, None, &open));
         assert_eq!(marks.len(), 1, "one open terminal, one mark");
@@ -944,9 +955,7 @@ mod hover_tests {
             ..SchematicDocument::default()
         };
         let editor = EditorSession::default();
-        let halo_ink = rspice_ui_kit::tokens::active_palette()
-            .canvas_select
-            .gamma_multiply(0.35);
+        let halo_ink = Tokens::default().color.canvas_select.gamma_multiply(0.35);
         let strokes = |shapes: &[egui::Shape]| -> Vec<(egui::Color32, f32)> {
             shapes
                 .iter()
@@ -984,5 +993,141 @@ mod hover_tests {
                 .all(|(color, _)| *color != halo_ink),
             "a selected wire draws no halo"
         );
+    }
+}
+
+#[cfg(test)]
+mod palette_tests {
+    use super::super::grid::{GridStyle, draw_grid};
+    use super::*;
+    use crate::session::visibility::SchematicReviewMarkerVisibility;
+    use rspice_design::schematic::{
+        design_note::{DesignNote, DesignNoteKind},
+        document::SchematicDocument,
+    };
+    use rspice_ui_kit::{EngineeringCanvasTheme, Theme, tokens::Mode};
+
+    fn themed(theme: Theme) -> egui::Context {
+        let ctx = egui::Context::default();
+        theme.apply(&ctx);
+        // The note lays out text, which needs the fonts a first pass loads.
+        let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+        ctx
+    }
+
+    /// One frame of the grid and the scene: the colour of every glyph run
+    /// and of every grid vertex it painted.
+    fn painted_ink(
+        ctx: &egui::Context,
+        document: &SchematicDocument,
+    ) -> (Vec<egui::Color32>, Vec<egui::Color32>) {
+        let bounds = Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(400.0, 200.0));
+        let painter = Painter::new(
+            ctx.clone(),
+            egui::LayerId::new(egui::Order::Foreground, egui::Id::new("palette-test")),
+            bounds,
+        );
+        let viewport = Viewport {
+            offset: egui::Pos2::ZERO,
+            zoom: 2.0,
+            bounds,
+        };
+        draw_grid(
+            &painter,
+            bounds,
+            bounds,
+            GridStyle::Dots,
+            10,
+            (0.0, 0.0),
+            2.0,
+        );
+        let editor = EditorSession::default();
+        let context = SchematicSymbolContext::default();
+        draw_content(
+            &painter,
+            bounds,
+            &viewport,
+            &SceneView {
+                design: DesignView {
+                    document,
+                    canvas_cache: None,
+                    sheet_catalog: None,
+                    review_markers: SchematicReviewMarkerVisibility::All,
+                },
+                editor: &editor,
+                net_highlighting: SchematicNetHighlighting::Off,
+                parameter_labels: SchematicParameterLabelVisibility::NamesAndValues,
+                hover_wire_vertex: None,
+                selection_filter: SchematicSelectionFilter::default(),
+                hover: None,
+            },
+            SceneSymbols {
+                library: None,
+                context: &context,
+            },
+            SceneOverlays {
+                net_class_colors: HashMap::new(),
+                operating_point: Vec::new(),
+                operating_point_layout: None,
+                probe_status: &|_| ProbeVisualStatus::Materialized,
+                selected_trace_expression: &|| None,
+                open_pins: &HashMap::new(),
+            },
+            String::new,
+        );
+        let (mut text, mut grid) = (Vec::new(), Vec::new());
+        painter.for_each_shape(|shape| match &shape.shape {
+            egui::Shape::Text(run) => {
+                text.extend(run.galley.job.sections.iter().map(|s| s.format.color));
+            }
+            egui::Shape::Mesh(mesh) => grid.extend(mesh.vertices.iter().map(|v| v.color)),
+            _ => {}
+        });
+        (text, grid)
+    }
+
+    /// Two contexts in one process wear their own themes. The light theme is
+    /// installed last, and the dark context paints before and after the
+    /// light one: a note's text and the grid each carry the ink of the
+    /// context they are painted in.
+    #[test]
+    fn each_context_paints_a_note_and_the_grid_in_its_own_theme() {
+        let document = SchematicDocument {
+            design_notes: vec![
+                DesignNote::new(5, Point::new(50, 40), DesignNoteKind::PlainText, "Bias")
+                    .expect("a plain note"),
+            ],
+            ..SchematicDocument::default()
+        };
+        let dark = themed(Theme::default());
+        let light = themed(Theme {
+            mode: Mode::Light,
+            canvas_theme: EngineeringCanvasTheme::Light,
+            ..Theme::default()
+        });
+        let (dark_ink, light_ink) = (Tokens::get(&dark).color, Tokens::get(&light).color);
+        assert_ne!(dark_ink.text_dim, light_ink.text_dim);
+        assert_ne!(dark_ink.canvas_grid, light_ink.canvas_grid);
+
+        for (name, ctx, ink) in [
+            ("dark", &dark, &dark_ink),
+            ("light", &light, &light_ink),
+            ("dark again", &dark, &dark_ink),
+        ] {
+            let (text, grid) = painted_ink(ctx, &document);
+            assert!(!text.is_empty(), "{name}: the note painted no text");
+            assert!(!grid.is_empty(), "{name}: the grid painted no dots");
+            assert!(
+                text.iter().all(|color| *color == ink.text_dim),
+                "{name}: note ink {text:?}, expected {:?}",
+                ink.text_dim
+            );
+            assert!(
+                grid.iter().all(|color| *color == ink.canvas_grid),
+                "{name}: grid ink {:?}, expected {:?}",
+                grid.first(),
+                ink.canvas_grid
+            );
+        }
     }
 }

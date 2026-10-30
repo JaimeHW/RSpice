@@ -6,9 +6,10 @@ use egui::{Painter, Pos2, Shape, Stroke, pos2, vec2};
 use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design_model::Point;
 use rspice_design_model::design_management::{SheetCatalog, SheetId};
+use rspice_ui_kit::palette::Palette;
 use rspice_ui_kit::panels::elide_chars;
 use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::active_palette;
+use rspice_ui_kit::tokens::Tokens;
 
 /// Marker half-extent in screen px (badges do not scale with zoom — they
 /// are annotations, not geometry).
@@ -23,7 +24,7 @@ pub fn draw_violation_markers(
     violations: &[DrcViolation],
     canvas_hover: Option<(f64, f64)>,
 ) {
-    let palette = active_palette();
+    let palette = Tokens::get(painter.ctx()).color;
     let cursor = cursor_screen_pos(view, viewport, canvas_hover);
     let mut hovered: Option<(Pos2, &DrcViolation)> = None;
 
@@ -47,7 +48,7 @@ pub fn draw_violation_markers(
     }
 
     if let Some((pos, violation)) = hovered {
-        draw_hover_card(painter, viewport, pos, violation);
+        draw_hover_card(painter, viewport, pos, violation, &palette);
     }
 }
 
@@ -64,7 +65,7 @@ pub fn draw_related_marks(
     points: &[Point],
     severity: DrcSeverity,
 ) {
-    let palette = active_palette();
+    let palette = Tokens::get(painter.ctx()).color;
     let stroke = Stroke::new(1.5, severity_color(severity, &palette));
     for world in points {
         let pos = viewport.schematic_to_screen(*world);
@@ -282,9 +283,13 @@ fn draw_badge(painter: &Painter, center: Pos2, fill: egui::Color32, ink: egui::C
 
 /// The hover card: severity + violation type, the message, and the
 /// suggested fix, in an elevated box clamped to the canvas.
-fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violation: &DrcViolation) {
-    let palette = active_palette();
-
+fn draw_hover_card(
+    painter: &Painter,
+    viewport: &Viewport,
+    marker: Pos2,
+    violation: &DrcViolation,
+    palette: &Palette,
+) {
     let title = format!(
         "{} · {}",
         violation.severity.display_name(),
@@ -295,7 +300,7 @@ fn draw_hover_card(painter: &Painter, viewport: &Viewport, marker: Pos2, violati
     let title_galley = painter.layout_no_wrap(
         title,
         theme::mono(11.0, FontWeight::Medium),
-        severity_color(violation.severity, &palette),
+        severity_color(violation.severity, palette),
     );
     let message_galley = painter.layout_no_wrap(
         elide_chars(&violation.message, 78),

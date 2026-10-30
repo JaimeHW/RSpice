@@ -25,6 +25,7 @@ use rspice_design::{
     symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
 };
 use rspice_design_model::{Point, port::PortDirection, symbol_pin::SymbolPinSide};
+use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 
 pub fn draw_resolved_symbol(
     painter: &Painter,
@@ -42,9 +43,14 @@ pub fn draw_resolved_symbol(
         symbol,
         stroke,
         SchematicParameterLabelVisibility::NamesAndValues,
+        &Tokens::get(painter.ctx()).color,
     );
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "Independent canvas transform, resolved symbol, and paint inputs."
+)]
 pub fn draw_resolved_symbol_with_visibility(
     painter: &Painter,
     origin: Pos2,
@@ -53,10 +59,19 @@ pub fn draw_resolved_symbol_with_visibility(
     symbol: &ResolvedCellSymbol,
     stroke: Stroke,
     parameter_labels: SchematicParameterLabelVisibility,
+    palette: &Palette,
 ) {
     draw_symbol_body(painter, origin, scale, component, symbol, stroke);
     draw_symbol_pins(painter, origin, scale, component, symbol, stroke, true);
-    draw_symbol_labels(painter, origin, scale, component, symbol, parameter_labels);
+    draw_symbol_labels(
+        painter,
+        origin,
+        scale,
+        component,
+        symbol,
+        parameter_labels,
+        palette,
+    );
 }
 
 /// The symbol's artwork without its type: body and pin leads, and no pin,
@@ -258,11 +273,11 @@ fn draw_symbol_labels(
     component: &Component,
     symbol: &ResolvedCellSymbol,
     visibility: SchematicParameterLabelVisibility,
+    palette: &Palette,
 ) {
     use super::drawing::{INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD};
     use rspice_ui_kit::theme::{FontWeight, sans};
     let ppp = painter.pixels_per_point();
-    let palette = rspice_ui_kit::tokens::active_palette();
     let name_anchor = symbol.document().name_anchor;
     if let Some(size) = lod::annotation_size(INSTANCE_NAME_WORLD, scale, ppp)
         && component.display_mode.show_name(visibility)

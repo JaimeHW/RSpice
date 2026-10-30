@@ -86,7 +86,8 @@ pub fn draw_component_preview(
         // Ghost the symbol in the held-back selection colour until it is placed.
         let preview_stroke = Stroke::new(
             ghost_width(painter, viewport),
-            rspice_ui_kit::tokens::active_palette()
+            rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+                .color
                 .canvas_select
                 .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
         );
@@ -233,7 +234,8 @@ pub fn draw_shelf_drag_preview(
     let mirror_h = view.editor.preview_mirror_h;
     let preview_stroke = Stroke::new(
         ghost_width(painter, viewport),
-        rspice_ui_kit::tokens::active_palette()
+        rspice_ui_kit::tokens::Tokens::get(painter.ctx())
+            .color
             .canvas_select
             .gamma_multiply(COMPONENT_PREVIEW_GHOST_ALPHA),
     );

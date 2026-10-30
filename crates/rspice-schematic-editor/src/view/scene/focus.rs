@@ -37,7 +37,7 @@ pub fn draw_keyboard_focus(
         rect.center(),
         egui::vec2(rect.width().max(16.0), rect.height().max(16.0)),
     );
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = rspice_ui_kit::tokens::Tokens::get(painter.ctx()).color;
     painter.rect_stroke(
         rect,
         3.0,

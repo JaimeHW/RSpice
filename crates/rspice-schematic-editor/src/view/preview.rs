@@ -22,6 +22,7 @@ use rspice_design::schematic::{
     net_label::NetLabel,
 };
 use rspice_design_model::{Point, design_management::CrossSheetPortDirection};
+use rspice_ui_kit::tokens::Tokens;
 
 mod component;
 mod wire;
@@ -92,16 +93,20 @@ pub fn draw_documentation_shape_preview(
     }
     let geometry = geometry_from_points(pending.kind, &points);
     let valid = geometry.is_ok();
+    let palette = Tokens::get(painter.ctx()).color;
     if let Ok(geometry) = geometry {
-        draw_geometry(painter, viewport, &geometry, preview_stroke(true));
+        draw_geometry(painter, viewport, &geometry, preview_stroke(true, &palette));
     } else if points.len() >= 2 {
         let screen_points = points
             .iter()
             .map(|point| viewport.schematic_to_screen(*point))
             .collect::<Vec<_>>();
-        painter.add(egui::Shape::line(screen_points, preview_stroke(false)));
+        painter.add(egui::Shape::line(
+            screen_points,
+            preview_stroke(false, &palette),
+        ));
     }
-    let color = preview_anchor_color(valid);
+    let color = preview_anchor_color(valid, &palette);
     for point in &points {
         painter.circle_stroke(
             viewport.schematic_to_screen(*point),
@@ -159,6 +164,7 @@ pub fn draw_design_note_preview(
         &DesignNoteRenderContext::for_document(view.design.document, &view_path()),
         false,
         false,
+        &Tokens::get(painter.ctx()).color,
     );
 }
 
@@ -201,7 +207,15 @@ pub fn draw_net_label_preview(
         }
         None => NetLabel::new(0, position, name),
     };
-    draw_net_label(painter, viewport, &ghost, false, false, true);
+    draw_net_label(
+        painter,
+        viewport,
+        &ghost,
+        false,
+        false,
+        true,
+        &Tokens::get(painter.ctx()).color,
+    );
 }
 
 pub fn draw_junction_preview(
@@ -229,7 +243,7 @@ pub fn draw_junction_preview(
         .nearest_junction_candidate(requested, view.design.document.grid_size);
     let preview = candidate.unwrap_or(requested);
     let pos = viewport.schematic_to_screen(preview);
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = Tokens::get(painter.ctx()).color;
     let mixed_bus = candidate.is_some_and(|point| {
         view.design
             .document
@@ -258,12 +272,13 @@ pub fn draw_bus_preview(painter: &Painter, view: &PreviewView<'_>, viewport: &Vi
     let mut points = view.editor.bus_drawing.points.clone();
     let preview = view.editor.bus_drawing.preview_path();
     points.extend(preview.into_iter().skip(1));
+    let palette = Tokens::get(painter.ctx()).color;
     if points.len() < 2 {
         if let Some(start) = points.first() {
             painter.circle_stroke(
                 viewport.schematic_to_screen(*start),
                 (5.0 * viewport.zoom).max(3.0),
-                Stroke::new(1.0, rspice_ui_kit::tokens::active_palette().accent),
+                Stroke::new(1.0, palette.accent),
             );
         }
         return;
@@ -273,7 +288,7 @@ pub fn draw_bus_preview(painter: &Painter, view: &PreviewView<'_>, viewport: &Vi
         points,
         declaration: view.editor.bus_drawing.declaration.clone(),
     };
-    draw_bus(painter, viewport, &bus, true);
+    draw_bus(painter, viewport, &bus, true, &palette);
 }
 
 pub fn draw_bus_tap_preview(
@@ -290,6 +305,7 @@ pub fn draw_bus_tap_preview(
     };
     let requested = screen_to_schematic(viewport, hover);
     let hit_radius = (6.0 / viewport.zoom.max(0.1)).ceil() as i32;
+    let palette = Tokens::get(painter.ctx()).color;
     match resolve_bus_tap_candidate(
         &view.design,
         view.editor
@@ -311,13 +327,13 @@ pub fn draw_bus_tap_preview(
                 slice: pending.configuration.slice.clone(),
                 orientation: candidate.orientation,
             };
-            draw_bus_tap(painter, viewport, &tap, true);
+            draw_bus_tap(painter, viewport, &tap, true, &palette);
         }
         Err(_) => {
             painter.circle_stroke(
                 viewport.schematic_to_screen(requested),
                 (4.0 * viewport.zoom).max(3.0),
-                Stroke::new(1.0, rspice_ui_kit::tokens::active_palette().err),
+                Stroke::new(1.0, palette.err),
             );
         }
     }
@@ -350,7 +366,7 @@ pub fn draw_selection_rect(painter: &Painter, view: &PreviewView<'_>, tool_viewp
     if anchor.distance(corner) < BAND_APPEARS_AFTER {
         return;
     }
-    let palette = rspice_ui_kit::tokens::active_palette();
+    let palette = Tokens::get(painter.ctx()).color;
     let stroke = Stroke::new(1.0 / ppp, palette.canvas_select);
     let rect = Rect::from_two_pos(anchor, corner);
     if window.enclosed_only() {

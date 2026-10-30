@@ -149,7 +149,7 @@ pub(super) fn draw_scene(
             net_class_colors: if state.design.schematic_visibility.net_highlighting
                 == SchematicNetHighlighting::NetClassColors
             {
-                net_class_colors(state)
+                net_class_colors(state, &crate::ui::tokens::Tokens::get(painter.ctx()).color)
             } else {
                 std::collections::HashMap::new()
             },
@@ -355,7 +355,10 @@ fn extract_open_pins(
     open
 }
 
-fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Color32> {
+fn net_class_colors(
+    state: &AppState,
+    palette: &crate::ui::palette::Palette,
+) -> std::collections::HashMap<u64, egui::Color32> {
     let mut colors = std::collections::HashMap::new();
     let Ok(projection) = state.model.workspace.design_projection(
         &state.model.library_manager,
@@ -371,7 +374,7 @@ fn net_class_colors(state: &AppState) -> std::collections::HashMap<u64, egui::Co
     );
     for net in nets.iter().filter(|net| net.authored_name) {
         // A name that declares no class is painted as a wire.
-        let Some(color) = named_net_class_color(&net.name) else {
+        let Some(color) = named_net_class_color(&net.name, palette) else {
             continue;
         };
         for wire_id in &net.wire_ids {
@@ -917,7 +920,7 @@ mod tests {
     #[test]
     fn separated_groups_one_name_joins_take_one_net_colour() {
         let state = separated_same_name_groups();
-        let colors = net_class_colors(&state);
+        let colors = net_class_colors(&state, &crate::ui::palette::INSTRUMENT_DARK);
         assert!(
             colors.contains_key(&11),
             "an authored conductor carries a class colour"
@@ -935,7 +938,7 @@ mod tests {
     #[test]
     fn no_net_the_deck_solves_is_split_across_colours() {
         let state = separated_same_name_groups();
-        let colors = net_class_colors(&state);
+        let colors = net_class_colors(&state, &crate::ui::palette::INSTRUMENT_DARK);
         let connectivity =
             rspice_design::connectivity::extract_with_hierarchy(&state.model.schematic, None);
         for net in &connectivity.nets {
@@ -958,7 +961,7 @@ mod tests {
             label.name = "VOUT".to_owned();
         }
         state.sync_active_schematic_to_workspace();
-        assert!(net_class_colors(&state).is_empty());
+        assert!(net_class_colors(&state, &crate::ui::palette::INSTRUMENT_DARK).is_empty());
     }
 
     /// An unnamed conductor declares no class, so it keeps the default stroke
@@ -973,7 +976,7 @@ mod tests {
             .wires
             .push(Wire::segment(31, Point::new(0, 0), Point::new(40, 0)));
         state.sync_active_schematic_to_workspace();
-        assert!(net_class_colors(&state).is_empty());
+        assert!(net_class_colors(&state, &crate::ui::palette::INSTRUMENT_DARK).is_empty());
     }
 
     #[test]

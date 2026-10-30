@@ -6,6 +6,7 @@ use rspice_design::schematic::documentation_shape::{
     DocumentationShape, DocumentationShapeGeometry, arc_parameters,
 };
 use rspice_design_model::Point;
+use rspice_ui_kit::palette::Palette;
 
 use super::drawing::draw_hover_outline;
 use super::lod::{self, Emphasis, StrokeRole};
@@ -24,8 +25,8 @@ pub fn draw_documentation_shape(
     shape: &DocumentationShape,
     selected: bool,
     hovered: bool,
+    palette: &Palette,
 ) {
-    let palette = rspice_ui_kit::tokens::active_palette();
     let color = if selected {
         palette.canvas_select
     } else {
@@ -327,8 +328,7 @@ fn shape_segments(geometry: &DocumentationShapeGeometry) -> Vec<(Point, Point)> 
     }
 }
 
-pub fn preview_stroke(valid: bool) -> Stroke {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn preview_stroke(valid: bool, palette: &Palette) -> Stroke {
     Stroke::new(
         1.4,
         if valid {
@@ -339,8 +339,7 @@ pub fn preview_stroke(valid: bool) -> Stroke {
     )
 }
 
-pub fn preview_anchor_color(valid: bool) -> Color32 {
-    let palette = rspice_ui_kit::tokens::active_palette();
+pub fn preview_anchor_color(valid: bool, palette: &Palette) -> Color32 {
     if valid {
         palette.canvas_select.gamma_multiply(PREVIEW_ALPHA)
     } else {
