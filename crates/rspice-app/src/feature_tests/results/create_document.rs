@@ -412,3 +412,173 @@ fn duplicate_name_revalidation_leaves_project_unchanged() {
         before
     );
 }
+
+/// What the Results workspace draws, through whole frames of the
+/// application, once a result document is created: the stage draws the
+/// document, the document bar gives it a tab after the dataset's, and the
+/// toolbar's document control agrees with the stage in the same frame.
+/// Closing the tab keeps the saved document and puts the dataset's own viewer
+/// back, and the toolbar's control goes with it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_created_document_is_drawn_and_its_tab_closes_back_to_the_dataset() {
+    use egui::accesskit::{Action, ActionRequest, Node, NodeId, Role, TreeId};
+    use egui::{Context, Event, Key, Modifiers, Rect, pos2, vec2};
+
+    // What only each surface draws: the stage's bar offers to create a
+    // document over a dataset's viewer and to add a pane over a document, and
+    // the toolbar's tracking control exists only for a document. No plan
+    // produced this run, so the control reads Historical.
+    const DATASET_STAGE: &str = "Create a dataset-bound result document";
+    const DOCUMENT_STAGE: &str = "Add a pane to this result document";
+    const DOCUMENT_TOOLBAR: &str = "Historical";
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let run = retained_run_with(AnalysisType::Transient);
+    let dataset_id = run.dataset_id;
+    app.state.model.simulation.retained.runs = vec![run].into();
+    assert!(app.state.model.simulation.select_run(0));
+    app.state.workbench.activate(Workspace::Results);
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut time = 0.0;
+    // Three frames, the first carrying `events`; the last one's nodes.
+    let mut frames = |app: &mut RSpiceApp, mut events: Vec<Event>| -> Vec<(NodeId, Node)> {
+        let mut nodes = Vec::new();
+        for _ in 0..3 {
+            time += 0.1;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+                    time: Some(time),
+                    focused: true,
+                    events: std::mem::take(&mut events),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut frame),
+            );
+            nodes = output
+                .platform_output
+                .accesskit_update
+                .map(|update| update.nodes)
+                .unwrap_or_default();
+        }
+        nodes
+    };
+    let drawn = |nodes: &[(NodeId, Node)], role: Role, label: &str| {
+        nodes
+            .iter()
+            .any(|(_, node)| node.role() == role && node.label() == Some(label))
+    };
+    // The document bar's tabs left to right, by where the strip drew them.
+    // Its tabs are the ones that say how they close; the viewer and console
+    // tabs say nothing.
+    let tabs = |nodes: &[(NodeId, Node)]| {
+        let mut tabs = nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == Role::Tab
+                    && node.description().is_some_and(|description| {
+                        description.ends_with("Press Delete to close.")
+                            || description == "Pinned primary document."
+                            || description == "Unsaved changes."
+                    })
+            })
+            .filter_map(|(id, node)| Some((node.bounds()?.x0, *id, node.clone())))
+            .collect::<Vec<_>>();
+        tabs.sort_by(|left, right| left.0.total_cmp(&right.0));
+        tabs.into_iter()
+            .map(|(_, id, node)| (id, node))
+            .collect::<Vec<_>>()
+    };
+
+    let nodes = frames(&mut app, Vec::new());
+    assert!(drawn(&nodes, Role::Button, DATASET_STAGE));
+    assert!(!drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR));
+
+    app.state.results.create_result_document = CreateResultDocumentDialogState {
+        open: true,
+        name: "Transient review".to_owned(),
+        name_touched: true,
+        dataset_id: Some(dataset_id),
+        family_id: ResultDocumentFamily::WaveformWorksheet.id().to_owned(),
+        viewer_id: "viewer-waveform".to_owned(),
+        layout_id: ResultDocumentLayout::TwoLinkedPanes.id().to_owned(),
+        validation_error: None,
+    };
+    let document_id = commit(&mut app.state.results_parts()).expect("document commits");
+    let nodes = frames(&mut app, Vec::new());
+
+    assert!(
+        drawn(&nodes, Role::Button, DOCUMENT_STAGE),
+        "the stage draws the created document"
+    );
+    assert!(
+        !drawn(&nodes, Role::Button, DATASET_STAGE),
+        "the stage still draws the dataset's viewer"
+    );
+    assert!(
+        drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
+        "the toolbar's document control is missing beside the document"
+    );
+    let strip = tabs(&nodes);
+    let labels = strip
+        .iter()
+        .map(|(_, node)| node.label().unwrap_or_default())
+        .collect::<Vec<_>>();
+    let dataset_label = app.state.model.simulation.retained.runs[0].label.clone();
+    assert_eq!(labels, [dataset_label.as_str(), "Transient review"]);
+    let (document_tab, tab) = &strip[1];
+    assert_eq!(
+        tab.is_selected(),
+        Some(true),
+        "the document's tab is not the active one"
+    );
+
+    frames(
+        &mut app,
+        vec![Event::AccessKitActionRequest(ActionRequest {
+            action: Action::Focus,
+            target_tree: TreeId::ROOT,
+            target_node: *document_tab,
+            data: None,
+        })],
+    );
+    let nodes = frames(
+        &mut app,
+        vec![Event::Key {
+            key: Key::Delete,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: Modifiers::NONE,
+        }],
+    );
+
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .visualization_document(document_id)
+            .is_some(),
+        "closing the tab deleted the saved document"
+    );
+    assert!(
+        drawn(&nodes, Role::Button, DATASET_STAGE),
+        "the stage does not draw the dataset's viewer after the close"
+    );
+    assert!(!drawn(&nodes, Role::Button, DOCUMENT_STAGE));
+    assert!(
+        !drawn(&nodes, Role::Button, DOCUMENT_TOOLBAR),
+        "the toolbar keeps the closed document's control"
+    );
+    // The dataset is the one document left, and a strip of one is not drawn.
+    assert!(
+        tabs(&nodes).is_empty(),
+        "the closed document still has a tab"
+    );
+}

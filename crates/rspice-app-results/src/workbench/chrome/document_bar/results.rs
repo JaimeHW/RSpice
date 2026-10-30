@@ -1,5 +1,5 @@
-//! The document bar's Results tabs: one per retained dataset, and the
-//! activation of a dataset or a saved result document.
+//! The document bar's Results tabs: one per retained dataset and one per
+//! saved result document, and the activation of either.
 
 use crate::state::SimulationState;
 use crate::workbench::app_state::Model;
@@ -9,9 +9,16 @@ use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
-/// One tab per retained result dataset.
-pub fn result_documents(simulation: &SimulationState) -> Vec<WorkspaceDocument> {
-    simulation
+/// One tab per retained result dataset, then one per saved result document
+/// in the order the project made them.
+pub fn result_documents(model: &Model) -> Vec<WorkspaceDocument> {
+    let content = &model.workspace.content;
+    // An edit to a result document is committed to the project's catalog as
+    // it is made, and the catalog is saved and reverted whole, with the result
+    // history: its one unsaved flag is every document's.
+    let unsaved = content.visualization_documents_dirty;
+    let datasets = model
+        .simulation
         .retained
         .runs
         .iter()
@@ -20,18 +27,27 @@ pub fn result_documents(simulation: &SimulationState) -> Vec<WorkspaceDocument> 
             label: run.label.clone(),
             icon: WorkbenchIcon::Results,
             dirty: false,
-        })
-        .collect()
+        });
+    let documents = content
+        .visualization_documents
+        .iter()
+        .map(|document| WorkspaceDocument {
+            id: WorkspaceDocumentId::VisualizationDocument(document.id()),
+            label: document.title().to_owned(),
+            icon: WorkbenchIcon::Results,
+            dirty: unsaved,
+        });
+    datasets.chain(documents).collect()
 }
 
 /// The document Results shows, as the document bar resolves it while
-/// Results is the workspace showing: its documents are the retained
-/// datasets, and no page document stands in for them.
+/// Results is the workspace showing: a retained dataset or a saved result
+/// document, and no page document stands in for them.
 pub(in crate::workbench) fn active_result_document(
     model: &Model,
     workbench: &WorkbenchSession,
 ) -> Option<WorkspaceDocumentId> {
-    super::active_document_among(workbench, model, result_documents(&model.simulation), None)
+    super::active_document_among(workbench, model, result_documents(model), None)
 }
 
 /// Show a saved result document.
