@@ -104,7 +104,7 @@ fn draw_placement_badge(painter: &Painter, response: &Response, state: &AppState
     let (Some(hover), Some(name)) = (response.hover_pos(), sequence.next_name()) else {
         return;
     };
-    let palette = crate::ui::tokens::active_palette();
+    let palette = crate::ui::tokens::Tokens::get(painter.ctx()).color;
     let refusal = sequence
         .next_placement(
             state.model.schematic.topology_version(),

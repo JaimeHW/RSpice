@@ -77,7 +77,10 @@ pub(super) fn paint_zoom_box(painter: &Painter, state: &AppState, viewport: &Vie
     painter.rect_stroke(
         Rect::from_min_max(to_screen(min_x, min_y), to_screen(max_x, max_y)),
         0.0,
-        Stroke::new(1.0, crate::ui::tokens::active_palette().accent),
+        Stroke::new(
+            1.0,
+            crate::ui::tokens::Tokens::get(painter.ctx()).color.accent,
+        ),
         egui::StrokeKind::Inside,
     );
 }
