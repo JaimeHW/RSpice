@@ -76,14 +76,14 @@ impl LayoutScope {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(crate) struct WorkspaceLayoutManagerState {
-    pub(crate) open: bool,
+pub struct WorkspaceLayoutManagerState {
+    pub open: bool,
     template: LayoutTemplate,
     scope: LayoutScope,
 }
 
 impl WorkspaceLayoutManagerState {
-    pub(crate) fn open(&mut self, preset: WorkspacePreset) {
+    pub fn open(&mut self, preset: WorkspacePreset) {
         self.open = true;
         self.template = match preset {
             WorkspacePreset::Engineering => LayoutTemplate::Engineering,

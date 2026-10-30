@@ -120,11 +120,7 @@ pub(super) fn paint_dashed_rect(painter: &egui::Painter, rect: egui::Rect, color
     }
 }
 
-pub(crate) fn process_key_capture(
-    ctx: &Context,
-    editor: &mut ShortcutEditorState,
-    registry: &Registry,
-) {
+pub fn process_key_capture(ctx: &Context, editor: &mut ShortcutEditorState, registry: &Registry) {
     let Some(target) = editor.recording else {
         return;
     };
@@ -273,7 +269,7 @@ pub(super) fn modifiers_are_empty(modifiers: Modifiers) -> bool {
         && !modifiers.command
 }
 
-pub(crate) fn binding_platforms(
+pub fn binding_platforms(
     profile: &ShortcutPreferences,
     command: CommandKey,
     slot: ShortcutBindingSlot,

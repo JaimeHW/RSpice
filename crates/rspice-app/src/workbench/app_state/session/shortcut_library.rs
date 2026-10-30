@@ -47,7 +47,7 @@ pub enum ShortcutLibraryPersistenceRuntime {
 }
 
 impl ShortcutLibraryPersistenceRuntime {
-    pub(crate) fn persisted(&self) -> Option<&PersistedShortcutProfileLibrary> {
+    pub fn persisted(&self) -> Option<&PersistedShortcutProfileLibrary> {
         match self {
             Self::Ready { persisted, .. } => Some(persisted.as_ref()),
             _ => None,
@@ -100,7 +100,7 @@ pub enum ShortcutLibraryPublication {
 
 /// Exact UI transaction awaiting an asynchronous browser publication.
 #[derive(Debug, Clone)]
-pub(crate) enum ShortcutLibraryPublicationContinuation {
+pub enum ShortcutLibraryPublicationContinuation {
     Editor,
     Policy,
     Import(Box<crate::workbench::shortcuts::artifacts::ShortcutImportReceipt>),
@@ -113,14 +113,14 @@ pub(crate) enum ShortcutLibraryPublicationContinuation {
 /// store's standing. Its failures go to the model's log. Putting a library in
 /// use asks the shell to reset the shortcut resolver, so a chord half-typed
 /// under the previous library does not complete under this one.
-pub(crate) struct ShortcutLibraryParts<'a> {
-    pub(crate) persistence: &'a mut ShortcutLibraryPersistenceRuntime,
-    pub(crate) model: &'a mut Model,
-    pub(crate) outbox: &'a mut Outbox,
+pub struct ShortcutLibraryParts<'a> {
+    pub persistence: &'a mut ShortcutLibraryPersistenceRuntime,
+    pub model: &'a mut Model,
+    pub outbox: &'a mut Outbox,
 }
 
 impl ShortcutLibraryParts<'_> {
-    pub(crate) fn initialize_shortcut_library_persistence(
+    pub fn initialize_shortcut_library_persistence(
         &mut self,
         ctx: &egui::Context,
         registry: &Registry,
@@ -176,7 +176,7 @@ impl ShortcutLibraryParts<'_> {
     /// Publish one fully-validated candidate with exact CAS authority. The
     /// live profile is replaced only by the durable result returned from the
     /// persistence backend.
-    pub(crate) fn publish_shortcut_library_candidate(
+    pub fn publish_shortcut_library_candidate(
         &mut self,
         candidate: &crate::state::shortcuts::ShortcutProfileLibrary,
         ctx: &egui::Context,
@@ -269,7 +269,7 @@ impl ShortcutLibraryParts<'_> {
     }
 
     #[must_use]
-    pub(crate) fn shortcut_library_publication_completion_pending(&self) -> bool {
+    pub fn shortcut_library_publication_completion_pending(&self) -> bool {
         match &*self.persistence {
             ShortcutLibraryPersistenceRuntime::Ready {
                 publication_completion,
@@ -307,7 +307,7 @@ impl ShortcutLibraryParts<'_> {
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(crate) fn poll_shortcut_library_persistence(&mut self) {
+    pub fn poll_shortcut_library_persistence(&mut self) {
         let (token, predecessor) = match &*self.persistence {
             ShortcutLibraryPersistenceRuntime::Initializing(token) => (*token, None),
             ShortcutLibraryPersistenceRuntime::Publishing { predecessor, token } => {
@@ -461,7 +461,7 @@ impl ShortcutLibraryParts<'_> {
     }
 
     #[cfg(test)]
-    pub(crate) fn enable_volatile_test_shortcut_persistence(&mut self) {
+    pub fn enable_volatile_test_shortcut_persistence(&mut self) {
         let library = self.model.preferences.shortcut_profiles().clone();
         *self.persistence = ShortcutLibraryPersistenceRuntime::Ready {
             persisted: Box::new(PersistedShortcutProfileLibrary::test_snapshot(library, 1)),

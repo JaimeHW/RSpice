@@ -41,11 +41,11 @@ const SETTINGS_EXPORT_ID: &str = "rspice.preferences.settings-file.export";
 const PENDING_RESTORE_ID: &str = "rspice.preferences.pending-restore";
 
 /// The page whose Restore defaults is waiting on the reader's answer.
-pub(crate) fn pending_restore(ctx: &Context) -> Option<PreferenceCategory> {
+pub fn pending_restore(ctx: &Context) -> Option<PreferenceCategory> {
     ctx.data(|data| data.get_temp::<PreferenceCategory>(Id::new(PENDING_RESTORE_ID)))
 }
 
-pub(crate) fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
+pub fn set_pending_restore(ctx: &Context, category: Option<PreferenceCategory>) {
     let id = Id::new(PENDING_RESTORE_ID);
     ctx.data_mut(|data| match category {
         Some(category) => {
@@ -58,41 +58,38 @@ pub(crate) fn set_pending_restore(ctx: &Context, category: Option<PreferenceCate
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct PreferencePageActions {
-    pub(crate) open_shortcut_editor: bool,
-    pub(crate) open_shortcut_import: bool,
-    pub(crate) open_shortcut_export: bool,
-    pub(crate) import_settings_file: bool,
-    pub(crate) export_settings_file: bool,
-    pub(crate) show_settings_file: bool,
-    pub(crate) shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
+pub struct PreferencePageActions {
+    pub open_shortcut_editor: bool,
+    pub open_shortcut_import: bool,
+    pub open_shortcut_export: bool,
+    pub import_settings_file: bool,
+    pub export_settings_file: bool,
+    pub show_settings_file: bool,
+    pub shortcut_policy_candidate: Option<crate::state::shortcuts::ShortcutPreferences>,
 }
 
 /// What Preferences and the windows it opens read and write: the settings
 /// feature's dialogs and its stores, the model whose preferences they edit,
 /// the session, the platform services' state, whose autosave interval and
 /// recent files a page keeps, and what the cloud shows.
-pub(crate) struct PreferencesDialogs<'a> {
-    pub(crate) preferences_open: &'a mut bool,
-    pub(crate) workspace_layout_manager:
-        &'a mut workspace_layout_manager::WorkspaceLayoutManagerState,
-    pub(crate) shortcut_portability:
-        &'a mut shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
-    pub(crate) shortcut_editor: &'a mut shortcut_preferences::ShortcutEditorState,
-    pub(crate) shortcut_policy_candidate:
-        &'a mut Option<crate::state::shortcuts::ShortcutPreferences>,
-    pub(crate) browser_spoken_feedback: &'a mut bool,
-    pub(crate) shortcut_library_persistence: &'a mut ShortcutLibraryPersistenceRuntime,
-    pub(crate) shortcut_library_publication_continuation:
+pub struct PreferencesDialogs<'a> {
+    pub preferences_open: &'a mut bool,
+    pub workspace_layout_manager: &'a mut workspace_layout_manager::WorkspaceLayoutManagerState,
+    pub shortcut_portability: &'a mut shortcut_portability_dialogs::ShortcutPortabilityDialogsState,
+    pub shortcut_editor: &'a mut shortcut_preferences::ShortcutEditorState,
+    pub shortcut_policy_candidate: &'a mut Option<crate::state::shortcuts::ShortcutPreferences>,
+    pub browser_spoken_feedback: &'a mut bool,
+    pub shortcut_library_persistence: &'a mut ShortcutLibraryPersistenceRuntime,
+    pub shortcut_library_publication_continuation:
         &'a mut Option<ShortcutLibraryPublicationContinuation>,
-    pub(crate) preferences_file: &'a mut PreferencesFileRuntime,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) platform: &'a mut PlatformState,
-    pub(crate) cloud: &'a dyn CloudPort,
+    pub preferences_file: &'a mut PreferencesFileRuntime,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub platform: &'a mut PlatformState,
+    pub cloud: &'a dyn CloudPort,
     /// Every command the application registers: what a shortcut profile is
     /// checked against and a command is labelled by.
-    pub(crate) commands: &'static Registry,
+    pub commands: &'static Registry,
 }
 
 impl PreferencesDialogs<'_> {
@@ -137,7 +134,7 @@ impl PreferencesDialogs<'_> {
 
 impl PreferencesDialogs<'_> {
     /// Draw Preferences and the windows it opens for this frame.
-    pub(crate) fn render(&mut self, ctx: &Context) {
+    pub fn render(&mut self, ctx: &Context) {
         self.poll_shortcut_portability_source();
         self.poll_settings_file_transfer(ctx);
         self.finish_shortcut_library_publication();
@@ -232,7 +229,7 @@ impl PreferencesDialogs<'_> {
         self.render_shortcut_portability_dialogs(ctx);
     }
 
-    pub(crate) fn execute_preference_page_actions(
+    pub fn execute_preference_page_actions(
         &mut self,
         ctx: &Context,
         actions: PreferencePageActions,

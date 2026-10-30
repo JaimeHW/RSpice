@@ -29,7 +29,7 @@ use super::preferences_shell::{
 use super::{PreferencePageActions, PreferencesDialogs};
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum ShortcutEditorContext {
+pub enum ShortcutEditorContext {
     #[default]
     All,
     Global,
@@ -41,7 +41,7 @@ pub(crate) enum ShortcutEditorContext {
 }
 
 impl ShortcutEditorContext {
-    pub(crate) const ALL: [Self; 7] = [
+    pub const ALL: [Self; 7] = [
         Self::All,
         Self::Global,
         Self::Schematic,
@@ -65,38 +65,38 @@ impl ShortcutEditorContext {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) struct ShortcutCaptureTarget {
-    pub(crate) command: CommandKey,
-    pub(crate) slot: crate::state::shortcuts::ShortcutBindingSlot,
+pub struct ShortcutCaptureTarget {
+    pub command: CommandKey,
+    pub slot: crate::state::shortcuts::ShortcutBindingSlot,
 }
 
 /// Retained transaction state for the command-binding editor. Visible
 /// controls mutate `draft`; the live profile is replaced only by validated
 /// Save.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ShortcutEditorState {
-    pub(crate) open: bool,
-    pub(crate) original: Option<crate::state::shortcuts::ShortcutPreferences>,
-    pub(crate) draft: Option<crate::state::shortcuts::ShortcutPreferences>,
-    pub(crate) query: String,
-    pub(crate) context: ShortcutEditorContext,
-    pub(crate) selected_command: Option<CommandKey>,
-    pub(crate) recording: Option<ShortcutCaptureTarget>,
-    pub(crate) capture_strokes: Vec<crate::state::shortcuts::ShortcutStroke>,
-    pub(crate) capture_last_input_at: Option<f64>,
-    pub(crate) dirty: bool,
+pub struct ShortcutEditorState {
+    pub open: bool,
+    pub original: Option<crate::state::shortcuts::ShortcutPreferences>,
+    pub draft: Option<crate::state::shortcuts::ShortcutPreferences>,
+    pub query: String,
+    pub context: ShortcutEditorContext,
+    pub selected_command: Option<CommandKey>,
+    pub recording: Option<ShortcutCaptureTarget>,
+    pub capture_strokes: Vec<crate::state::shortcuts::ShortcutStroke>,
+    pub capture_last_input_at: Option<f64>,
+    pub dirty: bool,
     /// A browser CAS is in flight. The draft remains isolated and the editor
     /// cannot close or launch a second publication until completion.
-    pub(crate) persistence_pending: bool,
-    pub(crate) discard_confirmation: bool,
-    pub(crate) error_summary: Option<String>,
-    pub(crate) repair_receipt: Option<String>,
-    pub(crate) focus_error: Option<ShortcutCaptureTarget>,
-    pub(crate) body_scroll_offset: f32,
+    pub persistence_pending: bool,
+    pub discard_confirmation: bool,
+    pub error_summary: Option<String>,
+    pub repair_receipt: Option<String>,
+    pub focus_error: Option<ShortcutCaptureTarget>,
+    pub body_scroll_offset: f32,
 }
 
 impl ShortcutEditorState {
-    pub(crate) fn open(&mut self, profile: &crate::state::shortcuts::ShortcutPreferences) {
+    pub fn open(&mut self, profile: &crate::state::shortcuts::ShortcutPreferences) {
         *self = Self {
             open: true,
             original: Some(profile.clone()),
@@ -105,7 +105,7 @@ impl ShortcutEditorState {
         };
     }
 
-    pub(crate) fn close_and_discard(&mut self) {
+    pub fn close_and_discard(&mut self) {
         *self = Self::default();
     }
 }
@@ -358,7 +358,7 @@ fn registry_status_tone(audit: &ShortcutProfileAudit, command: CommandKey) -> Ta
     }
 }
 
-pub(crate) fn render_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
+pub fn render_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
     if !state.shortcut_editor.open {
         return;
     }
@@ -882,7 +882,7 @@ fn synchronize_editor_validation(editor: &mut ShortcutEditorState, registry: &Re
 /// bindings the editor edits.
 pub(crate) const COMMAND_REFERENCE: CommandKey = CommandKey::new("command-reference");
 
-pub(crate) fn filtered_commands(
+pub fn filtered_commands(
     editor: &ShortcutEditorState,
     operating_system: egui::os::OperatingSystem,
     registry: &Registry,
@@ -922,7 +922,7 @@ pub(crate) fn filtered_commands(
 
 /// The editor's context filter a command lists under; a key no command
 /// declares lists with the global ones.
-pub(crate) fn editor_context(command: CommandKey, registry: &Registry) -> ShortcutEditorContext {
+pub fn editor_context(command: CommandKey, registry: &Registry) -> ShortcutEditorContext {
     match registry.context(command) {
         Some(
             ShortcutContext::EditContext
@@ -953,7 +953,7 @@ fn context_matches(
     filter == ShortcutEditorContext::All || editor_context(command, registry) == filter
 }
 
-pub(crate) fn binding_for_slot(
+pub fn binding_for_slot(
     profile: &ShortcutPreferences,
     command: CommandKey,
     slot: ShortcutBindingSlot,
@@ -1244,7 +1244,7 @@ fn blocking_issue_count(audit: &ShortcutProfileAudit) -> usize {
         .count()
 }
 
-pub(crate) fn commit_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
+pub fn commit_editor(ctx: &Context, state: &mut PreferencesDialogs<'_>) {
     let audit = state
         .shortcut_editor
         .draft

@@ -63,16 +63,16 @@ pub(crate) fn canonicalize_value(value: Value) -> Value {
     }
 }
 
-pub(crate) fn canonical_json_bytes(value: Value) -> Result<Vec<u8>, serde_json::Error> {
+pub fn canonical_json_bytes(value: Value) -> Result<Vec<u8>, serde_json::Error> {
     let mut bytes = serde_json::to_vec_pretty(&canonicalize_value(value))?;
     bytes.push(b'\n');
     Ok(bytes)
 }
 
-pub(crate) fn sha256(bytes: &[u8]) -> [u8; 32] {
+pub fn sha256(bytes: &[u8]) -> [u8; 32] {
     Sha256::digest(bytes).into()
 }
 
-pub(crate) fn hex_digest(digest: [u8; 32]) -> String {
+pub fn hex_digest(digest: [u8; 32]) -> String {
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
 }

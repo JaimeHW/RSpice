@@ -109,7 +109,7 @@ impl PersistedShortcutProfileLibrary {
     /// Consume the durable result when the caller is ready to replace its live
     /// copy. This is the only library returned by a successful publication.
     #[cfg(test)]
-    pub(crate) fn test_snapshot(library: ShortcutProfileLibrary, generation: u64) -> Self {
+    pub fn test_snapshot(library: ShortcutProfileLibrary, generation: u64) -> Self {
         let file_digest = serde_json::to_vec(&library)
             .map(|bytes| sha256(&bytes))
             .unwrap_or([0; 32]);
@@ -207,10 +207,7 @@ fn retained(
     }
 }
 
-pub(crate) fn decode_store_bytes(
-    bytes: &[u8],
-    registry: &Registry,
-) -> ShortcutProfileLibraryRestore {
+pub fn decode_store_bytes(bytes: &[u8], registry: &Registry) -> ShortcutProfileLibraryRestore {
     if bytes.len() > MAX_SHORTCUT_LIBRARY_STORE_BYTES {
         return ShortcutProfileLibraryRestore::Corrupt(retained(
             bytes,
@@ -449,7 +446,7 @@ pub fn validate_device_local_privacy(value: &Value) -> Result<(), String> {
     walk(value, None, &mut Vec::new())
 }
 
-pub(crate) fn encode_store_bytes(
+pub fn encode_store_bytes(
     library: &ShortcutProfileLibrary,
     generation: u64,
     registry: &Registry,

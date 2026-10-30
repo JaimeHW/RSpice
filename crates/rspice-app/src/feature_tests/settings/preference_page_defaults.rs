@@ -55,7 +55,7 @@ fn production_code() -> String {
 fn pages_and_restore() -> (String, String) {
     let code = production_code();
     let (pages, restore) = code
-        .split_once("pub(crate) fn restore_defaults(")
+        .split_once("fn restore_defaults(")
         .expect("restore_defaults follows the pages");
     (pages.to_owned(), restore.to_owned())
 }

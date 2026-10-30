@@ -24,7 +24,7 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::SettingsCommand;
 
 /// The settings feature.
-pub(crate) struct SettingsFeature;
+pub struct SettingsFeature;
 
 impl Feature for SettingsFeature {
     type State = SettingsState;
@@ -76,7 +76,7 @@ fn render_preferences(cx: &mut Cx<'_, SettingsFeature>, ctx: &egui::Context) {
 /// Every command key the feature names as data rather than declares, with
 /// what names it: the commands the VS Code map binds, and the command the
 /// shortcut editor leaves out. The registry checks each is a live key.
-pub(crate) fn named_command_keys() -> impl Iterator<Item = (&'static str, CommandKey)> {
+pub fn named_command_keys() -> impl Iterator<Item = (&'static str, CommandKey)> {
     VSCODE_COMMAND_MAPPINGS
         .iter()
         .map(|mapping| ("the VS Code shortcut map", mapping.rspice_command))

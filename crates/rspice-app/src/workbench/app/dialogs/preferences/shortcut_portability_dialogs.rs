@@ -28,9 +28,9 @@ use crate::workbench::shortcuts::artifacts::{
 
 use super::preferences_shell::{control_width, preference_switch, value_column};
 
-pub(crate) const IMPORT_TITLE: &str = "Import keyboard shortcut map";
+pub const IMPORT_TITLE: &str = "Import keyboard shortcut map";
 pub(crate) const IMPORT_PRIMARY: &str = "Import compatible bindings";
-pub(crate) const EXPORT_TITLE: &str = "Export keyboard shortcut map";
+pub const EXPORT_TITLE: &str = "Export keyboard shortcut map";
 pub(crate) const EXPORT_PRIMARY: &str = "Export shortcut profile";
 
 pub const IMPORT_CLASSES: [ImportBindingClass; 4] = [
@@ -70,17 +70,17 @@ pub const IMPORT_SOURCE_PLACEHOLDER: &str = "~/Downloads/rspice-shortcuts.json";
 
 /// Runtime context required to project an export accurately.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct ShortcutExportEnvironment<'a> {
-    pub(crate) runtime_platform: CommandPlatform,
-    pub(crate) operating_system: egui::os::OperatingSystem,
-    pub(crate) current_contexts: &'a [ShortcutContext],
+pub struct ShortcutExportEnvironment<'a> {
+    pub runtime_platform: CommandPlatform,
+    pub operating_system: egui::os::OperatingSystem,
+    pub current_contexts: &'a [ShortcutContext],
 }
 
 /// A fully typed side effect. The caller must report completion through the
 /// corresponding `complete_*` method; an emitted effect is never a success
 /// claim by itself.
 #[derive(Debug, Default)]
-pub(crate) enum ShortcutPortabilityAction {
+pub enum ShortcutPortabilityAction {
     #[default]
     None,
     SelectImportSource,
@@ -102,13 +102,13 @@ pub enum ImportPending {
 /// bytes; the decoded artifact retains only the normalized file name and
 /// content digest required by the import receipt.
 #[derive(Debug, Clone)]
-pub(crate) struct ShortcutImportDialogState {
+pub struct ShortcutImportDialogState {
     pub open: bool,
     pub artifact: Option<DecodedShortcutArtifact>,
     pub vscode_report: Option<VscodeImportReport>,
-    pub(crate) options: ShortcutImportOptions,
-    pub(crate) plan: Option<ShortcutImportPlan>,
-    pub(crate) plan_dirty: bool,
+    pub options: ShortcutImportOptions,
+    pub plan: Option<ShortcutImportPlan>,
+    pub plan_dirty: bool,
     pub pending: ImportPending,
     pub cancel_requested: bool,
     pub discard_confirmation: bool,
@@ -136,11 +136,11 @@ impl Default for ShortcutImportDialogState {
 
 impl ShortcutImportDialogState {
     #[must_use]
-    pub(crate) const fn is_open(&self) -> bool {
+    pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    pub(crate) fn open(&mut self) {
+    pub fn open(&mut self) {
         let last_receipt = self.last_receipt.take();
         *self = Self {
             open: true,
@@ -149,7 +149,7 @@ impl ShortcutImportDialogState {
         };
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         let last_receipt = self.last_receipt.take();
         *self = Self {
             last_receipt,
@@ -210,7 +210,7 @@ impl ShortcutImportDialogState {
         }
     }
 
-    pub(crate) fn accept_detected(
+    pub fn accept_detected(
         &mut self,
         base: &ShortcutProfileLibrary,
         detected: DetectedShortcutArtifact,
@@ -260,7 +260,7 @@ impl ShortcutImportDialogState {
         self.plan_dirty = false;
     }
 
-    pub(crate) fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary, registry: &Registry) {
+    pub fn synchronize_plan(&mut self, base: &ShortcutProfileLibrary, registry: &Registry) {
         if self.pending != ImportPending::None || self.artifact.is_none() {
             return;
         }
@@ -280,7 +280,7 @@ impl ShortcutImportDialogState {
         }
     }
 
-    pub(crate) fn complete_commit(&mut self, result: Result<ShortcutImportReceipt, String>) {
+    pub fn complete_commit(&mut self, result: Result<ShortcutImportReceipt, String>) {
         if self.pending != ImportPending::Commit {
             return;
         }
@@ -300,7 +300,7 @@ impl ShortcutImportDialogState {
     }
 
     /// Report that a pending commit was cancelled before publication.
-    pub(crate) fn commit_cancelled(&mut self, result: Result<(), String>) {
+    pub fn commit_cancelled(&mut self, result: Result<(), String>) {
         if self.pending != ImportPending::Commit || !self.cancel_requested {
             return;
         }
@@ -324,7 +324,7 @@ impl ShortcutImportDialogState {
 
 /// Retained export choices and publication state.
 #[derive(Debug, Clone)]
-pub(crate) struct ShortcutExportDialogState {
+pub struct ShortcutExportDialogState {
     open: bool,
     format: ShortcutArtifactFormat,
     pub scope: ShortcutExportScope,
@@ -350,11 +350,11 @@ impl Default for ShortcutExportDialogState {
 
 impl ShortcutExportDialogState {
     #[must_use]
-    pub(crate) const fn is_open(&self) -> bool {
+    pub const fn is_open(&self) -> bool {
         self.open
     }
 
-    pub(crate) fn open(&mut self) {
+    pub fn open(&mut self) {
         *self = Self {
             open: true,
             ..Self::default()
@@ -402,25 +402,25 @@ impl ShortcutExportDialogState {
 
 /// The mutually-exclusive Preferences portability workflows.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ShortcutPortabilityDialogsState {
+pub struct ShortcutPortabilityDialogsState {
     pub import: ShortcutImportDialogState,
     pub export: ShortcutExportDialogState,
 }
 
 impl ShortcutPortabilityDialogsState {
     #[must_use]
-    pub(crate) const fn application_modal_open(&self) -> bool {
+    pub const fn application_modal_open(&self) -> bool {
         self.import.is_open() || self.export.is_open()
     }
 
-    pub(crate) fn open_import(&mut self) {
+    pub fn open_import(&mut self) {
         if self.application_modal_open() {
             return;
         }
         self.import.open();
     }
 
-    pub(crate) fn open_export(&mut self) {
+    pub fn open_export(&mut self) {
         if self.application_modal_open() {
             return;
         }
@@ -431,7 +431,7 @@ impl ShortcutPortabilityDialogsState {
     /// Preferences owner. Asynchronous source selection and durable import
     /// publication retain ownership until their exact cancellation or
     /// completion result arrives; idle dialogs close immediately.
-    pub(crate) fn request_route_close(&mut self) -> ShortcutPortabilityAction {
+    pub fn request_route_close(&mut self) -> ShortcutPortabilityAction {
         if self.import.is_open() {
             return match self.import.pending {
                 ImportPending::None => {
@@ -464,7 +464,7 @@ impl ShortcutPortabilityDialogsState {
         self.import.accept_source(base, source, registry);
     }
 
-    pub(crate) fn import_source_cancelled(&mut self) {
+    pub fn import_source_cancelled(&mut self) {
         self.import.source_cancelled();
     }
 
@@ -476,7 +476,7 @@ impl ShortcutPortabilityDialogsState {
         self.import.complete_commit(result);
     }
 
-    pub(crate) fn import_commit_cancelled(&mut self, result: Result<(), String>) {
+    pub fn import_commit_cancelled(&mut self, result: Result<(), String>) {
         self.import.commit_cancelled(result);
     }
 
@@ -487,7 +487,7 @@ impl ShortcutPortabilityDialogsState {
         self.export.complete_publication(result);
     }
 
-    pub(crate) fn render(
+    pub fn render(
         &mut self,
         ctx: &Context,
         library: &ShortcutProfileLibrary,

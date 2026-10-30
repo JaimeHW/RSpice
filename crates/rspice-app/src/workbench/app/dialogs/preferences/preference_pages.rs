@@ -901,7 +901,7 @@ fn set_browser_spoken_feedback(state: &mut PreferencesDialogs<'_>, enabled: bool
 /// Shortcuts are the one page this does not write directly: their shipped
 /// profile is handed to `actions` and saved before it goes live, the same
 /// way an edit made on the page is.
-pub(crate) fn restore_defaults(
+pub fn restore_defaults(
     category: PreferenceCategory,
     state: &mut PreferencesDialogs<'_>,
     actions: &mut PreferencePageActions,

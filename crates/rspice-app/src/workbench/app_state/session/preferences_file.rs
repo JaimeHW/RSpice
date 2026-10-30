@@ -368,7 +368,7 @@ pub enum PreferencesStore {
 }
 
 impl PreferencesStore {
-    pub(in crate::workbench) fn production() -> Option<Self> {
+    pub fn production() -> Option<Self> {
         #[cfg(not(target_arch = "wasm32"))]
         {
             dirs::config_dir().map(|folder| Self::File(folder.join("rspice").join(FILE_NAME)))
@@ -478,7 +478,7 @@ fn browser_storage() -> Result<web_sys::Storage, String> {
 
 /// Write-on-change bookkeeping for the preferences file.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct PreferencesFileRuntime {
+pub struct PreferencesFileRuntime {
     /// Where the file lives. `None` keeps preferences with the session alone,
     /// which is what every test state and a machine with no settings folder
     /// get.
@@ -516,11 +516,11 @@ pub struct StagedSettingsImport {
 /// the file's own bookkeeping. Its failures go to the model's log, and its
 /// answers to the gesture to the session's prompt.
 pub struct PreferencesFileParts<'a> {
-    pub(crate) file: &'a mut PreferencesFileRuntime,
-    pub(crate) browser_spoken_feedback: &'a mut bool,
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) platform: &'a mut PlatformState,
+    pub file: &'a mut PreferencesFileRuntime,
+    pub browser_spoken_feedback: &'a mut bool,
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub platform: &'a mut PlatformState,
 }
 
 impl PreferencesFileParts<'_> {
@@ -626,7 +626,7 @@ impl PreferencesFileParts<'_> {
     /// Runs every frame. The settings are hashed only on a frame whose input
     /// could have changed one, while a write is pending, or once a second
     /// otherwise.
-    pub(in crate::workbench) fn persist_preferences_file(&mut self, ctx: &egui::Context) {
+    pub fn persist_preferences_file(&mut self, ctx: &egui::Context) {
         let had_input = ctx.input(|input| input_can_change_a_setting(&input.events));
         if let Some(wait) = self.persist_preferences_file_at(Instant::now(), had_input) {
             ctx.request_repaint_after(wait);

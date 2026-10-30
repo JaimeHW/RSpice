@@ -13,7 +13,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the settings feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SettingsCommand {
+pub enum SettingsCommand {
     Preferences,
     WorkspaceLayouts,
 }
@@ -28,10 +28,10 @@ const PREFERENCES: &[ShortcutBinding] = &[ShortcutBinding {
 
 impl SettingsCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 2] = [Self::Preferences, Self::WorkspaceLayouts];
+    pub const ALL: [Self; 2] = [Self::Preferences, Self::WorkspaceLayouts];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::Preferences => ids::PREFERENCES,
             Self::WorkspaceLayouts => ids::WORKSPACE_LAYOUTS,
@@ -40,7 +40,7 @@ impl SettingsCommand {
 
     /// What the command declares about itself. Both are listed in the
     /// palette and run anywhere, with or without a project.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, bindings) = match self {
             Self::Preferences => ("Preferences…", "Edit", PREFERENCES),
             Self::WorkspaceLayouts => ("Workspace layouts\u{2026}", "Window", NONE),
