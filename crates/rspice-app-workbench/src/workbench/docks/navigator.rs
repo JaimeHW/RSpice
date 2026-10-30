@@ -250,10 +250,8 @@ pub fn panel_search(
 /// The control that empties the filter, drawn in the field's right inset.
 ///
 /// The mark is [`WorkbenchIcon::Close`] — the same crossing strokes every
-/// other dismissal in the workbench paints — rather than a `✕` set in text.
-/// The bundled IBM Plex cuts are Latin subsets and the character is not in
-/// them, so a text mark would ship as a replacement box while every test that
-/// only reads the announced control still passed.
+/// other dismissal in the workbench paints — rather than a `✕` set in text,
+/// so it matches them stroke for stroke whichever face holds the character.
 fn panel_search_clear(ui: &mut Ui, id: &'static str, field: &Response) -> bool {
     let t = Tokens::get(ui.ctx());
     let rect = egui::Rect::from_center_size(

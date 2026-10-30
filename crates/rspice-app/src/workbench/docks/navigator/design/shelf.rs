@@ -94,11 +94,11 @@ pub(super) const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, bool, &[&str]); 4] = [
 /// (structural objects with no card of their own), the event-driven ⊞ for
 /// every A-card XSPICE row, and `VA` for generated Verilog-A models.
 ///
-/// The bundled IBM Plex faces are Latin subsets: every non-Latin candidate in
-/// the mockup vocabulary — ◯ ▷ △ ⊞ ⊳ ⏚, and even Σ and Ω — rasterizes as a
-/// tofu box, which is why the family marks are vector geometry rather than
-/// text. `every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box`
-/// walks the table and fails on any glyph the faces lack.
+/// The bundled faces do not hold every candidate in the mockup vocabulary
+/// (◯ ▷ ⊳ among them), and a character they lack rasterizes as a tofu box,
+/// which is why the family marks are vector geometry rather than text.
+/// `every_shelf_glyph_paints_ink_and_no_text_glyph_is_a_tofu_box` walks the
+/// table and fails on any glyph the faces lack.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum ShelfGlyph {
     /// A mono-face string: a SPICE card letter (`R`, `Q`, `M`), a family

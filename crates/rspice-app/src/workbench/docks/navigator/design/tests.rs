@@ -2015,16 +2015,14 @@ fn the_filter_is_emptied_by_its_own_control_and_by_escape() {
     );
 }
 
-/// The clear control's mark is painted, not set in a face that lacks it.
+/// The clear control's mark is painted geometry, not a character.
 ///
-/// The mockup draws a `✕` and the bundled IBM Plex cuts are Latin subsets that
-/// do not hold one, so an authored character would have shipped as the
-/// layouter's replacement box while every test that reads announced controls
-/// went on passing. The first assertion is the trap itself, stated so a future
-/// reader cannot mistake the vector mark for decoration.
+/// The mockup draws a `✕`. The control paints [`WorkbenchIcon::Close`]
+/// instead, the crossing strokes every other dismissal in the workbench
+/// paints, so the mark matches them whichever face holds the character.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_filter_clear_mark_is_painted_because_the_bundled_faces_lack_the_glyph() {
+fn the_filter_clear_mark_paints_the_workbench_close_strokes() {
     let pixels = |canvas: &crate::ui::raster::Canvas| -> Vec<egui::Color32> {
         canvas
             .pixels_in(egui::Rect::from_min_size(
@@ -2034,12 +2032,6 @@ fn the_filter_clear_mark_is_painted_because_the_bundled_faces_lack_the_glyph() {
             .collect()
     };
     let tofu = pixels(&glyph_canvas(ShelfGlyph::Text("\u{2603}")));
-    assert_eq!(
-        pixels(&glyph_canvas(ShelfGlyph::Text("\u{2715}"))),
-        tofu,
-        "the mockup's ✕ is not in the bundled faces, which is why the control \
-         paints its own mark"
-    );
 
     let mark = crate::ui::raster::render(egui::vec2(24.0, 24.0), |ui, background| {
         egui::CentralPanel::default()
