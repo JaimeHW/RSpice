@@ -27,6 +27,7 @@ mod dialog;
 mod docbar;
 mod form;
 pub mod notice;
+mod ordered_chips;
 #[cfg(all(any(test, feature = "test-support"), not(target_arch = "wasm32")))]
 pub mod painted_runs;
 mod pane;
@@ -53,6 +54,7 @@ pub use form::name_control;
 pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, read_only_value, switch_row,
 };
+pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{
     PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
 };

@@ -209,6 +209,13 @@ fn render_close_project_review(
             format!("Stimulus definition {definition}: draft not applied (discarded on close)"),
         ));
     }
+    // Configuration edits are page state too, applied only by the page.
+    if let Some(configuration) = app.unapplied_configuration_edits() {
+        unsaved.push((
+            WorkbenchIcon::Sliders,
+            format!("Configuration {configuration}: edits not applied (discarded on close)"),
+        ));
+    }
     if app.model().simulation.execution.has_active_execution() {
         render_close_blocked_by_run(app, ctx, &unsaved);
     } else if documents.is_empty() && unsaved.is_empty() {

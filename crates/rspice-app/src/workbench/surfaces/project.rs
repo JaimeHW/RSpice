@@ -40,6 +40,10 @@ use technology::{open_technology_attachment_dialog, show_technology_attachment_d
 use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
 
 const PROJECT_TAB_HEIGHT: f32 = 24.0;
+/// The unsaved mark a tab or row carries, the document bar's dot, and the
+/// room it takes after the label.
+const DIRTY_MARK_SIZE: f32 = 6.0;
+const DIRTY_MARK_ADVANCE: f32 = 12.0;
 const WORKSPACE_TABLE_HEADER_HEIGHT: f32 = 37.0;
 
 /// Height of one ledger row.
@@ -153,16 +157,17 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ProjectPage::Overview => overview::overview(ui, app),
             ProjectPage::Library => library::library(ui, app),
             ProjectPage::Recovery => recovery(ui, app),
+            ProjectPage::Configuration => configuration::configuration(ui, app),
             page => {
                 ScrollArea::vertical()
                     .id_salt(("workbench.project.surface", page))
                     .auto_shrink([false, false])
                     .show(ui, |ui| match page {
-                        ProjectPage::Configuration => {
-                            configuration::configuration(ui, app);
-                        }
                         ProjectPage::Dependencies => dependencies::dependencies(ui, app),
-                        ProjectPage::Overview | ProjectPage::Library | ProjectPage::Recovery => {
+                        ProjectPage::Overview
+                        | ProjectPage::Library
+                        | ProjectPage::Configuration
+                        | ProjectPage::Recovery => {
                             unreachable!("page owns its scroll contract")
                         }
                     });
@@ -270,6 +275,13 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_1, FontWeight::Medium);
     let tab_ids = ProjectPage::ALL.map(|page| ui.id().with(("project-section-tab", page)));
+    // Edits to a configuration survive leaving its page, so its tab carries
+    // the unsaved mark a document tab does until they are applied.
+    let configuration_dirty = app
+        .state
+        .project
+        .configuration
+        .is_dirty(&app.state.model.workspace.content.configuration_sets);
     let shown = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (index, page) in ProjectPage::ALL.into_iter().enumerate() {
@@ -278,7 +290,10 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                 .layout_no_wrap(page.label().to_owned(), font.clone(), tokens.color.text)
                 .size()
                 .x;
-            let (_, rect) = ui.allocate_space(vec2(text_width + 20.0, PROJECT_TAB_HEIGHT));
+            let dirty = page == ProjectPage::Configuration && configuration_dirty;
+            let mark_width = if dirty { DIRTY_MARK_ADVANCE } else { 0.0 };
+            let (_, rect) =
+                ui.allocate_space(vec2(text_width + 20.0 + mark_width, PROJECT_TAB_HEIGHT));
             let response = ui.interact(rect, tab_ids[index], Sense::click());
             let selected = app.state.project.project_page == page;
             response.widget_info(|| {
@@ -293,12 +308,15 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                 node.set_role(egui::accesskit::Role::Tab);
                 node.set_label(page.label());
                 node.set_selected(selected);
+                if dirty {
+                    node.set_description("Unsaved changes.");
+                }
             });
             if response.hovered() {
                 ui.painter().rect_filled(rect, 0.0, tokens.color.bg_hover);
             }
             ui.painter().text(
-                rect.center(),
+                rect.center() - vec2(mark_width * 0.5, 0.0),
                 Align2::CENTER_CENTER,
                 page.label(),
                 font.clone(),
@@ -308,6 +326,17 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     tokens.color.text_dim
                 },
             );
+            if dirty {
+                // A live state, not a warning: the secondary text tone.
+                ui.painter().circle_filled(
+                    pos2(
+                        rect.center().x + text_width * 0.5 + DIRTY_MARK_ADVANCE * 0.5,
+                        rect.center().y,
+                    ),
+                    DIRTY_MARK_SIZE * 0.5,
+                    tokens.color.text_dim,
+                );
+            }
             if selected {
                 ui.painter().rect_filled(
                     Rect::from_min_max(

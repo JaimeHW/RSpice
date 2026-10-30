@@ -1019,11 +1019,16 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 }
 
 /// Whether closing the open project loses nothing: no unsaved document or
-/// model candidate, and no local run that would have to stop. A project never
-/// saved to a file always has something to lose.
+/// model candidate, no configuration edits left unapplied, and no local run
+/// that would have to stop. A project never saved to a file always has
+/// something to lose.
 fn closing_loses_nothing(state: &AppState) -> bool {
     !state.model.simulation.execution.has_active_execution()
         && !state.models.model_editor_has_unsaved_changes()
+        && !state
+            .project
+            .configuration
+            .is_dirty(&state.model.workspace.content.configuration_sets)
         && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
 }
 

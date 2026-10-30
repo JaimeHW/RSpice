@@ -6,7 +6,9 @@ use egui::{ScrollArea, Ui};
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::{WorkbenchIcon, section_header};
-use super::nav_row;
+use super::{nav_row, nav_row_response};
+use crate::ui::theme::{self, FontWeight};
+use crate::ui::tokens::{self, Tokens};
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
 
@@ -119,17 +121,57 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             .then(|| format!("{} / {total}", rows.len()))
             .as_deref(),
     );
+    let page = &app.state.project.configuration;
+    let edited = page
+        .is_dirty(catalog)
+        .then(|| page.draft().map(|draft| draft.id))
+        .flatten();
+    let mut picked = None;
     for (target, name, runs) in rows {
-        if nav_row(
-            ui,
-            WorkbenchIcon::Sliders,
-            &name,
-            selection == target,
-            runs.then_some("used for runs"),
-        ) {
-            app.state.project.configuration.select(target);
+        let meta = runs.then_some("used for runs");
+        let response =
+            nav_row_response(ui, WorkbenchIcon::Sliders, &name, selection == target, meta);
+        if edited.is_some_and(|id| target == ConfigurationSelection::Configuration(id)) {
+            unsaved_mark(ui, &response, meta);
+        }
+        if response.clicked() {
+            picked = Some(target);
         }
     }
+    if let Some(target) = picked {
+        app.state.project.configuration.request_selection(
+            &app.state.model.workspace.content.configuration_sets,
+            target,
+        );
+    }
+}
+
+/// The document bar's unsaved dot, set before a row's meta: the
+/// configuration has edits that are not applied.
+fn unsaved_mark(ui: &Ui, response: &egui::Response, meta: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let meta_width = meta.map_or(0.0, |meta| {
+        ui.painter()
+            .layout_no_wrap(
+                meta.to_owned(),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            )
+            .size()
+            .x
+            + 8.0
+    });
+    ui.painter().circle_filled(
+        egui::pos2(
+            response.rect.right() - 8.0 - meta_width - 3.0,
+            response.rect.center().y,
+        ),
+        3.0,
+        t.color.text_dim,
+    );
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_description("Unsaved changes.");
+    });
 }
 
 fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {

@@ -729,6 +729,13 @@ impl WorkbenchHost for RSpiceApp {
         self.state.design.stimulus_editor.dirty_definitions()
     }
 
+    fn unapplied_configuration_edits(&self) -> Option<String> {
+        self.state
+            .project
+            .configuration
+            .unapplied_edits(&self.state.model.workspace.content.configuration_sets)
+    }
+
     fn open_cell_view(&mut self, reference: CellViewRef) {
         self.state.open_workspace_view(reference);
     }

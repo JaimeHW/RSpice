@@ -72,6 +72,10 @@ pub trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     /// The stimulus definitions whose drafts are not applied, by name.
     fn unapplied_stimulus_drafts(&self) -> Vec<String>;
 
+    /// The configuration whose edits on the Configuration page are not
+    /// applied, by name.
+    fn unapplied_configuration_edits(&self) -> Option<String>;
+
     /// Open `reference` as the design's active view.
     fn open_cell_view(&mut self, reference: CellViewRef);
 
