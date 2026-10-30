@@ -19,3 +19,21 @@ mod specs;
 mod surface;
 mod viewer_capabilities;
 mod waveform_export;
+
+use crate::simulation::SimulationController;
+use crate::workbench::RSpiceApp;
+use crate::workbench::documents::result_document::ResultsParts;
+
+/// Lend `app`'s results parts, run controller and selected specification to
+/// `draw`, as the shell lends them to the results surface.
+fn with_surface_parts<R>(
+    app: &mut RSpiceApp,
+    draw: impl FnOnce(&mut ResultsParts<'_>, &mut SimulationController, Option<&str>) -> R,
+) -> R {
+    let selected_specification = app.state.simulate.selected_specification.clone();
+    draw(
+        &mut app.state.results_parts(),
+        &mut app.simulation_controller,
+        selected_specification.as_deref(),
+    )
+}

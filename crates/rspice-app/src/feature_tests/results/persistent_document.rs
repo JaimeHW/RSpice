@@ -194,18 +194,15 @@ fn a_latest_document_that_cannot_retarget_keeps_its_last_good_binding() {
     // The document still draws: the pane resolves, against the binding it
     // last had.
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let context = app
         .state
@@ -472,9 +469,21 @@ pub(crate) fn drive_frame(body: impl FnMut(&mut Ui)) {
 fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
+    });
+    let settled = app.state.model.simulation.view.data_version;
+
+    for frame in 0..4 {
+        drive_frame(|ui| {
+            super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
                 show(
                     ui,
                     state,
@@ -482,25 +491,7 @@ fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
                     selected_specification,
                     document_id,
                 )
-            },
-        )
-    });
-    let settled = app.state.model.simulation.view.data_version;
-
-    for frame in 0..4 {
-        drive_frame(|ui| {
-            crate::workbench::documents::result_document::with_surface_parts(
-                &mut app,
-                |state, run_controller, selected_specification| {
-                    show(
-                        ui,
-                        state,
-                        run_controller,
-                        selected_specification,
-                        document_id,
-                    )
-                },
-            )
+            })
         });
         assert_eq!(
             app.state.model.simulation.view.data_version, settled,
@@ -516,18 +507,15 @@ fn idle_frames_of_an_open_persistent_document_never_advance_the_data_version() {
 fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
         app.state.model.simulation.retained.runs[0].dataset_id,
@@ -544,18 +532,15 @@ fn idle_frames_of_an_open_persistent_document_hold_cursors_and_trace_selection()
 
     for frame in 0..3 {
         drive_frame(|ui| {
-            crate::workbench::documents::result_document::with_surface_parts(
-                &mut app,
-                |state, run_controller, selected_specification| {
-                    show(
-                        ui,
-                        state,
-                        run_controller,
-                        selected_specification,
-                        document_id,
-                    )
-                },
-            )
+            super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            })
         });
         assert!(
             app.state.results.results.session.selected_trace.is_some(),
@@ -753,18 +738,15 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
 
     for _ in 0..3 {
         drive_frame(|ui| {
-            crate::workbench::documents::result_document::with_surface_parts(
-                &mut app,
-                |state, run_controller, selected_specification| {
-                    show(
-                        ui,
-                        state,
-                        run_controller,
-                        selected_specification,
-                        document_id,
-                    )
-                },
-            )
+            super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            })
         });
     }
 
@@ -787,17 +769,14 @@ fn quick_markers_are_untouched_by_opening_and_leaving_a_persistent_document() {
     // Back on a quick surface the overlay is gone and the quick marker is
     // exactly what it was.
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                crate::workbench::documents::result_document::show_compact_split(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            crate::workbench::documents::result_document::show_compact_split(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+            )
+        })
     });
     assert!(
         app.state
@@ -1251,12 +1230,9 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     .expect("a second document commits");
 
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(ui, state, run_controller, selected_specification, first)
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(ui, state, run_controller, selected_specification, first)
+        })
     });
     let first_pane = app
         .state
@@ -1286,12 +1262,9 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         .session
         .select_persistent_document_pane(second, working_pane);
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(ui, state, run_controller, selected_specification, second)
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(ui, state, run_controller, selected_specification, second)
+        })
     });
     assert_eq!(
         app.state
@@ -1314,12 +1287,9 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
     // Coming back to each finds the reader where they were, rather than
     // wherever the other document last left one global selection.
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(ui, state, run_controller, selected_specification, first)
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(ui, state, run_controller, selected_specification, first)
+        })
     });
     assert_eq!(
         app.state
@@ -1330,12 +1300,9 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
         Some(first_pane)
     );
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(ui, state, run_controller, selected_specification, second)
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(ui, state, run_controller, selected_specification, second)
+        })
     });
     assert_eq!(
         app.state
@@ -1355,18 +1322,15 @@ fn pane_selection_belongs_to_the_document_it_was_made_in() {
 fn closing_and_reopening_a_document_holds_the_readers_place() {
     let (mut app, document_id) = persistent_transient_fixture();
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let pane = app
         .state
@@ -1398,17 +1362,14 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     // Close: the reader goes back to the dataset quick view, which leaves
     // the persistent projection behind.
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                crate::workbench::documents::result_document::show_compact_split(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            crate::workbench::documents::result_document::show_compact_split(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+            )
+        })
     });
     assert!(
         app.state
@@ -1422,18 +1383,15 @@ fn closing_and_reopening_a_document_holds_the_readers_place() {
     // Re-open, and hold it open.
     for frame in 0..3 {
         drive_frame(|ui| {
-            crate::workbench::documents::result_document::with_surface_parts(
-                &mut app,
-                |state, run_controller, selected_specification| {
-                    show(
-                        ui,
-                        state,
-                        run_controller,
-                        selected_specification,
-                        document_id,
-                    )
-                },
-            )
+            super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+                show(
+                    ui,
+                    state,
+                    run_controller,
+                    selected_specification,
+                    document_id,
+                )
+            })
         });
         assert!(
             app.state.results.results.session.selected_trace.is_some(),
@@ -1550,18 +1508,15 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
     let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
     reload(&mut app, document_id);
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")
@@ -1602,18 +1557,15 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
 fn linked_cursors_are_kept_by_the_document_and_move_together() {
     let (mut app, document_id) = transient_fixture_with_layout("two-linked-panes");
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")
@@ -1640,18 +1592,15 @@ fn linked_cursors_are_kept_by_the_document_and_move_together() {
 
     reload(&mut app, document_id);
     drive_frame(|ui| {
-        crate::workbench::documents::result_document::with_surface_parts(
-            &mut app,
-            |state, run_controller, selected_specification| {
-                show(
-                    ui,
-                    state,
-                    run_controller,
-                    selected_specification,
-                    document_id,
-                )
-            },
-        )
+        super::with_surface_parts(&mut app, |state, run_controller, selected_specification| {
+            show(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            )
+        })
     });
     let page = projection(app.state.results_reads(), document_id)
         .expect("document projection")

@@ -188,14 +188,13 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
-#[cfg(test)]
-use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::{
-    Model, PlatformState, runtime_command_platform, viewer_capabilities::AnalysisWorkspaceState,
-};
+use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 use crate::workbench::framework::command_registry::{Registry, ids};
 use crate::workbench::framework::ports::{CapturedViewport, ResultsPort};
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
+use rspice_app_services::workbench::slots::platform::PlatformState;
+use rspice_app_state::workbench::app_state::model::Model;
+use rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform;
 use rspice_results::family_projection::SourceSampleSelection;
 use rspice_results::result_presentation::{
     ResultArtifactPresentationKey, SourceWaveformPresentationKey,
@@ -1687,21 +1686,6 @@ fn hide_selected_trace(state: &mut ResultsParts<'_>) {
         waves::toggle_visibility(state, analysis_index, waveform_index);
         state.results.session.selected_trace = None;
     }
-}
-
-/// Lend `app`'s results parts, run controller and selected specification to
-/// `draw`, as the shell lends them to the results surface.
-#[cfg(test)]
-pub(crate) fn with_surface_parts<R>(
-    app: &mut RSpiceApp,
-    draw: impl FnOnce(&mut ResultsParts<'_>, &mut SimulationController, Option<&str>) -> R,
-) -> R {
-    let selected_specification = app.state.simulate.selected_specification.clone();
-    draw(
-        &mut app.state.results_parts(),
-        &mut app.simulation_controller,
-        selected_specification.as_deref(),
-    )
 }
 
 /// Render one project-owned result document selected by its stable identity.

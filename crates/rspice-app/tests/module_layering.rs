@@ -837,7 +837,7 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // Downward: a module that needs one slice of the session takes the whole
     // aggregate. Each of these retires by passing the slice — the schematic,
     // the workspace, the netlist session — instead of `&AppState`.
-    ("documents/result_document", "app_state", 3),
+    ("documents/result_document", "app_state", 1),
     // The results feature's test host holds the results slot whose parts its
     // tests run against, as the session does.
     ("documents/result_document", "slots", 1),
@@ -858,7 +858,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // burndown, not with a module move.
     ("documents/code_workspace", "app", 5),
     ("documents/model_editor", "app", 1),
-    ("documents/result_document", "app", 3),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),

@@ -446,7 +446,7 @@ fn show_with_pane_chrome(ui: &mut Ui, state: &mut ResultsParts<'_>, pane_chrome:
             let shortcut = state.model.preferences.shortcuts().resolved_label(
                 state.commands,
                 crate::workbench::framework::command_registry::ids::RUN_SIMULATION,
-                crate::workbench::app_state::runtime_command_platform(ui.ctx()),
+                rspice_app_workbench::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
             if shortcut.is_empty() {

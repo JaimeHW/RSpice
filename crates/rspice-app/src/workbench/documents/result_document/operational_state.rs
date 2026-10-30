@@ -12,10 +12,10 @@ use super::{AnalysisPresentationKey, ResultViewer, ResultsParts, ResultsReads, R
 use crate::state::{
     AnalysisResult, AnalysisResultSourceDomain, SimulationRun, SimulationRunLifecycle,
 };
-use crate::workbench::app_state::Model;
 #[cfg(test)]
 use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use crate::workbench::framework::requests::MarkFailureSites;
+use rspice_app_state::workbench::app_state::model::Model;
 
 /// Runtime boundaries that cannot be inferred from a retained result alone.
 ///
