@@ -56,6 +56,7 @@ impl Bsim4v8Device {
     pub fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
         self.op = self.periodic_op(solution)?;
         self.bias = self.raw_branch_voltages(solution);
+        self.last_update = None;
         Ok(())
     }
 

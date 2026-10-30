@@ -3974,3 +3974,121 @@ fn bsim4_off_keyword_selects_the_bistable_operating_point_branch() {
          m2 OFF ({m2_off_d1}, {m2_off_d2})"
     );
 }
+
+/// Forty BSIM4 4.7 devices of random CMOS logic with gate tunnelling
+/// (`igcmod=1`) through a 1.25 nm oxide and lumped gate resistors
+/// (`rgatemod=1`). The card is extreme on purpose: the gate currents put the
+/// undriven outputs g8 and g9 outside the rails, and the circuit has more than
+/// one operating point, so the Newton path decides which one is reported.
+const GATE_TUNNELLING_LOGIC_MODELS: &str = "\
+.model nmos nmos level=54 version=4.7 toxe=1.25n toxp=1n toxm=1.25n vth0=0.47 igcmod=1 rgatemod=1
+.model pmos pmos level=54 version=4.7 toxe=1.25n toxp=1n toxm=1.25n vth0=-0.49 igcmod=1 rgatemod=1
+Vdd vdd 0 1.0
+Vi0 i0 0 1.0
+Vi1 i1 0 0
+Vi2 i2 0 0
+Vi3 i3 0 1.0
+Vi4 i4 0 1.0
+Vi5 i5 0 1.0
+";
+
+const GATE_TUNNELLING_LOGIC_DEVICES: &str = "\
+MP0_0 g0 i1 vdd vdd pmos l=0.05u w=0.5u
+MN0_0 g0 i1 s0_0 0 nmos l=0.05u w=1.0u
+MP0_1 g0 i0 vdd vdd pmos l=0.05u w=1.0u
+MN0_1 s0_0 i0 s0_1 0 nmos l=0.05u w=1.5u
+MP0_2 g0 i3 vdd vdd pmos l=0.05u w=0.5u
+MN0_2 s0_1 i3 0 0 nmos l=0.05u w=1.5u
+MP1_0 g1 i2 vdd vdd pmos l=0.05u w=0.5u
+MN1_0 g1 i2 s1_0 0 nmos l=0.05u w=1.5u
+MP1_1 g1 i5 vdd vdd pmos l=0.05u w=0.5u
+MN1_1 s1_0 i5 s1_1 0 nmos l=0.05u w=1.0u
+MP1_2 g1 g0 vdd vdd pmos l=0.05u w=0.5u
+MN1_2 s1_1 g0 0 0 nmos l=0.05u w=0.5u
+MP2 g2 i0 vdd vdd pmos l=0.05u w=1.0u
+MN2 g2 i0 0 0 nmos l=0.05u w=1.5u
+MP3_0 g3 g0 vdd vdd pmos l=0.05u w=1.5u
+MN3_0 g3 g0 s3_0 0 nmos l=0.05u w=0.5u
+MP3_1 g3 i0 vdd vdd pmos l=0.05u w=1.0u
+MN3_1 s3_0 i0 0 0 nmos l=0.05u w=1.0u
+MP4_0 g4 i5 vdd vdd pmos l=0.05u w=1.5u
+MN4_0 g4 i5 s4_0 0 nmos l=0.05u w=0.5u
+MP4_1 g4 i3 vdd vdd pmos l=0.05u w=1.0u
+MN4_1 s4_0 i3 0 0 nmos l=0.05u w=1.0u
+MP5 g5 g0 vdd vdd pmos l=0.05u w=1.5u
+MN5 g5 g0 0 0 nmos l=0.05u w=1.5u
+MP6 g6 i2 vdd vdd pmos l=0.05u w=1.5u
+MN6 g6 i2 0 0 nmos l=0.05u w=1.5u
+MP7_0 s7_0 i2 vdd vdd pmos l=0.05u w=1.0u
+MN7_0 g7 i2 0 0 nmos l=0.05u w=1.5u
+MP7_1 g7 g6 s7_0 vdd pmos l=0.05u w=1.5u
+MN7_1 g7 g6 0 0 nmos l=0.05u w=1.5u
+MP8_0 g8 g4 vdd vdd pmos l=0.05u w=1.0u
+MN8_0 g8 g4 s8_0 0 nmos l=0.05u w=1.0u
+MP8_1 g8 g6 vdd vdd pmos l=0.05u w=1.5u
+MN8_1 s8_0 g6 s8_1 0 nmos l=0.05u w=1.0u
+MP8_2 g8 i5 vdd vdd pmos l=0.05u w=1.5u
+MN8_2 s8_1 i5 0 0 nmos l=0.05u w=1.0u
+MP9 g9 g4 vdd vdd pmos l=0.05u w=0.5u
+MN9 g9 g4 0 0 nmos l=0.05u w=1.5u
+";
+
+#[test]
+fn bsim4_gate_tunnelling_logic_reaches_the_ngspice_operating_point_by_plain_newton() {
+    // ngspice-46 reaches this point by plain Newton from its cold start, with
+    // no gmin or source stepping, in 41 iterations.
+    const NGSPICE: [(&str, f64); 19] = [
+        ("g0", 0.9997626359808542),
+        ("g1", 0.9999968690537483),
+        ("g2", 1.278329773190637e-05),
+        ("g3", 3.80763718272863e-05),
+        ("g4", 0.5384137491422423),
+        ("g5", 1.277562680626735e-05),
+        ("g6", 0.9999498324534339),
+        ("g7", 1.278170667291499e-05),
+        ("g8", 2.261351320101365),
+        ("g9", -1.571572324284901),
+        ("s0_0", 5.053473516063482e-05),
+        ("s0_1", 3.775254480109616e-05),
+        ("s1_0", 7.60233021581772e-05),
+        ("s1_1", 6.321783311807853e-05),
+        ("s3_0", 2.524477383260953e-05),
+        ("s4_0", 0.1011124607285793),
+        ("s7_0", 0.9999968888580614),
+        ("s8_0", 0.1259273853612325),
+        ("s8_1", 0.05998637264887152),
+    ];
+    // The element order fixes the matrix ordering, and with it the rounding
+    // of every Newton step; both orders must find the same point.
+    let reversed: String = GATE_TUNNELLING_LOGIC_DEVICES
+        .lines()
+        .rev()
+        .map(|line| format!("{line}\n"))
+        .collect();
+    for (order, devices) in [
+        ("as written", GATE_TUNNELLING_LOGIC_DEVICES),
+        ("reversed", reversed.as_str()),
+    ] {
+        let deck = format!(
+            "* random CMOS logic with gate tunnelling\n{GATE_TUNNELLING_LOGIC_MODELS}{devices}.op\n.end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("gate-tunnelling logic deck parses");
+        let mut config = SimulationConfig::default();
+        config.convergence_config.gmin_stepping = false;
+        config.convergence_config.source_stepping = false;
+        config.convergence_config.pseudo_transient = false;
+        config.convergence_config.arc_length = false;
+        let result = Engine::new_with_resolved_config(config)
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|error| panic!("{order}: plain Newton failed: {error}"));
+        for (node, expected) in NGSPICE {
+            let got = result
+                .try_voltage_named(node)
+                .unwrap_or_else(|| panic!("{order}: missing voltage for node {node}"));
+            assert!(
+                (got - expected).abs() <= 1.0e-6 * expected.abs() + 1.0e-9,
+                "{order}: V({node}) rspice={got} ngspice={expected}"
+            );
+        }
+    }
+}

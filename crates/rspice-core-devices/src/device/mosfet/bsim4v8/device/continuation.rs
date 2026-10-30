@@ -234,6 +234,7 @@ impl Bsim4v8Device {
         self.von_prev = self.op.von;
         self.has_history = true;
         self.limit_anchor_valid.set(true);
+        self.last_update = None;
         self.last_limited.set(false);
         self.initial_off_seed_pending = false;
         self.initial_off_seed_evaluations = 0;

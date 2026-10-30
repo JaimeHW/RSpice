@@ -86,6 +86,18 @@ struct Bsim4v8RdsBranch {
     gdtotb: Value,
 }
 
+/// One iterate's raw branch voltages with the state they are limited
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Bsim4v8LimitAnchor {
+    raw: Bsim4v8Bias,
+    raw_junction: Option<Bsim4v8JunctionBias>,
+    bias: Bsim4v8Bias,
+    junction_bias: Bsim4v8JunctionBias,
+    von: Value,
+    valid: bool,
+}
+
 /// One BSIM4 v4.8 instance wired into the engine.
 #[derive(Debug, Clone)]
 pub struct Bsim4v8Device {
@@ -135,6 +147,9 @@ pub struct Bsim4v8Device {
     /// The previous iterate exists, so the b4ld.c limiting sequence applies
     /// (the first iterate of an analysis phase passes through unlimited).
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// The raw voltages the last `update` limited and the state it limited
+    /// them against ([`Self::limit_anchor`]).
+    last_update: Option<Bsim4v8LimitAnchor>,
     /// `DEVpnjlim` flagged the body junction on the last update (ngspice
     /// bumps `CKTnoncon`, b4ld.c:4070-4072; here it vetoes device
     /// convergence for the iterate).
@@ -203,6 +218,7 @@ impl Bsim4v8Device {
             von_prev: 0.0,
             has_history: false,
             limit_anchor_valid: std::cell::Cell::new(false),
+            last_update: None,
             last_limited: std::cell::Cell::new(false),
             initial_off,
             initial_off_seed_pending: true,
@@ -358,10 +374,11 @@ impl Bsim4v8Device {
         }
         let raw = self.raw_branch_voltages(v);
         let raw_junction = self.raw_junction_bias(v);
-        if !self.limit_anchor_valid.get() {
+        let anchor = self.limit_anchor(raw, raw_junction);
+        if !anchor.valid {
             return (raw, raw_junction, false);
         }
-        let (limited, mut check) = self.core.limit_voltages(raw, self.bias, self.von_prev);
+        let (limited, mut check) = self.core.limit_voltages(raw, anchor.bias, anchor.von);
         let Some(raw_junction) = raw_junction else {
             return (limited, None, check);
         };
@@ -371,14 +388,14 @@ impl Bsim4v8Device {
         let junction = if limited.vds >= 0.0 {
             let vdbs = pnjlim(
                 raw_junction.vbd + raw.vds,
-                self.junction_bias.vbd + self.bias.vds,
+                anchor.junction_bias.vbd + anchor.bias.vds,
                 common::CONST_VT0,
                 self.core.model_temp.vcrit,
                 &mut check1,
             );
             let vsbs = pnjlim(
                 raw_junction.vbs,
-                self.junction_bias.vbs,
+                anchor.junction_bias.vbs,
                 common::CONST_VT0,
                 self.core.model_temp.vcrit,
                 &mut check2,
@@ -390,14 +407,14 @@ impl Bsim4v8Device {
         } else {
             let vdbd = pnjlim(
                 raw_junction.vbd,
-                self.junction_bias.vbd,
+                anchor.junction_bias.vbd,
                 common::CONST_VT0,
                 self.core.model_temp.vcrit,
                 &mut check1,
             );
             let vsbd = pnjlim(
                 raw_junction.vbs - raw.vds,
-                self.junction_bias.vbs - self.bias.vds,
+                anchor.junction_bias.vbs - anchor.bias.vds,
                 common::CONST_VT0,
                 self.core.model_temp.vcrit,
                 &mut check2,
@@ -409,6 +426,31 @@ impl Bsim4v8Device {
         };
         check = check1 || check2;
         (limited, Some(junction), check)
+    }
+
+    /// The state an iterate is limited against: b4ld.c's `CKTstate0`, the
+    /// bias of the previous iterate. The engine updates and stamps one
+    /// iterate more than once, and each pass overwrites `bias`; limiting the
+    /// same raw voltages again against the bias the first pass stored would
+    /// compound the `DEVfetlim`/`DEVlimvds`/`DEVpnjlim` steps. So an iterate
+    /// the last `update` already saw is limited against what that update
+    /// limited it against, and any other against the present state.
+    fn limit_anchor(
+        &self,
+        raw: Bsim4v8Bias,
+        raw_junction: Option<Bsim4v8JunctionBias>,
+    ) -> Bsim4v8LimitAnchor {
+        match self.last_update {
+            Some(anchor) if anchor.raw == raw && anchor.raw_junction == raw_junction => anchor,
+            _ => Bsim4v8LimitAnchor {
+                raw,
+                raw_junction,
+                bias: self.bias,
+                junction_bias: self.junction_bias,
+                von: self.von_prev,
+                valid: self.limit_anchor_valid.get(),
+            },
+        }
     }
 
     /// DC operating point at an already-limited bias. The only error paths
@@ -2001,11 +2043,19 @@ impl NonlinearDevice for Bsim4v8Device {
             let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
             if moved || self.initial_off_seed_evaluations >= 2 {
                 self.initial_off_seed_pending = false;
+                // The startup bias is the state the first Newton iterate is
+                // limited against, as b4ld.c limits against the zeroed
+                // CKTstate0, whatever an earlier pass anchored.
+                self.last_update = None;
             } else {
                 self.initial_off_seed_evaluations += 1;
                 self.initial_off_seed_raw = Some(raw);
             }
         }
+        self.last_update = Some(self.limit_anchor(
+            self.raw_branch_voltages(voltages),
+            self.raw_junction_bias(voltages),
+        ));
         let (bias, junction_bias, check) = self.limited_branch_voltages(voltages);
         self.last_limited.set(check);
         self.bias = bias;
@@ -2180,5 +2230,55 @@ mod tests {
         assert!((gcrgs - 1.2).abs() < 1e-14);
         assert!((gcrgb - 2.8).abs() < 1e-14);
         assert!((ceqgcrg + 2.64).abs() < 1e-14);
+    }
+
+    #[test]
+    fn an_iterate_updated_twice_is_limited_once() {
+        use crate::device::mosfet::bsim4v8::{Bsim4v8Geometry, Bsim4v8Model};
+        let model = std::sync::Arc::new(Bsim4v8Model::from_params(
+            &std::collections::HashMap::new(),
+            false,
+            300.15,
+        ));
+        let geometry = Bsim4v8Geometry {
+            l: 0.1e-6,
+            w: 1.0e-6,
+            nf: 1.0,
+            ..Bsim4v8Geometry::default()
+        };
+        let core = Bsim4v8::new("m1".to_string(), model, geometry, 300.15).expect("BSIM4 instance");
+        // Drain on node 1, gate on node 2, source and body grounded.
+        let mut device = Bsim4v8Device::new(
+            "m1".to_string(),
+            1,
+            1,
+            2,
+            2,
+            2,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            0,
+            1.0,
+            core,
+        );
+        device.update(&[0.0, 0.0]);
+        let (anchor, von) = (device.bias, device.op.von);
+
+        // A 4 V gate step out of cutoff, which DEVfetlim holds near threshold.
+        let iterate = [0.05, 4.0];
+        let raw = device.raw_branch_voltages(&iterate);
+        let (once, _) = device.core.limit_voltages(raw, anchor, von);
+        assert!(once.vgs < 2.0, "the step is limited: {once:?}");
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes and the stamp see one limiting.
+        device.update(&iterate);
+        device.update(&iterate);
+        assert_eq!(device.bias, once);
+        assert_eq!(device.limited_branch_voltages(&iterate).0, once);
     }
 }
