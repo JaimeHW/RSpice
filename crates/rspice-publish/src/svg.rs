@@ -24,8 +24,11 @@ use crate::escape_html;
 /// whichever face of the vendor's name a reader has installed.
 pub(crate) const PUBLISHED_MONO_FAMILY: &str = "RSpice Plex Mono";
 
-/// The family every figure stack ends in: RSpice Symbols, which the page
-/// ships for the engineering symbols no Plex face carries.
+/// The family every figure stack names right after its Plex face, or first
+/// where it has none: RSpice Symbols, which the page ships for the
+/// engineering symbols no Plex face carries. Ahead of the system faces, a
+/// symbol letters as the product paints and prints it, not as whichever
+/// installed face also has it.
 pub(crate) const PUBLISHED_SYMBOLS_FAMILY: &str = "RSpice Symbols";
 
 /// Full turn in the contract's millidegree unit.
@@ -245,7 +248,7 @@ fn text_markup(text: &TextPrimitive) -> String {
     presentation.text_paint(text.paint);
     let presentation = presentation.markup();
     let mono = format!(
-        " font-family=\"'{PUBLISHED_MONO_FAMILY}', Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace, '{PUBLISHED_SYMBOLS_FAMILY}'\""
+        " font-family=\"'{PUBLISHED_MONO_FAMILY}', '{PUBLISHED_SYMBOLS_FAMILY}', Consolas, 'Cascadia Code', 'DejaVu Sans Mono', monospace\""
     );
     let font = match text.font {
         TextFont::Sans => String::new(),
@@ -313,7 +316,7 @@ pub fn scene_svg(scene: &Scene, accessible_title: &str) -> String {
     let width_mm = fmt_f64(scene.width_um as f64 / 1000.0);
     let height_mm = fmt_f64(scene.height_um as f64 / 1000.0);
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'Segoe UI', system-ui, sans-serif, '{PUBLISHED_SYMBOLS_FAMILY}'\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'{PUBLISHED_SYMBOLS_FAMILY}', 'Segoe UI', system-ui, sans-serif\">",
         fmt_um(scene.width_um as i64),
         fmt_um(scene.height_um as i64),
         escape_html(accessible_title),

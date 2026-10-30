@@ -110,11 +110,30 @@ fn a_figure_bundle_ships_the_faces_its_stylesheet_declares() {
     );
 }
 
-/// Every font stack on the page, chrome and figures alike, ends in RSpice
-/// Symbols, so a symbol no earlier face carries letters from the face the
-/// product prints it in rather than as a missing glyph.
+/// Asserts that `stack` names RSpice Symbols once, right after its Plex face,
+/// or first where it names none.
+fn assert_symbols_follow_plex(stack: &str) {
+    let families: Vec<&str> = stack.split(',').collect();
+    let symbols: Vec<usize> = families
+        .iter()
+        .enumerate()
+        .filter(|(_, family)| family.contains("RSpice Symbols"))
+        .map(|(index, _)| index)
+        .collect();
+    let plex = families.iter().position(|family| family.contains("Plex"));
+    assert_eq!(
+        symbols,
+        [plex.map_or(0, |plex| plex + 1)],
+        "{stack} does not name RSpice Symbols right after its Plex face, or first"
+    );
+}
+
+/// Every font stack on the page, chrome and figures alike, names RSpice
+/// Symbols right after its Plex face, or first where it has none, so a symbol
+/// Plex lacks letters from the face the product paints and prints it in,
+/// ahead of whichever installed face also carries it.
 #[test]
-fn every_font_stack_ends_in_rspice_symbols() {
+fn every_font_stack_names_rspice_symbols_after_its_plex_face() {
     let bundle =
         render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
     let styles = utf8(&bundle["assets/page.css"]).replace("\r\n", "\n");
@@ -138,23 +157,26 @@ fn every_font_stack_ends_in_rspice_symbols() {
                 continue;
             }
             stacks += 1;
-            assert!(
-                value.trim_end().ends_with(", \"RSpice Symbols\""),
-                "{declaration} does not end in RSpice Symbols"
-            );
+            assert_symbols_follow_plex(value);
         }
     }
     assert!(stacks >= 10, "only {stacks} font stacks were found");
 
     let html = utf8(&bundle["index.html"]);
-    assert!(
-        html.contains("monospace, 'RSpice Symbols'\""),
-        "a figure's monospace stack ends in RSpice Symbols"
-    );
-    assert!(
-        html.contains("sans-serif, 'RSpice Symbols'\""),
-        "a figure's sans stack ends in RSpice Symbols"
-    );
+    let figure_stacks: Vec<&str> = html
+        .split("font-family=\"")
+        .skip(1)
+        .map(|rest| rest.split_once('"').expect("a closed attribute").0)
+        .collect();
+    for kind in ["monospace", "sans-serif"] {
+        assert!(
+            figure_stacks.iter().any(|stack| stack.contains(kind)),
+            "no figure names a {kind} stack"
+        );
+    }
+    for stack in figure_stacks {
+        assert_symbols_follow_plex(stack);
+    }
 
     // The face is fetched only for the characters it carries.
     let (_, range) = styles
