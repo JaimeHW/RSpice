@@ -6,6 +6,7 @@
 mod glyph_fallback;
 mod legend;
 mod plot_overlay;
+mod printer_margin;
 mod provenance;
 mod schematic_labels;
 mod sheet_frame;

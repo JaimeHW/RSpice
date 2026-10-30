@@ -26,6 +26,7 @@ use sha2::{Digest as _, Sha256};
 use crate::product::ContentDigest;
 use rspice_hardcopy::render::RenderedHardcopyPublication;
 use rspice_hardcopy::render::RenderedPrinterPages;
+use rspice_hardcopy::render::{PrinterMarginShortfall, printer_margin_shortfall};
 use rspice_hardcopy_contract::{
     CancellationPhase, DuplexMode, HardcopyFailureCode, HardcopyOutcome, HardcopyPlan,
     OutputFormat, PaperSize, PrinterJobSettings, PrinterMediaSource, PrinterRasterGeometry,
@@ -614,8 +615,8 @@ pub enum HardcopyPrintError {
     MixedAuthoredMediaUnsupported,
     #[error("selected printer paper '{0}' is invalid or unavailable")]
     UnsupportedPaperIdentity(String),
-    #[error("planned printable ink lies outside the selected driver printable rectangle")]
-    PlannedInkOutsidePrintableArea,
+    #[error("{0}")]
+    InkInPrinterMargin(PrinterMarginShortfall),
     #[error("printer does not support the planned media source: {0}")]
     UnsupportedMediaSource(String),
     #[error("printer does not support the planned {0} DPI resolution")]
@@ -708,7 +709,7 @@ impl HardcopyPrintError {
             | Self::UnsupportedPaper
             | Self::MixedAuthoredMediaUnsupported
             | Self::UnsupportedPaperIdentity(_)
-            | Self::PlannedInkOutsidePrintableArea
+            | Self::InkInPrinterMargin(_)
             | Self::UnsupportedMediaSource(_)
             | Self::UnsupportedResolution(_)
             | Self::UnsupportedDuplex(_)
@@ -800,7 +801,6 @@ fn resolve_job_settings(
     {
         return Err(HardcopyPrintError::UnsupportedPaper);
     }
-    validate_planned_printable_area(plan, job.raster_geometry())?;
     if !capabilities.resolutions.iter().any(|resolution| {
         resolution.horizontal_dpi == job.resolution_dpi()
             && resolution.vertical_dpi == job.resolution_dpi()
@@ -892,53 +892,14 @@ fn validate_printer_publication(
                 index + 1
             )));
         }
-    }
-    Ok(())
-}
-
-fn validate_planned_printable_area(
-    plan: &HardcopyPlan,
-    raster: PrinterRasterGeometry,
-) -> Result<(), HardcopyPrintError> {
-    let geometry = plan.pagination().geometry();
-    let (physical_width, physical_height) = geometry.physical_size();
-    let (raster_width, raster_height) = raster.physical_size_px();
-    let planned = geometry.printable_rect();
-    let scale_floor = |position_um: u64, physical_um: u64, pixels: u32| -> u32 {
-        ((u128::from(position_um) * u128::from(pixels)) / u128::from(physical_um)) as u32
-    };
-    let scale_ceil = |position_um: u64, physical_um: u64, pixels: u32| -> u32 {
-        (u128::from(position_um) * u128::from(pixels)).div_ceil(u128::from(physical_um)) as u32
-    };
-    let planned_left = scale_floor(
-        planned.x.micrometres(),
-        physical_width.micrometres(),
-        raster_width,
-    );
-    let planned_top = scale_floor(
-        planned.y.micrometres(),
-        physical_height.micrometres(),
-        raster_height,
-    );
-    let planned_right = scale_ceil(
-        planned.x.micrometres() + planned.width.micrometres(),
-        physical_width.micrometres(),
-        raster_width,
-    );
-    let planned_bottom = scale_ceil(
-        planned.y.micrometres() + planned.height.micrometres(),
-        physical_height.micrometres(),
-        raster_height,
-    );
-    let (device_x, device_y, device_width, device_height) = raster.printable_rect_px();
-    let device_right = device_x + device_width;
-    let device_bottom = device_y + device_height;
-    if planned_left < device_x
-        || planned_top < device_y
-        || planned_right > device_right
-        || planned_bottom > device_bottom
-    {
-        return Err(HardcopyPrintError::PlannedInkOutsidePrintableArea);
+        if let Some(shortfall) = printer_margin_shortfall(
+            page.ink(),
+            (page.width(), page.height()),
+            job.raster_geometry.printable_rect_px(),
+            job.resolution_dpi,
+        ) {
+            return Err(HardcopyPrintError::InkInPrinterMargin(shortfall));
+        }
     }
     Ok(())
 }
@@ -2186,19 +2147,51 @@ mod tests {
         );
     }
 
+    /// The driver prints nothing outside its printable rectangle, so the
+    /// spool refuses pages whose ink reaches past it and says by how much.
+    /// The planned margin does not decide it: the same pages print on a
+    /// rectangle that stops exactly at their ink.
     #[test]
+    #[cfg(not(target_arch = "wasm32"))]
     fn device_printable_rectangle_must_contain_all_planned_ink() {
         let capabilities =
             PrinterCapabilitySnapshot::try_from_descriptor(capability_descriptor()).unwrap();
-        let full = raster_geometry(600);
-        let (width, height) = full.physical_size_px();
-        let clipped =
-            PrinterRasterGeometry::try_new(width, height, 300, 300, width - 600, height - 600)
-                .unwrap();
-        let plan = native_plan_for_exact_mode(&capabilities, "1", clipped, 600);
-        assert_eq!(
-            resolve_native_printer_job(&plan, &capabilities),
-            Err(HardcopyPrintError::PlannedInkOutsidePrintableArea)
+        let unbanded = native_plan_for_exact_mode(&capabilities, "1", raster_geometry(72), 72);
+        let setup = unbanded.setup();
+        let banded = HardcopySetup::try_new_with_schematic(
+            setup.physical_page().clone(),
+            setup.scale(),
+            setup.tiling(),
+            setup.render().clone(),
+            DecorationSetup::try_new(false, false, true, Watermark::None).unwrap(),
+            setup.schematic(),
+            setup.print_mapping().clone(),
+        )
+        .unwrap();
+        let plan = HardcopyPlan::compile(source(), banded, unbanded.content_extent()).unwrap();
+        let pages = rendered_pages(&plan, 72);
+        let ink = pages.pages()[0].ink().expect("the provenance band is ink");
+        let mut job = resolve_native_printer_job(&plan, &capabilities).unwrap();
+        let (width, height) = job.raster_geometry.physical_size_px();
+        let reaching = |left: u32| {
+            PrinterRasterGeometry::try_new(width, height, left, 0, width - left, height).unwrap()
+        };
+        job.raster_geometry = reaching(ink.left);
+        assert_eq!(validate_printer_publication(&plan, &pages, &job), Ok(()));
+
+        job.raster_geometry = reaching(ink.left + 1);
+        let refusal = validate_printer_publication(&plan, &pages, &job).unwrap_err();
+        let HardcopyPrintError::InkInPrinterMargin(shortfall) = refusal else {
+            panic!("ink in the unprintable margin was not refused for it: {refusal}");
+        };
+        let micrometres = |pixels: u32| (u64::from(pixels) * 25_400).div_ceil(72);
+        assert_eq!(shortfall.margin_um(), micrometres(ink.left + 1));
+        assert_eq!(shortfall.ink_um(), micrometres(ink.left));
+        assert!(
+            refusal
+                .to_string()
+                .starts_with("The printer can't print within"),
+            "{refusal}"
         );
     }
 

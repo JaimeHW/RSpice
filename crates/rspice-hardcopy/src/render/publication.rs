@@ -16,12 +16,16 @@
 
 mod legend;
 mod pdf;
+mod printer_margin;
 mod provenance;
 mod raster;
 mod svg;
 
 use legend::*;
 use pdf::*;
+#[cfg(not(target_arch = "wasm32"))]
+use printer_margin::opaque_page_ink;
+pub use printer_margin::{InkBounds, PrinterMarginShortfall, printer_margin_shortfall};
 use provenance::*;
 /// The dialog asks the publisher what it can afford rather than predicting it,
 /// so this crosses the module boundary the glob import above does not.
@@ -434,11 +438,19 @@ pub struct PrinterRasterPage {
     height: u32,
     dpi: u16,
     rgba: Vec<u8>,
+    ink: Option<InkBounds>,
     digest: ContentDigest,
 }
 
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
 impl PrinterRasterPage {
+    /// Where the page's ink lies, measured on these pixels; `None` for a
+    /// page with no ink at all.
+    #[must_use]
+    pub const fn ink(&self) -> Option<InkBounds> {
+        self.ink
+    }
+
     #[must_use]
     pub const fn page_number(&self) -> u32 {
         self.page_number
@@ -1058,8 +1070,8 @@ pub enum HardcopyRenderError {
     #[error("printer render DPI differs from the immutable native job resolution")]
     PrinterRasterDpiMismatch,
     #[cfg(not(target_arch = "wasm32"))]
-    #[error("planned printable area lies outside the sealed native driver printable geometry")]
-    PrinterPrintableGeometryMismatch,
+    #[error("{0}")]
+    InkInPrinterMargin(PrinterMarginShortfall),
     #[cfg(not(target_arch = "wasm32"))]
     #[error("the selected native printer job cannot mix portrait and landscape page geometry")]
     PrinterMixedPageGeometryUnsupported,
@@ -1491,12 +1503,7 @@ impl HardcopyRenderer {
             return Err(HardcopyRenderError::PrinterMixedPageGeometryUnsupported);
         }
         let (raster_width, raster_height) = job.raster_geometry().physical_size_px();
-        validate_driver_printable_geometry(
-            first_page,
-            raster_width,
-            raster_height,
-            job.raster_geometry().printable_rect_px(),
-        )?;
+        let paper = background_color(plan).ok_or(HardcopyRenderError::TransparentPrinterPage)?;
         let per_page_pixels = u64::from(raster_width)
             .checked_mul(u64::from(raster_height))
             .ok_or(HardcopyRenderError::RasterDimensionOverflow)?;
@@ -1532,8 +1539,16 @@ impl HardcopyRenderer {
                 raster_width,
                 raster_height,
             )?;
-            if raster.rgba.chunks_exact(4).any(|pixel| pixel[3] != u8::MAX) {
-                return Err(HardcopyRenderError::TransparentPrinterPage);
+            // The driver prints only inside its printable rectangle, so a page
+            // is refused when its ink, not its planned margin, reaches past it.
+            let ink = opaque_page_ink(&raster.rgba, raster.width, paper)?;
+            if let Some(shortfall) = printer_margin_shortfall(
+                ink,
+                (raster.width, raster.height),
+                job.raster_geometry().printable_rect_px(),
+                device_dpi,
+            ) {
+                return Err(HardcopyRenderError::InkInPrinterMargin(shortfall));
             }
             let digest = ContentDigest::from_bytes(Sha256::digest(&raster.rgba).into());
             publication_digest.update(page.number().to_le_bytes());
@@ -1547,6 +1562,7 @@ impl HardcopyRenderer {
                 height: raster.height,
                 dpi: device_dpi,
                 rgba: raster.rgba,
+                ink,
                 digest,
             });
         }
@@ -1555,75 +1571,6 @@ impl HardcopyRenderer {
             digest: ContentDigest::from_bytes(publication_digest.finalize().into()),
         })
     }
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn validate_driver_printable_geometry(
-    page: &PreviewPage,
-    raster_width: u32,
-    raster_height: u32,
-    driver_printable: (u32, u32, u32, u32),
-) -> Result<(), HardcopyRenderError> {
-    let geometry = page.geometry();
-    let printable = geometry.printable_rect();
-    let (physical_width, physical_height) = geometry.physical_size();
-    let map_floor =
-        |position: u64, pixels: u32, physical: u64| -> Result<u64, HardcopyRenderError> {
-            u64::try_from(
-                u128::from(position)
-                    .checked_mul(u128::from(pixels))
-                    .ok_or(HardcopyRenderError::RasterDimensionOverflow)?
-                    / u128::from(physical),
-            )
-            .map_err(|_| HardcopyRenderError::RasterDimensionOverflow)
-        };
-    let map_ceil =
-        |position: u64, pixels: u32, physical: u64| -> Result<u64, HardcopyRenderError> {
-            u64::try_from(
-                u128::from(position)
-                    .checked_mul(u128::from(pixels))
-                    .ok_or(HardcopyRenderError::RasterDimensionOverflow)?
-                    .div_ceil(u128::from(physical)),
-            )
-            .map_err(|_| HardcopyRenderError::RasterDimensionOverflow)
-        };
-    let right_um = printable
-        .x
-        .micrometres()
-        .checked_add(printable.width.micrometres())
-        .ok_or(HardcopyRenderError::PrinterPrintableGeometryMismatch)?;
-    let bottom_um = printable
-        .y
-        .micrometres()
-        .checked_add(printable.height.micrometres())
-        .ok_or(HardcopyRenderError::PrinterPrintableGeometryMismatch)?;
-    let planned_left = map_floor(
-        printable.x.micrometres(),
-        raster_width,
-        physical_width.micrometres(),
-    )?;
-    let planned_top = map_floor(
-        printable.y.micrometres(),
-        raster_height,
-        physical_height.micrometres(),
-    )?;
-    let planned_right = map_ceil(right_um, raster_width, physical_width.micrometres())?;
-    let planned_bottom = map_ceil(bottom_um, raster_height, physical_height.micrometres())?;
-    let (driver_x, driver_y, driver_width, driver_height) = driver_printable;
-    let driver_right = u64::from(driver_x)
-        .checked_add(u64::from(driver_width))
-        .ok_or(HardcopyRenderError::PrinterPrintableGeometryMismatch)?;
-    let driver_bottom = u64::from(driver_y)
-        .checked_add(u64::from(driver_height))
-        .ok_or(HardcopyRenderError::PrinterPrintableGeometryMismatch)?;
-    if planned_left < u64::from(driver_x)
-        || planned_top < u64::from(driver_y)
-        || planned_right > driver_right
-        || planned_bottom > driver_bottom
-    {
-        return Err(HardcopyRenderError::PrinterPrintableGeometryMismatch);
-    }
-    Ok(())
 }
 
 fn render_browser_print_html(
