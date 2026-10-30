@@ -219,7 +219,7 @@ fn decode(value: Value, strict: bool) -> Result<PersonalSettings, String> {
         &mut unread,
         |raw| {
             serde_json::from_value::<u8>(raw)
-                .map(crate::workbench::lifecycle::session::normalize_autosave_minutes)
+                .map(crate::services::session::normalize_autosave_minutes)
                 .map_err(|error| error.to_string())
         },
     )?

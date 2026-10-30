@@ -5,14 +5,5 @@
 //! module holds only what more than one of them reads: the autosave interval
 //! Preferences offers, and the symbol editor's tool vocabulary.
 
+pub(crate) use crate::services::session::normalize_autosave_minutes;
 pub use rspice_schematic_editor::symbol_editor::session::{SymbolGridSpacing, SymbolTool};
-
-/// Map any stored interval onto the 2, 5 and 10 minutes Preferences offers.
-pub(crate) fn normalize_autosave_minutes(minutes: u8) -> u8 {
-    match minutes {
-        2 | 5 | 10 => minutes,
-        0..=3 => 2,
-        4..=7 => 5,
-        _ => 10,
-    }
-}

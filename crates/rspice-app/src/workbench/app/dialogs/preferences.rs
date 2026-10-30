@@ -6,6 +6,8 @@ pub(crate) mod shortcut_portability_dialogs;
 pub(crate) mod shortcut_preferences;
 pub(crate) mod workspace_layout_manager;
 
+pub use crate::services::session::normalize_autosave_minutes;
+
 use egui::{Context, Id};
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -684,14 +686,5 @@ pub fn close_preferences(state: &mut PreferencesDialogs<'_>) {
         .replace_route(fallback, RouteTransitionSource::User)
     {
         state.prompt(format!("Could not close Preferences: {error}"));
-    }
-}
-
-pub fn normalize_autosave_minutes(minutes: u8) -> u8 {
-    match minutes {
-        2 | 5 | 10 => minutes,
-        0..=3 => 2,
-        4..=7 => 5,
-        _ => 10,
     }
 }

@@ -17,3 +17,13 @@ pub enum SessionKept {
 
 /// The autosave interval a session starts with when nothing chose one.
 pub const DEFAULT_AUTOSAVE_MINUTES: u8 = 5;
+
+/// Map any stored interval onto the 2, 5 and 10 minutes Preferences offers.
+pub fn normalize_autosave_minutes(minutes: u8) -> u8 {
+    match minutes {
+        2 | 5 | 10 => minutes,
+        0..=3 => 2,
+        4..=7 => 5,
+        _ => 10,
+    }
+}
