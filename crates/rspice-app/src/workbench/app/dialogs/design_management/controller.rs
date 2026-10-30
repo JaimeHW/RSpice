@@ -229,6 +229,8 @@ impl RSpiceApp {
                 crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
                     &mut self.state,
                 );
+                self.state.project.configuration.tab =
+                    crate::workbench::project::configuration_state::ConfigurationTab::Instances;
             }
         }
     }
