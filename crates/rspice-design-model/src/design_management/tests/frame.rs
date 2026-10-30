@@ -406,14 +406,15 @@ fn arch_sheets_are_zoned_in_equal_zones_of_one_to_five_and_a_half_inches() {
             );
         }
     }
-    // ARCH D's 36 in edge takes ANSI D's eight zones; its 24 in edge, too
-    // long for ANSI C's four, takes five.
+    // ARCH D's 36 in edge takes ANSI D's eight zones. Its 24 in edge is too
+    // long for ANSI C's four; five would fit, but an odd count sets the
+    // centring arrow across the middle zone's letter, so it takes six.
     let arch_d = sheet(
         DrawingSheetStandard::ArchD,
         SchematicPageOrientation::Landscape,
     );
     let zones = arch_d.geometry().unwrap().zones.unwrap();
-    assert_eq!((zones.columns, zones.rows), (8, 5));
+    assert_eq!((zones.columns, zones.rows), (8, 6));
 
     assert_eq!(
         DrawingSheetStandard::ArchE1.portrait_dimensions_um(),
@@ -424,6 +425,65 @@ fn arch_sheets_are_zoned_in_equal_zones_of_one_to_five_and_a_half_inches() {
         serde_json::to_value(DrawingSheetStandard::ArchE1).unwrap(),
         serde_json::json!("arch-e1")
     );
+}
+
+/// ASME Y14.1 5.7.1 sets a centring arrow at the middle of each edge, and
+/// every count in Table 4-1 is even, so that middle is a zone boundary. An
+/// ARCH sheet's edges take even counts too, so no arrow lands on a letter.
+#[test]
+fn no_arch_centring_arrow_lands_on_a_zone_letter() {
+    for standard in DrawingSheetStandard::ALL
+        .into_iter()
+        .filter(|standard| standard.series() == DrawingSheetStandardSeries::Architectural)
+    {
+        for orientation in [
+            SchematicPageOrientation::Landscape,
+            SchematicPageOrientation::Portrait,
+        ] {
+            let arrowed = sheet(standard, orientation)
+                .try_update(|draft| draft.marks.centring = true)
+                .unwrap();
+            let geometry = arrowed.geometry().unwrap();
+            let zones = geometry.zones.unwrap();
+            assert!(
+                zones.columns.is_multiple_of(2) && zones.rows.is_multiple_of(2),
+                "{standard:?} {orientation:?}: {} × {} zones",
+                zones.columns,
+                zones.rows
+            );
+            let artwork = arrowed.frame_artwork(&geometry);
+            let arrows = artwork
+                .layer(DrawingSheetFrameLayer::CentringMarks)
+                .filter_map(|mark| match mark {
+                    DrawingSheetFrameMark::FilledPolygon { points } => Some((
+                        points.iter().map(|point| point.0).min().unwrap(),
+                        points.iter().map(|point| point.0).max().unwrap(),
+                        points.iter().map(|point| point.1).min().unwrap(),
+                        points.iter().map(|point| point.1).max().unwrap(),
+                    )),
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(arrows.len(), 4, "{standard:?} {orientation:?}");
+            for ((x, y), text, lettering_um) in texts(&artwork, DrawingSheetFrameLayer::ZoneLabels)
+            {
+                // A generous box: a full lettering height each side, and as
+                // wide each side as the label has letters.
+                let half_height = lettering_um as i64;
+                let half_width = half_height * text.chars().count() as i64;
+                for &(left, right, top, bottom) in &arrows {
+                    assert!(
+                        x + half_width < left
+                            || x - half_width > right
+                            || y + half_height < top
+                            || y - half_height > bottom,
+                        "{standard:?} {orientation:?}: zone {text} at ({x}, {y}) \
+                         lies under the arrow spanning ({left}, {top})..({right}, {bottom})"
+                    );
+                }
+            }
+        }
+    }
 }
 
 #[test]

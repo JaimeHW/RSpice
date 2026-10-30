@@ -92,6 +92,12 @@ pub fn drawing_sheet_iso_5457_field_count(edge_um: u64) -> u8 {
 /// An ANSI edge takes its Table 4-1 count. Any other edge, an ARCH sheet's or
 /// a custom one's, takes the count of the ANSI edge closest to it and then
 /// the nearest count that keeps every zone inside Note (1)'s 1 to 5.50 in.
+///
+/// That count is then made even, as every count in Table 4-1 is, so the
+/// centring arrow 5.7.1 sets at the middle of each edge falls on a zone
+/// boundary rather than across a zone's letter. An odd count goes up by one
+/// where the zones stay at least 1 in long, and otherwise down by one; an
+/// edge too short for two zones keeps its one.
 #[must_use]
 pub fn drawing_sheet_asme_zone_count(edge_um: u64) -> u8 {
     let (_, closest) = ASME_Y14_1_TABLE_4_1
@@ -103,6 +109,13 @@ pub fn drawing_sheet_asme_zone_count(edge_um: u64) -> u8 {
         count = edge_um.div_ceil(DRAWING_SHEET_ASME_MAX_ZONE_UM);
     } else if edge_um < count * DRAWING_SHEET_ASME_MIN_ZONE_UM {
         count = (edge_um / DRAWING_SHEET_ASME_MIN_ZONE_UM).max(1);
+    }
+    if !count.is_multiple_of(2) {
+        if edge_um >= (count + 1) * DRAWING_SHEET_ASME_MIN_ZONE_UM {
+            count += 1;
+        } else if count > 1 && edge_um <= (count - 1) * DRAWING_SHEET_ASME_MAX_ZONE_UM {
+            count -= 1;
+        }
     }
     u8::try_from(count).unwrap_or(u8::MAX)
 }
