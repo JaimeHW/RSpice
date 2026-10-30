@@ -1212,10 +1212,12 @@ pub fn property_row_input_with_hint(
     invalid: bool,
 ) -> Response {
     let hint_shown = hint_shows(value, hint);
+    let mut resting = resting_layout(ui, invalid);
     property_row_text_edit_in(
         ui,
         label,
         hinted_edit(value, hint),
+        Some(&mut resting),
         invalid,
         None,
         hint_shown,
@@ -1232,10 +1234,12 @@ pub fn property_row_input_with_hint_labelled(
     label_width: f32,
 ) -> Response {
     let hint_shown = hint_shows(value, hint);
+    let mut resting = resting_layout(ui, invalid);
     property_row_text_edit_in(
         ui,
         label,
         hinted_edit(value, hint),
+        Some(&mut resting),
         invalid,
         Some(label_width),
         hint_shown,
@@ -1289,21 +1293,58 @@ pub fn property_row_text_edit(
     edit: egui::TextEdit<'_>,
     invalid: bool,
 ) -> Response {
-    property_row_text_edit_in(ui, label, edit, invalid, None, false)
+    property_row_text_edit_in(ui, label, edit, None, invalid, None, false)
 }
 
-fn property_row_text_edit_in(
+/// How a resting field lays its value out: on one line, cut to the field
+/// with an ellipsis ending what is cut, in the field's own face and ink.
+type RestingLayout<'t> =
+    &'t mut dyn FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley>;
+
+/// The [`RestingLayout`] of a field painted in value ink, or in the error
+/// tone where its text is `invalid`.
+fn resting_layout(
+    ui: &Ui,
+    invalid: bool,
+) -> impl FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley> + use<> {
+    let t = Tokens::get(ui.ctx());
+    let ink = if invalid { t.color.err } else { t.color.text };
+    let font = egui::TextStyle::Monospace.resolve(ui.style());
+    move |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+        let mut job = egui::text::LayoutJob::single_section(
+            text.as_str().to_owned(),
+            egui::TextFormat::simple(font.clone(), ink),
+        );
+        job.wrap = egui::text::TextWrapping::truncate_at_width(wrap_width);
+        ui.fonts_mut(|fonts| fonts.layout_job(job))
+    }
+}
+
+fn property_row_text_edit_in<'t>(
     ui: &mut Ui,
     label: &str,
-    edit: egui::TextEdit<'_>,
+    edit: egui::TextEdit<'t>,
+    resting: Option<RestingLayout<'t>>,
     invalid: bool,
     label_width: Option<f32>,
     hint_shown: bool,
 ) -> Response {
     let t = Tokens::get(ui.ctx());
-    let (slot, _) = row_slot(ui, label_width, Sense::hover());
+    let (slot, row) = row_slot(ui, label_width, Sense::hover());
     row_label(ui, slot.label, label);
     let value_rect = slot.field();
+    let ink = if invalid { t.color.err } else { t.color.text };
+    // A value longer than its field ends in an ellipsis while the field
+    // rests, so a cut reads as a cut, as it does on a read-only row. Being
+    // edited, it is laid out whole: the caret and the selection index its
+    // characters, and the field scrolls to them. The row remembers which
+    // editor is its field, so whether that editor holds the focus is read
+    // before it is shown, and read without side effects: a response read
+    // ahead would surrender a focus the press of that pass took elsewhere.
+    let editing = resting.is_some()
+        && ui
+            .data_mut(|data| data.get_temp::<egui::Id>(row.id))
+            .is_some_and(|field| ui.memory(|memory| memory.has_focus(field)));
     let mut edit = edit
         .font(egui::TextStyle::Monospace)
         .margin(hinted_field_margin(
@@ -1313,11 +1354,15 @@ fn property_row_text_edit_in(
             hint_shown,
         ))
         .desired_width(value_rect.width())
-        .text_color(t.color.text);
-    if invalid {
-        edit = edit.text_color(t.color.err);
+        .text_color(ink);
+    let rests = resting.is_some();
+    if let Some(resting) = resting.filter(|_| !editing) {
+        edit = edit.layouter(resting);
     }
     let response = show_property_field(ui, value_rect, edit);
+    if rests {
+        ui.data_mut(|data| data.insert_temp(row.id, response.id));
+    }
     slot.close(ui);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);

@@ -1194,3 +1194,56 @@ fn a_chosen_value_reads_in_value_ink() {
     assert_eq!(ink(&painted("ISO A4")), value);
     assert_eq!(ink(&painted("Bias network")), value);
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+/// A typed value longer than its field ends in an ellipsis while the field
+/// rests, inside the field, as a read-only value does. Being edited it is
+/// laid out whole, so the caret indexes the text as typed.
+#[test]
+fn a_cut_typed_value_ends_in_an_ellipsis_until_it_is_edited() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let long = "Laboratory test panel for the bias network".to_owned();
+    let mut typed = long.clone();
+    let pass = |typed: &mut String| {
+        let mut field = None;
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(240.0, 200.0))),
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default()
+                    .frame(egui::Frame::NONE)
+                    .show(ctx, |ui| {
+                        field = Some(property_row_input(ui, "Size name", typed, false));
+                    });
+            },
+        );
+        let field = field.expect("the row was shown");
+        let shown = output
+            .shapes
+            .iter()
+            .find_map(|clipped| {
+                painted_text(&clipped.shape, &long).map(|text| (text, clipped.clip_rect))
+            })
+            .expect("the value was painted");
+        (field, shown)
+    };
+    let (field, (resting, clip)) = pass(&mut typed);
+    assert!(
+        resting.galley.elided,
+        "a resting cut value ends in an ellipsis"
+    );
+    let painted_right = resting.pos.x + resting.galley.size().x;
+    assert!(
+        painted_right <= clip.right() + 0.5 && painted_right <= field.rect.right(),
+        "the ellipsis is inside the field: {painted_right} against {clip:?}"
+    );
+    assert_eq!(ink(&resting), Tokens::default().color.text);
+
+    ctx.memory_mut(|memory| memory.request_focus(field.id));
+    let (_, (editing, _)) = pass(&mut typed);
+    assert!(!editing.galley.elided, "an edited value is laid out whole");
+    assert_eq!(typed, long, "the value itself is never cut");
+}
