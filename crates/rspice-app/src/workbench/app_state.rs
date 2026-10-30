@@ -22,7 +22,7 @@ mod full_screen;
 pub(in crate::workbench) mod interaction_state;
 #[cfg(test)]
 mod modal_gate_tests;
-pub(in crate::workbench) use rspice_app_state::workbench::app_state::model;
+pub(crate) use rspice_app_state::workbench::app_state::model;
 mod model_access;
 pub(crate) use rspice_app_workbench::workbench::app_state::problems_view;
 mod run_access;

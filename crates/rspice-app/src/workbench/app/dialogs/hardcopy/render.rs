@@ -5,7 +5,7 @@
 //! one semantic source and one immutable pagination plan.
 
 mod bodies;
-mod content_options;
+pub(crate) mod content_options;
 mod labels;
 mod preview;
 
@@ -38,14 +38,10 @@ use rspice_hardcopy_contract::{
 #[cfg(target_os = "windows")]
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource};
 
-#[cfg(test)]
-use super::hardcopy_parts;
 use super::{
     BlockedSetup, DEFAULT_RASTER_DPI, HardcopyDialogPage, HardcopyDialogState, HardcopyParts,
     HardcopyRegion, HardcopySection, HardcopyWorkflow, PaperDraft, publish,
 };
-#[cfg(test)]
-use crate::workbench::app::RSpiceApp;
 
 #[derive(Clone)]
 struct PreviewTexture {
@@ -117,7 +113,7 @@ thread_local! {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
-enum BodyAction {
+pub enum BodyAction {
     None,
     PrinterProperties,
     CustomPaper,
@@ -162,7 +158,7 @@ struct RenderingInputs {
 
 /// Draw the hardcopy dialog for this frame over its `parts`. It runs every
 /// frame, open or not: closed, it lets go of the work the dialog started.
-pub(crate) fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
+pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
     publish::register_repaint_context(ctx);
     if !parts.dialog.open {
         publish::cancel_source_resolution();
@@ -714,7 +710,7 @@ const STUDIO_STACK_WIDTH: f32 = 980.0;
 /// either, so the surface shows one of them at a time. Nothing below this width
 /// can carry a form and a page desk at once, and a surface that answers that by
 /// scrolling is the failure this studio exists to remove.
-const STUDIO_SPLIT_WIDTH: f32 = 730.0;
+pub const STUDIO_SPLIT_WIDTH: f32 = 730.0;
 const PANEL_INSET_X: i8 = 18;
 const PANEL_INSET_Y: i8 = 16;
 /// Height of one row of the preview's estimate strip. The strip's total height
@@ -1010,7 +1006,7 @@ fn section_entry_name(section: HardcopySection, blocked: bool) -> String {
 
 /// The width a marked entry gives up from its summary: the glyph, and the
 /// gutter that keeps it off the text.
-const PROBLEM_MARKER_TRACK: f32 = 22.0;
+pub const PROBLEM_MARKER_TRACK: f32 = 22.0;
 /// The rail entry's own horizontal inset, which the mark shares so it lines up
 /// with the column of text above and below it.
 const PROBLEM_MARKER_INSET: f32 = 12.0;
@@ -1201,7 +1197,7 @@ const fn orientation_word(orientation: Orientation) -> &'static str {
 
 /// The target in one phrase. A raster format is nothing without its
 /// resolution, so it never appears without one.
-fn output_summary(format: OutputFormat) -> String {
+pub fn output_summary(format: OutputFormat) -> String {
     format.raster_dpi().map_or_else(
         || format_label(format).to_owned(),
         |dpi| {
@@ -1220,7 +1216,11 @@ fn output_summary(format: OutputFormat) -> String {
 /// The editor column. `height` fills the studio's assigned track; `None` sizes
 /// to the section's own content, which is what the stacked layout needs — a
 /// fixed track there would strand the preview a screen below the form.
-fn editor_column(ui: &mut Ui, draft: &mut HardcopyDialogState, height: Option<f32>) -> BodyAction {
+pub fn editor_column(
+    ui: &mut Ui,
+    draft: &mut HardcopyDialogState,
+    height: Option<f32>,
+) -> BodyAction {
     let t = Tokens::get(ui.ctx());
     let mut action = BodyAction::None;
     Frame::NONE.fill(t.color.bg_app).show(ui, |ui| {
@@ -1586,7 +1586,7 @@ const PREVIEW_MIN: f32 = 330.0;
 const PAIRED_TRACK_MINIMUM: f32 = 430.0;
 /// The measure a stacked form is authored to: one full-width field per row,
 /// wide enough that nothing in a section wraps of its own accord.
-const EDITOR_STACKED_MEASURE: f32 = 430.0;
+pub const EDITOR_STACKED_MEASURE: f32 = 430.0;
 /// The measure a paired form needs: the two-up track plus the panel's insets.
 const EDITOR_PAIRED_MEASURE: f32 = 2.0 * PANEL_INSET_X as f32 + PAIRED_TRACK_MINIMUM;
 /// The column height a stacked form needs before it is worth trading width for

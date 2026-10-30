@@ -8,16 +8,15 @@ use super::*;
 
 use crate::product::{DatasetBinding, DatasetId, ResultDocumentId, VerificationEvidenceId};
 use crate::results::report_document::{
-    DataTableBlock, EvidenceBlock, PlotFigureBlock, ReportEdit, ReportEntityRef,
-    ReportFigureSourceLocator, ReportReferenceFigureArtifact, ReportReferenceInventoryEntry,
-    ReportReferenceSnapshot, ReportSourceId, TableCell, TableColumn,
+    EvidenceBlock, PlotFigureBlock, ReportEdit, ReportEntityRef, ReportFigureSourceLocator,
+    ReportReferenceFigureArtifact, ReportReferenceInventoryEntry, ReportReferenceSnapshot,
+    ReportSourceId,
 };
 use crate::results::visualization_document::{
     AnnotationAnchor, AxisOrientation, AxisScale, ColumnRole, DocumentEdit, EntityRef, NewAxis,
     NewTrace, PlotMarkerKind, PlotMarkerScope, SourceColumn, SourceDataset, SourceRow, TypedValue,
     ValueType, VisualizationDocument,
 };
-use crate::state::{SheetDefinition, SheetPortPolicy, SheetTemplate, SimulationRunLifecycle};
 
 fn identity(key: &str) -> HardcopySourceIdentity {
     HardcopySourceIdentity::try_new(
@@ -147,15 +146,6 @@ fn schematic_digest_ignores_viewport_state_but_changes_with_authored_content() {
         first.authority().content_digest(),
         third.authority().content_digest()
     );
-}
-
-fn sheet_definition(name: &str) -> SheetDefinition {
-    SheetDefinition {
-        name: name.to_owned(),
-        template: SheetTemplate::AnalogSchematic,
-        port_policy: SheetPortPolicy::TypedOffSheetPorts,
-        explicit_page_number: None,
-    }
 }
 
 #[test]
@@ -355,115 +345,6 @@ fn report_source_uses_authenticated_current_revision_snapshot() {
 }
 
 #[test]
-fn linked_report_table_requires_exact_source_and_dataset_inventory() {
-    let mut app = AppState::default();
-    let mut run = SimulationRun::new(1);
-    run.lifecycle = SimulationRunLifecycle::Completed;
-    let dataset_id = run.dataset_id;
-    let dataset_digest = run.dataset_content_digest();
-    app.model.simulation.retained.runs.push(run);
-    let binding = DatasetBinding::new(dataset_id, dataset_digest);
-    let snapshot = ReportReferenceSnapshot::new(
-        ReportSourceId::Dataset { dataset_id },
-        None,
-        dataset_digest,
-        vec![binding],
-    )
-    .unwrap();
-    let report = report_with_block(ReportBlockKind::DataTable(DataTableBlock {
-        title: "Exact samples".to_owned(),
-        columns: vec![TableColumn {
-            key: "value".to_owned(),
-            heading: "Value".to_owned(),
-            unit: Some("V".to_owned()),
-        }],
-        rows: vec![vec![TableCell::Number {
-            value: 1.25,
-            unit: Some("V".to_owned()),
-        }]],
-        reference: ReportReferenceMode::Linked {
-            snapshot: snapshot.clone(),
-        },
-    }));
-    assert!(matches!(
-        resolve_report_source(ReportHardcopySource {
-            source_key: "report".to_owned(),
-            document: &report,
-            reference_inventory: None,
-            scope: HardcopyScope::CompleteReport,
-        }),
-        Err(HardcopySourceError::ReportReferenceInventoryRequired)
-    ));
-
-    // Application resolution derives an exact inventory from retained source
-    // owners. It never substitutes a most-recent or background run.
-    let report_id = report.id();
-    app.model
-        .workspace
-        .content
-        .report_documents
-        .push(report.clone());
-    app.hardcopy.report_authoring.selected_document = Some(report_id);
-    let app_resolved = report_inventory::resolve(
-        SourceReads::of(&app),
-        &report,
-        HardcopyScope::CompleteReport,
-    )
-    .expect("the retained dataset must authenticate the linked report table");
-    let HardcopySemanticDocument::Report(app_semantic) = app_resolved.semantic_document() else {
-        panic!("expected semantic report")
-    };
-    assert_eq!(app_semantic.authenticated_references.len(), 1);
-
-    let missing_dataset = ReportReferenceInventory {
-        sources: vec![
-            ReportReferenceInventoryEntry::new(
-                snapshot.source.clone(),
-                snapshot.source_revision,
-                snapshot.content_digest,
-                snapshot.dataset_bindings.clone(),
-            )
-            .unwrap(),
-        ],
-        available_datasets: Vec::new(),
-        figure_artifacts: Vec::new(),
-    };
-    assert!(matches!(
-        resolve_report_source(ReportHardcopySource {
-            source_key: "report".to_owned(),
-            document: &report,
-            reference_inventory: Some(&missing_dataset),
-            scope: HardcopyScope::CompleteReport,
-        }),
-        Err(HardcopySourceError::UnauthenticatedReportReference {
-            currentness: ReportReferenceCurrentness::DatasetMissing,
-            ..
-        })
-    ));
-
-    let exact_inventory = ReportReferenceInventory {
-        sources: missing_dataset.sources.clone(),
-        available_datasets: vec![binding],
-        figure_artifacts: Vec::new(),
-    };
-    let resolved = resolve_report_source(ReportHardcopySource {
-        source_key: "report".to_owned(),
-        document: &report,
-        reference_inventory: Some(&exact_inventory),
-        scope: HardcopyScope::CompleteReport,
-    })
-    .unwrap();
-    let HardcopySemanticDocument::Report(semantic) = resolved.semantic_document() else {
-        panic!("expected semantic report")
-    };
-    assert_eq!(semantic.authenticated_references.len(), 1);
-    assert!(matches!(
-        semantic.pages[0].sections()[0].blocks()[0].kind(),
-        ReportBlockKind::DataTable(_)
-    ));
-}
-
-#[test]
 fn frozen_report_evidence_is_self_contained_and_remains_typed() {
     let digest = ContentDigest::from_bytes([0x44; 32]);
     let snapshot = ReportReferenceSnapshot::new(
@@ -503,164 +384,6 @@ fn frozen_report_evidence_is_self_contained_and_remains_typed() {
     };
     assert_eq!(evidence.summary, "All retained checks passed.");
     assert_eq!(semantic.authenticated_references.len(), 1);
-}
-
-#[test]
-fn retained_linked_report_figure_resolves_identically_in_process_and_worker_snapshot() {
-    let binding = DatasetBinding::new(DatasetId::new(), ContentDigest::from_bytes([0x6b; 32]));
-    let dataset = SourceDataset::new(
-        binding,
-        vec![
-            SourceColumn::new(
-                "time",
-                "Time",
-                ValueType::Real,
-                ColumnRole::Coordinate,
-                Some("s".to_owned()),
-            )
-            .unwrap(),
-            SourceColumn::new(
-                "out",
-                "V(out)",
-                ValueType::Real,
-                ColumnRole::Signal,
-                Some("V".to_owned()),
-            )
-            .unwrap(),
-        ],
-        vec![
-            SourceRow::new(vec![TypedValue::Real(0.0), TypedValue::Real(-0.25)]),
-            SourceRow::new(vec![TypedValue::Real(1.0), TypedValue::Real(0.75)]),
-        ],
-    )
-    .unwrap();
-    let mut visualization = VisualizationDocument::new("Retained waveform", vec![dataset]).unwrap();
-    let page_id = visualization.pages()[0].id;
-    let pane_id = visualization.panes()[0].id;
-    let axes = visualization
-        .transact(
-            visualization.revision(),
-            vec![
-                DocumentEdit::AddAxis(NewAxis {
-                    pane_id,
-                    label: "Time".to_owned(),
-                    orientation: AxisOrientation::Horizontal,
-                    scale: AxisScale::Linear,
-                    unit: Some("s".to_owned()),
-                    range: None,
-                }),
-                DocumentEdit::AddAxis(NewAxis {
-                    pane_id,
-                    label: "Voltage".to_owned(),
-                    orientation: AxisOrientation::VerticalLeft,
-                    scale: AxisScale::Linear,
-                    unit: Some("V".to_owned()),
-                    range: None,
-                }),
-            ],
-        )
-        .unwrap();
-    let x_axis = match axes.created[0] {
-        EntityRef::Axis(id) => id,
-        _ => unreachable!(),
-    };
-    let y_axis = match axes.created[1] {
-        EntityRef::Axis(id) => id,
-        _ => unreachable!(),
-    };
-    visualization
-        .transact(
-            visualization.revision(),
-            vec![DocumentEdit::AddTrace(NewTrace {
-                pane_id,
-                binding,
-                signal_key: "out".to_owned(),
-                coordinate_key: "time".to_owned(),
-                row_predicates: Vec::new(),
-                x_axis_id: x_axis,
-                y_axis_id: y_axis,
-                label: "V(out)".to_owned(),
-            })],
-        )
-        .unwrap();
-    let snapshot = ReportReferenceSnapshot::new(
-        ReportSourceId::VisualizationDocument {
-            document_id: visualization.id(),
-        },
-        Some(visualization.revision()),
-        visualization.content_digest().unwrap(),
-        vec![binding],
-    )
-    .unwrap();
-    let mut report = report_with_block(ReportBlockKind::PlotFigure(PlotFigureBlock {
-        caption: "Retained waveform".to_owned(),
-        alternative_text: "Voltage versus time".to_owned(),
-        sizing: FigureSizing::FitWidth,
-        source_locator: Some(ReportFigureSourceLocator {
-            page_id: page_id.get(),
-            pane_id: pane_id.get(),
-        }),
-        reference: ReportReferenceMode::Linked {
-            snapshot: snapshot.clone(),
-        },
-    }));
-    let section_id = report.pages()[0].sections()[0].id();
-    report
-        .transact(
-            report.revision(),
-            vec![ReportEdit::AddBlock {
-                section_id,
-                kind: ReportBlockKind::PlotFigure(PlotFigureBlock {
-                    caption: "Frozen follow-up".to_owned(),
-                    alternative_text: "A frozen figure after the linked figure.".to_owned(),
-                    sizing: FigureSizing::Natural,
-                    source_locator: None,
-                    reference: ReportReferenceMode::Frozen {
-                        snapshot,
-                        artifact: FrozenReportArtifact::new("image/png", opaque_rgb8_png(128, 128))
-                            .unwrap(),
-                    },
-                }),
-            }],
-            95,
-        )
-        .unwrap();
-
-    let mut state = AppState::default();
-    let report_id = report.id();
-    let project = &mut state.model.workspace.content;
-    project.visualization_documents.push(visualization);
-    project.report_documents.push(report);
-    state.hardcopy.report_authoring.selected_document = Some(report_id);
-    let project_id = project.project.id().as_uuid();
-    let source_key = format!("project:{project_id}:report:{report_id}");
-
-    let synchronous =
-        resolve_retained_hardcopy_source(&state, &source_key, HardcopyScope::CompleteReport)
-            .unwrap();
-    let HardcopySemanticDocument::Report(semantic) = synchronous.semantic_document() else {
-        panic!("expected semantic report")
-    };
-    assert_eq!(semantic.figures.len(), 2);
-    assert_eq!(semantic.figures[0].caption, "Retained waveform");
-    assert_eq!(semantic.figures[1].caption, "Frozen follow-up");
-    assert_eq!(semantic.figures[0].media_type, "image/png");
-    assert!(
-        semantic.figures[0]
-            .payload
-            .starts_with(b"\x89PNG\r\n\x1a\n")
-    );
-
-    let prepared = prepare_retained_hardcopy_resolution(
-        SourceReads::of(&state),
-        &source_key,
-        HardcopyScope::CompleteReport,
-    )
-    .unwrap();
-    let worker_bytes = prepared.into_worker_snapshot_json().unwrap();
-    let restored =
-        PreparedRetainedHardcopyResolution::from_worker_snapshot_json(&worker_bytes).unwrap();
-    assert_eq!(restored.resolve_owned().unwrap(), synchronous);
 }
 
 #[test]
@@ -954,8 +677,6 @@ fn retained_plot_scene_maps_to_platform_independent_integer_geometry() {
         "the publication digest also binds the resolved physical semantics"
     );
 }
-
-mod app_resolution;
 
 #[test]
 fn linear_axes_are_captioned_on_both_dimensions_and_keep_offset_anchors() {

@@ -16,11 +16,11 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-struct PendingPageSetup {
-    opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
-    setup: rspice_hardcopy_contract::HardcopySetup,
-    staged_mapping: StagedPrintMappingPersistence,
-    schematic_authority: Option<super::SchematicPageSetupAuthority>,
+pub struct PendingPageSetup {
+    pub opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
+    pub setup: rspice_hardcopy_contract::HardcopySetup,
+    pub staged_mapping: StagedPrintMappingPersistence,
+    pub schematic_authority: Option<super::SchematicPageSetupAuthority>,
 }
 
 pub(super) fn register_repaint_context(context: &egui::Context) {
@@ -46,8 +46,6 @@ use crate::workbench::hardcopy_adapters::sources::ResolvedHardcopyDocument;
 use crate::workbench::workflows::export_workflow::{
     ObservedExportDestination, SaveDialogConfig, export_completion_message,
 };
-#[cfg(test)]
-use rspice_hardcopy::render::HardcopyRenderer;
 #[cfg(target_arch = "wasm32")]
 use rspice_hardcopy::render::RenderedHardcopyPublication;
 use rspice_hardcopy::render::{HardcopyPublicationTimestamp, HardcopySceneMetadata};
@@ -144,14 +142,14 @@ enum BrowserPublicationDestination {
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
-    static PUBLICATION: std::cell::RefCell<Option<ActiveNativePublication>> =
+    pub static PUBLICATION: std::cell::RefCell<Option<ActiveNativePublication>> =
         const { std::cell::RefCell::new(None) };
-    static FINALIZATION: std::cell::RefCell<Option<ActiveNativeFinalization>> =
+    pub static FINALIZATION: std::cell::RefCell<Option<ActiveNativeFinalization>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct ActiveNativePublication {
+pub struct ActiveNativePublication {
     ticket: super::execution::ExecutionTicket,
     plan: std::sync::Arc<HardcopyPlan>,
     staged_mapping: StagedPrintMappingPersistence,
@@ -159,7 +157,7 @@ struct ActiveNativePublication {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct ActiveNativeFinalization {
+pub struct ActiveNativeFinalization {
     ticket: super::finalize::FinalizationTicket,
     plan: std::sync::Arc<HardcopyPlan>,
     source_digest: ContentDigest,
@@ -169,22 +167,22 @@ struct ActiveNativeFinalization {
 
 #[cfg(not(target_arch = "wasm32"))]
 thread_local! {
-    static PENDING_PUBLICATION: std::cell::RefCell<Option<PendingNativePublication>> =
+    pub static PENDING_PUBLICATION: std::cell::RefCell<Option<PendingNativePublication>> =
         const { std::cell::RefCell::new(None) };
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-struct PendingNativePublication {
-    plan: std::sync::Arc<HardcopyPlan>,
-    opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
-    metadata: HardcopySceneMetadata,
-    staged_mapping: StagedPrintMappingPersistence,
-    operation: super::execution::ExecutionOperation,
-    destination: NativePublicationDestination,
+pub struct PendingNativePublication {
+    pub plan: std::sync::Arc<HardcopyPlan>,
+    pub opened_source: std::sync::Arc<ResolvedHardcopyDocument>,
+    pub metadata: HardcopySceneMetadata,
+    pub staged_mapping: StagedPrintMappingPersistence,
+    pub operation: super::execution::ExecutionOperation,
+    pub destination: NativePublicationDestination,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-enum NativePublicationDestination {
+pub enum NativePublicationDestination {
     Print {
         printer_id: String,
         capabilities_digest: ContentDigest,
@@ -633,7 +631,7 @@ pub(super) fn cancel_source_resolution() {
     });
 }
 
-fn apply_open_resolved(
+pub fn apply_open_resolved(
     parts: &mut HardcopyParts<'_>,
     workflow: HardcopyWorkflow,
     resolved: ResolvedHardcopyDocument,
@@ -785,7 +783,7 @@ fn active_schematic_page_authority(
     })
 }
 
-fn validate_schematic_page_authority(
+pub fn validate_schematic_page_authority(
     model: &crate::workbench::app_state::Model,
     authority: &super::SchematicPageSetupAuthority,
 ) -> Result<(), String> {
@@ -858,7 +856,7 @@ fn authored_sheet_format(
     ))
 }
 
-fn setup_seeded_from_sheet_format(
+pub fn setup_seeded_from_sheet_format(
     format: crate::state::SchematicSheetFormat,
 ) -> Result<rspice_hardcopy_contract::HardcopySetup, String> {
     use crate::state::{SchematicPageOrientation, SchematicPageSize, SchematicSheetSize};
@@ -1402,7 +1400,7 @@ enum PublicationCompletion {
     Pending,
 }
 
-enum StagedPrintMappingPersistence {
+pub enum StagedPrintMappingPersistence {
     Document,
     Project {
         catalog: rspice_hardcopy_contract::PrintMappingPresetCatalog,
@@ -1411,7 +1409,7 @@ enum StagedPrintMappingPersistence {
     Personal(rspice_hardcopy_contract::PrintMappingPresetCatalog),
 }
 
-fn stage_print_mapping_persistence(
+pub fn stage_print_mapping_persistence(
     parts: &HardcopyParts<'_>,
     mapping: &rspice_hardcopy_contract::PrintMappingTable,
 ) -> Result<StagedPrintMappingPersistence, String> {
@@ -1447,7 +1445,7 @@ fn stage_print_mapping_persistence(
     }
 }
 
-fn commit_print_mapping_persistence(
+pub fn commit_print_mapping_persistence(
     parts: &mut HardcopyParts<'_>,
     staged: StagedPrintMappingPersistence,
 ) -> Result<(), String> {
@@ -1466,7 +1464,7 @@ fn commit_print_mapping_persistence(
     }
 }
 
-fn current_plan(
+pub fn current_plan(
     parts: &HardcopyParts<'_>,
     source: &ResolvedHardcopyDocument,
 ) -> Result<std::sync::Arc<HardcopyPlan>, String> {
@@ -1511,7 +1509,7 @@ fn current_plan(
     Ok(preview_plan.clone())
 }
 
-fn current_metadata(parts: &HardcopyParts<'_>) -> Result<HardcopySceneMetadata, String> {
+pub fn current_metadata(parts: &HardcopyParts<'_>) -> Result<HardcopySceneMetadata, String> {
     parts
         .dialog
         .metadata
@@ -1548,7 +1546,7 @@ fn begin_publication_authentication(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn begin_publication_authentication(
+pub fn begin_publication_authentication(
     parts: &mut HardcopyParts<'_>,
     pending: PendingNativePublication,
 ) -> Result<(), String> {
@@ -1702,7 +1700,7 @@ fn finish_page_setup_authentication(
     commit_authenticated_page_setup(parts, source, pending)
 }
 
-fn commit_authenticated_page_setup(
+pub fn commit_authenticated_page_setup(
     parts: &mut HardcopyParts<'_>,
     source: ResolvedHardcopyDocument,
     pending: PendingPageSetup,
@@ -2081,7 +2079,10 @@ fn poll_native_finalization(parts: &mut HardcopyParts<'_>) -> bool {
 /// would, so a write that failed after the reader closed it is reported, the
 /// way a failed export is; one the reader cancelled by closing is not.
 #[cfg(not(target_arch = "wasm32"))]
-fn conclude_native_finalization(parts: &mut HardcopyParts<'_>, completion: Result<String, String>) {
+pub fn conclude_native_finalization(
+    parts: &mut HardcopyParts<'_>,
+    completion: Result<String, String>,
+) {
     parts.dialog.busy = false;
     match completion {
         Ok(message) => {
@@ -2195,7 +2196,7 @@ fn export_bytes_and_identity(
     ))
 }
 
-fn format_file_contract(
+pub fn format_file_contract(
     format: OutputFormat,
 ) -> Result<(&'static str, &'static str, &'static str), String> {
     match format {

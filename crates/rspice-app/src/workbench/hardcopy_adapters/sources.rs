@@ -8,7 +8,7 @@
 //! rectangle.
 
 mod quick_view_overlay;
-mod report_inventory;
+pub(crate) mod report_inventory;
 
 pub(crate) use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`
@@ -17,9 +17,7 @@ pub(crate) use rspice_hardcopy::sources::*;
 use quick_view_overlay::*;
 
 #[cfg(test)]
-use crate::state::{
-    DrawingSheetTitleFieldId, SchematicSheetFormat, SchematicState, Selection, SymbolDocument, Wire,
-};
+use crate::state::{SchematicSheetFormat, SchematicState, Selection, SymbolDocument, Wire};
 
 use uuid::Uuid;
 
@@ -27,9 +25,7 @@ use crate::product::DatasetId;
 #[cfg(test)]
 use crate::product::{ContentDigest, ObjectRevision};
 #[cfg(test)]
-use crate::results::report_document::{
-    FigureSizing, ReportBlockKind, ReportReferenceCurrentness, ReportReferenceMode,
-};
+use crate::results::report_document::{FigureSizing, ReportBlockKind, ReportReferenceMode};
 #[cfg(test)]
 use crate::results::report_document::{ReportDocument, ReportReferenceInventory};
 use crate::results::visualization_document::{Page, Pane, VisualizationDocument};

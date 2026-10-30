@@ -17,7 +17,7 @@
 //! the shell lays out and dispatches like any other.
 
 pub(crate) mod commands;
-mod exports;
+pub(crate) mod exports;
 pub(crate) mod report;
 pub(crate) mod report_authoring;
 

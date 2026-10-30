@@ -40,7 +40,7 @@ pub(super) fn availability(
     }
 }
 
-pub(super) fn resolve(
+pub fn resolve(
     reads: SourceReads<'_>,
     document: &ReportDocument,
     scope: HardcopyScope,

@@ -42,7 +42,7 @@ pub(super) fn report_figure_options(model: &Model) -> Vec<ReportFigureOption> {
     options
 }
 
-pub(super) fn open_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn open_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
     let options = report_figure_options(cx.model);
     if !report_mutation_allowed(cx) || options.is_empty() {
         return;
@@ -63,7 +63,7 @@ pub(super) fn open_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
     editor.transaction_error = None;
 }
 
-pub(super) fn commit_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn commit_insert_result_document(cx: &mut Cx<'_, HardcopyFeature>) {
     if !report_mutation_allowed(cx) {
         cx.state.report_authoring.transaction_error =
             Some(report_mutation_block_reason(cx).to_owned());

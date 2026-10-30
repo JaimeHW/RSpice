@@ -1,0 +1,813 @@
+//! The Hardcopy Studio drawn in a whole application: its sections, rail and
+//! strip at every viewport, and the widget identities they keep.
+
+use crate::ui::tokens;
+use crate::ui::tokens::Tokens;
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app::dialogs::hardcopy::HardcopyRegion;
+use crate::workbench::app::dialogs::hardcopy::HardcopySection;
+use crate::workbench::app::dialogs::hardcopy::HardcopyWorkflow;
+use crate::workbench::app::dialogs::hardcopy::hardcopy_parts;
+use crate::workbench::app::dialogs::hardcopy::publish;
+use crate::workbench::app::dialogs::hardcopy::render::*;
+use egui::Align;
+use egui::Context;
+use egui::Frame;
+use egui::Layout;
+use egui::Rect;
+use egui::Vec2;
+use egui::vec2;
+
+/// Viewports the studio has to fit: the desktop sizes the workbench ships
+/// against, the widths where its three columns stop fitting side by side,
+/// and the edge-to-edge tablet and phone surfaces.
+#[cfg(not(target_arch = "wasm32"))]
+const FIT_VIEWPORTS: [(f32, f32); 9] = [
+    (1_920.0, 1_200.0),
+    (1_440.0, 900.0),
+    (1_366.0, 768.0),
+    (1_280.0, 800.0),
+    (1_024.0, 768.0),
+    (900.0, 700.0),
+    (820.0, 1_180.0),
+    (768.0, 1_024.0),
+    (390.0, 844.0),
+];
+
+/// The last two controls in the preview column — the toolbar's Fit page
+/// button and the final row of the estimate strip. They are named because
+/// they are what a surface that does not fit loses first, and because
+/// bounds alone cannot tell a control that fits from one that was never
+/// drawn.
+#[cfg(not(target_arch = "wasm32"))]
+const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "COLOR"];
+
+/// Where `DialogSize::SchematicPageSetup` puts the surface: 1280 × 760 pt
+/// inside a 12 pt viewport gutter, edge to edge at or below the 820 pt
+/// manager breakpoint. Anything the studio lays out beyond this rectangle
+/// is off the dialog.
+///
+/// At narrow this is the viewport, which is the bound the studio may not
+/// cross — not the surface, which is its content's height centred inside
+/// that. The caller asks the centring question there instead; see the guard
+/// in `the_studio_fits_every_viewport_and_section_without_scrolling`.
+#[cfg(not(target_arch = "wasm32"))]
+fn studio_surface(viewport: Vec2) -> Rect {
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, viewport);
+    if viewport.x <= 820.0 {
+        return screen;
+    }
+    Rect::from_center_size(
+        screen.center(),
+        vec2(
+            1_280.0_f32.min(viewport.x - 12.0),
+            760.0_f32.min(viewport.y - 12.0),
+        ),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn studio_app() -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let reference = app.state.model.workspace.content.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+            reference,
+        ));
+    publish::open_hardcopy_workflow(&mut hardcopy_parts(&mut app), HardcopyWorkflow::Export);
+    app
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn render_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::FullOutput {
+    ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, viewport)),
+            ..Default::default()
+        },
+        |ui| render_hardcopy_dialog(&mut hardcopy_parts(app), ui),
+    )
+}
+
+/// Fonts build on the first pass, the source resolves on a worker thread,
+/// and the exact page raster lands a pass after the plan it belongs to. The
+/// measurement is only meaningful once all three have happened and the modal
+/// fade has finished, so the probe waits for them using egui's frame clock.
+#[cfg(not(target_arch = "wasm32"))]
+fn settled_studio(ctx: &Context, app: &mut RSpiceApp, viewport: Vec2) -> egui::FullOutput {
+    let _ = render_studio(ctx, app, viewport);
+    let fully_visible_at =
+        ctx.input(|input| input.time) + f64::from(ctx.global_style().animation_time);
+    for _ in 0..400 {
+        let _ = render_studio(ctx, app, viewport);
+        if app.state.hardcopy.hardcopy.preview.is_some()
+            && ctx.input(|input| input.time) >= fully_visible_at
+        {
+            let _ = render_studio(ctx, app, viewport);
+            return render_studio(ctx, app, viewport);
+        }
+        if app.state.hardcopy.hardcopy.preview.is_none() {
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    panic!("the hardcopy studio never resolved a source and an exact page preview");
+}
+
+/// Every control the dialog laid out this pass, at the rect it was laid out
+/// at. A scroll area clips what it paints but still lays its content out at
+/// true coordinates, so a control that can only be reached by scrolling
+/// reports a rect outside the surface — which is the condition being
+/// measured.
+#[cfg(not(target_arch = "wasm32"))]
+fn dialog_controls(output: &egui::FullOutput) -> Vec<(String, Rect)> {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .expect("the probe enables AccessKit, so every pass carries a tree")
+        .nodes
+        .iter()
+        // The modal container spans the whole viewport by design: it is the
+        // scrim, not the surface.
+        .filter(|(_, node)| node.role() != egui::accesskit::Role::Dialog)
+        // A scroll bar is the scroll area's own furniture, laid against the
+        // surface edge by egui rather than laid out by the studio, and it
+        // overhangs that edge by a point. Excluding it does not soften what
+        // this probe measures: content a scroll area is hiding still reports
+        // its true rect outside the surface, which is the condition being
+        // caught. The bar is the symptom's frame, not the symptom.
+        .filter(|(_, node)| node.role() != egui::accesskit::Role::ScrollBar)
+        .filter_map(|(_, node)| {
+            let bounds = node.bounds()?;
+            let rect = Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            );
+            // A static label carries its text as the node's value; every
+            // other control carries it as the node's label.
+            let text = node.label().or_else(|| node.value()).unwrap_or_default();
+            rect.is_finite().then(|| (text.to_owned(), rect))
+        })
+        .collect()
+}
+
+/// The accessibility role of whatever the tree published at `rect`.
+///
+/// A control that does not fit is reported by its label, and the ones worth
+/// knowing about are often the ones with no label to report. The role is what
+/// names them.
+#[cfg(not(target_arch = "wasm32"))]
+fn role_at(output: &egui::FullOutput, rect: Rect) -> String {
+    output
+        .platform_output
+        .accesskit_update
+        .as_ref()
+        .and_then(|update| {
+            update.nodes.iter().find_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                ((bounds.x0 as f32 - rect.left()).abs() < 0.5
+                    && (bounds.y0 as f32 - rect.top()).abs() < 0.5)
+                    .then(|| format!("{:?}", node.role()))
+            })
+        })
+        .unwrap_or_else(|| "unknown".to_owned())
+}
+
+/// How far outside the surface a control reaches, in points.
+#[cfg(not(target_arch = "wasm32"))]
+fn overflow_beyond(surface: Rect, control: Rect) -> f32 {
+    (control.bottom() - surface.bottom())
+        .max(surface.top() - control.top())
+        .max(control.right() - surface.right())
+        .max(surface.left() - control.left())
+}
+
+/// The studio's whole claim is that it fits by construction. Rendering it
+/// and looking at the picture is how a size gets missed, so the claim is
+/// measured: across every viewport the workbench supports and every section
+/// the rail offers, no control may land outside the dialog surface. A
+/// control outside it is one a scroll area is hiding, which is the failure
+/// this layout exists to remove.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_studio_fits_every_viewport_and_section_without_scrolling() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    // The workflow resolves its source on a worker thread and rewrites the
+    // draft when it lands, so the matrix starts from a settled one.
+    let _ = settled_studio(&ctx, &mut app, vec2(FIT_VIEWPORTS[0].0, FIT_VIEWPORTS[0].1));
+    let mut failures = Vec::new();
+    for (width, height) in FIT_VIEWPORTS {
+        let viewport = vec2(width, height);
+        let surface = studio_surface(viewport);
+        // Below the split width the studio shows one region at a time, so
+        // each one is measured holding the whole track.
+        let regions: &[bool] = if surface.width() < STUDIO_SPLIT_WIDTH {
+            &[false, true]
+        } else {
+            &[true]
+        };
+        for section in HardcopySection::ALL {
+            for previewing in regions.iter().copied() {
+                app.state.hardcopy.hardcopy.section = section;
+                app.state.hardcopy.hardcopy.region = if previewing {
+                    HardcopyRegion::Preview
+                } else {
+                    HardcopyRegion::Setup
+                };
+                let output = settled_studio(&ctx, &mut app, viewport);
+                let case = format!(
+                    "{width}x{height} {section:?}{}",
+                    if previewing && regions.len() > 1 {
+                        " previewing"
+                    } else {
+                        ""
+                    }
+                );
+                let controls = dialog_controls(&output);
+                assert!(
+                    !controls.is_empty(),
+                    "{case}: the dialog drew no controls at all"
+                );
+                // The header sits on the surface's top edge and the command
+                // row on its bottom one, so both edges must be reached.
+                // Without this the probe would be measuring against a
+                // rectangle larger than the dialog, and would pass on
+                // anything.
+                //
+                // That holds only where the probe knows the surface's height.
+                // At narrow, edge to edge is a statement about the side
+                // gutters alone: the surface spends none of the width on one
+                // and takes its height from its content, centred in the
+                // viewport. There is no fixed rectangle to reach there, so
+                // the same question is asked of what the dialog drew — the
+                // span stayed inside the viewport, and sits centred in it.
+                let reach = controls
+                    .iter()
+                    .fold((f32::MAX, f32::MIN), |acc, (_, rect)| {
+                        (acc.0.min(rect.top()), acc.1.max(rect.bottom()))
+                    });
+                let top_gap = reach.0 - surface.top();
+                let bottom_gap = surface.bottom() - reach.1;
+                if width <= 820.0 {
+                    assert!(
+                        top_gap >= 0.0 && bottom_gap >= 0.0,
+                        "{case}: the studio drew outside the viewport — its controls \
+                             span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                    assert!(
+                        (top_gap - bottom_gap).abs() <= 24.0,
+                        "{case}: the content-height surface is not centred in the \
+                             viewport — {top_gap:.0} above its controls, {bottom_gap:.0} below"
+                    );
+                } else {
+                    assert!(
+                        top_gap <= 16.0 && bottom_gap <= 16.0,
+                        "{case}: the surface this probe measures against is not the one the \
+                             dialog drew — its controls span {:.0}..{:.0} inside {:.0}..{:.0}",
+                        reach.0,
+                        reach.1,
+                        surface.top(),
+                        surface.bottom()
+                    );
+                }
+                if previewing {
+                    for missing in PREVIEW_TAIL_CONTROLS
+                        .into_iter()
+                        .filter(|wanted| !controls.iter().any(|(label, _)| label == wanted))
+                    {
+                        failures.push(format!("{case}: {missing:?} was never drawn"));
+                    }
+                }
+                if let Some((label, overflow)) = controls
+                    .iter()
+                    .map(|(label, rect)| (label, overflow_beyond(surface, *rect)))
+                    .max_by(|left, right| left.1.total_cmp(&right.1))
+                    .filter(|(_, overflow)| *overflow > 0.5)
+                {
+                    let rect = controls
+                        .iter()
+                        .find(|(name, _)| name == label)
+                        .map(|(_, rect)| *rect)
+                        .unwrap_or(Rect::NOTHING);
+                    failures.push(format!(
+                        "{case}: {label:?} ({}) is {overflow:.1} pt outside the {:.0}x{:.0} pt \
+                             surface — it sits at x {:.1}..{:.1}, y {:.1}..{:.1} inside \
+                             x {:.1}..{:.1}, y {:.1}..{:.1}",
+                        role_at(&output, rect),
+                        surface.width(),
+                        surface.height(),
+                        rect.left(),
+                        rect.right(),
+                        rect.top(),
+                        rect.bottom(),
+                        surface.left(),
+                        surface.right(),
+                        surface.top(),
+                        surface.bottom()
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "the hardcopy studio does not fit:\n{}",
+        failures.join("\n")
+    );
+}
+
+/// Every filled rectangle the dialog painted this pass. Geometry the
+/// AccessKit tree cannot see: a panel's fill is not a control, and the
+/// defect it carries — a fill that stops short of the track it was given —
+/// is invisible to a probe that only reads controls.
+#[cfg(not(target_arch = "wasm32"))]
+fn painted_rects(output: &egui::FullOutput) -> Vec<(egui::Color32, Rect)> {
+    fn walk(shape: &egui::Shape, into: &mut Vec<(egui::Color32, Rect)>) {
+        match shape {
+            egui::Shape::Rect(rect) => into.push((rect.fill, rect.rect)),
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, into);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rects = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut rects);
+    }
+    rects
+}
+
+/// The largest control carrying `label`. A rail entry names itself twice —
+/// once as the text inside it and once as the row that selects it — so the
+/// row is the taller of the two.
+#[cfg(not(target_arch = "wasm32"))]
+fn control_rect(controls: &[(String, Rect)], label: &str) -> Option<Rect> {
+    controls
+        .iter()
+        .filter(|(found, _)| found == label)
+        .map(|(_, rect)| *rect)
+        .reduce(|held, rect| {
+            if rect.height() > held.height() {
+                rect
+            } else {
+                held
+            }
+        })
+}
+
+/// The strip is a band across the surface, so its fill is the width of the
+/// surface's content box — the resolved rect measures the outer edge, and the
+/// surface's own border is not track for the band to cover. Sized to its chips
+/// instead, it stopped after the last one and the rest of the band read as a
+/// second, lighter panel butted against it.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_tab_strip_fills_the_track_it_was_given() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    let viewport = vec2(900.0, 700.0);
+    let surface = studio_surface(viewport);
+    let output = settled_studio(&ctx, &mut app, viewport);
+    let chip = control_rect(&dialog_controls(&output), "01  Source and scope")
+        .expect("the strip carries a chip for every section");
+    let strip = painted_rects(&output)
+        .into_iter()
+        // Theme and opacity processing may transform a fill before it reaches
+        // the output shape list, so color equality is not a stable identity.
+        // The strip is the only shallow painted band that contains the chip
+        // with its ten-point margin on every side. The dialog surface also
+        // contains it, but is far taller; a missing strip therefore cannot
+        // satisfy this geometry probe by falling back to the surface.
+        .map(|(_, rect)| rect)
+        .filter(|rect| {
+            rect.contains_rect(chip)
+                && rect.width() > chip.width() + 2.0
+                && rect.height() > chip.height() + 2.0
+                && rect.height() < surface.height() * 0.5
+        })
+        .fold(None::<Rect>, |narrowest, rect| {
+            Some(narrowest.map_or(rect, |held| {
+                if rect.height() < held.height() {
+                    rect
+                } else {
+                    held
+                }
+            }))
+        })
+        .expect("the strip paints a panel behind its chips");
+    let track = surface.shrink(1.0).width();
+    assert!(
+        strip.width() >= track - 1.0,
+        "the strip's fill is {:.0} pt wide inside a {:.0} pt track",
+        strip.width(),
+        track
+    );
+}
+
+/// Which region the surface is showing and which section it is editing are
+/// different questions. Asked by identical chips in one row they read as
+/// one list of six peers, and nothing says that choosing the sixth replaces
+/// the whole surface.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_narrow_strip_asks_one_question_per_control() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    let viewport = vec2(390.0, 844.0);
+
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
+    let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
+    assert!(control_rect(&controls, "01  Source and scope").is_some());
+    assert!(control_rect(&controls, "Setup").is_some());
+    assert!(control_rect(&controls, "Preview").is_some());
+    assert!(
+        !controls
+            .iter()
+            .any(|(label, _)| label.starts_with("0") && label.contains("Preview")),
+        "the preview must not be offered as a sixth section chip"
+    );
+
+    // With the page on screen there is no section to choose, so the chips
+    // that would choose one are not there to be read as inert.
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Preview;
+    let controls = dialog_controls(&settled_studio(&ctx, &mut app, viewport));
+    assert!(control_rect(&controls, "01  Source and scope").is_none());
+    assert!(control_rect(&controls, "Setup").is_some());
+    assert!(control_rect(&controls, "Preview").is_some());
+}
+
+/// The studio ships to tablet and phone, so every row and chip it navigates
+/// by is a touch target where the shell is in touch mode.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn navigation_targets_meet_the_touch_minimum() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+    let mut app = studio_app();
+
+    let rail = dialog_controls(&settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0)));
+    for section in HardcopySection::ALL {
+        if let Some(rect) = control_rect(&rail, section.label()) {
+            assert!(
+                rect.height() >= tokens::TOUCH_TARGET,
+                "rail row {:?} is {:.0} pt tall",
+                section.label(),
+                rect.height()
+            );
+        }
+    }
+
+    let strip = dialog_controls(&settled_studio(&ctx, &mut app, vec2(390.0, 844.0)));
+    for label in ["01  Source and scope", "Setup", "Preview"] {
+        let rect = control_rect(&strip, label).unwrap_or_else(|| panic!("{label} is drawn"));
+        assert!(
+            rect.height() >= tokens::TOUCH_TARGET,
+            "strip control {label:?} is {:.0} pt tall",
+            rect.height()
+        );
+    }
+}
+
+/// Every error-filled triangle the pass painted. The rail's problem marker
+/// is a path rather than a rectangle, so `painted_rects` cannot see it, and
+/// its colour is the only thing that distinguishes it from the section
+/// icons drawn beside it.
+#[cfg(not(target_arch = "wasm32"))]
+fn marker_rects(output: &egui::FullOutput, err: egui::Color32) -> Vec<Rect> {
+    fn walk(shape: &egui::Shape, err: egui::Color32, into: &mut Vec<Rect>) {
+        match shape {
+            egui::Shape::Path(path) if path.fill == err => {
+                into.push(path.visual_bounding_rect());
+            }
+            egui::Shape::Vec(shapes) => {
+                for shape in shapes {
+                    walk(shape, err, into);
+                }
+            }
+            _ => {}
+        }
+    }
+    let mut rects = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, err, &mut rects);
+    }
+    rects
+}
+
+/// Every rectangle egui outlined because the widget occupying it answered
+/// to a different id than it did on the previous pass. egui reports these
+/// as a log warning and a red outline; the outline is the part a test can
+/// read, and it carries the rectangle that names the offender.
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+fn id_change_marks(output: &egui::FullOutput) -> Vec<Rect> {
+    output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Rect(shape)
+                if clipped.clip_rect == Rect::EVERYTHING
+                    && shape.stroke.color == egui::Color32::RED
+                    && shape.stroke.width == 2.0
+                    && shape.stroke_kind == egui::StrokeKind::Outside =>
+            {
+                Some(shape.rect)
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// A widget's id is its continuity: focus, drag state, tooltips and the
+/// scroll offsets of everything under it are keyed by it. An id derived
+/// from how many siblings happened to be laid out first changes whenever
+/// the surface does — a section appearing, a refusal opening the banner —
+/// and every one of those is an ordinary move in this dialog.
+#[test]
+#[cfg(all(debug_assertions, not(target_arch = "wasm32")))]
+fn no_widget_changes_its_id_as_the_studio_changes() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    let viewport = vec2(1_440.0, 900.0);
+
+    let mut marks = Vec::new();
+    let mut record = |output: &egui::FullOutput| {
+        marks.extend(id_change_marks(output).into_iter().map(|rect| {
+            format!(
+                "[{:.0},{:.0}]-[{:.0},{:.0}]",
+                rect.left(),
+                rect.top(),
+                rect.right(),
+                rect.bottom()
+            )
+        }));
+    };
+    for _ in 0..200 {
+        record(&render_studio(&ctx, &mut app, viewport));
+        if app.state.hardcopy.hardcopy.preview.is_some() {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // The sheet section only appears once the source has resolved, and that
+    // arrival is the move that shifted the rail's ids. Without it the rest
+    // of this probe would pass by never having been tested.
+    assert!(
+        app.state.hardcopy.hardcopy.preview.is_some(),
+        "the studio never resolved a source and an exact page preview"
+    );
+    record(&render_studio(&ctx, &mut app, viewport));
+    for section in HardcopySection::ALL {
+        app.state.hardcopy.hardcopy.section = section;
+        record(&render_studio(&ctx, &mut app, viewport));
+        record(&render_studio(&ctx, &mut app, viewport));
+    }
+    // A refusal opens the banner strip between the body and the command
+    // row, and clearing it closes it again. Both are ordinary, and a
+    // publication that fails late raises one over a plan that stayed valid.
+    for refusal in [true, false] {
+        app.state.hardcopy.hardcopy.error =
+            refusal.then(|| "the publication was refused".to_owned());
+        record(&render_studio(&ctx, &mut app, viewport));
+        record(&render_studio(&ctx, &mut app, viewport));
+    }
+    app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
+    record(&render_studio(&ctx, &mut app, viewport));
+    record(&render_studio(&ctx, &mut app, viewport));
+    app.state.hardcopy.hardcopy.margin_left = "0.5".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
+    record(&render_studio(&ctx, &mut app, viewport));
+    record(&render_studio(&ctx, &mut app, viewport));
+
+    // Below the rail's width the sections become a strip and the regions a
+    // switch, so the same moves rearrange a different composition.
+    let narrow = vec2(390.0, 844.0);
+    record(&render_studio(&ctx, &mut app, narrow));
+    record(&render_studio(&ctx, &mut app, narrow));
+    for region in [HardcopyRegion::Preview, HardcopyRegion::Setup] {
+        app.state.hardcopy.hardcopy.region = region;
+        record(&render_studio(&ctx, &mut app, narrow));
+        record(&render_studio(&ctx, &mut app, narrow));
+    }
+
+    assert!(
+        marks.is_empty(),
+        "widgets changed id between passes at {marks:?}"
+    );
+}
+
+/// An invalid field is invisible from every other section, and a disabled
+/// primary with a dialog-level banner says only that something is wrong.
+/// The rail has to say where: marked by name in the accessibility tree,
+/// marked on the surface by a glyph inside the entry it belongs to, and
+/// neither at the cost of the row's height.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn a_blocked_section_is_marked_on_the_rail_from_every_other_section() {
+    for ready_preview in [false, true] {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let err = Tokens::get(&ctx).color.err;
+        let mut app = studio_app();
+        let viewport = vec2(1_440.0, 900.0);
+
+        if ready_preview {
+            // A resolved preview can arrive before a newly opened dialog finishes
+            // fading in. Warm the real source/preview pipeline in another context
+            // so this case does not depend on the machine's worker scheduling.
+            let warm_context = Context::default();
+            crate::ui::Theme::default().apply(&warm_context);
+            let _ = settled_studio(&warm_context, &mut app, viewport);
+        }
+
+        let settled = settled_studio(&ctx, &mut app, viewport);
+        let clean = dialog_controls(&settled);
+        let clean_row = control_rect(&clean, HardcopySection::Page.label())
+            .expect("the rail names every section it offers");
+        assert!(
+            marker_rects(&settled, err)
+                .iter()
+                .all(|marker| !clean_row.contains_rect(*marker)),
+            "a valid configuration marks nothing"
+        );
+
+        // A margin wider than the page, entered while standing in Output.
+        app.state.hardcopy.hardcopy.section = HardcopySection::Output;
+        app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+        app.state.hardcopy.hardcopy.refresh_preview();
+        assert_eq!(
+            app.state.hardcopy.hardcopy.error_section,
+            Some(HardcopySection::Page)
+        );
+        // A blocked draft compiles no plan, so the settling probe would wait
+        // for a preview that can never arrive. Two passes are what the tree
+        // needs: one to lay the rail out and one to report it.
+        let _ = render_studio(&ctx, &mut app, viewport);
+        let blocked = render_studio(&ctx, &mut app, viewport);
+        let controls = dialog_controls(&blocked);
+
+        let marked = control_rect(&controls, "Page and pagination · blocked")
+            .expect("the rail entry names the section that holds the refused field");
+        // The entry sets its title as text inside itself as well. What has to
+        // carry the mark is the row a keyboard or screen reader lands on, which
+        // is the one that contains the other.
+        let title = control_rect(&controls, HardcopySection::Page.label())
+            .expect("the entry still draws its title");
+        assert!(
+            marked.contains_rect(title) && marked.height() > title.height(),
+            "the mark is on a label inside the entry rather than on the entry"
+        );
+        for section in [
+            HardcopySection::Source,
+            HardcopySection::Output,
+            HardcopySection::Identity,
+        ] {
+            assert!(
+                control_rect(&controls, &format!("{} · blocked", section.label())).is_none(),
+                "{section:?} holds nothing invalid and must not be marked"
+            );
+        }
+        assert!(
+            (marked.height() - clean_row.height()).abs() < 0.5,
+            "the marker grew the rail row from {:.0} pt to {:.0} pt",
+            clean_row.height(),
+            marked.height()
+        );
+        let markers: Vec<Rect> = marker_rects(&blocked, err)
+            .into_iter()
+            .filter(|marker| marked.contains_rect(*marker))
+            .collect();
+        assert_eq!(
+            markers.len(),
+            1,
+            "the marked entry carries exactly one painted mark"
+        );
+        assert!(
+            marked.right() - markers[0].right() < PROBLEM_MARKER_TRACK,
+            "the mark sits at the entry's trailing edge"
+        );
+
+        // The strip the primary's refusal is explained in names the same
+        // section, so the banner and the rail cannot send the operator to
+        // different places.
+        assert!(
+            controls
+                .iter()
+                .any(|(label, _)| label == "Blocked in Page and pagination"),
+            "the transaction strip names the section holding the primary"
+        );
+    }
+}
+
+/// Below the rail's width the chips are the rail, and a mark that only
+/// existed in the wide layout would be missing on exactly the surfaces
+/// where a section is hardest to find.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn the_narrow_strip_marks_the_blocked_section_too() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    let viewport = vec2(390.0, 844.0);
+    let _ = settled_studio(&ctx, &mut app, viewport);
+
+    app.state.hardcopy.hardcopy.region = HardcopyRegion::Setup;
+    app.state.hardcopy.hardcopy.section = HardcopySection::Identity;
+    app.state.hardcopy.hardcopy.margin_left = "100".to_owned();
+    app.state.hardcopy.hardcopy.refresh_preview();
+    let _ = render_studio(&ctx, &mut app, viewport);
+    let controls = dialog_controls(&render_studio(&ctx, &mut app, viewport));
+
+    assert!(control_rect(&controls, "02  Page and pagination · blocked").is_some());
+    assert!(control_rect(&controls, "01  Source and scope").is_some());
+}
+
+/// The editor column at `measure`, laid out to its own natural height:
+/// what the section takes, and how far the widest thing in it reaches.
+#[cfg(not(target_arch = "wasm32"))]
+fn editor_extent(app: &mut RSpiceApp, section: HardcopySection, measure: f32) -> (f32, f32) {
+    app.state.hardcopy.hardcopy.section = section;
+    let draft = &mut app.state.hardcopy.hardcopy;
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut natural = 0.0_f32;
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                vec2(measure + 40.0, 4_000.0),
+            )),
+            ..Default::default()
+        },
+        |ui| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
+                    let column = ui.allocate_ui_with_layout(
+                        vec2(measure, 0.0),
+                        Layout::top_down(Align::Min),
+                        |ui| {
+                            ui.set_width(measure);
+                            editor_column(ui, draft, None);
+                        },
+                    );
+                    natural = column.response.rect.height();
+                });
+        },
+    );
+    let reach = dialog_controls(&output)
+        .iter()
+        .filter(|(_, rect)| rect.width() < measure + 1.0)
+        .fold(0.0_f32, |acc, (_, rect)| acc.max(rect.right()));
+    (natural, reach)
+}
+
+/// The division is a claim about the forms, not about the surface: at the
+/// measure the studio picks, every section reaches the column's far edge.
+/// The fixed fraction this replaced left Identity — a column of switches
+/// with nothing two-up in it — standing in a column a third wider than
+/// anything it contained, which is the emptiness the measure exists to
+/// remove.
+#[test]
+#[cfg(not(target_arch = "wasm32"))]
+fn every_section_reaches_the_edge_of_the_measure_it_is_given() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = studio_app();
+    // Sections draw what the resolved source gives them, so the measurement
+    // is only of the real form once the source has landed.
+    let _ = settled_studio(&ctx, &mut app, vec2(1_440.0, 900.0));
+    for section in HardcopySection::ALL {
+        let (_, reach) = editor_extent(&mut app, section, EDITOR_STACKED_MEASURE);
+        assert!(
+            reach >= EDITOR_STACKED_MEASURE - 24.0,
+            "{section:?} reaches only {reach:.0} pt of its {EDITOR_STACKED_MEASURE:.0} pt \
+                 column"
+        );
+    }
+}

@@ -5,7 +5,7 @@
 //! complete report workflow is ready for production use.
 
 mod presentation;
-mod result_insert;
+pub(crate) mod result_insert;
 use rspice_results_ui::report::composer::{PageMoveDirection, PageSettingEdit};
 use rspice_results_ui::report::inspector::DocumentPublicationEdit;
 use rspice_results_ui::report::session::{
@@ -30,13 +30,11 @@ use crate::workbench::hardcopy::report as report_editor;
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-#[cfg(test)]
-use crate::results::report_document::ReportFigureSourceLocator;
 use result_insert::{
     commit_insert_result_document, open_insert_result_document, report_figure_options,
 };
 
-fn can_move_selected_page(cx: &Cx<'_, HardcopyFeature>, direction: PageMoveDirection) -> bool {
+pub fn can_move_selected_page(cx: &Cx<'_, HardcopyFeature>, direction: PageMoveDirection) -> bool {
     if !report_mutation_allowed(cx) {
         return false;
     }
@@ -59,7 +57,7 @@ fn can_move_selected_page(cx: &Cx<'_, HardcopyFeature>, direction: PageMoveDirec
     }
 }
 
-fn move_selected_page(cx: &mut Cx<'_, HardcopyFeature>, direction: PageMoveDirection) {
+pub fn move_selected_page(cx: &mut Cx<'_, HardcopyFeature>, direction: PageMoveDirection) {
     if !report_mutation_allowed(cx) {
         let reason = report_mutation_block_reason(cx).to_owned();
         cx.state.report_authoring.transaction_error = Some(reason);
@@ -116,7 +114,7 @@ fn move_selected_page(cx: &mut Cx<'_, HardcopyFeature>, direction: PageMoveDirec
     }
 }
 
-fn commit_page_setting(
+pub fn commit_page_setting(
     cx: &mut Cx<'_, HardcopyFeature>,
     page_id: ReportPageId,
     setting: PageSettingEdit,
@@ -206,7 +204,7 @@ fn commit_page_setting(
     }
 }
 
-fn commit_document_publication_setting(
+pub fn commit_document_publication_setting(
     cx: &mut Cx<'_, HardcopyFeature>,
     document_id: crate::product::ResultDocumentId,
     setting: DocumentPublicationEdit,
@@ -265,7 +263,7 @@ fn commit_document_publication_setting(
     }
 }
 
-fn set_report_block_enabled(
+pub fn set_report_block_enabled(
     cx: &mut Cx<'_, HardcopyFeature>,
     document_id: crate::product::ResultDocumentId,
     block_id: ReportBlockId,
@@ -425,16 +423,16 @@ impl ReportJointYield {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ReportSummaryMetrics {
-    checks_passing: usize,
-    checks_total: usize,
+pub struct ReportSummaryMetrics {
+    pub checks_passing: usize,
+    pub checks_total: usize,
     joint_yield: Option<ReportJointYield>,
-    pvt_completed: Option<usize>,
-    pvt_total: Option<usize>,
+    pub pvt_completed: Option<usize>,
+    pub pvt_total: Option<usize>,
 }
 
 impl ReportSummaryMetrics {
-    fn from_model(model: &Model) -> Self {
+    pub fn from_model(model: &Model) -> Self {
         let run = model.simulation.active_run();
         let checks_total = model.workspace.content.specs.len();
         let checks_passing = model
@@ -496,7 +494,7 @@ impl ReportSummaryMetrics {
     }
 }
 
-fn report_reference_resolves(model: &Model, reference: &ReportReferenceMode) -> bool {
+pub fn report_reference_resolves(model: &Model, reference: &ReportReferenceMode) -> bool {
     let snapshot = reference.snapshot();
     match &snapshot.source {
         ReportSourceId::VisualizationDocument { document_id } => model
@@ -580,7 +578,7 @@ fn open_release_cockpit(cx: &mut Cx<'_, HardcopyFeature>) {
     }
 }
 
-fn commit_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn commit_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
     if !report_mutation_allowed(cx) {
         cx.state.report_authoring.transaction_error =
             Some(report_mutation_block_reason(cx).to_owned());
@@ -746,7 +744,7 @@ fn report_dataset_snapshot(
     Ok((snapshot, binding))
 }
 
-fn commit_add_report_element(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn commit_add_report_element(cx: &mut Cx<'_, HardcopyFeature>) {
     if !report_mutation_allowed(cx) {
         cx.state.report_authoring.transaction_error =
             Some(report_mutation_block_reason(cx).to_owned());
@@ -949,7 +947,7 @@ fn report_field_key(label: &str) -> String {
     }
 }
 
-fn commit_remove_report_block(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn commit_remove_report_block(cx: &mut Cx<'_, HardcopyFeature>) {
     if !report_mutation_allowed(cx) {
         cx.state.report_authoring.transaction_error =
             Some(report_mutation_block_reason(cx).to_owned());
@@ -1058,7 +1056,7 @@ fn commit_page_properties(cx: &mut Cx<'_, HardcopyFeature>) {
     }
 }
 
-fn synchronize_report_selection(cx: &mut Cx<'_, HardcopyFeature>) {
+pub fn synchronize_report_selection(cx: &mut Cx<'_, HardcopyFeature>) {
     let documents = &cx.model.workspace.content.report_documents;
     let selected_is_valid = cx
         .state

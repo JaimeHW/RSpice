@@ -18,15 +18,15 @@ use rspice_hardcopy_contract::{
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
 
 #[cfg(not(target_arch = "wasm32"))]
-mod execution;
+pub(crate) mod execution;
 #[cfg(not(target_arch = "wasm32"))]
 mod finalize;
 pub(crate) mod publish;
-mod render;
+pub(crate) mod render;
 #[cfg(test)]
 mod setting_effects;
 #[cfg(any(test, target_arch = "wasm32"))]
-mod worker;
+pub(crate) mod worker;
 /// Resolution a raster export starts at when the setup carries none. It is a
 /// starting point, not a ceiling: what the host can actually afford for the
 /// chosen page comes from `render::max_raster_dpi`, and on a small enough
