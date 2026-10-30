@@ -41,7 +41,7 @@
 //! not a dependency, so they are excluded. `use`, type positions, and paths
 //! all count equally: the metric tracks coupling, not import style.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -345,6 +345,120 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
     );
     found.sort();
     found
+}
+
+/// The application crates every whole-file scan must find: this crate and the
+/// six split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 7] = [
+    "rspice-app",
+    "rspice-app-runs",
+    "rspice-app-services",
+    "rspice-app-settings",
+    "rspice-app-sheets",
+    "rspice-app-state",
+    "rspice-app-workbench",
+];
+
+/// Every application crate's `src`: this crate's and each `rspice-app-*`
+/// crate's, the model, the services, the run tier, the workbench framework and
+/// the features that compile as crates of their own.
+///
+/// The whole-file conventions below hold in all of them. A module that moves
+/// to another application crate keeps its path under that crate's `src` and is
+/// read there, so a move neither drops it from a scan nor renames its entries
+/// here, and a new application crate is read without an edit. A crate the
+/// discovery misses fails here rather than leaving every scan to pass without
+/// it.
+fn app_src_dirs() -> Vec<PathBuf> {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crates directory");
+    let mut dirs: Vec<PathBuf> = fs::read_dir(crates)
+        .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+        .map(|entry| entry.expect("directory entry").path())
+        .filter(|path| {
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .is_some_and(|name| name == "rspice-app" || name.starts_with("rspice-app-"))
+                && path.join("Cargo.toml").is_file()
+        })
+        .map(|path| path.join("src"))
+        .collect();
+    dirs.sort();
+    let found: BTreeSet<String> = dirs.iter().map(|dir| crate_of(dir)).collect();
+    for known in KNOWN_APP_CRATES {
+        assert!(
+            found.contains(known),
+            "application crate {known} was not found under {}; every whole-file \
+             scan would pass without reading it",
+            crates.display()
+        );
+    }
+    dirs
+}
+
+/// The crate a `src` directory belongs to.
+fn crate_of(src: &Path) -> String {
+    src.parent()
+        .and_then(Path::file_name)
+        .expect("a crate directory")
+        .to_string_lossy()
+        .into_owned()
+}
+
+/// One application source: the file, its crate, its path under that crate's
+/// `src` (the key the tables here use) and the name a report gives it.
+struct AppSource {
+    file: PathBuf,
+    krate: String,
+    relative: String,
+    shown: String,
+}
+
+/// Every Rust source of every application crate.
+fn app_sources() -> Vec<AppSource> {
+    let crates = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .expect("the crates directory");
+    app_src_dirs()
+        .iter()
+        .flat_map(|root| {
+            let krate = crate_of(root);
+            rust_sources(root).into_iter().map(move |file| {
+                let under = |base: &Path| {
+                    file.strip_prefix(base)
+                        .unwrap_or(&file)
+                        .display()
+                        .to_string()
+                        .replace('\\', "/")
+                };
+                let relative = under(root);
+                let shown = under(crates);
+                AppSource {
+                    file,
+                    krate: krate.clone(),
+                    relative,
+                    shown,
+                }
+            })
+        })
+        .collect()
+}
+
+/// Fails unless `scan` read a source of every discovered application crate,
+/// so a crate a scan stops reaching fails instead of passing on nothing.
+fn assert_reads_every_app_crate<'a>(scan: &str, read: impl IntoIterator<Item = &'a str>) {
+    let read: BTreeSet<&str> = read.into_iter().collect();
+    let missed: Vec<String> = app_src_dirs()
+        .iter()
+        .map(|dir| crate_of(dir))
+        .filter(|krate| !read.contains(krate.as_str()))
+        .collect();
+    assert!(
+        missed.is_empty(),
+        "{scan} read no source of {}; a scan that reaches nothing there passes forever",
+        missed.join(", ")
+    );
 }
 
 /// The top-level module a source file belongs to.
@@ -1305,20 +1419,19 @@ fn the_public_module_surface_does_not_grow() {
 #[test]
 fn source_files_have_no_byte_order_mark() {
     const BOM: &[u8] = &[0xEF, 0xBB, 0xBF];
-    let root = src_dir();
-    let offenders: Vec<String> = rust_sources(&root)
+    let sources = app_sources();
+    assert_reads_every_app_crate(
+        "the byte-order-mark scan",
+        sources.iter().map(|source| source.krate.as_str()),
+    );
+    let offenders: Vec<String> = sources
         .into_iter()
-        .filter(|path| {
-            fs::read(path)
+        .filter(|source| {
+            fs::read(&source.file)
                 .map(|bytes| bytes.starts_with(BOM))
                 .unwrap_or(false)
         })
-        .map(|path| {
-            path.strip_prefix(&root)
-                .unwrap_or(&path)
-                .display()
-                .to_string()
-        })
+        .map(|source| source.shown)
         .collect();
     assert!(
         offenders.is_empty(),
@@ -1513,22 +1626,21 @@ fn lint_suppressions_do_not_grow() {
 /// is pinned to, what a silent fallback would hide — the header says so.
 #[test]
 fn modules_explain_themselves() {
-    let root = src_dir();
-    let undocumented: Vec<String> = rust_sources(&root)
+    let sources = app_sources();
+    assert_reads_every_app_crate(
+        "the module-doc scan",
+        sources.iter().map(|source| source.krate.as_str()),
+    );
+    let undocumented: Vec<String> = sources
         .into_iter()
-        .filter(|path| {
-            !fs::read_to_string(path)
+        .filter(|source| {
+            !fs::read_to_string(&source.file)
                 .unwrap_or_default()
                 .lines()
                 .next()
                 .is_some_and(|line| line.trim_start().starts_with("//!"))
         })
-        .map(|path| {
-            path.strip_prefix(&root)
-                .unwrap_or(&path)
-                .display()
-                .to_string()
-        })
+        .map(|source| source.shown)
         .collect();
 
     assert!(
@@ -1540,7 +1652,7 @@ fn modules_explain_themselves() {
     );
 }
 
-/// The crate uses one module-file convention: `foo.rs` beside `foo/`.
+/// The application's crates use one module-file convention: `foo.rs` beside `foo/`.
 ///
 /// It previously mixed both forms, sometimes inside the same directory —
 /// `dialogs/` held `hardcopy.rs` + `hardcopy/` next to `library/mod.rs`.
@@ -1548,16 +1660,15 @@ fn modules_explain_themselves() {
 /// remembering which style its author used.
 #[test]
 fn modules_use_the_sibling_file_convention_not_mod_rs() {
-    let root = src_dir();
-    let offenders: Vec<String> = rust_sources(&root)
+    let sources = app_sources();
+    assert_reads_every_app_crate(
+        "the sibling-file scan",
+        sources.iter().map(|source| source.krate.as_str()),
+    );
+    let offenders: Vec<String> = sources
         .into_iter()
-        .filter(|path| path.file_name().is_some_and(|name| name == "mod.rs"))
-        .map(|path| {
-            path.strip_prefix(&root)
-                .unwrap_or(&path)
-                .display()
-                .to_string()
-        })
+        .filter(|source| source.file.file_name().is_some_and(|name| name == "mod.rs"))
+        .map(|source| source.shown)
         .collect();
     assert!(
         offenders.is_empty(),
@@ -1571,9 +1682,13 @@ fn modules_use_the_sibling_file_convention_not_mod_rs() {
 
 #[test]
 fn whole_application_mutable_access_does_not_grow() {
-    let root = src_dir();
+    let sources = app_sources();
+    assert_reads_every_app_crate(
+        "the mutable-access count",
+        sources.iter().map(|source| source.krate.as_str()),
+    );
     let mut count = 0;
-    for file in rust_sources(&root) {
+    for AppSource { file, .. } in sources {
         let source = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
         count += strip_line_comments(&source)
@@ -1752,7 +1867,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
 
 #[test]
 fn source_files_stay_within_the_line_budget() {
-    let root = src_dir();
     let allowed: BTreeMap<&str, usize> = OVERSIZED_FILES.iter().copied().collect();
     assert_eq!(
         allowed.len(),
@@ -1764,13 +1878,12 @@ fn source_files_stay_within_the_line_budget() {
     let mut grown = Vec::new();
     let mut seen = Vec::new();
 
-    for file in rust_sources(&root) {
-        let relative = file
-            .strip_prefix(&root)
-            .unwrap_or(&file)
-            .display()
-            .to_string()
-            .replace('\\', "/");
+    let sources = app_sources();
+    assert_reads_every_app_crate(
+        "the line budget",
+        sources.iter().map(|source| source.krate.as_str()),
+    );
+    for AppSource { file, relative, .. } in sources {
         let lines = budgeted_lines(
             &fs::read_to_string(&file)
                 .unwrap_or_else(|error| panic!("read {}: {error}", file.display())),
@@ -1827,11 +1940,15 @@ fn source_files_stay_within_the_line_budget() {
 #[test]
 fn every_production_dialog_callsite_supplies_a_description() {
     let source_root = Path::new(env!("CARGO_MANIFEST_DIR")).parent().unwrap();
-    let mut sources = rust_sources(&source_root.join("rspice-app/src"));
+    let mut sources: Vec<PathBuf> = app_sources()
+        .into_iter()
+        .map(|source| source.file)
+        .collect();
     sources.extend(rust_sources(&source_root.join("rspice-ui-kit/src")));
     sources.extend(rust_sources(&source_root.join("rspice-results-ui/src")));
 
     let mut audited = 0;
+    let mut read = BTreeSet::new();
     let mut missing = Vec::new();
     for path in sources {
         let relative = path
@@ -1854,6 +1971,7 @@ fn every_production_dialog_callsite_supplies_a_description() {
             continue;
         }
 
+        read.insert(relative.split('/').next().unwrap_or_default().to_owned());
         let source = std::fs::read_to_string(&path).expect("read Rust source");
         let production_source = source.split("\n#[cfg(test)]").next().unwrap_or(&source);
         for (offset, _) in production_source.match_indices("Dialog::new(") {
@@ -1888,6 +2006,10 @@ fn every_production_dialog_callsite_supplies_a_description() {
     }
 
     assert!(audited > 0, "source audit did not find a production dialog");
+    assert_reads_every_app_crate(
+        "the dialog-description audit",
+        read.iter().map(String::as_str),
+    );
     assert!(
         missing.is_empty(),
         "production dialogs must publish explicit purpose text:\n{}",
