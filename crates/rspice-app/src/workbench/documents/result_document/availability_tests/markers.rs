@@ -3,7 +3,7 @@
 use super::*;
 use crate::io::ProjectSnapshot;
 
-fn marker_project(state: &AppState) -> ProjectSnapshot {
+fn marker_project(state: &ResultsTestHost) -> ProjectSnapshot {
     ProjectSnapshot::new_with_execution_context(
         state.model.workspace.clone(),
         state.model.library_manager.clone(),
@@ -22,7 +22,7 @@ fn marker_project(state: &AppState) -> ProjectSnapshot {
     )
 }
 
-fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
+fn marker_state(id: u32) -> (ResultsTestHost, AnalysisPresentationKey) {
     let mut state = transient_state();
     let run = &mut state.model.simulation.retained.runs[0];
     run.restore_provenance(crate::state::SimulationRunProvenance::LegacyUnattributed)
@@ -48,7 +48,7 @@ fn marker_state(id: u32) -> (AppState, AnalysisPresentationKey) {
 }
 
 fn place_quick(
-    state: &mut AppState,
+    state: &mut ResultsTestHost,
     analysis: AnalysisPresentationKey,
     x: f64,
 ) -> Option<MarkerSelector> {

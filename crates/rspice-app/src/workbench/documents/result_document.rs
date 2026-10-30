@@ -35,7 +35,7 @@ mod pz;
 mod retained_memo;
 mod scatter;
 mod sensitivity;
-mod smith;
+pub(crate) mod smith;
 mod soa;
 pub(crate) mod specs;
 mod table;
@@ -155,7 +155,7 @@ pub(crate) fn visualization_source_dataset(
     create_document::source_dataset(run, analysis).map_err(|error| error.to_string())
 }
 
-mod waves;
+pub(crate) mod waves;
 pub(crate) use waves::copy_cursor_text;
 pub(crate) use waves::{
     ActivePaneFacts, SharedXStatus, active_pane_facts, active_shared_x_status,
@@ -188,8 +188,6 @@ use crate::state::command_catalog::CommandKey;
 use crate::state::{ActiveViewer, AnalysisResult, RetainedTrace, SimulationRun};
 
 use crate::ui::tokens::Tokens;
-#[cfg(test)]
-use crate::workbench::AppState;
 #[cfg(test)]
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::{
@@ -555,9 +553,9 @@ pub(crate) fn apply_pending_view_gesture(ui: &Ui, state: &mut ResultsParts<'_>) 
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct ViewerAvailability {
-    available: bool,
-    reason: &'static str,
+pub(crate) struct ViewerAvailability {
+    pub(crate) available: bool,
+    pub(crate) reason: &'static str,
 }
 
 impl ViewerAvailability {
@@ -1914,7 +1912,7 @@ pub(crate) fn viewer_unavailability_reason(
 /// change of selection clears the session's cursors and hidden family
 /// members, which here were projected from this pane's own document state
 /// and have to survive it, or capturing the pane would delete them.
-pub(super) fn show_persistent_pane_viewer(
+pub(crate) fn show_persistent_pane_viewer(
     ui: &mut Ui,
     state: &mut ResultsParts<'_>,
     run_controller: &mut SimulationController,
@@ -2310,7 +2308,7 @@ fn memoized_incomplete_evidence_reason(
 }
 
 /// The same question for whichever analysis the active sheet is speaking for.
-fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static str> {
+pub(crate) fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static str> {
     let run = state.model.simulation.active_run()?;
     if viewer_uses_wave_stack(state.results.session.viewer) {
         // The stack draws every analysis of the run at once, so the bar
@@ -2327,7 +2325,7 @@ fn active_incomplete_evidence_reason(state: ResultsReads<'_>) -> Option<&'static
     )
 }
 
-fn sheet_purpose(state: ResultsReads<'_>) -> String {
+pub(crate) fn sheet_purpose(state: ResultsReads<'_>) -> String {
     let viewer = state.results.session.viewer;
     let detail = viewer_availability(state, viewer).reason;
     match active_incomplete_evidence_reason(state) {
@@ -2337,7 +2335,7 @@ fn sheet_purpose(state: ResultsReads<'_>) -> String {
 }
 
 #[cfg(test)]
-fn viewer_tabs(ui: &mut Ui, state: &mut AppState) {
+fn viewer_tabs(ui: &mut Ui, state: &mut ResultsTestHost) {
     let available = ResultViewer::all()
         .filter(|&viewer| viewer_availability(state.results_reads(), viewer).available);
     if let Some(viewer) =
@@ -2377,7 +2375,10 @@ fn reconcile_active_viewer(state: &mut ResultsParts<'_>) {
     }
 }
 
-fn viewer_availability(state: ResultsReads<'_>, viewer: ResultViewer) -> ViewerAvailability {
+pub(crate) fn viewer_availability(
+    state: ResultsReads<'_>,
+    viewer: ResultViewer,
+) -> ViewerAvailability {
     let active_run = state.model.simulation.active_run();
     match viewer {
         ResultViewer::Waves => {

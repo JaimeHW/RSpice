@@ -2,6 +2,7 @@
 //! that reach the Results workspace and its return edges, and the cases that
 //! read or write another feature's state on the way.
 
+mod availability;
 mod commands;
 pub(super) mod histogram_publication;
 mod inspector;
