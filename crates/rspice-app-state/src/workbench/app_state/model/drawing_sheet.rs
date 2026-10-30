@@ -52,6 +52,20 @@ impl Model {
         }
     }
 
+    /// The ISO 639 code of the language the project's documents are written
+    /// in, from its title-block Language code, if it gives one. The project
+    /// keeps it, so every sheet of a document shares it.
+    pub fn document_language(&self) -> Option<&str> {
+        self.workspace
+            .content
+            .design_management
+            .drawing_sheet_settings()
+            .title_block_field_values
+            .get(&DrawingSheetTitleFieldId::Language)
+            .map(|language| language.trim())
+            .filter(|language| !language.is_empty())
+    }
+
     /// Whether the open view's sheet is one an editor may change: a writable
     /// schematic or testbench.
     pub fn drawing_sheet_writable(&self) -> bool {

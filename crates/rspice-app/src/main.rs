@@ -49,6 +49,11 @@ fn main() {
 
     log::info!("Starting RSpice UI with egui (commercial-grade GPU rendering)...");
 
+    // Open the installed font files while the window is created, on a worker
+    // thread, so a script the embedded faces lack letters soon after a frame
+    // first shows it.
+    rspice_ui_kit::fonts::system::start(rspice_app_state::quantity::platform_display_languages());
+
     let mut viewport = egui::ViewportBuilder::default()
         .with_title("RSpice - Circuit Simulator")
         .with_inner_size([1400.0, 900.0])

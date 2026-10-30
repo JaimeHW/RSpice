@@ -6,6 +6,8 @@
 mod locale;
 pub use rspice_simulation_contract::spice_value;
 
+#[cfg(not(target_arch = "wasm32"))]
+pub use locale::platform_display_languages;
 pub use locale::platform_number_locale;
 #[cfg(any(test, feature = "test-support"))]
 pub use rspice_vocabulary::quantity::AngleDisplay;

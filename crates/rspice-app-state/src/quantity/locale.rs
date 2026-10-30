@@ -1,7 +1,8 @@
-//! Number locale.
+//! Number locale, and display languages.
 //!
 //! Which decimal and grouping separators the host platform uses, so a typed
-//! value is parsed the way the user typed it.
+//! value is parsed the way the user typed it; and which languages it displays
+//! in, so a Han character is lettered in the form its reader expects.
 
 use super::UiNumberLocale;
 
@@ -78,6 +79,67 @@ fn platform_decimal_separator() -> Option<char> {
         .and_then(|locale| decimal_separator_for_locale_tag(&locale))
 }
 
+/// The languages the platform displays in, most preferred first, as BCP 47
+/// tags or POSIX locale names. Empty where the platform does not say.
+#[cfg(not(target_arch = "wasm32"))]
+#[must_use]
+pub fn platform_display_languages() -> Vec<String> {
+    display_languages()
+}
+
+#[cfg(windows)]
+fn display_languages() -> Vec<String> {
+    use windows_sys::Win32::Globalization::{GetUserPreferredUILanguages, MUI_LANGUAGE_NAME};
+
+    let mut count = 0_u32;
+    let mut length = 0_u32;
+    // SAFETY: a null buffer with a zero length asks only for the length the
+    // list needs; both out-pointers are to live locals.
+    let sized = unsafe {
+        GetUserPreferredUILanguages(
+            MUI_LANGUAGE_NAME,
+            &mut count,
+            std::ptr::null_mut(),
+            &mut length,
+        )
+    };
+    if sized == 0 || length == 0 {
+        return Vec::new();
+    }
+    let mut names = vec![0_u16; length as usize];
+    // SAFETY: the buffer is writable for the length the first call reported.
+    let read = unsafe {
+        GetUserPreferredUILanguages(
+            MUI_LANGUAGE_NAME,
+            &mut count,
+            names.as_mut_ptr(),
+            &mut length,
+        )
+    };
+    if read == 0 {
+        return Vec::new();
+    }
+    names
+        .split(|&unit| unit == 0)
+        .filter(|name| !name.is_empty())
+        .map(String::from_utf16_lossy)
+        .collect()
+}
+
+#[cfg(all(not(windows), not(target_arch = "wasm32")))]
+fn display_languages() -> Vec<String> {
+    let mut languages: Vec<String> = std::env::var("LANGUAGE")
+        .map(|list| list.split(':').map(str::to_owned).collect())
+        .unwrap_or_default();
+    languages.extend(
+        ["LC_ALL", "LC_MESSAGES", "LANG"]
+            .into_iter()
+            .filter_map(|name| std::env::var(name).ok()),
+    );
+    languages.retain(|language| !matches!(language.as_str(), "" | "C" | "POSIX"));
+    languages
+}
+
 #[cfg(any(test, all(not(windows), not(target_arch = "wasm32"))))]
 fn decimal_separator_for_locale_tag(locale: &str) -> Option<char> {
     let normalized = locale
@@ -152,5 +214,16 @@ mod tests {
         assert_eq!(decimal_separator_for_locale_tag("de-CH"), Some('.'));
         assert_eq!(decimal_separator_for_locale_tag("en_US.UTF-8"), Some('.'));
         assert_eq!(decimal_separator_for_locale_tag("C"), Some('.'));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn display_languages_are_whole_tags() {
+        for language in platform_display_languages() {
+            assert!(
+                !language.is_empty() && !language.contains(['\0', ':']),
+                "{language:?}"
+            );
+        }
     }
 }

@@ -453,6 +453,8 @@ impl RSpiceApp {
         // Apply the design-system theme (canvas painters read the active
         // palette directly).
         state.workbench.theme.apply(&cc.egui_ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_ui_kit::fonts::system::attach(&cc.egui_ctx);
         dialogs::help::report_problem::record_graphics_adapter(cc.wgpu_render_state.as_ref());
 
         // Persisted sessions may still carry the legacy seeded
@@ -1010,6 +1012,11 @@ impl eframe::App for RSpiceApp {
             });
         }
         self.prepare_frame(&ctx);
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_ui_kit::fonts::system::set_document_language(
+            &ctx,
+            self.state.model.document_language(),
+        );
         self.poll_cloud_account(&ctx);
         self.record_publish_receipt();
         self.pump_live_session();
