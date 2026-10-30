@@ -134,7 +134,8 @@ SLICE_RULES = [
     (W + r"app/dialogs\.rs$", "shell"),
     # Actions and the rest of app/.
     (W + r"app/actions\.rs$", "shell"),
-    (W + r"app/actions/export_image", "hardcopy"),
+    # The figure-export request drain runs over the whole app, as the frame hooks do.
+    (W + r"app/actions/export_image", "shell"),
     (W + r"app/actions/file", "project"),
     (W + r"app/actions/(hierarchy_net_highlight|property_edit|stimulus|symbol|workspace)", "design"),
     (W + r"app/actions/reveal", "shell"),
