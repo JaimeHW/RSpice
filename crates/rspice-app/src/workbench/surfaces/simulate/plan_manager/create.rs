@@ -40,10 +40,10 @@
 //! [`NewSimulationPlanDraft`] grows no field for a choice that has no fourth
 //! destination.
 
+use super::kit::concept_banner;
 use super::*;
 
 use crate::product::ProcessCorner;
-use crate::workbench::app::concept_banner;
 use crate::workbench::state::NewSimulationPlanDraft;
 use rspice_simulation_contract::run_set::ReferencePoint;
 

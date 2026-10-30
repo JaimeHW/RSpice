@@ -102,11 +102,6 @@ pub use dialogs::confirmation_state::{ConfirmationAction, ConfirmationResponse};
 /// The Model Hub work vocabulary, named where surfaces can reach it.
 pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
 
-/// The authored concept banner, named where the surfaces that compose their own
-/// dialog bodies can reach it. One painter for the box, its two tones and its
-/// margins.
-pub(in crate::workbench) use dialogs::design_management::widgets::concept_banner;
-
 /// Sheet navigation and sheet lifecycle, where the shell's feature tests
 /// reach them.
 #[cfg(test)]

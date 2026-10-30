@@ -19,7 +19,7 @@
 //! the table a track it would overflow, which is why the breakpoint is derived
 //! from the table rather than authored beside it.
 
-use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
+use egui::{Align, Align2, Color32, Frame, Layout, Margin, Rect, Sense, Stroke, Ui, pos2, vec2};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -1076,6 +1076,46 @@ pub(super) fn equal_columns(ui: &mut Ui, count: usize, mut column: impl FnMut(&m
             });
         }
     });
+}
+
+/// The authored `.concept-banner`: one sentence in a filled box, warning-toned
+/// when the transaction under it can refuse or retire something.
+///
+/// The child dialogs state their concept in exactly this box, so there is one
+/// set of margins and tones for one design element.
+pub(super) fn concept_banner(ui: &mut Ui, text: &str, warning: bool) {
+    let t = Tokens::get(ui.ctx());
+    Frame::NONE
+        .fill(if warning {
+            t.color.accent_dim
+        } else {
+            t.color.bg_panel
+        })
+        .stroke(Stroke::new(
+            1.0,
+            if warning {
+                t.color.warn
+            } else {
+                t.color.border
+            },
+        ))
+        .inner_margin(Margin::same(10))
+        .show(ui, |ui| {
+            // A `Frame` shrinks to its content, and a sentence that wraps short
+            // of the track leaves the banner narrower than the surface it
+            // belongs to — a box floating in the dialog rather than a band
+            // across it. The authored `.concept-banner` is a block.
+            ui.set_min_width(ui.available_width());
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(if warning {
+                        t.color.text
+                    } else {
+                        t.color.text_dim
+                    }),
+            );
+        });
 }
 
 #[cfg(test)]

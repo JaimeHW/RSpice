@@ -10,8 +10,7 @@
     "project->models": 2,
     "project->simulate": 3,
     "simulate->design": 4,
-    "simulate->models": 11,
-    "simulate->project": 2
+    "simulate->models": 11
   },
   "lower->upper": {},
   "whole-app": {

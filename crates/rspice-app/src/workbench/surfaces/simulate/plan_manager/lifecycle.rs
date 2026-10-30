@@ -19,9 +19,9 @@
 //! move a flag in the plan catalog, so they are handed the catalog and could not
 //! reach the run controller if they tried.
 
+use super::kit::concept_banner;
 use super::*;
 
-use crate::workbench::app::concept_banner;
 use crate::workbench::design_system::property_row_input;
 
 /// The route's dialog. See the shell's child-dialog signature contract.
