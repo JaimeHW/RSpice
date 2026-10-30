@@ -5,7 +5,9 @@
 
 use super::*;
 
-use crate::state::{ConfigurationSetDefinition, LibraryManager, default_view_search_order};
+use crate::state::{
+    ConfigurationCellBinding, ConfigurationSetDefinition, LibraryManager, default_view_search_order,
+};
 use crate::ui::widgets::select;
 use crate::workbench::project::configuration_state::{
     CellRow, ConfigurationRow, cell_binding, cell_view_names,
@@ -35,6 +37,23 @@ struct Row<'a> {
     in_design: bool,
 }
 
+/// The cell bindings that name no cell of the expanded design: kept, as
+/// Cadence keeps them, and listed after the cells, but binding nothing.
+pub(super) fn bindings_not_in_design<'a>(
+    cells: &'a [CellRow],
+    definition: Option<&'a ConfigurationSetDefinition>,
+) -> impl Iterator<Item = &'a ConfigurationCellBinding> + 'a {
+    definition
+        .into_iter()
+        .flat_map(|definition| &definition.cell_bindings)
+        .filter(move |binding| {
+            !cells.iter().any(|cell| {
+                cell.library.eq_ignore_ascii_case(&binding.library)
+                    && cell.cell.eq_ignore_ascii_case(&binding.cell)
+            })
+        })
+}
+
 pub(super) fn cells_table(
     ui: &mut Ui,
     cells: &[CellRow],
@@ -57,23 +76,15 @@ pub(super) fn cells_table(
             in_design: true,
         })
         .collect::<Vec<_>>();
-    if let Some(definition) = definition {
-        for binding in &definition.cell_bindings {
-            let bound = cells.iter().any(|cell| {
-                cell.library.eq_ignore_ascii_case(&binding.library)
-                    && cell.cell.eq_ignore_ascii_case(&binding.cell)
-            });
-            if !bound {
-                rows.push(Row {
-                    library: &binding.library,
-                    cell: &binding.cell,
-                    instances: 0,
-                    views_found: &[],
-                    in_design: false,
-                });
-            }
-        }
-    }
+    rows.extend(
+        bindings_not_in_design(cells, definition).map(|binding| Row {
+            library: &binding.library,
+            cell: &binding.cell,
+            instances: 0,
+            views_found: &[],
+            in_design: false,
+        }),
+    );
     let inherited = definition.map_or_else(
         || {
             let order = default_view_search_order("schematic", false);

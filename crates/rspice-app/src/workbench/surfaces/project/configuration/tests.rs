@@ -359,4 +359,11 @@ fn the_cells_tab_lists_each_cell_once_with_its_binding() {
         .filter(|label| label.starts_with("Cell user/amp:"))
         .count();
     assert_eq!(amp_rows, 1, "a cell instantiated twice is one row");
+    // The count is the design's cells; the binding beside them is counted
+    // apart, so the header agrees with the rows under it.
+    assert!(
+        shown.says("4 cells \u{b7} 1 binding not in this design"),
+        "{:#?}",
+        shown.every_word().collect::<Vec<_>>()
+    );
 }

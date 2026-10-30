@@ -81,7 +81,7 @@ pub(super) fn tables(
     let editable = definition.is_some() && !state.model.safe_mode.project_read_only();
     let page = &state.project.configuration;
     let tab = page.tab;
-    let mut edit = tab_header(ui, resolution, tab, editable);
+    let mut edit = tab_header(ui, resolution, definition, tab, editable);
     let Ok(hierarchy) = &resolution.hierarchy else {
         apply_table_edit(state, id, edit);
         return;
@@ -179,6 +179,7 @@ fn apply_table_edit(
 fn tab_header(
     ui: &mut Ui,
     resolution: &ConfigurationResolution,
+    definition: Option<&ConfigurationSetDefinition>,
     tab: ConfigurationTab,
     editable: bool,
 ) -> Option<TableEdit> {
@@ -190,7 +191,14 @@ fn tab_header(
         }
         ConfigurationTab::Cells => {
             let count = resolution.cells.len();
-            format!("{count} cell{}", plural_suffix(count))
+            let cells = format!("{count} cell{}", plural_suffix(count));
+            match super::cells::bindings_not_in_design(&resolution.cells, definition).count() {
+                0 => cells,
+                unused => format!(
+                    "{cells} \u{b7} {unused} binding{} not in this design",
+                    plural_suffix(unused)
+                ),
+            }
         }
     };
     let (rect, _) = ui.allocate_exact_size(
