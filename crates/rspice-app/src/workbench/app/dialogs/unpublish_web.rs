@@ -15,7 +15,7 @@ use crate::workbench::state::WorkbenchSession;
 
 /// Unpublish confirmation state, armed with one exact publication target.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct UnpublishWebDialogState {
+pub struct UnpublishWebDialogState {
     pub open: bool,
     pub acknowledged: bool,
     pub circuit_id: String,

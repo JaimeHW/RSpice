@@ -8,31 +8,30 @@ use crate::workbench::live_session::CloudHandles;
 
 /// What the cloud feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct CloudState {
+pub struct CloudState {
     /// License activation dialog state
     pub license_dialog: crate::workbench::app::dialogs::license::LicenseDialogState,
 
     /// Immutable cloud publication transaction.
-    pub(crate) publish_web: crate::workbench::app::dialogs::publish_web::PublishWebDialogState,
+    pub publish_web: crate::workbench::app::dialogs::publish_web::PublishWebDialogState,
 
     /// Live-session lifecycle controls (start review, host roster, guest view).
-    pub(crate) live_session: crate::workbench::app::dialogs::live_session::LiveSessionDialogState,
+    pub live_session: crate::workbench::app::dialogs::live_session::LiveSessionDialogState,
 
     /// Owner-confirmed publication tombstone transaction.
-    pub(crate) unpublish_web:
-        crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
+    pub unpublish_web: crate::workbench::app::dialogs::unpublish_web::UnpublishWebDialogState,
 
     /// The activated license key as pasted (persisted; re-verified on load).
-    pub(crate) license_key: Option<String>,
+    pub license_key: Option<String>,
     /// The verified grant behind `license_key` (derived, never persisted).
-    pub(crate) license: Option<crate::services::license::LicenseInfo>,
+    pub license: Option<crate::services::license::LicenseInfo>,
 }
 
 impl CloudState {
     /// Take the license kept on this computer when the session holds none:
     /// its key and the grant it verifies to.
     #[cfg(not(target_arch = "wasm32"))]
-    pub(crate) fn restore_stored_license(&mut self) {
+    pub fn restore_stored_license(&mut self) {
         if self.license.is_none()
             && let Some((key, info)) = crate::services::license::load_stored()
         {

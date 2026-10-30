@@ -31,7 +31,7 @@ use rspice_publication_contract::PublicationSnapshot;
 
 /// What the open-time snapshot build proved about the publish scope.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PublishScope {
+pub struct PublishScope {
     /// Schematic sheet names, in page order.
     pub sheets: Vec<String>,
     /// Plot figure titles, in page order.
@@ -52,7 +52,7 @@ pub(crate) struct PublishScope {
 /// builder's refusal); `submitted` means this dialog handed a request to the
 /// executor and now renders its progress.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct PublishWebDialogState {
+pub struct PublishWebDialogState {
     pub open: bool,
     pub title: String,
     pub description: String,
@@ -84,7 +84,7 @@ pub(crate) struct PublishWebDialogState {
 /// What a review build reads: the open project, and the hardcopy feature's
 /// port with the parts it builds the snapshot from beside its own state.
 #[derive(Clone, Copy)]
-pub(crate) struct SnapshotSource<'a> {
+pub struct SnapshotSource<'a> {
     pub(crate) hardcopy: &'a dyn HardcopyPort,
     pub(crate) model: &'a Model,
     pub(crate) workbench: &'a WorkbenchSession,
@@ -549,7 +549,7 @@ fn resolve_target(
     })
 }
 
-pub(crate) fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
+pub fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDraft {
     PublicationDraft {
         title: dialog.title.trim().to_owned(),
         description: dialog.description.trim().to_owned(),
@@ -572,7 +572,7 @@ pub(crate) fn publication_draft(dialog: &PublishWebDialogState) -> PublicationDr
 }
 
 /// Build the reviewed scope from the same draft the final submission uses.
-pub(crate) fn build_scope(
+pub fn build_scope(
     source: SnapshotSource<'_>,
     draft: &PublicationDraft,
 ) -> Result<PublishScope, String> {
@@ -632,7 +632,7 @@ pub(crate) fn build_scope(
     })
 }
 
-pub(crate) fn imported_model_source_count(model: &Model, include_netlist: bool) -> usize {
+pub fn imported_model_source_count(model: &Model, include_netlist: bool) -> usize {
     if !include_netlist {
         return 0;
     }

@@ -199,22 +199,22 @@ struct PendingRunRequest {
 /// the account session boundary (sign-in, entitlements, license leases) and
 /// the live-session engine that drains it each frame (document sync, write
 /// leases and presence over the relay port the account hands out).
-pub(crate) struct CloudHandles {
-    pub(crate) account: CloudAccountService,
-    pub(crate) live_session: LiveSessionEngine,
+pub struct CloudHandles {
+    pub account: CloudAccountService,
+    pub live_session: LiveSessionEngine,
 }
 
 /// What the engine reads and writes of the application in one phase of its
 /// pump: the model, the session, and what a project snapshot reads beside
 /// the model, with what the design and code features show. The shell lends
 /// them for the one call.
-pub(crate) struct LiveHost<'a> {
-    pub(crate) model: &'a mut Model,
-    pub(crate) workbench: &'a mut WorkbenchSession,
-    pub(crate) platform: &'a PlatformState,
-    pub(crate) presentation: &'a dyn ResultPresentationSource,
-    pub(crate) design: &'a dyn DesignPort,
-    pub(crate) code: &'a dyn CodePort,
+pub struct LiveHost<'a> {
+    pub model: &'a mut Model,
+    pub workbench: &'a mut WorkbenchSession,
+    pub platform: &'a PlatformState,
+    pub presentation: &'a dyn ResultPresentationSource,
+    pub design: &'a dyn DesignPort,
+    pub code: &'a dyn CodePort,
 }
 
 /// A host's whole-project snapshot reads the project from the parts the
@@ -234,28 +234,28 @@ impl LifecycleSource for LiveHost<'_> {
 /// between the pump's phases: the session that mirrored it is over and its
 /// policy keeps no copy.
 #[must_use]
-pub(crate) struct DiscardMirror;
+pub struct DiscardMirror;
 
 /// The host's whole-project snapshot waiting to replace a guest's mirror,
 /// and the host's name for what the replacement logs.
-pub(crate) struct MirrorSnapshot {
+pub struct MirrorSnapshot {
     content: CompletedContent,
     host_label: String,
 }
 
 impl MirrorSnapshot {
     /// The snapshot's project text, as the host serialized it.
-    pub(crate) fn bytes(&self) -> &[u8] {
+    pub fn bytes(&self) -> &[u8] {
         &self.content.bytes
     }
 
-    pub(crate) fn host_label(&self) -> &str {
+    pub fn host_label(&self) -> &str {
         &self.host_label
     }
 }
 
 /// How the shell's replacement of the project with a mirror snapshot went.
-pub(crate) enum MirrorApply {
+pub enum MirrorApply {
     Applied,
     /// A local run or lifecycle transaction owns the project right now; the
     /// snapshot waits for the next pump.
@@ -267,7 +267,7 @@ pub(crate) enum MirrorApply {
 /// next to the cloud account service it drains. The shell runs its phases
 /// in order and carries out the project transactions they ask for between
 /// them.
-pub(crate) struct LiveSessionEngine {
+pub struct LiveSessionEngine {
     connection: Option<Connection>,
     role: Role,
     peers: HashMap<PeerIdentity, PeerPresence>,
@@ -314,7 +314,7 @@ impl LiveSessionEngine {
     /// enter the mirror a close made room for, drain inbound frames, and say
     /// a refused lease. `false` when no session runs, once what an ended one
     /// left behind is dropped; the frame's pump stops there.
-    pub(crate) fn pump_inbound(
+    pub fn pump_inbound(
         &mut self,
         state: &mut LiveHost<'_>,
         cloud: &mut CloudAccountService,
@@ -353,7 +353,7 @@ impl LiveSessionEngine {
     /// The session's outbound half for one frame: broadcast local changes,
     /// stream the run's status, keep presence and the cursor current, retire
     /// quiet peers, and project write locks.
-    pub(crate) fn pump_outbound(&mut self, state: &mut LiveHost<'_>) {
+    pub fn pump_outbound(&mut self, state: &mut LiveHost<'_>) {
         self.broadcast_local_changes(state);
         self.stream_run_status(state);
         self.send_presence_heartbeat(state);
@@ -541,7 +541,7 @@ impl LiveSessionEngine {
     /// The freshest stashed project snapshot, for the shell to apply in
     /// place of the guest's mirror; `None` unless a mirroring guest holds
     /// one.
-    pub(crate) fn take_mirror_snapshot(&mut self) -> Option<MirrorSnapshot> {
+    pub fn take_mirror_snapshot(&mut self) -> Option<MirrorSnapshot> {
         let host_label = self.display_name_of_host();
         let Role::Guest(guest) = &mut self.role else {
             return None;
@@ -557,7 +557,7 @@ impl LiveSessionEngine {
     /// restarts the wire digests and re-baselines held leases, and one the
     /// project could not take yet stays stashed while a local run or
     /// lifecycle transaction owns the project.
-    pub(crate) fn mirror_snapshot_applied(
+    pub fn mirror_snapshot_applied(
         &mut self,
         state: &mut LiveHost<'_>,
         snapshot: MirrorSnapshot,
@@ -613,14 +613,14 @@ impl LiveSessionEngine {
 
     /// Whether a mirror teardown that waited for the local run to stop can
     /// close the mirrored project now.
-    pub(crate) fn mirror_discard_due(&self, state: &LiveHost<'_>) -> Option<DiscardMirror> {
+    pub fn mirror_discard_due(&self, state: &LiveHost<'_>) -> Option<DiscardMirror> {
         (self.mirror_discard_pending && !state.model.simulation.execution.has_active_execution())
             .then_some(DiscardMirror)
     }
 
     /// The shell's close of a teardown that waited: once the project closes,
     /// nothing waits any more.
-    pub(crate) fn mirror_discard_settled(&mut self, closed: bool) {
+    pub fn mirror_discard_settled(&mut self, closed: bool) {
         if closed {
             self.mirror_discard_pending = false;
         }
@@ -628,7 +628,7 @@ impl LiveSessionEngine {
 
     /// The shell's close of the mirror a session's end retired: one it could
     /// not close waits for the local run to stop.
-    pub(crate) fn mirror_retired(&mut self, closed: bool) {
+    pub fn mirror_retired(&mut self, closed: bool) {
         if !closed {
             self.mirror_discard_pending = true;
         }
@@ -640,7 +640,7 @@ impl LiveSessionEngine {
     /// the editors, the host, and a fresh role for a new session. Leaving a
     /// mirror whose session's policy keeps no copy asks the shell to close
     /// it once this returns.
-    pub(crate) fn reconcile_role(
+    pub fn reconcile_role(
         &mut self,
         state: &mut LiveHost<'_>,
         cloud: &CloudAccountService,

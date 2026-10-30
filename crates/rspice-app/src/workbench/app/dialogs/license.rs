@@ -45,7 +45,7 @@ const KEY_LINES: usize = 3;
 
 /// Open the dialog: fresh entry, or `license`, the stored grant, when already
 /// activated (primary becomes Close, secondary removes the license).
-pub(crate) fn open_license_dialog(dialog: &mut LicenseDialogState, license: Option<&LicenseInfo>) {
+pub fn open_license_dialog(dialog: &mut LicenseDialogState, license: Option<&LicenseInfo>) {
     dialog.open = true;
     dialog.text.clear();
     dialog.phase = match license {
@@ -56,7 +56,7 @@ pub(crate) fn open_license_dialog(dialog: &mut LicenseDialogState, license: Opti
 
 /// What the license dialog reads and writes: its own inputs, the key and
 /// the grant this machine holds, and the model's log it reports to.
-pub(crate) struct LicenseParts<'a> {
+pub struct LicenseParts<'a> {
     pub dialog: &'a mut LicenseDialogState,
     pub license_key: &'a mut Option<String>,
     pub license: &'a mut Option<LicenseInfo>,
@@ -65,7 +65,7 @@ pub(crate) struct LicenseParts<'a> {
 
 /// Draw the license dialog for this frame, when it is open, and carry out
 /// what the reader chose in it.
-pub(crate) fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context) {
+pub fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context) {
     if !parts.dialog.open {
         return;
     }
@@ -176,7 +176,7 @@ pub(crate) fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context)
     }
 }
 
-pub(crate) fn verify_license_input(dialog: &mut LicenseDialogState) {
+pub fn verify_license_input(dialog: &mut LicenseDialogState) {
     let text = dialog.text.clone();
     dialog.phase = match license::parse_and_verify(&text) {
         Ok(info) => LicensePhase::Verified(info),

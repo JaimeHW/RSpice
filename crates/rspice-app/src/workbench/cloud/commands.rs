@@ -9,7 +9,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the cloud feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum CloudCommand {
+pub enum CloudCommand {
     LiveSession,
     PublishToWeb,
     AccountOrganization,
@@ -18,7 +18,7 @@ pub(crate) enum CloudCommand {
 
 impl CloudCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 4] = [
+    pub const ALL: [Self; 4] = [
         Self::LiveSession,
         Self::PublishToWeb,
         Self::AccountOrganization,
@@ -26,7 +26,7 @@ impl CloudCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::LiveSession => CommandKey::new("live-session"),
             Self::PublishToWeb => CommandKey::new("publish-web"),
@@ -39,7 +39,7 @@ impl CloudCommand {
     /// and has no binding of its own. Publishing needs an open project.
     /// Hosting a live session does too, but the same dialog joins by code
     /// from any state, so that command never requires one.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, flags) = match self {
             Self::LiveSession => ("Live session…", "File", CommandFlags::PALETTE_VISIBLE),
             Self::PublishToWeb => (

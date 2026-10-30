@@ -447,7 +447,7 @@ fn unix_date(unix_seconds: i64) -> String {
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum AccountAction {
+pub enum AccountAction {
     PersonalPreferences,
     ActivateLicense,
     ManageLicense,
@@ -489,7 +489,7 @@ impl AccountAction {
 /// What the account console reads and writes: the license dialog it opens
 /// over itself, the license this machine holds, the account service, and the
 /// session whose route it is drawn on.
-pub(crate) struct AccountConsoleParts<'a> {
+pub struct AccountConsoleParts<'a> {
     pub license_dialog: &'a mut LicenseDialogState,
     pub license: Option<&'a LicenseInfo>,
     pub account: &'a mut CloudAccountService,
@@ -498,7 +498,7 @@ pub(crate) struct AccountConsoleParts<'a> {
 
 /// Carry out `action`; the command it runs, for the caller to run once the
 /// console has drawn.
-pub(crate) fn execute_action(
+pub fn execute_action(
     parts: &mut AccountConsoleParts<'_>,
     action: AccountAction,
 ) -> Option<CommandKey> {
@@ -545,7 +545,7 @@ pub(crate) fn execute_action(
 /// the application pass; temporarily yielding this parent keeps that child
 /// transaction visually and interactively on top. Returns the command the
 /// reader asked of the console, for the caller to run once it has drawn.
-pub(crate) fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> Option<CommandKey> {
+pub fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> Option<CommandKey> {
     if parts.workbench.current_route().surface_id() != SurfaceId::AccountOrganization
         || parts.license_dialog.open
     {
@@ -591,7 +591,7 @@ pub(crate) fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> 
     requested_action.and_then(|action| execute_action(parts, action))
 }
 
-pub(crate) fn close_to_source(workbench: &mut WorkbenchSession) {
+pub fn close_to_source(workbench: &mut WorkbenchSession) {
     if workbench
         .navigate_back(RouteTransitionSource::User)
         .is_some()

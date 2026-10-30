@@ -40,7 +40,7 @@ use crate::services::live_protocol::{
 
 /// Entitlement feature key the service requires before accepting a
 /// publication. Must match the API's `require_cloud_publishing_entitlement`.
-pub(crate) const CLOUD_PUBLISHING_FEATURE: &str = "cloud_publishing";
+pub const CLOUD_PUBLISHING_FEATURE: &str = "cloud_publishing";
 
 /// Entitlement feature key for hosting or joining live sessions. Must match
 /// the API's live-collaboration entitlement checks; every participant —
@@ -49,7 +49,7 @@ pub(crate) const LIVE_COLLABORATION_FEATURE: &str = "live_collaboration";
 
 /// Whether this build can operate a cloud account session at all.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum CloudAccountAvailability {
+pub enum CloudAccountAvailability {
     /// Native build with release-configured endpoints: full sign-in, refresh,
     /// entitlements, and offline license leases.
     Native,
@@ -61,7 +61,7 @@ pub(crate) enum CloudAccountAvailability {
     /// build still has to say that web publishing is the desktop's job.
     #[cfg_attr(
         not(target_arch = "wasm32"),
-        expect(dead_code, reason = "constructed only by browser builds")
+        allow(dead_code, reason = "constructed only by browser builds")
     )]
     Browser,
     /// This build was produced without pinned cloud endpoints, so every cloud
@@ -71,7 +71,7 @@ pub(crate) enum CloudAccountAvailability {
 
 /// Lifecycle phase of the cloud session.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum CloudSessionPhase {
+pub enum CloudSessionPhase {
     /// No account session. `last_error` carries the most recent sign-in or
     /// refresh failure in presentation-safe form.
     SignedOut { last_error: Option<String> },
@@ -115,14 +115,14 @@ impl CloudSessionPhase {
 /// Carries exactly what the console renders; richer projections arrive with
 /// the surfaces that prove them.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(crate) struct PrincipalSummary {
+pub struct PrincipalSummary {
     pub email: Option<String>,
     pub display_name: Option<String>,
 }
 
 /// One entitlement row as the server projects it (history included).
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct EntitlementSummary {
+pub struct EntitlementSummary {
     pub status: String,
     /// Explicit Boolean feature grants (`true` values only, fail closed).
     pub granted_features: Vec<String>,
@@ -131,7 +131,7 @@ pub(crate) struct EntitlementSummary {
 
 /// The verified native license lease bound to this device.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct NativeLicenseSummary {
+pub struct NativeLicenseSummary {
     pub plan: String,
     pub product: String,
     /// Feature names granted `true` in the authenticated feature policy.
@@ -142,7 +142,7 @@ pub(crate) struct NativeLicenseSummary {
 
 /// One issued license lease (a signed-in device) from the server's history.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LeaseSummary {
+pub struct LeaseSummary {
     pub id: String,
     pub plan: String,
     pub issued_at: String,
@@ -154,7 +154,7 @@ pub(crate) struct LeaseSummary {
 
 /// A workspace the principal can publish into.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct WorkspaceSummary {
+pub struct WorkspaceSummary {
     pub id: String,
     pub name: String,
 }
@@ -199,7 +199,7 @@ pub(crate) struct PublishReceipt {
 
 /// Progress of the publish in flight, rendered by the dialog.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum PublishState {
+pub enum PublishState {
     /// Uploading the snapshot and sealing the circuit revision.
     Publishing,
     /// The publication exists; the page render is still preparing.
@@ -212,7 +212,7 @@ pub(crate) enum PublishState {
 
 /// One publication of the bound circuit, for the Published band.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct PublicationSummary {
+pub struct PublicationSummary {
     pub id: String,
     pub title: String,
     pub url_path: String,
@@ -223,7 +223,7 @@ pub(crate) struct PublicationSummary {
 
 /// One roster row of the live session, rendered fields only.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LiveParticipantSummary {
+pub struct LiveParticipantSummary {
     pub principal_id: String,
     pub display_name: String,
     /// Whether this row is the session host (a fixed editor).
@@ -239,7 +239,7 @@ pub(crate) struct LiveParticipantSummary {
 
 /// Host-controlled session policy, as the dialog renders and applies it.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct LiveSessionPolicySummary {
+pub struct LiveSessionPolicySummary {
     /// Guests joining by code become editors (`true`) or viewers (`false`).
     pub guests_edit: bool,
     /// Whether each join waits for the host's approval.
@@ -250,7 +250,7 @@ pub(crate) struct LiveSessionPolicySummary {
 
 /// The live session as the UI renders it. Carries no connect credential.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LiveSessionSummary {
+pub struct LiveSessionSummary {
     pub session_id: String,
     /// The human-relayable join code, held only while hosting: the server
     /// returns it exactly once per creation or rotation and stores only a
@@ -322,7 +322,7 @@ pub(crate) struct LiveRelayPort {
 
 /// Lifecycle of the live session, dialog- and chrome-rendered.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum LiveSessionState {
+pub enum LiveSessionState {
     /// Going live: the creation is in flight.
     Starting,
     /// This install hosts the session.
@@ -340,7 +340,7 @@ pub(crate) enum LiveSessionState {
 
 /// Everything the UI may render about the cloud session. Carries no secrets.
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CloudSessionSnapshot {
+pub struct CloudSessionSnapshot {
     pub phase: CloudSessionPhase,
     pub principal: Option<PrincipalSummary>,
     pub entitlements: Vec<EntitlementSummary>,
@@ -405,7 +405,7 @@ impl CloudSessionSnapshot {
 
 impl CloudSessionSnapshot {
     /// Whether any server-verified or offline-verified session exists.
-    pub(crate) fn signed_in(&self) -> bool {
+    pub fn signed_in(&self) -> bool {
         matches!(
             self.phase,
             CloudSessionPhase::Active | CloudSessionPhase::OfflineLicensed
@@ -629,7 +629,7 @@ impl LiveRelayPortReceiver {
 const MAX_PENDING_CLOUD_COMMANDS: usize = 8;
 
 /// The application-facing service. Owns the executor and the latest snapshot.
-pub(crate) struct CloudAccountService {
+pub struct CloudAccountService {
     availability: CloudAccountAvailability,
     snapshot: CloudSessionSnapshot,
     pending_browser_url: Option<String>,
@@ -653,7 +653,7 @@ pub(crate) struct CloudAccountService {
 impl CloudAccountService {
     /// Resolve configuration and, when this build can operate a session,
     /// start the background executor (which restores any stored session).
-    pub(crate) fn new(repaint: Option<egui::Context>) -> Self {
+    pub fn new(repaint: Option<egui::Context>) -> Self {
         #[cfg(target_arch = "wasm32")]
         {
             match config::CloudAccountConfig::resolve() {
@@ -728,7 +728,7 @@ impl CloudAccountService {
     /// A service that never operates a session, so test instances start no
     /// thread and touch no network.
     #[cfg(test)]
-    pub(crate) fn unconfigured() -> Self {
+    pub fn unconfigured() -> Self {
         Self {
             availability: CloudAccountAvailability::UnconfiguredBuild,
             snapshot: CloudSessionSnapshot::default(),
@@ -747,7 +747,7 @@ impl CloudAccountService {
     /// An inert service that reports `snapshot`, so a surface can be drawn in
     /// a session state no test can reach without a server.
     #[cfg(test)]
-    pub(crate) fn with_snapshot(
+    pub fn with_snapshot(
         availability: CloudAccountAvailability,
         snapshot: CloudSessionSnapshot,
     ) -> Self {
@@ -758,7 +758,7 @@ impl CloudAccountService {
         }
     }
 
-    pub(crate) fn availability(&self) -> CloudAccountAvailability {
+    pub fn availability(&self) -> CloudAccountAvailability {
         self.availability
     }
 
@@ -781,7 +781,7 @@ impl CloudAccountService {
             .map_err(|_| "The cloud endpoints this build carries are invalid.".to_owned())
     }
 
-    pub(crate) fn snapshot(&self) -> &CloudSessionSnapshot {
+    pub fn snapshot(&self) -> &CloudSessionSnapshot {
         &self.snapshot
     }
 

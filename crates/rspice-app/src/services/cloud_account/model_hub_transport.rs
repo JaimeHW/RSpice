@@ -30,7 +30,7 @@ use crate::state::model_hub::{
 /// The shell installs it on the session's Model Hub service at startup; it is
 /// the only provider a running application has.
 #[derive(Debug)]
-pub(crate) struct CloudModelHubTransportProvider;
+pub struct CloudModelHubTransportProvider;
 
 impl ModelHubTransportProvider for CloudModelHubTransportProvider {
     #[cfg(not(target_arch = "wasm32"))]

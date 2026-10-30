@@ -26,7 +26,7 @@ use crate::workbench::live_session::LiveSessionEngine;
 /// Live-session dialog state. The session itself lives in the cloud
 /// service's snapshot; this holds only the user's in-dialog inputs.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub(crate) struct LiveSessionDialogState {
+pub struct LiveSessionDialogState {
     pub open: bool,
     /// Join-by-code input on the start surface.
     pub join_code_input: String,

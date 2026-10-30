@@ -42,7 +42,7 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::CloudCommand;
 
 /// The cloud feature.
-pub(crate) struct CloudFeature;
+pub struct CloudFeature;
 
 impl Feature for CloudFeature {
     type State = CloudState;
@@ -58,11 +58,7 @@ impl Feature for CloudFeature {
 impl CloudFeature {
     /// Draw the live session's presence in the title bar, touch-sized while
     /// `large_targets`, and carry out what the reader asked of it there.
-    pub(crate) fn show_presence(
-        cx: &mut Cx<'_, CloudFeature>,
-        ui: &mut egui::Ui,
-        large_targets: bool,
-    ) {
+    pub fn show_presence(cx: &mut Cx<'_, CloudFeature>, ui: &mut egui::Ui, large_targets: bool) {
         let reads = PresenceReads {
             account: &cx.own.account,
             engine: &cx.own.live_session,
@@ -85,7 +81,7 @@ impl CloudFeature {
     /// Say what the account service settled since the last frame: a session
     /// it lost, a refusal and a failure to keep the session; and open the
     /// sign-in page it asked for.
-    pub(crate) fn poll_account(cx: &mut Cx<'_, CloudFeature>, ctx: &egui::Context) {
+    pub fn poll_account(cx: &mut Cx<'_, CloudFeature>, ctx: &egui::Context) {
         let account = &mut cx.own.account;
         if let Some(reason) = account.poll_for_lost_session() {
             cx.model
@@ -106,7 +102,7 @@ impl CloudFeature {
     /// Take the publish executor's receipt, and say a publish that failed
     /// after its dialog closed. Runs every frame, so a closed dialog never
     /// loses the binding or the failure.
-    pub(crate) fn record_publish_receipt(cx: &mut Cx<'_, CloudFeature>) {
+    pub fn record_publish_receipt(cx: &mut Cx<'_, CloudFeature>) {
         record_publish_receipt(&mut cx.state.publish_web, &mut cx.own.account, cx.model);
     }
 }
