@@ -41,9 +41,20 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
 
 /// Why Open is refused, if it is.
 fn open_refusal(state: &AppState) -> Option<&'static str> {
-    (state.platform.project_lifecycle.is_open()
-        && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state))
-    .then_some("Save or close the open project first: an example replaces it")
+    if !state.platform.project_lifecycle.is_open() {
+        return None;
+    }
+    if state
+        .project
+        .configuration
+        .is_dirty(&state.model.workspace.content.configuration_sets)
+    {
+        return Some(
+            "Apply or revert the configuration edits first: an example replaces the project",
+        );
+    }
+    crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+        .then_some("Save or close the open project first: an example replaces it")
 }
 
 /// Where a row of `rect` paints: its highlight, and the x its name starts

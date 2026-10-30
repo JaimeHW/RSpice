@@ -2181,3 +2181,36 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     );
     std::fs::remove_dir_all(directory).ok();
 }
+
+/// Close project asks about configuration edits that are not applied before
+/// its review of unsaved documents, and closes nothing meanwhile.
+#[test]
+fn close_project_asks_about_configuration_edits_before_its_review() {
+    let fixture = crate::workbench::examples::hierarchy_reference::build();
+    let mut state = fixture.state;
+    state.open_project_session();
+    let catalog = state.model.workspace.content.configuration_sets.clone();
+    state
+        .project
+        .configuration
+        .edit(&catalog, fixture.configuration, |definition| {
+            definition.stop_views = vec!["spice".to_owned()];
+        });
+    assert!(state.project.configuration.is_dirty(&catalog));
+
+    assert!(request_close_project(&mut state));
+
+    assert_eq!(
+        state
+            .project
+            .configuration_dialog
+            .leaving
+            .as_ref()
+            .map(|leaving| leaving.action),
+        Some(crate::workbench::app::ConfirmationAction::CloseProject(
+            ProjectCloseDestination::EmptyWorkbench
+        ))
+    );
+    assert!(state.workbench.project_review_dialog.request.is_none());
+    assert!(state.platform.project_lifecycle.is_open());
+}

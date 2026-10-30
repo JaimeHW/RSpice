@@ -338,6 +338,15 @@ impl RSpiceApp {
     /// Open an entry from the recent-files list, prompting to save first when
     /// the current document has unsaved changes.
     pub(crate) fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
+        if recent.kind == crate::services::recent_files::RecentKind::Project
+            && crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+                &mut self.state,
+                ConfirmationAction::OpenRecent,
+                Some((recent.path.clone(), recent.kind)),
+            )
+        {
+            return;
+        }
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
             || (recent.kind == crate::services::recent_files::RecentKind::Project
                 && self.state.models.model_editor_has_unsaved_changes())

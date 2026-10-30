@@ -1008,6 +1008,13 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
         return false;
     }
     let destination = ProjectCloseDestination::EmptyWorkbench;
+    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+        state,
+        crate::workbench::app::ConfirmationAction::CloseProject(destination),
+        None,
+    ) {
+        return true;
+    }
     if closing_loses_nothing(state) {
         return close_project_discard(state, destination);
     }

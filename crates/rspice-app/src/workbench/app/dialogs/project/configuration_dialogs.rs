@@ -1,4 +1,5 @@
-//! The configuration dialogs: New configuration, Clone, Rename and Delete.
+//! The configuration dialogs: New configuration, Clone, Rename and Delete,
+//! and the question asked before edits that are not applied would be lost.
 //!
 //! Everything else about a configuration is edited on its page. These four
 //! are the transactions that add one to the project, name one, or take one
@@ -6,6 +7,7 @@
 
 use egui::{Context, Id, TextEdit, Ui};
 
+use crate::services::recent_files::RecentKind;
 use crate::state::{
     CellViewRef, ConfigurationBlackBoxPolicy, ConfigurationModelProfile, ConfigurationSetCatalog,
     ConfigurationSetDefinition, ConfigurationSetId, DEFAULT_STOP_VIEW_TYPES, InstancePath,
@@ -15,11 +17,11 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, field_label,
     kv_row, select, switch_row,
 };
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration_transaction, delete_refusal,
 };
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
+use crate::workbench::app::{ConfirmationAction, RSpiceApp};
 use crate::workbench::app_state::AppState;
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -114,12 +116,24 @@ pub(crate) enum ConfigurationDialog {
     Delete(ConfigurationSetId),
 }
 
+/// A request that takes the open project away, held while the configuration
+/// in front has edits that are not applied.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Leaving {
+    pub(crate) action: ConfirmationAction,
+    /// The recent project an Open recent asked for.
+    pub(crate) recent: Option<(std::path::PathBuf, RecentKind)>,
+}
+
 /// The configuration dialogs' state, held by the project feature.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ConfigurationDialogState {
     pub(crate) open: Option<ConfigurationDialog>,
     /// Why the last commit was refused; the dialog stays open to say so.
     refusal: Option<String>,
+    /// Opening, creating or importing another project, closing this one, or
+    /// exiting, waiting for the edits not applied to be applied or discarded.
+    pub(crate) leaving: Option<Leaving>,
 }
 
 impl ConfigurationDialogState {
@@ -131,6 +145,25 @@ impl ConfigurationDialogState {
         self.open = None;
         self.refusal = None;
     }
+}
+
+/// Hold `action`, which takes the open project away, while the Configuration
+/// page has edits that are not applied: the page asks to apply or discard
+/// them first, then goes on with it. Returns whether it held the action.
+pub(in crate::workbench) fn hold_for_configuration_edits(
+    state: &mut AppState,
+    action: ConfirmationAction,
+    recent: Option<(std::path::PathBuf, RecentKind)>,
+) -> bool {
+    if !state
+        .project
+        .configuration
+        .is_dirty(&state.model.workspace.content.configuration_sets)
+    {
+        return false;
+    }
+    state.project.configuration_dialog.leaving = Some(Leaving { action, recent });
+    true
 }
 
 /// Which dialog to open.
@@ -229,6 +262,30 @@ pub(in crate::workbench) fn configuration_actions_menu(
 
 impl RSpiceApp {
     pub(in crate::workbench) fn render_configuration_dialog(&mut self, ctx: &Context) {
+        if self.state.project.configuration_dialog.leaving.is_some() {
+            let choice = edits_prompt(ctx, &self.state).unwrap_or(DialogChoice::Secondary);
+            let leaving = match answer_leaving(&mut self.state, choice) {
+                LeavingAnswer::Stay => None,
+                LeavingAnswer::GoOn(leaving) => Some(leaving),
+                LeavingAnswer::ApplyThenGoOn(leaving) => {
+                    match commit_configuration_transaction(self, ConfigurationTransaction::Apply) {
+                        Ok(()) => Some(leaving),
+                        // A refused apply stays, on the page, saying why.
+                        Err(refusal) => {
+                            self.state.project.configuration.refusal = Some(refusal);
+                            show_configuration_page(&mut self.state);
+                            None
+                        }
+                    }
+                }
+            };
+            if let Some((action, path, kind)) =
+                leaving.and_then(|leaving| go_on_leaving(&mut self.state, leaving))
+            {
+                self.execute_pending_action(action, path, kind, None);
+            }
+            return;
+        }
         if let Some((target, choice)) = selection_prompt(ctx, &self.state) {
             match choice {
                 DialogChoice::Primary => {
@@ -282,6 +339,74 @@ impl RSpiceApp {
             DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
+}
+
+/// What the answer to the question asked before leaving the project leaves
+/// to do.
+#[derive(Debug, PartialEq, Eq)]
+enum LeavingAnswer {
+    /// Stay in the project: cancelled, or not answered yet.
+    Stay,
+    /// Apply the edits, then go on leaving.
+    ApplyThenGoOn(Leaving),
+    /// The edits are discarded: go on leaving.
+    GoOn(Leaving),
+}
+
+/// Take the reader's answer about the configuration edits held before
+/// leaving the project. Discard drops them here; Apply is the caller's,
+/// because it commits through the application.
+fn answer_leaving(state: &mut AppState, choice: DialogChoice) -> LeavingAnswer {
+    if choice == DialogChoice::None {
+        return LeavingAnswer::Stay;
+    }
+    let Some(leaving) = state.project.configuration_dialog.leaving.take() else {
+        return LeavingAnswer::Stay;
+    };
+    match choice {
+        DialogChoice::Primary => LeavingAnswer::ApplyThenGoOn(leaving),
+        DialogChoice::Secondary => {
+            state.project.configuration.revert();
+            LeavingAnswer::GoOn(leaving)
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled | DialogChoice::None => LeavingAnswer::Stay,
+    }
+}
+
+/// Go on with `leaving` once the configuration edits are settled: ask about
+/// the project's unsaved work first, as the request itself does, or hand back
+/// the action to carry out now. An applied edit is unsaved work too: the
+/// project changed.
+fn go_on_leaving(
+    state: &mut AppState,
+    Leaving { action, recent }: Leaving,
+) -> Option<(
+    ConfirmationAction,
+    Option<std::path::PathBuf>,
+    Option<RecentKind>,
+)> {
+    if let ConfirmationAction::CloseProject(destination) = action {
+        // The close review closes at once when nothing is left unsaved.
+        state
+            .workbench
+            .project_review_dialog
+            .show_close_project(destination);
+        return None;
+    }
+    let drafts = if action == ConfirmationAction::Exit {
+        state.models.has_unsaved_authoring_changes()
+    } else {
+        state.models.model_editor_has_unsaved_changes()
+    };
+    if !drafts && !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
+        let (path, kind) = recent.unzip();
+        return Some((action, path, kind));
+    }
+    match recent {
+        Some((path, kind)) => state.workbench.confirmation_dialog.show_recent(path, kind),
+        None => state.workbench.confirmation_dialog.show(action),
+    }
+    None
 }
 
 fn new_dialog(
@@ -475,12 +600,18 @@ fn selection_prompt(
     ctx: &Context,
     state: &AppState,
 ) -> Option<(ConfigurationSelection, DialogChoice)> {
-    let page = &state.project.configuration;
-    let target = page.pending_selection?;
+    let target = state.project.configuration.pending_selection?;
+    Some((
+        target,
+        edits_prompt(ctx, state).unwrap_or(DialogChoice::Secondary),
+    ))
+}
+
+/// Apply, discard or keep the edits not applied to the configuration in
+/// front. `None` when there are none left to ask about.
+fn edits_prompt(ctx: &Context, state: &AppState) -> Option<DialogChoice> {
     let catalog: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
-    let Some(draft) = page.draft() else {
-        return Some((target, DialogChoice::Secondary));
-    };
+    let draft = state.project.configuration.draft()?;
     let name = catalog.find(draft.id).map_or_else(
         || draft.definition.name.clone(),
         |committed| committed.name().to_owned(),
@@ -497,7 +628,7 @@ fn selection_prompt(
         .secondary_leading()
         .ghost("Cancel")
         .show(ctx, |ui| consequence_text(ui, &consequence));
-    Some((target, choice))
+    Some(choice)
 }
 
 /// What a confirmation does, in the dialog's body type.

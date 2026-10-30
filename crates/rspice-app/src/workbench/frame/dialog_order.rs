@@ -264,6 +264,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         modality: Modality::Dialog,
         is_open: Some(|state| {
             state.project.configuration_dialog.is_open()
+                || state.project.configuration_dialog.leaving.is_some()
                 || state.project.configuration.pending_selection.is_some()
         }),
         render: |app, ctx| app.render_configuration_dialog(ctx),

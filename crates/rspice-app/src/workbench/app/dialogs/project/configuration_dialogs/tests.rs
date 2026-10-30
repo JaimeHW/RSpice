@@ -177,3 +177,178 @@ fn deleting_what_runs_use_says_why_it_cannot() {
         "{words:#?}"
     );
 }
+
+fn edit_views(app: &mut RSpiceApp, id: ConfigurationSetId, views: &[&str], stops: &[&str]) {
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    app.state
+        .project
+        .configuration
+        .edit(&catalog, id, |definition| {
+            definition.executable_view_policy =
+                views.iter().map(|view| (*view).to_owned()).collect();
+            definition.stop_views = stops.iter().map(|view| (*view).to_owned()).collect();
+        });
+}
+
+fn leaving(app: &RSpiceApp) -> Option<&Leaving> {
+    app.state.project.configuration_dialog.leaving.as_ref()
+}
+
+/// One frame of the configuration dialogs with `keys` pressed.
+fn press(app: &mut RSpiceApp, ctx: &egui::Context, keys: &[egui::Key]) {
+    let events = keys
+        .iter()
+        .map(|&key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        })
+        .collect();
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1440.0, 900.0),
+            )),
+            events,
+            ..Default::default()
+        },
+        |ui| app.render_configuration_dialog(ui.ctx()),
+    );
+}
+
+#[test]
+fn leaving_the_project_asks_about_configuration_edits_first() {
+    let (mut app, id) = reference_app();
+    assert!(
+        !hold_for_configuration_edits(&mut app.state, ConfirmationAction::ProjectNew, None),
+        "with nothing unapplied there is nothing to ask"
+    );
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let committed = app.state.model.workspace.content.configuration_sets.clone();
+
+    // Cancel keeps the project and the edits.
+    assert!(hold_for_configuration_edits(
+        &mut app.state,
+        ConfirmationAction::ProjectNew,
+        None
+    ));
+    let words = announced(&mut app);
+    assert!(
+        words
+            .iter()
+            .any(|word| word.contains("Apply your edits to Reference hierarchy?")),
+        "{words:#?}"
+    );
+    assert_eq!(
+        answer_leaving(&mut app.state, DialogChoice::None),
+        LeavingAnswer::Stay
+    );
+    assert!(
+        leaving(&app).is_some(),
+        "an unanswered question stays asked"
+    );
+    assert_eq!(
+        answer_leaving(&mut app.state, DialogChoice::Ghost),
+        LeavingAnswer::Stay
+    );
+    assert!(leaving(&app).is_none());
+    assert!(app.state.project.configuration.is_dirty(&committed));
+
+    // Discard drops them, then asks about the project's unsaved work as New
+    // project always does.
+    assert!(crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&app.state));
+    assert!(hold_for_configuration_edits(
+        &mut app.state,
+        ConfirmationAction::ProjectNew,
+        None
+    ));
+    let LeavingAnswer::GoOn(going) = answer_leaving(&mut app.state, DialogChoice::Secondary) else {
+        panic!("Discard goes on leaving");
+    };
+    assert!(app.state.project.configuration.draft().is_none());
+    assert_eq!(
+        app.state.model.workspace.content.configuration_sets,
+        committed
+    );
+    assert_eq!(go_on_leaving(&mut app.state, going), None);
+    assert!(app.state.workbench.confirmation_dialog.visible);
+    assert_eq!(
+        app.state.workbench.confirmation_dialog.pending_action,
+        Some(ConfirmationAction::ProjectNew)
+    );
+}
+
+#[test]
+fn applying_before_leaving_commits_the_edits_and_keeps_the_recent_project_asked_for() {
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic", "spice"], &[]);
+    let path = std::path::PathBuf::from("other.rspiceproj");
+    assert!(hold_for_configuration_edits(
+        &mut app.state,
+        ConfirmationAction::OpenRecent,
+        Some((path.clone(), RecentKind::Project)),
+    ));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    press(&mut app, &ctx, &[]);
+    press(&mut app, &ctx, &[egui::Key::Enter]);
+
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    assert_eq!(
+        catalog.find(id).unwrap().executable_view_policy(),
+        ["schematic", "spice"]
+    );
+    assert!(leaving(&app).is_none());
+    // The applied edit changed the project, so the save question follows,
+    // still about the project that was asked for.
+    let confirmation = &app.state.workbench.confirmation_dialog;
+    assert!(confirmation.visible);
+    assert_eq!(
+        confirmation.pending_action,
+        Some(ConfirmationAction::OpenRecent)
+    );
+    assert_eq!(confirmation.pending_path.as_ref(), Some(&path));
+    assert_eq!(confirmation.pending_recent_kind, Some(RecentKind::Project));
+}
+
+#[test]
+fn a_refused_apply_before_leaving_stays_on_the_configuration_page() {
+    let (mut app, id) = reference_app();
+    edit_views(&mut app, id, &["schematic"], &["extracted"]);
+    let committed = app.state.model.workspace.content.configuration_sets.clone();
+    app.state.project.project_page = ProjectPage::Overview;
+    assert!(hold_for_configuration_edits(
+        &mut app.state,
+        ConfirmationAction::Exit,
+        None
+    ));
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+
+    press(&mut app, &ctx, &[]);
+    press(&mut app, &ctx, &[egui::Key::Enter]);
+
+    assert!(leaving(&app).is_none());
+    assert!(!app.state.shell.exit_requested);
+    assert!(!app.state.workbench.confirmation_dialog.visible);
+    assert_eq!(
+        app.state.model.workspace.content.configuration_sets,
+        committed
+    );
+    assert!(app.state.project.configuration.is_dirty(&committed));
+    assert!(
+        app.state
+            .project
+            .configuration
+            .refusal
+            .as_deref()
+            .is_some_and(|refusal| refusal.starts_with("Cannot apply Reference hierarchy")),
+        "{:?}",
+        app.state.project.configuration.refusal
+    );
+    assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
+}

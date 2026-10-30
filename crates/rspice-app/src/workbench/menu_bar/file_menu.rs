@@ -130,6 +130,13 @@ fn require_save_confirmation_if_dirty(state: &mut AppState, action: Confirmation
 }
 
 fn request_exit(state: &mut AppState) {
+    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+        state,
+        ConfirmationAction::Exit,
+        None,
+    ) {
+        return;
+    }
     if state.models.has_unsaved_authoring_changes() {
         state
             .workbench
@@ -156,6 +163,11 @@ fn require_project_save_confirmation_if_dirty(
     state: &mut AppState,
     action: ConfirmationAction,
 ) -> bool {
+    if crate::workbench::app::dialogs::project::configuration_dialogs::hold_for_configuration_edits(
+        state, action, None,
+    ) {
+        return true;
+    }
     if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
         && !state.models.model_editor_has_unsaved_changes()
     {
@@ -169,6 +181,46 @@ fn require_project_save_confirmation_if_dirty(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// New, Open, Open netlist and Exit each take the open project away, so
+    /// each first asks about configuration edits that are not applied, before
+    /// it asks about saving or does anything else.
+    #[test]
+    fn leaving_the_project_waits_on_configuration_edits_not_applied() {
+        let fixture = crate::workbench::examples::hierarchy_reference::build();
+        let mut state = fixture.state;
+        let catalog = state.model.workspace.content.configuration_sets.clone();
+        state
+            .project
+            .configuration
+            .edit(&catalog, fixture.configuration, |definition| {
+                definition.stop_views = vec!["spice".to_owned()];
+            });
+        for (action, held) in [
+            (FileMenuAction::NewProject, ConfirmationAction::ProjectNew),
+            (FileMenuAction::OpenProject, ConfirmationAction::ProjectOpen),
+            (
+                FileMenuAction::OpenNetlist,
+                ConfirmationAction::OpenNetlistProject,
+            ),
+            (FileMenuAction::Exit, ConfirmationAction::Exit),
+        ] {
+            state.project.configuration_dialog.leaving = None;
+            dispatch_file_menu_action(&mut state, action, &NoIo);
+            assert_eq!(
+                state
+                    .project
+                    .configuration_dialog
+                    .leaving
+                    .as_ref()
+                    .map(|leaving| leaving.action),
+                Some(held),
+                "{action:?}"
+            );
+            assert!(!state.workbench.confirmation_dialog.visible, "{action:?}");
+            assert!(!state.shell.exit_requested, "{action:?}");
+        }
+    }
 
     #[test]
     fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
