@@ -58,6 +58,8 @@ SHEET_SOURCE_SCOPES = (
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy.rs",
     "crates/rspice-app/src/workbench/app/dialogs/hardcopy",
     "crates/rspice-app/src/workbench/hardcopy_adapters",
+    "crates/rspice-app/src/feature_tests/hardcopy.rs",
+    "crates/rspice-app/src/feature_tests/hardcopy",
 )
 
 QUALIFICATION_INPUTS = (
