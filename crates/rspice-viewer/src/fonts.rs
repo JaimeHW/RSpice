@@ -1,61 +1,24 @@
-//! The faces a hydrated scene's monospace text is lettered in.
+//! The faces a hydrated scene is lettered in.
 //!
-//! A drawing sheet is laid out against IBM Plex Mono: its character budgets,
-//! cap heights and baselines are measurements of that face, and its title
-//! block sets the document identifier apart in the Medium cut. egui carries
-//! one face per family and has no weight axis, so each cut the contract
-//! names is installed as a family of its own; a scene drawn in egui's default
-//! monospace would letter every field in another face, at one weight.
+//! A drawing sheet is laid out against IBM Plex: its character budgets, cap
+//! heights and baselines are measurements of those faces, and its title
+//! block sets the document identifier apart in the Medium cut. The viewer
+//! installs the faces and fallback chains of `rspice-fonts`, the ones the
+//! product paints and prints with, so each line letters in the face and
+//! weight the contract names, a symbol Plex lacks letters from RSpice
+//! Symbols, and a character no face has letters as the same square.
 //! The faces are licensed under the SIL Open Font License
-//! (see `assets/fonts/OFL-IBMPlex.txt`).
+//! (see `assets/fonts/OFL-IBMPlex.txt` and `assets/fonts/OFL-RSpiceSymbols.txt`).
 
-use std::sync::LazyLock;
-
-use egui::{Context, FontData, FontDefinitions, FontFamily, FontId};
+use egui::{Context, FontDefinitions, FontId};
+use rspice_fonts::Role;
 use rspice_publication_contract::TextFont;
 
-/// Family a contract [`TextFont::Monospace`] line is lettered in (400).
-const MONO: &str = "rspice-plex-mono";
-/// Family a contract [`TextFont::MonospaceMedium`] line is lettered in (500).
-const MONO_MEDIUM: &str = "rspice-plex-mono-medium";
-
-static MONO_FAMILY: LazyLock<FontFamily> = LazyLock::new(|| FontFamily::Name(MONO.into()));
-static MONO_MEDIUM_FAMILY: LazyLock<FontFamily> =
-    LazyLock::new(|| FontFamily::Name(MONO_MEDIUM.into()));
-
-/// IBM Plex Mono Regular, as the product ships it.
-pub const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexMono-Regular.ttf"
-));
-/// IBM Plex Mono Medium, as the product ships it.
-pub const IBM_PLEX_MONO_MEDIUM: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexMono-Medium.ttf"
-));
-
-/// egui's own definitions with the two Plex Mono cuts added as families of
-/// their own. Each falls back to egui's monospace for a glyph Plex lacks.
+/// Every face `rspice-fonts` embeds, and one family per role. egui's own
+/// default faces are not installed: a sheet is never lettered in them.
 #[must_use]
 pub fn font_definitions() -> FontDefinitions {
-    let mut fonts = FontDefinitions::default();
-    let fallback = fonts
-        .families
-        .get(&FontFamily::Monospace)
-        .cloned()
-        .unwrap_or_default();
-    for (name, data) in [
-        (MONO, IBM_PLEX_MONO_REGULAR),
-        (MONO_MEDIUM, IBM_PLEX_MONO_MEDIUM),
-    ] {
-        fonts
-            .font_data
-            .insert(name.to_owned(), FontData::from_static(data).into());
-        let mut stack = vec![name.to_owned()];
-        stack.extend(fallback.iter().cloned());
-        fonts.families.insert(FontFamily::Name(name.into()), stack);
-    }
-    fonts
+    rspice_fonts::egui_font_definitions()
 }
 
 /// Install the scene faces into a context. egui rebuilds its glyph atlas on
@@ -64,20 +27,26 @@ pub fn install(ctx: &Context) {
     ctx.set_fonts(font_definitions());
 }
 
+/// The role a contract text line is lettered in.
+const fn role(font: TextFont) -> Role {
+    match font {
+        TextFont::Sans => Role::Sans,
+        TextFont::SansSemibold => Role::SansSemibold,
+        TextFont::Monospace => Role::Mono,
+        TextFont::MonospaceMedium => Role::MonoMedium,
+    }
+}
+
 /// The font a contract text line is lettered in at `size` points.
 #[must_use]
 pub fn text_font(font: TextFont, size: f32) -> FontId {
-    match font {
-        // Sans text keeps egui's proportional face; only the sheet's
-        // monospace lettering is measured against a particular face.
-        TextFont::Sans | TextFont::SansSemibold => FontId::proportional(size),
-        TextFont::Monospace => FontId::new(size, MONO_FAMILY.clone()),
-        TextFont::MonospaceMedium => FontId::new(size, MONO_MEDIUM_FAMILY.clone()),
-    }
+    FontId::new(size, role(font).egui_family())
 }
 
 #[cfg(test)]
 mod tests {
+    use rspice_fonts::Face;
+
     use super::*;
 
     /// The `usWeightClass` an sfnt face's `OS/2` table records.
@@ -94,20 +63,30 @@ mod tests {
     }
 
     #[test]
-    fn each_monospace_weight_letters_from_its_own_cut() {
+    fn each_contract_font_letters_from_its_own_cut() {
         let fonts = font_definitions();
-        for (font, weight) in [(TextFont::Monospace, 400), (TextFont::MonospaceMedium, 500)] {
-            let family = text_font(font, 10.0).family;
-            let face = fonts.families[&family][0].clone();
+        for (font, family, weight) in [
+            (TextFont::Sans, "IBM Plex Sans", 400),
+            (TextFont::SansSemibold, "IBM Plex Sans", 600),
+            (TextFont::Monospace, "IBM Plex Mono", 400),
+            (TextFont::MonospaceMedium, "IBM Plex Mono", 500),
+        ] {
+            let chain = &fonts.families[&text_font(font, 10.0).family];
+            let face = Face::ALL
+                .into_iter()
+                .find(|face| face.key() == chain[0])
+                .expect("a family starts with an embedded face");
+            assert_eq!(face.family(), family, "{font:?}");
             assert_eq!(
-                weight_class(&fonts.font_data[&face].font),
+                weight_class(&fonts.font_data[&chain[0]].font),
                 weight,
                 "{font:?} must letter from a face of weight {weight}, not fall back"
             );
+            // A symbol Plex lacks, and the replacement square, letter from
+            // RSpice Symbols at the end of every chain.
+            assert_eq!(chain.last().map(String::as_str), Some(Face::Symbols.key()));
         }
-        // A glyph Plex lacks still resolves through egui's own monospace.
-        for family in [MONO_FAMILY.clone(), MONO_MEDIUM_FAMILY.clone()] {
-            assert!(fonts.families[&family].len() > 1);
-        }
+        // egui's default faces are not installed.
+        assert_eq!(fonts.font_data.len(), Face::ALL.len());
     }
 }

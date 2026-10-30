@@ -14,6 +14,9 @@ ROOT = Path(__file__).resolve().parents[2]
 # their own boundaries; these rows forbid a new extracted crate reaching up.
 ALLOWED: dict[str, set[str]] = {
     "rspice-units": set(),
+    # The embedded faces and their fallback chains, below every crate that
+    # letters text. Its optional egui feature builds the screen's families.
+    "rspice-fonts": set(),
     "rspice-vocabulary": set(),
     "rspice-results": {"rspice-vocabulary", "rspice-units"},
     "rspice-model-library": {"rspice-vocabulary", "rspice-results"},
@@ -41,9 +44,9 @@ ALLOWED: dict[str, set[str]] = {
     },
     "rspice-hardcopy": {
         "rspice-vocabulary", "rspice-hardcopy-contract", "rspice-design", "rspice-project-contract",
-        "rspice-results", "rspice-formats",
+        "rspice-results", "rspice-formats", "rspice-fonts",
     },
-    "rspice-ui-kit": {"rspice-vocabulary", "rspice-results"},
+    "rspice-ui-kit": {"rspice-vocabulary", "rspice-results", "rspice-fonts"},
     "rspice-schematic-editor": {
         "rspice-vocabulary", "rspice-design", "rspice-model-library",
         "rspice-ui-kit", "rspice-simulation-contract",
@@ -93,7 +96,9 @@ ALLOWED: dict[str, set[str]] = {
     # The settings feature: the persisted model, the platform services, and the
     # workbench framework it registers with, whose context carries the
     # commands it labels and binds.
-    "rspice-app-settings": {"rspice-app-state", "rspice-app-services", "rspice-app-workbench"},
+    "rspice-app-settings": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-workbench", "rspice-fonts",
+    },
     # The results feature: the persisted model, the platform services, the run
     # tier whose runs it shows, the workbench framework it registers with, and
     # the result, format and painting crates its viewers and exports are built on.
@@ -110,7 +115,7 @@ ALLOWED: dict[str, set[str]] = {
     },
 }
 HEADLESS = set(ALLOWED) - {
-    "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
+    "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
     "rspice-app-settings", "rspice-app-results",
 }

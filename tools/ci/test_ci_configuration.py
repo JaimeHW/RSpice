@@ -466,6 +466,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-core-netlist",
             "rspice-core-devices",
             "rspice-publication-contract",
+            "rspice-fonts",
         )
         offenders = []
         for crate in shipping:

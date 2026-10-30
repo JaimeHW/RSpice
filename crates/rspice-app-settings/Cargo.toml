@@ -26,6 +26,7 @@ sha2 = "0.10"
 log = "0.4"
 unicode-segmentation = "1.12"
 krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
+rspice-fonts.workspace = true
 
 [dev-dependencies]
 rspice-app-services = { workspace = true, features = ["test-support"] }

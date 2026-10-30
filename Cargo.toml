@@ -36,6 +36,7 @@ members = [
     "crates/rspice-app-services",
     "crates/rspice-app-state",
     "crates/rspice-ui-kit",
+    "crates/rspice-fonts",
     "crates/rspice-schematic-editor",
     "crates/rspice-results-ui",
     "crates/rspice-vocabulary",
@@ -177,6 +178,7 @@ rspice-app-results = { path = "crates/rspice-app-results", version = "0.1.0" }
 rspice-app-settings = { path = "crates/rspice-app-settings", version = "0.1.0" }
 rspice-app-sheets = { path = "crates/rspice-app-sheets", version = "0.1.0" }
 rspice-ui-kit = { path = "crates/rspice-ui-kit", version = "0.1.0" }
+rspice-fonts = { path = "crates/rspice-fonts", version = "0.1.0" }
 rspice-schematic-editor = { path = "crates/rspice-schematic-editor", version = "0.1.0" }
 rspice-results-ui = { path = "crates/rspice-results-ui", version = "0.1.0" }
 rspice-vocabulary = { path = "crates/rspice-vocabulary", version = "0.1.0" }

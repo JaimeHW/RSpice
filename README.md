@@ -417,6 +417,7 @@ use faer.
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |
 | [`rspice-ui-kit`](crates/rspice-ui-kit) | Design tokens, widgets and the plot engine |
+| [`rspice-fonts`](crates/rspice-fonts) | The embedded faces and the one fallback chain screen and print letter through |
 | [`rspice-project`](crates/rspice-project) | The project file, its workspace and the save lifecycle |
 | [`rspice-project-contract`](crates/rspice-project-contract) | Project identity, technology binding and library catalog records |
 | [`rspice-simulation`](crates/rspice-simulation) | Source preparation, scheduling and engine adapters for the application |

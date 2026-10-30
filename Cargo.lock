@@ -1857,7 +1857,6 @@ dependencies = [
  "bytemuck",
  "ecolor",
  "emath",
- "epaint_default_fonts",
  "font-types 0.11.3",
  "harfrust 0.7.0",
  "log",
@@ -1872,12 +1871,6 @@ dependencies = [
  "unicode-segmentation",
  "vello_cpu",
 ]
-
-[[package]]
-name = "epaint_default_fonts"
-version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "13ee4e1f553a3584c301f3a56ff1a775f1384781396cea301c8d952e9b93f560"
 
 [[package]]
 name = "equator"
@@ -5364,6 +5357,7 @@ dependencies = [
  "rspice-app-services",
  "rspice-app-state",
  "rspice-app-workbench",
+ "rspice-fonts",
  "serde",
  "serde_json",
  "sha2 0.10.9",
@@ -5749,6 +5743,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-fonts"
+version = "0.1.0"
+dependencies = [
+ "egui",
+ "skrifa 0.42.1",
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "rspice-formats"
 version = "0.1.0"
 dependencies = [
@@ -5791,6 +5794,7 @@ dependencies = [
  "rspice-core",
  "rspice-design",
  "rspice-design-model",
+ "rspice-fonts",
  "rspice-formats",
  "rspice-hardcopy-contract",
  "rspice-project-contract",
@@ -5929,6 +5933,7 @@ version = "0.1.0"
 dependencies = [
  "base64 0.23.1",
  "clap",
+ "rspice-fonts",
  "rspice-publication-contract",
  "serde_json",
  "sha2 0.10.9",
@@ -6053,6 +6058,7 @@ name = "rspice-ui-kit"
 version = "0.1.0"
 dependencies = [
  "egui",
+ "rspice-fonts",
  "rspice-results",
  "rspice-vocabulary",
  "serde",
@@ -6464,6 +6470,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "rspice-fonts",
  "rspice-publication-contract",
  "rspice-publish",
  "serde_json",
