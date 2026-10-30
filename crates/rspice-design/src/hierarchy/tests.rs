@@ -479,3 +479,51 @@ fn reviewed_fallback_follows_the_cell_binding_that_won() {
     );
     assert_eq!(listed.status, HierarchyBindingStatus::Resolved);
 }
+
+#[test]
+fn each_row_names_the_rule_that_chose_its_view() {
+    let unconfigured = resolve_bound(None);
+    assert_eq!(unconfigured.bindings.len(), 3);
+    for row in &unconfigured.bindings {
+        assert_eq!(
+            row.rule,
+            HierarchyBindingRule::Default,
+            "{:?}",
+            row.instance_paths
+        );
+    }
+
+    let layered = resolve_bound(Some(layered_configuration()));
+    for (path, rule) in [
+        ("/", HierarchyBindingRule::ViewList),
+        ("/X1", HierarchyBindingRule::CellBinding),
+        ("/X2", HierarchyBindingRule::InstanceBinding),
+        ("/X3", HierarchyBindingRule::ViewList),
+        ("/X4", HierarchyBindingRule::InstanceBinding),
+    ] {
+        assert_eq!(row(&layered, path).rule, rule, "{path}");
+    }
+}
+
+#[test]
+fn rows_a_different_rule_chose_are_never_merged() {
+    // Every `amp` instance searches the one view `schematic` with no stop, so
+    // only the rule that chose that list tells their rows apart.
+    let mut definition = bound_configuration(&["schematic"], &[]);
+    definition.cell_bindings = vec![cell_binding("amp", &["schematic"], None)];
+    definition.overrides = vec![instance_binding("/X2", &["schematic"], None)];
+    let resolution = resolve_bound(Some(definition));
+
+    let cell_bound = row(&resolution, "/X1");
+    let instance_bound = row(&resolution, "/X2");
+    assert_eq!(cell_bound.reference, instance_bound.reference);
+    assert_eq!(
+        cell_bound.view_search_order,
+        instance_bound.view_search_order
+    );
+    assert_eq!(cell_bound.stop_view, instance_bound.stop_view);
+    assert_eq!(cell_bound.rule, HierarchyBindingRule::CellBinding);
+    assert_eq!(cell_bound.instance_paths, ["/X1", "/X4"]);
+    assert_eq!(instance_bound.rule, HierarchyBindingRule::InstanceBinding);
+    assert_eq!(instance_bound.instance_paths, ["/X2"]);
+}

@@ -241,8 +241,8 @@ pub use workspace::PreparedProjectLibraryMutation;
 pub use workspace::{
     CaptureGroup, CaptureGroupMembership, CaptureGroupRule, CellViewRef, ComplexExpressionPolicy,
     DesignVariable, DesignVariableDefect, DesignVariableOverridePolicy, DesignVariableQuantity,
-    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, MembershipMove,
-    MissingMeasurementPolicy, MonteCarloSpecificationGate, NetlistExecutionProfile,
+    DesignVariableRange, DesignVariableScope, DesignVariableSweepEligibility, HierarchyBindingRule,
+    MembershipMove, MissingMeasurementPolicy, MonteCarloSpecificationGate, NetlistExecutionProfile,
     NetlistLineEnding, NetlistSourceDialect, NetlistTextEncoding, NominalFailurePolicy,
     OpenCellView, OutputSelectionMode, OwnedNetlistDescriptor, OwnedNetlistEditStrategy,
     OwnedNetlistIncludeDescriptor, OwnedNetlistSaveRecord, PROJECT_DESCRIPTOR_SCHEMA_VERSION,

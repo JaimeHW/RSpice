@@ -475,6 +475,19 @@ impl HierarchyBindingStatus {
     }
 }
 
+/// Which ordered view list chose a row's view.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HierarchyBindingRule {
+    /// No configuration is active; the built-in search order chose.
+    Default,
+    /// The active configuration's global view list.
+    ViewList,
+    /// A cell binding for the instance's master library and cell.
+    CellBinding,
+    /// An override naming the instance itself.
+    InstanceBinding,
+}
+
 /// One row in the resolved hierarchy-binding manifest. Repeated masters are
 /// grouped while `instance_count` retains their exact expanded multiplicity.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -494,6 +507,8 @@ pub struct ResolvedHierarchyBinding {
     /// True when the active configuration explicitly permits and records a
     /// reviewed fallback outside its primary ordered view policy.
     pub used_review_fallback: bool,
+    /// The ordered view list that chose this row's view.
+    pub rule: HierarchyBindingRule,
     pub diagnostic: Option<String>,
     /// Configured intent this row honours differently than it reads.
     ///
@@ -1289,6 +1304,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         };
         ResolvedHierarchyBinding {
             model_section: self.model_section(&reference, binding, instance_path),
+            rule: self.binding_rule(&reference, instance_path),
             reference,
             purpose: purpose.to_owned(),
             view_search_order: search_order,
@@ -1302,22 +1318,40 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         }
     }
 
-    /// The ordered view list that governs one instance: its own override,
-    /// then a cell binding for its master's library and cell, then the
-    /// configuration's global view list.
+    fn binding_rule(
+        &self,
+        master: &CellViewRef,
+        instance_path: &InstancePath,
+    ) -> HierarchyBindingRule {
+        self.configuration
+            .map_or(HierarchyBindingRule::Default, |configuration| {
+                self.configured_view_list(configuration, master, instance_path)
+                    .0
+            })
+    }
+
+    /// The ordered view list that governs one instance, and the rule that
+    /// chose it: its own override, then a cell binding for its master's
+    /// library and cell, then the configuration's global view list.
     fn configured_view_list(
         &self,
         configuration: &'a ConfigurationSet,
         master: &CellViewRef,
         instance_path: &InstancePath,
-    ) -> &[String] {
+    ) -> (HierarchyBindingRule, &[String]) {
         if let Some(scoped) = self.configured_override(instance_path) {
-            return &scoped.executable_views;
+            return (
+                HierarchyBindingRule::InstanceBinding,
+                &scoped.executable_views,
+            );
         }
         if let Some(binding) = self.configured_cell_binding(master) {
-            return &binding.executable_views;
+            return (HierarchyBindingRule::CellBinding, &binding.executable_views);
         }
-        configuration.executable_view_policy()
+        (
+            HierarchyBindingRule::ViewList,
+            configuration.executable_view_policy(),
+        )
     }
 
     /// The cell binding for one master's library and cell, matched the way
@@ -1354,6 +1388,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         }
         order.extend(
             self.configured_view_list(configuration, master, instance_path)
+                .1
                 .iter()
                 .cloned(),
         );
@@ -1783,9 +1818,9 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
         // a recursive or unresolved occurrence then promotes the aggregate to
         // the most severe observed status. Configuration variants still split
         // naturally through their ordered views, stop, model, and fallback
-        // fields below.
+        // fields below, and so do rows a different rule chose.
         let key = format!(
-            "{}|{}|{}|{}|{}",
+            "{}|{}|{}|{}|{}|{:?}",
             row.reference.key().to_ascii_lowercase(),
             row.view_search_order.join(",").to_ascii_lowercase(),
             row.stop_view
@@ -1794,6 +1829,7 @@ impl<'a, D: HierarchyDocuments, F: HierarchySourceFiles> HierarchyResolver<'a, D
                 .to_ascii_lowercase(),
             row.model_section.to_ascii_lowercase(),
             row.used_review_fallback,
+            row.rule,
         );
         if let Some(index) = self.row_indices.get(&key).copied() {
             // Occurrences are merged by path identity, so two spellings of one

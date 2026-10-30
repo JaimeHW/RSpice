@@ -5,7 +5,7 @@ use super::*;
 use hierarchy_core::HierarchySourceFiles;
 pub use hierarchy_core::{
     ConfigurationExecutionBinding, ConfigurationExecutionPlan, ConfigurationVerilogABinding,
-    HierarchyResolution, ResolvedHierarchyBinding,
+    HierarchyBindingRule, HierarchyResolution, ResolvedHierarchyBinding,
 };
 #[cfg(any(test, feature = "test-support"))]
 pub use hierarchy_core::{HierarchyBindingStatus, MasterRecord};

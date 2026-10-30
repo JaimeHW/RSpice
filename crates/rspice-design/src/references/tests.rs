@@ -1,5 +1,5 @@
 use super::*;
-use crate::hierarchy::{HierarchyBindingStatus, ResolvedHierarchyBinding};
+use crate::hierarchy::{HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding};
 use rspice_design_model::Point;
 
 #[test]
@@ -45,6 +45,7 @@ fn shared_master_renames_prepare_probes_without_mutating_sources() {
             instance_count: 2,
             instance_paths: vec!["/Xleft".to_owned(), "/Xright".to_owned()],
             used_review_fallback: false,
+            rule: HierarchyBindingRule::Default,
             diagnostic: None,
             warnings: Vec::new(),
         }],
