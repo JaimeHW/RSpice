@@ -710,3 +710,24 @@ fn an_iterate_updated_twice_is_limited_once() {
         (12.0, 12.0, 6.5)
     );
 }
+
+/// Transient Newton revisits an iterate before stamping it as the operating
+/// point does: both passes see one `B3SOIFDlimit` step, and a new timestep
+/// attempt makes the same voltages the next iteration.
+#[test]
+fn a_transient_iterate_updated_twice_is_limited_once() {
+    let mut dev = device_for_stamp_test(false);
+    dev.set_dc_mode(false);
+    dev.update(&[0.0, 0.0, 0.0, 0.0]);
+    let far = [8.0, 7.0, -7.5, 0.5];
+    dev.update(&far);
+    dev.update(&far);
+    assert_eq!((dev.bias.vds, dev.bias.vgs, dev.bias.ves), (6.0, 6.0, 3.5));
+
+    dev.begin_timestep_iteration();
+    dev.update(&far);
+    assert_eq!(
+        (dev.bias.vds, dev.bias.vgs, dev.bias.ves),
+        (12.0, 12.0, 6.5)
+    );
+}

@@ -172,14 +172,15 @@ pub struct B3SoiDd {
     /// Without this guard `stamp_nonlinear` would immediately re-evaluate from
     /// the raw node seed and discard the startup branch used to enter Newton.
     startup_seed_pending: std::cell::Cell<bool>,
-    /// Raw terminal vector consumed by the previous DC update. The engine
-    /// revisits an accepted candidate before stamping the next Newton system;
-    /// that repeat must not advance the stateful voltage limiters again.
-    last_dc_update_terminals: std::cell::Cell<Option<B3SoiDdTerminals>>,
-    /// One-shot permission for the next identical DC update to reuse the
-    /// candidate linearization. Once consumed, a later identical Newton
-    /// iterate is a real new load and must run the limiters again.
-    dc_stamp_reuse_pending: std::cell::Cell<bool>,
+    /// Raw terminal vector consumed by the previous update. The engine
+    /// revisits a candidate before stamping the next Newton system; that
+    /// repeat must not advance the stateful voltage limiters again.
+    last_update_terminals: std::cell::Cell<Option<B3SoiDdTerminals>>,
+    /// One-shot permission for the next identical update to reuse the
+    /// candidate linearization. Once consumed, or once a timestep attempt
+    /// begins, a later identical Newton iterate is a real new load and must
+    /// run the limiters again.
+    stamp_reuse_pending: std::cell::Cell<bool>,
     /// The previous update evaluated at a bias adjusted by the body/temperature
     /// limiter. The stamp must use that same bias/op pair.
     bias_was_limited: std::cell::Cell<bool>,
@@ -293,8 +294,8 @@ impl B3SoiDd {
             terminal_limit_anchor: B3SoiDdTerminals::default(),
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
-            last_dc_update_terminals: std::cell::Cell::new(None),
-            dc_stamp_reuse_pending: std::cell::Cell::new(false),
+            last_update_terminals: std::cell::Cell::new(None),
+            stamp_reuse_pending: std::cell::Cell::new(false),
             bias_was_limited: std::cell::Cell::new(false),
         })
     }
@@ -322,8 +323,8 @@ impl B3SoiDd {
         }
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
-        self.last_dc_update_terminals.set(None);
-        self.dc_stamp_reuse_pending.set(false);
+        self.last_update_terminals.set(None);
+        self.stamp_reuse_pending.set(false);
         self.bias_was_limited.set(false);
         self.startup_seed_pending.set(false);
     }
@@ -353,8 +354,8 @@ impl B3SoiDd {
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
         self.last_limited.set(false);
-        self.last_dc_update_terminals.set(None);
-        self.dc_stamp_reuse_pending.set(false);
+        self.last_update_terminals.set(None);
+        self.stamp_reuse_pending.set(false);
         self.bias_was_limited.set(false);
     }
 
@@ -419,6 +420,7 @@ impl B3SoiDd {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
         self.predictor_bias.set(None);
+        self.stamp_reuse_pending.set(false);
     }
 
     /// Mark the start of a transient timestep attempt, using ngspice's
@@ -466,6 +468,7 @@ impl B3SoiDd {
         self.accepted_bias_prev_prev.set(Some(prev));
         self.accepted_bias_prev.set(Some(current));
         self.predictor_bias.set(None);
+        self.stamp_reuse_pending.set(false);
     }
 
     /// Re-linearize directly at the supplied static candidate solution.
@@ -481,8 +484,8 @@ impl B3SoiDd {
         self.apply_dc_smart_vbs(&mut bias);
         let terminals = self.raw_terminal_voltages(voltages);
         self.terminal_limit_anchor = terminals;
-        self.last_dc_update_terminals.set(Some(terminals));
-        self.dc_stamp_reuse_pending.set(false);
+        self.last_update_terminals.set(Some(terminals));
+        self.stamp_reuse_pending.set(false);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
@@ -1063,7 +1066,7 @@ impl NonlinearDevice for B3SoiDd {
         if !self.has_history && self.dc_mode.get() {
             let terminals = self.raw_terminal_voltages(voltages);
             self.converged_ref = self.bias;
-            self.last_dc_update_terminals.set(Some(terminals));
+            self.last_update_terminals.set(Some(terminals));
             let bias = self.junction_init_bias(self.bias_from_terminals(terminals));
             self.bias = bias;
             self.op = self.eval_op_for_bias(bias);
@@ -1082,21 +1085,22 @@ impl NonlinearDevice for B3SoiDd {
         }
 
         let node_terminals = self.raw_terminal_voltages(voltages);
-        if self.dc_mode.get()
-            && self
-                .last_dc_update_terminals
-                .get()
-                .is_some_and(|last| terminals_match(last, node_terminals))
-            && self.dc_stamp_reuse_pending.replace(false)
+        // One Newton iterate can reach `update` twice, after its solve and
+        // again before its stamp. b3soiddld.c limits each load once against
+        // CKTstate0, so the second pass at the same terminals keeps the first
+        // pass's evaluation, in the operating point and in transient alike.
+        if self
+            .last_update_terminals
+            .get()
+            .is_some_and(|last| terminals_match(last, node_terminals))
+            && self.stamp_reuse_pending.replace(false)
         {
             self.converged_ref = self.bias;
             return;
         }
         self.converged_ref = self.bias;
-        if self.dc_mode.get() {
-            self.last_dc_update_terminals.set(Some(node_terminals));
-            self.dc_stamp_reuse_pending.set(true);
-        }
+        self.last_update_terminals.set(Some(node_terminals));
+        self.stamp_reuse_pending.set(true);
         let node_bias = self.bias_from_terminals(node_terminals);
         let predicted_bias = self.predictor_bias.take();
         let raw_bias = predicted_bias.unwrap_or(node_bias);
@@ -2022,10 +2026,11 @@ mod tests {
         );
     }
 
-    #[test]
-    fn update_limits_branch_voltages_per_newton_iteration() {
+    /// An `N1` device with an ideal body tie, nodes drain 1, gate 2, source 3,
+    /// substrate 4, body 5 and body contact 7.
+    fn tied_ideal_device() -> B3SoiDd {
         let model = Arc::new(B3SoiDdModel::from_params(&n1_params(), false, 300.15));
-        let mut dev = B3SoiDd::new(
+        B3SoiDd::new(
             "m1".to_string(),
             B3SoiDdNodes {
                 node_drain: 1,
@@ -2042,7 +2047,12 @@ mod tests {
             geom(),
             300.15,
         )
-        .expect("DD device builds");
+        .expect("DD device builds")
+    }
+
+    #[test]
+    fn update_limits_branch_voltages_per_newton_iteration() {
+        let mut dev = tied_ideal_device();
 
         dev.update(&[0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
         assert_eq!(dev.bias.vgs, 0.0);
@@ -2099,6 +2109,35 @@ mod tests {
         assert!(
             dev.bias.vbs > limited_bias.vbs,
             "a later identical Newton iterate must advance the limiter"
+        );
+    }
+
+    /// Transient Newton revisits an iterate before stamping it as the
+    /// operating point does: both passes see one `B3SOIDDlimit` step, and a
+    /// new timestep attempt makes the same voltages the next iteration.
+    #[test]
+    fn a_transient_iterate_updated_twice_is_limited_once() {
+        let mut dev = tied_ideal_device();
+        assert!(!dev.dc_mode.get(), "DD starts in transient mode");
+        dev.update(&[0.0; 7]);
+
+        let limited_input = [10.0, 8.0, 0.0, 7.0, 1.0, 0.0, 9.0];
+        dev.update(&limited_input);
+        assert!(dev.last_limited.get());
+        let limited_bias = dev.bias;
+        dev.update(&limited_input);
+        assert!(
+            biases_match(dev.bias, limited_bias),
+            "the second pass moved vds {} -> {}",
+            limited_bias.vds,
+            dev.bias.vds
+        );
+
+        dev.begin_timestep_iteration();
+        dev.update(&limited_input);
+        assert!(
+            dev.bias.vds > limited_bias.vds,
+            "the next iteration advances the limiter"
         );
     }
 

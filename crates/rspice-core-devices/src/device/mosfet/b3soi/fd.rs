@@ -125,9 +125,10 @@ pub struct B3SoiFd {
     /// `stamp_nonlinear` would re-evaluate from the raw node seed and discard
     /// the startup branch before it reached the matrix.
     startup_seed_pending: std::cell::Cell<bool>,
-    /// Raw `[vg, vd, vs, ve, delTemp]` of the iterate the last operating-point
-    /// `update` evaluated, until a matrix load or a second `update` sees it.
-    open_dc_update: std::cell::Cell<Option<[Value; 5]>>,
+    /// Raw `[vg, vd, vs, ve, delTemp]` of the iterate the last `update`
+    /// evaluated, until a matrix load, a second `update` or a timestep attempt
+    /// sees it.
+    open_update: std::cell::Cell<Option<[Value; 5]>>,
 }
 
 super::common::deref_core!(B3SoiFd => SoiInstanceCore);
@@ -195,7 +196,7 @@ impl B3SoiFd {
             terminal_limit_anchor: [0.0; 4],
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
-            open_dc_update: std::cell::Cell::new(None),
+            open_update: std::cell::Cell::new(None),
         })
     }
 
@@ -206,7 +207,7 @@ impl B3SoiFd {
             return;
         }
         self.limit_anchor_valid.set(false);
-        self.open_dc_update.set(None);
+        self.open_update.set(None);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
     }
@@ -251,7 +252,7 @@ impl B3SoiFd {
         self.terminal_limit_anchor = [0.0; 4];
         self.dc_mode.set(true);
         self.limit_anchor_valid.set(false);
-        self.open_dc_update.set(None);
+        self.open_update.set(None);
         self.startup_seed_pending.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
@@ -270,7 +271,7 @@ impl B3SoiFd {
         self.del_temp_limit_anchor = bias.del_temp;
         self.terminal_limit_anchor = self.raw_terminals(solution);
         self.limit_anchor_valid.set(true);
-        self.open_dc_update.set(None);
+        self.open_update.set(None);
         self.startup_seed_pending.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
@@ -291,6 +292,7 @@ impl B3SoiFd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+        self.open_update.set(None);
     }
 
     /// Re-linearize directly at the supplied static candidate solution.
@@ -309,7 +311,7 @@ impl B3SoiFd {
         self.del_temp_limit_anchor = bias.del_temp;
         self.terminal_limit_anchor = self.raw_terminals(voltages);
         self.limit_anchor_valid.set(true);
-        self.open_dc_update.set(None);
+        self.open_update.set(None);
         self.bypass_active.set(false);
         self.force_full_eval.set(false);
         self.last_limited.set(false);
@@ -758,16 +760,16 @@ impl NonlinearDevice for B3SoiFd {
             self.last_limited.set(false);
             return;
         }
-        // One Newton iterate reaches `update` twice, after its solve and again
-        // before its stamp. b3soifdld.c limits each load once against
-        // CKTstate0, so the second pass of a limited operating-point iterate
-        // keeps the first pass's evaluation instead of limiting the same raw
-        // voltages again against its own output (the DD and PD variants hold
-        // the same invariant through `dc_stamp_reuse_pending`). After a matrix
-        // load the same raw voltages are the next iteration.
+        // One Newton iterate can reach `update` twice, after its solve and
+        // again before its stamp. b3soifdld.c limits each load once against
+        // CKTstate0, so the second pass of a limited iterate keeps the first
+        // pass's evaluation instead of limiting the same raw voltages again
+        // against its own output, in the operating point and in transient
+        // alike (the DD and PD variants hold the same invariant through
+        // `stamp_reuse_pending`). After a matrix load the same raw voltages
+        // are the next iteration.
         let raw = self.raw_limiter_inputs(voltages);
-        if self.dc_mode.get() && self.last_limited.get() && self.open_dc_update.take() == Some(raw)
-        {
+        if self.last_limited.get() && self.open_update.take() == Some(raw) {
             self.converged_ref = self.bias;
             return;
         }
@@ -799,7 +801,7 @@ impl NonlinearDevice for B3SoiFd {
         self.del_temp_limit_anchor = bias.del_temp;
         self.terminal_limit_anchor = terminals;
         self.limit_anchor_valid.set(true);
-        self.open_dc_update.set(self.dc_mode.get().then_some(raw));
+        self.open_update.set(Some(raw));
     }
 
     fn stamp_nonlinear(
@@ -810,7 +812,7 @@ impl NonlinearDevice for B3SoiFd {
     ) {
         // The load closes the iterate: an update at the same raw voltages
         // after it is the next Newton iteration.
-        self.open_dc_update.set(None);
+        self.open_update.set(None);
         if self.bypass_active.get() {
             // Bypassed iterate: restamp the frozen linearization unchanged.
             self.stamp_op(&self.op, self.bias, matrix);
@@ -856,7 +858,6 @@ impl NonlinearDevice for B3SoiFd {
 }
 
 impl B3SoiFd {
-    /// The `[vg, vd, vs, ve]` node voltages of a solution vector.
     /// The raw voltages the limiters act on: the four terminals and the
     /// temperature rise.
     fn raw_limiter_inputs(&self, v: &[Value]) -> [Value; 5] {
@@ -864,6 +865,7 @@ impl B3SoiFd {
         [vg, vd, vs, ve, self.raw_branch_voltages(v).del_temp]
     }
 
+    /// The `[vg, vd, vs, ve]` node voltages of a solution vector.
     fn raw_terminals(&self, v: &[Value]) -> [Value; 4] {
         let node = |n: NodeId| if n == 0 { 0.0 } else { v[n - 1] };
         [

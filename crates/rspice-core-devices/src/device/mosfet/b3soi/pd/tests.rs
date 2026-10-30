@@ -176,10 +176,11 @@ fn model_consts(m: &B3SoiPdModel) -> ModelConsts {
     }
 }
 
-#[test]
-fn update_applies_body_limit_after_branch_limit() {
+/// An `N1` device with an ideal body tie, nodes drain 1, gate 2, source 3,
+/// substrate 4, body 5 and body contact 6.
+fn tied_ideal_device() -> B3SoiPd {
     let model = Arc::new(B3SoiPdModel::from_params(&n1_params(), false, 300.15));
-    let mut dev = B3SoiPd::new(
+    B3SoiPd::new(
         "m1".to_string(),
         B3SoiPdNodes {
             node_drain: 1,
@@ -195,7 +196,12 @@ fn update_applies_body_limit_after_branch_limit() {
         geom(),
         300.15,
     )
-    .expect("PD device builds");
+    .expect("PD device builds")
+}
+
+#[test]
+fn update_applies_body_limit_after_branch_limit() {
+    let mut dev = tied_ideal_device();
 
     dev.dc_mode.set(false);
     dev.update(&[0.0; 6]);
@@ -222,6 +228,35 @@ fn update_applies_body_limit_after_branch_limit() {
     assert!(
         dev.bias.vbs > limited_bias.vbs,
         "a later identical Newton iterate must advance the limiter"
+    );
+}
+
+/// Transient Newton revisits an iterate before stamping it as the operating
+/// point does: both passes see one `B3SOIPDlimit` step, and a new timestep
+/// attempt makes the same voltages the next iteration.
+#[test]
+fn a_transient_iterate_updated_twice_is_limited_once() {
+    let mut dev = tied_ideal_device();
+    dev.set_dc_mode(false);
+    dev.update(&[0.0; 6]);
+
+    let limited_input = [10.0, 8.0, 0.0, 7.0, 1.0, 9.0];
+    dev.update(&limited_input);
+    assert!(dev.last_limited.get());
+    let limited_bias = dev.bias;
+    dev.update(&limited_input);
+    assert!(
+        biases_match(dev.bias, limited_bias),
+        "the second pass moved vds {} -> {}",
+        limited_bias.vds,
+        dev.bias.vds
+    );
+
+    dev.begin_timestep_iteration();
+    dev.update(&limited_input);
+    assert!(
+        dev.bias.vds > limited_bias.vds,
+        "the next iteration advances the limiter"
     );
 }
 

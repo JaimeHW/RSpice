@@ -141,13 +141,14 @@ pub struct B3SoiPd {
     /// `stamp_nonlinear` would immediately re-evaluate from the raw node seed
     /// and discard the startup branch that ngspice loads.
     startup_seed_pending: std::cell::Cell<bool>,
-    /// Raw bias consumed by the previous DC update. Repeated evaluation of the
+    /// Raw bias consumed by the previous update. Repeated evaluation of the
     /// same Newton candidate must reuse the current linearization rather than
     /// advancing the stateful limiters a second time.
-    last_dc_update_bias: std::cell::Cell<Option<B3SoiPdBias>>,
-    /// One-shot permission for the next identical DC update to reuse the
-    /// candidate linearization before stamping.
-    dc_stamp_reuse_pending: std::cell::Cell<bool>,
+    last_update_bias: std::cell::Cell<Option<B3SoiPdBias>>,
+    /// One-shot permission for the next identical update to reuse the
+    /// candidate linearization before stamping, until a timestep attempt
+    /// begins.
+    stamp_reuse_pending: std::cell::Cell<bool>,
 }
 
 super::common::deref_core!(B3SoiPd => SoiInstanceCore);
@@ -231,8 +232,8 @@ impl B3SoiPd {
             del_temp_limit_anchor: 0.0,
             limit_anchor_valid: std::cell::Cell::new(false),
             startup_seed_pending: std::cell::Cell::new(false),
-            last_dc_update_bias: std::cell::Cell::new(None),
-            dc_stamp_reuse_pending: std::cell::Cell::new(false),
+            last_update_bias: std::cell::Cell::new(None),
+            stamp_reuse_pending: std::cell::Cell::new(false),
         })
     }
 
@@ -248,8 +249,8 @@ impl B3SoiPd {
         self.limit_anchor_valid.set(false);
         self.bypass_active.set(false);
         self.force_full_eval.set(true);
-        self.last_dc_update_bias.set(None);
-        self.dc_stamp_reuse_pending.set(false);
+        self.last_update_bias.set(None);
+        self.stamp_reuse_pending.set(false);
     }
 
     /// Clear the cached operating-point linearization before a fresh DC path.
@@ -336,6 +337,7 @@ impl B3SoiPd {
     pub fn begin_timestep_iteration(&self) {
         self.force_full_eval.set(true);
         self.bypass_active.set(false);
+        self.stamp_reuse_pending.set(false);
     }
 
     /// Re-linearize directly at the supplied static candidate solution.
@@ -348,8 +350,8 @@ impl B3SoiPd {
     pub fn update_static_linearization(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         let bias = self.raw_branch_voltages(voltages);
-        self.last_dc_update_bias.set(Some(bias));
-        self.dc_stamp_reuse_pending.set(false);
+        self.last_update_bias.set(Some(bias));
+        self.stamp_reuse_pending.set(false);
         self.bias = bias;
         self.op = self.eval_op_for_bias(bias);
         self.has_history = true;
@@ -860,7 +862,7 @@ impl NonlinearDevice for B3SoiPd {
         }
         if !self.has_history && self.dc_mode.get() {
             self.converged_ref = self.bias;
-            self.last_dc_update_bias
+            self.last_update_bias
                 .set(Some(self.raw_branch_voltages(voltages)));
             let bias = self.junction_init_bias();
             self.bias = bias;
@@ -877,21 +879,22 @@ impl NonlinearDevice for B3SoiPd {
             return;
         }
         let raw_bias = self.raw_branch_voltages(voltages);
-        if self.dc_mode.get()
-            && self
-                .last_dc_update_bias
-                .get()
-                .is_some_and(|last| biases_match(last, raw_bias))
-            && self.dc_stamp_reuse_pending.replace(false)
+        // One Newton iterate can reach `update` twice, after its solve and
+        // again before its stamp. b3soipdld.c limits each load once against
+        // CKTstate0, so the second pass at the same bias keeps the first
+        // pass's evaluation, in the operating point and in transient alike.
+        if self
+            .last_update_bias
+            .get()
+            .is_some_and(|last| biases_match(last, raw_bias))
+            && self.stamp_reuse_pending.replace(false)
         {
             self.converged_ref = self.bias;
             return;
         }
         self.converged_ref = self.bias;
-        if self.dc_mode.get() {
-            self.last_dc_update_bias.set(Some(raw_bias));
-            self.dc_stamp_reuse_pending.set(true);
-        }
+        self.last_update_bias.set(Some(raw_bias));
+        self.stamp_reuse_pending.set(true);
         // ngspice transient bypass (b3soipdld.c:515-565): when the previous
         // iterate evaluated without limiting and the new branch voltages plus
         // predicted currents are stationary within tolerances, freeze the
