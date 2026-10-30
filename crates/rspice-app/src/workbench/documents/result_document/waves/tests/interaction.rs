@@ -11,8 +11,8 @@ use super::*;
 
 /// An AC run whose one analysis projects a magnitude pane over a phase pane —
 /// the two-pane strip every shared-abscissa question needs.
-fn bode_strip() -> AppState {
-    let mut state = AppState::default();
+fn bode_strip() -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Ac, "AC").with_waveforms(vec![
             RetainedTrace::new(
@@ -33,7 +33,7 @@ fn bode_strip() -> AppState {
     state
 }
 
-fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
+fn strip_key(state: &mut ResultsTestHost) -> AnalysisPresentationKey {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -44,7 +44,7 @@ fn strip_key(state: &mut AppState) -> AnalysisPresentationKey {
     models[0].analysis_key
 }
 
-fn pane_units(state: &mut AppState) -> Vec<String> {
+fn pane_units(state: &mut ResultsTestHost) -> Vec<String> {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -60,7 +60,7 @@ fn pane_units(state: &mut AppState) -> Vec<String> {
 }
 
 fn pane_x(
-    state: &AppState,
+    state: &ResultsTestHost,
     analysis: AnalysisPresentationKey,
     ordinal: usize,
 ) -> Option<(f64, f64)> {
@@ -111,7 +111,7 @@ fn zoom_from_a_companion_pane_moves_the_strips_shared_abscissa() {
 /// in and back out does not return to where it started.
 #[test]
 fn a_logarithmic_pane_zooms_about_its_geometric_centre() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new(
@@ -229,7 +229,7 @@ fn fitting_a_pane_releases_every_ordinal_the_strip_pinned() {
 /// one that is drawn.
 #[test]
 fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![1.0, 1.0], "#fff"),
@@ -288,7 +288,7 @@ fn the_nearest_trace_is_measured_where_the_pane_draws_it() {
 /// reader is.
 #[test]
 fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new(
@@ -326,7 +326,7 @@ fn a_deeply_zoomed_shared_axis_states_the_value_its_ticks_are_offsets_from() {
 
 /// Every string one sheet paints through a real egui frame.
 pub(super) fn painted_texts(
-    state: &mut AppState,
+    state: &mut ResultsTestHost,
     sheet: fn(&mut Ui, &mut ResultsParts<'_>),
 ) -> Vec<String> {
     let ctx = egui::Context::default();
@@ -373,7 +373,7 @@ fn collect_texts(shapes: &[egui::epaint::ClippedShape], out: &mut Vec<String>) {
 /// A curve that reduces to nothing still lays out its axes and its legend, so
 /// "the pane drew something" is not the question — "the pane drew a curve" is.
 pub(super) fn painted_path_points(
-    state: &mut AppState,
+    state: &mut ResultsTestHost,
     sheet: fn(&mut Ui, &mut ResultsParts<'_>),
 ) -> usize {
     let ctx = egui::Context::default();

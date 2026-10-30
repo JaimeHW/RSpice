@@ -15,7 +15,7 @@ fn qpac_plot_keeps_signed_probe_offsets_on_a_named_linear_axis() {
     let result = crate::simulation::results::qpac_retained_test_fixture();
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(result);
     state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
@@ -41,7 +41,7 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
     let result = crate::simulation::results::qpxf_retained_test_fixture();
     assert!(result.success);
     assert!(crate::state::ac_bode_summary_for_analysis(&result, 0).is_none());
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(result);
     state.results.results.session.viewer = super::super::super::ResultViewer::Bode;
     let presentation = state.model.preferences.result_presentation_policy();
@@ -63,8 +63,8 @@ fn qpxf_plot_keeps_signed_output_frequencies_on_a_named_linear_axis() {
 }
 
 /// A DC sweep of a current source, with the deck the run actually executed.
-fn swept_current_source() -> AppState {
-    let mut state = AppState::default();
+fn swept_current_source() -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
@@ -89,7 +89,7 @@ fn swept_current_source() -> AppState {
     state
 }
 
-fn model_axis(state: &mut AppState) -> (String, String) {
+fn model_axis(state: &mut ResultsTestHost) -> (String, String) {
     let presentation = state.model.preferences.result_presentation_policy();
     let models = cached_models(
         &state.model.simulation,
@@ -269,7 +269,7 @@ fn a_solved_current_source_sweep_keeps_amperes_without_an_executed_deck() {
         (voltage - 1.0).abs() <= rspice_core::constants::RELTOL,
         "1 V within configured relative tolerance; got {voltage:.16e}"
     );
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation =
         crate::simulation::controller::test_execution::dc_history::history(analysis);
     state.results.results.session.viewer = super::super::super::ResultViewer::DcSweep;
@@ -295,7 +295,7 @@ fn a_dc_sweep_without_a_retained_deck_keeps_the_analysis_default() {
 /// overlay run drew an expression in one colour and named it in another.
 #[test]
 fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -366,7 +366,7 @@ fn an_expression_chip_takes_the_palette_slot_its_curve_draws_in() {
 /// is the overlay is the whole reason both are on the sheet.
 #[test]
 fn an_overlay_row_names_the_run_it_came_from() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -479,7 +479,7 @@ fn the_cursor_table_publishes_what_it_paints() {
 fn qpnoise_result_plot_preserves_physical_frequencies_and_separate_noise_units() {
     let result = crate::simulation::results::qpnoise_retained_test_fixture();
     assert!(result.success);
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(result);
     state.model.simulation.view.active_analysis_idx = Some(0);
     state.results.results.session.viewer = super::super::super::ResultViewer::NoiseContrib;

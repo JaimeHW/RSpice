@@ -2,8 +2,8 @@
 
 use super::*;
 
-fn fixture(indices: Vec<usize>, text: &str) -> (AppState, Vec<StripModel>) {
-    let mut state = AppState::default();
+fn fixture(indices: Vec<usize>, text: &str) -> (ResultsTestHost, Vec<StripModel>) {
+    let mut state = ResultsTestHost::default();
     state
         .model
         .simulation
@@ -160,7 +160,7 @@ fn restored_expression_and_typed_family_filter_keep_the_selected_measurement() {
         crate::state::result_presentation::ResultPresentation,
         FamilyPresentationPolicy,
     ) = serde_json::from_slice(&bytes).unwrap();
-    let mut reopened = AppState::default();
+    let mut reopened = ResultsTestHost::default();
     reopened.model.simulation = state.model.simulation.clone();
     super::super::super::restore_presentation(&mut reopened.results_parts(), presentation);
     let run = reopened.model.simulation.active_run().unwrap();

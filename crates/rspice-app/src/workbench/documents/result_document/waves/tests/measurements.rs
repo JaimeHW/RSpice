@@ -3,8 +3,8 @@
 
 use super::*;
 
-fn transient(x: Vec<f64>, y: Vec<f64>) -> AppState {
-    let mut state = AppState::default();
+fn transient(x: Vec<f64>, y: Vec<f64>) -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Transient")

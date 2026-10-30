@@ -113,7 +113,7 @@ pub fn right_panel(ui: &mut Ui, state: &mut ResultsParts<'_>) {
 }
 
 #[cfg(test)]
-pub(super) fn readout_row_count(state: &mut AppState) -> usize {
+pub(super) fn readout_row_count(state: &mut ResultsTestHost) -> usize {
     let need_models = state.results.results.session.cursor_strip.is_some();
     with_readout(
         &mut state.results_parts(),
@@ -124,7 +124,7 @@ pub(super) fn readout_row_count(state: &mut AppState) -> usize {
 }
 
 #[cfg(test)]
-pub(super) fn marker_body_height(state: &mut AppState) -> f32 {
+pub(super) fn marker_body_height(state: &mut ResultsTestHost) -> f32 {
     let session = &state.results.results.session;
     let need_models = session.cursor_readout_active() && session.cursor_strip.is_some();
     with_readout(
@@ -136,7 +136,7 @@ pub(super) fn marker_body_height(state: &mut AppState) -> f32 {
 }
 
 #[cfg(test)]
-pub(super) fn visible_markers(state: &AppState) -> Vec<MarkerView<'_>> {
+pub(super) fn visible_markers(state: &ResultsTestHost) -> Vec<MarkerView<'_>> {
     on_screen_strips(state.results_reads())
         .into_iter()
         .flat_map(|analysis| state.results.results.session.strip_markers(analysis))

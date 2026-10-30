@@ -60,9 +60,9 @@ use crate::ui::plot::Trace;
 use crate::ui::plot::sample::{SweepShape, sample_at_with_shape};
 use crate::ui::plot::{self, XScale, fmt_si_significant};
 use crate::ui::tokens::Tokens;
-#[cfg(test)]
-use crate::workbench::AppState;
 use crate::workbench::ComplexNumberDisplay;
+#[cfg(test)]
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 use rspice_results::family_projection::SourceSampleSelection;
 #[cfg(test)]
 use rspice_results_ui::waves::navigation::model_x_axis;

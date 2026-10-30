@@ -14,8 +14,8 @@ use super::*;
 /// Forward: y = 2x over x ∈ [0, 1]. Return: y = 4 − 2x over the same span. The
 /// two branches share the turnaround, and every closed form below is read off
 /// those two lines.
-pub(super) fn hysteresis_run() -> AppState {
-    let mut state = AppState::default();
+pub(super) fn hysteresis_run() -> ResultsTestHost {
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
             RetainedTrace::new(
@@ -31,7 +31,7 @@ pub(super) fn hysteresis_run() -> AppState {
     state
 }
 
-fn rows_of(state: &mut AppState, a: Option<f64>, b: Option<f64>) -> Vec<ReadoutRow> {
+fn rows_of(state: &mut ResultsTestHost, a: Option<f64>, b: Option<f64>) -> Vec<ReadoutRow> {
     let presentation = state.model.preferences.result_presentation_policy();
     let quantity_policy = state.model.preferences.quantity_presentation_policy();
     let models = cached_models(
@@ -128,7 +128,7 @@ fn a_branch_that_does_not_reach_the_cursor_reports_nothing() {
 /// row it always had — and that value is now read the right way round.
 #[test]
 fn a_descending_sweep_keeps_one_untagged_row() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC").with_waveforms(vec![
             RetainedTrace::new("V(out)", vec![2.0, 1.0, 0.0], vec![20.0, 10.0, 0.0], "#fff"),
@@ -179,7 +179,7 @@ fn a_sweep_past_the_branch_budget_reports_the_nearest_retained_sample() {
             y.push(leg as f64 + position);
         }
     }
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
@@ -308,7 +308,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
         .map(|index| 1.0 - f64::from(index) / f64::from(points))
         .collect();
     let y: Vec<f64> = x.iter().map(|value| value * 2.0).collect();
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::DcSweep, "DC")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#fff")]),
@@ -346,7 +346,7 @@ fn a_zoomed_reverse_sweep_still_draws_its_curve() {
 /// the "last" sample and clamps to the 4 V the return leg finishes on. That is
 /// the artifact each of the three surfaces below has to stop printing.
 fn loop_readings(
-    state: &mut AppState,
+    state: &mut ResultsTestHost,
 ) -> (
     AnalysisPresentationKey,
     WaveformPresentationKey,

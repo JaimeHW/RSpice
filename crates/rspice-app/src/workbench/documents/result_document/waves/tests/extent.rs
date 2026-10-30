@@ -14,7 +14,7 @@ use super::*;
 /// viewport gesture are derived from it.
 #[test]
 fn the_strip_extent_matches_the_walk_it_replaced() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0, 2.5], vec![0.0, 1.0, 2.0], "#fff"),
@@ -47,7 +47,7 @@ fn the_strip_extent_matches_the_walk_it_replaced() {
 /// scale every pane against data the reader cannot see.
 #[test]
 fn hiding_a_trace_moves_the_strip_extent() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -84,7 +84,7 @@ fn hiding_a_trace_moves_the_strip_extent() {
 /// path the product actually uses.
 #[test]
 fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -133,7 +133,7 @@ fn hiding_a_trace_through_the_override_map_moves_the_strip_extent() {
 /// baked before the overrides were applied reports a span instead.
 #[test]
 fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran").with_waveforms(vec![
             RetainedTrace::new("V(a)", vec![0.0, 1.0], vec![0.0, 1.0], "#fff"),
@@ -166,7 +166,7 @@ fn hiding_every_trace_through_the_override_map_leaves_the_strip_no_extent() {
 /// exactly one walk per strip per rebuild — not two, and never one per frame.
 #[test]
 fn the_extent_is_walked_once_per_strip_per_cache_build() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     run.add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "Tran A").with_waveforms(vec![

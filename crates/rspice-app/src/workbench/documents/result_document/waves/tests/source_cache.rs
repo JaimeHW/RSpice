@@ -131,7 +131,7 @@ fn wave_cache_unchanged_reads_and_clones_reuse_complete_models() {
 
 #[test]
 fn wave_cache_cursor_copy_refreshes_values_without_frame_preparation() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation = restored_spectrum(1.0, 3);
     let models = spectrum_models(&state.model.simulation, &mut state.results.results);
     assert_eq!(models[0].traces[0].y.as_slice(), [0.0; 3]);

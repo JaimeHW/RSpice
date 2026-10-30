@@ -89,7 +89,7 @@ fn degenerate_transient() -> AnalysisResult {
 /// harness that can prove the instrument survives its own data: a value that
 /// slips past the axis mapping does not fail an assert, it becomes a vertex
 /// at infinity, and the whole draw call degenerates around it.
-fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut ResultsParts<'_>)) {
+fn draw_and_tessellate(state: &mut ResultsTestHost, sheet: fn(&mut Ui, &mut ResultsParts<'_>)) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let input = egui::RawInput {
@@ -123,7 +123,7 @@ fn draw_and_tessellate(state: &mut AppState, sheet: fn(&mut Ui, &mut ResultsPart
 /// cursors down and the readout open. The value, delta and slope columns all
 /// compute and format from the samples themselves, so a degenerate run has
 /// to survive being read as well as being drawn.
-fn arm_cursors(state: &mut AppState) {
+fn arm_cursors(state: &mut ResultsTestHost) {
     if !state.results.results.session.cursor_tool.is_armed() {
         state.results.results.session.toggle_cursor_tool();
     }
@@ -144,7 +144,7 @@ fn arm_cursors(state: &mut AppState) {
 fn the_instrument_survives_each_degenerate_trace_alone() {
     for (label, waveform) in degenerate_waveforms() {
         eprintln!("degenerate case: {label}");
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.start_run().add_analysis(
             AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform]),
         );
@@ -155,7 +155,7 @@ fn the_instrument_survives_each_degenerate_trace_alone() {
 
 #[test]
 fn the_instrument_survives_a_degenerate_run() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state
         .model
         .simulation
@@ -213,7 +213,7 @@ fn a_long_run_that_diverges_partway_still_draws() {
             }
         })
         .collect::<Vec<_>>();
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.start_run().add_analysis(
         AnalysisResult::new(1, AnalysisType::Transient, "TRAN")
             .with_waveforms(vec![RetainedTrace::new("V(out)", x, y, "#0af")]),
@@ -225,7 +225,7 @@ fn a_long_run_that_diverges_partway_still_draws() {
 
 #[test]
 fn the_log_frequency_sheets_survive_a_non_positive_abscissa() {
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     let run = state.model.simulation.start_run();
     // A sweep carrying DC, and a PSD that went negative. log10 of the first
     // is -inf and the square root of the second is NaN, and both are shapes

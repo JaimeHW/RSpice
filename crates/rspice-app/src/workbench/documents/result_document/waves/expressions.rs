@@ -404,7 +404,7 @@ mod tests {
 
     #[test]
     fn complex_quick_trace_upgrade_refreshes_cached_values_without_rewriting_evidence() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.start_run().add_analysis(
             crate::state::AnalysisResult::new(1, crate::state::AnalysisType::Ac, "AC")
                 .with_waveforms(vec![
