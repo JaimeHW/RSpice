@@ -8,6 +8,23 @@ use crate::engine::core::{StartupVoltageConstraint, StartupVoltageHints};
 /// How many deficient rows the prose names before it summarizes the rest.
 pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 
+/// The largest DC system whose uncertified sparse solve is retried in
+/// extended precision.
+const EXTENDED_PRECISION_RETRY_UNKNOWNS: usize = 128;
+
+/// Whether a DC linear solve keeps the strict backward-error certificate.
+///
+/// A Newton iteration's convergence and residual tests judge its iterate, so
+/// its solve returns a finite candidate that misses only the certificate.
+/// Systems of at most [`EXTENDED_PRECISION_RETRY_UNKNOWNS`] unknowns keep the
+/// certificate and the extended-precision retry behind it, as do probe,
+/// polish and tangent solves.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(in crate::engine::convergence) enum DcSolve {
+    NewtonIteration,
+    Certified,
+}
+
 /// Report a device that could not evaluate finitely in preference to an
 /// iteration count.
 ///
@@ -149,12 +166,26 @@ impl Engine {
         denominator_floors: Option<&[Value]>,
         anchor: &[Value],
         solution: &mut Vec<Value>,
+        role: DcSolve,
     ) -> Result<(), SimulationError> {
-        Self::solve_dc_linearization_system(matrix, rhs, denominator_floors, solution)?;
+        Self::solve_dc_linearization_system(matrix, rhs, denominator_floors, solution, role)?;
         for (value, previous) in solution.iter_mut().zip(anchor) {
             *value += previous;
         }
         Ok(())
+    }
+
+    /// Solve the linear system of one DC Newton iteration; see [`DcSolve`].
+    pub(in crate::engine::convergence) fn solve_dc_newton_iteration(
+        matrix: &mut StaticMatrix,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        if rhs.len() > EXTENDED_PRECISION_RETRY_UNKNOWNS {
+            matrix.solve_newton_into(rhs, solution)
+        } else {
+            matrix.solve_into(rhs, solution)
+        }
     }
 
     pub(in crate::engine::convergence) fn solve_dc_linearization_system(
@@ -162,11 +193,16 @@ impl Engine {
         rhs: &[Value],
         denominator_floors: Option<&[Value]>,
         solution: &mut Vec<Value>,
+        role: DcSolve,
     ) -> Result<(), SimulationError> {
-        match matrix.solve_into(rhs, solution) {
+        let solved = match role {
+            DcSolve::NewtonIteration => Self::solve_dc_newton_iteration(matrix, rhs, solution),
+            DcSolve::Certified => matrix.solve_into(rhs, solution),
+        };
+        match solved {
             Ok(()) => Ok(()),
             Err(crate::solver::SolverError::InaccurateSolution(original_error)) => {
-                if rhs.len() <= 128 {
+                if rhs.len() <= EXTENDED_PRECISION_RETRY_UNKNOWNS {
                     log::debug!(
                         "sparse DC solve failed strict backward-error certification; retrying the small system with extended precision"
                     );
@@ -856,6 +892,7 @@ impl Engine {
                     solve_denominator_floors.as_deref(),
                     &solution,
                     &mut new_solution,
+                    DcSolve::NewtonIteration,
                 )?;
             } else {
                 Self::solve_dc_linearization_system(
@@ -863,6 +900,7 @@ impl Engine {
                     &rhs,
                     solve_denominator_floors.as_deref(),
                     &mut new_solution,
+                    DcSolve::NewtonIteration,
                 )?;
             }
             Self::reset_nonfinite_values(&mut new_solution);
@@ -1068,6 +1106,7 @@ impl Engine {
                     solve_denominator_floors.as_deref(),
                     &solution,
                     &mut raw_solution,
+                    DcSolve::NewtonIteration,
                 )
             } else {
                 Self::solve_dc_linearization_system(
@@ -1075,6 +1114,7 @@ impl Engine {
                     &rhs,
                     solve_denominator_floors.as_deref(),
                     &mut raw_solution,
+                    DcSolve::NewtonIteration,
                 )
             };
             match solve_result {
@@ -1900,10 +1940,16 @@ impl Engine {
             )?;
 
             if uses_vbic_correction {
-                Self::solve_direct_dc_correction(matrix, &rhs, None, &solution, &mut new_solution)?;
+                Self::solve_direct_dc_correction(
+                    matrix,
+                    &rhs,
+                    None,
+                    &solution,
+                    &mut new_solution,
+                    DcSolve::NewtonIteration,
+                )?;
             } else {
-                matrix
-                    .solve_into(&rhs, &mut new_solution)
+                Self::solve_dc_newton_iteration(matrix, &rhs, &mut new_solution)
                     .map_err(SimulationError::Solver)?;
             }
             if !node_hints.is_empty() && Self::junction_limiting_owns_newton_steps(circuit) {
@@ -2388,10 +2434,16 @@ impl Engine {
             )?;
 
             let solve_result = if uses_vbic_correction {
-                Self::solve_direct_dc_correction(matrix, &rhs, None, &solution, &mut raw_solution)
+                Self::solve_direct_dc_correction(
+                    matrix,
+                    &rhs,
+                    None,
+                    &solution,
+                    &mut raw_solution,
+                    DcSolve::NewtonIteration,
+                )
             } else {
-                matrix
-                    .solve_into(&rhs, &mut raw_solution)
+                Self::solve_dc_newton_iteration(matrix, &rhs, &mut raw_solution)
                     .map_err(SimulationError::Solver)
             };
             match solve_result {

@@ -8,6 +8,7 @@
 //! certified by the residual test a direct solve faces; otherwise it fails
 //! with a [`ContinuationFailure`] naming the aid and the stage it stopped at.
 
+use super::solve::DcSolve;
 use super::*;
 use crate::analysis::error::{ContinuationAid, ContinuationFailure, ContinuationStage};
 
@@ -582,10 +583,10 @@ impl Engine {
                         solve_denominator_floors.as_deref(),
                         &solution,
                         &mut raw_solution,
+                        DcSolve::NewtonIteration,
                     )
                 } else {
-                    matrix
-                        .solve_into(&rhs, &mut raw_solution)
+                    Self::solve_dc_newton_iteration(matrix, &rhs, &mut raw_solution)
                         .map_err(SimulationError::Solver)
                 };
                 match solve_result {
@@ -1239,10 +1240,10 @@ impl Engine {
                     solve_denominator_floors.as_deref(),
                     &solution,
                     &mut raw_solution,
+                    DcSolve::NewtonIteration,
                 )
             } else {
-                matrix
-                    .solve_into(&rhs, &mut raw_solution)
+                Self::solve_dc_newton_iteration(matrix, &rhs, &mut raw_solution)
                     .map_err(SimulationError::Solver)
             };
             match solve_result {

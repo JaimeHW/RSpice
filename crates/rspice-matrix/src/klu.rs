@@ -63,6 +63,13 @@ const PIVOT_TOL: Value = 1e-3;
 /// on accuracy and triggers the supernodal fallback when necessary.
 const REFACTOR_PIVOT_TOL: Value = 1e-8;
 
+/// Reciprocal pivot growth below `sqrt(eps)` marks a pivot sequence that
+/// threshold pivoting chose to the factors' numerical damage.
+#[inline]
+fn damaging_growth(reciprocal_pivot_growth: Value) -> bool {
+    reciprocal_pivot_growth < Value::EPSILON.sqrt()
+}
+
 /// Numeric quality indicators for the current factorization.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub struct KluDiagnostics {
@@ -292,6 +299,8 @@ pub struct KluSolver {
     factor_workspace: FactorWorkspace,
     /// Whether L/U currently hold a valid factorization.
     factored: bool,
+    /// Whether the current factors replay pivots chosen for earlier values.
+    pivots_reused: bool,
 }
 
 impl KluSolver {
@@ -360,6 +369,7 @@ impl KluSolver {
         self.work = work;
         self.diagnostics = checkpoint.diagnostics;
         self.factored = true;
+        self.pivots_reused = false;
         Ok(())
     }
 
@@ -529,6 +539,38 @@ impl KluSolver {
         self.diagnostics
     }
 
+    /// Whether factors that replay earlier pivots show, for `values`, the
+    /// element growth that makes [`Self::factor`] rebuild with maximum partial
+    /// pivoting.
+    ///
+    /// A values-only refactor keeps the reciprocal pivot growth measured when
+    /// its pivots were chosen; this measures it for the values the factors now
+    /// hold, with the same column-wise ratio `factor` uses. Fresh factors
+    /// already had that test.
+    pub(crate) fn reused_pivots_show_damaging_growth(&self, values: &[Value]) -> bool {
+        if !self.factored || !self.pivots_reused || values.len() != self.a_rows.len() {
+            return false;
+        }
+        let mut reciprocal_pivot_growth = Value::INFINITY;
+        for (j, &a_col) in self.col_perm.iter().enumerate() {
+            let a_col = a_col as usize;
+            let (a_begin, a_end) = (self.a_col_ptr[a_col], self.a_col_ptr[a_col + 1]);
+            let input_col_max = values[a_begin..a_end]
+                .iter()
+                .zip(&self.a_entry_scale[a_begin..a_end])
+                .fold(0.0_f64, |max, (&value, &scale)| {
+                    max.max((value * scale).abs())
+                });
+            let u_col_max = self.u_vals[self.u_col_ptr[j]..self.u_col_ptr[j + 1]]
+                .iter()
+                .fold(0.0_f64, |max, value| max.max(value.abs()));
+            if u_col_max > 0.0 {
+                reciprocal_pivot_growth = reciprocal_pivot_growth.min(input_col_max / u_col_max);
+            }
+        }
+        damaging_growth(reciprocal_pivot_growth)
+    }
+
     #[cfg(test)]
     pub(crate) fn full_factorization_count(&self) -> u64 {
         self.full_factorization_count
@@ -628,8 +670,7 @@ impl KluSolver {
         // Preserve the sparse diagonal on the normal path, but rebuild once
         // with maximum partial pivoting when measured element growth shows
         // that threshold pivoting selected a numerically damaging sequence.
-        if !self.growth_retry_disabled
-            && self.diagnostics.reciprocal_pivot_growth < Value::EPSILON.sqrt()
+        if !self.growth_retry_disabled && damaging_growth(self.diagnostics.reciprocal_pivot_growth)
         {
             self.factor_with_pivot_tolerance(values, 1.0)?;
         }
@@ -933,6 +974,7 @@ impl KluSolver {
             max_abs_pivot,
         };
         self.factored = true;
+        self.pivots_reused = false;
         #[cfg(test)]
         {
             self.full_factorization_count = self.full_factorization_count.saturating_add(1);
@@ -1164,6 +1206,7 @@ impl KluSolver {
             min_abs_pivot,
             max_abs_pivot,
         };
+        self.pivots_reused = true;
         Ok(())
     }
 
@@ -2309,6 +2352,33 @@ mod tests {
         disabled.factor(&[1.0e200]).expect("factor unscaled probe");
         assert_eq!(disabled.row_scale, [1.0]);
         assert!(disabled.growth_retry_disabled);
+    }
+
+    #[test]
+    fn reused_pivots_report_the_growth_of_the_values_they_now_factor() {
+        // Diagonal pivots suit the first matrix. Replayed on the second, whose
+        // diagonal is 1.2e-8 of its off-diagonal in either elimination order,
+        // they pass the refactor's own pivot alarm yet grow U by 1/1.2e-8.
+        let (col_ptr, row_idx) = ([0, 2, 4], [0, 1, 0, 1]);
+        let suited = [1.0, 0.5, 0.5, 1.0];
+        let tiny = 1.2e-8;
+        let grown = [tiny, 1.0, 1.0, tiny];
+        let mut solver = KluSolver::new();
+        solver
+            .analyze(2, &col_ptr, &row_idx)
+            .expect("analyze 2x2 probe");
+        solver.factor(&suited).expect("factor with diagonal pivots");
+        assert!(!solver.reused_pivots_show_damaging_growth(&suited));
+
+        solver
+            .refactor(&grown)
+            .expect("reused pivots pass the refactor alarm");
+        assert!(solver.reused_pivots_show_damaging_growth(&grown));
+
+        solver
+            .factor(&grown)
+            .expect("fresh pivots for the grown matrix");
+        assert!(!solver.reused_pivots_show_damaging_growth(&grown));
     }
 
     #[test]

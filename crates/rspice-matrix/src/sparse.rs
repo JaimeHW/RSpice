@@ -396,6 +396,40 @@ pub struct StaticMatrix {
     correction_rhs_lo_scratch: Vec<Value>,
     /// First attempted stamp outside the frozen sparsity pattern.
     stamping_error: Option<MatrixStampError>,
+    /// Newton candidates returned without the backward-error certificate.
+    newton_certificate_misses: NewtonCertificateMisses,
+}
+
+/// Newton linear solves whose finite candidate missed the componentwise
+/// backward-error certificate and went back to the Newton iteration, whose
+/// own convergence and residual tests judge it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct NewtonCertificateMisses {
+    /// Candidates returned uncertified.
+    pub count: u64,
+    /// Largest componentwise backward error among them.
+    pub worst_componentwise: Value,
+}
+
+impl NewtonCertificateMisses {
+    fn record(&mut self, backward_error: BackwardError, n: usize) {
+        self.count += 1;
+        self.worst_componentwise = self.worst_componentwise.max(backward_error.componentwise);
+        log::debug!(
+            "Newton linear solve of {n} unknowns returned uncertified: componentwise backward error {:.3e}",
+            backward_error.componentwise
+        );
+    }
+}
+
+/// What a real solve does with a finite candidate that misses the
+/// componentwise backward-error certificate after refinement.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CertificateMiss {
+    /// Fall back to faer, then refuse with `InaccurateSolution`.
+    Refuse,
+    /// Return the candidate to the Newton iteration that asked for it.
+    ReturnToNewton,
 }
 
 struct ProbeValuesGuard<'a> {
@@ -1546,6 +1580,7 @@ impl StaticMatrix {
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
             stamping_error: None,
+            newton_certificate_misses: NewtonCertificateMisses::default(),
         }
     }
 
@@ -1711,6 +1746,7 @@ impl StaticMatrix {
             klu_correction_scratch: Vec::new(),
             correction_rhs_lo_scratch: Vec::new(),
             stamping_error: None,
+            newton_certificate_misses: NewtonCertificateMisses::default(),
         })
     }
 
@@ -2880,6 +2916,7 @@ impl StaticMatrix {
                 solution,
                 RealSolveOp::Transpose,
                 factorization,
+                CertificateMiss::Refuse,
             ) {
                 Ok(true) => return Ok(()),
                 Ok(false) => {}
@@ -3320,6 +3357,7 @@ impl StaticMatrix {
             solution,
             RealSolveOp::Normal,
             Some(denominator_floor),
+            CertificateMiss::Refuse,
         )
     }
 
@@ -3329,6 +3367,44 @@ impl StaticMatrix {
         rhs: &[Value],
         solution: &mut Vec<Value>,
         factorization: FactorizationRequest,
+    ) -> Result<(), SolverError> {
+        self.solve_real_into(rhs, solution, factorization, CertificateMiss::Refuse)
+    }
+
+    /// Solve the linear system of one Newton iteration.
+    ///
+    /// The solve is [`Self::solve_into`]'s, except for a finite candidate that
+    /// misses only the componentwise backward-error certificate after
+    /// same-factor refinement: Circuit LU re-pivots once when the reused
+    /// pivots show damaging growth, and the candidate then goes back to the
+    /// Newton iteration, whose convergence and residual tests judge the
+    /// iterate. Such a miss never falls back to faer; faer still answers when
+    /// Circuit LU itself fails. [`Self::newton_certificate_misses`] counts the
+    /// candidates returned this way.
+    pub fn solve_newton_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+    ) -> Result<(), SolverError> {
+        self.solve_real_into(
+            rhs,
+            solution,
+            FactorizationRequest::Automatic,
+            CertificateMiss::ReturnToNewton,
+        )
+    }
+
+    /// Newton linear solves that returned an uncertified candidate.
+    pub fn newton_certificate_misses(&self) -> NewtonCertificateMisses {
+        self.newton_certificate_misses
+    }
+
+    fn solve_real_into(
+        &mut self,
+        rhs: &[Value],
+        solution: &mut Vec<Value>,
+        factorization: FactorizationRequest,
+        miss: CertificateMiss,
     ) -> Result<(), SolverError> {
         let n = self.nrows;
         self.check_stamping_error()?;
@@ -3348,6 +3424,7 @@ impl StaticMatrix {
                 solution,
                 RealSolveOp::Normal,
                 factorization,
+                miss,
             ) {
                 Ok(true) => {
                     return if solution.iter().all(|value| value.is_finite()) {
@@ -3361,7 +3438,7 @@ impl StaticMatrix {
             }
         }
 
-        self.solve_faer_into(rhs, solution)
+        self.solve_faer_operation_into_with_floors(rhs, solution, RealSolveOp::Normal, None, miss)
     }
 
     /// Form the Newton correction right-hand side `b - A*x` without changing
@@ -3450,7 +3527,13 @@ impl StaticMatrix {
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
     ) -> Result<(), SolverError> {
-        self.solve_faer_operation_into_with_floors(rhs, solution, operation, None)
+        self.solve_faer_operation_into_with_floors(
+            rhs,
+            solution,
+            operation,
+            None,
+            CertificateMiss::Refuse,
+        )
     }
 
     fn solve_faer_operation_into_with_floors(
@@ -3459,6 +3542,7 @@ impl StaticMatrix {
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
         denominator_floor: Option<&[Value]>,
+        miss: CertificateMiss,
     ) -> Result<(), SolverError> {
         if denominator_floor.is_some() && operation != RealSolveOp::Normal {
             return Err(SolverError::InvalidCircuit(
@@ -3477,6 +3561,7 @@ impl StaticMatrix {
             residual_gross_scratch,
             residual_compensation_scratch,
             residual_row_nnz_scratch,
+            newton_certificate_misses,
             ..
         } = self;
         let Some(ws) = lu.as_mut() else {
@@ -3714,6 +3799,16 @@ impl StaticMatrix {
             }
         }
 
+        if miss == CertificateMiss::ReturnToNewton && operation == RealSolveOp::Normal {
+            for (value, &scale) in solution.iter_mut().zip(&ws.col_scale) {
+                *value *= scale;
+                if !value.is_finite() {
+                    return Err(SolverError::Overflow);
+                }
+            }
+            newton_certificate_misses.record(backward_error, csc.nrows());
+            return Ok(());
+        }
         Err(SolverError::InaccurateSolution(
             backward_error.componentwise,
         ))
@@ -3727,6 +3822,7 @@ impl StaticMatrix {
             solution,
             RealSolveOp::Normal,
             FactorizationRequest::Automatic,
+            CertificateMiss::Refuse,
         )
         .is_ok_and(|accepted| accepted)
     }
@@ -3737,6 +3833,7 @@ impl StaticMatrix {
         solution: &mut Vec<Value>,
         operation: RealSolveOp,
         factorization: FactorizationRequest,
+        miss: CertificateMiss,
     ) -> Result<bool, SolverError> {
         let Self {
             nrows,
@@ -3753,6 +3850,7 @@ impl StaticMatrix {
             residual_compensation_scratch,
             residual_row_nnz_scratch,
             klu_correction_scratch,
+            newton_certificate_misses,
             ..
         } = self;
         let n = *nrows;
@@ -3854,6 +3952,7 @@ impl StaticMatrix {
         if backward_error.accepted() {
             return Ok(true);
         }
+        let mut candidate_error = backward_error;
 
         // KLU's unscaled factors are substantially faster on the ordinary
         // Newton hot path, but ill-scaled MNA rows (for example a 1e12-ohm
@@ -3899,6 +3998,7 @@ impl StaticMatrix {
             if refined_error.accepted() {
                 return Ok(true);
             }
+            candidate_error = refined_error;
             if refined_error.acceptance_ratio
                 >= backward_error.acceptance_ratio * MIN_IMPROVEMENT_FACTOR
             {
@@ -3925,11 +4025,52 @@ impl StaticMatrix {
             if canonical_error.accepted() {
                 return Ok(true);
             }
+            candidate_error = canonical_error;
         }
-        // An unexcited cycle's LU remnants are left to the faer fallback,
-        // which projects them only once its own certificate has failed.
-        // Projecting them here would replace a solve that faer certifies.
-        Ok(false)
+        if miss == CertificateMiss::Refuse {
+            // An unexcited cycle's LU remnants are left to the faer fallback,
+            // which projects them only once its own certificate has failed.
+            // Projecting them here would replace a solve that faer certifies.
+            return Ok(false);
+        }
+
+        // Pivots reused from an earlier Jacobian may no longer suit this one.
+        // Re-pivot once when they show damaging growth, as a SPICE sparse
+        // solver reorders when a reused pivot fails; keep whichever candidate
+        // has the smaller backward error.
+        if backend.reused_pivots_show_damaging_growth(factor_values) {
+            let repivoted = backend
+                .factor(factor_values)
+                .and_then(|()| match backend_operation {
+                    RealSolveOp::Normal => backend.solve(rhs, klu_correction_scratch),
+                    RealSolveOp::Transpose => backend.solve_transpose(rhs, klu_correction_scratch),
+                });
+            if repivoted.is_err() {
+                klu_factored_values.clear();
+            } else if klu_correction_scratch.iter().all(|value| value.is_finite())
+                && let Ok(repivoted_error) = componentwise_backward_error_with_layout(
+                    csc,
+                    residual_layout,
+                    values,
+                    klu_correction_scratch,
+                    rhs,
+                    residual_scratch,
+                    residual_gross_scratch,
+                    residual_compensation_scratch,
+                    residual_row_nnz_scratch,
+                    operation,
+                )
+                && repivoted_error.acceptance_ratio < candidate_error.acceptance_ratio
+            {
+                solution.copy_from_slice(klu_correction_scratch);
+                if repivoted_error.accepted() {
+                    return Ok(true);
+                }
+                candidate_error = repivoted_error;
+            }
+        }
+        newton_certificate_misses.record(candidate_error, n);
+        Ok(true)
     }
 
     /// Solve Ax = b via dense Gaussian elimination.
@@ -8000,6 +8141,83 @@ mod tests {
         )
         .unwrap();
         assert!(backward_error.accepted());
+    }
+
+    /// A system whose Circuit LU factors belong to other values, so neither
+    /// the candidate they give nor its refinement certifies: the factors of
+    /// `[[1, 0.1], [0.1, 1]]` stand in for factors that cannot certify
+    /// `[[1, 3], [3, 1]]`. Refinement with them diverges, since
+    /// `I - F^-1 A` has a spectral radius near 3.
+    fn matrix_with_uncertifiable_circuit_lu_factors() -> (StaticMatrix, [Value; 2]) {
+        let triplets = [(0, 0, 1.0), (1, 0, 0.1), (0, 1, 0.1), (1, 1, 1.0)];
+        let mut matrix =
+            StaticMatrix::from_triplets_with_options(2, 2, &triplets, SolverOptions::default())
+                .unwrap();
+        let rhs = [1.0, 2.0];
+        let mut solution = Vec::new();
+        matrix.solve_into(&rhs, &mut solution).unwrap();
+        assert!(matrix.lu.is_none(), "Circuit LU certifies the first system");
+        matrix.clear_values();
+        for (row, col, value) in [(0, 0, 1.0), (1, 0, 3.0), (0, 1, 3.0), (1, 1, 1.0)] {
+            matrix.add(row, col, value);
+        }
+        matrix.klu_factored_values.clone_from(&matrix.values);
+        (matrix, rhs)
+    }
+
+    fn real_backward_error(
+        matrix: &StaticMatrix,
+        solution: &[Value],
+        rhs: &[Value],
+    ) -> BackwardError {
+        componentwise_backward_error(
+            &matrix.csc,
+            &matrix.values,
+            solution,
+            rhs,
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            &mut Vec::new(),
+            RealSolveOp::Normal,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn newton_solve_returns_a_certificate_only_miss_without_faer() {
+        let (mut matrix, rhs) = matrix_with_uncertifiable_circuit_lu_factors();
+        let mut solution = Vec::new();
+        matrix
+            .solve_newton_into(&rhs, &mut solution)
+            .expect("a finite Newton candidate");
+
+        assert!(solution.iter().all(|value| value.is_finite()));
+        assert!(
+            matrix.lu.is_none(),
+            "a certificate-only miss never reaches faer"
+        );
+        assert!(!real_backward_error(&matrix, &solution, &rhs).accepted());
+        let misses = matrix.newton_certificate_misses();
+        assert_eq!(misses.count, 1);
+        assert!(misses.worst_componentwise > 0.0);
+    }
+
+    #[test]
+    fn linear_solve_refuses_the_candidate_a_newton_solve_returns() {
+        let (mut matrix, rhs) = matrix_with_uncertifiable_circuit_lu_factors();
+        let mut solution = Vec::new();
+        matrix
+            .solve_into(&rhs, &mut solution)
+            .expect("faer certifies the system");
+
+        assert!(
+            matrix.lu.is_some(),
+            "the uncertified candidate goes to faer"
+        );
+        assert!(real_backward_error(&matrix, &solution, &rhs).accepted());
+        assert_relative_solution(&solution, &[5.0 / 8.0, 1.0 / 8.0]);
+        assert_eq!(matrix.newton_certificate_misses().count, 0);
     }
 
     fn amesos_klu_options() -> SolverOptions {

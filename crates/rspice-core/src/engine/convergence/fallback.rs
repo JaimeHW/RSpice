@@ -1,5 +1,6 @@
 //! Initial-guess preparation, fallback candidates, and warm restart helpers.
 
+use super::solve::DcSolve;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -252,10 +253,10 @@ impl Engine {
                     solve_denominator_floors.as_deref(),
                     &solution,
                     &mut raw_solution,
+                    DcSolve::NewtonIteration,
                 )
             } else {
-                matrix
-                    .solve_into(&rhs, &mut raw_solution)
+                Self::solve_dc_newton_iteration(matrix, &rhs, &mut raw_solution)
                     .map_err(SimulationError::Solver)
             };
             match solve_result {

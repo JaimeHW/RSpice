@@ -9369,7 +9369,7 @@ impl Engine {
                             linear_solution = solution;
                         })
                     } else {
-                        matrix.solve_into(direct_rhs, &mut linear_solution)
+                        matrix.solve_newton_into(direct_rhs, &mut linear_solution)
                     }
                     .map(|()| {
                         solved_weighted_correction_norm = self
@@ -9404,7 +9404,7 @@ impl Engine {
                             if prefer_dense_solver {
                                 linear_solution = matrix.solve_dense(&correction_rhs)?;
                             } else {
-                                matrix.solve_into(&correction_rhs, &mut linear_solution)?;
+                                matrix.solve_newton_into(&correction_rhs, &mut linear_solution)?;
                             }
                             solved_weighted_correction_norm = self
                                 .transient_newton_weighted_correction_norm(
@@ -9423,7 +9423,7 @@ impl Engine {
                         linear_solution = solution;
                     })
                 } else {
-                    matrix.solve_into(&rhs, &mut linear_solution)
+                    matrix.solve_newton_into(&rhs, &mut linear_solution)
                 };
                 total_solve_nanos += newton_solve_start.elapsed().as_nanos();
 

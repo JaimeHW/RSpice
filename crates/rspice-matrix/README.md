@@ -88,16 +88,19 @@ matrix.solve_into(&[1.0, 2.0], &mut solution)?;
 `SolverOptions::default()` is deterministic and selects
 `RealSolverBackend::Auto`: the KLU-class kernel, except for patterns whose
 measured fill favors faer's supernodal LU. Under the default robustness
-policy, any circuit-LU solve that cannot certify its result falls back to
-equilibrated faer. A complex factorization is reused until the matrix's values
-are next written, so a noise analysis solving many right-hand sides factors
-once.
+policy, a circuit-LU solve that cannot certify its result falls back to
+equilibrated faer, except a Newton iteration's (below). A complex
+factorization is reused until the matrix's values are next written, so a noise
+analysis solving many right-hand sides factors once.
 
 A successful sparse solve satisfies a scale-invariant componentwise
 backward-error bound; a finite but inaccurate candidate is refined or
-rejected, never returned. Finiteness is checked again at every solve
-boundary, including after unchecked hot-path stamping, and a `CscIndex` from
-another topology is refused rather than written.
+rejected. `solve_newton_into` is the one exception: after refinement, and one
+re-pivot when reused pivots show damaging growth, it returns such a candidate
+to the Newton iteration, whose convergence and residual tests judge it, and
+counts it in `newton_certificate_misses`. Finiteness is checked again at every
+solve boundary, including after unchecked hot-path stamping, and a `CscIndex`
+from another topology is refused rather than written.
 
 ## Feature flags
 

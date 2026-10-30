@@ -1,5 +1,6 @@
 //! Residual reconstruction, convergence checks, and nonlinear merit functions.
 
+use super::solve::DcSolve;
 use super::*;
 
 impl Engine {
@@ -505,6 +506,7 @@ impl Engine {
             floors.as_deref(),
             solution,
             &mut next,
+            DcSolve::Certified,
         )
         .is_err()
         {
@@ -555,6 +557,7 @@ impl Engine {
                     denominator_floors.as_deref(),
                     solution,
                     &mut next_solution,
+                    DcSolve::Certified,
                 )
             } else {
                 Self::solve_dc_linearization_system(
@@ -562,6 +565,7 @@ impl Engine {
                     rhs,
                     denominator_floors.as_deref(),
                     &mut next_solution,
+                    DcSolve::Certified,
                 )
             };
             if result.is_err() {
@@ -658,6 +662,7 @@ impl Engine {
                         direction,
                         denominator_floors.as_deref(),
                         &mut tangent,
+                        DcSolve::Certified,
                     )?;
                     if tangent.iter().any(|value| !value.is_finite()) {
                         return Err(SimulationError::Circuit(
@@ -737,6 +742,7 @@ impl Engine {
             rhs,
             denominator_floors.as_deref(),
             &mut next_solution,
+            DcSolve::Certified,
         )
         .is_err()
         {
