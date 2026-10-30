@@ -238,6 +238,7 @@ fn pattern_bindings(
             )
         });
         row_fill(ui, rect, &response, is_selected);
+        theme::paint_focus_ring(ui, &response, rect);
         let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
         let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
         let cells = [
@@ -458,6 +459,7 @@ fn instance_row(
         )
     });
     row_fill(ui, rect, &response, is_selected);
+    theme::paint_focus_ring(ui, &response, rect);
     let painter = ui.painter().with_clip_rect(rect.intersect(ui.clip_rect()));
     let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
     let cells = column_rects(rect);
@@ -498,6 +500,7 @@ fn instance_row(
             WorkbenchIcon::ChevronDown
         };
         icon.paint(&painter, chevron.shrink(2.5), t.color.text_dim);
+        theme::paint_focus_ring(ui, &toggle, chevron);
         let keyboard = response.has_focus()
             && ui.input_mut(|input| {
                 let key = if collapsed {

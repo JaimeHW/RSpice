@@ -8,7 +8,10 @@
 //! catalog changes.
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::state::{ConfigurationSetCatalog, ConfigurationSetError};
+use crate::state::{
+    ConfigurationCloneScope, ConfigurationSetCatalog, ConfigurationSetDefinition,
+    ConfigurationSetError, ConfigurationSetId,
+};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::project::configuration_state::{ConfigurationSelection, plain_refusal};
@@ -21,6 +24,41 @@ pub(in crate::workbench) enum ConfigurationTransaction {
     /// Commit the Configuration page's edits to the configuration they were
     /// made to.
     Apply,
+    /// Add `definition` to the project, and use it for runs or leave runs
+    /// with what they use now.
+    Create {
+        definition: Box<ConfigurationSetDefinition>,
+        use_for_runs: bool,
+    },
+    /// Copy every binding of `source` into a new configuration named `name`.
+    Clone {
+        source: ConfigurationSetId,
+        name: String,
+        use_for_runs: bool,
+    },
+    Rename {
+        id: ConfigurationSetId,
+        name: String,
+    },
+    Delete(ConfigurationSetId),
+}
+
+/// The catalog a transaction produces, the line the log records, and the
+/// configuration the page shows afterwards.
+struct Prepared {
+    candidate: ConfigurationSetCatalog,
+    message: String,
+    select: Option<ConfigurationSelection>,
+}
+
+impl Prepared {
+    fn new(candidate: ConfigurationSetCatalog, message: String) -> Self {
+        Self {
+            candidate,
+            message,
+            select: None,
+        }
+    }
 }
 
 /// Commit `transaction`, then drop every run preparation the old catalog
@@ -31,28 +69,48 @@ pub(in crate::workbench) fn commit_configuration_transaction(
     transaction: ConfigurationTransaction,
 ) -> Result<(), String> {
     let applies_draft = transaction == ConfigurationTransaction::Apply;
-    let Some((candidate, message)) = prepare(&app.state, transaction)? else {
+    let renamed = match &transaction {
+        ConfigurationTransaction::Rename { id, name } => Some((*id, name.clone())),
+        _ => None,
+    };
+    let Some(prepared) = prepare(&app.state, transaction)? else {
         if applies_draft {
             app.state.project.configuration.revert();
         }
         return Ok(());
     };
-    publish(&mut app.state, candidate)?;
+    publish(&mut app.state, prepared.candidate)?;
+    let page = &mut app.state.project.configuration;
     if applies_draft {
-        app.state.project.configuration.revert();
+        page.revert();
     }
+    if let Some((id, name)) = renamed
+        && let Some(revision) = app
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id)
+            .map(|configuration| configuration.revision())
+    {
+        page.renamed(id, &name, revision);
+    }
+    if let Some(selection) = prepared.select {
+        page.select(selection);
+    }
+    let message = prepared.message;
     app.invalidate_simulation_preflight();
     app.state
         .record(LogSeverity::Info, LogSource::Studio, message);
     Ok(())
 }
 
-/// The catalog `transaction` produces and the line the log records, or
-/// `None` when it changes nothing.
+/// What `transaction` produces, or `None` when it changes nothing.
 fn prepare(
     state: &AppState,
     transaction: ConfigurationTransaction,
-) -> Result<Option<(ConfigurationSetCatalog, String)>, String> {
+) -> Result<Option<Prepared>, String> {
     let current: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
     match transaction {
         ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default) => {
@@ -65,7 +123,7 @@ fn prepare(
             candidate
                 .deactivate()
                 .map_err(|error| format!("Cannot return to Default: {}", plain_refusal(&error)))?;
-            Ok(Some((
+            Ok(Some(Prepared::new(
                 candidate,
                 "Runs now use the Default configuration.".to_owned(),
             )))
@@ -84,7 +142,10 @@ fn prepare(
                 .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
             validate_candidate_configuration(state, &candidate)
                 .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
-            Ok(Some((candidate, format!("Runs now use {name}."))))
+            Ok(Some(Prepared::new(
+                candidate,
+                format!("Runs now use {name}."),
+            )))
         }
         ConfigurationTransaction::Apply => {
             let Some(draft) = state.project.configuration.draft() else {
@@ -113,12 +174,131 @@ fn prepare(
                 validate_candidate_configuration(state, &candidate)
                     .map_err(|error| format!("Cannot apply {name}: {error}"))?;
             }
-            Ok(Some((
+            Ok(Some(Prepared::new(
                 candidate,
                 format!("Applied the edits to {}.", draft.definition.name),
             )))
         }
+        ConfigurationTransaction::Create {
+            definition,
+            use_for_runs,
+        } => {
+            let name = definition.name.clone();
+            let mut candidate = current.clone();
+            let id = candidate
+                .create(*definition)
+                .map_err(|error| format!("Cannot create {name}: {}", plain_refusal(&error)))?;
+            added(
+                state,
+                current,
+                candidate,
+                id,
+                &name,
+                use_for_runs,
+                "Created",
+            )
+        }
+        ConfigurationTransaction::Clone {
+            source,
+            name,
+            use_for_runs,
+        } => {
+            let original = current
+                .find(source)
+                .ok_or_else(|| "That configuration was deleted. Pick another one.".to_owned())?;
+            let mut candidate = current.clone();
+            let id = candidate
+                .clone_configuration_scoped(
+                    source,
+                    original.revision(),
+                    name.clone(),
+                    ConfigurationCloneScope::AllBindings,
+                    original.definition().clone(),
+                )
+                .map_err(|error| {
+                    format!(
+                        "Cannot clone {}: {}",
+                        original.name(),
+                        plain_refusal(&error)
+                    )
+                })?;
+            added(state, current, candidate, id, &name, use_for_runs, "Cloned")
+        }
+        ConfigurationTransaction::Rename { id, name } => {
+            let committed = current
+                .find(id)
+                .ok_or_else(|| "That configuration was deleted. Pick another one.".to_owned())?;
+            let old = committed.name().to_owned();
+            let mut definition = committed.definition().clone();
+            definition.name = name.trim().to_owned();
+            let mut candidate = current.clone();
+            match candidate.update(id, committed.revision(), definition) {
+                Ok(_) => {}
+                Err(ConfigurationSetError::NoChanges(_)) => return Ok(None),
+                Err(error) => {
+                    return Err(format!("Cannot rename {old}: {}", plain_refusal(&error)));
+                }
+            }
+            Ok(Some(Prepared::new(
+                candidate,
+                format!("Renamed {old} to {}.", name.trim()),
+            )))
+        }
+        ConfigurationTransaction::Delete(id) => {
+            let committed = current
+                .find(id)
+                .ok_or_else(|| "That configuration was deleted already.".to_owned())?;
+            let name = committed.name().to_owned();
+            if current.active_configuration_id() == Some(id) {
+                return Err(delete_refusal(&name));
+            }
+            let mut candidate = current.clone();
+            candidate
+                .remove(id, committed.revision())
+                .map_err(|error| format!("Cannot delete {name}: {}", plain_refusal(&error)))?;
+            Ok(Some(Prepared::new(candidate, format!("Deleted {name}."))))
+        }
     }
+}
+
+/// Why the configuration used for runs cannot be deleted, and what to do.
+pub(in crate::workbench) fn delete_refusal(name: &str) -> String {
+    format!(
+        "Runs use {name}, so it cannot be deleted. Use another configuration, or Default, for runs first."
+    )
+}
+
+/// Finish adding configuration `id` to `candidate`: runs use it when asked,
+/// and otherwise keep what they used before it was added, whichever that was.
+fn added(
+    state: &AppState,
+    current: &ConfigurationSetCatalog,
+    mut candidate: ConfigurationSetCatalog,
+    id: ConfigurationSetId,
+    name: &str,
+    use_for_runs: bool,
+    verb: &str,
+) -> Result<Option<Prepared>, String> {
+    let message = if use_for_runs {
+        candidate
+            .activate(id)
+            .map_err(|error| format!("Cannot use {name} for runs: {}", plain_refusal(&error)))?;
+        validate_candidate_configuration(state, &candidate)
+            .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
+        format!("{verb} {name}; runs now use it.")
+    } else {
+        match current.active_configuration_id() {
+            Some(previous) => candidate.activate(previous),
+            None => candidate.deactivate(),
+        }
+        .map_err(|error| format!("Cannot add {name}: {}", plain_refusal(&error)))?;
+        format!("{verb} {name}.")
+    };
+    Ok(Some(Prepared {
+        candidate,
+        message,
+        select: Some(ConfigurationSelection::Configuration(id)),
+    }))
 }
 
 /// Replace the catalog and the project revision as one transaction; the
@@ -362,6 +542,186 @@ mod tests {
                 .configuration_sets
                 .active_configuration_id(),
             Some(id)
+        );
+    }
+
+    fn definition_from(
+        app: &RSpiceApp,
+        id: ConfigurationSetId,
+        name: &str,
+    ) -> ConfigurationSetDefinition {
+        let mut definition = app
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id)
+            .unwrap()
+            .definition()
+            .clone();
+        definition.name = name.to_owned();
+        definition.overrides.clear();
+        definition
+    }
+
+    fn active(app: &RSpiceApp) -> Option<ConfigurationSetId> {
+        app.state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .active_configuration_id()
+    }
+
+    #[test]
+    fn the_configuration_used_for_runs_cannot_be_deleted() {
+        let (mut app, id) = reference_app();
+        let before = app.state.model.workspace.content.configuration_sets.clone();
+        let refusal =
+            commit_configuration_transaction(&mut app, ConfigurationTransaction::Delete(id))
+                .expect_err("deleting what runs use is refused");
+        assert_eq!(refusal, delete_refusal("Reference hierarchy"));
+        assert!(refusal.contains("Use another configuration, or Default, for runs first"));
+        assert_eq!(app.state.model.workspace.content.configuration_sets, before);
+
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default),
+        )
+        .unwrap();
+        commit_configuration_transaction(&mut app, ConfigurationTransaction::Delete(id)).unwrap();
+        assert!(
+            app.state
+                .model
+                .workspace
+                .content
+                .configuration_sets
+                .find(id)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn a_new_configuration_leaves_runs_alone_unless_asked() {
+        let (mut app, id) = reference_app();
+        let definition = definition_from(&app, id, "Characterization");
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::Create {
+                definition: Box::new(definition.clone()),
+                use_for_runs: false,
+            },
+        )
+        .unwrap();
+        let catalog = app.state.model.workspace.content.configuration_sets.clone();
+        let created = catalog
+            .configurations()
+            .iter()
+            .find(|configuration| configuration.name() == "Characterization")
+            .unwrap()
+            .id();
+        assert_eq!(active(&app), Some(id));
+        assert_eq!(
+            app.state.project.configuration.selection(&catalog),
+            ConfigurationSelection::Configuration(created),
+            "the page shows what was created"
+        );
+
+        // From Default, a configuration added without being used for runs
+        // leaves runs on Default.
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default),
+        )
+        .unwrap();
+        let mut second = definition.clone();
+        second.name = "Lab".to_owned();
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::Create {
+                definition: Box::new(second),
+                use_for_runs: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(active(&app), None);
+
+        let mut third = definition;
+        third.name = "Signoff".to_owned();
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::Create {
+                definition: Box::new(third),
+                use_for_runs: true,
+            },
+        )
+        .unwrap();
+        let signoff = app
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .configurations()
+            .iter()
+            .find(|configuration| configuration.name() == "Signoff")
+            .unwrap()
+            .id();
+        assert_eq!(active(&app), Some(signoff));
+    }
+
+    #[test]
+    fn a_clone_copies_every_binding_and_can_take_over_runs() {
+        let (mut app, id) = reference_app();
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::Clone {
+                source: id,
+                name: "Reference copy".to_owned(),
+                use_for_runs: true,
+            },
+        )
+        .unwrap();
+        let catalog = app.state.model.workspace.content.configuration_sets.clone();
+        let copy = catalog
+            .configurations()
+            .iter()
+            .find(|configuration| configuration.name() == "Reference copy")
+            .unwrap();
+        assert_eq!(copy.overrides(), catalog.find(id).unwrap().overrides());
+        assert_eq!(active(&app), Some(copy.id()));
+    }
+
+    #[test]
+    fn renaming_keeps_unapplied_edits_applicable() {
+        let (mut app, id) = reference_app();
+        edit_views(&mut app, id, &["schematic", "spice"], &[]);
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::Rename {
+                id,
+                name: "Renamed".to_owned(),
+            },
+        )
+        .unwrap();
+        let catalog = app.state.model.workspace.content.configuration_sets.clone();
+        assert_eq!(catalog.find(id).unwrap().name(), "Renamed");
+        assert!(app.state.project.configuration.is_dirty(&catalog));
+        commit_configuration_transaction(&mut app, ConfigurationTransaction::Apply).unwrap();
+        let configuration = app
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id)
+            .unwrap()
+            .clone();
+        assert_eq!(configuration.name(), "Renamed");
+        assert_eq!(
+            configuration.executable_view_policy(),
+            ["schematic", "spice"]
         );
     }
 }

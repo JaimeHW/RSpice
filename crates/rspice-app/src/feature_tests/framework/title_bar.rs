@@ -2076,7 +2076,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Sheets, variants and annotation… | design-management |  | on",
             "Selection and bulk editing… | design-bulk-tools |  | on",
             "Connectivity and bus manager… | design-connectivity-tools |  | on",
-            "Configuration sets… | configuration-sets |  | on",
+            "Configurations | configuration-sets |  | on",
             "Design rule setup… | design-rule-setup |  | on",
             "Review comments… | review-comments |  | on",
             "Revision history… | revision-history |  | on",

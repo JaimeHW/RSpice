@@ -6,9 +6,12 @@ use egui::{ScrollArea, Ui};
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::{WorkbenchIcon, section_header};
-use super::{nav_row, nav_row_response};
+use super::{nav_row, nav_row_response, row_context_menu};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app::dialogs::project::configuration_dialogs::{
+    configuration_actions_menu, open_configuration_dialog,
+};
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
 
@@ -126,7 +129,9 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .is_dirty(catalog)
         .then(|| page.draft().map(|draft| draft.id))
         .flatten();
+    let write_allowed = !app.state.model.safe_mode.project_read_only();
     let mut picked = None;
+    let mut dialog = None;
     for (target, name, runs) in rows {
         let meta = runs.then_some("used for runs");
         let response =
@@ -137,12 +142,22 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         if response.clicked() {
             picked = Some(target);
         }
+        let (popup, _) = row_context_menu(&response);
+        popup.show(|ui| {
+            if let Some(request) = configuration_actions_menu(ui, target, write_allowed) {
+                dialog = Some(request);
+                ui.close();
+            }
+        });
     }
     if let Some(target) = picked {
         app.state.project.configuration.request_selection(
             &app.state.model.workspace.content.configuration_sets,
             target,
         );
+    }
+    if let Some(request) = dialog {
+        open_configuration_dialog(&mut app.state, request);
     }
 }
 

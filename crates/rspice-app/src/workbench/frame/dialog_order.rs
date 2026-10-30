@@ -260,10 +260,13 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| app.render_symbol_definition_dialogs(ctx),
     },
     DialogSpec {
-        key: DialogKey("simulate.configuration_sets"),
+        key: DialogKey("project.configuration"),
         modality: Modality::Dialog,
-        is_open: Some(|state| state.simulate.configuration_sets.open),
-        render: |app, ctx| app.render_configuration_sets_dialog(ctx),
+        is_open: Some(|state| {
+            state.project.configuration_dialog.is_open()
+                || state.project.configuration.pending_selection.is_some()
+        }),
+        render: |app, ctx| app.render_configuration_dialog(ctx),
     },
     // A new deck changes what blocks a run, so a run prepared under the
     // old one is not authorized under it.

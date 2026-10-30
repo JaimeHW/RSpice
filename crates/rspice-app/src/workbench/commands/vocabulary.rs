@@ -494,9 +494,7 @@ impl Command {
                 "Selection and bulk editing\u{2026}",
                 "Design",
             ),
-            Self::ConfigurationSets => {
-                spec("configuration-sets", "Configuration sets\u{2026}", "Design")
-            }
+            Self::ConfigurationSets => spec("configuration-sets", "Configurations", "Design"),
             Self::RuleSetup => spec("design-rule-setup", "Design rule setup\u{2026}", "Design"),
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
             Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),

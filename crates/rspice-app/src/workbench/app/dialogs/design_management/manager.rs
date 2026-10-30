@@ -700,7 +700,7 @@ pub(super) fn hierarchy_manager_body(
             {
                 action = DesignManagementBodyAction::OpenConfigurationBinding;
             }
-            if Button::new("Configuration sets\u{2026}").show(ui).clicked() {
+            if Button::new("Configurations").show(ui).clicked() {
                 action = DesignManagementBodyAction::OpenConfigurationSets;
             }
             if Button::new("Audit unresolved views\u{2026}")

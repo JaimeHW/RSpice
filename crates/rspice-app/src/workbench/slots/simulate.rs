@@ -1,5 +1,5 @@
-//! The simulate feature's dialogs: the analysis plan's removal review and
-//! the configuration-set manager; and the Simulation and Verification
+//! The simulate feature's dialogs: the analysis plan's removal review; and
+//! the Simulation and Verification
 //! Studios' session: their pages, selections, drafts and filters, the
 //! analysis lifecycle outcome and the Jobs manager's review context.
 
@@ -16,9 +16,6 @@ pub(crate) struct SimulateState {
     /// staged. The review above asks; this one only states.
     pub(crate) plan_removal_refusal:
         crate::workbench::app::dialogs::plan_removal::PlanRemovalRefusal,
-
-    /// Project-owned hierarchy/view configuration manager.
-    pub(crate) configuration_sets: crate::workbench::app::ConfigurationSetsDialogState,
 
     pub verification_page: crate::workbench::state::VerificationPage,
     /// Selected Simulation Studio setup route.
@@ -115,7 +112,6 @@ impl Default for SimulateState {
         Self {
             plan_removal_review: Default::default(),
             plan_removal_refusal: Default::default(),
-            configuration_sets: Default::default(),
             verification_page: crate::workbench::state::VerificationPage::Yield,
             simulation_page: crate::workbench::state::SimulationPage::Analyses,
             verification: Default::default(),

@@ -17,6 +17,9 @@ use super::*;
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration_transaction,
 };
+use crate::workbench::app::dialogs::project::configuration_dialogs::{
+    ConfigurationDialogRequest, configuration_actions_menu, open_configuration_dialog,
+};
 use crate::workbench::app_state::AppState;
 use crate::workbench::project::configuration_state::{
     ConfigurationResolution, ConfigurationSelection, used_for_runs,
@@ -31,7 +34,7 @@ enum ToolbarIntent {
     UseForRuns(ConfigurationSelection),
     Apply,
     Revert,
-    New,
+    Open(ConfigurationDialogRequest),
 }
 
 pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -59,7 +62,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.project.configuration.refusal = refusal;
         }
         Some(ToolbarIntent::Revert) => app.state.project.configuration.revert(),
-        Some(ToolbarIntent::New) => Command::ConfigurationSets.execute(app),
+        Some(ToolbarIntent::Open(request)) => open_configuration_dialog(&mut app.state, request),
         None => {}
     }
     if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {
@@ -67,22 +70,6 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     grid::global_bindings(ui, &mut app.state, selection, &resolution);
     instances::instances(ui, &mut app.state, selection, &resolution);
-    if let Some((target, choice)) = selection_prompt(ui.ctx(), &app.state) {
-        match choice {
-            DialogChoice::Primary => {
-                app.state.project.configuration.pending_selection = None;
-                match commit_configuration_transaction(app, ConfigurationTransaction::Apply) {
-                    Ok(()) => app.state.project.configuration.select(target),
-                    Err(refusal) => app.state.project.configuration.refusal = Some(refusal),
-                }
-            }
-            DialogChoice::Secondary => app.state.project.configuration.select(target),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                app.state.project.configuration.pending_selection = None;
-            }
-            DialogChoice::None => {}
-        }
-    }
 }
 
 /// The page's one-row band: the configuration in front of the reader,
@@ -152,7 +139,24 @@ fn toolbar(
                         .show(ui)
                         .clicked()
                     {
-                        intent = Some(ToolbarIntent::New);
+                        intent = Some(ToolbarIntent::Open(ConfigurationDialogRequest::New));
+                    }
+                    if selection != ConfigurationSelection::Default {
+                        let more = crate::ui::panels::icon_button(
+                            ui,
+                            WorkbenchIcon::More,
+                            "More configuration actions",
+                            false,
+                            vec2(28.0, 26.0),
+                        );
+                        egui::Popup::menu(&more).show(|ui| {
+                            if let Some(request) =
+                                configuration_actions_menu(ui, selection, write_allowed)
+                            {
+                                intent = Some(ToolbarIntent::Open(request));
+                                ui.close();
+                            }
+                        });
                     }
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                         status_text(ui, &status);
@@ -279,48 +283,6 @@ fn refusal_strip(ui: &mut Ui, refusal: &str) {
             ui.set_width(ui.available_width());
             problem_mark_line(ui, Problem::Failure, refusal);
         });
-}
-
-/// The reader picked another configuration while this one has edits that
-/// are not applied: apply them, discard them, or stay. Returns the choice
-/// and the configuration it was asked for.
-fn selection_prompt(
-    ctx: &Context,
-    state: &AppState,
-) -> Option<(ConfigurationSelection, DialogChoice)> {
-    let page = &state.project.configuration;
-    let target = page.pending_selection?;
-    let catalog = &state.model.workspace.content.configuration_sets;
-    let Some(draft) = page.draft() else {
-        return Some((target, DialogChoice::Secondary));
-    };
-    let name = catalog.find(draft.id).map_or_else(
-        || draft.definition.name.clone(),
-        |committed| committed.name().to_owned(),
-    );
-    let title = format!("Apply your edits to {name}?");
-    let consequence = format!(
-        "{name} has edits that are not applied. Applying commits them to the project;          discarding puts {name} back as it was."
-    );
-    let choice = Dialog::new(&title, "Apply")
-        .description(&consequence)
-        .size(DialogSize::Confirmation)
-        .primary_enabled(!state.model.safe_mode.project_read_only())
-        .secondary("Discard")
-        .secondary_leading()
-        .ghost("Cancel")
-        .show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            ui.add(
-                egui::Label::new(
-                    egui::RichText::new(&consequence)
-                        .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                        .color(t.color.text),
-                )
-                .wrap(),
-            );
-        });
-    Some((target, choice))
 }
 
 /// Side of a problem mark set in front of a line on this page, and the

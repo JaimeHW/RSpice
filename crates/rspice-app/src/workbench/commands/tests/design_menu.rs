@@ -165,14 +165,20 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
 }
 
 #[test]
-fn configuration_sets_opens_the_owned_workflow() {
+fn configurations_opens_the_project_configuration_page() {
     let mut app = RSpiceApp::test_instance();
     assert!(Command::ConfigurationSets.is_enabled(&app));
     Command::ConfigurationSets.execute(&mut app);
-    assert!(app.state.simulate.configuration_sets.open);
-    assert!(app.state.dialog_modal_open());
+    assert_eq!(
+        app.state.workbench.workspace,
+        crate::workbench::state::Workspace::Project
+    );
+    assert_eq!(
+        app.state.project.project_page,
+        crate::workbench::project::workspace_state::ProjectPage::Configuration
+    );
+    assert!(!app.state.dialog_modal_open(), "the page is not a modal");
 
-    app.state.simulate.configuration_sets.open = false;
     app.state.close_project_session();
     assert!(!Command::ConfigurationSets.is_enabled(&app));
 }

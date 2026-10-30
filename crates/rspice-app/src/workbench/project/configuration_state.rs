@@ -200,6 +200,16 @@ impl ConfigurationPageState {
         self.refusal = None;
     }
 
+    /// The configuration `id` was renamed to `name` at `revision` by a
+    /// dialog: edits to it keep going from the renamed configuration rather
+    /// than becoming edits to a configuration that changed under them.
+    pub(crate) fn renamed(&mut self, id: ConfigurationSetId, name: &str, revision: u64) {
+        if let Some(draft) = self.draft.as_mut().filter(|draft| draft.id == id) {
+            draft.definition.name = name.to_owned();
+            draft.base_revision = revision;
+        }
+    }
+
     /// Drop the edits; the page shows what the project holds again.
     pub(crate) fn revert(&mut self) {
         self.draft = None;

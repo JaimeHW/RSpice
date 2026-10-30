@@ -343,7 +343,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_source_language_tools_dialog", "code"),
     ("render_create_model_bound_symbol_dialog", "design"),
     ("render_symbol_definition_dialogs", "design"),
-    ("render_configuration_sets_dialog", "simulate"),
+    ("render_configuration_dialog", "project"),
     ("dialogs::rule_setup::render_rule_setup_dialog", "design"),
     ("invalidate_simulation_preflight", "shell"),
     ("features::render_dialog", "sheets"),

@@ -8,7 +8,6 @@
 
 pub(in crate::workbench) mod check_and_save;
 pub(in crate::workbench) mod check_and_save_validation;
-pub(in crate::workbench) mod configuration_sets;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::confirmation;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::confirmation_state;
 pub(in crate::workbench) mod connectivity_manager;

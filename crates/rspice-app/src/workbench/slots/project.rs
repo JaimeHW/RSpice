@@ -165,6 +165,9 @@ pub(crate) struct ProjectState {
     /// its last refusal.
     pub(crate) configuration:
         crate::workbench::project::configuration_state::ConfigurationPageState,
+    /// New configuration, Clone, Rename and Delete.
+    pub(crate) configuration_dialog:
+        crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogState,
 }
 
 impl ProjectState {
@@ -179,5 +182,6 @@ impl ProjectState {
     pub(crate) fn on_project_changed(&mut self) {
         self.check_and_save.close();
         self.configuration = Default::default();
+        self.configuration_dialog = Default::default();
     }
 }

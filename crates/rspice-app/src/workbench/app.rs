@@ -107,10 +107,6 @@ pub(in crate::workbench) use dialogs::pdk_workflow::ModelHubRequest;
 #[cfg(test)]
 pub(crate) use actions::sheets;
 
-pub(crate) use dialogs::configuration_sets::{
-    ConfigurationSetsDialogState, open_configuration_binding_dialog, open_configuration_sets_dialog,
-};
-
 pub(crate) use dialogs::design_management::{
     DesignManagementDialogState, open_design_management_dialog,
 };

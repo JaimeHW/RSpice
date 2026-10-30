@@ -547,7 +547,8 @@ impl Command {
             | Self::DesignManagement
             | Self::RevisionHistory
             | Self::CheckAndSave
-            | Self::ProjectPage(_) => CommandOwner::Project,
+            | Self::ProjectPage(_)
+            | Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
             | Self::PlaceInstance
             | Self::PlaceWire
@@ -632,8 +633,7 @@ impl Command {
             | Self::AddAnalysis
             | Self::SimulationOptions
             | Self::SimulationPage(_)
-            | Self::VerificationPage(_)
-            | Self::ConfigurationSets => CommandOwner::Simulate,
+            | Self::VerificationPage(_) => CommandOwner::Simulate,
             Self::ModelsPage(_)
             | Self::ModelBrowser
             | Self::ModelCreateProjectCopy
@@ -1147,7 +1147,9 @@ impl Command {
                 None => app.state.prompt("No placement or edit has run yet."),
             },
             Self::ConfigurationSets => {
-                crate::workbench::app::open_configuration_sets_dialog(&mut app.state);
+                crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
+                    &mut app.state,
+                );
             }
             Self::RuleSetup => {
                 crate::workbench::app::open_rule_setup(&mut app.state);

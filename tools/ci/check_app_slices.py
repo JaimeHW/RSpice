@@ -119,7 +119,7 @@ SLICE_RULES = [
     (D + r"project(\.rs$|/)", "project"),
     (D + r"library/(new_veriloga_device|veriloga_import)", "code"),
     (D + r"library(\.rs$|/)", "project"),
-    (D + r"(configuration_sets|plan_removal)(\.rs$|/)", "simulate"),
+    (D + r"plan_removal(\.rs$|/)", "simulate"),
     (D + r"(confirmation|confirmation_state|operation_primitives|review_primitives|window_session)(\.rs$|/)", "framework"),
     (D + r"(connectivity_manager|design_review_comments|engineering_table|find_replace|grid_snap_routing|hierarchy"
          r"|object_properties|placement|property_dialog|replace_instance|rule_setup|selection"

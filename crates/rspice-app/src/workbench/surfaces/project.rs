@@ -663,15 +663,8 @@ fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
                 Command::PdkSettings.execute(app);
             }
         }
-        ProjectPage::Configuration => {
-            if Button::new("New override\u{2026}").show(ui).clicked() {
-                crate::workbench::app::open_configuration_binding_dialog(&mut app.state);
-            }
-            if Button::new("Validate").show(ui).clicked() {
-                Command::PreflightChecks.execute(app);
-            }
-        }
-        ProjectPage::Dependencies | ProjectPage::Recovery => {}
+        // The Configuration page's own band carries its actions.
+        ProjectPage::Configuration | ProjectPage::Dependencies | ProjectPage::Recovery => {}
     }
 }
 

@@ -212,7 +212,9 @@ impl RSpiceApp {
                 }
                 self.state.project.design_management.close_and_discard();
                 crate::workbench::app::close_design_management_dialog_route(&mut self.state);
-                crate::workbench::app::open_configuration_sets_dialog(&mut self.state);
+                crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
+                    &mut self.state,
+                );
             }
             DesignManagementBodyAction::OpenConfigurationBinding => {
                 if self.state.project.design_management.dirty() {
@@ -224,7 +226,9 @@ impl RSpiceApp {
                 }
                 self.state.project.design_management.close_and_discard();
                 crate::workbench::app::close_design_management_dialog_route(&mut self.state);
-                crate::workbench::app::open_configuration_binding_dialog(&mut self.state);
+                crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page(
+                    &mut self.state,
+                );
             }
         }
     }

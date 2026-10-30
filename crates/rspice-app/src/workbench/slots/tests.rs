@@ -450,8 +450,11 @@ const DIALOG_GATE: &[DialogRow] = &[
     ("symbol_parameter_form", |dialogs| {
         dialogs.design.symbol_parameter_form.open = true;
     }),
-    ("configuration_sets", |dialogs| {
-        dialogs.simulate.configuration_sets.open = true;
+    ("configuration_dialog", |dialogs| {
+        crate::workbench::app::dialogs::project::configuration_dialogs::open_configuration_dialog(
+            dialogs,
+            crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogRequest::New,
+        );
     }),
     ("rule_setup", |dialogs| {
         dialogs.design.rule_setup.open = true
