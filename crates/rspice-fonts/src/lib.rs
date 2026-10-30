@@ -42,6 +42,24 @@ macro_rules! font_asset {
     };
 }
 
+/// Embeds a face as an array static, so the binary holds its bytes once and
+/// every reference to them, from any crate or `const`, is to that one
+/// symbol. Bytes written inline in a `const fn`, or reached through a
+/// static that holds a reference to them, are copied into each crate and
+/// codegen unit that uses them.
+macro_rules! face_static {
+    ($name:ident, $file:literal) => {
+        static $name: [u8; font_asset!($file).len()] = *font_asset!($file);
+    };
+}
+
+face_static!(SANS_REGULAR, "IBMPlexSans-Regular.ttf");
+face_static!(SANS_MEDIUM, "IBMPlexSans-Medium.ttf");
+face_static!(SANS_SEMIBOLD, "IBMPlexSans-SemiBold.ttf");
+face_static!(MONO_REGULAR, "IBMPlexMono-Regular.ttf");
+face_static!(MONO_MEDIUM, "IBMPlexMono-Medium.ttf");
+face_static!(SYMBOLS, "RSpiceSymbols-Regular.ttf");
+
 const IBM_PLEX_LICENCE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../assets/fonts/OFL-IBMPlex.txt"
@@ -76,12 +94,12 @@ impl Face {
     #[must_use]
     pub const fn bytes(self) -> &'static [u8] {
         match self {
-            Self::SansRegular => font_asset!("IBMPlexSans-Regular.ttf"),
-            Self::SansMedium => font_asset!("IBMPlexSans-Medium.ttf"),
-            Self::SansSemibold => font_asset!("IBMPlexSans-SemiBold.ttf"),
-            Self::MonoRegular => font_asset!("IBMPlexMono-Regular.ttf"),
-            Self::MonoMedium => font_asset!("IBMPlexMono-Medium.ttf"),
-            Self::Symbols => font_asset!("RSpiceSymbols-Regular.ttf"),
+            Self::SansRegular => &SANS_REGULAR,
+            Self::SansMedium => &SANS_MEDIUM,
+            Self::SansSemibold => &SANS_SEMIBOLD,
+            Self::MonoRegular => &MONO_REGULAR,
+            Self::MonoMedium => &MONO_MEDIUM,
+            Self::Symbols => &SYMBOLS,
         }
     }
 
