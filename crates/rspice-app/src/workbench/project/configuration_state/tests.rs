@@ -15,6 +15,7 @@ fn definition(name: &str) -> ConfigurationSetDefinition {
         unresolved_policy: UnresolvedBindingPolicy::BlockNetlist,
         black_box_policy: ConfigurationBlackBoxPolicy::MaterializedSourceBoundariesOnly,
         overrides: Vec::new(),
+        cell_bindings: Vec::new(),
         model_profile: ConfigurationModelProfile::ProjectRunSetSections,
         owner: "Local project".to_owned(),
     }
@@ -71,26 +72,6 @@ fn a_new_selection_clears_the_refusal_it_did_not_cause() {
         ConfigurationSetId::new(),
     ));
     assert!(page.refusal.is_none());
-}
-
-#[test]
-fn the_built_in_order_matches_what_the_resolver_searches() {
-    assert_eq!(
-        built_in::default_view_search_order("schematic", false),
-        ["schematic", "extracted", "spice"]
-    );
-    assert_eq!(
-        built_in::default_view_search_order("schematic", true),
-        ["schematic", "spice"]
-    );
-    assert_eq!(
-        built_in::default_view_search_order("spice", false),
-        ["spice"]
-    );
-    assert_eq!(
-        built_in::default_view_search_order("symbol", false),
-        ["schematic", "extracted", "spice"]
-    );
 }
 
 #[test]
@@ -206,7 +187,9 @@ fn view_to_use_writes_an_exact_binding_and_inherited_removes_it() {
 
 #[test]
 fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
-    use rspice_design::hierarchy::{HierarchyBindingStatus, ResolvedHierarchyBinding};
+    use rspice_design::hierarchy::{
+        HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding,
+    };
 
     let binding = |cell: &str, paths: &[&str]| ResolvedHierarchyBinding {
         reference: CellViewRef::new("user", cell, "schematic"),
@@ -215,6 +198,7 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
         stop_view: None,
         model_section: String::new(),
         status: HierarchyBindingStatus::Resolved,
+        rule: HierarchyBindingRule::ViewList,
         instance_count: paths.len(),
         instance_paths: paths.iter().map(|path| (*path).to_owned()).collect(),
         used_review_fallback: false,
@@ -285,4 +269,25 @@ fn refusals_say_what_is_wrong_in_the_page_words() {
             "{banned}"
         );
     }
+}
+
+#[test]
+fn default_resolves_with_no_configuration_and_revises_none() {
+    let (catalog, active) = catalog_with_active();
+    let revision = catalog.find(active).unwrap().revision();
+    let candidate = candidate_catalog(&catalog, ConfigurationSelection::Default, None).unwrap();
+    assert_eq!(candidate.active_configuration_id(), None);
+    assert_eq!(candidate.find(active).unwrap().revision(), revision);
+    assert!(used_for_runs(&candidate, ConfigurationSelection::Default));
+
+    let mut edited = definition("schematic");
+    edited.stop_views.clear();
+    let candidate = candidate_catalog(
+        &candidate,
+        ConfigurationSelection::Configuration(active),
+        Some(&edited),
+    )
+    .unwrap();
+    assert_eq!(candidate.active_configuration_id(), Some(active));
+    assert!(candidate.find(active).unwrap().stop_views().is_empty());
 }

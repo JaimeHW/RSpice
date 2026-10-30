@@ -4,9 +4,11 @@
 
 use super::*;
 
-use crate::state::{CellViewRef, ConfigurationSetDefinition, UnresolvedBindingPolicy};
+use crate::state::{
+    CellViewRef, ConfigurationSetDefinition, DEFAULT_STOP_VIEW_TYPES, UnresolvedBindingPolicy,
+    default_view_search_order,
+};
 use crate::ui::widgets::{OrderedChipsEdit, ordered_chips, select_mono_with_response};
-use crate::workbench::project::configuration_state::built_in;
 
 const LABEL_WIDTH: f32 = 112.0;
 const ROW_HEIGHT: f32 = 32.0;
@@ -174,11 +176,11 @@ fn value(ui: &mut Ui, text: &str, mono: bool) {
 fn default_grid(ui: &mut Ui, state: &AppState) {
     let project = &state.model.workspace.content.project;
     let top = format!("{}/{}/schematic", project.root_library, project.top_cell);
-    let order = built_in::default_view_search_order("schematic", false);
+    let order = default_view_search_order("schematic", false);
     let mut words = vec!["the instance's own view".to_owned()];
     words.extend(order.into_iter().skip(1));
     let view_list = words.join(", then ");
-    let stops = built_in::DEFAULT_STOP_VIEW_TYPES
+    let stops = DEFAULT_STOP_VIEW_TYPES
         .iter()
         .map(|view_type| view_type.display_name().to_owned())
         .collect::<Vec<_>>();

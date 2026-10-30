@@ -11,9 +11,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{ConfigurationSetCatalog, ConfigurationSetError};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::project::configuration_state::{
-    ConfigurationSelection, built_in, plain_refusal,
-};
+use crate::workbench::project::configuration_state::{ConfigurationSelection, plain_refusal};
 
 /// One change to the project's configuration catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -64,8 +62,9 @@ fn prepare(
             // The built-in order is what a new project runs with, so
             // returning to it is never refused for what the design holds.
             let mut candidate = current.clone();
-            built_in::deactivate(&mut candidate)
-                .map_err(|error| format!("Cannot return to Default: {error}"))?;
+            candidate
+                .deactivate()
+                .map_err(|error| format!("Cannot return to Default: {}", plain_refusal(&error)))?;
             Ok(Some((
                 candidate,
                 "Runs now use the Default configuration.".to_owned(),
@@ -315,5 +314,54 @@ mod tests {
             project_revision
         );
         assert!(app.state.project.configuration.is_dirty(&before));
+    }
+
+    #[test]
+    fn default_returns_runs_to_the_built_in_order_and_back() {
+        let (mut app, id) = reference_app();
+        let revision = app
+            .state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .find(id)
+            .unwrap()
+            .revision();
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default),
+        )
+        .unwrap();
+        let catalog = &app.state.model.workspace.content.configuration_sets;
+        assert_eq!(catalog.active_configuration_id(), None);
+        assert_eq!(catalog.find(id).unwrap().revision(), revision);
+        assert_eq!(
+            app.state
+                .model
+                .workspace
+                .content
+                .simulation_root_reference(),
+            crate::state::CellViewRef::new(
+                &app.state.model.workspace.content.project.root_library,
+                &app.state.model.workspace.content.project.top_cell,
+                "schematic",
+            )
+        );
+
+        commit_configuration_transaction(
+            &mut app,
+            ConfigurationTransaction::UseForRuns(ConfigurationSelection::Configuration(id)),
+        )
+        .unwrap();
+        assert_eq!(
+            app.state
+                .model
+                .workspace
+                .content
+                .configuration_sets
+                .active_configuration_id(),
+            Some(id)
+        );
     }
 }
