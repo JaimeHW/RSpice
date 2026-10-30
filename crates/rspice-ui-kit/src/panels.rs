@@ -1557,6 +1557,7 @@ fn property_row_combo_in(
     enabled: bool,
     label_width: Option<f32>,
 ) -> bool {
+    let t = Tokens::get(ui.ctx());
     let (slot, _) = row_slot(ui, label_width, Sense::hover());
     row_label(ui, slot.label, label);
     let value_rect = slot.field();
@@ -1594,10 +1595,13 @@ fn property_row_combo_in(
                 .x
                 > room;
             ui.add_enabled_ui(enabled, |ui| {
+                // The choice is the row's value and reads in value ink, as a
+                // typed value and a read-only one do. Left to egui it takes
+                // the resting-button tone, the label column's grey.
                 let output = egui::ComboBox::from_id_salt(id_source)
                     .width(value_rect.width())
                     .truncate()
-                    .selected_text(selected_label.clone())
+                    .selected_text(egui::RichText::new(selected_label.clone()).color(t.color.text))
                     .show_ui(ui, |ui| {
                         for (value, display) in options {
                             ui.selectable_value(selected, value.clone(), display);

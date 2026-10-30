@@ -1152,3 +1152,45 @@ fn a_row_outside_a_panel_body_keeps_the_inset_itself() {
     assert!((lefts[0] - PANEL_INSET).abs() < 0.5, "{lefts:?}");
     assert!((lefts[0] - lefts[1]).abs() < 0.5, "{lefts:?}");
 }
+
+/// The ink a text shape paints in: its override, else its first stated
+/// section colour, else the painter's fallback.
+fn ink(text: &egui::epaint::TextShape) -> Color32 {
+    text.override_text_color.unwrap_or_else(|| {
+        text.galley
+            .job
+            .sections
+            .iter()
+            .map(|section| section.format.color)
+            .find(|color| *color != Color32::PLACEHOLDER)
+            .unwrap_or(text.fallback_color)
+    })
+}
+
+/// A choice is the row's value, so it reads in value ink as a typed value
+/// does, not in the grey egui gives a resting combo.
+#[test]
+fn a_chosen_value_reads_in_value_ink() {
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut selected = "a4".to_owned();
+    let mut typed = "Bias network".to_owned();
+    let options = vec![("a4".to_owned(), "ISO A4".to_owned())];
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(320.0);
+            property_row_combo(ui, "Size", "value-ink", &mut selected, &options, true);
+            property_row_input(ui, "Sheet title", &mut typed, false);
+        });
+    });
+    let painted = |wanted: &str| {
+        output
+            .shapes
+            .iter()
+            .find_map(|clipped| painted_text(&clipped.shape, wanted))
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    let value = Tokens::default().color.text;
+    assert_eq!(ink(&painted("ISO A4")), value);
+    assert_eq!(ink(&painted("Bias network")), value);
+}
