@@ -206,6 +206,21 @@ impl AppState {
         self.model.include_search_chain()
     }
 
+    /// The parts the model commands' selection rules read.
+    pub(crate) fn model_editor_reads(
+        &self,
+    ) -> crate::workbench::documents::model_editor::ModelEditorReads<'_> {
+        self.models.model_editor_reads(&self.model, &self.platform)
+    }
+
+    /// The parts opening a model in the editor writes.
+    pub(crate) fn model_editor_parts(
+        &mut self,
+    ) -> crate::workbench::documents::model_editor::ModelEditorParts<'_> {
+        self.models
+            .model_editor_parts(&mut self.model, &mut self.workbench, &self.platform)
+    }
+
     /// The parts the results workspace's predicates read.
     pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
         self.results.reads(&self.model, &self.workbench)

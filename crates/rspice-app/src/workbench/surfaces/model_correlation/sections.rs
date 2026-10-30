@@ -1149,7 +1149,7 @@ pub(super) fn open_affected_vectors(app: &mut RSpiceApp) -> Result<(), String> {
         .selected_model
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
-    open_project_model(app, &library, &model)
+    open_project_model(&mut app.state.model_editor_parts(), &library, &model)
         .map_err(|error| format!("Qualification vectors cannot be opened: {error}"))?;
     app.state
         .workbench

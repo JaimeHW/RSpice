@@ -501,9 +501,11 @@ impl Command {
                 state.runs.preflight.checking.is_some()
                     || stop_simulation_enabled(&state.model.simulation)
             }
-            Self::ModelCreateProjectCopy => selected_model_for_project_copy(app).is_ok(),
+            Self::ModelCreateProjectCopy => {
+                selected_model_for_project_copy(app.state.model_editor_reads()).is_ok()
+            }
             Self::ModelEditor | Self::ModelCorrelation => {
-                selected_project_model_for_editor(app).is_ok()
+                selected_project_model_for_editor(app.state.model_editor_reads()).is_ok()
             }
             Self::ModelSaveRevision => {
                 state

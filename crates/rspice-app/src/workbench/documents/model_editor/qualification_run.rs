@@ -7,6 +7,9 @@
 //! not finish.
 
 use super::*;
+use crate::workbench::state::WorkbenchSession;
+use rspice_app_services::workbench::slots::platform::PlatformState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 pub(super) fn parse_frequency_axis(value: &str) -> Result<Vec<FiniteValue>, String> {
     let tokens = value
@@ -54,6 +57,37 @@ pub(super) fn parse_non_negative(value: &str, label: &str) -> Result<f64, String
     }
 }
 
+/// What the model commands' selection rules read: the device-model editor,
+/// the catalog's selected model, the model and the platform services' state,
+/// which says whether a project is open.
+///
+/// Whether a model can be opened, copied or saved is a question about those
+/// parts alone, so the rules take them rather than the application state, and
+/// a feature's availability can answer them from what it reads.
+#[derive(Clone, Copy)]
+pub(crate) struct ModelEditorReads<'a> {
+    pub(crate) editor: &'a ModelEditorState,
+    pub(crate) selected_model: &'a Option<String>,
+    pub(crate) model: &'a Model,
+    pub(crate) platform: &'a PlatformState,
+}
+
+/// What opening a model in the editor writes: the editor, the catalog's
+/// selected model, the model, which the editor's revision is published to
+/// and whose library becomes the selected one, and the session, which
+/// routes to the editor; beside the platform state it reads.
+///
+/// Opening a model or copying one into the project reads and writes those
+/// parts alone, so the operations take them rather than the application
+/// state, and a feature's command can run them in its context.
+pub(crate) struct ModelEditorParts<'a> {
+    pub(crate) editor: &'a mut ModelEditorState,
+    pub(crate) selected_model: &'a mut Option<String>,
+    pub(crate) model: &'a mut Model,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) platform: &'a PlatformState,
+}
+
 /// Copy one selected read-only catalog model into a new project-owned revision
 /// and open that exact committed revision in the transactional editor.
 ///
@@ -61,37 +95,31 @@ pub(super) fn parse_non_negative(value: &str, label: &str) -> Result<f64, String
 /// project publication. A parse, metadata, identity, or editor error therefore
 /// leaves both the project and global Undo history unchanged.
 pub fn create_editable_project_copy_and_open(
-    app: &mut RSpiceApp,
+    parts: &mut ModelEditorParts<'_>,
     source_library_name: &str,
     source_model_name: &str,
 ) -> Result<(String, String), String> {
-    if !app.state.platform.project_lifecycle.is_open() {
+    if !parts.platform.project_lifecycle.is_open() {
         return Err("Open a project before creating an editable model copy".to_owned());
     }
-    if app.state.model.safe_mode.project_read_only() {
+    if parts.model.safe_mode.project_read_only() {
         return Err(
             "An editable model copy cannot be created while the project is read-only".to_owned(),
         );
     }
-    if app.state.platform.project_lifecycle.operation_in_progress() {
+    if parts.platform.project_lifecycle.operation_in_progress() {
         return Err(
             "Wait for the current project operation before creating an editable model copy"
                 .to_owned(),
         );
     }
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if parts.editor.qualification_execution.is_some() {
         return Err(
             "Finish or cancel the active model qualification run before creating another model"
                 .to_owned(),
         );
     }
-    if let Some(open) = app.state.models.model_editor.draft.as_ref()
+    if let Some(open) = parts.editor.draft.as_ref()
         && open.is_dirty()
     {
         return Err(format!(
@@ -100,19 +128,16 @@ pub fn create_editable_project_copy_and_open(
         ));
     }
 
-    let project_library_name = available_project_copy_library_name(
-        &app.state.model.model_library_manager,
-        source_model_name,
-    );
-    let mut candidate = app.state.model.model_library_manager.clone();
+    let project_library_name =
+        available_project_copy_library_name(&parts.model.model_library_manager, source_model_name);
+    let mut candidate = parts.model.model_library_manager.clone();
     let commit = candidate.create_editable_project_copy(
         source_library_name,
         source_model_name,
         &project_library_name,
     )?;
     let project_model_name = commit.model_name.clone();
-    let expected_project_revision = app
-        .state
+    let expected_project_revision = parts
         .model
         .workspace
         .content
@@ -127,27 +152,27 @@ pub fn create_editable_project_copy_and_open(
         expected_project_revision,
     )?;
 
-    app.state.model.publish_project_model_candidate(
+    parts.model.publish_project_model_candidate(
         candidate,
         commit,
         format!(
             "create editable project model {source_library_name}/{source_model_name} as {project_library_name}/{project_model_name}"
         ),
     )?;
-    app.state
+    parts
         .workbench
         .navigate(
             SurfaceRoute::surface(SurfaceId::ModelEditor),
             RouteTransitionSource::User,
         )
         .map_err(|error| error.to_string())?;
-    app.state.models.model_editor = editor;
+    *parts.editor = editor;
     crate::workbench::models::workspace_state::select_library_or_prompt(
-        &mut app.state.model,
-        &mut app.state.workbench,
+        parts.model,
+        parts.workbench,
         &project_library_name,
     );
-    app.state.models.selected_model = Some(project_model_name.clone());
+    *parts.selected_model = Some(project_model_name.clone());
     Ok((project_library_name, project_model_name))
 }
 
@@ -186,23 +211,17 @@ fn available_project_copy_library_name(manager: &ModelLibraryManager, model_name
 
 /// Open an exact project-owned model revision in the transactional editor.
 pub fn open_project_model(
-    app: &mut RSpiceApp,
+    parts: &mut ModelEditorParts<'_>,
     library_name: &str,
     model_name: &str,
 ) -> Result<(), String> {
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if parts.editor.qualification_execution.is_some() {
         return Err(
             "Finish or cancel the active model qualification run before opening another model"
                 .to_owned(),
         );
     }
-    if let Some(open) = app.state.models.model_editor.draft.as_ref()
+    if let Some(open) = parts.editor.draft.as_ref()
         && open.is_dirty()
     {
         if open.library_name.eq_ignore_ascii_case(library_name)
@@ -217,25 +236,25 @@ pub fn open_project_model(
     }
     let mut editor = ModelEditorState::default();
     editor.open(
-        &app.state.model.model_library_manager,
+        &parts.model.model_library_manager,
         library_name,
         model_name,
-        app.state.model.workspace.content.project.revision(),
+        parts.model.workspace.content.project.revision(),
     )?;
-    app.state
+    parts
         .workbench
         .navigate(
             SurfaceRoute::surface(SurfaceId::ModelEditor),
             RouteTransitionSource::User,
         )
         .map_err(|error| error.to_string())?;
-    app.state.models.model_editor = editor;
+    *parts.editor = editor;
     crate::workbench::models::workspace_state::select_library_or_prompt(
-        &mut app.state.model,
-        &mut app.state.workbench,
+        parts.model,
+        parts.workbench,
         library_name,
     );
-    app.state.models.selected_model = Some(model_name.to_owned());
+    *parts.selected_model = Some(model_name.to_owned());
     Ok(())
 }
 

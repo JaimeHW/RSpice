@@ -299,7 +299,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(action) = requested_action {
         apply_action(app, action);
     }
-    if active_model_editor_workflow(app).is_some() {
+    if active_model_editor_workflow(app.state.model_editor_reads()).is_some() {
         show_model_editor_workflow(ui.ctx(), app, &records);
     } else {
         show_inspection_dialogs(ui.ctx(), app, &records);
@@ -354,7 +354,10 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
         .show(&mut button_ui)
         .on_disabled_hover_text("No project-owned model candidate is open.");
     if response.clicked() {
-        request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate);
+        request_model_editor_workflow(
+            app.state.model_editor_reads(),
+            ModelEditorWorkflow::ValidateCandidate,
+        );
     }
 }
 

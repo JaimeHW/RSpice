@@ -1272,7 +1272,7 @@ mod tests {
             .create_project_model("owned-models", &definition)
             .expect("create project model");
         crate::workbench::documents::model_editor::open_project_model(
-            &mut app,
+            &mut app.state.model_editor_parts(),
             "owned-models",
             "nch_gated",
         )

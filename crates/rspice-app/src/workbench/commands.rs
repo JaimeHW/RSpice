@@ -10,12 +10,14 @@ use crate::schematic::view::selection_transform::{
 };
 use crate::state::{ComponentType, Tool};
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::documents::model_editor::ModelEditorReads;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
 use crate::workbench::menu_bar::{
     FileMenuAction, check_cellview, check_design, dispatch_file_menu_action,
 };
 use crate::workbench::{AppState, RSpiceApp};
+use rspice_app_state::workbench::app_state::model::Model;
 use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 use std::cell::RefCell;
@@ -66,19 +68,15 @@ fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
     simulation.can_request_abort_active_run()
 }
 
-fn model_library_rescan_diagnostic(app: &RSpiceApp) -> (String, bool) {
-    let discovered_files = app.state.model.pdk_config.discovered_files.len();
-    let scan_errors = &app.state.model.pdk_config.scan_errors;
-    let pack_definitions = app
-        .state
-        .model
-        .model_library_manager
-        .pack_definition_count();
+fn model_library_rescan_diagnostic(model: &Model) -> (String, bool) {
+    let discovered_files = model.pdk_config.discovered_files.len();
+    let scan_errors = &model.pdk_config.scan_errors;
+    let pack_definitions = model.model_library_manager.pack_definition_count();
     let mut summary = format!(
         "Found {discovered_files} configured model file(s) and {pack_definitions} shipped pack \
          part(s)"
     );
-    let pack_error = app.state.model.model_library_manager.spice_pack_error();
+    let pack_error = model.model_library_manager.spice_pack_error();
     if let Some(error) = pack_error {
         summary = format!("{summary}; {error}");
     }
@@ -165,25 +163,23 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
 /// Command enablement is deliberately fail-closed. A stale catalog selection,
 /// mismatched retained bytes, or a partial source closure must never expose an
 /// editor command that can only fail after navigation.
-fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn selected_project_model_for_editor<'a>(
+    reads: ModelEditorReads<'a>,
+) -> Result<(&'a str, &'a str), &'static str> {
+    if !reads.platform.project_lifecycle.is_open() {
         return Err("open a project before editing a device model");
     }
-    let library_name = app
-        .state
+    let library_name = reads
         .model
         .model_library_manager
         .selected_library
         .as_deref()
         .ok_or("select one model in Model & library catalog")?;
-    let model_name = app
-        .state
-        .models
+    let model_name = reads
         .selected_model
         .as_deref()
         .ok_or("select one model in Model & library catalog")?;
-    let library = app
-        .state
+    let library = reads
         .model
         .model_library_manager
         .get_library(library_name)
@@ -203,7 +199,7 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
         }
     }
     crate::workbench::documents::model_editor::resolve_project_model_for_editor(
-        &app.state.model.model_library_manager,
+        &reads.model.model_library_manager,
         library_name,
         model_name,
     )
@@ -216,25 +212,23 @@ fn selected_project_model_for_editor(app: &RSpiceApp) -> Result<(&str, &str), &'
 /// Resolve one selected external or built-in model that can become a new
 /// project-owned revision. Mutation authority and editor lifecycle checks live
 /// here so every command surface exposes the same fail-closed availability.
-fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'static str> {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn selected_model_for_project_copy<'a>(
+    reads: ModelEditorReads<'a>,
+) -> Result<(&'a str, &'a str), &'static str> {
+    if !reads.platform.project_lifecycle.is_open() {
         return Err("open a project before creating an editable model copy");
     }
-    let library_name = app
-        .state
+    let library_name = reads
         .model
         .model_library_manager
         .selected_library
         .as_deref()
         .ok_or("select one external or built-in model in Model & library catalog")?;
-    let model_name = app
-        .state
-        .models
+    let model_name = reads
         .selected_model
         .as_deref()
         .ok_or("select one external or built-in model in Model & library catalog")?;
-    let library = app
-        .state
+    let library = reads
         .model
         .model_library_manager
         .get_library(library_name)
@@ -245,22 +239,14 @@ fn selected_model_for_project_copy(app: &RSpiceApp) -> Result<(&str, &str), &'st
     if library.source_authority.is_project_owned() {
         return Err("the selected model is already an editable project copy");
     }
-    if app.state.model.safe_mode.project_read_only() {
+    if reads.model.safe_mode.project_read_only() {
         return Err("the project is open read-only");
     }
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if reads.editor.qualification_execution.is_some() {
         return Err("a model qualification run is active");
     }
-    if app
-        .state
-        .models
-        .model_editor
+    if reads
+        .editor
         .draft
         .as_ref()
         .is_some_and(|draft| draft.is_dirty())
@@ -296,10 +282,10 @@ thread_local! {
 }
 
 pub(crate) fn request_model_editor_workflow(
-    app: &RSpiceApp,
+    reads: ModelEditorReads<'_>,
     workflow: ModelEditorWorkflow,
 ) -> bool {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+    let Some(draft) = reads.editor.draft.as_ref() else {
         return false;
     };
     MODEL_EDITOR_WORKFLOW.with(|state| {
@@ -314,11 +300,11 @@ pub(crate) fn request_model_editor_workflow(
     true
 }
 
-pub(crate) fn active_model_editor_workflow(app: &RSpiceApp) -> Option<ModelEditorWorkflowRequest> {
-    let identity = app
-        .state
-        .models
-        .model_editor
+pub(crate) fn active_model_editor_workflow(
+    reads: ModelEditorReads<'_>,
+) -> Option<ModelEditorWorkflowRequest> {
+    let identity = reads
+        .editor
         .draft
         .as_ref()
         .map(|draft| (draft.library_name.as_str(), draft.model_name.as_str()));
@@ -1476,11 +1462,13 @@ impl Command {
             Self::ModelBrowser => app.state.models.model_browser_state.open = true,
             // Disabled, with the reason, while nothing can be copied.
             Self::ModelCreateProjectCopy => {
-                if let Ok((library_name, model_name)) = selected_model_for_project_copy(app) {
+                if let Ok((library_name, model_name)) =
+                    selected_model_for_project_copy(app.state.model_editor_reads())
+                {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     match crate::workbench::documents::model_editor::create_editable_project_copy_and_open(
-                        app,
+                        &mut app.state.model_editor_parts(),
                         &library_name,
                         &model_name,
                     ) {
@@ -1501,12 +1489,14 @@ impl Command {
             }
             // Disabled, with the reason, while no project model is selected.
             Self::ModelEditor => {
-                if let Ok((library_name, model_name)) = selected_project_model_for_editor(app) {
+                if let Ok((library_name, model_name)) =
+                    selected_project_model_for_editor(app.state.model_editor_reads())
+                {
                     let library_name = library_name.to_owned();
                     let model_name = model_name.to_owned();
                     if let Err(error) =
                         crate::workbench::documents::model_editor::open_project_model(
-                            app,
+                            &mut app.state.model_editor_parts(),
                             &library_name,
                             &model_name,
                         )
@@ -1517,7 +1507,7 @@ impl Command {
                 }
             }
             Self::ModelCorrelation => {
-                if selected_project_model_for_editor(app).is_ok()
+                if selected_project_model_for_editor(app.state.model_editor_reads()).is_ok()
                     && let Err(error) = app.state.workbench.navigate(
                         super::SurfaceRoute::surface(super::SurfaceId::ModelCorrelation),
                         super::RouteTransitionSource::User,
@@ -1529,13 +1519,22 @@ impl Command {
             }
             // The three model workflows are disabled while no candidate is open.
             Self::ModelSaveRevision => {
-                request_model_editor_workflow(app, ModelEditorWorkflow::SaveRevision);
+                request_model_editor_workflow(
+                    app.state.model_editor_reads(),
+                    ModelEditorWorkflow::SaveRevision,
+                );
             }
             Self::ModelValidate => {
-                request_model_editor_workflow(app, ModelEditorWorkflow::ValidateCandidate);
+                request_model_editor_workflow(
+                    app.state.model_editor_reads(),
+                    ModelEditorWorkflow::ValidateCandidate,
+                );
             }
             Self::ModelRunQualificationTests => {
-                request_model_editor_workflow(app, ModelEditorWorkflow::RunQualification);
+                request_model_editor_workflow(
+                    app.state.model_editor_reads(),
+                    ModelEditorWorkflow::RunQualification,
+                );
             }
             Self::ModelCompareRelease => {
                 app.state.models.model_editor.comparison_open = true;
@@ -1576,7 +1575,7 @@ impl Command {
                 // Reported here, so the toolbar, the menu and the palette all
                 // say the same. A clean rescan answers the gesture; one that
                 // could not read a library is worth interrupting for.
-                let (message, has_errors) = model_library_rescan_diagnostic(app);
+                let (message, has_errors) = model_library_rescan_diagnostic(&app.state.model);
                 if has_errors {
                     app.state
                         .report_warning("Model library rescan completed with warnings", message);

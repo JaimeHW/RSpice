@@ -39,6 +39,38 @@ pub(crate) struct ModelsState {
 }
 
 impl ModelsState {
+    /// What the model commands' selection rules read: this slot's editor and
+    /// selection, the model and the platform state.
+    pub(crate) fn model_editor_reads<'a>(
+        &'a self,
+        model: &'a rspice_app_state::workbench::app_state::model::Model,
+        platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
+    ) -> crate::workbench::documents::model_editor::ModelEditorReads<'a> {
+        crate::workbench::documents::model_editor::ModelEditorReads {
+            editor: &self.model_editor,
+            selected_model: &self.selected_model,
+            model,
+            platform,
+        }
+    }
+
+    /// What opening a model in the editor writes: this slot's editor and
+    /// selection, the model and the session, beside the platform state.
+    pub(crate) fn model_editor_parts<'a>(
+        &'a mut self,
+        model: &'a mut rspice_app_state::workbench::app_state::model::Model,
+        workbench: &'a mut crate::workbench::state::WorkbenchSession,
+        platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
+    ) -> crate::workbench::documents::model_editor::ModelEditorParts<'a> {
+        crate::workbench::documents::model_editor::ModelEditorParts {
+            editor: &mut self.model_editor,
+            selected_model: &mut self.selected_model,
+            model,
+            workbench,
+            platform,
+        }
+    }
+
     pub(crate) fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor

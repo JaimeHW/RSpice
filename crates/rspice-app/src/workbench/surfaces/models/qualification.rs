@@ -921,7 +921,9 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
             .prompt("Select a model family before opening qualification.");
         return;
     };
-    if let Err(error) = model_editor::open_project_model(app, &library, &model) {
+    if let Err(error) =
+        model_editor::open_project_model(&mut app.state.model_editor_parts(), &library, &model)
+    {
         app.state
             .prompt(format!("Qualification cannot be opened: {error}"));
         return;

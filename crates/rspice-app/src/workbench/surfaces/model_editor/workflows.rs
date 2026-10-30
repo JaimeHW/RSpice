@@ -27,7 +27,7 @@ pub(super) fn show_model_editor_workflow(
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
 ) {
-    let Some(request) = active_model_editor_workflow(app) else {
+    let Some(request) = active_model_editor_workflow(app.state.model_editor_reads()) else {
         return;
     };
     match request.workflow {

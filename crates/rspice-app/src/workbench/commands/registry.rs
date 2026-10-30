@@ -989,12 +989,14 @@ impl Command {
             Self::StopSimulation => "no simulation is running",
             Self::PreflightChecks => "the engine is still building the decks of the last check",
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
-            Self::ModelCreateProjectCopy => super::selected_model_for_project_copy(app)
-                .err()
-                .unwrap_or("the selected model cannot be copied into the project"),
+            Self::ModelCreateProjectCopy => {
+                super::selected_model_for_project_copy(app.state.model_editor_reads())
+                    .err()
+                    .unwrap_or("the selected model cannot be copied into the project")
+            }
             // Correlation opens on the same selected model the editor does.
             Self::ModelEditor | Self::ModelCorrelation => {
-                super::selected_project_model_for_editor(app)
+                super::selected_project_model_for_editor(app.state.model_editor_reads())
                     .err()
                     .unwrap_or("the selected model cannot be opened for inspection")
             }

@@ -436,8 +436,12 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         .expect("first draft")
         .description = "Unsaved first-model description".to_owned();
 
-    let error = open_project_model(&mut app, "second-owned-model", "pch_owned")
-        .expect_err("dirty candidate replacement must be blocked");
+    let error = open_project_model(
+        &mut app.state.model_editor_parts(),
+        "second-owned-model",
+        "pch_owned",
+    )
+    .expect_err("dirty candidate replacement must be blocked");
     assert_eq!(
         error,
         "Unsaved model candidate 'first-owned-model/nch_owned' is open; save or discard it before opening 'second-owned-model/pch_owned'"
@@ -453,8 +457,12 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     assert_eq!(retained.model_name, "nch_owned");
     assert_eq!(retained.description, "Unsaved first-model description");
 
-    open_project_model(&mut app, "first-owned-model", "nch_owned")
-        .expect("reselecting the same dirty candidate retains it");
+    open_project_model(
+        &mut app.state.model_editor_parts(),
+        "first-owned-model",
+        "nch_owned",
+    )
+    .expect("reselecting the same dirty candidate retains it");
     assert_eq!(
         app.state
             .models
