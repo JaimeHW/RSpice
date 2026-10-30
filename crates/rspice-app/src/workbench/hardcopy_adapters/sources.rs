@@ -50,7 +50,7 @@ use rspice_results::renderability::{
 };
 // The persisted source-set records and the validation they share with these
 // adapters are owned one layer down, where `state` can reach them.
-use crate::workbench::documents::result_document::ResultViewer;
+use crate::state::result_presentation::ResultViewer;
 use crate::workbench::framework::ports::ResultsPort;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use rspice_app_state::workbench::app_state::model::Model;

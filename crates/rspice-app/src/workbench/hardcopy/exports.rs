@@ -12,7 +12,7 @@ use super::HardcopyFeature;
 
 /// Export the open schematic as SVG, through the export IO.
 pub(super) fn action_export_svg_with_io(model: &mut Model, io: &(impl ExportWorkflowIo + ?Sized)) {
-    use crate::schematic::export::{
+    use rspice_schematic_editor::export::{
         SvgDesignContext, SvgExportConfig, export_to_svg_with_symbol_resolver_and_context,
     };
 

@@ -4,7 +4,6 @@
 //! Provides the core schematic viewing, editing, and export functionality.
 //!
 //! - `view` - Main schematic canvas with pan/zoom and rendering
-//! - `export` - Export to SVG format (and other formats)
 //! - `symbols` - Component symbol library and rendering
 //!
 //! # Architecture
@@ -14,7 +13,7 @@
 //! - This module provides the egui view layer
 //! - User interactions are translated to state mutations
 
+pub(crate) use rspice_schematic_editor::symbols;
 pub use rspice_schematic_editor::{ComponentPaletteEntry, component_palette};
-pub(crate) use rspice_schematic_editor::{export, symbols};
 pub(crate) mod symbol_editor;
 pub(crate) mod view;

@@ -1,7 +1,7 @@
 //! Capture the live Results sheet's reading through its authoritative UI accessors.
 
 use super::*;
-use crate::workbench::documents::result_document::{AnalysisPresentationKey, MarkerKind};
+use crate::state::result_presentation::{AnalysisPresentationKey, MarkerKind};
 use crate::workbench::preferences::CursorInterpolation;
 use rspice_results::result_presentation::SourceWaveformPresentationKey;
 
