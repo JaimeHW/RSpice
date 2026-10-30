@@ -5,9 +5,9 @@ use egui::{ScrollArea, Ui};
 
 use crate::workbench::RSpiceApp;
 
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{WorkbenchIcon, section_header};
-use super::{muted, nav_row};
+use super::nav_row;
+use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
 
 pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -79,6 +79,8 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
+/// The project's configurations, Default first. A row puts its configuration
+/// in front of the reader; which one runs use changes only on the page.
 fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
     let query = app
         .state
@@ -86,71 +88,47 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         .navigator_filter()
         .trim()
         .to_ascii_lowercase();
-    let active_id = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active_configuration_id();
-    let configurations = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .configurations()
-        .iter()
-        .filter(|configuration| {
-            query.is_empty()
-                || configuration.name().to_ascii_lowercase().contains(&query)
-                || configuration
-                    .root()
-                    .display_path()
-                    .to_ascii_lowercase()
-                    .contains(&query)
-        })
-        .map(|configuration| (configuration.id(), configuration.name().to_owned()))
-        .collect::<Vec<_>>();
-    let total = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .configurations()
-        .len();
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let selection = app.state.project.configuration.selection(catalog);
+    let project = &app.state.model.workspace.content.project;
+    let default_top = format!("{}/{}", project.root_library, project.top_cell);
+    let rows = std::iter::once((
+        ConfigurationSelection::Default,
+        "Default".to_owned(),
+        default_top,
+    ))
+    .chain(catalog.configurations().iter().map(|configuration| {
+        (
+            ConfigurationSelection::Configuration(configuration.id()),
+            configuration.name().to_owned(),
+            configuration.root().display_path(),
+        )
+    }))
+    .filter(|(_, name, top)| {
+        query.is_empty()
+            || name.to_ascii_lowercase().contains(&query)
+            || top.to_ascii_lowercase().contains(&query)
+    })
+    .map(|(target, name, _)| (target, name, used_for_runs(catalog, target)))
+    .collect::<Vec<_>>();
+    let total = catalog.configurations().len() + 1;
     section_header(
         ui,
-        "Configuration sets",
+        "Configurations",
         (!query.is_empty())
-            .then(|| format!("{} / {total}", configurations.len()))
+            .then(|| format!("{} / {total}", rows.len()))
             .as_deref(),
     );
-    for (id, name) in configurations {
-        // The row the catalog is bound to is the one the list marks; naming
-        // every other row "available" says only that it is a row.
-        let active = active_id == Some(id);
-        if nav_row(ui, WorkbenchIcon::Sliders, &name, active, None) {
-            app.state.project.project_page = ProjectPage::Configuration;
-            if !active {
-                Command::ConfigurationSets.execute(app);
-            }
+    for (target, name, runs) in rows {
+        if nav_row(
+            ui,
+            WorkbenchIcon::Sliders,
+            &name,
+            selection == target,
+            runs.then_some("used for runs"),
+        ) {
+            app.state.project.configuration.select(target);
         }
-    }
-    // The inspector's "Active binding" section already states the testbench,
-    // the DUT and the override count, so the rail keeps only the state the
-    // inspector cannot explain.
-    if app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active()
-        .is_none()
-    {
-        muted(ui, "No project configuration is active.");
     }
 }
 
@@ -401,11 +379,17 @@ mod tests {
         }
 
         let configuration = painted(ProjectPage::Configuration);
-        assert!(
-            configuration.contains("Configuration sets"),
-            "{configuration}"
-        );
-        for retired in ["available", "current", "Active binding", "DUT", "Overrides"] {
+        assert!(configuration.contains("Configurations"), "{configuration}");
+        assert!(configuration.contains("Default"), "{configuration}");
+        for retired in [
+            "available",
+            "current",
+            "Active binding",
+            "DUT",
+            "Overrides",
+            "Configuration sets",
+            "No project configuration is active.",
+        ] {
             assert!(
                 !configuration.contains(retired),
                 "{retired:?} in:\n{configuration}"

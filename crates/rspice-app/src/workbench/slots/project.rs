@@ -161,6 +161,10 @@ pub(crate) struct ProjectState {
     /// route. Authoritative library, cellview, symbol, and form records remain
     /// in the project domains.
     pub library_cellview_page: crate::workbench::project::workspace_state::LibraryCellviewPage,
+    /// The Configuration page: the configuration in front of the reader and
+    /// its last refusal.
+    pub(crate) configuration:
+        crate::workbench::project::configuration_state::ConfigurationPageState,
 }
 
 impl ProjectState {
@@ -170,8 +174,10 @@ impl ProjectState {
     }
 
     /// The open project is being replaced or closed: a Check and save review
-    /// belongs to the project going away.
+    /// and the Configuration page's selection belong to the project going
+    /// away.
     pub(crate) fn on_project_changed(&mut self) {
         self.check_and_save.close();
+        self.configuration = Default::default();
     }
 }

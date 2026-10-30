@@ -622,6 +622,9 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // frames. The project slot holds it and the session wire persists it, so
     // it ranks below both; it names nothing of the workbench.
     "project/workspace_state",
+    // What the Project > Configuration page keeps between frames. The project
+    // slot holds it, so it ranks below it; it names only lower crates.
+    "project/configuration_state",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the

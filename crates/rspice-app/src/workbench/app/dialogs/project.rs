@@ -1,10 +1,12 @@
 //! Project-lifecycle dialogs: the transactions that create or replace the
-//! whole session project rather than editing something inside one.
+//! whole session project rather than editing something inside one, and the
+//! configuration transactions that decide how the project netlists.
 //!
 //! The project surface draws two more project-wide transactions, attaching a
 //! technology and recovering from a checkpoint; their drafts live here, below
 //! the dialog aggregate that holds them.
 
+pub(in crate::workbench) mod configuration;
 pub(in crate::workbench) mod new_project;
 
 /// Retained draft for the mockup-owned project technology transaction.

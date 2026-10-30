@@ -1,19 +1,23 @@
 //! Project configuration workspace.
 //!
 //! This surface is a read/write projection of the project-owned
-//! [`ConfigurationSetCatalog`](crate::state::ConfigurationSetCatalog). It
-//! never substitutes demonstration bindings: precedence, overrides,
-//! connectivity policy, resolution counts, and execution identities all come
-//! from the active configuration and its exact live-buffer execution
-//! projection.
+//! [`ConfigurationSetCatalog`](crate::state::ConfigurationSetCatalog) and of
+//! the built-in Default order a project netlists with when no configuration
+//! is used for runs. It never substitutes demonstration bindings: every list,
+//! binding and count comes from the selected configuration and the live
+//! design.
 
 use super::*;
 
-use crate::state::{
-    ConfigurationSet, ConfigurationSetCatalog, ConfigurationSetId, ConfigurationSetOverride,
+use crate::state::{ConfigurationSet, ConfigurationSetOverride};
+use crate::workbench::app::dialogs::project::configuration::{
+    ConfigurationTransaction, commit_configuration_transaction,
+};
+use crate::workbench::project::configuration_state::{
+    ConfigurationSelection, built_in, used_for_runs,
 };
 
-const CONTEXT_HEIGHT: f32 = 40.0;
+const TOOLBAR_HEIGHT: f32 = 32.0;
 const SECTION_HEADER_HEIGHT: f32 = 30.0;
 const PRECEDENCE_ROW_HEIGHT: f32 = 34.0;
 const PROPERTY_ROW_HEIGHT: f32 = 28.0;
@@ -23,7 +27,6 @@ const TABLE_MIN_WIDTH: f32 = 850.0;
 const SPLIT_BREAKPOINT: f32 = 640.0;
 const LEFT_PANE_SHARE: f32 = 0.38;
 const FILTER_STATE_ID: &str = "workbench.project.configuration.override-filter";
-const ACTIVATION_ERROR_ID: &str = "workbench.project.configuration.activation-error";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProjectionFacts {
@@ -40,38 +43,46 @@ enum ProjectionState {
     Blocked(String),
 }
 
+/// What the toolbar band asked for this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum ContextIntent {
-    Activate(ConfigurationSetId),
-    Manage,
+enum ToolbarIntent {
+    UseForRuns(ConfigurationSelection),
+    New,
 }
 
 pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    if let Some(intent) = configuration_context(ui, app) {
-        apply_context_intent(ui.ctx(), app, intent);
+    let selection = app
+        .state
+        .project
+        .configuration
+        .selection(&app.state.model.workspace.content.configuration_sets);
+    match toolbar(ui, app, selection) {
+        Some(ToolbarIntent::UseForRuns(target)) => {
+            let refusal =
+                commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
+                    .err();
+            app.state.project.configuration.refusal = refusal;
+        }
+        Some(ToolbarIntent::New) => Command::ConfigurationSets.execute(app),
+        None => {}
     }
-    activation_error(ui);
+    if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {
+        refusal_strip(ui, refusal);
+    }
 
+    let ConfigurationSelection::Configuration(id) = selection else {
+        default_bindings(ui, app);
+        return;
+    };
     let Some(configuration) = app
         .state
         .model
         .workspace
         .content
         .configuration_sets
-        .active()
+        .find(id)
         .cloned()
     else {
-        let count = app
-            .state
-            .model
-            .workspace
-            .content
-            .configuration_sets
-            .configurations()
-            .len();
-        if no_active_configuration(ui, count) {
-            Command::ConfigurationSets.execute(app);
-        }
         return;
     };
 
@@ -134,111 +145,65 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> {
+/// The page's one-row band: the configuration in front of the reader, and
+/// whether runs use it.
+fn toolbar(
+    ui: &mut Ui,
+    app: &RSpiceApp,
+    selection: ConfigurationSelection,
+) -> Option<ToolbarIntent> {
     let t = Tokens::get(ui.ctx());
-    let configurations = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .configurations()
-        .iter()
-        .map(|configuration| {
-            (
-                configuration.id(),
-                format!(
-                    "{} \u{00b7} r{}",
-                    configuration.name(),
-                    configuration.revision()
-                ),
-            )
-        })
-        .collect::<Vec<_>>();
-    let active_id = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active_configuration_id();
-    let active = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active();
-    let selected_label = active
-        .map(|configuration| {
-            format!(
-                "{} \u{00b7} r{}",
-                configuration.name(),
-                configuration.revision()
-            )
-        })
-        .unwrap_or_else(|| "No active configuration".to_owned());
-    let options = configurations
-        .iter()
-        .map(|(_, label)| label.clone())
-        .collect::<Vec<_>>();
+    let catalog = &app.state.model.workspace.content.configuration_sets;
+    let name = match selection {
+        ConfigurationSelection::Default => "Default".to_owned(),
+        ConfigurationSelection::Configuration(id) => catalog
+            .find(id)
+            .map_or_else(String::new, |configuration| configuration.name().to_owned()),
+    };
+    let write_allowed = !app.state.model.safe_mode.project_read_only();
     let mut intent = None;
-
     let shown = egui::Frame::new()
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 4))
+        .inner_margin(Margin::symmetric(10, 0))
         .show(ui, |ui| {
-            ui.set_min_height(CONTEXT_HEIGHT - 8.0);
-            ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing.x = 7.0;
-                ui.label(
-                    egui::RichText::new("Configuration")
-                        .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                        .color(t.color.text_faint),
-                );
-                if !options.is_empty() {
-                    if let Some(index) = select(
-                        ui,
-                        "project-active-configuration",
-                        "Active project configuration",
-                        &selected_label,
-                        &options,
-                        220.0_f32.min(ui.available_width().max(120.0)),
-                    ) {
-                        let id = configurations[index].0;
-                        if Some(id) != active_id {
-                            intent = Some(ContextIntent::Activate(id));
-                        }
-                    }
-                } else {
+            ui.set_width(ui.available_width());
+            ui.allocate_ui_with_layout(
+                vec2(ui.available_width(), TOOLBAR_HEIGHT),
+                Layout::left_to_right(Align::Center),
+                |ui| {
+                    ui.spacing_mut().item_spacing.x = 8.0;
                     ui.label(
-                        egui::RichText::new("No configuration sets")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text_dim),
+                        egui::RichText::new(&name)
+                            .font(theme::sans(tokens::FS_1, FontWeight::SemiBold))
+                            .color(t.color.text),
                     );
-                }
-
-                if let Some(configuration) = active {
-                    ui.separator();
-                    context_value(ui, "Testbench", &configuration.root().display_path());
-                    ui.separator();
-                    context_value(ui, "DUT", configuration.dut_path());
-                    ui.separator();
-                    context_value(
-                        ui,
-                        "Binding",
-                        &format!("{} overrides", configuration.overrides().len()),
-                    );
-                }
-
-                if active.is_none() {
-                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        if Button::new("Manage\u{2026}").show(ui).clicked() {
-                            intent = Some(ContextIntent::Manage);
-                        }
-                    });
-                }
-            });
+                    if used_for_runs(catalog, selection) {
+                        ui.label(
+                            egui::RichText::new("Used for runs")
+                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                                .color(t.color.text_dim),
+                        );
+                    } else if Button::new("Use for runs")
+                        .enabled(write_allowed)
+                        .show(ui)
+                        .clicked()
+                    {
+                        intent = Some(ToolbarIntent::UseForRuns(selection));
+                    }
+                    let new_label = if selection == ConfigurationSelection::Default {
+                        "New configuration\u{2026}"
+                    } else {
+                        "New\u{2026}"
+                    };
+                    if Button::new(new_label)
+                        .enabled(write_allowed)
+                        .show(ui)
+                        .clicked()
+                    {
+                        intent = Some(ToolbarIntent::New);
+                    }
+                },
+            );
         });
     ui.painter().hline(
         shown.response.rect.x_range(),
@@ -248,146 +213,15 @@ fn configuration_context(ui: &mut Ui, app: &RSpiceApp) -> Option<ContextIntent> 
     intent
 }
 
-fn context_value(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_faint),
-    );
-    ui.label(
-        egui::RichText::new(value)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text),
-    );
-}
-
-fn apply_context_intent(ctx: &Context, app: &mut RSpiceApp, intent: ContextIntent) {
-    match intent {
-        ContextIntent::Activate(id) => match activate_configuration(app, id) {
-            Ok(receipt) => {
-                ctx.data_mut(|data| {
-                    data.remove::<String>(egui::Id::new(ACTIVATION_ERROR_ID));
-                });
-                app.state
-                    .record(LogSeverity::Info, LogSource::Studio, receipt);
-            }
-            // The page states the refusal under the selector.
-            Err(error) => {
-                ctx.data_mut(|data| {
-                    data.insert_temp(egui::Id::new(ACTIVATION_ERROR_ID), error);
-                });
-            }
-        },
-        ContextIntent::Manage => Command::ConfigurationSets.execute(app),
-    }
-}
-
-fn activate_configuration(app: &mut RSpiceApp, id: ConfigurationSetId) -> Result<String, String> {
-    let current: &ConfigurationSetCatalog = &app.state.model.workspace.content.configuration_sets;
-    let selected = current
-        .find(id)
-        .ok_or_else(|| "The selected configuration no longer exists.".to_owned())?;
-    if current.active_configuration_id() == Some(id) {
-        return Ok(format!(
-            "{} is already the active configuration.",
-            selected.name()
-        ));
-    }
-    let name = selected.name().to_owned();
-    let mut candidate = current.clone();
-    candidate.activate(id).map_err(|error| error.to_string())?;
-    validate_candidate_configuration(app, &candidate)?;
-    let revision = app
-        .state
-        .model
-        .workspace
-        .content
-        .replace_configuration_sets(candidate)
-        .map_err(|error| error.to_string())?;
-    app.invalidate_simulation_preflight();
-    app.state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
-    Ok(format!(
-        "Activated {name} at project revision {}.",
-        revision.get()
-    ))
-}
-
-fn validate_candidate_configuration(
-    app: &RSpiceApp,
-    catalog: &ConfigurationSetCatalog,
-) -> Result<(), String> {
-    let mut workspace = app.state.model.workspace.clone();
-    *workspace.content.configuration_sets = catalog.clone();
-    let projection = workspace
-        .configuration_execution_projection(
-            &app.state.model.library_manager,
-            &app.state.model.workspace.content.active_view,
-            &app.state.model.schematic,
-        )
-        .map_err(|error| format!("Configuration cannot be activated: {error}"))?;
-    projection
-        .connectivity()
-        .validate()
-        .map_err(|error| format!("Configuration connectivity is invalid: {error}"))?;
-    let root = projection.root_schematic().ok_or_else(|| {
-        "Configuration cannot be activated without its root schematic.".to_owned()
-    })?;
-    let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        app.state.model.library_manager.catalog(),
-        &projection,
-    );
-    let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
-        root,
-        &[],
-        &hierarchy,
-        &rspice_simulation::netlist_gen::NetlistSourceData::new(
-            &crate::simulation::table_route::SourceFiles,
-        ),
-    );
-    if !generated.errors.is_empty() {
-        return Err(format!(
-            "Configuration cannot be activated because netlist generation failed: {}",
-            generated.errors.join("; ")
-        ));
-    }
-    let generated = workspace
-        .content
-        .bind_generated_netlist_provenance(generated.netlist);
-    rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
-        &generated,
-        root.current_file(),
-        &app.state.include_search_chain(),
-        app.state.model.model_library_manager.catalog(),
-        app.state.model.model_library_manager.resolution_records(),
-    )
-    .map_err(|error| {
-        format!("Configuration cannot be activated because source sealing failed: {error}")
-    })?;
-    Ok(())
-}
-
-fn activation_error(ui: &mut Ui) {
-    let error = ui
-        .ctx()
-        .data(|data| data.get_temp::<String>(egui::Id::new(ACTIVATION_ERROR_ID)));
-    let Some(error) = error else {
-        return;
-    };
+/// The refusal the last transaction on this page stated, under the band.
+fn refusal_strip(ui: &mut Ui, refusal: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
         .fill(t.color.bg_panel_2)
         .inner_margin(Margin::symmetric(10, 7))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            problem_mark_line(
-                ui,
-                Problem::Failure,
-                &format!("Activation blocked. {error}"),
-            );
+            problem_mark_line(ui, Problem::Failure, refusal);
         });
 }
 
@@ -436,29 +270,39 @@ fn problem_mark_line(ui: &mut Ui, problem: Problem, message: &str) {
     );
 }
 
-fn no_active_configuration(ui: &mut Ui, count: usize) -> bool {
-    let mut manage = false;
-    // The page's only content is the absence itself, so it states it with the
-    // workbench's centred empty-state idiom rather than a stranded paragraph.
-    crate::workbench::design_system::empty_state_with_actions(
+/// The built-in order, stated: what a project netlists with when no
+/// configuration is used for runs. It is read-only; a different order is a
+/// new configuration.
+fn default_bindings(ui: &mut Ui, app: &RSpiceApp) {
+    let project = &app.state.model.workspace.content.project;
+    section_header(ui, "Global bindings", "built in", None);
+    dense_property_row(
         ui,
-        WorkbenchIcon::Layers,
-        "No active configuration",
-        &format!(
-            "The project catalog holds {count} configuration set{}. Activate one to pin the hierarchy, view-binding, and model-source contract every run executes.",
-            plural_suffix(count)
-        ),
-        |ui| {
-            if Button::new("Manage configurations\u{2026}")
-                .accent()
-                .show(ui)
-                .clicked()
-            {
-                manage = true;
-            }
-        },
+        "Top cell",
+        &format!("{}/{}/schematic", project.root_library, project.top_cell),
+        true,
     );
-    manage
+    dense_property_row(ui, "DUT instance", "\u{2014}", true);
+    dense_property_row(ui, "View list", &default_view_list_text(), false);
+    dense_property_row(ui, "Stop list", &default_stop_list_text(), true);
+    dense_property_row(ui, "Unresolved cells", "Stop the netlist", false);
+}
+
+/// The built-in view list in words: its first entry is whatever view the
+/// instance itself asks for.
+fn default_view_list_text() -> String {
+    let order = built_in::default_view_search_order("schematic", false);
+    let mut words = vec!["the instance's own view".to_owned()];
+    words.extend(order.into_iter().skip(1));
+    words.join(", then ")
+}
+
+fn default_stop_list_text() -> String {
+    built_in::DEFAULT_STOP_VIEW_TYPES
+        .iter()
+        .map(|view_type| view_type.display_name())
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn precedence_panel(ui: &mut Ui, configuration: &ConfigurationSet) {
@@ -1255,26 +1099,6 @@ mod tests {
         assert_eq!(
             short_digest("0123456789abcdef0123456789abcdef"),
             "01234567\u{2026}89abcdef"
-        );
-    }
-
-    #[test]
-    fn activating_a_missing_configuration_is_fail_closed() {
-        let mut app = RSpiceApp::test_instance();
-        let before_catalog = app.state.model.workspace.content.configuration_sets.clone();
-        let before_revision = app.state.model.workspace.content.project.revision();
-
-        let error = activate_configuration(&mut app, ConfigurationSetId::new())
-            .expect_err("a missing configuration identity must be rejected");
-
-        assert!(error.contains("no longer exists"));
-        assert_eq!(
-            app.state.model.workspace.content.configuration_sets,
-            before_catalog
-        );
-        assert_eq!(
-            app.state.model.workspace.content.project.revision(),
-            before_revision
         );
     }
 
