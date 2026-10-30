@@ -74,6 +74,14 @@ pub fn joined_families(ctx: &Context) -> Vec<String> {
     .unwrap_or_default()
 }
 
+/// The font definitions `ctx` letters with while the plugin is attached: the
+/// embedded faces and every face joined so far. The plugin holds the joined
+/// faces, so they outlive anything kept in the context's memory, and every
+/// install builds from this one set.
+pub(super) fn definitions_with_joined(ctx: &Context) -> Option<FontDefinitions> {
+    ctx.with_plugin(|plugin: &mut SystemFontsPlugin| definitions(&plugin.joined))
+}
+
 /// The egui plugin that finds and installs the faces.
 pub struct SystemFontsPlugin {
     fonts: SystemFonts,

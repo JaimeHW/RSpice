@@ -211,3 +211,26 @@ fn the_document_language_reorders_the_cjk_faces() {
     settle(&ctx, "、");
     assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), rebuilds);
 }
+
+#[test]
+fn reinstalling_the_fonts_keeps_the_faces_that_joined() {
+    let ctx = context(Source::files(vec![korean()]));
+    let squares = ink(&ctx, &frame(&ctx, "한국"));
+    let joined = ink(&ctx, &settle(&ctx, "한국"));
+    assert_ne!(joined, squares);
+
+    // Losing the context's memory loses the theme's once-flag, so the theme
+    // installs the fonts again.
+    ctx.memory_mut(|memory| *memory = egui::Memory::default());
+    crate::Theme::default().apply(&ctx);
+    frame(&ctx, "한국");
+    frame(&ctx, "한국");
+    assert_eq!(ink(&ctx, &frame(&ctx, "한국")), joined);
+
+    // So does an install made directly.
+    crate::fonts::install(&ctx);
+    frame(&ctx, "한국");
+    frame(&ctx, "한국");
+    assert_eq!(ink(&ctx, &frame(&ctx, "한국")), joined);
+    assert_eq!(joined_families(&ctx), ["IBM Plex Sans KR"]);
+}

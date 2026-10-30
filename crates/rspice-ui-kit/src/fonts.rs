@@ -57,10 +57,18 @@ pub fn font_definitions() -> FontDefinitions {
     rspice_fonts::egui_font_definitions()
 }
 
-/// Install the embedded fonts into an egui context. Idempotent and cheap to
-/// guard with a once-flag at the call site; egui rebuilds its glyph atlas on
-/// every call, so avoid calling this per-frame.
+/// Install the application's fonts into an egui context: every embedded face
+/// and, on a desktop, every installed face that has joined its families
+/// (`system`). An install never drops a joined face, whoever makes it, so
+/// text lettered from one never falls back to the square. Idempotent and
+/// cheap to guard with a once-flag at the call site; egui rebuilds its glyph
+/// atlas whenever the set changes, so avoid calling this per-frame.
 pub fn install(ctx: &Context) {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Some(fonts) = system::definitions_with_joined(ctx) {
+        ctx.set_fonts(fonts);
+        return;
+    }
     ctx.set_fonts(font_definitions());
 }
 
