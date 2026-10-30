@@ -1,6 +1,8 @@
 //! The Project workspace's inspector: the overview, library, configuration,
 //! dependency and recovery pages.
 
+mod configuration;
+
 use egui::Ui;
 use rspice_ui_kit::panels::{Problem, section_header};
 
@@ -18,7 +20,7 @@ pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
     match app.state.project.project_page {
         ProjectPage::Overview => project_overview(ui, app),
         ProjectPage::Library => project_library(ui, app),
-        ProjectPage::Configuration => project_configuration(ui, app),
+        ProjectPage::Configuration => configuration::project_configuration(ui, app),
         ProjectPage::Dependencies => project_dependency(ui, app),
         ProjectPage::Recovery => project_recovery(ui, app),
     }
@@ -224,49 +226,6 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     // the "Used by" row above names them in place. No "Revision history…"
     // either — it is a project-level dialog, and the Project overview
     // inspector is where the project's own actions live.
-}
-
-fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    let active = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active();
-    let name = active.map_or_else(
-        || "No active configuration".to_owned(),
-        |item| item.name().to_owned(),
-    );
-    let testbench = active.map_or_else(
-        || "not configured".to_owned(),
-        |item| item.root().display_path(),
-    );
-    let dut = active.map_or_else(
-        || "not configured".to_owned(),
-        |item| item.dut_path().to_owned(),
-    );
-    let overrides = active.map_or(0, |item| item.definition().overrides.len());
-
-    section_header(ui, "Active binding", None);
-    property_row(ui, "Configuration", &name);
-    property_row(ui, "Testbench", &testbench);
-    property_row(ui, "DUT", &dut);
-
-    section_header(ui, "Netlisting", None);
-    // "resolved" was success and "missing" restated "No active
-    // configuration" two rows up; the precedence order is a constant and
-    // belongs on the control that obeys it.
-    property_row(ui, "Overrides", &overrides.to_string())
-        .on_hover_text("Resolved in order: project, then configuration, then run.");
-
-    section_header(ui, "Actions", None);
-    if inspector_action(ui, "Validate configuration") {
-        Command::PreflightChecks.execute(app);
-    }
-    if inspector_action(ui, "Manage configuration sets\u{2026}") {
-        Command::ConfigurationSets.execute(app);
-    }
 }
 
 fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {

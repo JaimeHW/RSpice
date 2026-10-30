@@ -36,6 +36,28 @@ pub(crate) struct ConfigurationDraft {
     pub(crate) definition: ConfigurationSetDefinition,
 }
 
+/// Text typed into one of the page's fields and not committed yet. A field
+/// commits on Enter or when it loses focus, so typing never re-resolves the
+/// design.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct FieldEdit {
+    /// Which field: its own stable key.
+    pub(crate) field: String,
+    pub(crate) text: String,
+}
+
+/// One change to an instance or pattern binding, made in the inspector.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum BindingChange {
+    Views(crate::ui::widgets::OrderedChipsEdit),
+    Stop(Option<String>),
+    ModelSection(Option<String>),
+    RunsOn(Vec<ConfigurationPlatform>),
+    /// A pattern binding's pattern.
+    Path(String),
+    Remove,
+}
+
 /// The table row whose properties the inspector shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConfigurationRow {
@@ -59,6 +81,7 @@ pub(crate) struct ConfigurationPageState {
     /// that are not applied; the page asks before it switches.
     pub(crate) pending_selection: Option<ConfigurationSelection>,
     pub(crate) row: Option<ConfigurationRow>,
+    pub(crate) field_edit: Option<FieldEdit>,
     /// Instances whose children the tree hides, by fold key.
     collapsed: BTreeSet<String>,
     resolution: ResolutionCache,
@@ -249,6 +272,12 @@ impl ConfigurationPageState {
             builds: self.resolution.builds + 1,
         };
         value
+    }
+
+    /// The last resolution built, without rebuilding: what the inspector
+    /// reads beside the stage.
+    pub(crate) fn last_resolution(&self) -> Option<Arc<ConfigurationResolution>> {
+        self.resolution.value.clone()
     }
 
     /// The tree rows not hidden under a collapsed instance, as indices into
@@ -542,6 +571,65 @@ pub(crate) fn set_instance_view(
             model_section: None,
             eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
         }),
+    }
+}
+
+/// Apply `change` to the binding stored under `path`. An instance with no
+/// binding of its own gets one, starting from `inherited`, the view list it
+/// inherits, so editing it changes only what the reader changed.
+pub(crate) fn apply_binding_change(
+    definition: &mut ConfigurationSetDefinition,
+    path: &str,
+    inherited: &[String],
+    change: BindingChange,
+) {
+    let exact_key = InstancePath::parse_legacy(path)
+        .ok()
+        .map(|exact| exact.fold_key());
+    let position = definition.overrides.iter().position(|binding| {
+        binding.instance_path.eq_ignore_ascii_case(path)
+            || exact_key.as_ref().is_some_and(|key| {
+                InstancePath::parse_legacy(&binding.instance_path)
+                    .is_ok_and(|exact| &exact.fold_key() == key)
+            })
+    });
+    let index = match (position, &change) {
+        (Some(index), _) => index,
+        (None, BindingChange::Remove | BindingChange::Path(_)) => return,
+        (None, _) => {
+            definition.overrides.push(ConfigurationSetOverride {
+                instance_path: exact_key
+                    .and_then(|_| InstancePath::parse_legacy(path).ok())
+                    .map_or_else(|| path.to_owned(), |exact| exact.to_string()),
+                executable_views: inherited.to_vec(),
+                stop_view: None,
+                model_section: None,
+                eligible_platforms: ConfigurationPlatform::ALL.to_vec(),
+            });
+            definition.overrides.len() - 1
+        }
+    };
+    let binding = &mut definition.overrides[index];
+    match change {
+        BindingChange::Views(edit) => {
+            edit.apply(&mut binding.executable_views);
+            let views = binding.executable_views.clone();
+            binding.stop_view = binding
+                .stop_view
+                .take()
+                .filter(|stop| views.iter().any(|view| view.eq_ignore_ascii_case(stop)));
+        }
+        BindingChange::Stop(stop) => binding.stop_view = stop,
+        BindingChange::ModelSection(section) => {
+            binding.model_section = section
+                .map(|section| section.trim().to_owned())
+                .filter(|section| !section.is_empty());
+        }
+        BindingChange::RunsOn(platforms) => binding.eligible_platforms = platforms,
+        BindingChange::Path(pattern) => binding.instance_path = pattern.trim().to_owned(),
+        BindingChange::Remove => {
+            definition.overrides.remove(index);
+        }
     }
 }
 
