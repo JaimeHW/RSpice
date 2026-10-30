@@ -13,6 +13,7 @@ use krilla::page::PageSettings;
 use krilla::paint::Fill;
 use krilla::text::{Font, TextDirection};
 use krilla::{Document, SerializeSettings};
+use rspice_fonts::Face;
 use unicode_segmentation::UnicodeSegmentation;
 
 use super::markdown::status_label;
@@ -35,19 +36,6 @@ const TABLE_FONT_SIZE: f32 = 7.5;
 const CELL_PADDING_X: f32 = 5.0;
 const CELL_PADDING_Y: f32 = 5.5;
 const COLUMN_WIDTHS: [f32; 6] = [88.0, 60.0, 142.0, 92.0, 67.0, 74.28];
-
-const IBM_PLEX_SANS_REGULAR: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexSans-Regular.ttf"
-));
-const IBM_PLEX_SANS_SEMIBOLD: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexSans-SemiBold.ttf"
-));
-const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexMono-Regular.ttf"
-));
 
 /// PDF serialization failure with a stable, user-presentable description.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -138,16 +126,16 @@ struct Fonts {
 impl Fonts {
     fn load() -> Result<Self, ShortcutPdfError> {
         Ok(Self {
-            sans_regular: load_font(IBM_PLEX_SANS_REGULAR, "IBM Plex Sans Regular")?,
-            sans_semibold: load_font(IBM_PLEX_SANS_SEMIBOLD, "IBM Plex Sans SemiBold")?,
-            mono_regular: load_font(IBM_PLEX_MONO_REGULAR, "IBM Plex Mono Regular")?,
+            sans_regular: load_font(Face::SansRegular)?,
+            sans_semibold: load_font(Face::SansSemibold)?,
+            mono_regular: load_font(Face::MonoRegular)?,
         })
     }
 }
 
-fn load_font(bytes: &'static [u8], name: &str) -> Result<Font, ShortcutPdfError> {
-    Font::new(bytes.into(), 0)
-        .ok_or_else(|| ShortcutPdfError(format!("embedded {name} font is invalid")))
+fn load_font(face: Face) -> Result<Font, ShortcutPdfError> {
+    Font::new(face.bytes().into(), 0)
+        .ok_or_else(|| ShortcutPdfError(format!("embedded {} font is invalid", face.name())))
 }
 
 #[derive(Default)]
