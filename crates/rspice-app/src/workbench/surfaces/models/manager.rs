@@ -48,6 +48,7 @@ use crate::ui::tokens::{self, Tokens};
 // it through `use super::*`, which is what keeps one spelling of a button, a
 // chip, a select and a modal across all six of them.
 use crate::state::ModelsPage;
+use crate::state::command_catalog::CommandKey;
 use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
     paint_problem_mark, problem_line,
@@ -99,7 +100,7 @@ const CATALOG_TRACK_FRACTION: f32 = 0.45;
 const CATALOG_TRACK_MIN_H: f32 = 120.0;
 
 enum ManagerAction {
-    Command(Command),
+    Command(CommandKey),
     ImportModelSource,
     RefreshLibrary {
         library: String,
@@ -143,8 +144,8 @@ struct ManagerRenderContext<'a> {
 }
 
 impl ManagerRenderContext<'_> {
-    fn queue_command(&mut self, command: Command) {
-        self.pending_actions.push(ManagerAction::Command(command));
+    fn queue_command(&mut self, key: CommandKey) {
+        self.pending_actions.push(ManagerAction::Command(key));
     }
 
     fn queue_model_source_import(&mut self) {
@@ -306,7 +307,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     for action in pending_actions {
         match action {
-            ManagerAction::Command(command) => command.execute(app),
+            ManagerAction::Command(key) => app.execute_command_key(key),
             ManagerAction::ImportModelSource => app.start_model_source_import(&context),
             ManagerAction::RefreshLibrary { library } => {
                 app.start_model_library_refresh(&context, library);

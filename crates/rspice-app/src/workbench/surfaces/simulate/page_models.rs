@@ -9,13 +9,12 @@
 
 use egui::Ui;
 
-use crate::state::ModelsPage;
 use crate::state::model_library::{ModelSourceAuthority, short_digest};
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 
 use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
@@ -836,7 +835,7 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
         // Route to the surface that owns the qualification record.
         // Dispositioning a vector from the plan would give one record two
         // authors, so the page hands off instead.
-        Command::ModelsPage(ModelsPage::Qualification).execute(app);
+        app.execute_command_key(ids::MODEL_QUALIFICATION);
     }
 }
 

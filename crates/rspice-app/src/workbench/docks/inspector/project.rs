@@ -6,9 +6,10 @@ mod configuration;
 use egui::Ui;
 use rspice_ui_kit::panels::{Problem, section_header};
 
-use crate::state::{CellViewRef, ModelsPage, ViewType};
+use crate::state::{CellViewRef, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 
 use super::super::super::commands::vocabulary::Command;
@@ -297,10 +298,10 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
 
     section_header(ui, "Actions", None);
     if inspector_action(ui, "Model & library catalog") {
-        Command::ModelsPage(ModelsPage::Models).execute(app);
+        app.execute_command_key(ids::MODELS_CATALOG);
     }
     if inspector_action(ui, "PDK and model paths\u{2026}") {
-        Command::PdkSettings.execute(app);
+        app.execute_command_key(ids::PDK_SETTINGS);
     }
 }
 

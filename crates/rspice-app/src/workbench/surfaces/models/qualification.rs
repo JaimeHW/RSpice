@@ -948,20 +948,20 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
         QualificationPageAction::RunSuite => {
             app.state.models.model_editor.active_section = ModelEditorSection::Tests;
             model_editor::validate_open_candidate(app);
-            let command = Command::ModelRunQualificationTests;
-            if command.is_enabled(app) {
-                command.execute(app);
-            } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
+            let key = Command::ModelRunQualificationTests.key();
+            if app.command_key_enabled(key) {
+                app.execute_command_key(key);
+            } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {
                 app.state
                     .prompt(format!("Qualification cannot run: {reason}."));
             }
         }
         QualificationPageAction::CompareRelease => {
             app.state.models.model_editor.active_section = ModelEditorSection::Release;
-            let command = Command::ModelCompareRelease;
-            if command.is_enabled(app) {
-                command.execute(app);
-            } else if let CommandAvailability::Disabled(reason) = command.availability(app) {
+            let key = Command::ModelCompareRelease.key();
+            if app.command_key_enabled(key) {
+                app.execute_command_key(key);
+            } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {
                 app.state.prompt(format!(
                     "Approved-model comparison is unavailable: {reason}."
                 ));

@@ -333,7 +333,7 @@ pub(super) fn qualification_run_workflow(
     records: &PersistedModelRecords,
     request: &super::super::super::commands::ModelEditorWorkflowRequest,
 ) {
-    let runnable = Command::ModelRunQualificationTests.is_enabled(app);
+    let runnable = app.command_key_enabled(Command::ModelRunQualificationTests.key());
     let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
     .description("Confirm the saved source, the suites to run, the runtime target, and how results are kept before starting.")
     .size(DialogSize::Transaction)
@@ -353,7 +353,7 @@ pub(super) fn qualification_run_workflow(
         if let Some(error) = request.error.as_deref() {
             blocker_note(ui, error);
         } else if !runnable {
-            let reason = match Command::ModelRunQualificationTests.availability(app) {
+            let reason = match app.command_availability(Command::ModelRunQualificationTests.key()) {
                 CommandAvailability::Disabled(reason) => reason,
                 CommandAvailability::Available | CommandAvailability::Hidden => {
                     "Qualification is unavailable in this context."

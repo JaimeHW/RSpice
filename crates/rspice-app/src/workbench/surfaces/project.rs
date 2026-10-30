@@ -32,6 +32,7 @@ use crate::workbench::app_state::DesignCheckStatus;
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
+use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
 use crate::workbench::project::workspace_state::ProjectPage;
 use recovery::recovery;
@@ -661,7 +662,7 @@ fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
         ProjectPage::Overview => {}
         ProjectPage::Library => {
             if Button::new("Attach library\u{2026}").show(ui).clicked() {
-                Command::PdkSettings.execute(app);
+                app.execute_command_key(ids::PDK_SETTINGS);
             }
         }
         // The Configuration page's own band carries its actions.

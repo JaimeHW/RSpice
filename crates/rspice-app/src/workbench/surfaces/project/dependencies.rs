@@ -358,7 +358,7 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             open_technology_attachment_dialog(app);
         }
         if Button::new("Model paths\u{2026}").show(ui).clicked() {
-            Command::PdkSettings.execute(app);
+            app.execute_command_key(ids::PDK_SETTINGS);
         }
     });
     // The panel ends here rather than at the floor of the pane, so close it.

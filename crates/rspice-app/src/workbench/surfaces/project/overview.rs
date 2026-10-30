@@ -9,7 +9,7 @@ use std::collections::BTreeSet;
 
 use egui::{Align, Align2, Color32, Layout, Rect, Sense, Stroke, Ui, pos2, vec2};
 
-use crate::state::ModelsPage;
+use crate::state::command_catalog::CommandKey;
 use crate::state::netlist_document::{DiagnosticSeverity, DocumentOwnership};
 use crate::state::{CellViewRef, SimulationRunLifecycle, ViewType};
 use crate::ui::icons::Icon;
@@ -20,7 +20,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::DesignCheckStatus;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_problem};
-use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::{ModelsCatalogScope, Workspace};
@@ -117,7 +117,7 @@ impl OverviewIntent {
             Self::OpenProjectRoot => open_project_root(app),
             Self::OpenProjectModels => {
                 app.state.models.models_view.catalog_scope = ModelsCatalogScope::Project;
-                Command::ModelsPage(ModelsPage::Models).execute(app);
+                app.execute_command_key(ids::MODELS_CATALOG);
             }
             Self::OpenRun(index) => {
                 let has_retained_dataset = app
@@ -259,8 +259,8 @@ pub(super) const fn run_destination(has_retained_dataset: bool, netlist_first: b
     }
 }
 
-fn command_gate(app: &RSpiceApp, command: Command) -> (bool, Option<&'static str>) {
-    match command.availability(app) {
+fn command_gate(app: &RSpiceApp, key: CommandKey) -> (bool, Option<&'static str>) {
+    match app.command_availability(key) {
         CommandAvailability::Available => (true, None),
         CommandAvailability::Disabled(reason) => (false, Some(reason)),
         CommandAvailability::Hidden => (false, Some("this action is unavailable in this context")),
@@ -441,7 +441,7 @@ impl OverviewSnapshot {
         let latest_run_status = state.model.simulation.retained.runs.first().map_or_else(
             || {
                 let command = Command::OpenWorkspace(run_destination(false, netlist_first));
-                let (enabled, disabled_reason) = command_gate(app, command);
+                let (enabled, disabled_reason) = command_gate(app, command.key());
                 StatusSnapshot {
                     area: "Latest run",
                     state: "No retained run".to_owned(),
@@ -470,7 +470,7 @@ impl OverviewSnapshot {
                 let has_dataset = !run.analyses.is_empty();
                 let destination = run_destination(has_dataset, netlist_first);
                 let (enabled, disabled_reason) =
-                    command_gate(app, Command::OpenWorkspace(destination));
+                    command_gate(app, Command::OpenWorkspace(destination).key());
                 StatusSnapshot {
                     area: "Latest run",
                     state: format!(
@@ -502,12 +502,11 @@ impl OverviewSnapshot {
         );
 
         let (configuration_enabled, configuration_disabled_reason) =
-            command_gate(app, Command::ConfigurationSets);
-        let (models_enabled, models_disabled_reason) =
-            command_gate(app, Command::ModelsPage(ModelsPage::Models));
+            command_gate(app, Command::ConfigurationSets.key());
+        let (models_enabled, models_disabled_reason) = command_gate(app, ids::MODELS_CATALOG);
         let primary_status = if netlist_first {
             let (enabled, disabled_reason) =
-                command_gate(app, Command::OpenWorkspace(Workspace::Netlist));
+                command_gate(app, Command::OpenWorkspace(Workspace::Netlist).key());
             source_deck.as_ref().map_or_else(
                 || StatusSnapshot {
                     area: "Source deck",
@@ -1058,7 +1057,7 @@ fn overview_header(
                             format!("Run {}…", snapshot.run_plan_name)
                         };
                         let command = Command::OpenWorkspace(Workspace::Simulate);
-                        let (enabled, disabled_reason) = command_gate(app, command);
+                        let (enabled, disabled_reason) = command_gate(app, command.key());
                         let run_plan = Button::new(&run_label).enabled(enabled).show(ui);
                         let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
                             run_plan.on_disabled_hover_text(reason)
@@ -1068,7 +1067,7 @@ fn overview_header(
                         }
                     }
                     let (new_cell_command_enabled, new_cell_command_reason) =
-                        command_gate(app, Command::NewCell);
+                        command_gate(app, Command::NewCell.key());
                     let has_writable_library = app
                         .state
                         .model
@@ -1095,7 +1094,7 @@ fn overview_header(
                         intent = Some(OverviewIntent::Command(Command::NewCell));
                     }
                     let (open_deck_enabled, open_deck_disabled_reason) =
-                        command_gate(app, Command::OpenNetlist);
+                        command_gate(app, Command::OpenNetlist.key());
                     let import_deck = Button::new("Import deck…")
                         .enabled(open_deck_enabled)
                         .show(ui);
@@ -1107,7 +1106,7 @@ fn overview_header(
                         intent = Some(import_deck_intent());
                     }
                     let (history_enabled, history_disabled_reason) =
-                        command_gate(app, Command::RevisionHistory);
+                        command_gate(app, Command::RevisionHistory.key());
                     let history = Button::new("History…").enabled(history_enabled).show(ui);
                     let history = history_disabled_reason.map_or(history.clone(), |reason| {
                         history.on_disabled_hover_text(reason)
@@ -1497,7 +1496,8 @@ fn design_register(
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 let library_command = Command::ProjectPage(ProjectPage::Library);
-                let (library_enabled, library_disabled_reason) = command_gate(app, library_command);
+                let (library_enabled, library_disabled_reason) =
+                    command_gate(app, library_command.key());
                 let library = Button::new("Browse library…")
                     .enabled(library_enabled)
                     .show(ui);
@@ -1509,7 +1509,7 @@ fn design_register(
                 }
                 let configuration_command = Command::ConfigurationSets;
                 let (configuration_enabled, configuration_disabled_reason) =
-                    command_gate(app, configuration_command);
+                    command_gate(app, configuration_command.key());
                 let configuration = Button::new("Configurations")
                     .enabled(configuration_enabled)
                     .show(ui);

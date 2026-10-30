@@ -583,7 +583,7 @@ fn arm_library_part(
 /// on the cursor when the install completes, so the round trip ends where the
 /// user started.
 fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, version: String) {
-    use crate::state::ModelsPage;
+    use crate::workbench::framework::command_registry::ids;
     use crate::workbench::state::{ModelsWorkbenchDialog, PackReleaseConfirmation};
 
     let Some(release) = PackReleaseConfirmation::for_release(
@@ -603,7 +603,7 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
         attach: true,
         release: Some(Box::new(release)),
     });
-    crate::workbench::commands::vocabulary::Command::ModelsPage(ModelsPage::Models).execute(app);
+    app.execute_command_key(ids::MODELS_CATALOG);
 }
 
 pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usize {

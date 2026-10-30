@@ -224,7 +224,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                     .as_deref()
                     .map(|corner| format!("{library}\u{1f}{corner}"));
             }
-            Command::ModelsPage(page).execute(app);
+            app.execute_command_key(Command::ModelsPage(page).key());
         }
         PreflightRemediation::NetlistSource { line } => {
             use crate::workbench::documents::netlist_document;
