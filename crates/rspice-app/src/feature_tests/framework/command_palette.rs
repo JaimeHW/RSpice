@@ -367,6 +367,96 @@ fn opening_shortcut_and_repeated_letters_in_one_frame_preserve_the_search() {
     assert!(!app.state.design.bus_tap.open);
 }
 
+/// The browser qualification's configuration path, through whole frames of
+/// the application: the Configurations command shows the page, typing
+/// straight after New configuration\u{2026} is released lands in the new
+/// configuration's Name even in the frame of the release, and Escape leaves
+/// the project without it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn typing_straight_after_new_configuration_lands_in_its_name() {
+    use egui::accesskit::{Node, Role, TreeUpdate};
+
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut time = 0.0;
+    // Three frames, the first carrying `events`; the last one's tree.
+    let mut run = |app: &mut RSpiceApp, mut events: Vec<egui::Event>| -> TreeUpdate {
+        let mut tree = None;
+        for _ in 0..3 {
+            time += 0.1;
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+                    time: Some(time),
+                    focused: true,
+                    events: std::mem::take(&mut events),
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(app, ui, &mut frame),
+            );
+            tree = output.platform_output.accesskit_update;
+        }
+        tree.expect("a frame with AccessKit on publishes its tree")
+    };
+    let named = |tree: &TreeUpdate, role: Role, label: &str| -> Vec<Node> {
+        tree.nodes
+            .iter()
+            .filter(|(_, node)| node.role() == role && node.label() == Some(label))
+            .map(|(_, node)| node.clone())
+            .collect()
+    };
+
+    app.execute_command_key(Command::ConfigurationSets.key());
+    let tree = run(&mut app, Vec::new());
+    let new = named(&tree, Role::Button, "New configuration\u{2026}");
+    assert_eq!(new.len(), 1, "the page offers one New configuration button");
+    let bounds = new[0].bounds().expect("a laid-out button");
+    let at = pos2(
+        ((bounds.x0 + bounds.x1) / 2.0) as f32,
+        ((bounds.y0 + bounds.y1) / 2.0) as f32,
+    );
+    let press = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: Modifiers::NONE,
+    };
+    let name = "Browser configuration draft";
+    run(&mut app, vec![egui::Event::PointerMoved(at), press(true)]);
+    let tree = run(
+        &mut app,
+        vec![
+            press(false),
+            primary_key_event(Key::A),
+            egui::Event::Text(name.to_owned()),
+        ],
+    );
+    let fields = named(&tree, Role::TextInput, "Name");
+    assert_eq!(fields.len(), 1, "New configuration asks for one Name");
+    assert_eq!(fields[0].value(), Some(name));
+
+    let tree = run(&mut app, vec![key_event(Key::Escape)]);
+    assert!(
+        named(&tree, Role::TextInput, "Name").is_empty(),
+        "Escape closes New configuration"
+    );
+    assert!(
+        app.state
+            .model
+            .workspace
+            .content
+            .configuration_sets
+            .configurations()
+            .is_empty(),
+        "and creates nothing"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn primary_key_event(key: Key) -> egui::Event {
     egui::Event::Key {

@@ -607,22 +607,29 @@ def choose_command(browser, label, *, input_burst=False, keyboard=()):
 
 
 def configuration_opening_input(browser):
-    query, name = "Browser configuration filter", "Browser configuration draft"
-    choose_command(browser, "Configuration sets", keyboard=((query, ()),))
+    """Typing straight after New configuration is clicked lands in its Name,
+    and Escape leaves the project without the configuration."""
+    name, new = "Browser configuration draft", "New configuration\u2026"
+    choose_command(browser, "Configurations")
+    wait_for(lambda: any(control["label"] == new and control["role"] == "button"
+                        for control in controls(browser.snapshot())), "the Configuration page")
+    browser.click(new, "button", keyboard=(("a", ("\ue009",)), (name, ())))
 
-    def expect_value(snapshot, value, label=None):
-        fields = [control for control in controls(snapshot) if control["role"] == "textInput"
-                  and control["value"] == value and (label is None or control["label"] == label)]
-        if len(fields) != 1:
-            raise AssertionError(f"Configuration opening input was lost or misdirected: {value!r}")
+    def names(snapshot):
+        return [control for control in controls(snapshot)
+                if control["role"] == "textInput" and control["label"] == "Name"]
 
-    expect_value(browser.capture("configuration-filter"), query)
-    browser.click("New configuration", "button", keyboard=(("a", ("\ue009",)), (name, ())))
-    expect_value(browser.capture("configuration-name"), name, "Name")
-    returned_query = "Configuration filter after Escape"
-    browser.key_sequence((("\ue00c", ()), ("a", ("\ue009",)), (returned_query, ())))
-    expect_value(browser.capture("configuration-cancelled"), returned_query)
-    browser.click("Close", "button")
+    fields = names(browser.capture("configuration-name"))
+    if len(fields) != 1 or fields[0]["value"] != name:
+        raise AssertionError(f"Configuration opening input was lost or misdirected: {fields}")
+    browser.keys("\ue00c")
+    wait_for(lambda: not names(browser.snapshot()), "New configuration to close on Escape")
+    if any(name in control["label"] for control in controls(browser.capture("configuration-cancelled"))):
+        raise AssertionError("Escape created the configuration it cancelled")
+    # The review that follows places its note on the schematic.
+    choose_command(browser, "Open design workspace")
+    wait_for(lambda: any(control["label"] == "Schematic canvas" and control["role"] == "canvas"
+                        for control in controls(browser.snapshot())), "the schematic canvas")
 
 
 def wait_until_ready(browser):
