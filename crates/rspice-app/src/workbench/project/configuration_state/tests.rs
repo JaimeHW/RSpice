@@ -237,6 +237,7 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
     page.resolution.value = Some(Arc::new(ConfigurationResolution {
         hierarchy: Ok(hierarchy),
         instances: rows,
+        cells: Vec::new(),
         top_cells: Vec::new(),
         view_names: Vec::new(),
     }));
@@ -246,6 +247,63 @@ fn the_tree_puts_children_under_their_parents_and_hides_collapsed_ones() {
     assert_eq!(&*page.visible_instances(), [0, 1, 3, 4]);
     page.toggle_collapsed("/");
     assert_eq!(&*page.visible_instances(), [0]);
+}
+
+#[test]
+fn view_to_use_on_a_cell_writes_a_cell_binding_and_inherited_removes_it() {
+    let mut definition = definition("schematic");
+    set_cell_view(&mut definition, "vendor", "filter", Some("spice"));
+    let binding = cell_binding(&definition, "VENDOR", "Filter").expect("bound case-insensitively");
+    assert_eq!(binding.executable_views, ["spice"]);
+    assert_eq!(binding.stop_view, None);
+
+    apply_cell_binding_change(
+        &mut definition,
+        "vendor",
+        "filter",
+        &[],
+        BindingChange::Views(crate::ui::widgets::OrderedChipsEdit::Add(
+            "schematic".to_owned(),
+        )),
+    );
+    apply_cell_binding_change(
+        &mut definition,
+        "vendor",
+        "filter",
+        &[],
+        BindingChange::Stop(Some("spice".to_owned())),
+    );
+    let binding = cell_binding(&definition, "vendor", "filter").unwrap();
+    assert_eq!(binding.executable_views, ["spice", "schematic"]);
+    assert_eq!(binding.stop_view.as_deref(), Some("spice"));
+
+    // Model sections and platforms belong to instance bindings.
+    apply_cell_binding_change(
+        &mut definition,
+        "vendor",
+        "filter",
+        &[],
+        BindingChange::ModelSection(Some("tt".to_owned())),
+    );
+    assert_eq!(definition.cell_bindings.len(), 1);
+
+    set_cell_view(&mut definition, "vendor", "filter", None);
+    assert!(definition.cell_bindings.is_empty());
+
+    // Editing the view list of an unbound cell starts from what it inherits.
+    apply_cell_binding_change(
+        &mut definition,
+        "user",
+        "amp",
+        &["schematic".to_owned(), "spice".to_owned()],
+        BindingChange::Views(crate::ui::widgets::OrderedChipsEdit::Remove(1)),
+    );
+    assert_eq!(
+        cell_binding(&definition, "user", "amp")
+            .unwrap()
+            .executable_views,
+        ["schematic"]
+    );
 }
 
 #[test]

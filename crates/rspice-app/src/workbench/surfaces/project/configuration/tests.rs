@@ -289,13 +289,13 @@ fn a_dirty_configuration_offers_apply_and_revert() {
 fn the_instances_tree_states_what_every_instance_resolved_to() {
     let mut app = reference_app();
     let shown = frame(&mut app, 1440.0);
-    for (path, cell, to_use) in [
-        ("/X1", "user/amp", "Inherited"),
-        ("/X2", "user/amp", "schematic"),
+    for (path, cell, to_use, rule) in [
+        ("/X1", "user/amp", "Inherited", "View list"),
+        ("/X2", "user/amp", "schematic", "Instance binding"),
     ] {
         let row = format!(
             "Instance {path}: cell {cell}; view found schematic; view to use {to_use}; \
-             model section"
+             bound by {rule}; model section"
         );
         assert!(
             shown.announced.iter().any(|label| label.starts_with(&row)),
@@ -304,11 +304,59 @@ fn the_instances_tree_states_what_every_instance_resolved_to() {
         );
     }
     assert!(shown.says(
-        "Instance columns: Instance, Cell, View found, View to use, Model section, Runs on, Status"
+        "Instance columns: Instance, Cell, View found, View to use, Bound by, Model section, Runs on, Status"
     ));
 
     let collapsed = app.state.project.configuration.visible_instances().len();
     app.state.project.configuration.toggle_collapsed("/");
     assert_eq!(app.state.project.configuration.visible_instances().len(), 1);
     assert!(collapsed > 1);
+}
+
+/// The Cells tab lists each library/cell once, and keeps a cell binding the
+/// design does not use, marked, so it can be removed.
+#[test]
+fn the_cells_tab_lists_each_cell_once_with_its_binding() {
+    let mut app = reference_app();
+    let catalog = app.state.model.workspace.content.configuration_sets.clone();
+    let id = catalog.active_configuration_id().unwrap();
+    app.state
+        .project
+        .configuration
+        .edit(&catalog, id, |definition| {
+            crate::workbench::project::configuration_state::set_cell_view(
+                definition,
+                "vendor",
+                "filter",
+                Some("schematic"),
+            );
+            crate::workbench::project::configuration_state::set_cell_view(
+                definition,
+                "user",
+                "retired_block",
+                Some("schematic"),
+            );
+        });
+    app.state.project.configuration.tab =
+        crate::workbench::project::configuration_state::ConfigurationTab::Cells;
+    let shown = frame(&mut app, 1440.0);
+    assert!(shown.says(
+        "Cell columns: Library, Cell, Instances, View found, View to use, Inherited view list"
+    ));
+    for row in [
+        "Cell user/amp: 2 instances; view found schematic; view to use Inherited; \
+         inherited view list schematic",
+        "Cell vendor/filter: 1 instance; view found schematic; view to use schematic; \
+         inherited view list schematic",
+        "Cell user/retired_block: 0 instances; view found \u{2014}; view to use schematic; \
+         inherited view list schematic; Warning: not in this design",
+    ] {
+        assert!(shown.says(row), "no row {row:?} in {:#?}", shown.announced);
+    }
+    let amp_rows = shown
+        .announced
+        .iter()
+        .filter(|label| label.starts_with("Cell user/amp:"))
+        .count();
+    assert_eq!(amp_rows, 1, "a cell instantiated twice is one row");
 }

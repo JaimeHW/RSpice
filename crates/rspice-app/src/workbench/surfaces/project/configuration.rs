@@ -7,6 +7,7 @@
 //! page until Apply commits them to the project, and the tables always show
 //! what the edited configuration resolves to, never a demonstration.
 
+mod cells;
 mod grid;
 mod instances;
 #[cfg(test)]
@@ -69,7 +70,7 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         refusal_strip(ui, refusal);
     }
     grid::global_bindings(ui, &mut app.state, selection, &resolution);
-    instances::instances(ui, &mut app.state, selection, &resolution);
+    instances::tables(ui, &mut app.state, selection, &resolution);
 }
 
 /// The page's one-row band: the configuration in front of the reader,
@@ -118,7 +119,6 @@ fn toolbar(
                     }
                     if selection != ConfigurationSelection::Default {
                         if Button::new("Apply")
-                            .accent()
                             .enabled(write_allowed && dirty)
                             .show(ui)
                             .clicked()

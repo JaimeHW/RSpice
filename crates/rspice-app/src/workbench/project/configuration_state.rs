@@ -12,9 +12,10 @@ use std::sync::Arc;
 
 use crate::state::workspace::{DesignProjectionKey, HierarchyResolution};
 use crate::state::{
-    CellViewRef, ConfigurationPlatform, ConfigurationSetCatalog, ConfigurationSetDefinition,
-    ConfigurationSetError, ConfigurationSetId, ConfigurationSetOverride, InstancePath,
-    InstancePathPattern, LibraryManager, ProjectWorkspace, SchematicState, ViewType,
+    CellViewRef, ConfigurationCellBinding, ConfigurationPlatform, ConfigurationSetCatalog,
+    ConfigurationSetDefinition, ConfigurationSetError, ConfigurationSetId,
+    ConfigurationSetOverride, InstancePath, InstancePathPattern, LibraryManager, ProjectWorkspace,
+    SchematicState, ViewType,
 };
 
 /// The configuration the page shows. `Default` is the built-in search order
@@ -58,6 +59,14 @@ pub(crate) enum BindingChange {
     Remove,
 }
 
+/// The two tables under the global bindings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum ConfigurationTab {
+    #[default]
+    Instances,
+    Cells,
+}
+
 /// The table row whose properties the inspector shows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum ConfigurationRow {
@@ -65,6 +74,8 @@ pub(crate) enum ConfigurationRow {
     Instance(String),
     /// One pattern binding, by its pattern as written.
     Pattern(String),
+    /// One library/cell, bound or not.
+    Cell { library: String, cell: String },
 }
 
 /// The Configuration page's own state.
@@ -80,6 +91,7 @@ pub(crate) struct ConfigurationPageState {
     /// A configuration the reader picked while the one in front had edits
     /// that are not applied; the page asks before it switches.
     pub(crate) pending_selection: Option<ConfigurationSelection>,
+    pub(crate) tab: ConfigurationTab,
     pub(crate) row: Option<ConfigurationRow>,
     pub(crate) field_edit: Option<FieldEdit>,
     /// Instances whose children the tree hides, by fold key.
@@ -355,10 +367,24 @@ pub(crate) struct ConfigurationResolution {
     pub(crate) hierarchy: Result<HierarchyResolution, String>,
     /// Every expanded instance, parents before their children.
     pub(crate) instances: Vec<InstanceRow>,
+    /// Every distinct library/cell the expanded design instantiates, in
+    /// library/cell order.
+    pub(crate) cells: Vec<CellRow>,
     /// The views a configuration can take as its top cell.
     pub(crate) top_cells: Vec<CellViewRef>,
     /// Every view name the project's libraries hold.
     pub(crate) view_names: Vec<String>,
+}
+
+/// One library/cell of the expanded design.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CellRow {
+    pub(crate) library: String,
+    pub(crate) cell: String,
+    /// Expanded instances of it.
+    pub(crate) instances: usize,
+    /// The distinct views its instances resolved to; empty when none did.
+    pub(crate) views_found: Vec<String>,
 }
 
 /// One expanded instance in the tree.
@@ -397,9 +423,11 @@ impl ConfigurationResolution {
                 .map_err(|error| error.to_string())
         });
         let instances = hierarchy.as_ref().map(instance_rows).unwrap_or_default();
+        let cells = hierarchy.as_ref().map(cell_rows).unwrap_or_default();
         Self {
             hierarchy,
             instances,
+            cells,
             top_cells: top_cell_choices(workspace, libraries),
             view_names: project_view_names(libraries),
         }
@@ -482,14 +510,132 @@ fn instance_rows(hierarchy: &HierarchyResolution) -> Vec<InstanceRow> {
         {
             parents.pop();
         }
-        if let Some(parent) = parents.last() {
-            if rows[index].0.starts_with(&rows[*parent].0) {
-                instances[*parent].children += 1;
-            }
+        if let Some(parent) = parents.last()
+            && rows[index].0.starts_with(&rows[*parent].0)
+        {
+            instances[*parent].children += 1;
         }
         parents.push(index);
     }
     instances
+}
+
+/// The grouped bindings regrouped by the library/cell they instantiate.
+fn cell_rows(hierarchy: &HierarchyResolution) -> Vec<CellRow> {
+    let mut cells: std::collections::BTreeMap<(String, String), CellRow> =
+        std::collections::BTreeMap::new();
+    for binding in &hierarchy.bindings {
+        let reference = &binding.reference;
+        let row = cells
+            .entry((
+                reference.library.to_ascii_lowercase(),
+                reference.cell.to_ascii_lowercase(),
+            ))
+            .or_insert_with(|| CellRow {
+                library: reference.library.clone(),
+                cell: reference.cell.clone(),
+                instances: 0,
+                views_found: Vec::new(),
+            });
+        row.instances += binding.instance_count;
+        if binding.status.is_resolved()
+            && !row
+                .views_found
+                .iter()
+                .any(|view| view.eq_ignore_ascii_case(&reference.view))
+        {
+            row.views_found.push(reference.view.clone());
+        }
+    }
+    cells.into_values().collect()
+}
+
+/// The cell binding for `library`/`cell`, if the definition has one.
+pub(crate) fn cell_binding<'a>(
+    definition: &'a ConfigurationSetDefinition,
+    library: &str,
+    cell: &str,
+) -> Option<&'a ConfigurationCellBinding> {
+    definition.cell_bindings.iter().find(|binding| {
+        binding.library.eq_ignore_ascii_case(library) && binding.cell.eq_ignore_ascii_case(cell)
+    })
+}
+
+/// Apply `change` to the cell binding for `library`/`cell`. A cell with no
+/// binding gets one, starting from `inherited`; Remove returns every
+/// instance of it to the view list. Model sections and platforms belong to
+/// instance bindings, so those changes leave a cell binding alone.
+pub(crate) fn apply_cell_binding_change(
+    definition: &mut ConfigurationSetDefinition,
+    library: &str,
+    cell: &str,
+    inherited: &[String],
+    change: BindingChange,
+) {
+    let position = definition.cell_bindings.iter().position(|binding| {
+        binding.library.eq_ignore_ascii_case(library) && binding.cell.eq_ignore_ascii_case(cell)
+    });
+    let index = match (position, &change) {
+        (Some(index), _) => index,
+        (None, BindingChange::Views(_) | BindingChange::Stop(_)) => {
+            definition.cell_bindings.push(ConfigurationCellBinding {
+                library: library.to_owned(),
+                cell: cell.to_owned(),
+                executable_views: inherited.to_vec(),
+                stop_view: None,
+            });
+            definition.cell_bindings.len() - 1
+        }
+        (None, _) => return,
+    };
+    let binding = &mut definition.cell_bindings[index];
+    match change {
+        BindingChange::Views(edit) => {
+            edit.apply(&mut binding.executable_views);
+            let views = binding.executable_views.clone();
+            binding.stop_view = binding
+                .stop_view
+                .take()
+                .filter(|stop| views.iter().any(|view| view.eq_ignore_ascii_case(stop)));
+        }
+        BindingChange::Stop(stop) => binding.stop_view = stop,
+        BindingChange::Remove => {
+            definition.cell_bindings.remove(index);
+        }
+        BindingChange::ModelSection(_) | BindingChange::RunsOn(_) | BindingChange::Path(_) => {}
+    }
+}
+
+/// Bind every instance of `library`/`cell` to exactly `view`, or with
+/// `None` remove the cell binding so they inherit the view list again.
+pub(crate) fn set_cell_view(
+    definition: &mut ConfigurationSetDefinition,
+    library: &str,
+    cell: &str,
+    view: Option<&str>,
+) {
+    match view {
+        None => apply_cell_binding_change(definition, library, cell, &[], BindingChange::Remove),
+        Some(view) => {
+            if let Some(binding) = definition.cell_bindings.iter_mut().find(|binding| {
+                binding.library.eq_ignore_ascii_case(library)
+                    && binding.cell.eq_ignore_ascii_case(cell)
+            }) {
+                binding.executable_views = vec![view.to_owned()];
+                binding.stop_view = binding
+                    .stop_view
+                    .take()
+                    .filter(|stop| stop.eq_ignore_ascii_case(view));
+            } else {
+                definition.cell_bindings.push(ConfigurationCellBinding {
+                    library: library.to_owned(),
+                    cell: cell.to_owned(),
+                    executable_views: vec![view.to_owned()],
+                    stop_view: None,
+                });
+            }
+        }
+    }
 }
 
 fn fold(path: &str) -> String {
@@ -734,6 +880,10 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
             "configuration.override.executable-views" => "An instance binding's view list",
             "configuration.override.stop-view" => "An instance binding's stop view",
             "configuration.override.model-section" => "Model section",
+            "configuration.cell-binding.library" => "A cell binding's library",
+            "configuration.cell-binding.cell" => "A cell binding's cell",
+            "configuration.cell-binding.executable-views" => "A cell binding's view list",
+            "configuration.cell-binding.stop-view" => "A cell binding's stop view",
             _ => "A field",
         }
     }
@@ -806,6 +956,14 @@ pub(crate) fn plain_refusal(error: &ConfigurationSetError) -> String {
         ConfigurationSetError::InvalidModelSection(section) => {
             format!("{section} is not a model section name.")
         }
+        ConfigurationSetError::DuplicateCellBinding { library, cell } => {
+            format!("{library}/{cell} has two cell bindings. Remove one.")
+        }
+        ConfigurationSetError::InvalidCellBindingName {
+            field: name,
+            name: value,
+            reason,
+        } => format!("{}: {value} is not a name ({reason}).", field(name)),
         ConfigurationSetError::ActiveConfigurationRemoval(_) => {
             "Runs use this configuration. Use another one (or Default) for runs, then delete it."
                 .to_owned()

@@ -20,8 +20,8 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{property_row, property_row_wrapped};
 use crate::workbench::project::configuration_state::{
     BindingChange, ConfigurationResolution, ConfigurationRow, ConfigurationSelection, FieldEdit,
-    apply_binding_change, cell_view_names, governing_binding, instance_binding, runs_on_label,
-    used_for_runs,
+    apply_binding_change, apply_cell_binding_change, cell_binding, cell_view_names,
+    governing_binding, instance_binding, runs_on_label, used_for_runs,
 };
 
 const RUNS_ON: [&str; 3] = ["All", "Desktop", "Browser"];
@@ -32,6 +32,12 @@ enum InspectorAction {
     Rename(String),
     Binding {
         path: String,
+        inherited: Vec<String>,
+        change: BindingChange,
+    },
+    CellBinding {
+        library: String,
+        cell: String,
         inherited: Vec<String>,
         change: BindingChange,
     },
@@ -60,6 +66,14 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             &path,
             editable,
             &mut buffer,
+        ),
+        Some(ConfigurationRow::Cell { library, cell }) => cell_facts(
+            ui,
+            state,
+            definition,
+            resolution.as_deref(),
+            (&library, &cell),
+            editable,
         ),
         Some(ConfigurationRow::Pattern(pattern)) => definition.and_then(|definition| {
             pattern_binding(
@@ -90,6 +104,14 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.project.configuration.refusal = refusal;
         }
         InspectorAction::Deselect => app.state.project.configuration.row = None,
+        InspectorAction::CellBinding {
+            library,
+            cell,
+            inherited,
+            change,
+        } => edit(&mut app.state, selection, |definition| {
+            apply_cell_binding_change(definition, &library, &cell, &inherited, change);
+        }),
         InspectorAction::Rename(name) => edit(&mut app.state, selection, |definition| {
             definition.name = name;
         }),
@@ -134,7 +156,6 @@ fn edit(
 fn default_facts(ui: &mut Ui, state: &AppState) -> Option<InspectorAction> {
     let project = &state.model.workspace.content.project;
     let catalog = &state.model.workspace.content.configuration_sets;
-    section_header(ui, "Configuration", None);
     property_row(ui, "Name", "Default");
     property_row(
         ui,
@@ -201,7 +222,6 @@ fn configuration(
     buffer: &mut Option<FieldEdit>,
 ) -> Option<InspectorAction> {
     let catalog = &state.model.workspace.content.configuration_sets;
-    section_header(ui, "Configuration", None);
     let mut action = committed_text(
         ui,
         buffer,
@@ -278,9 +298,7 @@ fn instance(
     for warning in &resolved.warnings {
         property_row_wrapped(ui, "Note", warning);
     }
-    let Some(definition) = definition else {
-        return None;
-    };
+    let definition = definition?;
     let exact = instance_binding(definition, path);
     let inherited = governing_binding(definition, path).map_or_else(
         || definition.executable_view_policy.clone(),
@@ -315,8 +333,8 @@ fn instance(
         BindingFields {
             views: &views_owned,
             stop: stop.as_deref(),
-            section: &section,
-            platforms: &platforms,
+            section: Some(&section),
+            platforms: Some(&platforms),
             addable: &addable,
         },
         editable,
@@ -333,6 +351,88 @@ fn instance(
     })
 }
 
+/// One library/cell: what its instances resolved to, and the cell binding
+/// they all follow.
+fn cell_facts(
+    ui: &mut Ui,
+    state: &AppState,
+    definition: Option<&ConfigurationSetDefinition>,
+    resolution: Option<&ConfigurationResolution>,
+    (library, cell): (&str, &str),
+    editable: bool,
+) -> Option<InspectorAction> {
+    let row = resolution.and_then(|resolution| {
+        resolution.cells.iter().find(|row| {
+            row.library.eq_ignore_ascii_case(library) && row.cell.eq_ignore_ascii_case(cell)
+        })
+    });
+    section_header(ui, "Cell", None);
+    property_row(ui, "Cell", &format!("{library}/{cell}"));
+    match row {
+        Some(row) => {
+            property_row(ui, "Instances", &row.instances.to_string());
+            property_row(
+                ui,
+                "View found",
+                &if row.views_found.is_empty() {
+                    "\u{2014}".to_owned()
+                } else {
+                    row.views_found.join(", ")
+                },
+            );
+        }
+        None => {
+            property_row_wrapped(
+                ui,
+                "Instances",
+                "None: this design does not instantiate the cell, so its binding binds nothing.",
+            );
+        }
+    }
+    let definition = definition?;
+    let binding = cell_binding(definition, library, cell);
+    let inherited = definition.executable_view_policy.clone();
+    section_header(
+        ui,
+        "Binding",
+        Some(if binding.is_some() {
+            "this cell"
+        } else {
+            "inherited"
+        }),
+    );
+    let views = binding.map_or_else(
+        || inherited.clone(),
+        |binding| binding.executable_views.clone(),
+    );
+    let stop = binding.and_then(|binding| binding.stop_view.clone());
+    let addable = cell_view_names(&state.model.library_manager, library, cell);
+    let mut unused = None;
+    let change = binding_fields(
+        ui,
+        &format!("cell-{library}-{cell}"),
+        BindingFields {
+            views: &views,
+            stop: stop.as_deref(),
+            section: None,
+            platforms: None,
+            addable: &addable,
+        },
+        editable,
+        &mut unused,
+    )
+    .or_else(|| {
+        (editable && binding.is_some() && action_button(ui, "Inherit the view list", true))
+            .then_some(BindingChange::Remove)
+    });
+    change.map(|change| InspectorAction::CellBinding {
+        library: library.to_owned(),
+        cell: cell.to_owned(),
+        inherited,
+        change,
+    })
+}
+
 /// One pattern binding.
 fn pattern_binding(
     ui: &mut Ui,
@@ -342,13 +442,10 @@ fn pattern_binding(
     editable: bool,
     buffer: &mut Option<FieldEdit>,
 ) -> Option<InspectorAction> {
-    let Some(binding) = definition
+    let binding = definition
         .overrides
         .iter()
-        .find(|binding| binding.instance_path == pattern)
-    else {
-        return None;
-    };
+        .find(|binding| binding.instance_path == pattern)?;
     section_header(ui, "Pattern binding", None);
     let mut change = committed_text(
         ui,
@@ -366,8 +463,8 @@ fn pattern_binding(
         BindingFields {
             views: &binding.executable_views,
             stop: binding.stop_view.as_deref(),
-            section: binding.model_section.as_deref().unwrap_or_default(),
-            platforms: &binding.eligible_platforms,
+            section: Some(binding.model_section.as_deref().unwrap_or_default()),
+            platforms: Some(&binding.eligible_platforms),
             addable: resolution.map_or(&[][..], |resolution| &resolution.view_names),
         },
         editable,
@@ -388,8 +485,10 @@ fn pattern_binding(
 struct BindingFields<'a> {
     views: &'a [String],
     stop: Option<&'a str>,
-    section: &'a str,
-    platforms: &'a [ConfigurationPlatform],
+    /// Instance and pattern bindings only: a cell binding names no model
+    /// section and runs wherever its instances do.
+    section: Option<&'a str>,
+    platforms: Option<&'a [ConfigurationPlatform]>,
     /// The views the view list can add: the bound cell's, or for a pattern,
     /// which binds no single cell, every view the project's libraries hold.
     addable: &'a [String],
@@ -450,20 +549,25 @@ fn binding_fields(
         ));
     }
 
-    if let Some(section) = committed_text(
-        ui,
-        buffer,
-        &format!("{key}-section"),
-        "Model section",
-        fields.section,
-        editable,
-    ) {
+    if let Some(current) = fields.section
+        && let Some(section) = committed_text(
+            ui,
+            buffer,
+            &format!("{key}-section"),
+            "Model section",
+            current,
+            editable,
+        )
+    {
         change = Some(BindingChange::ModelSection(
             (!section.trim().is_empty()).then_some(section),
         ));
     }
 
-    let runs_on = runs_on_label(fields.platforms);
+    let Some(platforms) = fields.platforms else {
+        return change;
+    };
+    let runs_on = runs_on_label(platforms);
     let options = RUNS_ON.map(str::to_owned);
     if let Some(index) = choice_row(
         ui,

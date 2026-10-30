@@ -1,45 +1,71 @@
-//! The Instances table: every instance of the expanded design as a tree,
-//! what the shown configuration resolved it to, and the view it binds it
-//! to. Pattern bindings sit above it, since one names many instances.
+//! The tables under the global bindings. Instances lists every instance of
+//! the expanded design as a tree: what the shown configuration resolved it
+//! to, which list chose that, and the view it binds it to; pattern bindings
+//! sit above it, since one names many instances. Cells lists each
+//! library/cell once, with the cell binding every instance of it follows.
 
 use super::*;
 
-use rspice_design::hierarchy::{HierarchyBindingStatus, ResolvedHierarchyBinding};
+use rspice_design::hierarchy::{
+    HierarchyBindingRule, HierarchyBindingStatus, ResolvedHierarchyBinding,
+};
 
 use crate::state::{ConfigurationPlatform, ConfigurationSetDefinition, ConfigurationSetOverride};
-use crate::ui::widgets::select;
+use crate::ui::widgets::{SegmentedWidth, segmented, select};
 use crate::workbench::project::configuration_state::{
-    ConfigurationRow, InstanceRow, cell_view_names, governing_binding, instance_binding,
-    is_pattern, runs_on_label, set_instance_view,
+    ConfigurationRow, ConfigurationTab, InstanceRow, cell_view_names, governing_binding,
+    instance_binding, is_pattern, runs_on_label, set_cell_view, set_instance_view,
 };
 
 /// Below this width the table scrolls sideways instead of squeezing.
-const TABLE_MIN_WIDTH: f32 = 900.0;
+const TABLE_MIN_WIDTH: f32 = 760.0;
 const INDENT: f32 = 14.0;
 const CHEVRON: f32 = 14.0;
 const INHERITED: &str = "Inherited";
 
 /// The columns, by share of the table's width.
-const COLUMNS: [(&str, f32); 7] = [
-    ("Instance", 0.22),
-    ("Cell", 0.16),
-    ("View found", 0.11),
-    ("View to use", 0.14),
-    ("Model section", 0.12),
-    ("Runs on", 0.09),
-    ("Status", 0.16),
+const COLUMNS: [(&str, f32); 8] = [
+    ("Instance", 0.17),
+    ("Cell", 0.14),
+    ("View found", 0.10),
+    ("View to use", 0.13),
+    ("Bound by", 0.14),
+    ("Model section", 0.10),
+    ("Runs on", 0.07),
+    ("Status", 0.15),
 ];
 
 /// What the reader did to the tables this frame.
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TableEdit {
+pub(super) enum TableEdit {
+    Tab(ConfigurationTab),
     Select(ConfigurationRow),
     Toggle(String),
-    View { path: String, view: Option<String> },
+    View {
+        path: String,
+        view: Option<String>,
+    },
+    CellView {
+        library: String,
+        cell: String,
+        view: Option<String>,
+    },
     AddPattern,
 }
 
-pub(super) fn instances(
+/// Which list chose a row's view, in the page's words.
+fn rule_label(rule: HierarchyBindingRule) -> &'static str {
+    // Spelled from the crate root: the variant names are also item names in
+    // other features, and the full path says which these are.
+    match rule {
+        rspice_design::hierarchy::HierarchyBindingRule::Default => "Default",
+        rspice_design::hierarchy::HierarchyBindingRule::ViewList => "View list",
+        rspice_design::hierarchy::HierarchyBindingRule::CellBinding => "Cell binding",
+        rspice_design::hierarchy::HierarchyBindingRule::InstanceBinding => "Instance binding",
+    }
+}
+
+pub(super) fn tables(
     ui: &mut Ui,
     state: &mut AppState,
     selection: ConfigurationSelection,
@@ -54,15 +80,31 @@ pub(super) fn instances(
     let definition = id.and_then(|id| state.project.configuration.definition(catalog, id));
     let editable = definition.is_some() && !state.model.safe_mode.project_read_only();
     let page = &state.project.configuration;
-    let mut edit = tab_header(ui, resolution, editable);
+    let tab = page.tab;
+    let mut edit = tab_header(ui, resolution, tab, editable);
+    let Ok(hierarchy) = &resolution.hierarchy else {
+        apply_table_edit(state, id, edit);
+        return;
+    };
+    if tab == ConfigurationTab::Cells {
+        if let Some(cell_edit) = super::cells::cells_table(
+            ui,
+            &resolution.cells,
+            definition,
+            &state.model.library_manager,
+            page.row.as_ref(),
+            editable,
+        ) {
+            edit = Some(cell_edit);
+        }
+        apply_table_edit(state, id, edit);
+        return;
+    }
     if let Some(definition) = definition
         && let Some(pattern_edit) = pattern_bindings(ui, definition, page.row.as_ref())
     {
         edit = Some(pattern_edit);
     }
-    let Ok(hierarchy) = &resolution.hierarchy else {
-        return;
-    };
     if let Some(table_edit) = instance_tree(
         ui,
         TreeInput {
@@ -78,11 +120,36 @@ pub(super) fn instances(
     ) {
         edit = Some(table_edit);
     }
+    apply_table_edit(state, id, edit);
+}
+
+fn apply_table_edit(
+    state: &mut AppState,
+    id: Option<crate::state::ConfigurationSetId>,
+    edit: Option<TableEdit>,
+) {
     let Some(edit) = edit else {
         return;
     };
     match edit {
+        TableEdit::Tab(tab) => {
+            state.project.configuration.tab = tab;
+            state.project.configuration.row = None;
+        }
         TableEdit::Select(row) => state.project.configuration.row = Some(row),
+        TableEdit::CellView {
+            library,
+            cell,
+            view,
+        } => {
+            if let Some(id) = id {
+                state.project.configuration.edit(
+                    &state.model.workspace.content.configuration_sets,
+                    id,
+                    |definition| set_cell_view(definition, &library, &cell, view.as_deref()),
+                );
+            }
+        }
         TableEdit::Toggle(path) => state.project.configuration.toggle_collapsed(&path),
         TableEdit::View { path, view } => {
             if let Some(id) = id {
@@ -107,67 +174,74 @@ pub(super) fn instances(
     }
 }
 
-/// The band over the tables: what they list, and the one action that adds
-/// to them.
+/// The band over the tables: which table, how many rows it holds, and on
+/// Instances the one action that adds to it.
 fn tab_header(
     ui: &mut Ui,
     resolution: &ConfigurationResolution,
+    tab: ConfigurationTab,
     editable: bool,
 ) -> Option<TableEdit> {
     let t = Tokens::get(ui.ctx());
-    let count = resolution
-        .instances
-        .iter()
-        .filter(|row| row.depth > 0)
-        .count();
-    let (rect, response) = ui.allocate_exact_size(
-        vec2(ui.available_width().max(1.0), SECTION_HEADER_HEIGHT),
+    let meta = match tab {
+        ConfigurationTab::Instances => {
+            let count = resolution.instances.len();
+            format!("{count} instance{}", plural_suffix(count))
+        }
+        ConfigurationTab::Cells => {
+            let count = resolution.cells.len();
+            format!("{count} cell{}", plural_suffix(count))
+        }
+    };
+    let (rect, _) = ui.allocate_exact_size(
+        vec2(ui.available_width().max(1.0), SECTION_HEADER_HEIGHT + 4.0),
         Sense::hover(),
     );
-    let meta = format!("{count} instance{}", plural_suffix(count));
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            ui.is_enabled(),
-            format!("Instances: {meta}"),
-        )
-    });
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     ui.painter().hline(
         rect.x_range(),
         rect.bottom(),
         Stroke::new(1.0, t.color.border_strong),
     );
-    let title_right = ui
-        .painter()
-        .text(
-            rect.left_center() + vec2(10.0, 0.0),
-            Align2::LEFT_CENTER,
-            "Instances",
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            t.color.text,
-        )
-        .right();
-    ui.painter().text(
-        pos2(title_right + 8.0, rect.center().y),
-        Align2::LEFT_CENTER,
-        &meta,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
-        t.color.text_faint,
-    );
-    if !editable {
-        return None;
-    }
-    let mut add = false;
+    let mut edit = None;
     ui.scope_builder(
         egui::UiBuilder::new()
             .max_rect(rect.shrink2(vec2(8.0, 3.0)))
-            .layout(Layout::right_to_left(Align::Center)),
+            .layout(Layout::left_to_right(Align::Center)),
         |ui| {
-            add = Button::new("Add pattern binding").show(ui).clicked();
+            ui.spacing_mut().item_spacing.x = 10.0;
+            let mut index = match tab {
+                ConfigurationTab::Instances => 0,
+                ConfigurationTab::Cells => 1,
+            };
+            if segmented(
+                ui,
+                "configuration-tables",
+                &["Instances", "Cells"],
+                &mut index,
+                SegmentedWidth::Natural,
+            ) {
+                edit = Some(TableEdit::Tab(if index == 0 {
+                    ConfigurationTab::Instances
+                } else {
+                    ConfigurationTab::Cells
+                }));
+            }
+            ui.label(
+                egui::RichText::new(&meta)
+                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .color(t.color.text_faint),
+            );
+            if tab == ConfigurationTab::Instances && editable {
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    if Button::new("Add pattern binding").show(ui).clicked() {
+                        edit = Some(TableEdit::AddPattern);
+                    }
+                });
+            }
         },
     );
-    add.then_some(TableEdit::AddPattern)
+    edit
 }
 
 /// Bind every instance a new pattern names, starting from the first scope
@@ -339,7 +413,7 @@ fn header_row(ui: &mut Ui, width: f32, height: f32) {
 }
 
 /// Each column's name and its rect in `row`.
-fn column_rects(row: Rect) -> [(&'static str, Rect); 7] {
+fn column_rects(row: Rect) -> [(&'static str, Rect); 8] {
     let mut left = row.left();
     COLUMNS.map(|(name, share)| {
         let right = (left + row.width() * share).min(row.right());
@@ -426,6 +500,7 @@ fn instance_row(
     let to_use = exact
         .and_then(|binding| binding.executable_views.first())
         .map_or(INHERITED, String::as_str);
+    let rule = rule_label(binding.rule);
     let section = if binding.model_section.is_empty() {
         "\u{2014}"
     } else {
@@ -444,7 +519,7 @@ fn instance_row(
     };
     let mut label = format!(
         "Instance {}: cell {cell}; view found {found}; view to use {to_use}; \
-         model section {section}; runs on {runs_on}",
+         bound by {rule}; model section {section}; runs on {runs_on}",
         row.path
     );
     if let Some(problem) = problem {
@@ -559,11 +634,19 @@ fn instance_row(
     } else {
         cell_text(ui, &painter, view_cell, to_use, &mono, t.color.text_dim);
     }
-    cell_text(ui, &painter, cells[4].1, section, &mono, t.color.text_dim);
-    cell_text(ui, &painter, cells[5].1, runs_on, &mono, t.color.text_dim);
+    cell_text(
+        ui,
+        &painter,
+        cells[4].1,
+        rule,
+        &theme::sans(tokens::FS_0, FontWeight::Regular),
+        t.color.text_dim,
+    );
+    cell_text(ui, &painter, cells[5].1, section, &mono, t.color.text_dim);
+    cell_text(ui, &painter, cells[6].1, runs_on, &mono, t.color.text_dim);
 
     // Status: blank when bound; the mark and a short reason otherwise.
-    let status_cell = cells[6].1;
+    let status_cell = cells[7].1;
     if let Some(problem) = problem {
         paint_problem_mark(
             &painter,
