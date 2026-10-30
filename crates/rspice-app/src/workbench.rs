@@ -254,11 +254,10 @@ pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
     BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, EngineeringExportFormat,
-    FolderListPreference, ScalarPreference, TogglePreference, WorkspacePreferences,
-    WorkspacePreset,
+    ScalarPreference, TogglePreference, WorkspacePreferences, WorkspacePreset,
 };
 #[cfg(test)]
-pub use preferences::{ConsoleLaunchBehavior, UserPreferences};
+pub use preferences::{ConsoleLaunchBehavior, FolderListPreference, UserPreferences};
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};
