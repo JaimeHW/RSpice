@@ -39,6 +39,7 @@ rspice-app-state.workspace = true
 rspice-app-services.workspace = true
 rspice-app-runs.workspace = true
 rspice-app-workbench.workspace = true
+rspice-app-results.workspace = true
 rspice-app-settings.workspace = true
 rspice-app-sheets.workspace = true
 rspice-vocabulary.workspace = true
@@ -88,7 +89,6 @@ uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
 unicode-normalization.workspace = true
 unicode-segmentation = "1.12"
 ropey.workspace = true
-krilla = { version = "0.8.2", default-features = false, features = ["raster-images", "simple-text"] }
 
 # egui - Commercial-grade immediate mode GUI with native wgpu rendering
 egui = { version = "0.35.0", default-features = false }
@@ -105,6 +105,7 @@ rspice-app-state = { workspace = true, features = ["test-support"] }
 rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-runs = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
+rspice-app-results = { workspace = true, features = ["test-support"] }
 rspice-app-settings = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
 rspice-schematic-editor = { workspace = true, features = ["test-support"] }
@@ -118,13 +119,8 @@ rspice-model-library = { workspace = true, features = ["catalog-test-observation
 rspice-design = { workspace = true, features = ["symbol-test-observation", "schematic-test-fixtures", "work-observation"] }
 zip.workspace = true
 rustyhdf5 = { version = "1.93", default-features = false }
-arrow-array = "60"
-arrow-ipc = "60"
-arrow-schema = "60"
-matfile = "0.5"
 parquet = { version = "60", default-features = false, features = ["arrow"] }
 wat = "1"
-fst-writer = "0.3"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 # Keypair generation for license issuance in the `services::license` tests.

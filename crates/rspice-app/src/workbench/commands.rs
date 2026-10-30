@@ -26,7 +26,7 @@ use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 pub(crate) mod code_context;
 mod enablement;
 mod registry;
-pub(crate) mod result_navigation;
+pub(crate) use rspice_app_results::workbench::commands::result_navigation;
 pub(crate) mod vocabulary;
 
 const COMMAND_ZOOM_FACTOR: f64 = 1.2;

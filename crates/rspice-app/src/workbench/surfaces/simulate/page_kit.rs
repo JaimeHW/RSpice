@@ -1472,12 +1472,15 @@ mod tests {
         }
 
         let workbench = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/workbench");
-        // A framework file compiles in rspice-app-workbench, and a settings file in
-        // rspice-app-settings, each at the same path under its crate's `src`.
+        // A framework file compiles in rspice-app-workbench, a settings file in
+        // rspice-app-settings and a results file in rspice-app-results, each at the
+        // same path under its crate's `src`.
         let framework =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench");
         let settings =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench");
+        let results =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench");
         let mut sites = Vec::new();
         for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
             for file in files {
@@ -1485,6 +1488,7 @@ mod tests {
                     workbench.join(file),
                     framework.join(file),
                     settings.join(file),
+                    results.join(file),
                 ]
                 .into_iter()
                 .find(|path| path.is_file())

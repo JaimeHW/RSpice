@@ -45,10 +45,10 @@ pub enum DatasetWalk {
     /// Monte-Carlo moment and consistency walks over a sample population.
     HistMoments,
     /// The shared X extent of a strip: every visible trace's coordinates.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     WaveXRange,
     /// Family-envelope construction: every sample of every family member.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     WaveEnvelope,
     /// Baking the eye density texture from every folded acquisition.
     EyeRaster,
@@ -84,7 +84,7 @@ pub enum DatasetWalk {
 
 impl DatasetWalk {
     /// Every variant, for reporting a complete count table.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(crate) const ALL: [Self; 22] = [
         Self::EvidenceValidation,
         Self::DatasetDigest,
@@ -118,7 +118,7 @@ impl DatasetWalk {
 /// did this frame touch", not "how often was the answer wanted".
 #[inline]
 pub(crate) fn note(_walk: DatasetWalk) {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     COUNTS.with(|counts| counts.borrow_mut()[_walk as usize] += 1);
 }
 
@@ -161,7 +161,7 @@ pub(super) enum FrameSampleRead {
 
 impl FrameSampleRead {
     /// Every variant, for reporting a complete count table.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub(super) const ALL: [Self; 2] = [Self::StripOverview, Self::TraceExtremes];
 }
 
@@ -169,11 +169,11 @@ impl FrameSampleRead {
 /// read, at the point it reads them.
 #[inline]
 pub(super) fn note_samples(_read: FrameSampleRead, _samples: usize) {
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     SAMPLES.with(|samples| samples.borrow_mut()[_read as usize] += _samples as u64);
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 thread_local! {
     static COUNTS: std::cell::RefCell<[u64; DatasetWalk::ALL.len()]> =
         const { std::cell::RefCell::new([0; DatasetWalk::ALL.len()]) };
@@ -182,14 +182,14 @@ thread_local! {
 }
 
 /// Counted whole-dataset work, as a snapshot that arithmetic can be done on.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct WorkCounts {
     walks: [u64; DatasetWalk::ALL.len()],
     samples: [u64; FrameSampleRead::ALL.len()],
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 impl WorkCounts {
     const ZERO: Self = Self {
         walks: [0; DatasetWalk::ALL.len()],

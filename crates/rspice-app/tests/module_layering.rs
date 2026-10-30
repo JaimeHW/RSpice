@@ -61,9 +61,10 @@ const LAYERS: &[(&str, u32)] = &[
     // `rspice-app-services`, and the run tier (the controller, its prepared
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
-    // compiles as `rspice-app-workbench`, and the sheets and settings features
-    // as `rspice-app-sheets` and `rspice-app-settings`, inside `workbench`,
-    // where the interior order below ranks them.
+    // compiles as `rspice-app-workbench`, and the sheets, settings and results
+    // features as `rspice-app-sheets`, `rspice-app-settings` and
+    // `rspice-app-results`, inside `workbench`, where the interior order below
+    // ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -348,9 +349,10 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// six split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 7] = [
+/// seven split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 8] = [
     "rspice-app",
+    "rspice-app-results",
     "rspice-app-runs",
     "rspice-app-services",
     "rspice-app-settings",
@@ -1014,15 +1016,17 @@ fn workbench_dir() -> PathBuf {
 }
 
 /// The workbench's framework modules compile as `rspice-app-workbench`, and
-/// the sheets and settings features as `rspice-app-sheets` and
-/// `rspice-app-settings`, at the paths they had here, and keep their rank in
-/// the same order: each crate's `src/workbench` is scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 4] {
+/// the sheets, settings and results features as `rspice-app-sheets`,
+/// `rspice-app-settings` and `rspice-app-results`, at the paths they had here,
+/// and keep their rank in the same order: each crate's `src/workbench` is
+/// scanned beside this crate's.
+fn workbench_roots() -> [PathBuf; 5] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-sheets/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench"),
     ]
 }
 
@@ -1589,7 +1593,7 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// 12 -> 11: the shortcut platform's allow moves with the workbench framework
 /// to `rspice-app-workbench`, whose own guard counts it.
-const MAX_LINT_SUPPRESSIONS: usize = 11;
+const MAX_LINT_SUPPRESSIONS: usize = 9;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
@@ -2027,6 +2031,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-workbench/src",
     "rspice-app-sheets/src",
     "rspice-app-settings/src",
+    "rspice-app-results/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",
@@ -2050,6 +2055,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
 /// every property of every card in that workspace and published nothing at
 /// all — and this is what was left.
 const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
+    "rspice-app-results/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app-workbench/src/workbench/app/dialogs/review_primitives.rs::purpose_line",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_dialog",
     "rspice-app-workbench/src/workbench/docks/drawers.rs::mobile_navigation_group",
@@ -2060,7 +2066,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
     "rspice-app/src/workbench/app/dialogs/library/cell_ops_dialogs.rs::process_copy_cell_dialog",
     "rspice-app/src/workbench/app/dialogs/library/new_cell_dialog.rs::process_new_cell_dialog",
-    "rspice-app/src/workbench/docks/inspector/results.rs::trace_colour_row",
     "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
     "rspice-app/src/workbench/surfaces/design/layout_editor.rs::show_canvas",
     "rspice-app/src/workbench/surfaces/model_editor.rs::dialog_subheading",

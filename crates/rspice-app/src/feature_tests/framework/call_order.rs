@@ -18,7 +18,7 @@ const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
-const RESULTS: &str = include_str!("../../workbench/results.rs");
+const RESULTS: &str = include_str!("../../../../rspice-app-results/src/workbench/results.rs");
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 

@@ -555,10 +555,10 @@ fn remove_pane_edits(
     Ok(edits)
 }
 
-pub(crate) mod compare;
-pub(crate) mod family;
-pub(crate) mod links;
-pub(crate) mod measurement;
+pub mod compare;
+pub mod family;
+pub mod links;
+pub mod measurement;
 mod properties;
 
 pub use compare::{compare_availability, open_compare};

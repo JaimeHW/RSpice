@@ -11,7 +11,7 @@ mod netlist_compat;
 mod netlist_export;
 mod simulate_menu;
 mod tools_menu;
-mod waveform_export;
+use rspice_app_results::workbench::menu_bar::waveform_export;
 
 pub(crate) use file_menu::{FileMenuAction, dispatch_file_menu_action};
 pub(crate) use netlist_export::{
@@ -20,10 +20,9 @@ pub(crate) use netlist_export::{
 };
 pub(crate) use simulate_menu::open_simulation_options;
 pub(crate) use tools_menu::{check_cellview, check_design};
-pub(crate) use waveform_export::{
-    DatasetExportPicker, action_export_csv_with_io, action_export_result_selection_with_io,
-    show_dataset_export_picker,
-};
+pub(crate) use waveform_export::action_export_result_selection_with_io;
+#[cfg(test)]
+pub(crate) use waveform_export::{DatasetExportPicker, action_export_csv_with_io};
 
 use crate::workbench::app_state::AppState;
 

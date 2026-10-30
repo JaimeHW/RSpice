@@ -62,8 +62,8 @@ pub(crate) mod chrome {
     pub(in crate::workbench) mod presence;
     pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
     pub(crate) mod activity_rail {
+        pub(in crate::workbench) use rspice_app_results::workbench::chrome::activity_rail::results;
         pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
-        pub(in crate::workbench) mod results;
     }
     pub(crate) mod document_bar {
         pub use rspice_app_workbench::workbench::chrome::document_bar::*;
@@ -71,13 +71,13 @@ pub(crate) mod chrome {
         pub(crate) mod design;
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod project;
-        pub(in crate::workbench) mod results;
+        pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
         pub(in crate::workbench) mod simulate;
     }
     pub(crate) mod status_bar {
         pub use rspice_app_workbench::workbench::chrome::status_bar::*;
         pub(crate) mod design;
-        pub(crate) mod results;
+        pub(crate) use rspice_app_results::workbench::chrome::status_bar::results;
         pub(crate) use rspice_app_sheets::workbench::chrome::status_bar::sheets;
         pub(in crate::workbench) mod shell;
     }
@@ -92,7 +92,7 @@ pub(crate) mod chrome {
         pub(crate) mod design;
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod project;
-        pub(crate) mod results;
+        pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
         pub(in crate::workbench) mod run_config_chip;
         pub(crate) mod simulate;
     }
@@ -104,7 +104,8 @@ pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;
 pub(crate) mod docks {
-    pub(crate) use inspector::run_details::{RunDetailsDialogState, show as show_run_details};
+    #[cfg(test)]
+    pub(crate) use inspector::run_details::RunDetailsDialogState;
     pub(crate) use navigator::stimulus::browser_state::StimulusBrowserState;
     pub use rspice_app_workbench::workbench::docks::*;
     pub(crate) mod inspector {
@@ -113,11 +114,10 @@ pub(crate) mod docks {
         pub(crate) mod design;
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod project;
-        mod result_authority;
-        pub(crate) mod results;
-        /// Visible to the dock layer: the data browser opens it from a run's row, and
-        /// the frame draws it whichever dock is showing.
-        pub(crate) mod run_details;
+        #[cfg(test)]
+        pub(crate) use rspice_app_results::workbench::docks::inspector::results;
+        #[cfg(test)]
+        pub(crate) use rspice_app_results::workbench::docks::inspector::run_details;
         pub(in crate::workbench) mod simulation;
         /// Visible to the dock layer so the library browser's own gate can render this
         /// pane beside it: the two docks state the same counts about the same design,
@@ -136,9 +136,12 @@ pub(crate) mod docks {
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod netlist;
         pub(in crate::workbench) mod project;
-        pub(in crate::workbench) mod results;
-        mod results_actions;
-        mod results_rows;
+        #[cfg(test)]
+        pub(in crate::workbench) use rspice_app_results::workbench::docks::navigator::results;
+        #[cfg(test)]
+        use rspice_app_results::workbench::docks::navigator::results_actions;
+        #[cfg(test)]
+        use rspice_app_results::workbench::docks::navigator::results_rows;
         pub(in crate::workbench) mod simulate;
         pub(in crate::workbench) mod source_bundle;
         pub(in crate::workbench) mod stimulus;
@@ -156,7 +159,7 @@ pub(crate) mod documents {
     pub(crate) mod model_correlation;
     pub(crate) mod model_editor;
     pub(crate) mod netlist_document;
-    pub(crate) mod result_document;
+    pub(crate) use rspice_app_results::workbench::documents::result_document;
     pub(crate) mod text_document_model;
     pub(crate) mod text_editor_commands;
     pub(crate) mod virtual_text_editor;
@@ -204,9 +207,9 @@ pub(crate) mod logging;
 pub(crate) mod menu_bar;
 pub(crate) mod models;
 pub(crate) mod project;
+pub(crate) use rspice_app_results::workbench::results;
 pub(crate) use rspice_app_runs::workbench::preflight;
 pub(crate) use rspice_app_state::workbench::preferences;
-pub(crate) mod results;
 pub(crate) use rspice_app_workbench::workbench::routing;
 /// The shell's transactions over the whole project, run where a feature's
 /// work asks for one.
@@ -253,11 +256,13 @@ pub use localization::UiTextLocale;
 pub(crate) use localization::{MessageCatalog, MessageId};
 pub(crate) use preferences::DrawingSheetPersonalPreferences;
 pub use preferences::{
-    BackgroundTaskAttention, ChoicePreference, ComplexNumberDisplay, EngineeringExportFormat,
-    ScalarPreference, TogglePreference, WorkspacePreferences, WorkspacePreset,
+    BackgroundTaskAttention, ChoicePreference, TogglePreference, WorkspacePreferences,
+    WorkspacePreset,
 };
 #[cfg(test)]
-pub use preferences::{ConsoleLaunchBehavior, FolderListPreference, UserPreferences};
+pub use preferences::{
+    ConsoleLaunchBehavior, FolderListPreference, ScalarPreference, UserPreferences,
+};
 #[cfg(any(test, target_arch = "wasm32"))]
 pub use routing::navigation::BrowserHistoryEffect;
 pub use routing::navigation::{RouteTransitionSource, SurfaceNavigation};

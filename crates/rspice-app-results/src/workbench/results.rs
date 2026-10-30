@@ -8,10 +8,10 @@
 //! whether a project is open. The data browser, the Results navigator,
 //! draws in the same context.
 
-pub(crate) mod calculator;
-pub(crate) mod commands;
+pub mod calculator;
+pub mod commands;
 mod expression_diagnostics;
-pub(crate) mod surface;
+pub mod surface;
 
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::commands::result_navigation::{

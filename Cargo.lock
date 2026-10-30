@@ -5166,9 +5166,6 @@ dependencies = [
 name = "rspice-app"
 version = "0.1.0"
 dependencies = [
- "arrow-array",
- "arrow-ipc",
- "arrow-schema",
  "base64 0.23.1",
  "chrono",
  "csv",
@@ -5178,15 +5175,12 @@ dependencies = [
  "egui",
  "egui_extras",
  "env_logger",
- "fst-writer",
  "futures-util",
  "getrandom 0.4.3",
  "gloo-timers",
  "js-sys",
- "krilla",
  "log",
  "lopdf",
- "matfile",
  "num-complex",
  "parquet",
  "png",
@@ -5195,6 +5189,7 @@ dependencies = [
  "rfd",
  "ron",
  "ropey",
+ "rspice-app-results",
  "rspice-app-runs",
  "rspice-app-services",
  "rspice-app-settings",
@@ -5250,6 +5245,44 @@ dependencies = [
  "windows-sys 0.61.2",
  "winit",
  "winresource",
+ "zip",
+]
+
+[[package]]
+name = "rspice-app-results"
+version = "0.1.0"
+dependencies = [
+ "arrow-array",
+ "arrow-ipc",
+ "arrow-schema",
+ "csv",
+ "egui",
+ "fst-writer",
+ "matfile",
+ "num-complex",
+ "parquet",
+ "rfd",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-core",
+ "rspice-design",
+ "rspice-formats",
+ "rspice-hardcopy",
+ "rspice-hardcopy-contract",
+ "rspice-results",
+ "rspice-results-ui",
+ "rspice-schematic-editor",
+ "rspice-simulation-contract",
+ "rspice-ui-kit",
+ "rspice-vocabulary",
+ "rustyhdf5",
+ "serde",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "uuid",
  "zip",
 ]
 

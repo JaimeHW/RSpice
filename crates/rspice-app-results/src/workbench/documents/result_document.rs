@@ -9,25 +9,25 @@ pub(crate) mod axis_range;
 mod bars;
 mod bode;
 mod box_violin;
-pub(crate) mod create_document;
-pub(crate) mod document_edit;
+pub mod create_document;
+pub mod document_edit;
 pub(crate) use document_edit::show as show_document_dialog;
 mod events;
 mod eye;
 mod fft;
-pub(crate) mod frame_work;
+pub mod frame_work;
 mod harmonic_balance;
 mod hist;
-pub(crate) mod import;
+pub mod import;
 mod instrument;
-pub(crate) mod manifest;
+pub mod manifest;
 pub(crate) mod network_matrix;
 mod noise_contrib;
 mod nyquist;
-pub(crate) mod op_inspector;
-pub(crate) mod operational_state;
+pub mod op_inspector;
+pub mod operational_state;
 mod optimization;
-pub(crate) mod persistent_document;
+pub mod persistent_document;
 mod phase_noise;
 mod polar;
 mod population;
@@ -35,12 +35,12 @@ mod pz;
 mod retained_memo;
 mod scatter;
 mod sensitivity;
-pub(crate) mod smith;
+pub mod smith;
 mod soa;
-pub(crate) mod specs;
+pub mod specs;
 mod table;
 mod transfer_function;
-pub(crate) mod view_context;
+pub mod view_context;
 mod view_plans;
 mod viewer_state;
 
@@ -147,7 +147,7 @@ pub use document_edit::{
     toggle_linked_cursors,
 };
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn visualization_source_dataset(
     run: &crate::state::SimulationRun,
     analysis: &crate::state::AnalysisResult,
@@ -155,7 +155,7 @@ pub fn visualization_source_dataset(
     create_document::source_dataset(run, analysis).map_err(|error| error.to_string())
 }
 
-pub(crate) mod waves;
+pub mod waves;
 pub(crate) use waves::copy_cursor_text;
 pub use waves::{
     ActivePaneFacts, SharedXStatus, active_pane_facts, active_shared_x_status,
@@ -170,7 +170,7 @@ use std::collections::{HashMap, HashSet};
 
 use egui::{Ui, WidgetInfo, WidgetType};
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub(crate) use crate::state::result_presentation::TracePresentationKey;
 pub use crate::state::result_presentation::{AnalysisPresentationKey, WaveformPresentationKey};
 pub use crate::state::result_presentation::{
@@ -452,8 +452,8 @@ mod exact_evidence_quarantine_tests;
 #[cfg(test)]
 mod copied_value_tests;
 
-#[cfg(test)]
-pub(crate) mod test_fixtures;
+#[cfg(any(test, feature = "test-support"))]
+pub mod test_fixtures;
 #[cfg(test)]
 pub(crate) mod test_host;
 #[cfg(test)]
@@ -1033,7 +1033,7 @@ pub fn commit_marker_edit(
 /// Production anchors come from the drawn trace, which carries the family
 /// discriminator this cannot know; this exists so persistence tests can name
 /// a signal without standing up a whole strip.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn marker_anchor_for(
     analysis: AnalysisPresentationKey,
     source_name: &str,
