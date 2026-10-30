@@ -25,6 +25,7 @@ pub(crate) mod publish;
 pub(crate) mod render;
 #[cfg(test)]
 mod setting_effects;
+mod unsaved_sheet;
 #[cfg(any(test, target_arch = "wasm32"))]
 pub(crate) mod worker;
 /// Resolution a raster export starts at when the setup carries none. It is a
@@ -432,6 +433,10 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) content_extent: Option<ContentExtent>,
     pub(crate) resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
     pub(crate) schematic_page_authority: Option<SchematicPageSetupAuthority>,
+    /// A drawing sheet opened with nothing saved: how it was drawn, and how
+    /// the dialog last laid it out for its target. Boxed: two whole setups
+    /// would hold the dialog over its inline stack budget.
+    pub(crate) unsaved_sheet: Option<Box<unsaved_sheet::UnsavedSheetLayout>>,
     pub(crate) source_candidates:
         Vec<crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
     pub(crate) paper: PaperDraft,
@@ -570,6 +575,7 @@ impl HardcopyDialogState {
             content_extent: None,
             resolved_document: None,
             schematic_page_authority: None,
+            unsaved_sheet: None,
             source_candidates: Vec::new(),
             paper: PaperDraft::from_paper(physical.paper(), display_unit),
             display_unit,
@@ -700,10 +706,15 @@ impl HardcopyDialogState {
             || Ok(document.default_print_mapping().clone()),
             |setup| merge_print_mapping(document.default_print_mapping(), setup.print_mapping()),
         )?;
-        let unsaved = saved.is_none().then(|| unsaved_setup(&document));
-        self.open(workflow, authority, extent, saved.or(unsaved.as_ref()));
+        let as_drawn = saved.is_none().then(|| sheet_as_drawn(&document)).flatten();
+        self.open(workflow, authority, extent, saved.or(as_drawn.as_ref()));
         self.resolved_document = Some(std::sync::Arc::new(document));
         self.print_mapping = mapping;
+        self.unsaved_sheet = as_drawn.and_then(|as_drawn| {
+            self.page_layout().ok().map(|laid_out| {
+                Box::new(unsaved_sheet::UnsavedSheetLayout::new(as_drawn, laid_out))
+            })
+        });
         self.refresh_preview();
         Ok(())
     }
@@ -719,6 +730,7 @@ impl HardcopyDialogState {
         self.content_extent = None;
         self.resolved_document = None;
         self.schematic_page_authority = None;
+        self.unsaved_sheet = None;
         self.source_candidates.clear();
         self.error = None;
         self.error_section = None;
@@ -941,6 +953,21 @@ impl HardcopyDialogState {
         print_mapping: &PrintMappingTable,
     ) -> Result<HardcopySetup, HardcopyDialogError> {
         self.validate_schematic_output_contract()?;
+        self.assemble_setup(print_mapping, false)
+    }
+
+    /// The page this draft lays out, whatever it is sent to.
+    fn page_layout(&self) -> Result<HardcopySetup, HardcopyDialogError> {
+        self.assemble_setup(&self.print_mapping, true)
+    }
+
+    /// The draft as a setup; with `page_only`, as one sent to a file, so the
+    /// page it lays out compiles before a printer is chosen.
+    fn assemble_setup(
+        &self,
+        print_mapping: &PrintMappingTable,
+        page_only: bool,
+    ) -> Result<HardcopySetup, HardcopyDialogError> {
         let parse = |value: &str| Length::parse_decimal(value, self.display_unit);
         let bleed = match parse(&self.bleed)? {
             Length::ZERO => Bleed::None,
@@ -960,11 +987,15 @@ impl HardcopyDialogState {
         } else {
             self.tiling
         };
-        let is_platform_print = self.format == runtime_print_format();
-        let target = if is_platform_print {
-            runtime_print_target(&self.printer_id, self.printer_job.as_ref())?
+        let (target, format) = if page_only {
+            (RenderTarget::ExportArtifact, OutputFormat::PdfVector)
+        } else if self.format == runtime_print_format() {
+            (
+                runtime_print_target(&self.printer_id, self.printer_job.as_ref())?,
+                self.format,
+            )
         } else {
-            RenderTarget::ExportArtifact
+            (RenderTarget::ExportArtifact, self.format)
         };
         let authored_media = if matches!(self.paper, PaperDraft::MatchAuthoredSheets) {
             Some(
@@ -997,7 +1028,7 @@ impl HardcopyDialogState {
             TilingSetup::try_new(tiling_mode, parse(&self.overlap)?, self.registration_marks)?,
             RenderSetup::try_new(
                 target,
-                self.format,
+                format,
                 self.color_mapping,
                 self.background,
                 FontPolicy::new(self.embed_fonts, self.searchable_text),
@@ -1108,16 +1139,16 @@ impl HardcopyDialogState {
     }
 }
 
-/// The setup a source starts from when nothing is saved for it. An authored
-/// drawing sheet prints as drawn, on its own paper at 1:1: its title block
-/// already says what it is. Every other source (a selection, a symbol, a plot,
-/// results or a report) starts from the general default.
-fn unsaved_setup(document: &ResolvedHardcopyDocument) -> HardcopySetup {
+/// The setup a source carrying an authored drawing sheet starts from when
+/// nothing is saved for it: the sheet as drawn, on its own paper at 1:1, since
+/// its title block already says what it is. Every other source (a selection, a
+/// symbol, a plot, results or a report) has none and starts from the general
+/// default.
+fn sheet_as_drawn(document: &ResolvedHardcopyDocument) -> Option<HardcopySetup> {
     document
         .authored_sheet_output_media()
         .ok()
         .and_then(|media| HardcopySetup::for_authored_sheets(media).ok())
-        .unwrap_or_default()
 }
 
 fn merge_print_mapping(

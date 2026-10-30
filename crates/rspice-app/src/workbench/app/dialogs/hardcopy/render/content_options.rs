@@ -402,13 +402,18 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
     action
 }
 
-/// The closed reading of a scale mode that derives its own percentage. Kept
-/// short because the control has to say it inside one line of the narrow
-/// column; the list it opens carries the full names.
+/// The closed reading of a scale mode that derives its own percentage: the
+/// paper it fits and the number that comes to, so a fitted drawing never
+/// reads as 1:1. Kept short because the control has to say it inside one line
+/// of the narrow column; the list it opens carries the full names.
 fn resolved_scale(draft: &HardcopyDialogState) -> Option<String> {
+    let paper = match &draft.paper {
+        PaperDraft::MatchAuthoredSheets => "sheet".to_owned(),
+        paper => super::short_paper_label(paper),
+    };
     let mode = match draft.scale {
-        ScaleMode::FitPrintableArea => "Fit page",
-        ScaleMode::FitWidth => "Fit width",
+        ScaleMode::FitPrintableArea => format!("Fit {paper}"),
+        ScaleMode::FitWidth => format!("Fit {paper} width"),
         ScaleMode::EngineeringOneToOne | ScaleMode::CustomPercent { .. } => return None,
     };
     let tenths = draft
@@ -1150,6 +1155,43 @@ mod tests {
         draft.format = OutputFormat::SvgVector;
         draft.refresh_preview();
         draft
+    }
+
+    /// A fitted scale names the paper it fits and the number that comes to,
+    /// so a fitted drawing never reads as 1:1 in the closed control.
+    #[test]
+    fn a_fitted_scale_names_the_paper_it_fits() {
+        let mut draft = sheet_draft();
+        let reading = |draft: &mut HardcopyDialogState, paper, scale| {
+            draft.paper = paper;
+            draft.scale = scale;
+            draft.refresh_preview();
+            let tenths = draft
+                .preview_plan
+                .as_ref()
+                .expect("the fitted page previews")
+                .pagination()
+                .scale()
+                .hundredths_percent()
+                / 10;
+            (
+                resolved_scale(draft),
+                format!("{}.{}%", tenths / 10, tenths % 10),
+            )
+        };
+        let letter = PaperDraft::Standard(StandardPaper::Letter);
+        let (closed, percent) = reading(&mut draft, letter.clone(), ScaleMode::FitPrintableArea);
+        assert_eq!(closed, Some(format!("Fit US Letter · {percent}")));
+        let (closed, percent) = reading(&mut draft, letter, ScaleMode::FitWidth);
+        assert_eq!(closed, Some(format!("Fit US Letter width · {percent}")));
+        let (closed, percent) = reading(
+            &mut draft,
+            PaperDraft::MatchAuthoredSheets,
+            ScaleMode::FitPrintableArea,
+        );
+        assert_eq!(closed, Some(format!("Fit sheet · {percent}")));
+        draft.scale = ScaleMode::EngineeringOneToOne;
+        assert_eq!(resolved_scale(&draft), None);
     }
 
     fn metadata(lettered: bool) -> HardcopySceneMetadata {

@@ -461,6 +461,9 @@ pub struct PrinterCatalogEntry {
     capabilities: PrinterCapabilitySnapshot,
     is_default: bool,
     queue_status_flags: u32,
+    /// The paper the driver's own settings print on, when it names one.
+    #[serde(default)]
+    default_paper_platform_id: Option<i16>,
 }
 
 impl PrinterCatalogEntry {
@@ -472,6 +475,11 @@ impl PrinterCatalogEntry {
     #[must_use]
     pub const fn is_default(&self) -> bool {
         self.is_default
+    }
+
+    #[must_use]
+    pub const fn default_paper_platform_id(&self) -> Option<i16> {
+        self.default_paper_platform_id
     }
 }
 

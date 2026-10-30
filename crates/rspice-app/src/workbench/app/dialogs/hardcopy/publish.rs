@@ -1062,6 +1062,24 @@ pub(super) fn select_printer_capabilities(
             .map(|value| value.collate)
             .or_else(|| previous.as_ref().map(PrinterJobSettings::collate))
             .unwrap_or(false);
+    // A sheet with nothing saved prints fitted to this printer's paper,
+    // unless the driver's own settings just named one.
+    let fitted = suggested.is_none() && {
+        let default_paper = parts
+            .dialog
+            .printer_report
+            .as_ref()
+            .and_then(|report| {
+                report
+                    .printers()
+                    .iter()
+                    .find(|entry| entry.capabilities().device_id() == capabilities.device_id())
+            })
+            .and_then(|entry| entry.default_paper_platform_id());
+        parts
+            .dialog
+            .fit_unsaved_sheet_to_printer(&capabilities, default_paper)
+    };
     let selected_paper_id = suggested
         .as_ref()
         .and_then(|value| value.paper_platform_id)
@@ -1092,6 +1110,11 @@ pub(super) fn select_printer_capabilities(
                 return;
             }
         };
+    if fitted {
+        parts
+            .dialog
+            .keep_unsaved_sheet_inside(raster_geometry, resolution);
+    }
     match PrinterJobSettings::try_new(
         capabilities.content_digest(),
         selected_paper_id,

@@ -96,6 +96,11 @@ pub(super) fn discover_native_printers() -> Result<PrinterDiscoveryReport, Hardc
     for name in names {
         match resolve_printer(&name) {
             Ok(printer) => report.printers.push(PrinterCatalogEntry {
+                default_paper_platform_id: suggestion_from_devmode(
+                    &printer.devmode,
+                    &printer.capabilities,
+                )
+                .paper_platform_id,
                 capabilities: printer.capabilities,
                 is_default: printer.attributes & PRINTER_ATTRIBUTE_DEFAULT != 0,
                 queue_status_flags: printer.status,
