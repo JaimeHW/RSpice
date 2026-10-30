@@ -3,7 +3,30 @@
 use super::*;
 use crate::SpiceDialect;
 
+/// ngspice's `NIiter` floors every Newton call's iteration limit to 100
+/// (`niiter.c`: "some convergence issues that get resolved by increasing max
+/// iter"), the default ITL1.
+const NGSPICE_NIITER_FLOOR: usize = 100;
+
 impl Engine {
+    /// The direct DC operating-point Newton's budget: ITL1 as authored, with
+    /// ngspice's floor of 100. Past it the operating point belongs to the
+    /// homotopy aids, as in ngspice's `CKTop`.
+    #[inline]
+    pub(in crate::engine::convergence) fn dc_direct_newton_budget(&self) -> usize {
+        self.config.max_iterations.max(NGSPICE_NIITER_FLOOR)
+    }
+
+    /// The Newton budget of one dynamic GMIN stage: ITL2, with the floor
+    /// ngspice's `NIiter` applies to it (`dynamic_gmin` calls
+    /// `NIiter(ckt, ckt->CKTdcTrcvMaxIter)`).
+    #[inline]
+    pub(in crate::engine::convergence) fn gmin_stage_newton_budget(&self) -> usize {
+        self.config
+            .dc_transfer_max_iterations
+            .max(NGSPICE_NIITER_FLOOR)
+    }
+
     #[inline]
     pub(in crate::engine::convergence) fn nonlinear_iteration_budget(
         &self,

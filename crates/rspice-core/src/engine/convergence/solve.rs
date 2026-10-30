@@ -1026,8 +1026,7 @@ impl Engine {
         // transiently rises along the convergent direction).
         let junction_owns_steps = Self::junction_limiting_owns_newton_steps(circuit)
             || self.b3soi_limiter_owns_global_damping(circuit);
-        // Allow additional iterations for damped nonlinear operating-point solves.
-        let dc_max_iterations = self.nonlinear_iteration_budget(10);
+        let dc_max_iterations = self.dc_direct_newton_budget();
         let mut direct_iterations = 0usize;
         let mut residual_stall_iterations = 0usize;
         let mut residual_stalled = false;
@@ -1496,16 +1495,14 @@ impl Engine {
         } else {
             self.prefer_lower_merit_scaled_seed(circuit, matrix, &solution, &zero_seed, 1.0)
         };
-        let prefer_gate_generation_aids = circuit.has_jfet_gate_generation_branches();
-        let prefer_gmin_aids =
-            prefer_gate_generation_aids || !circuit.b3soi.is_empty() || !circuit.bjts.is_empty();
-        let mut gmin_attempted = false;
+        let gate_generation_aid = circuit.has_jfet_gate_generation_branches();
 
-        if prefer_gmin_aids && allow_gmin {
+        // The aids run in ngspice's order (cktop.c, CKTop): dynamic GMIN
+        // stepping, then source stepping, then the continuation methods.
+        if allow_gmin {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            gmin_attempted = true;
             let gmin_state = circuit.nonlinear_state_snapshot();
             match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
                 Ok(gmin_solution) => {
@@ -1536,8 +1533,11 @@ impl Engine {
                 }
                 Err(e) => {
                     circuit.restore_nonlinear_state(gmin_state);
+                    if !allow_source && !allow_pseudo && !allow_arc && !gate_generation_aid {
+                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
+                    }
                     log::warn!(
-                        "Early GMIN stepping for weakly anchored nonlinear devices failed with {}. Continuing with configured aids.",
+                        "GMIN stepping failed with {}. Escalating to next configured aid.",
                         e
                     );
                 }
@@ -1658,7 +1658,7 @@ impl Engine {
                 }
                 Err(e) => {
                     circuit.restore_nonlinear_state(source_state);
-                    if !allow_pseudo && !allow_gmin && !allow_arc {
+                    if !allow_pseudo && !allow_arc && !gate_generation_aid {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
@@ -1711,7 +1711,7 @@ impl Engine {
                     }
                 }
                 Err(e) => {
-                    if !allow_gmin && !allow_arc {
+                    if !allow_arc && !gate_generation_aid {
                         return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
                     }
                     log::warn!(
@@ -1722,52 +1722,7 @@ impl Engine {
             }
         }
 
-        if allow_gmin && !gmin_attempted {
-            if abort.is_aborted() {
-                return Err(SimulationError::Aborted);
-            }
-            let gmin_state = circuit.nonlinear_state_snapshot();
-            match self.gmin_stepping_nonlinear_with_abort(circuit, matrix, &fallback_seed, abort) {
-                Ok(gmin_solution) => {
-                    if let Some(candidate) = self.evaluate_fallback_candidate(
-                        circuit,
-                        matrix,
-                        gmin_solution.clone(),
-                        "GMIN stepping",
-                        abort,
-                    )? {
-                        return Ok(candidate);
-                    }
-                    fallback_seed = self.prefer_lower_merit_scaled_seed(
-                        circuit,
-                        matrix,
-                        &fallback_seed,
-                        &gmin_solution,
-                        1.0,
-                    );
-                    if let Some(restarted) =
-                        self.warm_restart_after_fallback(circuit, matrix, &fallback_seed, abort)?
-                    {
-                        log::info!(
-                            "GMIN stepping warmed the nonlinear state; direct Newton restart accepted."
-                        );
-                        return Ok(restarted);
-                    }
-                }
-                Err(e) => {
-                    circuit.restore_nonlinear_state(gmin_state);
-                    if !allow_arc {
-                        return Err(prefer_nonfinite_trial_failure(e, &nonfinite_direct_failure));
-                    }
-                    log::warn!(
-                        "GMIN stepping failed with {}. Escalating to arc-length continuation.",
-                        e
-                    );
-                }
-            }
-        }
-
-        if circuit.has_jfet_gate_generation_branches() {
+        if gate_generation_aid {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }

@@ -1024,37 +1024,18 @@ impl Engine {
             circuit.reset_b3soi_operating_point_history();
         }
         let mut damping_state = NewtonDampingState::default();
-        // Each stage takes ITL2 Newton iterations, as `NIiter(ckt,
-        // ckt->CKTdcTrcvMaxIter)` does there.
-        let gmin_iterations = self.config.dc_transfer_max_iterations.max(1);
+        // Each stage takes the iterations `NIiter(ckt, ckt->CKTdcTrcvMaxIter)`
+        // allows there; the factor adapts to ITL2 itself.
+        let gmin_iterations = self.gmin_stage_newton_budget();
+        let itl2 = self.config.dc_transfer_max_iterations.max(1);
         let mut total_iterations = 0usize;
 
-        let (initial_solution, initial_converged, initial_iterations) = self
-            .solve_gmin_nonlinear_corrector(
-                circuit,
-                matrix,
-                start_gmin,
-                CorrectorRun {
-                    initial_solution: &solution,
-                    damping_state: &mut damping_state,
-                    max_iterations: gmin_iterations,
-                },
-                abort,
-            )?;
-        total_iterations = total_iterations.saturating_add(initial_iterations);
-        if abort.is_aborted() {
-            return Err(SimulationError::Aborted);
-        }
-        if !initial_converged {
-            return Err(stopped(
-                None,
-                start_gmin,
-                total_iterations.max(gmin_iterations),
-            ));
-        }
-        solution = initial_solution;
-
-        let mut accepted_gmin = start_gmin;
+        // ngspice's walk starts one full factor above its first stage
+        // (`OldGmin = 1e-2; CKTdiagGmin = OldGmin / factor`), so a first stage
+        // that fails is retried nearer that start with a smaller factor, as
+        // any failed stage is.
+        let mut accepted_gmin = start_gmin * 10.0_f64.powf(MAX_GMIN_STEP_DECADES);
+        let mut reached = None;
         let mut step_decades = MAX_GMIN_STEP_DECADES;
         let mut attempts = 0usize;
 
@@ -1062,7 +1043,7 @@ impl Engine {
             let target_gmin = Self::next_descending_gmin(accepted_gmin, final_gmin, step_decades);
             if attempts >= MAX_GMIN_ATTEMPTS || target_gmin >= accepted_gmin {
                 return Err(stopped(
-                    Some(accepted_gmin),
+                    reached,
                     target_gmin.min(accepted_gmin),
                     total_iterations,
                 ));
@@ -1099,14 +1080,15 @@ impl Engine {
             if converged {
                 solution = candidate;
                 accepted_gmin = target_gmin;
+                reached = Some(target_gmin);
                 damping_state = trial_damping_state;
                 // A fast stage (at most a quarter of ITL2) raises the factor
                 // to its 1.5th power, up to `gminfactor`; a slow one (over
                 // three quarters) takes its square root.
-                if used_iterations <= gmin_iterations / 4 {
+                if used_iterations <= itl2 / 4 {
                     step_decades = (step_decades * 1.5).min(MAX_GMIN_STEP_DECADES);
                 }
-                if used_iterations > 3 * gmin_iterations / 4 {
+                if used_iterations > 3 * itl2 / 4 {
                     step_decades = (step_decades * 0.5).max(min_gmin_step_decades);
                 }
             } else {
@@ -1115,7 +1097,7 @@ impl Engine {
                 // root of the factor, and gives up once the factor is below
                 // 1.00005: the walk has stalled against a fold.
                 if step_decades < min_gmin_step_decades {
-                    return Err(stopped(Some(accepted_gmin), target_gmin, total_iterations));
+                    return Err(stopped(reached, target_gmin, total_iterations));
                 }
                 step_decades *= 0.25;
             }
