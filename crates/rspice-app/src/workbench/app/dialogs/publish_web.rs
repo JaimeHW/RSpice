@@ -85,11 +85,11 @@ pub struct PublishWebDialogState {
 /// port with the parts it builds the snapshot from beside its own state.
 #[derive(Clone, Copy)]
 pub struct SnapshotSource<'a> {
-    pub(crate) hardcopy: &'a dyn HardcopyPort,
-    pub(crate) model: &'a Model,
-    pub(crate) workbench: &'a WorkbenchSession,
-    pub(crate) results: &'a dyn ResultsPort,
-    pub(crate) runs: &'a RunsState,
+    pub hardcopy: &'a dyn HardcopyPort,
+    pub model: &'a Model,
+    pub workbench: &'a WorkbenchSession,
+    pub results: &'a dyn ResultsPort,
+    pub runs: &'a RunsState,
 }
 
 impl<'a> SnapshotSource<'a> {
