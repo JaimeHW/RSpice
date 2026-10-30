@@ -610,10 +610,12 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
     let result = engine
         .run_tran_with_startup_mode(&deck, 60.0e-9, 6.0e-9, TransientStartupMode::OperatingPoint)
         .unwrap();
+    // The schedule's copy of the 25 ns corner's arrival, and the line's own.
+    let breakpoint: f64 = 25.0e-9 + 10.0e-9;
     let arrival: f64 = 25.0e-9_f64.next_up() + 10.0e-9;
-    assert_eq!(arrival, 3.5000000000000002e-8);
+    assert!(breakpoint < arrival);
     assert!(result.time.contains(&arrival));
-    assert!(!result.time.contains(&(25.0e-9 + 10.0e-9)));
+    assert!(!result.time.contains(&breakpoint));
     let shortest = result
         .time
         .windows(2)
@@ -629,18 +631,18 @@ fn a_breakpoint_ulps_before_a_line_arrival_lands_on_the_arrival() {
 
     // Xyce 7.10: time, V(near), V(far).
     let xyce = [
-        (1.41879999999999696e-08, 0.0, 2.5),
-        (1.50999999999999996e-08, 0.0, 2.5),
-        (1.51006250000000003e-08, 0.0, 2.48437500000000311),
-        (1.51050000000000019e-08, 0.0, 2.37499999999996225),
-        (1.51400000000000019e-08, 0.0, 1.49999999999996203),
-        (1.51800000000000009e-08, 0.0, 4.99999999999986677e-01),
-        (1.52000000000000005e-08, 0.0, 0.0),
-        (3.42880000000000421e-08, 0.0, 0.0),
-        (3.50000000000000024e-08, 0.0, 0.0),
-        (3.50000097656250031e-08, 0.0, 2.44140625017078895e-04),
-        (3.50003125000000044e-08, 0.0, 7.81250000005021678e-03),
-        (3.50025000000000052e-08, 0.0, 6.25000000000708600e-02),
+        (1.418799999999997e-8, 0.0, 2.5),
+        (1.51e-8, 0.0, 2.5),
+        (1.5100625e-8, 0.0, 2.484375000000003),
+        (1.5105000000000002e-8, 0.0, 2.3749999999999623),
+        (1.5140000000000002e-8, 0.0, 1.499999999999962),
+        (1.518e-8, 0.0, 0.4999999999999867),
+        (1.52e-8, 0.0, 0.0),
+        (3.428800000000004e-8, 0.0, 0.0),
+        (3.5e-8, 0.0, 0.0),
+        (3.5000009765625e-8, 0.0, 0.0002441406250170789),
+        (3.5000312500000004e-8, 0.0, 0.007812500000050217),
+        (3.5002500000000005e-8, 0.0, 0.06250000000007086),
     ];
     let near = result.try_voltage_waveform_named("near").unwrap();
     let far = result.try_voltage_waveform_named("far").unwrap();
