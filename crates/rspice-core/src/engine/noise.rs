@@ -5186,12 +5186,22 @@ r1 a 0 rmod
             .filter(|process| process.instance.eq_ignore_ascii_case("r1"))
             .collect::<Vec<_>>();
         assert_eq!(r2_sources.len(), 2, "R2 exports two canonical mechanisms");
+        // A generated process carries Xyce's `<kind>_<pos>_<neg>_<label>`
+        // name, so DNO(R1,white_n1_n2_thermal) resolves, and the catalog that
+        // contribution rows key on names the same mechanisms.
         let mechanisms = r2_sources
             .iter()
             .map(|source| source.mechanism.as_str())
             .collect::<std::collections::HashSet<_>>();
-        assert!(mechanisms.contains("THERMAL"));
-        assert!(mechanisms.contains("FLICKER"));
+        assert!(mechanisms.contains("WHITE_N1_N2_THERMAL"));
+        assert!(mechanisms.contains("FLICKER_N1_N2_FLICKER"));
+        let catalog = Engine::veriloga_noise_process_catalog(&circuit);
+        let catalogued = catalog
+            .iter()
+            .filter(|identity| identity.device.eq_ignore_ascii_case("r1"))
+            .map(|identity| identity.mechanism.as_deref().expect("named mechanism"))
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(catalogued, mechanisms);
         for source in &r2_sources {
             assert_eq!(source.injections.len(), 1);
             assert_eq!(source.injections[0].node_neg, 0);
@@ -5200,7 +5210,7 @@ r1 a 0 rmod
         assert!(
             r2_sources
                 .iter()
-                .find(|source| source.mechanism == "THERMAL")
+                .find(|source| source.mechanism == "WHITE_N1_N2_THERMAL")
                 .expect("thermal mechanism")
                 .psd
                 > 0.0
