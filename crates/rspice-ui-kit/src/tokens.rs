@@ -266,12 +266,10 @@ impl Tokens {
     }
 
     /// Install this token set into the egui context (done by `Theme::apply`).
-    /// Also publishes the palette process-globally for paint-level helpers
-    /// that have no [`Context`] in reach (see [`active_palette`]).
+    /// It belongs to that context alone: a painter reads its palette from
+    /// [`Tokens::get`] on its own context, so two contexts in one process
+    /// can wear different themes.
     pub fn install(self, ctx: &Context) {
-        if let Ok(mut palette) = ACTIVE_PALETTE.write() {
-            *palette = self.color;
-        }
         let tokens = Arc::new(self);
         ctx.data_mut(|d| d.insert_temp(Self::ctx_key(), tokens));
     }
@@ -302,21 +300,6 @@ impl Tokens {
             color: self.color.shadow_color,
         }
     }
-}
-
-/// Process-global copy of the active palette, refreshed by
-/// [`Tokens::install`]. Lets paint-level helpers (which receive only a
-/// `Painter`) stay theme-correct without threading a `Context` through
-/// every rendering signature.
-static ACTIVE_PALETTE: std::sync::RwLock<Palette> =
-    std::sync::RwLock::new(palette::INSTRUMENT_DARK);
-
-/// The palette of the most recently applied theme.
-pub fn active_palette() -> Palette {
-    ACTIVE_PALETTE
-        .read()
-        .map(|palette| *palette)
-        .unwrap_or(palette::INSTRUMENT_DARK)
 }
 
 #[cfg(test)]
