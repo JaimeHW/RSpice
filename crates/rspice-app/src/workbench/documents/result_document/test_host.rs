@@ -56,6 +56,14 @@ impl Default for ResultsTestHost {
 }
 
 impl ResultsTestHost {
+    /// The prompt on the status bar, if one is showing.
+    pub(crate) fn prompt_text(&self) -> Option<&str> {
+        self.workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| prompt.text.as_str())
+    }
+
     /// The parts the results workspace's predicates read.
     pub(crate) fn results_reads(&self) -> ResultsReads<'_> {
         self.results.reads(&self.model, &self.workbench)

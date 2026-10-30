@@ -146,14 +146,14 @@ pub(crate) fn show_dataset_export_picker(
 mod tests {
     use super::*;
     use crate::workbench::EngineeringExportFormat;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
     /// The picker's list is the stored choice's numbering, and its "one
     /// analysis" flags agree with the formats the export refuses on a
     /// multi-analysis view.
     #[test]
     fn the_picker_offers_every_format_the_export_writes_in_stored_order() {
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         for (index, (_, one_analysis)) in FORMATS.iter().enumerate() {
             state
                 .model
@@ -188,7 +188,7 @@ mod tests {
     fn export_remembers_the_format_and_cancel_does_not() {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.results.dataset_export = Some(DatasetExportPicker {
             format: 2,
             several_analyses: false,

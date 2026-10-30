@@ -7,7 +7,7 @@
 //! round trip and refusals are in `binary_formats`.
 
 use super::*;
-use crate::workbench::app_state::AppState;
+use crate::workbench::documents::result_document::test_host::ResultsTestHost;
 
 mod binary_formats;
 mod periodic_noise;
@@ -168,7 +168,7 @@ fn complex_waveform(
     )
 }
 
-fn last_log_message(state: &AppState) -> String {
+fn last_log_message(state: &ResultsTestHost) -> String {
     state
         .model
         .log_buffer
@@ -180,14 +180,14 @@ fn last_log_message(state: &AppState) -> String {
 }
 
 /// A refused export answers on the status bar.
-fn refusal(state: &AppState) -> String {
+fn refusal(state: &ResultsTestHost) -> String {
     state
         .prompt_text()
         .expect("the refusal answers on the status bar")
         .to_owned()
 }
 
-fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
+fn state_with_typed_result(analysis: AnalysisResult) -> ResultsTestHost {
     let viewer = match analysis.analysis_type {
         AnalysisType::DcOp => crate::workbench::ResultViewer::Op,
         AnalysisType::PoleZero => crate::workbench::ResultViewer::PoleZero,
@@ -203,7 +203,7 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     };
     let mut run = SimulationRun::new(1);
     run.add_analysis(analysis);
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -211,7 +211,7 @@ fn state_with_typed_result(analysis: AnalysisResult) -> AppState {
     state
 }
 
-fn activate_result_document(state: &mut AppState, viewer: crate::workbench::ResultViewer) {
+fn activate_result_document(state: &mut ResultsTestHost, viewer: crate::workbench::ResultViewer) {
     let dataset_id = state
         .model
         .simulation
@@ -224,7 +224,7 @@ fn activate_result_document(state: &mut AppState, viewer: crate::workbench::Resu
     state.results.results.session.viewer = viewer;
 }
 
-fn bind_active_fft_authority(state: &mut AppState) {
+fn bind_active_fft_authority(state: &mut ResultsTestHost) {
     let authority = {
         let run = state
             .model
@@ -531,59 +531,6 @@ fn csv_export_from_a_retained_sheet_is_unchanged_by_the_derived_route() {
         "a waveform sheet must still go through the waveform dataset writer"
     );
     assert_eq!(io.datasets.borrow().len(), 1);
-}
-
-/// The file the reader just chose is named on the status bar, and the Console
-/// keeps the same line. Nothing is toasted for an export that worked.
-#[test]
-fn a_result_export_names_its_file_on_the_status_bar() {
-    let mut state = state_with_typed_result(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform(
-            "V(out)",
-            vec![0.0, 1.0],
-            vec![0.0, 2.0],
-        )]),
-    );
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
-    let io = MockExportWorkflowIo::default();
-
-    action_export_csv_with_io(&mut state.results_parts(), &io);
-    state.drain_notices(&egui::Context::default());
-
-    let line = last_log_message(&state);
-    assert!(line.contains("waveforms.csv"), "{line}");
-    assert_eq!(state.prompt_text(), Some(line.as_str()));
-    assert!(state.workbench.toasts.activity().is_empty());
-}
-
-/// An export the user asked for that did not happen is said now, with the
-/// way to its Console line; the reader is not left to find it under the bell.
-#[test]
-fn a_result_export_that_fails_is_toasted() {
-    let mut state = state_with_typed_result(
-        AnalysisResult::new(1, AnalysisType::Transient, "TRAN").with_waveforms(vec![waveform(
-            "V(out)",
-            vec![0.0, 1.0],
-            vec![0.0, 2.0],
-        )]),
-    );
-    state.results.results.session.viewer = crate::workbench::ResultViewer::Waves;
-    let io = MockExportWorkflowIo {
-        dialog_error: Some("the file picker is unavailable".to_owned()),
-        ..MockExportWorkflowIo::default()
-    };
-
-    action_export_csv_with_io(&mut state.results_parts(), &io);
-    state.drain_notices(&egui::Context::default());
-
-    assert_eq!(
-        last_log_message(&state),
-        "CSV export failed: the file picker is unavailable"
-    );
-    let activity = state.workbench.toasts.activity();
-    assert_eq!(activity.len(), 1);
-    assert_eq!(activity[0].title(), "CSV export failed");
-    assert_eq!(activity[0].kind(), crate::ui::widgets::ToastKind::Error);
 }
 
 #[test]
@@ -1098,7 +1045,7 @@ fn bode_export_uses_the_displayed_frequency_analysis_not_the_global_selector() {
     run.add_analysis(transient.clone());
     run.add_analysis(ac);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     // Deliberately leave the simulation selector on TRAN while the Results
@@ -1147,7 +1094,7 @@ fn waves_export_preserves_every_displayed_analysis_and_independent_axes() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(tran_a);
     run.add_analysis(tran_b);
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1173,7 +1120,7 @@ fn csv_export_preserves_single_analysis_axis_shape() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient.clone());
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1228,7 +1175,7 @@ fn csv_export_uses_the_displayed_analysis_without_a_global_analysis_selector() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient.clone());
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state
@@ -1250,7 +1197,7 @@ fn csv_export_fails_closed_when_the_active_analysis_has_no_samples() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(AnalysisResult::new(1, AnalysisType::Transient, "Transient"));
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1275,7 +1222,7 @@ fn csv_export_rejects_single_analysis_divergent_x_axes() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1306,7 +1253,7 @@ fn csv_export_ignores_divergent_axes_owned_by_an_inactive_analysis() {
     run.add_analysis(transient);
     run.add_analysis(ac);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(1);
@@ -1352,7 +1299,7 @@ fn csv_export_includes_complex_real_and_imaginary_columns() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(ac);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1517,7 +1464,7 @@ fn engineering_export_preference_dispatches_compatible_touchstone() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(ac);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1593,7 +1540,7 @@ fn incompatible_touchstone_result_is_rejected_before_save_picker() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1620,7 +1567,7 @@ fn displayed_digits_never_reduce_csv_source_precision() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1648,7 +1595,7 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(transient.clone());
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1673,7 +1620,7 @@ fn csv_export_reports_browser_download_start_without_claiming_file_written() {
 
 /// A run with two traces, one of them hidden by the reader, exported from a
 /// view showing `analyses` analyses.
-fn hidden_trace_state(analyses: usize) -> AppState {
+fn hidden_trace_state(analyses: usize) -> ResultsTestHost {
     let mut run = SimulationRun::new(7);
     for index in 0..analyses {
         run.add_analysis(
@@ -1688,7 +1635,7 @@ fn hidden_trace_state(analyses: usize) -> AppState {
             ]),
         );
     }
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1734,7 +1681,7 @@ fn a_hidden_trace_stays_out_of_the_export_for_one_analysis_and_for_many() {
     assert!(!contents.contains(",V(mid),"), "{contents}");
 }
 
-fn stacked_export_state(preference: usize) -> AppState {
+fn stacked_export_state(preference: usize) -> ResultsTestHost {
     let mut run = SimulationRun::new(7);
     for id in 1..=2 {
         let mut analysis =
@@ -1759,7 +1706,7 @@ fn stacked_export_state(preference: usize) -> AppState {
         }
         run.add_analysis(analysis);
     }
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1883,10 +1830,10 @@ fn an_export_with_every_trace_hidden_names_the_hidden_traces() {
 /// the reader pressed on the operating-point sheet.
 #[test]
 fn an_operating_point_export_that_cannot_be_produced_states_why() {
-    fn op_state(analysis: AnalysisResult) -> AppState {
+    fn op_state(analysis: AnalysisResult) -> ResultsTestHost {
         let mut run = SimulationRun::new(7);
         run.add_analysis(analysis);
-        let mut state = AppState::default();
+        let mut state = ResultsTestHost::default();
         state.model.simulation.retained.runs = vec![run].into();
         state.model.simulation.view.active_run_idx = Some(0);
         state.model.simulation.view.active_analysis_idx = Some(0);
@@ -1957,7 +1904,7 @@ fn a_display_label_change_does_not_move_an_exported_coordinate_id() {
     let mut run = SimulationRun::new(7);
     run.add_analysis(pxf);
 
-    let mut state = AppState::default();
+    let mut state = ResultsTestHost::default();
     state.model.simulation.retained.runs = vec![run].into();
     state.model.simulation.view.active_run_idx = Some(0);
     state.model.simulation.view.active_analysis_idx = Some(0);

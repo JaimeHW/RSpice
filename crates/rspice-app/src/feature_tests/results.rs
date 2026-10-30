@@ -11,3 +11,4 @@ mod result_import_adapters;
 mod retained_memo;
 mod specs;
 mod viewer_capabilities;
+mod waveform_export;

@@ -49,7 +49,8 @@ mod tests {
     fn qpnoise_result_noise_sheet_export_preserves_all_displayed_analyses() {
         use crate::state::{AnalysisResult, AnalysisType, RetainedTrace};
         let qpnoise = crate::simulation::results::qpnoise_retained_test_fixture();
-        let mut state = crate::workbench::AppState::default();
+        let mut state =
+            crate::workbench::documents::result_document::test_host::ResultsTestHost::default();
         state.model.simulation.start_run().add_analysis(qpnoise);
         state.model.simulation.view.active_analysis_idx = Some(0);
         let mut ordinary = AnalysisResult::new(2, AnalysisType::Noise, "Ordinary noise");
