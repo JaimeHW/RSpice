@@ -517,7 +517,6 @@ fn binding_fields(
         .cloned()
         .collect::<Vec<_>>();
     ui.horizontal_wrapped(|ui| {
-        ui.add_space(10.0);
         if let Some(edit) = ordered_chips(
             ui,
             &format!("{key}-views"),
@@ -589,7 +588,6 @@ fn binding_fields(
 
 fn field_label(ui: &mut Ui, label: &str, t: &Tokens) {
     ui.horizontal(|ui| {
-        ui.add_space(10.0);
         ui.label(
             egui::RichText::new(label)
                 .font(theme::sans(tokens::FS_0, FontWeight::Regular))
@@ -615,8 +613,7 @@ fn choice_row(
     field_label(ui, label, &t);
     let mut picked = None;
     ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        let width = (ui.available_width() - 10.0).max(80.0);
+        let width = ui.available_width().max(80.0);
         picked = select(ui, id, label, current, options, width);
     });
     ui.add_space(4.0);
@@ -654,8 +651,7 @@ fn committed_text(
     };
     let mut committed = None;
     ui.horizontal(|ui| {
-        ui.add_space(10.0);
-        let width = (ui.available_width() - 10.0).max(80.0);
+        let width = ui.available_width().max(80.0);
         let response = ui.add_sized(
             [width, 24.0],
             TextEdit::singleline(&mut text)

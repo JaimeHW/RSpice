@@ -25,12 +25,12 @@ const INHERITED: &str = "Inherited";
 
 /// The columns, by share of the table's width.
 const COLUMNS: [(&str, f32); 8] = [
-    ("Instance", 0.17),
-    ("Cell", 0.14),
+    ("Instance", 0.16),
+    ("Cell", 0.13),
     ("View found", 0.10),
     ("View to use", 0.13),
     ("Bound by", 0.14),
-    ("Model section", 0.10),
+    ("Model section", 0.12),
     ("Runs on", 0.07),
     ("Status", 0.15),
 ];
