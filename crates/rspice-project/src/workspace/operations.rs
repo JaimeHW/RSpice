@@ -4,8 +4,10 @@ use super::catalog::validate_hardcopy_source_set_catalog;
 use super::*;
 
 impl ProjectWorkspace {
-    /// Exact testbench root selected for simulation. Legacy projects without
-    /// configuration sets retain their project descriptor root.
+    /// Exact testbench root selected for simulation: the active
+    /// configuration's root or, with none active (a project without
+    /// configuration sets, or one returned to the built-in default), the
+    /// project descriptor's top cell.
     pub fn simulation_root_reference(&self) -> CellViewRef {
         self.configuration_sets.active().map_or_else(
             || {

@@ -678,19 +678,20 @@ impl ConfigurationSetCatalog {
             }
         }
 
+        // No active configuration is a valid selection whether or not any
+        // exist: it is the built-in default, which netlists the project's top
+        // cell through the default view search order.
         match self.active_configuration_id {
             Some(active) if !ids.contains(&active) => {
                 Err(ConfigurationSetError::ActiveConfigurationMissing(active))
-            }
-            None if !self.configurations.is_empty() => {
-                Err(ConfigurationSetError::ActiveConfigurationRequired)
             }
             _ => Ok(()),
         }
     }
 
-    /// Create a configuration. The first configuration becomes active; later
-    /// creates preserve the user's exact active selection.
+    /// Create a configuration. The first configuration in an empty catalog
+    /// becomes active; later creates preserve the user's exact active
+    /// selection, including a return to the built-in default.
     pub fn create(
         &mut self,
         definition: ConfigurationSetDefinition,
@@ -715,10 +716,10 @@ impl ConfigurationSetCatalog {
             definition,
         };
         let mut candidate = self.clone();
-        candidate.configurations.push(configuration);
-        if candidate.active_configuration_id.is_none() {
+        if candidate.configurations.is_empty() {
             candidate.active_configuration_id = Some(id);
         }
+        candidate.configurations.push(configuration);
         candidate.validate()?;
         *self = candidate;
         Ok(id)
@@ -852,8 +853,8 @@ impl ConfigurationSetCatalog {
     }
 
     /// Remove a non-active configuration under exact revision authority. An
-    /// active set must first be replaced explicitly so deletion can never
-    /// silently change the design used for netlisting.
+    /// active set must first be replaced or deactivated explicitly so deletion
+    /// can never silently change the design used for netlisting.
     pub fn remove(
         &mut self,
         id: ConfigurationSetId,
@@ -885,6 +886,22 @@ impl ConfigurationSetCatalog {
         }
         let mut candidate = self.clone();
         candidate.active_configuration_id = Some(id);
+        candidate.validate()?;
+        *self = candidate;
+        Ok(())
+    }
+
+    /// Return to the built-in default: no configuration is active, so
+    /// netlisting resolves the project's top cell through the default view
+    /// search order. Like activation this changes catalog selection, not any
+    /// configuration, so no revision moves; returning to it again is a no-op.
+    pub fn deactivate(&mut self) -> Result<(), ConfigurationSetError> {
+        self.validate()?;
+        if self.active_configuration_id.is_none() {
+            return Ok(());
+        }
+        let mut candidate = self.clone();
+        candidate.active_configuration_id = None;
         candidate.validate()?;
         *self = candidate;
         Ok(())
@@ -1466,12 +1483,10 @@ pub enum ConfigurationSetError {
     RevisionExhausted(ConfigurationSetId),
     #[error("configuration-set {0} has no semantic changes")]
     NoChanges(ConfigurationSetId),
-    #[error("active configuration-set {0} must be replaced explicitly before removal")]
+    #[error("active configuration-set {0} must be replaced or deactivated before removal")]
     ActiveConfigurationRemoval(ConfigurationSetId),
     #[error("active configuration-set {0} does not exist in the catalog")]
     ActiveConfigurationMissing(ConfigurationSetId),
-    #[error("a non-empty configuration-set catalog requires an active configuration")]
-    ActiveConfigurationRequired,
     #[error("configuration-set {0} has an invalid semantic digest")]
     SemanticDigestMismatch(ConfigurationSetId),
     #[error("configuration root has an invalid library/cell/view segment: {0}")]
@@ -1737,6 +1752,67 @@ mod tests {
             .expect("remove inactive source");
         assert!(catalog.find(source_id).is_none());
         assert_eq!(catalog.active_configuration_id(), Some(clone_id));
+    }
+
+    #[test]
+    fn deactivation_returns_to_the_default_without_revising_anything() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        let source_id = catalog.create(definition("Release")).expect("source");
+        let clone_id = catalog
+            .clone_configuration(source_id, 1, "Post-layout")
+            .expect("clone");
+        let configurations = catalog.configurations().to_vec();
+
+        catalog.deactivate().expect("return to the default");
+        assert_eq!(catalog.active_configuration_id(), None);
+        assert!(catalog.active().is_none());
+        assert_eq!(
+            catalog.configurations(),
+            configurations.as_slice(),
+            "a selection is not an edit: no revision or digest moves"
+        );
+        let deactivated = catalog.clone();
+        catalog.deactivate().expect("deactivating again is a no-op");
+        assert_eq!(catalog, deactivated);
+
+        // A create on the default leaves the default in force.
+        let corner_id = catalog.create(definition("Corner")).expect("create");
+        assert_eq!(catalog.active_configuration_id(), None);
+
+        catalog
+            .remove(source_id, 1)
+            .expect("the formerly active configuration can be removed");
+        assert!(catalog.find(source_id).is_none());
+        catalog.activate(clone_id).expect("activate another");
+        assert_eq!(catalog.active_configuration_id(), Some(clone_id));
+        assert!(catalog.find(corner_id).is_some());
+
+        let mut tampered = catalog.clone();
+        tampered.schema_version = 0;
+        assert_eq!(
+            tampered.deactivate(),
+            Err(ConfigurationSetError::UnsupportedSchema(0)),
+            "deactivation validates the catalog it changes, as activation does"
+        );
+        assert_eq!(tampered.active_configuration_id(), Some(clone_id));
+    }
+
+    #[test]
+    fn a_stored_catalog_with_configurations_and_none_active_loads() {
+        let mut catalog = ConfigurationSetCatalog::default();
+        catalog.create(definition("Release")).expect("source");
+        catalog.deactivate().expect("deactivate");
+        let encoded = serde_json::to_string(&catalog).expect("serialize");
+        assert!(encoded.contains(r#""active_configuration_id":null"#));
+
+        let restored: ConfigurationSetCatalog =
+            serde_json::from_str(&encoded).expect("a catalog on the default loads");
+        restored
+            .validate()
+            .expect("a catalog on the default validates");
+        assert_eq!(restored, catalog);
+        assert_eq!(restored.configurations().len(), 1);
+        assert!(restored.active().is_none());
     }
 
     #[test]
