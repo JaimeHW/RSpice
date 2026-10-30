@@ -274,18 +274,47 @@ function dataUrl(blob) {
   });
 }
 
+// A CSS weight, or a face's range of them ("100 900"), as [lightest, heaviest].
+function weightRange(value) {
+  const weights = (value || "400").trim().split(/\s+/)
+    .map((weight) => (weight === "bold" ? 700 : Number(weight) || 400));
+  return [weights[0], weights.at(-1)];
+}
+
+// The [first, last] code points of each range a unicode-range lists, or null
+// for a face meant for every character.
+function codePointRanges(value) {
+  if (!value) return null;
+  return value.split(",").map((range) => {
+    const [first, last = first] = range.trim().replace(/^u\+/i, "").split("-");
+    return [parseInt(first.replace(/\?/g, "0"), 16), parseInt(last.replace(/\?/g, "f"), 16)];
+  });
+}
+
 // The page's faces that the figure letters in, inlined so the file keeps its
-// lettering and weights on a machine without them. A face that cannot be read
-// is left out and its text falls back along the family list.
+// lettering and weights on a machine without them. A text uses a face when
+// its family list names the face anywhere, its weight is one the face covers
+// and, for a face kept to a unicode-range, it has a character in that range.
+// A face that cannot be read is left out and its text falls back along the
+// family list.
 async function embeddedFaces(stylesheet, clone) {
-  const texts = Array.from(clone.querySelectorAll("text"));
+  const texts = Array.from(clone.querySelectorAll("text"), (text) => ({
+    families: (text.closest("[font-family]")?.getAttribute("font-family") || "")
+      .split(",").map((name) => name.trim().replace(/^["']|["']$/g, "")),
+    weight: weightRange(text.closest("[font-weight]")?.getAttribute("font-weight"))[0],
+    codePoints: Array.from(text.textContent || "", (character) => character.codePointAt(0)),
+  }));
   const faces = [];
   for (const rule of stylesheet.rules) {
     if (!(rule instanceof CSSFontFaceRule)) continue;
     const family = rule.style.getPropertyValue("font-family").replace(/^["']|["']$/g, "");
     const weight = rule.style.getPropertyValue("font-weight") || "400";
-    const used = texts.some((text) => (text.getAttribute("font-family") || "").startsWith(`'${family}'`)
-      && (text.getAttribute("font-weight") || "400") === weight);
+    const [lightest, heaviest] = weightRange(weight);
+    const range = rule.style.getPropertyValue("unicode-range");
+    const ranges = codePointRanges(range);
+    const used = texts.some((text) => text.families.includes(family)
+      && text.weight >= lightest && text.weight <= heaviest
+      && (!ranges || text.codePoints.some((point) => ranges.some(([first, last]) => point >= first && point <= last))));
     const src = rule.style.getPropertyValue("src");
     const path = /url\(\s*(["']?)(.*?)\1\s*\)/.exec(src)?.[2];
     if (!used || !path) continue;
@@ -293,7 +322,8 @@ async function embeddedFaces(stylesheet, clone) {
       const response = await fetch(new URL(path, stylesheet.href));
       if (!response.ok) continue;
       const format = /format\([^)]*\)/.exec(src)?.[0] || "";
-      faces.push(`@font-face{font-family:"${family}";font-weight:${weight};src:url("${await dataUrl(await response.blob())}") ${format}}`);
+      const subset = range ? `unicode-range:${range};` : "";
+      faces.push(`@font-face{font-family:"${family}";font-weight:${weight};${subset}src:url("${await dataUrl(await response.blob())}") ${format}}`);
     } catch {}
   }
   return faces.join("");
