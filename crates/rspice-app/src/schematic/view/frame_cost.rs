@@ -892,6 +892,149 @@ fn part_drag() -> [FrameTimes; 2] {
     ]
 }
 
+/// Han characters common in Chinese engineering text: 81 distinct glyphs,
+/// which the CJK scenarios letter four to a part's value.
+#[cfg(not(target_arch = "wasm32"))]
+const HAN_VALUES: &str = "电阻电容晶体管放大器输入输出电源地线信号频率增益偏置负载反馈滤波开关模拟数字时钟复位使能控制温度传感器检测保护驱动接口总线数据地址寄存存储器运算比较基准电压电流功率噪声阻抗匹配差分单端共模偏移";
+
+/// The scale fixture with every part's value in Chinese, at 100 %, where the
+/// values are legible and so are lettered.
+#[cfg(not(target_arch = "wasm32"))]
+fn chinese_values_at_100() -> AppState {
+    let mut state = fixture_without_overlay().state;
+    let han: Vec<char> = HAN_VALUES.chars().collect();
+    let document = state.model.schematic.document_mut_for_test();
+    for (ordinal, component) in document.components.iter_mut().enumerate() {
+        component.value = (0..4)
+            .map(|glyph| han[(ordinal * 7 + glyph * 13) % han.len()])
+            .collect();
+    }
+    let centre = Point::new(ORIGIN + PITCH * 4, ORIGIN + PITCH * 3);
+    let editor = &mut state.model.schematic.session.editor;
+    editor.needs_fit = false;
+    editor.zoom = 1.0;
+    editor.pan = (
+        f64::from(SCREEN.x) * 0.5 - f64::from(centre.x),
+        f64::from(SCREEN.y) * 0.5 - f64::from(centre.y),
+    );
+    state
+}
+
+/// A canvas context, letting what no embedded face has join from the faces
+/// `offered` as if installed.
+#[cfg(not(target_arch = "wasm32"))]
+fn context_with_system_faces(
+    offered: Vec<rspice_ui_kit::fonts::system::KnownFace>,
+) -> egui::Context {
+    use rspice_ui_kit::fonts::system::{self, HanVariant, Source, SystemFonts};
+
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    system::attach_with(
+        &ctx,
+        SystemFonts::spawn(Source::files(offered), HanVariant::Simplified.order()),
+        Vec::new(),
+    );
+    ctx
+}
+
+/// `TIMED_FRAMES` hover frames after `WARM_UP_FRAMES`, in milliseconds.
+#[cfg(not(target_arch = "wasm32"))]
+fn hover_frames(
+    ctx: &egui::Context,
+    state: &mut AppState,
+    symbols: Option<&super::super::symbols::SymbolLibrary>,
+) -> Vec<f64> {
+    let centre = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
+    let at = |frame: usize| centre + egui::vec2(f32::from(u8::from(frame.is_multiple_of(2))), 0.0);
+    for frame in 0..WARM_UP_FRAMES {
+        run_frame(ctx, state, symbols, at(frame + 1));
+    }
+    (0..TIMED_FRAMES)
+        .map(|frame| run_frame(ctx, state, symbols, at(frame)).0)
+        .collect()
+}
+
+/// The idle canvas with the installed-face plugin attached: its text is all
+/// Latin, so the plugin reads it and asks for nothing. Set beside "idle
+/// hover (Select)", this is what the plugin costs a frame that needs no face.
+#[cfg(not(target_arch = "wasm32"))]
+fn idle_hover_with_system_faces() -> FrameTimes {
+    let ctx = context_with_system_faces(Vec::new());
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let mut state = fixture_without_overlay().state;
+    state.model.schematic.session.editor.needs_fit = true;
+    let frames_ms = hover_frames(&ctx, &mut state, symbols.as_ref());
+    assert!(rspice_ui_kit::fonts::system::joined_families(&ctx).is_empty());
+    FrameTimes {
+        name: "idle hover, installed-face plugin",
+        budget_ms: 4.0,
+        frames_ms,
+        every_frame: false,
+    }
+}
+
+/// Chinese values at 100 %: lettered as squares while no face has them, the
+/// one frame a face joins in, which rebuilds the fonts and letters every
+/// visible value afresh, and the frames after it.
+#[cfg(not(target_arch = "wasm32"))]
+fn chinese_values() -> [FrameTimes; 3] {
+    use rspice_ui_kit::fonts::system::{FaceClass, HanVariant, KnownFace, joined_families};
+
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let squares = {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        hover_frames(&ctx, &mut chinese_values_at_100(), symbols.as_ref())
+    };
+
+    // IBM Plex Sans SC, read through the same path as an installed face.
+    let ctx = context_with_system_faces(vec![KnownFace::new(
+        concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../assets/fonts/IBMPlexSansSC-Regular.ttf"
+        ),
+        "IBM Plex Sans SC",
+        FaceClass::Han(HanVariant::Simplified),
+    )]);
+    let mut state = chinese_values_at_100();
+    let centre = egui::pos2(SCREEN.x * 0.5, SCREEN.y * 0.5);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+    while joined_families(&ctx).is_empty() {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "the values ask for a face, and the worker finds it"
+        );
+        run_frame(&ctx, &mut state, symbols.as_ref(), centre);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    // The pass that took the face asked for the rebuild; this one makes it.
+    let (joins_ms, _) = run_frame(&ctx, &mut state, symbols.as_ref(), centre);
+    let lettered = hover_frames(&ctx, &mut state, symbols.as_ref());
+    assert_eq!(joined_families(&ctx), ["IBM Plex Sans SC"]);
+    [
+        FrameTimes {
+            name: "Chinese values, 100 %: squares",
+            budget_ms: 4.0,
+            frames_ms: squares,
+            every_frame: false,
+        },
+        FrameTimes {
+            name: "Chinese values: the face joins",
+            // One display frame at 60 Hz.
+            budget_ms: 16.7,
+            frames_ms: vec![joins_ms],
+            every_frame: true,
+        },
+        FrameTimes {
+            name: "Chinese values, 100 %: lettered",
+            budget_ms: 4.0,
+            frames_ms: lettered,
+            every_frame: false,
+        },
+    ]
+}
+
 /// One suspected site's cost on its own: the median of seven calls, in
 /// milliseconds. `work` returns something read off its result, so the call
 /// cannot be optimized away.
@@ -1196,8 +1339,11 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
 /// 4 ms; the move preview, Stretch and the operating-point overlay under
 /// 8 ms; a part drag's press and every one of its moves under 8 ms, and its
 /// drop under one 60 Hz frame, each by its slowest frame and not only its
-/// median. Every scenario is printed before any budget is asserted, so a
-/// failing run still reports them all.
+/// median. On desktop, the installed-face plugin is held to the idle budget,
+/// Chinese values to it before and after their face joins, and the frame the
+/// face joins in, which rebuilds the fonts, to one 60 Hz frame. Every
+/// scenario is printed before any budget is asserted, so a failing run still
+/// reports them all.
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[ignore = "frame-cost probe"]
@@ -1214,6 +1360,11 @@ fn canvas_frame_cost_at_scale() {
         operating_point_overlay_legible(),
     ];
     scenarios.extend(part_drag());
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        scenarios.push(idle_hover_with_system_faces());
+        scenarios.extend(chinese_values());
+    }
     let mut table =
         String::from("scenario                            min ms  median ms     max ms   budget\n");
     for scenario in &scenarios {

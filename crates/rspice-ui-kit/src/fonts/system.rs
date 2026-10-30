@@ -16,8 +16,10 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use egui::{Context, FontData, FontDefinitions, FontFamily, FullOutput, Shape, text::LayoutJob};
-use rspice_fonts::system::{FaceClass, Source, SystemFace, SystemFonts};
-use rspice_fonts::{HanPreference, HanVariant, Role, han_order};
+pub use rspice_fonts::HanVariant;
+use rspice_fonts::system::SystemFace;
+pub use rspice_fonts::system::{FaceClass, KnownFace, Source, SystemFonts};
+use rspice_fonts::{HanPreference, Role, han_order};
 
 /// How often a frame looks for the worker's answer while a request is out.
 const POLL: Duration = Duration::from_millis(50);

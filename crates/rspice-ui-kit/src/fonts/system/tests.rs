@@ -3,7 +3,6 @@ use std::sync::mpsc;
 use std::time::Instant;
 
 use egui::{Color32, FontId, Pos2, Rect, RichText, Vec2};
-use rspice_fonts::system::KnownFace;
 
 use super::*;
 
