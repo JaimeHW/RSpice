@@ -390,7 +390,7 @@ fn open_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
 }
 
 /// Draw the report route's stage: the composer, and the dialogs it opens.
-pub(crate) fn show(cx: &mut Cx<'_, HardcopyFeature>, ui: &mut Ui) {
+pub fn show(cx: &mut Cx<'_, HardcopyFeature>, ui: &mut Ui) {
     report::composer::show(ui, &mut presentation::ReportHost(cx));
     report::dialogs::show(ui.ctx(), &mut presentation::ReportHost(cx));
 }

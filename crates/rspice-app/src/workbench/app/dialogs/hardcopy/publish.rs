@@ -216,7 +216,7 @@ enum SourceResolutionPurpose {
     SavePageSetup,
 }
 
-pub(crate) fn open_hardcopy_workflow(parts: &mut HardcopyParts<'_>, workflow: HardcopyWorkflow) {
+pub fn open_hardcopy_workflow(parts: &mut HardcopyParts<'_>, workflow: HardcopyWorkflow) {
     let (source_key, scope) = match active_retained_source_selection(parts) {
         Ok(selection) => selection,
         Err(error) => {
@@ -803,7 +803,7 @@ pub fn validate_schematic_page_authority(
     authority.edit.validate(model, "Page Setup")
 }
 
-pub(crate) fn active_retained_source_selection(
+pub fn active_retained_source_selection(
     parts: &HardcopyParts<'_>,
 ) -> Result<(String, rspice_hardcopy_contract::HardcopyScope), String> {
     use crate::workbench::SurfaceId;

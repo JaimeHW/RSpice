@@ -26,7 +26,7 @@ const CANCELLED_MESSAGE: &str = "Native hardcopy rendering was cancelled.";
 
 /// The exact renderer entry point owned by a native execution ticket.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ExecutionOperation {
+pub enum ExecutionOperation {
     Publication,
     NativePrinter { dpi: u16 },
 }

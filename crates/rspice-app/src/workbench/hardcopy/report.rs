@@ -123,7 +123,7 @@ pub(crate) fn open_page_properties(
 }
 
 /// The report document the editor has open.
-pub(crate) fn active_document<'m>(
+pub fn active_document<'m>(
     editor: &ReportAuthoringState,
     model: &'m Model,
 ) -> Option<&'m ReportDocument> {

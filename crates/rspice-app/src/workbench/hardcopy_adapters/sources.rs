@@ -10,7 +10,7 @@
 mod quick_view_overlay;
 pub(crate) mod report_inventory;
 
-pub(crate) use rspice_hardcopy::sources::*;
+pub use rspice_hardcopy::sources::*;
 // Module-private: `noise` and `quick_view_overlay`
 // expose only `pub(super)` items, and the siblings reach them through
 // `use super::*`.
@@ -60,11 +60,11 @@ use rspice_results_ui::report::session::ReportAuthoringState;
 /// model, the session's open documents, the report editor's selection, and
 /// what the results workspace shows.
 #[derive(Clone, Copy)]
-pub(crate) struct SourceReads<'a> {
-    pub(crate) model: &'a Model,
-    pub(crate) workbench: &'a WorkbenchSession,
-    pub(crate) report_authoring: &'a ReportAuthoringState,
-    pub(crate) results: &'a dyn ResultsPort,
+pub struct SourceReads<'a> {
+    pub model: &'a Model,
+    pub workbench: &'a WorkbenchSession,
+    pub report_authoring: &'a ReportAuthoringState,
+    pub results: &'a dyn ResultsPort,
 }
 
 /// Cheap, semantic-free descriptor used by command enablement and the
@@ -159,7 +159,7 @@ impl RetainedHardcopySourceAvailability {
 /// their semantic content. A descriptor can be unavailable when its retained
 /// owner exists but lacks the exact evidence needed by the selected viewer.
 #[must_use]
-pub(crate) fn enumerate_retained_hardcopy_sources(
+pub fn enumerate_retained_hardcopy_sources(
     reads: SourceReads<'_>,
 ) -> Vec<RetainedHardcopySourceDescriptor> {
     let project_id = reads.model.workspace.content.project.id();
@@ -376,7 +376,7 @@ fn source_set_descriptor(
 /// This performs bounded identity/shape checks and cloning, but deliberately
 /// defers sample validation, digesting, symbol resolution, and semantic scene
 /// construction to [`PreparedRetainedHardcopyResolution::resolve_owned`].
-pub(crate) fn prepare_retained_hardcopy_resolution(
+pub fn prepare_retained_hardcopy_resolution(
     reads: SourceReads<'_>,
     source_key: &str,
     scope: HardcopyScope,
@@ -706,7 +706,7 @@ fn capture_hardcopy_run(run: SimulationRun) -> HardcopyRun {
 /// evidence-shape checks only; full digesting and semantic resolution occur
 /// when the dialog opens or commits.
 #[must_use]
-pub(crate) fn active_app_hardcopy_source_available(
+pub fn active_app_hardcopy_source_available(
     report_authoring: &ReportAuthoringState,
     model: &Model,
     workbench: &WorkbenchSession,
@@ -769,7 +769,7 @@ fn resolved_run_specifications_are_empty(model: &Model, run: &SimulationRun) -> 
     )
 }
 
-pub(crate) fn quick_result_availability(
+pub fn quick_result_availability(
     model: &Model,
     results: &dyn ResultsPort,
     run: &SimulationRun,
@@ -955,7 +955,7 @@ pub(crate) fn quick_result_availability(
     }
 }
 
-pub(crate) fn quick_result_analysis_index(
+pub fn quick_result_analysis_index(
     model: &Model,
     run: &SimulationRun,
     viewer: ResultViewer,
@@ -1047,7 +1047,7 @@ pub(crate) fn quick_result_analysis_index(
     }
 }
 
-pub(crate) fn active_visualization_document_pane<'m>(
+pub fn active_visualization_document_pane<'m>(
     model: &'m Model,
     results: &dyn ResultsPort,
     document_id: crate::product::ResultDocumentId,

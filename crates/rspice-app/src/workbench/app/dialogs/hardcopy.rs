@@ -32,22 +32,22 @@ pub(crate) mod worker;
 /// starting point, not a ceiling: what the host can actually afford for the
 /// chosen page comes from `render::max_raster_dpi`, and on a small enough
 /// budget the field opens already showing a violation rather than a lie.
-pub(crate) const DEFAULT_RASTER_DPI: u16 = 600;
+pub const DEFAULT_RASTER_DPI: u16 = 600;
 
-pub(crate) use publish::open_hardcopy_workflow;
-pub(crate) use render::render_hardcopy_dialog;
+pub use publish::open_hardcopy_workflow;
+pub use render::render_hardcopy_dialog;
 
 /// What the hardcopy workflow reads and writes, borrowed for one call: the
 /// dialog's draft, the report editor's selection, the model, the session,
 /// what the results workspace shows, and the export IO that asks where a
 /// file goes and writes it.
-pub(crate) struct HardcopyParts<'a> {
-    pub(crate) dialog: &'a mut HardcopyDialogState,
-    pub(crate) report_authoring: &'a rspice_results_ui::report::session::ReportAuthoringState,
-    pub(crate) model: &'a mut crate::workbench::app_state::Model,
-    pub(crate) workbench: &'a mut crate::workbench::state::WorkbenchSession,
-    pub(crate) results: &'a dyn crate::workbench::framework::ports::ResultsPort,
-    pub(crate) export_io: &'a dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
+pub struct HardcopyParts<'a> {
+    pub dialog: &'a mut HardcopyDialogState,
+    pub report_authoring: &'a rspice_results_ui::report::session::ReportAuthoringState,
+    pub model: &'a mut crate::workbench::app_state::Model,
+    pub workbench: &'a mut crate::workbench::state::WorkbenchSession,
+    pub results: &'a dyn crate::workbench::framework::ports::ResultsPort,
+    pub export_io: &'a dyn crate::workbench::workflows::export_workflow::ExportWorkflowIo,
 }
 
 impl HardcopyParts<'_> {
@@ -79,7 +79,7 @@ pub(crate) enum HardcopyDialogPage {
 /// of the hardcopy itself, so it stays out of the setup the workflow commits
 /// and out of the comparisons that invalidate the preview.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum HardcopyRegion {
+pub enum HardcopyRegion {
     #[default]
     Setup,
     Preview,
@@ -92,7 +92,7 @@ pub(crate) enum HardcopyRegion {
 /// the number visible at once is. The rail keeps the others legible by
 /// summarising each in a line, so nothing is hidden — only deferred.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
-pub(crate) enum HardcopySection {
+pub enum HardcopySection {
     #[default]
     Source,
     Page,
@@ -102,7 +102,7 @@ pub(crate) enum HardcopySection {
 }
 
 impl HardcopySection {
-    pub(crate) const ALL: [Self; 5] = [
+    pub const ALL: [Self; 5] = [
         Self::Source,
         Self::Page,
         Self::DrawingSheet,
@@ -120,7 +120,7 @@ impl HardcopySection {
         }
     }
 
-    pub(crate) const fn label(self) -> &'static str {
+    pub const fn label(self) -> &'static str {
         match self {
             Self::Source => "Source and scope",
             Self::Page => "Page and pagination",
@@ -293,7 +293,7 @@ impl HardcopyDialogError {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HardcopyWorkflow {
+pub enum HardcopyWorkflow {
     PageSetup,
     Print,
     Export,
@@ -318,7 +318,7 @@ impl HardcopyWorkflow {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) enum PaperDraft {
+pub enum PaperDraft {
     Standard(StandardPaper),
     MatchAuthoredSheets,
     Custom {
@@ -402,36 +402,36 @@ pub(crate) enum HardcopySubflowSnapshot {
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct GovernedSheetPageAuthority {
-    pub(crate) cell_view_key: String,
-    pub(crate) catalog_revision: u64,
-    pub(crate) sheet_id: crate::state::SheetId,
-    pub(crate) sheet_revision: u64,
+pub struct GovernedSheetPageAuthority {
+    pub cell_view_key: String,
+    pub catalog_revision: u64,
+    pub sheet_id: crate::state::SheetId,
+    pub sheet_revision: u64,
 }
 
 #[derive(Debug, Clone)]
-pub(crate) struct SchematicPageSetupAuthority {
-    pub(crate) edit: crate::workbench::app::SchematicEditAuthority,
-    pub(crate) governed_sheet: Option<GovernedSheetPageAuthority>,
+pub struct SchematicPageSetupAuthority {
+    pub edit: crate::workbench::app::SchematicEditAuthority,
+    pub governed_sheet: Option<GovernedSheetPageAuthority>,
 }
 
 /// Runtime-only dialog draft. Source identity and content revision are sealed
 /// when the workflow opens; publication re-resolves them before execution and
 /// fails closed if the active document changed underneath the preview.
 #[derive(Debug)]
-pub(crate) struct HardcopyDialogState {
-    pub(crate) open: bool,
+pub struct HardcopyDialogState {
+    pub open: bool,
     pub(crate) page: HardcopyDialogPage,
-    pub(crate) section: HardcopySection,
+    pub section: HardcopySection,
     /// Which region the one-at-a-time surface is showing. Meaningless where
     /// the setup and the page are both on screen, which is why nothing else
     /// reads it.
-    pub(crate) region: HardcopyRegion,
+    pub region: HardcopyRegion,
     pub(crate) subflow_snapshot: Option<HardcopySubflowSnapshot>,
-    pub(crate) workflow: HardcopyWorkflow,
-    pub(crate) source: Option<ActiveHardcopySource>,
+    pub workflow: HardcopyWorkflow,
+    pub source: Option<ActiveHardcopySource>,
     pub(crate) content_extent: Option<ContentExtent>,
-    pub(crate) resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
+    pub resolved_document: Option<std::sync::Arc<ResolvedHardcopyDocument>>,
     pub(crate) schematic_page_authority: Option<SchematicPageSetupAuthority>,
     /// A drawing sheet opened with nothing saved: how it was drawn, and how
     /// the dialog last laid it out for its target. Boxed: two whole setups
@@ -439,13 +439,13 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) unsaved_sheet: Option<Box<unsaved_sheet::UnsavedSheetLayout>>,
     pub(crate) source_candidates:
         Vec<crate::workbench::hardcopy_adapters::sources::RetainedHardcopySourceDescriptor>,
-    pub(crate) paper: PaperDraft,
+    pub paper: PaperDraft,
     pub(crate) display_unit: LengthUnit,
     pub(crate) orientation: Orientation,
     pub(crate) margin_top: String,
     pub(crate) margin_right: String,
     pub(crate) margin_bottom: String,
-    pub(crate) margin_left: String,
+    pub margin_left: String,
     pub(crate) bleed: String,
     pub(crate) scale: ScaleMode,
     pub(crate) custom_scale_percent: String,
@@ -463,22 +463,21 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) include_sheet_zones: bool,
     pub(crate) include_schematic_grid: bool,
     pub(crate) printer_id: String,
-    pub(crate) printer_job: Option<PrinterJobSettings>,
-    pub(crate) printer_report:
-        Option<crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport>,
+    pub printer_job: Option<PrinterJobSettings>,
+    pub printer_report: Option<crate::workbench::hardcopy_adapters::print::PrinterDiscoveryReport>,
     pub(crate) printer_capabilities:
         Option<crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot>,
     pub(crate) printer_discovery_busy: bool,
-    pub(crate) format: OutputFormat,
+    pub format: OutputFormat,
     /// Editable resolution for the raster formats. `format` stays the
     /// authority; this is the text being typed, committed on Enter or focus
     /// loss, because `60` is a legal prefix of `600` and refusing it mid-word
     /// would fight the typist.
-    pub(crate) raster_dpi_draft: String,
+    pub raster_dpi_draft: String,
     pub(crate) color_mapping: ColorMapping,
     pub(crate) background: BackgroundMode,
-    pub(crate) embed_fonts: bool,
-    pub(crate) searchable_text: bool,
+    pub embed_fonts: bool,
+    pub searchable_text: bool,
     pub(crate) soft_proof: bool,
     pub(crate) include_legends: bool,
     pub(crate) include_header: bool,
@@ -491,21 +490,20 @@ pub(crate) struct HardcopyDialogState {
     pub(crate) preview_zoom_percent: u16,
     pub(crate) preview_generation: u64,
     pub(crate) preview_failed_generation: Option<u64>,
-    pub(crate) source_resolution_generation: u64,
-    pub(crate) preview_plan: Option<std::sync::Arc<HardcopyPlan>>,
-    pub(crate) preview: Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
-    pub(crate) preview_adjacent:
-        Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
+    pub source_resolution_generation: u64,
+    pub preview_plan: Option<std::sync::Arc<HardcopyPlan>>,
+    pub preview: Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
+    pub preview_adjacent: Option<std::sync::Arc<rspice_hardcopy::render::HardcopyPreviewPage>>,
     pub(crate) metadata: Option<rspice_hardcopy::render::HardcopySceneMetadata>,
     pub(crate) body_scroll_offset: f32,
-    pub(crate) busy: bool,
+    pub busy: bool,
     pub(crate) cancellation: crate::workbench::hardcopy_adapters::print::HardcopyCancellationToken,
-    pub(crate) last_receipt: Option<HardcopyReceipt>,
-    pub(crate) error: Option<String>,
+    pub last_receipt: Option<HardcopyReceipt>,
+    pub error: Option<String>,
     /// The rail entry [`Self::error`] belongs to, where the contract named one.
     /// Written only where the draft is validated, so a section is never marked
     /// while its fields compile.
-    pub(crate) error_section: Option<HardcopySection>,
+    pub error_section: Option<HardcopySection>,
 }
 
 impl Default for HardcopyDialogState {
@@ -694,7 +692,7 @@ impl HardcopyDialogState {
         *self = draft;
     }
 
-    pub(crate) fn open_resolved(
+    pub fn open_resolved(
         &mut self,
         workflow: HardcopyWorkflow,
         document: ResolvedHardcopyDocument,
@@ -719,7 +717,7 @@ impl HardcopyDialogState {
         Ok(())
     }
 
-    pub(crate) fn close(&mut self) {
+    pub fn close(&mut self) {
         self.open = false;
         self.page = HardcopyDialogPage::Main;
         self.subflow_snapshot = None;
@@ -1073,7 +1071,7 @@ impl HardcopyDialogState {
         Ok(())
     }
 
-    pub(crate) fn refresh_preview(&mut self) {
+    pub fn refresh_preview(&mut self) {
         self.invalidate_preview_raster();
         match self.compile_preview_plan() {
             Ok(plan) => {

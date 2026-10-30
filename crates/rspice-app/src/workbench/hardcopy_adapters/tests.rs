@@ -1,12 +1,11 @@
 //! Application source resolution and headless renderer integration fixtures.
 
-use rspice_hardcopy::render::{
-    HardcopyRenderError, HardcopySceneMetadata, ScenePrimitive, scene_from_resolved,
-};
+use rspice_hardcopy::render::{HardcopyRenderError, HardcopySceneMetadata};
+use rspice_hardcopy::render::{ScenePrimitive, scene_from_resolved};
 
 use rspice_hardcopy::sources::ResolvedHardcopyDocument;
 
-pub(crate) fn source_metadata(
+pub fn source_metadata(
     source: &ResolvedHardcopyDocument,
     creator: impl Into<String>,
 ) -> Result<HardcopySceneMetadata, HardcopyRenderError> {

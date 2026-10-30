@@ -15,7 +15,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the hardcopy feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum HardcopyCommand {
+pub enum HardcopyCommand {
     ExportSchematicSvg,
     ExportPublicationSnapshot,
     PrintHardcopy,
@@ -112,7 +112,7 @@ const REPORT_ACTION: CommandFlags =
 
 impl HardcopyCommand {
     /// The commands the registry lists, in the shell's order.
-    pub(crate) const LISTED: [Self; 5] = [
+    pub const LISTED: [Self; 5] = [
         Self::ExportSchematicSvg,
         Self::ExportPublicationSnapshot,
         Self::PrintHardcopy,
@@ -123,14 +123,14 @@ impl HardcopyCommand {
     /// The report route's toolbar actions. The toolbar holds each by key; the
     /// registry leaves them out, so no menu, shortcut profile, palette or
     /// Repeat reaches them.
-    pub(crate) const REPORT_TOOLBAR: [Self; 3] = [
+    pub const REPORT_TOOLBAR: [Self; 3] = [
         Self::SaveReportDocument,
         Self::AddReportPage,
         Self::ReportPageProperties,
     ];
 
     /// The command `key` names, whether the registry lists it or not.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::LISTED
             .into_iter()
             .chain(Self::REPORT_TOOLBAR)
@@ -139,7 +139,7 @@ impl HardcopyCommand {
 
     /// The key a shortcut profile or the report toolbar names this command
     /// by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::ExportSchematicSvg => CommandKey::new("export-schematic-svg"),
             Self::ExportPublicationSnapshot => CommandKey::new("export-publication-snapshot"),
@@ -153,7 +153,7 @@ impl HardcopyCommand {
     }
 
     /// What the command declares about itself.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, flags, context, bindings) = match self {
             Self::ExportSchematicSvg => (
                 "Export schematic SVG\u{2026}",

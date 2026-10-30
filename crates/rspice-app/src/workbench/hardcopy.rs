@@ -37,7 +37,7 @@ use crate::workbench::state::WorkbenchSession;
 use commands::HardcopyCommand;
 
 /// The hardcopy feature.
-pub(crate) struct HardcopyFeature;
+pub struct HardcopyFeature;
 
 impl Feature for HardcopyFeature {
     type State = HardcopyState;
@@ -81,10 +81,7 @@ fn workflow_parts<'a>(cx: &'a mut Cx<'_, HardcopyFeature>) -> HardcopyParts<'a> 
 /// and Export active view, and, as the shell asks, for a request another part
 /// raised, the export workflow for a result document's figure or the print
 /// workflow another feature offers as its dialog's next step.
-pub(in crate::workbench) fn open_workflow(
-    cx: &mut Cx<'_, HardcopyFeature>,
-    workflow: HardcopyWorkflow,
-) {
+pub fn open_workflow(cx: &mut Cx<'_, HardcopyFeature>, workflow: HardcopyWorkflow) {
     open_hardcopy_workflow(&mut workflow_parts(cx), workflow);
 }
 

@@ -42,7 +42,7 @@ use rspice_hardcopy_contract::{ContentExtent, HardcopyScope};
 /// Why a snapshot could not be built. Every variant names the boundary that
 /// refused, so the publish surface can show an actionable message.
 #[derive(Debug)]
-pub(crate) enum PublicationBuildError {
+pub enum PublicationBuildError {
     /// A printable source failed hardcopy resolution.
     SourceResolution { source: String, reason: String },
     /// Scene compilation failed for a resolved source.
@@ -106,15 +106,15 @@ impl std::fmt::Display for PublicationBuildError {
 /// model among them, and the run tier's state, for the deck the last manual
 /// run executed.
 #[derive(Clone, Copy)]
-pub(crate) struct PublicationReads<'a> {
-    pub(crate) sources: SourceReads<'a>,
-    pub(crate) runs: &'a RunsState,
+pub struct PublicationReads<'a> {
+    pub sources: SourceReads<'a>,
+    pub runs: &'a RunsState,
 }
 
 /// Build a complete, validated publication snapshot from the open project:
 /// every currently printable schematic sheet and plot pane, plus the active
 /// run's analyses, datasets, and measurements, plus the effective deck.
-pub(crate) fn build_publication_snapshot(
+pub fn build_publication_snapshot(
     reads: PublicationReads<'_>,
     draft: &PublicationDraft,
 ) -> Result<PublicationSnapshot, PublicationBuildError> {
