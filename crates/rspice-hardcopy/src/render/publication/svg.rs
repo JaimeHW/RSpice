@@ -88,11 +88,12 @@ pub(super) fn render_page_svg(
 pub(super) fn write_embedded_svg_fonts(output: &mut String) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     output.push_str("<style>");
-    for (family, weight, bytes) in PUBLICATION_FACES {
+    for face in Face::ALL {
+        let (family, weight) = publication_face(face);
         write!(
             output,
             "@font-face{{font-family:'{family}';font-style:normal;font-weight:{weight};src:url(data:font/ttf;base64,{}) format('truetype');}}",
-            encoded(bytes)
+            encoded(face.bytes())
         )
         .expect("write to string");
     }
@@ -381,17 +382,7 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
 }
 
 pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
-    svg_face(font.fallback_chain()[0])
-}
-
-/// The family and weight a face is published under.
-pub(super) fn svg_face(face: PrintFace) -> (&'static str, &'static str) {
-    match face {
-        PrintFace::SansRegular => (PUBLICATION_SANS, "400"),
-        PrintFace::SansSemibold => (PUBLICATION_SANS, "600"),
-        PrintFace::MonoRegular => (PUBLICATION_MONO, "400"),
-        PrintFace::MonoMedium => (PUBLICATION_MONO, "500"),
-    }
+    publication_face(font.role().primary())
 }
 
 /// Write `text` as `font` letters it. A run in the element's own face is
@@ -399,16 +390,12 @@ pub(super) fn svg_face(face: PrintFace) -> (&'static str, &'static str) {
 /// so every renderer letters each glyph from the face the chain chose rather
 /// than from whichever face its own fallback finds first.
 pub(super) fn write_svg_text_runs(output: &mut String, font: SceneFont, text: &str) {
-    let Ok(faces) = PrintFaces::get() else {
-        escape_xml_into(text, output);
-        return;
-    };
-    let own = font.fallback_chain()[0];
-    for run in faces.runs(font, text) {
+    let own = font.role().primary();
+    for run in font.role().runs(text) {
         if run.face == own {
             escape_xml_into(&run.text, output);
         } else {
-            let (family, weight) = svg_face(run.face);
+            let (family, weight) = publication_face(run.face);
             write!(
                 output,
                 "<tspan font-family=\"{family}\" font-weight=\"{weight}\">"

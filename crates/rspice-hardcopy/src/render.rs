@@ -27,7 +27,7 @@ mod publication;
 
 use compiler::*;
 use glyph_runs::PrintFaces;
-pub use glyph_runs::{GlyphRun, PrintFace, REPLACEMENT_CHARACTER};
+use rspice_fonts::Face;
 
 use publication::auto_trace_pattern;
 pub use publication::*;
@@ -108,25 +108,6 @@ const MAX_RASTER_WORKING_BYTES: u64 = 1_024 * 1_048_576;
 const MAX_RASTER_WORKING_BYTES: u64 = 256 * 1_048_576;
 const DEFAULT_STROKE_UM: u64 = 250;
 const DECORATION_TEXT_UM: u64 = 3_000;
-
-// IBM Plex is licensed for embedding under SIL OFL 1.1. The retained license
-// is assets/fonts/OFL-IBMPlex.txt.
-const IBM_PLEX_SANS_REGULAR: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexSans-Regular.ttf"
-));
-const IBM_PLEX_SANS_SEMIBOLD: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexSans-SemiBold.ttf"
-));
-const IBM_PLEX_MONO_REGULAR: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexMono-Regular.ttf"
-));
-const IBM_PLEX_MONO_MEDIUM: &[u8] = include_bytes!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../assets/fonts/IBMPlexMono-Medium.ttf"
-));
 
 /// Stable publication timestamp. PDF/A requires this explicit value; the
 /// renderer never substitutes wall-clock time because that would make output

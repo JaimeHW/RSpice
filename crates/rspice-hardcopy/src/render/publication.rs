@@ -2229,8 +2229,10 @@ fn validate_render_budget(
             maximum: MAX_ESTIMATED_VECTOR_BYTES,
         })?;
     let embedded_font_bytes = if plan.setup().render().fonts().embed_fonts() {
-        (IBM_PLEX_SANS_REGULAR.len() + IBM_PLEX_SANS_SEMIBOLD.len() + IBM_PLEX_MONO_REGULAR.len())
-            as u64
+        Face::ALL
+            .iter()
+            .map(|face| face.bytes().len() as u64)
+            .sum::<u64>()
             * 2
     } else {
         0
@@ -2384,6 +2386,6 @@ fn validate_aggregate_pagination(
 mod style;
 pub(super) use style::auto_trace_pattern;
 use style::{
-    PUBLICATION_FACES, PUBLICATION_MONO, PUBLICATION_SANS, ResolvedStroke, background_color,
-    page_primitives, page_transform, resolve_color, resolve_stroke, svg_color,
+    PUBLICATION_MONO, PUBLICATION_SANS, ResolvedStroke, background_color, page_primitives,
+    page_transform, publication_face, resolve_color, resolve_stroke, svg_color,
 };

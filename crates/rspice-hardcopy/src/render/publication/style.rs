@@ -17,13 +17,21 @@ use super::*;
 pub(super) const PUBLICATION_SANS: &str = "RSpice Plex Sans";
 /// See [`PUBLICATION_SANS`].
 pub(super) const PUBLICATION_MONO: &str = "RSpice Plex Mono";
-/// Every publishable face, as family, CSS weight, and face data.
-pub(super) const PUBLICATION_FACES: [(&str, &str, &[u8]); 4] = [
-    (PUBLICATION_SANS, "400", IBM_PLEX_SANS_REGULAR),
-    (PUBLICATION_SANS, "600", IBM_PLEX_SANS_SEMIBOLD),
-    (PUBLICATION_MONO, "400", IBM_PLEX_MONO_REGULAR),
-    (PUBLICATION_MONO, "500", IBM_PLEX_MONO_MEDIUM),
-];
+/// See [`PUBLICATION_SANS`]. The symbols face is the product's own, so its
+/// published family is its own name.
+pub(super) const PUBLICATION_SYMBOLS: &str = "RSpice Symbols";
+
+/// The family and CSS weight each embedded face is published under.
+pub(super) const fn publication_face(face: Face) -> (&'static str, &'static str) {
+    match face {
+        Face::SansRegular => (PUBLICATION_SANS, "400"),
+        Face::SansMedium => (PUBLICATION_SANS, "500"),
+        Face::SansSemibold => (PUBLICATION_SANS, "600"),
+        Face::MonoRegular => (PUBLICATION_MONO, "400"),
+        Face::MonoMedium => (PUBLICATION_MONO, "500"),
+        Face::Symbols => (PUBLICATION_SYMBOLS, "400"),
+    }
+}
 
 pub(super) fn page_primitives<'a>(
     scene: &'a HardcopyScene,

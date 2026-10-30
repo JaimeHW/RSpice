@@ -25,7 +25,7 @@ pub(super) fn provenance_rows(
         return Ok(Vec::new());
     }
     let faces = PrintFaces::get()?;
-    let face = faces.face(PrintFace::MonoRegular);
+    let face = faces.face(Face::MonoRegular);
     let units = u64::from(face.units_per_em());
     let to_um = |value: u64| (value * PROVENANCE_TEXT_UM).div_ceil(units);
     let bounds = face.global_bounding_box();

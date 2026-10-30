@@ -75,7 +75,7 @@ fn check_footer(plan: &HardcopyPlan, svg: &str, expected: &str) {
     let mut options = usvg::Options::default();
     options
         .fontdb_mut()
-        .load_font_data(IBM_PLEX_MONO_REGULAR.to_vec());
+        .load_font_data(Face::MonoRegular.bytes().to_vec());
     let tree = usvg::Tree::from_str(&fragment, &options).unwrap();
     assert!(
         !tree.root().children().is_empty(),
