@@ -651,6 +651,13 @@ impl SheetCatalog {
     /// format. Callers that own project default policy resolve it before this
     /// catalog-local transaction; the sheet receives an exact snapshot and a
     /// sheet-owned title.
+    ///
+    /// A sheet inserted before the end of the catalog changes the order the
+    /// set prints in, as deleting and reordering do, so every printed page
+    /// number is restated in catalog order: the new sheet takes the number of
+    /// the place it is inserted at and the sheets after it move up by one. A
+    /// sheet appended at the end moves no other sheet and keeps the number it
+    /// was given.
     pub fn create_sheet_with_page_format(
         &mut self,
         definition: SheetDefinition,
@@ -659,7 +666,7 @@ impl SheetCatalog {
     ) -> Result<SheetId, DesignManagementError> {
         self.validate()?;
         require_limit("sheets", self.sheets.len() + 1, MAX_DESIGN_SHEETS)?;
-        let definition = normalize_sheet_definition(definition);
+        let mut definition = normalize_sheet_definition(definition);
         validate_sheet_definition(&definition)?;
         if self
             .sheets
@@ -684,6 +691,15 @@ impl SheetCatalog {
             }
             None => self.sheets.len(),
         };
+        let renumbers = insertion < self.sheets.len();
+        if renumbers {
+            // The new sheet is born with the number its place prints, so its
+            // own first revision already carries it.
+            definition.explicit_page_number = Some(
+                u32::try_from(insertion + 1)
+                    .map_err(|_| DesignManagementError::NumericRange("sheet page number"))?,
+            );
+        }
         let page_format = page_format.try_update(|draft| {
             draft
                 .title_block
@@ -703,6 +719,9 @@ impl SheetCatalog {
         };
         let mut candidate = self.clone();
         candidate.sheets.insert(insertion, sheet);
+        if renumbers {
+            candidate.renumber_print_pages()?;
+        }
         candidate.active_sheet_id.get_or_insert(id);
         candidate.bump_revision("sheet catalog")?;
         candidate.validate()?;

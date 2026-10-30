@@ -425,3 +425,83 @@ fn a_governed_selection_prints_only_the_active_sheet() {
     // A selection prints the chosen objects, not the sheet they sit on.
     assert_eq!(semantic.drawing_sheet, None);
 }
+
+#[test]
+fn a_sheet_inserted_mid_catalog_prints_its_place_in_the_set() {
+    let numbered = |name: &str, page: u32| SheetDefinition {
+        explicit_page_number: Some(page),
+        ..sheet_definition(name)
+    };
+    let mut document = SchematicDocument::default();
+    for id in 1..=4 {
+        let x = i32::try_from(id).unwrap() * 100;
+        document
+            .wires
+            .push(Wire::segment(id, Point::new(x, 0), Point::new(x + 20, 0)));
+    }
+    let schematic = Schematic::from_document(document);
+    let mut catalog = SheetCatalog::default();
+    let input = catalog.create_sheet(numbered("Input", 1), None).unwrap();
+    let filter = catalog
+        .create_sheet(numbered("Filter", 2), Some(input))
+        .unwrap();
+    let output = catalog
+        .create_sheet(numbered("Output", 3), Some(filter))
+        .unwrap();
+    // The application offers a new sheet the lowest free number.
+    let bias = catalog
+        .create_sheet(numbered("Bias", 4), Some(input))
+        .unwrap();
+    for (sheet, wire) in [(input, 1), (filter, 2), (output, 3), (bias, 4)] {
+        catalog
+            .assign_objects(catalog.revision(), sheet, [wire])
+            .unwrap();
+    }
+    let project_settings =
+        rspice_design_model::design_management::DrawingSheetProjectSettings::default();
+
+    let all = resolve_all_schematic_sheets(SchematicSheetSetHardcopySource {
+        identity: identity("governed-schematic"),
+        schematic: &schematic,
+        expected_topology_version: schematic.topology_version(),
+        symbol_resolver: None,
+        sheet_catalog: &catalog,
+        project_default_drawing_sheet: &project_settings.default_format,
+        project_title_block_field_values: &project_settings.title_block_field_values,
+    })
+    .unwrap();
+
+    let HardcopySemanticDocument::Aggregate(aggregate) = all.semantic_document() else {
+        panic!("expected aggregate")
+    };
+    let printed = aggregate
+        .children
+        .iter()
+        .map(|child| {
+            let HardcopySemanticDocument::Schematic(sheet) = child.document.as_ref() else {
+                panic!("expected schematic child")
+            };
+            let field = |id: DrawingSheetTitleFieldId| {
+                sheet
+                    .drawing_sheet_title_values
+                    .get(&id)
+                    .cloned()
+                    .unwrap_or_default()
+            };
+            (
+                field(DrawingSheetTitleFieldId::SheetTitle),
+                field(DrawingSheetTitleFieldId::Page),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        printed,
+        [
+            ("Input", "1 of 4"),
+            ("Bias", "2 of 4"),
+            ("Filter", "3 of 4"),
+            ("Output", "4 of 4"),
+        ]
+        .map(|(title, page)| (title.to_owned(), page.to_owned()))
+    );
+}

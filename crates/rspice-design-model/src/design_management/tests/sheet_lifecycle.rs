@@ -291,6 +291,50 @@ fn sheet_delete_reactivates_a_neighbor_and_renumbers_the_print_set() {
 }
 
 #[test]
+fn a_sheet_inserted_mid_catalog_renumbers_the_print_set_in_catalog_order() {
+    let mut catalog = SheetCatalog::default();
+    let input = catalog.create_sheet(sheet("Input", 1), None).unwrap();
+    let filter = catalog
+        .create_sheet(sheet("Filter", 2), Some(input))
+        .unwrap();
+    let output = catalog
+        .create_sheet(sheet("Output", 3), Some(filter))
+        .unwrap();
+
+    // The application offers a new sheet the lowest free number.
+    let bias = catalog.create_sheet(sheet("Bias", 4), Some(input)).unwrap();
+
+    let printed = catalog
+        .sheets()
+        .iter()
+        .map(|sheet| (sheet.id(), catalog.page_number_and_count(sheet.id())))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        printed,
+        [
+            (input, Some((1, 4))),
+            (bias, Some((2, 4))),
+            (filter, Some((3, 4))),
+            (output, Some((4, 4))),
+        ]
+    );
+    // The new sheet is born at its number, and each sheet it moved down
+    // advances, so an edit made against the old number fails closed.
+    assert_eq!(catalog.find(bias).unwrap().revision(), 1);
+    assert_eq!(catalog.find(input).unwrap().revision(), 1);
+    assert_eq!(catalog.find(filter).unwrap().revision(), 2);
+    assert_eq!(catalog.find(output).unwrap().revision(), 2);
+    catalog.validate().unwrap();
+
+    // Appending moves no sheet, so every number stands.
+    let notes = catalog
+        .create_sheet(sheet("Notes", 5), Some(output))
+        .unwrap();
+    assert_eq!(catalog.page_number_and_count(notes), Some((5, 5)));
+    assert_eq!(catalog.find(output).unwrap().revision(), 2);
+}
+
+#[test]
 fn moving_one_sheet_commits_the_same_transaction_as_the_equivalent_reorder() {
     let mut catalog = SheetCatalog::default();
     let top = catalog.create_sheet(sheet("Top", 1), None).unwrap();
