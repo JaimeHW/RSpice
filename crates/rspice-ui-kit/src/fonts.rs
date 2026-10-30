@@ -6,7 +6,10 @@
 //! The faces, and the chain each family falls back through, come from
 //! `rspice-fonts`, which the hardcopy letters through too: a character the
 //! canvas borrows from another face prints from that face, and one no face
-//! has paints and prints as the same square.
+//! has paints and prints as the same square. A desktop letters what no
+//! embedded face has from the faces installed there (`system`), after the
+//! whole embedded chain, so every character an embedded face has still
+//! letters identically everywhere.
 //!
 //! egui has no variable-weight axis, so the Medium and SemiBold weights are
 //! registered as named [`FontFamily`] entries and selected explicitly by
@@ -14,6 +17,9 @@
 
 use egui::{Context, FontDefinitions, FontFamily};
 use rspice_fonts::Role;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub mod system;
 
 /// Proportional UI family (regular weight).
 pub fn sans() -> FontFamily {
