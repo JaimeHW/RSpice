@@ -1,10 +1,13 @@
 //! Emitting a page as SVG.
 //!
-//! Fonts are embedded rather than referenced, and hatch patterns are emitted
-//! as definitions keyed by fill, so an exported page renders identically
+//! The faces a page's text is lettered in, and only those, are embedded
+//! rather than referenced, and hatch patterns are emitted as definitions
+//! keyed by fill, so an exported page renders identically
 //! wherever it is opened — nothing depends on the viewing machine having a
 //! font or a pattern library. Colours pass through the plan's print-safe
 //! mapping first, so what is emitted is what a printer will reproduce.
+
+use std::collections::BTreeSet;
 
 use super::*;
 
@@ -52,9 +55,10 @@ pub(super) fn render_page_svg(
         &mut output,
     );
     output.push_str("</metadata>");
-    if plan.setup().render().fonts().embed_fonts() {
-        write_embedded_svg_fonts(&mut output);
-    }
+    // The faces are embedded here once the page is written, so that only
+    // the faces its text was lettered in travel with it.
+    let fonts_at = output.len();
+    let mut faces = BTreeSet::new();
     write!(
         output,
         "<defs><clipPath id=\"content-clip\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath></defs>",
@@ -77,18 +81,25 @@ pub(super) fn render_page_svg(
     output.push_str("<g clip-path=\"url(#content-clip)\">");
     let transform = page_transform(page);
     for primitive in primitives {
-        write_svg_primitive(&mut output, plan, transform, primitive);
+        write_svg_primitive(&mut output, &mut faces, plan, transform, primitive);
     }
     output.push_str("</g>");
-    write_svg_decorations(&mut output, plan, scene, page)?;
+    write_svg_decorations(&mut output, &mut faces, plan, scene, page)?;
     output.push_str("</svg>");
+    if plan.setup().render().fonts().embed_fonts() && !faces.is_empty() {
+        let mut fonts = String::new();
+        write_embedded_svg_fonts(&mut fonts, &faces);
+        output.insert_str(fonts_at, &fonts);
+    }
     Ok(output)
 }
 
-pub(super) fn write_embedded_svg_fonts(output: &mut String) {
+/// An `@font-face` rule, with the face's data inline, for each face in
+/// `faces`.
+pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<Face>) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     output.push_str("<style>");
-    for face in Face::ALL {
+    for &face in faces {
         let (family, weight) = publication_face(face);
         write!(
             output,
@@ -102,6 +113,7 @@ pub(super) fn write_embedded_svg_fonts(output: &mut String) {
 
 pub(super) fn write_svg_primitive(
     output: &mut String,
+    faces: &mut BTreeSet<Face>,
     plan: &HardcopyPlan,
     transform: PageTransform,
     primitive: &ScenePrimitive,
@@ -231,7 +243,7 @@ pub(super) fn write_svg_primitive(
                 svg_color(resolve_color(plan, *color)),
             )
             .expect("write to string");
-            write_svg_text_runs(output, *font, text);
+            write_svg_text_runs(output, faces, *font, text);
             output.push_str("</text>");
         }
         ScenePrimitive::ClippedGroup {
@@ -242,7 +254,7 @@ pub(super) fn write_svg_primitive(
         } => {
             let transform = transform.remap(*source_origin, *destination_origin);
             for primitive in primitives {
-                write_svg_primitive(output, plan, transform, primitive);
+                write_svg_primitive(output, faces, plan, transform, primitive);
             }
         }
     }
@@ -388,10 +400,17 @@ pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
 /// Write `text` as `font` letters it. A run in the element's own face is
 /// character data; a run another face carries is a `tspan` naming that face,
 /// so every renderer letters each glyph from the face the chain chose rather
-/// than from whichever face its own fallback finds first.
-pub(super) fn write_svg_text_runs(output: &mut String, font: SceneFont, text: &str) {
+/// than from whichever face its own fallback finds first. Each face a run is
+/// lettered in joins `faces`, the set the page embeds.
+pub(super) fn write_svg_text_runs(
+    output: &mut String,
+    faces: &mut BTreeSet<Face>,
+    font: SceneFont,
+    text: &str,
+) {
     let own = font.role().primary();
     for run in font.role().runs(text) {
+        faces.insert(run.face);
         if run.face == own {
             escape_xml_into(&run.text, output);
         } else {
@@ -422,6 +441,7 @@ pub(super) fn escape_xml_into(value: &str, output: &mut String) {
 
 pub(super) fn write_svg_decorations(
     output: &mut String,
+    faces: &mut BTreeSet<Face>,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -439,7 +459,12 @@ pub(super) fn write_svg_decorations(
             printable.x.micrometres()
         )
         .expect("write to string");
-        write_svg_text_runs(output, SceneFont::SansSemibold, scene.metadata.title());
+        write_svg_text_runs(
+            output,
+            faces,
+            SceneFont::SansSemibold,
+            scene.metadata.title(),
+        );
         output.push_str("</text>");
         write!(
             output,
@@ -448,6 +473,7 @@ pub(super) fn write_svg_decorations(
         .expect("write to string");
         write_svg_text_runs(
             output,
+            faces,
             SceneFont::Monospace,
             &format!(
                 "rev {} · page {} / {} · {}",
@@ -465,7 +491,7 @@ pub(super) fn write_svg_decorations(
                 "<text x=\"{center}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"middle\">"
             )
             .expect("write to string");
-            write_svg_text_runs(output, SceneFont::Sans, line);
+            write_svg_text_runs(output, faces, SceneFont::Sans, line);
             output.push_str("</text>");
         }
     }
@@ -476,7 +502,7 @@ pub(super) fn write_svg_decorations(
             row.x_um, row.baseline_um
         )
         .expect("write to string");
-        write_svg_text_runs(output, SceneFont::Monospace, &row.text);
+        write_svg_text_runs(output, faces, SceneFont::Monospace, &row.text);
         output.push_str("</text>");
     }
     if let Some(legend) = legend_layout(plan, scene, page)? {
@@ -519,14 +545,14 @@ pub(super) fn write_svg_decorations(
                 slot.origin.0, slot.origin.1
             )
             .expect("write to string");
-            write_svg_text_runs(output, SceneFont::Sans, &slot.label);
+            write_svg_text_runs(output, faces, SceneFont::Sans, &slot.label);
             output.push_str("</text>");
         }
         output.push_str("</g>");
     }
-    write_svg_watermark(output, plan, scene, page);
+    write_svg_watermark(output, faces, plan, scene, page);
     write_svg_trim_marks(output, plan, page);
-    write_svg_registration_marks(output, plan, page);
+    write_svg_registration_marks(output, faces, plan, page);
     Ok(())
 }
 
@@ -567,6 +593,7 @@ pub(super) fn write_svg_trim_marks(output: &mut String, plan: &HardcopyPlan, pag
 
 pub(super) fn write_svg_watermark(
     output: &mut String,
+    faces: &mut BTreeSet<Face>,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -587,13 +614,14 @@ pub(super) fn write_svg_watermark(
         "<text x=\"{cx}\" y=\"{cy}\" fill=\"{ink}\" fill-opacity=\"0.16\" font-family=\"{PUBLICATION_SANS}\" font-weight=\"600\" font-size=\"{size}\" text-anchor=\"middle\" transform=\"rotate(-35 {cx} {cy})\">"
     )
     .expect("write to string");
-    write_svg_text_runs(output, SceneFont::SansSemibold, text);
+    write_svg_text_runs(output, faces, SceneFont::SansSemibold, text);
     output.push_str("</text>");
     let _ = scene;
 }
 
 pub(super) fn write_svg_registration_marks(
     output: &mut String,
+    faces: &mut BTreeSet<Face>,
     plan: &HardcopyPlan,
     page: &PreviewPage,
 ) {
@@ -619,10 +647,11 @@ pub(super) fn write_svg_registration_marks(
     }
     write!(
         output,
-        "<text x=\"{}\" y=\"{}\" fill=\"{color}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"2200\">{}</text>",
+        "<text x=\"{}\" y=\"{}\" fill=\"{color}\" font-family=\"{PUBLICATION_MONO}\" font-size=\"2200\">",
         left + 2_500,
         top + 3_000,
-        page.coordinate()
     )
     .expect("write to string");
+    write_svg_text_runs(output, faces, SceneFont::Monospace, page.coordinate());
+    output.push_str("</text>");
 }

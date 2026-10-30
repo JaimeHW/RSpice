@@ -210,3 +210,46 @@ fn a_borrowed_glyph_prints_as_its_lending_face_letters_it() {
     assert_eq!(uncovered, page(SceneFont::Sans, "\u{25fb}"));
     assert_ne!(uncovered, page(SceneFont::Sans, "?"));
 }
+
+/// The SVG of `primitives` on a page with no title strip, footer or
+/// watermark, so the only text is the scene's own.
+fn undecorated_svg(primitives: Vec<ScenePrimitive>) -> String {
+    let base = setup(OutputFormat::SvgVector, false);
+    let setup = HardcopySetup::try_new(
+        base.physical_page().clone(),
+        base.scale(),
+        base.tiling(),
+        base.render().clone(),
+        DecorationSetup::try_new(false, false, false, Watermark::None).unwrap(),
+        PrintMappingTable::default(),
+    )
+    .unwrap();
+    let content = extent(150_000, 80_000);
+    let plan = plan_from_setup(setup, content);
+    let publication = HardcopyRenderer::render(&plan, &text_scene(content, primitives)).unwrap();
+    String::from_utf8(publication.single_part().unwrap().bytes().to_vec()).unwrap()
+}
+
+/// The family, style and weight of each face `svg` embeds, in order.
+fn embedded_faces(svg: &str) -> Vec<&str> {
+    svg.split("@font-face{")
+        .skip(1)
+        .map(|rule| rule.split_once(";src:").expect("a face carries its data").0)
+        .collect()
+}
+
+/// An SVG carries the faces its text is lettered in and no others: a sheet
+/// lettered in one face does not ship the other five.
+#[test]
+fn svg_embeds_only_the_faces_its_text_is_lettered_in() {
+    let sans = "font-family:'RSpice Plex Sans';font-style:normal;font-weight:400";
+    let symbols = "font-family:'RSpice Symbols';font-style:normal;font-weight:400";
+    let plain = undecorated_svg(vec![text(SceneFont::Sans, "Plain text", 20_000)]);
+    assert_eq!(embedded_faces(&plain), [sans], "{plain}");
+    let diameter = undecorated_svg(vec![text(SceneFont::Sans, "\u{2300} 6 mm", 20_000)]);
+    assert_eq!(embedded_faces(&diameter), [sans, symbols]);
+    // A page with no text carries no face at all.
+    let blank = undecorated_svg(Vec::new());
+    assert!(!blank.contains("<style>"), "{blank}");
+    assert!(embedded_faces(&blank).is_empty());
+}
