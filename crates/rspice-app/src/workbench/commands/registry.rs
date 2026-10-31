@@ -170,6 +170,11 @@ const FULL_SCREEN: &[ShortcutBinding] = &[
     primary(chord(Key::F11, false, false, false, "F11"), DESKTOP),
     alternate(chord(Key::F, true, true, false, "Ctrl+Alt+F"), HOST),
 ];
+// The browser zooms its page on Ctrl+0, so the key is the desktop's only.
+const ZOOM_ONE_TO_ONE: &[ShortcutBinding] = &[primary(
+    chord(Key::Num0, true, false, false, "Ctrl+0"),
+    DESKTOP,
+)];
 const ENGINEERING_TABLE_VIEW: &[ShortcutBinding] = &[primary(
     chord(Key::T, true, false, true, "Ctrl+Shift+T"),
     ALL,
@@ -432,6 +437,7 @@ impl Command {
             Self::FindInDesign
             | Self::FindReplace
             | Self::CycleGrid
+            | Self::SetGridStyle(_)
             | Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceBus
@@ -566,6 +572,7 @@ impl Command {
             Self::MirrorSelectionHorizontal => MIRROR_SELECTION_HORIZONTAL,
             Self::MirrorSelectionVertical => MIRROR_SELECTION_VERTICAL,
             Self::CycleGrid => GRID,
+            Self::ZoomOneToOne => ZOOM_ONE_TO_ONE,
             Self::GridSnapRouting => NONE,
             Self::VisibilityOptions => NONE,
             Self::ToggleFullScreen => FULL_SCREEN,
@@ -872,7 +879,8 @@ impl Command {
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
-            Self::DeselectAll => "nothing is selected",
+            Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
+            Self::SetGridStyle(_) => "open a schematic or testbench",
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

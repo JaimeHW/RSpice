@@ -71,6 +71,8 @@ pub enum Command {
     ZoomToSelection,
     ZoomBox,
     CycleGrid,
+    /// Draw the grid in one style.
+    SetGridStyle(crate::state::GridStyle),
     GridSnapRouting,
     VisibilityOptions,
     ToggleFullScreen,
@@ -323,20 +325,25 @@ impl Command {
             Self::ZoomIn => spec("zoom-in", "Zoom in", "View"),
             Self::ZoomOut => spec("zoom-out", "Zoom out", "View"),
             Self::ZoomFit => spec("canvas-fit-sheet", "Fit drawing sheet", "View"),
-            Self::FitSchematicContent => {
-                spec("canvas-fit-content", "Fit schematic content", "View")
-            }
+            Self::FitSchematicContent => spec("canvas-fit-content", "Fit content", "View"),
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
             Self::ZoomToSelection => spec("zoom-to-selection", "Zoom to selection", "View"),
             Self::ZoomBox => spec("zoom-box", "Zoom box", "View"),
             Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
+            Self::SetGridStyle(crate::state::GridStyle::Dots) => {
+                spec("grid-dots", "Dot grid", "View")
+            }
+            Self::SetGridStyle(crate::state::GridStyle::Lines) => {
+                spec("grid-lines", "Line grid", "View")
+            }
+            Self::SetGridStyle(crate::state::GridStyle::Off) => spec("grid-off", "No grid", "View"),
             Self::GridSnapRouting => spec(
                 "grid-snap-routing",
                 "Grid, snap and wire routing\u{2026}",
                 "View",
             ),
             Self::VisibilityOptions => {
-                spec("visibility-options", "Schematic visibility\u{2026}", "View")
+                spec("visibility-options", "Display options\u{2026}", "View")
             }
             Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "View"),
             Self::ResetActiveView => spec("reset-active-view", "Reset active view", "View"),
@@ -731,6 +738,9 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomToSelection,
     Command::ZoomBox,
     Command::CycleGrid,
+    Command::SetGridStyle(crate::state::GridStyle::Dots),
+    Command::SetGridStyle(crate::state::GridStyle::Lines),
+    Command::SetGridStyle(crate::state::GridStyle::Off),
     Command::GridSnapRouting,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
@@ -963,6 +973,9 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ZoomToSelection.key(),
     Command::ZoomBox.key(),
     Command::CycleGrid.key(),
+    Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
+    Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
+    Command::SetGridStyle(crate::state::GridStyle::Off).key(),
     Command::GridSnapRouting.key(),
     SheetsCommand::DrawingSheetLayers.key(),
     Command::VisibilityOptions.key(),

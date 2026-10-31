@@ -50,6 +50,8 @@ pub struct MenuCommand {
     /// The row opens the command palette narrowed to this scope instead of
     /// running the command.
     palette_scope: Option<&'static str>,
+    /// The row is one of a group of which exactly one is on.
+    radio: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -109,6 +111,7 @@ impl MenuEntry {
             label: MenuLabel::Command,
             shortcut: None,
             palette_scope: None,
+            radio: false,
         })
     }
 
@@ -119,6 +122,19 @@ impl MenuEntry {
             label: MenuLabel::Fixed(label),
             shortcut: None,
             palette_scope: None,
+            radio: false,
+        })
+    }
+
+    /// The row of the command `key` names, under `label`, as one of a group
+    /// of which exactly one is on: the one that is wears a dot.
+    pub const fn radio(key: CommandKey, label: &'static str) -> Self {
+        Self::Command(MenuCommand {
+            command: key,
+            label: MenuLabel::Fixed(label),
+            shortcut: None,
+            palette_scope: None,
+            radio: true,
         })
     }
 }
@@ -130,6 +146,7 @@ pub const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntr
         label: MenuLabel::Fixed(label),
         shortcut: Some("Ctrl+K"),
         palette_scope: Some(scope),
+        radio: false,
     })
 }
 
@@ -168,6 +185,9 @@ pub struct CommandRow {
     /// Whether the state the command switches is on, for a command that
     /// switches one: the row shows a check mark while it is.
     pub checked: Option<bool>,
+    /// The row is one of a group of which exactly one is on: `checked`
+    /// marks the one, with a dot rather than a check mark.
+    pub radio: bool,
     /// The icon the row wears where it shows no check mark.
     icon: Option<WorkbenchIcon>,
     palette_scope: Option<&'static str>,
@@ -216,6 +236,7 @@ fn push_menu_rows(
                 shortcut: shortcut_for_occurrence(app, platform, os, item.command, item.shortcut),
                 availability: app.availability(item.command),
                 checked: app.checked(item.command),
+                radio: item.radio,
                 icon: app.command_icon(item.command),
                 palette_scope: item.palette_scope,
                 action: None,
@@ -239,6 +260,7 @@ fn push_menu_rows(
                         shortcut: String::new(),
                         availability,
                         checked: None,
+                        radio: false,
                         icon: None,
                         palette_scope: None,
                         action: Some(MenuAction::OpenRecent(recent.clone())),
@@ -379,15 +401,26 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
     response.widget_info(|| match row.checked {
-        Some(checked) => {
-            egui::WidgetInfo::selected(egui::WidgetType::Checkbox, enabled, checked, label)
-        }
+        Some(checked) => egui::WidgetInfo::selected(
+            if row.radio {
+                egui::WidgetType::RadioButton
+            } else {
+                egui::WidgetType::Checkbox
+            },
+            enabled,
+            checked,
+            label,
+        ),
         None => egui::WidgetInfo::labeled(egui::WidgetType::Button, enabled, label),
     });
     ui.ctx().accesskit_node_builder(response.id, |node| {
         match row.checked {
             Some(checked) => {
-                node.set_role(egui::accesskit::Role::MenuItemCheckBox);
+                node.set_role(if row.radio {
+                    egui::accesskit::Role::MenuItemRadio
+                } else {
+                    egui::accesskit::Role::MenuItemCheckBox
+                });
                 node.set_toggled(checked.into());
             }
             None => node.set_role(egui::accesskit::Role::MenuItem),
@@ -410,10 +443,11 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         rect,
         highlighted,
         enabled,
-        row.checked.map_or_else(
-            || row.icon.map_or(MenuRowLead::Blank, MenuRowLead::Icon),
-            MenuRowLead::Check,
-        ),
+        match row.checked {
+            Some(checked) if row.radio => MenuRowLead::Radio(checked),
+            Some(checked) => MenuRowLead::Check(checked),
+            None => row.icon.map_or(MenuRowLead::Blank, MenuRowLead::Icon),
+        },
         label,
         MenuRowTrailing::Shortcut(&row.shortcut),
     );

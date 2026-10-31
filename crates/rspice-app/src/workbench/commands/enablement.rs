@@ -316,6 +316,7 @@ impl Command {
                     .any(|document| document.open && document.closable)
             }
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::SetGridStyle(_) => active_schematic_editor(app),
             Self::GridSnapRouting => active_schematic_editor(app),
             Self::VisibilityOptions => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
@@ -523,6 +524,7 @@ impl Command {
             Self::ToggleConsole => Some(workbench.console_visible && !workbench.focus_mode),
             Self::ToggleFocusMode => Some(workbench.focus_mode),
             Self::ToggleFullScreen => Some(workbench.full_screen_presentation),
+            Self::SetGridStyle(style) => Some(app.state.design.grid == style),
             _ => None,
         }
     }

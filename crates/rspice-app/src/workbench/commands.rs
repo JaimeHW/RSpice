@@ -356,6 +356,7 @@ impl Command {
             | Self::FindReplace
             | Self::FitSchematicContent
             | Self::CycleGrid
+            | Self::SetGridStyle(_)
             | Self::GridSnapRouting
             | Self::VisibilityOptions
             | Self::EngineeringTableView
@@ -607,6 +608,7 @@ impl Command {
                 app.state.model.schematic.session.editor.zoom_box.arm();
             }
             Self::CycleGrid => cycle_canvas_grid(app),
+            Self::SetGridStyle(style) => app.state.design.set_grid_style(style),
             Self::GridSnapRouting => {
                 crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
             }

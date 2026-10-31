@@ -25,6 +25,8 @@ pub(super) enum MenuRowLead {
     /// The row switches a state: a check mark while it is on, nothing while
     /// it is off.
     Check(bool),
+    /// The row is one of a group of which one is on: a dot on that one.
+    Radio(bool),
 }
 
 /// One menu row's paint: its hover fill, leading mark, label and trailing
@@ -61,7 +63,15 @@ pub(super) fn paint_menu_row(
         Vec2::splat(17.0),
     );
     match lead {
-        MenuRowLead::Blank | MenuRowLead::Check(false) => {}
+        MenuRowLead::Blank | MenuRowLead::Check(false) | MenuRowLead::Radio(false) => {}
+        // A painted dot, centred where a check mark stands.
+        MenuRowLead::Radio(true) => {
+            ui.painter().circle_filled(
+                icon_rect.center(),
+                3.0,
+                if enabled { t.color.text } else { ink },
+            );
+        }
         MenuRowLead::Icon(icon) => icon.paint(ui.painter(), icon_rect, ink),
         // Painted as a vector: the bundled faces have no check glyph. Full
         // ink even at rest, so the state reads before the row is hovered.

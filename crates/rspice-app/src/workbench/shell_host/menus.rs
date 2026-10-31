@@ -239,34 +239,64 @@ const EDIT_MENU: &[MenuEntry] = &[
     settings(SettingsCommand::Preferences),
 ];
 
+/// View: how near, what is drawn over the drawing, which panels stand
+/// around it, and how much of the screen it takes.
 const VIEW_MENU: &[MenuEntry] = &[
     command(Command::ZoomIn),
     command(Command::ZoomOut),
+    command(Command::ZoomOneToOne),
     command(Command::ZoomFit),
     command(Command::FitSchematicContent),
-    command(Command::ZoomOneToOne),
     command(Command::ZoomToSelection),
     command(Command::ZoomBox),
-    command(Command::CycleGrid),
-    command(Command::GridSnapRouting),
-    sheets(SheetsCommand::DrawingSheetLayers),
+    Separator,
+    MenuEntry::Submenu {
+        label: "Grid",
+        entries: GRID_MENU,
+    },
     command(Command::VisibilityOptions),
+    Separator,
+    command_as(Command::ToggleNavigator, "Navigator"),
+    command_as(Command::ToggleInspector, "Inspector"),
+    command_as(Command::ToggleConsole, "Console"),
+    results(ResultsCommand::ToggleResultsSplit),
+    command_as(Command::OpenProblems, "Problems"),
+    Separator,
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
         MenuContext::SourceEditor,
-        &[
-            Separator,
-            command(Command::FoldSelection),
-            command(Command::UnfoldAtCaret),
-            command(Command::FoldAll),
-            command(Command::UnfoldAll),
-        ],
+        &[MenuEntry::Submenu {
+            label: "Folding",
+            entries: FOLDING_MENU,
+        }],
+    ),
+    command_as(Command::ToggleFocusMode, "Focus mode"),
+    command_as(Command::ToggleFullScreen, "Full screen"),
+];
+
+/// The grid's styles, one of which is drawn; G steps through them.
+const GRID_MENU: &[MenuEntry] = &[
+    MenuEntry::radio(
+        Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
+        "Dots",
+    ),
+    MenuEntry::radio(
+        Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
+        "Lines",
+    ),
+    MenuEntry::radio(
+        Command::SetGridStyle(crate::state::GridStyle::Off).key(),
+        "Off",
     ),
     Separator,
-    command_as(Command::ToggleFullScreen, "Full screen"),
-    command(Command::ResetActiveView),
-    Separator,
-    command(Command::EngineeringTableView),
+    command_as(Command::GridSnapRouting, "Grid, snap and routing\u{2026}"),
+];
+
+const FOLDING_MENU: &[MenuEntry] = &[
+    command(Command::FoldSelection),
+    command(Command::UnfoldAtCaret),
+    command(Command::FoldAll),
+    command(Command::UnfoldAll),
 ];
 
 const DESIGN_MENU: &[MenuEntry] = &[
@@ -437,12 +467,6 @@ const AUTOMATION_MENU: &[MenuEntry] = &[command_as(
 )];
 
 const WINDOW_MENU: &[MenuEntry] = &[
-    command_as(Command::ToggleNavigator, "Navigator"),
-    command_as(Command::ToggleInspector, "Inspector"),
-    command_as(Command::ToggleConsole, "Console"),
-    results(ResultsCommand::ToggleResultsSplit),
-    command_as(Command::ToggleFocusMode, "Focus mode"),
-    Separator,
     command(Command::NewApplicationWindow),
     command(Command::DetachDocument),
     command(Command::MoveDocumentToWindow),

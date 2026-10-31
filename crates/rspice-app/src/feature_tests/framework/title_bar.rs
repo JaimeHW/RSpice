@@ -759,18 +759,95 @@ fn design_placement_menu_matches_the_mockup_order() {
     assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_PLACEMENT_COMMANDS));
 }
 
+/// The panels around the drawing are switched from View, beside what is
+/// drawn over it; Window keeps the windows and the documents in them.
 #[test]
-fn window_layout_menu_places_split_with_results_before_focus_workspace() {
-    assert_menu_lists(
-        ApplicationMenu::Window,
-        &[
-            Command::ToggleNavigator.key(),
-            Command::ToggleInspector.key(),
-            Command::ToggleConsole.key(),
-            ResultsCommand::ToggleResultsSplit.key(),
-            Command::ToggleFocusMode.key(),
-        ],
+fn the_panels_are_switched_from_view_and_not_from_window() {
+    let panels = [
+        Command::ToggleNavigator.key(),
+        Command::ToggleInspector.key(),
+        Command::ToggleConsole.key(),
+        ResultsCommand::ToggleResultsSplit.key(),
+        Command::OpenProblems.key(),
+    ];
+    let screen = [
+        Command::ToggleFocusMode.key(),
+        Command::ToggleFullScreen.key(),
+    ];
+    assert_menu_lists(ApplicationMenu::View, &panels);
+    assert_menu_lists(ApplicationMenu::View, &screen);
+    let window = listed_commands(application_menu_entries(ApplicationMenu::Window));
+    for key in panels.into_iter().chain(screen) {
+        assert!(!window.contains(&key), "Window still lists {key:?}");
+    }
+}
+
+/// View > Grid draws one style at a time: its rows are radio items, the
+/// drawn style's selected, and choosing one draws it; G still steps through
+/// them.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_grid_rows_choose_the_drawn_style() {
+    use crate::state::GridStyle;
+    use egui::accesskit::{Role, Toggled};
+
+    let grid = application_menu_entries(ApplicationMenu::View)
+        .iter()
+        .find_map(|entry| match *entry {
+            MenuEntry::Submenu {
+                label: "Grid",
+                entries,
+            } => Some(entries),
+            _ => None,
+        })
+        .expect("View has a Grid submenu");
+    let mut app = title_test_app();
+    app.state.workbench.workspace = Workspace::Design;
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let output = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(MENU_OUTER_WIDTH, 720.0),
+            )),
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default()
+                .frame(Frame::NONE)
+                .show(ctx, |ui| draw_menu_entries(ui, &app, grid));
+        },
     );
+    let nodes = output
+        .platform_output
+        .accesskit_update
+        .expect("AccessKit Grid-menu tree")
+        .nodes;
+    let read = |label: &str| {
+        nodes
+            .iter()
+            .find(|(_, node)| node.label() == Some(label))
+            .map(|(_, node)| (node.role(), node.toggled()))
+            .unwrap_or_else(|| panic!("the Grid menu has no {label:?} row"))
+    };
+    assert_eq!(read("Dots"), (Role::MenuItemRadio, Some(Toggled::True)));
+    assert_eq!(read("Lines"), (Role::MenuItemRadio, Some(Toggled::False)));
+    assert_eq!(read("Off"), (Role::MenuItemRadio, Some(Toggled::False)));
+
+    app.execute(Command::SetGridStyle(GridStyle::Off).key());
+    assert_eq!(app.state.design.grid, GridStyle::Off);
+    assert_eq!(
+        app.checked(Command::SetGridStyle(GridStyle::Off).key()),
+        Some(true)
+    );
+    assert_eq!(
+        app.checked(Command::SetGridStyle(GridStyle::Dots).key()),
+        Some(false)
+    );
+    app.execute(Command::CycleGrid.key());
+    assert_eq!(app.state.design.grid, GridStyle::Dots);
 }
 
 /// What is done to a selection is edited from Edit, where Cut, Copy and
@@ -1244,10 +1321,12 @@ fn menu_pin_on(
                         CommandAvailability::Disabled(reason) => format!("off: {reason}"),
                         CommandAvailability::Hidden => "hidden".to_owned(),
                     };
-                    let mark = match row.checked {
-                        Some(true) => " | checked",
-                        Some(false) => " | unchecked",
-                        None => "",
+                    let mark = match (row.checked, row.radio) {
+                        (Some(true), true) => " | selected",
+                        (Some(false), true) => " | unselected",
+                        (Some(true), false) => " | checked",
+                        (Some(false), false) => " | unchecked",
+                        (None, _) => "",
                     };
                     out.push(format!(
                         "{indent}{} | {} | {} | {state}{mark}",
@@ -1556,21 +1635,21 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
             egui::CentralPanel::default()
                 .frame(Frame::NONE)
                 .show(ctx, |ui| {
-                    draw_menu_entries(ui, &app, application_menu_entries(ApplicationMenu::Window))
+                    draw_menu_entries(ui, &app, application_menu_entries(ApplicationMenu::View))
                 });
         },
     );
     let nodes = output
         .platform_output
         .accesskit_update
-        .expect("AccessKit Window-menu tree")
+        .expect("AccessKit View-menu tree")
         .nodes;
     let read = |label: &str| {
         nodes
             .iter()
             .find(|(_, node)| node.label() == Some(label))
             .map(|(_, node)| (node.role(), node.toggled()))
-            .unwrap_or_else(|| panic!("the Window menu has no {label:?} row"))
+            .unwrap_or_else(|| panic!("the View menu has no {label:?} row"))
     };
     assert_eq!(
         read("Navigator"),
@@ -1584,7 +1663,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
         read("Split with results"),
         (Role::MenuItemCheckBox, Some(Toggled::False))
     );
-    assert_eq!(read("Reset workspace layout…"), (Role::MenuItem, None));
+    assert_eq!(read("Display options…"), (Role::MenuItem, None));
 }
 
 /// With no one signed in and no license, the account button shows a
@@ -2279,20 +2358,28 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
         &[
             "Zoom in | zoom-in | + | on",
             "Zoom out | zoom-out | − | on",
+            "Zoom 100% | zoom-one-to-one | Ctrl+0 | on",
             "Fit drawing sheet | canvas-fit-sheet | F | on",
-            "Fit schematic content | canvas-fit-content | Shift+F | on",
-            "Zoom 100% | zoom-one-to-one |  | on",
-            "Zoom to selection | zoom-to-selection |  | off: command is unavailable in this context",
+            "Fit content | canvas-fit-content | Shift+F | on",
+            "Zoom to selection | zoom-to-selection |  | off: nothing is selected",
             "Zoom box | zoom-box | Z | on",
-            "Cycle grid display | cycle-grid | G | on",
-            "Grid, snap and wire routing… | grid-snap-routing |  | on",
-            "Drawing-sheet layers… | sheet-layer-visibility |  | on",
-            "Schematic visibility… | visibility-options |  | on",
             "---",
+            "Grid >",
+            "  Dots | grid-dots |  | on | selected",
+            "  Lines | grid-lines |  | on | unselected",
+            "  Off | grid-off |  | on | unselected",
+            "  ---",
+            "  Grid, snap and routing… | grid-snap-routing |  | on",
+            "Display options… | visibility-options |  | on",
+            "---",
+            "Navigator | toggle-navigator | Ctrl+B | on | checked",
+            "Inspector | toggle-inspector | Ctrl+I | on | checked",
+            "Console | console | Ctrl+J | on | unchecked",
+            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available | unchecked",
+            "Problems | open-problems |  | on",
+            "---",
+            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
             "Full screen | full-screen | F11 | on | unchecked",
-            "Reset active view | reset-active-view |  | on",
-            "---",
-            "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
         ],
     ),
     (
@@ -2417,12 +2504,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::Window,
         &[
-            "Navigator | toggle-navigator | Ctrl+B | on | checked",
-            "Inspector | toggle-inspector | Ctrl+I | on | checked",
-            "Console | console | Ctrl+J | on | unchecked",
-            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available | unchecked",
-            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
-            "---",
             "New application window… | new-application-window | Ctrl+Alt+Shift+N | on",
             "Detach active document… | detach-document |  | on",
             "Move active document to window… | move-document-window |  | off: create another application window before moving this document",
@@ -2484,25 +2565,33 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
         &[
             "Zoom in | zoom-in | + | on",
             "Zoom out | zoom-out | − | on",
+            "Zoom 100% | zoom-one-to-one | Ctrl+0 | on",
             "Fit drawing sheet | canvas-fit-sheet | F | on",
-            "Fit schematic content | canvas-fit-content | Shift+F | on",
-            "Zoom 100% | zoom-one-to-one |  | on",
-            "Zoom to selection | zoom-to-selection |  | off: command is unavailable in this context",
+            "Fit content | canvas-fit-content | Shift+F | on",
+            "Zoom to selection | zoom-to-selection |  | off: nothing is selected",
             "Zoom box | zoom-box | Z | on",
-            "Cycle grid display | cycle-grid | G | on",
-            "Grid, snap and wire routing… | grid-snap-routing |  | on",
-            "Drawing-sheet layers… | sheet-layer-visibility |  | on",
-            "Schematic visibility… | visibility-options |  | on",
             "---",
-            "Fold selection | fold-selection | Ctrl+Shift+[ | on",
-            "Unfold at caret | unfold-at-caret | Ctrl+Shift+] | on",
-            "Fold all | fold-all |  | on",
-            "Unfold all | unfold-all |  | on",
+            "Grid >",
+            "  Dots | grid-dots |  | on | selected",
+            "  Lines | grid-lines |  | on | unselected",
+            "  Off | grid-off |  | on | unselected",
+            "  ---",
+            "  Grid, snap and routing… | grid-snap-routing |  | on",
+            "Display options… | visibility-options |  | on",
             "---",
+            "Navigator | toggle-navigator | Ctrl+B | on | checked",
+            "Inspector | toggle-inspector | Ctrl+I | on | checked",
+            "Console | console | Ctrl+J | on | unchecked",
+            "Split with results | toggle-split-view | Ctrl+\\ | off: no retained result dataset is available | unchecked",
+            "Problems | open-problems |  | on",
+            "---",
+            "Folding >",
+            "  Fold selection | fold-selection | Ctrl+Shift+[ | on",
+            "  Unfold at caret | unfold-at-caret | Ctrl+Shift+] | on",
+            "  Fold all | fold-all |  | on",
+            "  Unfold all | unfold-all |  | on",
+            "Focus mode | toggle-focus-mode | Ctrl+Shift+F | on | unchecked",
             "Full screen | full-screen | F11 | on | unchecked",
-            "Reset active view | reset-active-view |  | on",
-            "---",
-            "Engineering table view… | engineering-table-manager | Ctrl+Shift+T | on",
         ],
     ),
 ];
