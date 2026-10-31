@@ -1,10 +1,10 @@
 //! The toolbars of the Models workspace and of the model editor route.
 
 use crate::state::command_catalog::CommandKey;
-use crate::workbench::RSpiceApp;
 use crate::workbench::RouteTransitionSource;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::models::commands::ModelsCommand;
 
@@ -26,10 +26,10 @@ const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = 
 
 pub(in crate::workbench) fn model_editor_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
-    if let Some(origin) = app.state.workbench.previous_route() {
+    if let Some(origin) = app.workbench().previous_route() {
         let label = format!("Source: {}", origin.surface_id().label());
         if take_projected_tool_slot(ui, layout)
             && labeled_icon_button_sized(
@@ -42,8 +42,7 @@ pub(in crate::workbench) fn model_editor_tools(
             )
             .clicked()
         {
-            app.state
-                .workbench
+            app.workbench_mut()
                 .navigate_back(RouteTransitionSource::User);
             return;
         }
@@ -85,7 +84,7 @@ pub(in crate::workbench) fn model_editor_tools(
 
 pub(in crate::workbench) fn models_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
     for (index, (key, icon, label)) in MODELS_TOOLBAR_COMMANDS.into_iter().enumerate() {
