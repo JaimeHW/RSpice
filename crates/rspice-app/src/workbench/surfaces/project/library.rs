@@ -7,6 +7,8 @@
 use super::*;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
+use crate::workbench::features;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
 
 const CONTEXT_HEIGHT: f32 = 36.0;
@@ -94,11 +96,16 @@ pub(super) fn library(ui: &mut Ui, app: &mut RSpiceApp) {
     show_library_audit_history(&ctx, &app.state);
     super::library_publication::show(&ctx, app);
     // The library and view membership modals are reachable only from this
-    // surface's own routes, so this surface owns their frame.
-    app.process_new_library_dialog(&ctx);
-    app.process_rename_library_dialog(&ctx);
-    app.process_delete_library_dialog(&ctx);
-    app.process_rename_view_dialog(&ctx);
+    // surface's own routes, so this surface owns their frame. Each draws in
+    // the project feature's context, and what one raised is answered as it
+    // returns.
+    ProjectFeature::process_new_library_dialog(&mut features::cx(app), &ctx);
+    ProjectFeature::process_rename_library_dialog(&mut features::cx(app), &ctx);
+    app.after_contribution();
+    ProjectFeature::process_delete_library_dialog(&mut features::cx(app), &ctx);
+    app.after_contribution();
+    ProjectFeature::process_rename_view_dialog(&mut features::cx(app), &ctx);
+    app.after_contribution();
 }
 
 fn ensure_valid_selection(manager: &mut crate::state::LibraryManager, active_view: &CellViewRef) {
@@ -820,14 +827,25 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 if count == 1 { "" } else { "s" }
             ));
         }
-        LibraryIntent::NewLibrary => app.state.open_new_library_dialog(),
+        LibraryIntent::NewLibrary => {
+            let state = &mut app.state;
+            state.project.open_new_library_dialog(&state.model);
+        }
         LibraryIntent::RenameLibrary(library) => {
-            if let Err(error) = app.state.open_rename_library_dialog(&library) {
+            let state = &mut app.state;
+            if let Err(error) = state
+                .project
+                .open_rename_library_dialog(&state.model, &library)
+            {
                 app.state.prompt(error);
             }
         }
         LibraryIntent::DeleteLibrary(library) => {
-            if let Err(error) = app.state.open_delete_library_review(&library) {
+            let state = &mut app.state;
+            if let Err(error) = state
+                .project
+                .open_delete_library_review(&state.model, &library)
+            {
                 app.state.prompt(error);
             }
         }
@@ -861,7 +879,9 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             }
         }
         LibraryIntent::RenameView(reference) => {
-            if let Err(error) = app.state.open_rename_view_dialog(
+            let state = &mut app.state;
+            if let Err(error) = state.project.open_rename_view_dialog(
+                &state.model,
                 &reference.library,
                 &reference.cell,
                 &reference.view,

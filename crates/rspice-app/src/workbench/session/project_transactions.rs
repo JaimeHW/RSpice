@@ -16,7 +16,9 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 #[cfg(doc)]
 use crate::workbench::app_state::Model;
-use crate::workbench::app_state::model::{LibraryRemoval, WorkspacePruned};
+#[cfg(test)]
+use crate::workbench::app_state::model::LibraryRemoval;
+use crate::workbench::app_state::model::WorkspacePruned;
 use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
@@ -499,6 +501,7 @@ impl RSpiceApp {
 /// project, in the order the change once did it itself.
 impl AppState {
     /// [`Model::rename_library`], then what it left.
+    #[cfg(test)]
     pub(crate) fn rename_library(
         &mut self,
         library: &str,
@@ -511,6 +514,7 @@ impl AppState {
 
     /// [`Model::delete_library`], then what it left, and only then its
     /// revision: the revision records the catalog the editor's reload leaves.
+    #[cfg(test)]
     pub(crate) fn delete_library(&mut self, library: &str) -> Result<usize, String> {
         let LibraryRemoval {
             cells,
@@ -554,6 +558,7 @@ impl AppState {
     }
 
     /// [`Model::rename_view`], then what it left.
+    #[cfg(test)]
     pub(crate) fn rename_view(
         &mut self,
         library: &str,

@@ -319,6 +319,7 @@ impl ProjectFeature {
                 Ok(Some((remapped, pruned))) => {
                     cx.wb.outbox.push(ProjectRequest::CatalogChanged {
                         pruned,
+                        mutation: None,
                         notice: format!(
                             "Renamed cell '{current}' to '{name}'; {remapped} instance \
                              references now name it."
@@ -345,6 +346,7 @@ impl ProjectFeature {
 mod tests {
     use super::*;
     use crate::state::{Cell, Library};
+    use crate::workbench::project::library_dialogs::shown;
     use crate::workbench::project::tests::with_cx;
     use crate::workbench::{AppState, RSpiceApp};
 
@@ -512,20 +514,6 @@ mod tests {
         (app, library, cell)
     }
 
-    /// What the status bar, the Console and the drawing show.
-    fn shown(app: &RSpiceApp) -> (Option<String>, Vec<String>, String) {
-        (
-            app.state.prompt_text().map(str::to_owned),
-            app.state
-                .model
-                .log_buffer
-                .entries()
-                .map(|entry| entry.message.clone())
-                .collect(),
-            app.state.model.workspace.content.active_view.display_path(),
-        )
-    }
-
     /// A rename carried out in the feature's context, with what it left
     /// handed to the shell, ends where the rename carried out in place did:
     /// what it left is carried out first, and only then is the rename
@@ -557,6 +545,7 @@ mod tests {
             .outbox
             .push(ProjectRequest::CatalogChanged {
                 pruned,
+                mutation: None,
                 notice: format!(
                     "Renamed cell '{cell}' to '{name}'; {remapped} instance references now name it."
                 ),

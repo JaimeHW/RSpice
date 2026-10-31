@@ -9,13 +9,16 @@
 //! Beside them is what the project feature hands the shell to carry out,
 //! which the feature's own context cannot.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use egui::Key;
 use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{CellViewRef, ViewType};
+use crate::state::{CellViewRef, PreparedProjectLibraryMutation, ViewType};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{Drain, Request};
 use crate::workbench::project::configuration_state::ConfigurationSelection;
@@ -262,10 +265,12 @@ pub(crate) enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
     UseForRuns(ConfigurationSelection),
-    /// What a catalog change left outside the model, then the change's own
-    /// line in the log, in the order the change once wrote both.
+    /// What a catalog change left outside the model, then the revision a
+    /// deletion reserved, then the change's own line in the log, in the
+    /// order the change once wrote them.
     CatalogChanged {
         pruned: WorkspacePruned,
+        mutation: Option<ReservedLibraryRevision>,
         notice: String,
     },
 }
@@ -273,3 +278,32 @@ pub(crate) enum ProjectRequest {
 impl Request for ProjectRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }
+
+/// The project revision a library deletion reserved, which the shell
+/// publishes once it has carried out what the deletion left.
+///
+/// A request is cloned with the state that holds it, and the reservation
+/// is published once and cannot be cloned, so every clone of the request
+/// shares this one reservation and the answer takes it.
+#[derive(Clone, Debug)]
+pub(crate) struct ReservedLibraryRevision(Rc<RefCell<Option<PreparedProjectLibraryMutation>>>);
+
+impl ReservedLibraryRevision {
+    pub(crate) fn new(mutation: PreparedProjectLibraryMutation) -> Self {
+        Self(Rc::new(RefCell::new(Some(mutation))))
+    }
+
+    /// The reservation, unless a clone of the request was answered first.
+    pub(crate) fn take(&self) -> Option<PreparedProjectLibraryMutation> {
+        self.0.borrow_mut().take()
+    }
+}
+
+/// Two requests carry the same reservation exactly when they share it.
+impl PartialEq for ReservedLibraryRevision {
+    fn eq(&self, other: &Self) -> bool {
+        Rc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for ReservedLibraryRevision {}

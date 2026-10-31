@@ -26,6 +26,7 @@ const RESULTS: &str = include_str!("../../../../rspice-app-results/src/workbench
 const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/serialization.rs");
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
+const LIBRARY_SURFACE: &str = include_str!("../../workbench/surfaces/project/library.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -1470,6 +1471,69 @@ fn the_cell_dialogs_draw_in_the_project_context_and_a_rename_is_answered_as_it_r
             "render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),"
         )),
         "Copy Cell draws in the project feature's context and answers nothing"
+    );
+}
+
+/// The library and view membership dialogs the Library surface draws, in
+/// today's order, each in the project feature's context. New Library raises
+/// nothing; each of the others has what it raised answered as it returns.
+const LIBRARY_DIALOGS: &[Step] = &[
+    (
+        "New Library",
+        &["ProjectFeature::process_new_library_dialog(&mut features::cx(app), &ctx);"],
+    ),
+    (
+        "Rename Library",
+        &[
+            "ProjectFeature::process_rename_library_dialog(&mut features::cx(app), &ctx);\
+             app.after_contribution();",
+        ],
+    ),
+    (
+        "Delete Library",
+        &[
+            "ProjectFeature::process_delete_library_dialog(&mut features::cx(app), &ctx);\
+             app.after_contribution();",
+        ],
+    ),
+    (
+        "Rename View",
+        &[
+            "ProjectFeature::process_rename_view_dialog(&mut features::cx(app), &ctx);\
+             app.after_contribution();",
+        ],
+    ),
+];
+
+/// What a catalog change hands the shell is carried out in the order the
+/// change once did it: what it left outside the model, then the revision a
+/// deletion reserved, then the change's own line in the log.
+const CATALOG_CHANGED: &[Step] = &[(
+    "CatalogChanged",
+    &[
+        "ProjectRequest::CatalogChanged {",
+        "apply_workspace_pruned(&mut app.state, pruned);",
+        "app.state.model.publish_project_library_mutation(mutation);",
+        "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
+    ],
+)];
+
+/// A deletion's reserved revision is answered as the dialog that reserved it
+/// returns, so no copy of the session can be taken while it waits.
+#[test]
+fn the_library_dialogs_draw_in_the_project_context_and_a_change_is_answered_as_it_returns() {
+    let library = body(LIBRARY_SURFACE, "pub(super) fn library(");
+    assert_runs_in_order("surfaces::project::library", &library, LIBRARY_DIALOGS);
+    assert!(
+        without_whitespace(&library).ends_with("app.after_contribution();"),
+        "the Library surface draws nothing after its last dialog has what it raised answered"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        CATALOG_CHANGED,
     );
 }
 

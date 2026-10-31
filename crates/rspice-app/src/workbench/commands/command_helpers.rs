@@ -347,7 +347,8 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
 /// place: the Configurations command, opening the selected view where it is
 /// edited, using a configuration for runs, whose refusal the Configuration
 /// page states, and what a library catalog change left outside the model,
-/// before the change's own line in the log.
+/// then the revision a deletion reserved, before the change's own line in
+/// the log.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
         ProjectRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
@@ -370,8 +371,22 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                     .err();
             app.state.project.configuration.refusal = refusal;
         }
-        ProjectRequest::CatalogChanged { pruned, notice } => {
+        ProjectRequest::CatalogChanged {
+            pruned,
+            mutation,
+            notice,
+        } => {
             apply_workspace_pruned(&mut app.state, pruned);
+            if let Some(mutation) = mutation {
+                let mutation = mutation.take();
+                debug_assert!(
+                    mutation.is_some(),
+                    "a deletion's reserved revision is published once, by the answer"
+                );
+                if let Some(mutation) = mutation {
+                    app.state.model.publish_project_library_mutation(mutation);
+                }
+            }
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);
         }
