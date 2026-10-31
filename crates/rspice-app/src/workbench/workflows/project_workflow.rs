@@ -1683,11 +1683,40 @@ fn start_browser_project_import(
     Ok(())
 }
 
+/// A project the browser read for opening, for the shell to apply.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
+pub(crate) enum BrowserProjectOpen {
+    /// A copy imported from a file the reader picked.
+    Import {
+        project: ProjectSnapshot,
+        name: String,
+        transaction: crate::product::TransactionId,
+    },
+    /// The project a browser binding opened, saved back through it.
+    Canonical(BrowserCanonicalOpen),
+}
+
+/// A project a browser binding opened, with the binding it saves through.
+#[cfg(target_arch = "wasm32")]
+pub(crate) struct BrowserCanonicalOpen {
+    pub(crate) project: ProjectSnapshot,
+    pub(crate) display_name: String,
+    pub(crate) handle_id: u64,
+    pub(crate) binding: PersistenceBinding,
+    pub(crate) transaction: crate::product::TransactionId,
+}
+
+/// Take the next project the browser finished reading or promoting, if
+/// any. A read that is stale, cancelled or failed ends its transaction and
+/// opens nothing; a promotion records whether the project will reopen.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn poll_browser_project_import(
+    model: &mut Model,
+    platform: &mut PlatformState,
+) -> Option<BrowserProjectOpen> {
     let Some(event) = BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| queue.borrow_mut().pop_front())
     else {
-        return false;
+        return None;
     };
     match event {
         BrowserProjectImportResult::CanonicalPromoted {
@@ -1697,21 +1726,17 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
             result,
         } => {
             if crate::workbench::lifecycle::project_lifecycle::complete_browser_binding_promotion(
-                &state.model,
-                &mut state.platform,
-                &context,
-                handle_id,
-                &result,
+                model, platform, &context, handle_id, &result,
             ) {
                 match result {
                     Ok(()) => {
-                        state.record(
+                        model.record(
                             LogSeverity::Info,
                             LogSource::Studio,
                             format!("{display_name} will reopen when the browser restarts."),
                         );
                     }
-                    Err(error) => state.model.report_warning(
+                    Err(error) => model.report_warning(
                         "Project will not reopen on restart",
                         format!(
                             "{display_name} will not reopen when the browser restarts: browser \
@@ -1720,13 +1745,13 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                     ),
                 };
             }
-            false
+            None
         }
         BrowserProjectImportResult::Transaction(completion) => {
             let transaction = completion.transaction;
             if !crate::workbench::lifecycle::project_lifecycle::browser_operation_context_is_current(
-                &state.model,
-                &state.platform,
+                model,
+                platform,
                 &completion.context,
             ) {
                 if let BrowserProjectImportPayload::Canonical(
@@ -1742,51 +1767,51 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                 }
                 finish_browser_project_import(completion.import_token);
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     transaction,
                 );
-                return false;
+                return None;
             }
             match completion.payload {
                 BrowserProjectImportPayload::Cancelled => {
                     finish_browser_project_import(completion.import_token);
                     crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                        &mut state.platform,
+                        platform,
                         transaction,
                     );
-                    false
+                    None
                 }
                 BrowserProjectImportPayload::Failed(error) => {
                     finish_browser_project_import(completion.import_token);
                     crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                        &mut state.platform,
+                        platform,
                         transaction,
                     );
-                    state.report_failure("Project open failed", error);
-                    false
+                    model.report_failure("Project open failed", error);
+                    None
                 }
                 BrowserProjectImportPayload::Loaded(file) => {
                     finish_browser_project_import(completion.import_token);
                     match crate::io::project_io::load_project_text(&file.contents, None) {
-                        Ok(project) => state.apply_loaded_project_authorized(
+                        Ok(project) => Some(BrowserProjectOpen::Import {
                             project,
-                            ProjectLoadOrigin::BrowserImport(&file.name),
-                            None,
+                            name: file.name,
                             transaction,
-                        ),
+                        }),
                         Err(error) => {
                             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                                &mut state.platform,
+                                platform,
                                 transaction,
                             );
-                            state.report_failure("Project open failed", error.to_string());
-                            false
+                            model.report_failure("Project open failed", error.to_string());
+                            None
                         }
                     }
                 }
                 BrowserProjectImportPayload::Canonical(result) => {
                     finish_browser_project_import(completion.import_token);
-                    finish_browser_canonical_open(state, transaction, result)
+                    prepare_browser_canonical_open(model, platform, transaction, result)
+                        .map(BrowserProjectOpen::Canonical)
                 }
             }
         }
@@ -1798,12 +1823,15 @@ fn finish_browser_project_import(token: crate::workbench::browser::file_import::
     let _ = crate::workbench::browser::file_import::finish_text_import(token);
 }
 
+/// Open the project the browser's binding read, ending the transaction and
+/// answering the open when it cannot be read.
 #[cfg(target_arch = "wasm32")]
-fn finish_browser_canonical_open(
-    state: &mut AppState,
+fn prepare_browser_canonical_open(
+    model: &mut Model,
+    platform: &mut PlatformState,
     transaction: crate::product::TransactionId,
     result: crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult,
-) -> bool {
+) -> Option<BrowserCanonicalOpen> {
     let crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
         handle_id,
         display_name,
@@ -1813,22 +1841,22 @@ fn finish_browser_canonical_open(
         match result {
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Cancelled => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     transaction,
                 );
             }
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Failed(error) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     transaction,
                 );
-                state.report_failure("Project open failed", error.to_string());
+                model.report_failure("Project open failed", error.to_string());
             }
             crate::workbench::lifecycle::project_lifecycle::BrowserOpenResult::Opened {
                 ..
             } => unreachable!(),
         }
-        return false;
+        return None;
     };
     let (project, binding) = match rspice_project::persistence::browser::BrowserBinding::open(
         bytes,
@@ -1839,21 +1867,35 @@ fn finish_browser_canonical_open(
         Err(error) => {
             crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
+                platform,
                 transaction,
             );
-            state.report_failure("Project open failed", error.to_string());
-            return false;
+            model.report_failure("Project open failed", error.to_string());
+            return None;
         }
     };
-    let binding = PersistenceBinding::Browser { handle_id, binding };
-    let binding_for_persist = binding.clone();
-    let opened = state.apply_loaded_project_authorized(
+    Some(BrowserCanonicalOpen {
         project,
-        ProjectLoadOrigin::BrowserCanonical(&display_name),
-        Some(binding),
+        display_name,
+        handle_id,
+        binding: PersistenceBinding::Browser { handle_id, binding },
         transaction,
-    );
+    })
+}
+
+/// Settle a browser binding's open once the shell has applied it: an open
+/// that failed lets the browser's handle go, and an accepted one promotes
+/// its binding record so it reopens when the browser restarts. Returns
+/// whether the project opened.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn settle_browser_canonical_open(
+    model: &Model,
+    platform: &mut PlatformState,
+    opened: bool,
+    handle_id: u64,
+    display_name: String,
+    binding: PersistenceBinding,
+) -> bool {
     if !opened {
         crate::workbench::lifecycle::project_lifecycle::release_browser_handle(handle_id);
         return false;
@@ -1863,11 +1905,10 @@ fn finish_browser_canonical_open(
     // never authorize an open that failed to apply or a project that has since
     // been replaced.
     let context = crate::workbench::lifecycle::project_lifecycle::begin_browser_binding_promotion(
-        &state.model,
-        &mut state.platform,
+        model, platform,
     );
     crate::workbench::lifecycle::project_lifecycle::start_browser_binding_persist(
-        binding_for_persist,
+        binding,
         move |result| {
             BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| {
                 queue

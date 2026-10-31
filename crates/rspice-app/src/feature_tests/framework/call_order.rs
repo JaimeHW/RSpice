@@ -139,6 +139,7 @@ const PREPARE_FRAME: &[Step] = &[
         "5.24",
         &[
             "project_workflow::poll_browser_project_import(",
+            "self.state.open_browser_project(open)",
             "self.restore_workspace_after_project_load()",
         ],
     ),
@@ -153,6 +154,7 @@ const PREPARE_FRAME: &[Step] = &[
         "5.26",
         &[
             "file_workflow::poll_browser_schematic_import(",
+            "self.state.open_browser_schematic(opened)",
             "self.state.results.analysis.clear_transient_specialized_viewer_data()",
         ],
     ),

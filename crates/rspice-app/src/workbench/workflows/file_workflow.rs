@@ -378,41 +378,48 @@ fn start_browser_schematic_import() -> Result<(), String> {
     Ok(())
 }
 
+/// A schematic the browser read for opening, for the shell to apply.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
-    let Some(completion) = BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())
-    else {
-        return false;
-    };
+pub(crate) struct BrowserSchematic {
+    pub(crate) schematic: SchematicState,
+    /// The picked file's name, kept as the next save's suggestion.
+    pub(crate) name: String,
+}
+
+/// Take the schematic the browser finished reading, if any, recording why
+/// a read that failed opened nothing.
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn poll_browser_schematic_import(model: &mut Model) -> Option<BrowserSchematic> {
+    let completion = BROWSER_SCHEMATIC_IMPORT_RESULT.with(|slot| slot.borrow_mut().take())?;
     if !crate::workbench::browser::file_import::finish_text_import(completion.token) {
-        return false;
+        return None;
     }
     match completion.result {
         BrowserSchematicImportResult::Loaded(file) => {
             match crate::io::schematic_io::load_schematic_text(&file.contents, None) {
-                Ok(schematic) => state.apply_loaded_schematic(
+                Ok(schematic) => Some(BrowserSchematic {
                     schematic,
-                    SchematicLoadOrigin::BrowserImport(&file.name),
-                ),
+                    name: file.name,
+                }),
                 Err(error) => {
-                    state.record(
+                    model.record(
                         LogSeverity::Error,
                         LogSource::Studio,
                         format!("Schematic open failed: {error}"),
                     );
-                    false
+                    None
                 }
             }
         }
         BrowserSchematicImportResult::Failed(error) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Schematic open failed: {error}"),
             );
-            false
+            None
         }
-        BrowserSchematicImportResult::Cancelled => false,
+        BrowserSchematicImportResult::Cancelled => None,
     }
 }
 

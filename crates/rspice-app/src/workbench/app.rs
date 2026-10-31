@@ -685,9 +685,13 @@ impl RSpiceApp {
             &mut self.state,
         );
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::workflows::project_workflow::poll_browser_project_import(
-            &mut self.state,
-        ) {
+        if let Some(open) =
+            crate::workbench::workflows::project_workflow::poll_browser_project_import(
+                &mut self.state.model,
+                &mut self.state.platform,
+            )
+            && self.state.open_browser_project(open)
+        {
             self.restore_workspace_after_project_load();
         }
         #[cfg(target_arch = "wasm32")]
@@ -699,9 +703,12 @@ impl RSpiceApp {
             self.handle_save_continuation_event(event);
         }
         #[cfg(target_arch = "wasm32")]
-        if crate::workbench::workflows::file_workflow::poll_browser_schematic_import(
-            &mut self.state,
-        ) {
+        if let Some(opened) =
+            crate::workbench::workflows::file_workflow::poll_browser_schematic_import(
+                &mut self.state.model,
+            )
+            && self.state.open_browser_schematic(opened)
+        {
             self.state
                 .results
                 .analysis

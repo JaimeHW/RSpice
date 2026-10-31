@@ -25,7 +25,11 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::workflows::file_workflow::BrowserSchematic;
 use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::workflows::project_workflow::BrowserProjectOpen;
 use crate::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
     OpenedProject, ProjectLoadOrigin, apply_live_project_snapshot,
@@ -128,6 +132,16 @@ impl AppState {
         self.clear_design_execution_context();
         file_workflow::settle_loaded_schematic(&mut self.model, &mut self.platform, origin);
         true
+    }
+
+    /// Open the schematic the browser read, its file's name kept as the next
+    /// save's suggestion. Returns whether it was applied.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_browser_schematic(&mut self, opened: BrowserSchematic) -> bool {
+        self.apply_loaded_schematic(
+            opened.schematic,
+            SchematicLoadOrigin::BrowserImport(&opened.name),
+        )
     }
 
     /// Reset the current schematic to a new empty document.
@@ -318,6 +332,41 @@ impl AppState {
         // page before anything is checked under it.
         self.publish_rule_deck_issues();
         true
+    }
+
+    /// Open the project the browser read: a copy imported from a picked
+    /// file, or the project a browser binding opened, whose binding is then
+    /// settled. Returns whether it opened.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn open_browser_project(&mut self, open: BrowserProjectOpen) -> bool {
+        match open {
+            BrowserProjectOpen::Import {
+                project,
+                name,
+                transaction,
+            } => self.apply_loaded_project_authorized(
+                project,
+                ProjectLoadOrigin::BrowserImport(&name),
+                None,
+                transaction,
+            ),
+            BrowserProjectOpen::Canonical(open) => {
+                let opened = self.apply_loaded_project_authorized(
+                    open.project,
+                    ProjectLoadOrigin::BrowserCanonical(&open.display_name),
+                    Some(open.binding.clone()),
+                    open.transaction,
+                );
+                project_workflow::settle_browser_canonical_open(
+                    &self.model,
+                    &mut self.platform,
+                    opened,
+                    open.handle_id,
+                    open.display_name,
+                    open.binding,
+                )
+            }
+        }
     }
 }
 
