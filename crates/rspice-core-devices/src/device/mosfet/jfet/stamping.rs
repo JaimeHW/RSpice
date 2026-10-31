@@ -390,6 +390,37 @@ impl Jfet {
 }
 
 impl NonlinearDevice for Jfet {
+    fn reopen_operating_point(&mut self) {
+        // jfetload.c's MODEINITJCT load (and the MESFET's and HFET's): with no
+        // previous iterate the gate junctions take their startup seed again,
+        // and nothing limits the first iterate.
+        self.vgs = Value::NAN;
+        self.vds = Value::NAN;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.last_raw_vgs_prev = Value::NAN;
+        self.last_raw_vgd_prev = Value::NAN;
+        self.last_raw_vgs = Value::NAN;
+        self.last_raw_vgd = Value::NAN;
+        self.eval_valid = false;
+        self.limiter_applied = false;
+        self.update_open.set(false);
+        self.eval_ids = 0.0;
+        self.eval_gm = 0.0;
+        self.eval_gds = 0.0;
+        self.eval_igs = 0.0;
+        self.eval_igd = 0.0;
+        self.eval_ggs = 0.0;
+        self.eval_ggd = 0.0;
+        self.eval_gmg = 0.0;
+        self.eval_gmd = 0.0;
+        self.eval_vds_linear = 0.0;
+        self.lin_vgs = 0.0;
+        self.lin_vgd = 0.0;
+        self.lin_cg = 0.0;
+        self.lin_cd = 0.0;
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         let vd = Self::node_voltage(voltages, self.drain);
         let vg = Self::node_voltage(voltages, self.gate);

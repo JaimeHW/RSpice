@@ -1535,6 +1535,40 @@ m1 d g 0 0 nb3 w=10u l=1u
 .op
 .end
 ",
+        "\
+* JFET
+icc 0 vcc 50m
+rcc vcc 0 100
+rd1 vcc d 10k
+j1 d 0 0 jmod
+.model jmod njf vto=-2 beta=1e-4
+.op
+.end
+",
+        "\
+* MESFET
+icc 0 vcc 50m
+rcc vcc 0 100
+rd1 vcc d 1k
+z1 d 0 0 mesmod area=1.4
+.model mesmod nmf level=1 vt0=-1.3 lambda=0.03 alpha=3 beta=1.4e-3
+.op
+.end
+",
+        "\
+* HFET
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 0.3m
+rg1 g 0 1k
+rd1 vcc d 1k
+z1 d g 0 hfet l=1u w=10u
+.model hfet nhfet level=5 rdi=0 rsi=0 m=2.57 lambda=0.17
++ vs=1.5e5 mu=0.385 vt0=0.13 eta=1.32 sigma0=0.04
++ vsigma=0.1 vsigmat=0.3 js1s=0 js1d=0 nmax=6e15
+.op
+.end
+",
     ];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load
