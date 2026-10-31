@@ -6,6 +6,7 @@
 //! result, has lost the object it was taken for — which is the defect these
 //! edges exist to close.
 
+use crate::state::SimulationPage;
 use crate::state::{AnalysisResult, AnalysisType};
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::RSpiceApp;
@@ -13,7 +14,7 @@ use crate::workbench::commands::tests::{RunOrigin, app_with_prepared_run, plan_b
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::Host;
 use crate::workbench::results::commands::ResultsCommand;
-use crate::workbench::state::{SimulationPage, Workspace};
+use crate::workbench::state::Workspace;
 
 #[test]
 fn opening_a_run_in_results_needs_a_dataset_and_lands_on_the_selected_one() {

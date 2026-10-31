@@ -431,7 +431,7 @@ fn two_connect_rule_blocks_are_refused_until_the_plan_names_one() {
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
-        crate::workbench::state::SimulationPage::Solver,
+        crate::state::SimulationPage::Solver,
         "the finding opens the page where the block is named"
     );
 }

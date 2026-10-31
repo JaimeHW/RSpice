@@ -19,11 +19,12 @@
 use egui::{Sense, Ui};
 
 use crate::simulation::placed_sources::SourceConsumer;
+use crate::state::SimulationPage;
 use crate::state::stimulus_library::definition::StimulusDefinition;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::app::actions::stimulus::{self as stimulus_actions, StimulusAdopter};
-use crate::workbench::state::{PURPOSE_FIELD, SimulationPage, Workspace};
+use crate::workbench::state::{PURPOSE_FIELD, Workspace};
 use crate::workbench::{AppState, MessageId};
 
 use super::super::super::design_system::{

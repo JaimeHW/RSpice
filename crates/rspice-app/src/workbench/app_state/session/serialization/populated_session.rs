@@ -13,10 +13,9 @@ use super::tests::{MemoryStorage, relaunch};
 use super::*;
 
 use crate::state::ModelsPage;
+use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
-use crate::workbench::state::{
-    ConsolePage, DesignPanel, SimulationPage, VerificationPage, Workspace, WorkspaceDocumentId,
-};
+use crate::workbench::state::{ConsolePage, DesignPanel, Workspace, WorkspaceDocumentId};
 
 /// A session in mid-work with every persisted field moved off its default:
 /// a closed project that left its documents, a run and an unsaved model edit

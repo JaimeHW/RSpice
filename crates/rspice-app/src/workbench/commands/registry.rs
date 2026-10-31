@@ -947,10 +947,10 @@ impl Command {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::VerificationPage;
     use crate::state::command_catalog::CommandCatalog;
     use crate::workbench::ResultViewer;
     use crate::workbench::results::commands::ResultsCommand;
-    use crate::workbench::state::VerificationPage;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         crate::workbench::commands::vocabulary::COMMAND_REGISTRY

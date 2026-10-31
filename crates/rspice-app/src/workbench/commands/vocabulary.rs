@@ -17,6 +17,7 @@ use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
 use crate::state::{ComponentType, ModelsPage};
+use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -26,7 +27,7 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
-use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 // `CommandPalette` is the feature's name, the same one the shortcut

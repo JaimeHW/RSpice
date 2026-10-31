@@ -1640,7 +1640,7 @@ fn an_analysis_configuration_finding_opens_the_analysis_it_is_about() {
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
         app.state.simulate.simulation_page,
-        crate::workbench::state::SimulationPage::Analyses
+        crate::state::SimulationPage::Analyses
     );
     assert_eq!(
         app.state.simulate.active_analysis_instance,

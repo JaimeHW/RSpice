@@ -18,6 +18,7 @@ use egui::Ui;
 use egui::os::OperatingSystem;
 
 use crate::diagnostics::LogAnchor;
+use crate::state::VerificationPage;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::{CellViewRef, ViewType};
 use crate::ui::icons::Icon;
@@ -52,7 +53,7 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
-use crate::workbench::state::{VerificationPage, WorkbenchSession, Workspace, WorkspaceDocumentId};
+use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
 use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 
@@ -1001,7 +1002,7 @@ mod tests {
             ),
             (
                 ids::SIMULATION_ANALYSES,
-                Command::SimulationPage(crate::workbench::state::SimulationPage::Analyses),
+                Command::SimulationPage(crate::state::SimulationPage::Analyses),
             ),
             (
                 ids::SIMULATE_WORKSPACE,

@@ -3,6 +3,7 @@
 //! is written the same way.
 
 use crate::state::ModelsPage;
+use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
@@ -16,7 +17,7 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
-use crate::workbench::state::{VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 
 /// The command's row under the vocabulary's label.
 const fn command(command: Command) -> MenuEntry {

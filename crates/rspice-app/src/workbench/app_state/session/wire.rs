@@ -20,6 +20,7 @@ use rspice_results_ui::report::session::ReportAuthoringState;
 use serde::{Deserialize, Serialize};
 
 use crate::state::{GridStyle, SchematicVisibilityPolicy, SchematicWireRoutingStyle};
+use crate::state::{SimulationPage, VerificationPage};
 use crate::ui::Theme;
 use crate::workbench::app::dialogs::selection::bulk_filter::SelectionBulkFilterSession;
 use crate::workbench::app_state::AppState;
@@ -36,10 +37,10 @@ use crate::workbench::slots::{
     SettingsState, SimulateState,
 };
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, SimulationPage, SpecialistToolBrowserState, VerificationPage,
-    VerificationSessionState, WorkbenchSession, Workspace, WorkspaceDocumentId,
-    WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
-    default_console_height, default_inspector_width, default_navigator_width,
+    ConsolePage, DesignPanel, SpecialistToolBrowserState, VerificationSessionState,
+    WorkbenchSession, Workspace, WorkspaceDocumentId, WorkspaceDocumentRegistry,
+    WorkspaceLayoutState, default_analysis_index, default_console_height, default_inspector_width,
+    default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 

@@ -7,6 +7,7 @@
 use egui::{Context, Frame, Id, Key, Modifiers, Popup, Rect, Ui};
 
 use crate::state::ModelsPage;
+use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::ui::panels::WorkbenchIcon;
 use crate::ui::theme::{self, FontWeight};
@@ -27,7 +28,7 @@ use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
-use crate::workbench::state::{VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 
 #[cfg(not(target_arch = "wasm32"))]
 fn title_test_app() -> RSpiceApp {

@@ -1092,8 +1092,7 @@ impl Command {
                 // command routes there rather than opening a second surface
                 // over the same state.
                 crate::workbench::menu_bar::open_simulation_options(&mut app.state);
-                app.state.simulate.simulation_page =
-                    crate::workbench::state::SimulationPage::Solver;
+                app.state.simulate.simulation_page = crate::state::SimulationPage::Solver;
                 activate_workspace(app, Workspace::Simulate);
             }
             Self::GenerateNetlist => {

@@ -5,6 +5,7 @@
 //! through the saved session unchanged is tested with the session wire.
 
 use super::*;
+use crate::state::VerificationPage;
 use crate::workbench::framework::requests::FullScreen;
 
 #[test]

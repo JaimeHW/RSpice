@@ -135,7 +135,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
 
     // The sandbox itself, rather than a paragraph recommending it.
     let tuning = crate::workbench::commands::vocabulary::Command::VerificationPage(
-        crate::workbench::state::VerificationPage::Tuning,
+        crate::state::VerificationPage::Tuning,
     );
     if let crate::workbench::framework::command_registry::CommandAvailability::Available =
         tuning.availability(app)
