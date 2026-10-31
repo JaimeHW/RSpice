@@ -1366,6 +1366,11 @@ impl CircuitData {
         } else {
             self.bjts.update_all(voltages);
         }
+        if preserve_initial_load {
+            for mosfet in &mut self.mosfets.devices {
+                mosfet.enter_operating_point();
+            }
+        }
         #[cfg(feature = "parallel")]
         if let Some(worker_count) = parallel_classic_mos_workers {
             self.mosfets.update_all_parallel(voltages, worker_count);

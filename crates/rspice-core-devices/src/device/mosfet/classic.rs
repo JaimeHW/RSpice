@@ -499,13 +499,15 @@ pub struct Mosfet {
     linearization_cache_valid: bool,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
-    /// Instance `IC=VDS,VGS,VBS`, read once at `UIC` transient startup and
-    /// never on a hot path, so it stays indirect like every other cold payload
-    /// on this instance.
-    initial_condition: Option<Box<MosfetInitialCondition>>,
-    /// The `OFF` startup state has not been superseded by a Newton step yet.
+    /// The instance `IC=` vector and the operating-point startup state, never
+    /// on a hot path, so they stay indirect like every other cold payload on
+    /// this instance.
+    cold: Option<Box<MosfetCold>>,
+    /// The startup state of the first operating-point load (an `OFF`
+    /// instance's zero bias) is still unspent.
     initial_off_seed_pending: bool,
-    /// How many evaluations the `OFF` startup state has already served.
+    /// How many consecutive evaluations the pending startup state has served
+    /// at an unchanged terminal bias.
     initial_off_seed_evaluations: u8,
     /// The last `update` began an iterate that no second `update` has seen
     /// yet (see `update_impl`).
@@ -562,7 +564,65 @@ pub struct MosfetNonlinearState {
     linearization_cache_valid: bool,
     initial_off_seed_pending: bool,
     initial_off_seed_evaluations: u8,
+    operating_point_startup: Option<InitialFixHold>,
     update_open: bool,
+}
+
+/// Cold per-instance payloads of a classic MOSFET, allocated only while one is
+/// present.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct MosfetCold {
+    /// Instance `IC=VDS,VGS,VBS`, read once at `UIC` transient startup.
+    pub(crate) initial_condition: Option<MosfetInitialCondition>,
+    /// Present while an operating-point solve has primed the instance and its
+    /// startup state is pending: an `OFF` instance holds its zero bias
+    /// through MODEINITFIX.
+    pub(crate) operating_point_startup: Option<OperatingPointStartup>,
+}
+
+/// The MODEINITFIX bookkeeping of a primed classic MOSFET. Convergence checks
+/// only borrow the device, and parallel passes share it, so it sits behind a
+/// lock.
+#[derive(Debug, Default)]
+pub(crate) struct OperatingPointStartup {
+    hold: std::sync::Mutex<InitialFixHold>,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq)]
+pub(crate) struct InitialFixHold {
+    /// The held `OFF` bias and load count at the last convergence check.
+    pub(crate) last_check: Option<([Value; 3], u8)>,
+    /// A convergence check found the circuit settled around the held `OFF`
+    /// instance; the next load releases it.
+    pub(crate) release_requested: bool,
+}
+
+impl OperatingPointStartup {
+    fn with_hold(hold: InitialFixHold) -> Self {
+        Self {
+            hold: std::sync::Mutex::new(hold),
+        }
+    }
+
+    pub(crate) fn hold(&self) -> InitialFixHold {
+        *self
+            .hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    pub(crate) fn set_hold(&self, hold: InitialFixHold) {
+        *self
+            .hold
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = hold;
+    }
+}
+
+impl Clone for OperatingPointStartup {
+    fn clone(&self) -> Self {
+        Self::with_hold(self.hold())
+    }
 }
 
 impl Mosfet {
@@ -606,6 +666,9 @@ impl Mosfet {
             linearization_cache_valid: self.linearization_cache_valid,
             initial_off_seed_pending: self.initial_off_seed_pending,
             initial_off_seed_evaluations: self.initial_off_seed_evaluations,
+            operating_point_startup: self
+                .operating_point_startup()
+                .map(OperatingPointStartup::hold),
             update_open: self.update_open,
         }
     }
@@ -649,6 +712,11 @@ impl Mosfet {
         self.linearization_cache_valid = state.linearization_cache_valid;
         self.initial_off_seed_pending = state.initial_off_seed_pending;
         self.initial_off_seed_evaluations = state.initial_off_seed_evaluations;
+        self.set_operating_point_startup(
+            state
+                .operating_point_startup
+                .map(OperatingPointStartup::with_hold),
+        );
         self.update_open = state.update_open;
     }
 
@@ -656,6 +724,49 @@ impl Mosfet {
     /// starts from the zero-junction state of mos1load.c's MODEINITJCT arm.
     pub(crate) fn set_initially_off(&mut self, off: bool) {
         self.initial_off = off;
+    }
+
+    /// Enter an operating-point solve, which starts with the MODEINITJCT
+    /// load: a pending startup state arms, and a spent one stays spent, so
+    /// continuation retries and later sweep points cannot replay it.
+    #[doc(hidden)]
+    pub fn enter_operating_point(&mut self) {
+        if self.initial_off
+            && self.initial_off_seed_pending
+            && self.operating_point_startup().is_none()
+        {
+            self.set_operating_point_startup(Some(OperatingPointStartup::default()));
+        }
+    }
+
+    pub(in crate::device::mosfet) fn operating_point_startup(
+        &self,
+    ) -> Option<&OperatingPointStartup> {
+        self.cold.as_deref()?.operating_point_startup.as_ref()
+    }
+
+    /// Install or clear the startup state, dropping an emptied cold payload.
+    pub(in crate::device::mosfet) fn set_operating_point_startup(
+        &mut self,
+        startup: Option<OperatingPointStartup>,
+    ) {
+        if startup.is_some() {
+            self.cold
+                .get_or_insert_with(Default::default)
+                .operating_point_startup = startup;
+        } else if let Some(cold) = self.cold.as_deref_mut() {
+            cold.operating_point_startup = None;
+            if cold.initial_condition.is_none() {
+                self.cold = None;
+            }
+        }
+    }
+
+    /// The bias a pending startup state evaluates instead of the Newton
+    /// iterate: `vbs = vgs = vds = 0` for an `OFF` instance (mos1load.c:397-410,
+    /// and its level 2/3/6/9 twins).
+    pub(in crate::device::mosfet) fn pending_startup_bias(&self) -> Option<(Value, Value, Value)> {
+        (self.initial_off_seed_pending && self.initial_off).then_some((0.0, 0.0, 0.0))
     }
 
     /// True when the deck marked this instance `OFF`.
@@ -676,13 +787,16 @@ impl Mosfet {
     pub fn transient_initial_condition(
         &self,
     ) -> Option<(Option<Value>, Option<Value>, Option<Value>)> {
-        let ic = self.initial_condition.as_deref()?;
+        let ic = self.cold.as_deref()?.initial_condition.as_ref()?;
         Some((ic.vds, ic.vgs, ic.vbs))
     }
 
     /// The authored `IC=` vector, allocating the cold payload on first write.
     pub(crate) fn initial_condition_mut(&mut self) -> &mut MosfetInitialCondition {
-        self.initial_condition.get_or_insert_with(Default::default)
+        self.cold
+            .get_or_insert_with(Default::default)
+            .initial_condition
+            .get_or_insert_with(Default::default)
     }
 
     /// True when this instance uses the Berkeley MOS3 equation core.

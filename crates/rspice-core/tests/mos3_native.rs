@@ -961,3 +961,36 @@ fn mos3_off_keyword_selects_the_bistable_operating_point_branch() {
          m2 OFF ({m2_off_d1}, {m2_off_d2})"
     );
 }
+
+#[test]
+fn mos3_off_devices_stay_cut_off_until_the_rest_of_the_latch_converges() {
+    // The q pull-down (mn2, mn3) is marked OFF. ngspice-46, LTspice 26.1.1 and
+    // QSPICE hold it at zero bias through MODEINITFIX, solve the latch
+    // without it, and only then release it: q = 5.000000 V, out = 4.424e-8 V.
+    // Releasing it after the first Newton iterate lets the zero-bias start
+    // flip the latch to q = 5.7e-8 V, out = 5 V.
+    let deck = "* OFF devices choose the state of a resistor-fed latch
+        .model nm nmos level=3 vto=1.0 uo=600 nsub=1e16 tox=30n nfs=1e12 kappa=0.02         theta=0.05 vmax=1.5e5 eta=0.5 xj=0.3u
+        .model pm pmos level=3 vto=-1.0 uo=250 nsub=5e15 tox=30n nfs=1e12 kappa=0.02         theta=0.1 vmax=2.5e5 eta=1.0 xj=0.3u
+        vdd vdd 0 5
+        vlo lo 0 0
+        vhi hi 0 5
+        mp1 out q vdd vdd pm w=9u l=2u
+        mn1 out q 0 0 nm w=9u l=2u
+        r1 out fb 200k
+        mp2 x fb vdd vdd pm w=9u l=2u
+        mp3 q lo x vdd pm w=9u l=2u
+        mn2 y fb 0 0 nm w=9u l=2u off
+        mn3 q hi y 0 nm w=9u l=2u off
+        .op
+        .end
+";
+    assert_close("q", dc_node_voltage(deck, "q"), 5.0, 1.0e-5, 0.0);
+    assert_close(
+        "out",
+        dc_node_voltage(deck, "out"),
+        4.424_112e-8,
+        0.0,
+        1.0e-6,
+    );
+}

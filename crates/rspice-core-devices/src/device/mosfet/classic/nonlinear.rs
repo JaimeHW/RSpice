@@ -43,9 +43,81 @@ impl Mosfet {
         let last_raw = [self.vgs, self.vds, self.vbs].map(Value::to_bits);
         let last_eval = [self.eval_vgs, self.eval_vds, self.eval_vbs].map(Value::to_bits);
         self.has_branch_history
-            && !(self.initial_off && self.initial_off_seed_pending)
+            && self.pending_startup_bias().is_none()
             && raw == last_raw
             && last_eval != last_raw
+    }
+
+    /// An `OFF` instance an operating-point solve primed keeps its zero bias
+    /// through MODEINITFIX, which ngspice leaves only once the circuit solved
+    /// without it converges (niiter.c:344-349). That is the whole lever OFF
+    /// has on which state of a latch the solve picks.
+    fn holds_through_initial_fix(&self) -> bool {
+        self.initial_off
+            && self.operating_point_startup().is_some()
+            && self.initial_off_seed_pending
+    }
+
+    /// Retire the startup state. A held `OFF` instance is released by the
+    /// load after a convergence check found its terminals settled (see
+    /// `is_converged`), and counts its loads in between. Any other startup
+    /// state serves one load, as MODEINITJCT does: the engine updates one
+    /// iterate more than once, so it retires when the bias moves, or after
+    /// three loads at one bias (ideal sources pin every terminal). A
+    /// transient load releases an operating-point startup outright.
+    fn advance_startup_state(&mut self, vgs: Value, vds: Value, vbs: Value, transient: bool) {
+        if self.holds_through_initial_fix() && !transient {
+            self.initial_off_seed_evaluations = self.initial_off_seed_evaluations.wrapping_add(1);
+            if self
+                .operating_point_startup()
+                .is_some_and(|startup| startup.hold().release_requested)
+            {
+                self.retire_startup_state();
+            }
+            return;
+        }
+        let moved = self.has_branch_history
+            && [vgs, vds, vbs]
+                .iter()
+                .zip([self.vgs, self.vds, self.vbs])
+                .any(|(a, b)| a.to_bits() != b.to_bits());
+        if moved
+            || (transient && self.operating_point_startup().is_some())
+            || self.initial_off_seed_evaluations >= 2
+        {
+            self.retire_startup_state();
+        } else {
+            self.initial_off_seed_evaluations += 1;
+        }
+    }
+
+    pub(in crate::device::mosfet) fn retire_startup_state(&mut self) {
+        self.initial_off_seed_pending = false;
+        self.set_operating_point_startup(None);
+    }
+
+    /// The convergence check of a held `OFF` instance. The circuit cannot
+    /// converge on the held bias; once the terminals settle between two checks
+    /// with a load in between, the next load releases the instance.
+    fn initial_fix_check(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        let Some(startup) = self.operating_point_startup() else {
+            return false;
+        };
+        let bias = [self.vgs, self.vds, self.vbs];
+        let loads = self.initial_off_seed_evaluations;
+        let mut hold = startup.hold();
+        if let Some((last, last_loads)) = hold.last_check.replace((bias, loads))
+            && last_loads != loads
+            && bias.iter().zip(last).all(|(a, b)| {
+                (a - b).abs()
+                    < criteria.relative_tolerance() * a.abs().max(b.abs())
+                        + criteria.voltage_tolerance()
+            })
+        {
+            hold.release_requested = true;
+        }
+        startup.set_hold(hold);
+        false
     }
 
     /// Make the present state the previous iterate.
@@ -102,24 +174,8 @@ impl Mosfet {
         vbs: Value,
         constants: Option<&ClassicMosTransientConstants>,
     ) {
-        // The OFF startup state owns the device only until Newton produces a
-        // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
-        // ngspice's first load. The operating-point seed here is primed and
-        // then re-evaluated at the same solution before anything is stamped,
-        // so a changed terminal bias retires the state; without that the
-        // keyword would be spent before it reached the matrix. Terminals an
-        // ideal source pins never change, so the evaluation count retires it
-        // too — otherwise such an instance would report cut off forever.
-        if self.initial_off && self.initial_off_seed_pending {
-            let moved = self.has_branch_history
-                && (vgs.to_bits() != self.vgs.to_bits()
-                    || vds.to_bits() != self.vds.to_bits()
-                    || vbs.to_bits() != self.vbs.to_bits());
-            if moved || self.initial_off_seed_evaluations >= 2 {
-                self.initial_off_seed_pending = false;
-            } else {
-                self.initial_off_seed_evaluations += 1;
-            }
+        if self.pending_startup_bias().is_some() {
+            self.advance_startup_state(vgs, vds, vbs, constants.is_some());
         }
         let (eval_vgs, eval_vds, eval_vbs) = if let Some(constants) = constants {
             self.limited_branch_voltages_for_transient_eval(vgs, vds, vbs, constants)
@@ -247,6 +303,9 @@ impl NonlinearDevice for Mosfet {
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
+        if self.holds_through_initial_fix() {
+            return self.initial_fix_check(criteria);
+        }
         // Every voltage, channel-current, and previous-junction field below
         // participates in a strict `< tolerance` predicate. IEEE NaN/Inf
         // therefore fails closed without a separate scan. The current body

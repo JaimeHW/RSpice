@@ -186,7 +186,7 @@ impl Mosfet {
             has_branch_history: false,
             linearization_cache_valid: false,
             initial_off: false,
-            initial_condition: None,
+            cold: None,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             update_open: false,
@@ -426,15 +426,10 @@ impl Mosfet {
         vbs: Value,
         constants: Option<&ClassicMosTransientConstants>,
     ) -> (Value, Value, Value) {
-        // mos1load.c reaches `vbs = vgs = vds = 0` on MODEINITJCT whenever the
-        // instance carries the OFF keyword, in every compatibility mode, and
-        // that state is an explicit device bias rather than the history fed to
-        // fetlim/limvds. Hold it until Newton actually moves the terminals so
-        // the first stamped linearization is the cut-off device the deck asked
-        // for; that is the whole lever OFF has on which branch of a bistable
-        // operating point the solve settles into.
-        if self.initial_off && self.initial_off_seed_pending {
-            return (0.0, 0.0, 0.0);
+        // The startup state is an explicit device bias rather than the history
+        // fed to fetlim/limvds; the next iterate is limited against it.
+        if let Some(startup) = self.pending_startup_bias() {
+            return startup;
         }
         if !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
@@ -1762,6 +1757,44 @@ mod tests {
         let mut active = Mosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
         active.update(&seed);
         assert_eq!((active.eval_vgs, active.eval_vds), (5.0, 5.0));
+    }
+
+    #[test]
+    fn primed_off_instance_holds_its_zero_bias_until_its_terminals_settle() {
+        use crate::device::NonlinearDevice;
+        use crate::device::traits::NonlinearConvergenceCriteria;
+
+        // In an operating point the OFF state lasts through MODEINITFIX: the
+        // circuit cannot converge on it, moving iterates keep it, and the load
+        // after a check that found two iterates agreeing releases it.
+        let criteria = NonlinearConvergenceCriteria::default();
+        let held = |mos: &Mosfet| (mos.eval_vgs, mos.eval_vds, mos.eval_vbs) == (0.0, 0.0, 0.0);
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.set_initially_off(true);
+        mos.enter_operating_point();
+        for bias in [
+            [5.0, 5.0, 0.0, 0.0],
+            [5.0, 4.0, 0.0, 0.0],
+            [4.5, 4.2, 0.0, 0.0],
+        ] {
+            for _ in 0..3 {
+                mos.update(&bias);
+                assert!(held(&mos));
+            }
+            assert!(!mos.is_converged(criteria));
+            // A second check with no load in between is no new evidence.
+            assert!(!mos.is_converged(criteria));
+        }
+        let settled = [4.5 + 1.0e-9, 4.2, 0.0, 0.0];
+        mos.update(&settled);
+        assert!(held(&mos) && !mos.is_converged(criteria));
+        mos.update(&settled);
+        assert!(!held(&mos));
+
+        // A spent state is not re-armed by a later solve's prime.
+        mos.enter_operating_point();
+        mos.update(&[3.0, 3.0, 0.0, 0.0]);
+        assert_ne!((mos.eval_vgs, mos.eval_vds), (0.0, 0.0));
     }
 
     #[test]
