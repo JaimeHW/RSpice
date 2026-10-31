@@ -6,6 +6,7 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration_transaction,
 };
+use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
@@ -459,6 +460,13 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 .record(LogSeverity::Info, LogSource::Studio, notice);
             if persist_global_veriloga {
                 persist_global_veriloga_library(&mut app.state.model);
+            }
+        }
+        ProjectRequest::CreateProject => {
+            let params = app.state.project.new_project.params();
+            match app.state.create_new_project_with(&params) {
+                Ok(()) => app.state.project.new_project = NewProjectDialogState::default(),
+                Err(error) => app.state.project.new_project.error = Some(error),
             }
         }
     }

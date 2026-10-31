@@ -319,7 +319,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "models"),
     ("features::render_dialog", "settings"),
     ("features::render_dialog", "cloud"),
-    ("render_new_project_dialog", "project"),
+    ("ProjectFeature::render_new_project_dialog", "project"),
     ("features::render_dialog", "cloud"),
     ("features::render_dialog", "cloud"),
     ("features::render_dialog", "cloud"),
@@ -1627,6 +1627,50 @@ fn the_library_deletion_steps_run_in_the_project_context_and_a_deletion_is_answe
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
         CELL_OR_VIEW_DELETED,
+    );
+}
+
+/// What New project hands the shell is carried out as the dialog once did
+/// it in place: the identity the held-open dialog names is created, then
+/// the outcome is written back into the dialog.
+const PROJECT_CREATED: &[Step] = &[(
+    "CreateProject",
+    &[
+        "ProjectRequest::CreateProject => {",
+        "let params = app.state.project.new_project.params();",
+        "match app.state.create_new_project_with(&params) {",
+        "Ok(()) => app.state.project.new_project = NewProjectDialogState::default(),",
+        "Err(error) => app.state.project.new_project.error = Some(error),",
+    ],
+)];
+
+/// New project draws in the project feature's context, and the creation it
+/// hands over is answered straight after it draws, in the step that drew it,
+/// so the dialogs drawn after it in the frame see the new project.
+#[test]
+fn the_new_project_dialog_draws_in_the_project_context_and_its_creation_is_answered_as_it_returns()
+{
+    let order = without_whitespace(DIALOG_ORDER);
+    let new_project = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"project.new_project\")"))
+        .expect("the shell's dialog order draws New project");
+    assert!(
+        new_project.contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::render_new_project_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "New project draws in the project feature's context, and its creation is answered \
+         straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        PROJECT_CREATED,
     );
 }
 

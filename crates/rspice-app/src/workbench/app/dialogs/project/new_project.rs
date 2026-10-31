@@ -9,16 +9,7 @@
 //! the reader edits it, after which the two are independent — a mirror that
 //! keeps overwriting a deliberate choice is worse than no mirror.
 
-use egui::Context;
-
-use crate::state::workspace::{
-    DEFAULT_PROJECT_LIBRARY, DEFAULT_SCHEMATIC_VIEW, DEFAULT_TOP_CELL,
-    PROJECT_DESCRIPTOR_SCHEMA_VERSION,
-};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
-use crate::workbench::app::RSpiceApp;
+use crate::state::workspace::{DEFAULT_PROJECT_LIBRARY, DEFAULT_TOP_CELL};
 use crate::workbench::app_state::AppState;
 use crate::workbench::workflows::project_workflow::NewProjectParams;
 
@@ -49,7 +40,7 @@ impl NewProjectDialogState {
     /// Re-derive Library from the project name. A reader who has typed in
     /// Library owns it from then on: a suggestion that keeps overwriting a
     /// deliberate choice is worse than no suggestion.
-    fn mirror_library_from_name(&mut self) {
+    pub(crate) fn mirror_library_from_name(&mut self) {
         if !self.library_edited {
             self.library = library_slug(&self.name);
         }
@@ -87,147 +78,6 @@ fn library_slug(name: &str) -> String {
     } else {
         trimmed.to_owned()
     }
-}
-
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_new_project_dialog(&mut self, ctx: &Context) {
-        if !self.state.project.new_project.open {
-            return;
-        }
-        // The footer is declared before the body runs, so the primary gate
-        // reads the identity as of this frame's start. Creation re-reads and
-        // re-validates the post-edit identity, so the one-frame lag can never
-        // let an invalid identity through.
-        let entry_valid = self.state.project.new_project.params().validate().is_ok();
-
-        let dialog = &mut self.state.project.new_project;
-        let choice = Dialog::new("Create RSpice project", "Create project")
-            .description(
-                "Name the new project, its editable design library, and its top cell before it \
-             replaces the current session.",
-            )
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
-            .hint("nothing is written to disk until Save")
-            .primary_enabled(entry_valid)
-            .show(ctx, |ui| {
-                ui.columns(2, |columns| {
-                    render_identity(&mut columns[0], dialog);
-                    render_contract(&mut columns[1], dialog);
-                });
-            });
-
-        match choice {
-            DialogChoice::Primary => {
-                let params = self.state.project.new_project.params();
-                match self.state.create_new_project_with(&params) {
-                    Ok(()) => self.state.project.new_project = NewProjectDialogState::default(),
-                    Err(error) => self.state.project.new_project.error = Some(error),
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.project.new_project = NewProjectDialogState::default();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
-        }
-    }
-}
-
-fn render_identity(ui: &mut egui::Ui, dialog: &mut NewProjectDialogState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    section_head(ui, "Project identity");
-    ui.spacing_mut().item_spacing.y = 2.0;
-
-    let mut edited = input_row(ui, "Project name", &mut dialog.name).changed();
-    if edited {
-        dialog.mirror_library_from_name();
-    }
-    if input_row(ui, "Library", &mut dialog.library).changed() {
-        dialog.library_edited = true;
-        edited = true;
-    }
-    edited |= input_row(ui, "Top cell", &mut dialog.top_cell).changed();
-    if edited {
-        // A refusal describes the identity that was submitted; editing one
-        // retires it rather than leaving a stale reason beside new fields.
-        dialog.error = None;
-    }
-    kv_row(ui, "View", DEFAULT_SCHEMATIC_VIEW);
-    kv_row(
-        ui,
-        "Format",
-        &format!(".rspiceproj \u{b7} schema {PROJECT_DESCRIPTOR_SCHEMA_VERSION}"),
-    );
-
-    let message = dialog
-        .params()
-        .validate()
-        .err()
-        .or_else(|| dialog.error.clone());
-    if let Some(message) = message {
-        ui.add_space(tokens::SP_3);
-        ui.label(
-            egui::RichText::new(message)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(c.err),
-        );
-    }
-}
-
-fn render_contract(ui: &mut egui::Ui, dialog: &NewProjectDialogState) {
-    let params = dialog.params();
-
-    // The "Safety contract" card above this said the same four things for
-    // every project anyone ever created, so it was not about this one.
-    let top_view = format!(
-        "{}/{}/{DEFAULT_SCHEMATIC_VIEW}",
-        params.root_library, params.top_cell
-    );
-    // The enabled Create button says the inputs are complete, and the field
-    // errors say which one is not.
-    property_card(
-        ui,
-        "Creates",
-        &[
-            ("Design library", params.root_library.as_str()),
-            ("Top cell view", top_view.as_str()),
-            ("Simulation plan", "personal default"),
-            ("Drawing sheet", "personal default"),
-        ],
-    );
-}
-
-/// The mockup's property card: a titled panel with an optional right-aligned
-/// status and a key/value list.
-fn property_card(ui: &mut egui::Ui, title: &str, rows: &[(&str, &str)]) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    egui::Frame::new()
-        .fill(c.bg_panel)
-        .stroke(egui::Stroke::new(1.0, c.border))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(title)
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(c.text),
-            );
-            ui.add_space(tokens::SP_2);
-            for &(key, value) in rows {
-                kv_row(ui, key, value);
-            }
-        });
-}
-
-fn section_head(ui: &mut egui::Ui, label: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-    );
-    ui.add_space(tokens::SP_2);
 }
 
 #[cfg(test)]

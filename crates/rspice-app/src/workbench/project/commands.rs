@@ -317,6 +317,10 @@ pub(crate) enum ProjectRequest {
         notice: String,
         persist_global_veriloga: bool,
     },
+    /// Create the project the New project dialog names, which replaces the
+    /// session, and write the outcome back into the dialog held open for it:
+    /// closed once the project is created, the refusal stated when it is not.
+    CreateProject,
 }
 
 impl Request for ProjectRequest {

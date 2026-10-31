@@ -67,7 +67,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.new_project"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_project.open),
-        render: |app, ctx| app.render_new_project_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::render_new_project_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("cloud.publish_web"),
