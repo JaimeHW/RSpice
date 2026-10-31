@@ -32,15 +32,15 @@ use crate::workbench::commands::{
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
-    CommandAvailability, CommandFlags, CommandSpec,
+    CommandAvailability, CommandFlags, CommandSpec, ids,
 };
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
     ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenProjectDialog,
     OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
-    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations,
-    ShowWaveforms, SubcircuitSymbolSource,
+    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels,
+    ShowSchematicAnnotations, ShowWaveforms, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -326,6 +326,15 @@ impl RSpiceApp {
                 app.state
                     .workbench
                     .activate(crate::workbench::state::Workspace::Design);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ShowProjectModels| {
+                app.state.models.models_view.catalog_scope =
+                    crate::workbench::state::ModelsCatalogScope::Project;
+                app.execute_command_key(ids::MODELS_CATALOG);
             },
         );
         requests::drain(

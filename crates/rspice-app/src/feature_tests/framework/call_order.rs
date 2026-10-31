@@ -542,10 +542,18 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "18",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app, ShowProjectModels|",
+            "app.state.models.models_view.catalog_scope =",
+            "app.execute_command_key(ids::MODELS_CATALOG);",
+        ],
     ),
     (
         "19",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "20",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -1181,8 +1189,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        19,
-        "`after_contribution` answers exactly the nineteen requests it lists"
+        20,
+        "`after_contribution` answers exactly the twenty requests it lists"
     );
 }
 

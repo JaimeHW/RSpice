@@ -24,7 +24,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::state::{ModelsCatalogScope, Workspace};
+use crate::workbench::state::Workspace;
 use rspice_design::drc::DrcSeverity;
 
 use super::page::{
@@ -117,8 +117,10 @@ impl OverviewIntent {
             }
             Self::OpenProjectRoot => open_project_root(app),
             Self::OpenProjectModels => {
-                app.state.models.models_view.catalog_scope = ModelsCatalogScope::Project;
-                app.execute_command_key(ids::MODELS_CATALOG);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(crate::workbench::framework::requests::ShowProjectModels);
             }
             Self::OpenRun(index) => {
                 let has_retained_dataset = app

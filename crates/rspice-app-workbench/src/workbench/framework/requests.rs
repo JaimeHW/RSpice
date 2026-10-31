@@ -483,6 +483,16 @@ impl Request for OpenInDesign {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show the project's own models on the Models workspace's catalog. Raised
+/// by the project overview, and taken straight after the call that raised
+/// it.
+#[derive(Clone, Debug)]
+pub struct ShowProjectModels;
+
+impl Request for ShowProjectModels {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

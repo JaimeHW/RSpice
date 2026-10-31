@@ -6,6 +6,7 @@
 //! it were the length of the history.
 
 use super::*;
+use crate::workbench::state::ModelsCatalogScope;
 use crate::workbench::surfaces::project::library_publication::{
     commit_project_library_publication, prepare_project_library_publication,
 };
@@ -312,6 +313,7 @@ fn overview_model_closure_always_opens_the_project_catalog_scope() {
     let mut app = RSpiceApp::test_instance();
     app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
     OverviewIntent::OpenProjectModels.execute(&mut app);
+    app.after_contribution();
 
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
     assert_eq!(
