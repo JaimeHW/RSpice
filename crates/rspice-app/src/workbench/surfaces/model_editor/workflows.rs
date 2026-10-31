@@ -10,53 +10,49 @@ use super::*;
 
 pub(super) fn show_inspection_dialogs(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    parameter_schema_dialog(ctx, app, records);
-    new_section_dialog(ctx, app, records);
-    correlation_matrix_dialog(ctx, app, records);
-    temperature_preview_dialog(ctx, app, records);
-    qualification_plan_dialog(ctx, app, records);
-    promotion_review_dialog(ctx, app, records);
-    release_comparison_dialog(ctx, app, records);
+    parameter_schema_dialog(ctx, cx, records);
+    new_section_dialog(ctx, cx, records);
+    correlation_matrix_dialog(ctx, cx, records);
+    temperature_preview_dialog(ctx, cx, records);
+    qualification_plan_dialog(ctx, cx, records);
+    promotion_review_dialog(ctx, cx, records);
+    release_comparison_dialog(ctx, cx, records);
 }
 
 pub(super) fn show_model_editor_workflow(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    let Some(request) = active_model_editor_workflow(app.state.model_editor_reads()) else {
+    let Some(request) =
+        active_model_editor_workflow(cx.state.model_editor_reads(cx.model, cx.platform))
+    else {
         return;
     };
     match request.workflow {
-        ModelEditorWorkflow::SaveRevision => save_revision_workflow(ctx, app, &request),
+        ModelEditorWorkflow::SaveRevision => save_revision_workflow(ctx, cx, &request),
         ModelEditorWorkflow::ValidateCandidate => {
-            validation_review_workflow(ctx, app, records, &request);
+            validation_review_workflow(ctx, cx, records, &request);
         }
         ModelEditorWorkflow::RunQualification => {
-            qualification_run_workflow(ctx, app, records, &request);
+            qualification_run_workflow(ctx, cx, records, &request);
         }
     }
 }
 
 pub(super) fn save_revision_workflow(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
-    let writable = app.state.platform.project_lifecycle.is_open()
-        && !app.state.model.safe_mode.project_read_only()
-        && app
-            .state
-            .models
-            .model_editor
-            .qualification_execution
-            .is_none();
-    let dirty = app
+    let writable = cx.platform.project_lifecycle.is_open()
+        && !cx.model.safe_mode.project_read_only()
+        && cx.state.model_editor.qualification_execution.is_none();
+    let dirty = cx
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -74,7 +70,7 @@ pub(super) fn save_revision_workflow(
             ui,
             "model-save-review-contract",
             &[("Field", 0.34), ("Reviewed value", 0.66)],
-            &save_review_rows(app),
+            &save_review_rows(cx),
             "No project-owned model candidate is open.",
         );
         if let Some(error) = request.error.as_deref() {
@@ -82,7 +78,7 @@ pub(super) fn save_revision_workflow(
         } else if !writable {
             blocker_note(
                 ui,
-                if app.state.model.safe_mode.project_read_only() {
+                if cx.model.safe_mode.project_read_only() {
                     "The project is open read-only. Inspection remains available, but this revision cannot be saved."
                 } else {
                     "Finish or cancel the active qualification run before saving this revision."
@@ -94,7 +90,11 @@ pub(super) fn save_revision_workflow(
     });
     match choice {
         DialogChoice::Primary if writable && dirty => {
-            match app.save_open_model_candidate() {
+            match crate::workbench::documents::model_editor::save_open_candidate(
+                &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
+                &mut cx.runs.preflight,
+                cx.handles.run_controller,
+            ) {
                 // The save records its own line.
                 Ok(_) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
@@ -105,8 +105,8 @@ pub(super) fn save_revision_workflow(
     }
 }
 
-pub(super) fn save_review_rows(app: &RSpiceApp) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+pub(super) fn save_review_rows(cx: &Cx<'_, ModelsFeature>) -> Vec<Vec<DisplayCell>> {
+    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let delta = draft.delta().ok();
@@ -165,7 +165,7 @@ pub(super) fn save_review_rows(app: &RSpiceApp) -> Vec<Vec<DisplayCell>> {
 
 pub(super) fn validation_review_workflow(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
@@ -180,17 +180,17 @@ pub(super) fn validation_review_workflow(
     ;
     let choice = if prepared {
         choice.show(ctx, |ui| {
-            validation_review_body(ui, app, records, request, prepared);
+            validation_review_body(ui, cx, records, request, prepared);
         })
     } else {
         choice.secondary("Cancel").show(ctx, |ui| {
-            validation_review_body(ui, app, records, request, prepared);
+            validation_review_body(ui, cx, records, request, prepared);
         })
     };
     match choice {
         DialogChoice::Primary if !prepared => {
             crate::workbench::documents::model_editor::validate_open_candidate(
-                &mut app.state.model_editor_parts(),
+                &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
             );
             prepare_model_editor_workflow();
         }
@@ -203,7 +203,7 @@ pub(super) fn validation_review_workflow(
 
 pub(super) fn validation_review_body(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
     prepared: bool,
@@ -217,7 +217,7 @@ pub(super) fn validation_review_body(
         ui,
         "model-validation-review-contract",
         &[("Check", 0.34), ("Observed", 0.44), ("State", 0.22)],
-        &validation_review_rows(app, records, prepared),
+        &validation_review_rows(cx, records, prepared),
         if prepared {
             "No model validation report is available."
         } else {
@@ -226,11 +226,10 @@ pub(super) fn validation_review_body(
     );
     if let Some(error) = request.error.as_deref() {
         blocker_note(ui, error);
-    } else if !app.state.models.model_editor.diagnostics.is_empty() {
+    } else if !cx.state.model_editor.diagnostics.is_empty() {
         blocker_note(
             ui,
-            &app.state
-                .models
+            &cx.state
                 .model_editor
                 .diagnostics
                 .iter()
@@ -242,12 +241,12 @@ pub(super) fn validation_review_body(
 }
 
 pub(super) fn validation_review_rows(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     prepared: bool,
 ) -> Vec<Vec<DisplayCell>> {
     if !prepared {
-        let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+        let Some(draft) = cx.state.model_editor.draft.as_ref() else {
             return Vec::new();
         };
         // Before the report is prepared there is one thing to state: which
@@ -264,11 +263,11 @@ pub(super) fn validation_review_rows(
             DisplayCell::plain(""),
         ]];
     }
-    let valid = app.state.models.model_editor.validation.is_some();
+    let valid = cx.state.model_editor.validation.is_some();
     let definition_valid =
-        records.metadata_error.is_none() && app.state.models.model_editor.diagnostics.is_empty();
+        records.metadata_error.is_none() && cx.state.model_editor.diagnostics.is_empty();
     let qualification_valid = records.qualification_error.is_none();
-    let qualification = qualification_totals(app, records);
+    let qualification = qualification_totals(cx, records);
     let parity_complete = qualification.total > 0
         && qualification.desktop_passed == qualification.total
         && qualification.wasm_passed == qualification.total;
@@ -331,11 +330,15 @@ pub(super) fn validation_row(check: &str, observed: &str, passed: bool) -> Vec<D
 
 pub(super) fn qualification_run_workflow(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
-    let runnable = app.command_key_enabled(ModelsCommand::ModelRunQualificationTests.key());
+    let runnable = crate::workbench::models::command_availability(
+        ModelsCommand::ModelRunQualificationTests,
+        cx,
+    )
+    .is_available();
     let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
     .description("Confirm the saved source, the suites to run, the runtime target, and how results are kept before starting.")
     .size(DialogSize::Transaction)
@@ -349,13 +352,16 @@ pub(super) fn qualification_run_workflow(
             ui,
             "model-qualification-run-contract",
             &[("Field", 0.34), ("Reviewed value", 0.66)],
-            &qualification_run_rows(app, records),
+            &qualification_run_rows(cx, records),
             "No executable qualification plan is available.",
         );
         if let Some(error) = request.error.as_deref() {
             blocker_note(ui, error);
         } else if !runnable {
-            let reason = match app.command_availability(ModelsCommand::ModelRunQualificationTests.key()) {
+            let reason = match crate::workbench::models::command_availability(
+                ModelsCommand::ModelRunQualificationTests,
+                cx,
+            ) {
                 CommandAvailability::Disabled(reason) => reason,
                 CommandAvailability::Available | CommandAvailability::Hidden => {
                     "Qualification is unavailable in this context."
@@ -367,7 +373,7 @@ pub(super) fn qualification_run_workflow(
     match choice {
         DialogChoice::Primary if runnable => {
             match crate::workbench::documents::model_editor::start_qualification_execution(
-                &mut app.state.model_editor_parts(),
+                &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
             ) {
                 Ok(()) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
@@ -379,10 +385,10 @@ pub(super) fn qualification_run_workflow(
 }
 
 pub(super) fn qualification_run_rows(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     _records: &PersistedModelRecords,
 ) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
@@ -438,7 +444,7 @@ pub(super) fn qualification_run_rows(
         ],
         vec![
             DisplayCell::plain("Validation"),
-            DisplayCell::plain(if app.state.models.model_editor.validation.is_some() {
+            DisplayCell::plain(if cx.state.model_editor.validation.is_some() {
                 ""
             } else {
                 "not validated"

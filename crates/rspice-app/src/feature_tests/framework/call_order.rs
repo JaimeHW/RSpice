@@ -551,6 +551,14 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
 /// them, so a request another point left waits for the answer it waited for.
 const MODELS_CONTRIBUTIONS: &[Step] = &[
     (
+        "model editor route",
+        &["== super::SurfaceId::ModelEditor\
+           {\
+           ModelsFeature::show_model_editor(&mut features::cx(app), ui);\
+           return;\
+           }"],
+    ),
+    (
         "measurement correlation route",
         &["== super::SurfaceId::ModelCorrelation\
            {\

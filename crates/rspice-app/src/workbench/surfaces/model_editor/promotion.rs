@@ -10,20 +10,19 @@ use super::*;
 
 pub(super) fn promotion_review_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.promotion_review_open {
+    if !cx.state.model_editor.promotion_review_open {
         return;
     }
-    if !exact_passing_evidence_available(app, records) {
-        promotion_unavailable_dialog(ctx, app, records);
+    if !exact_passing_evidence_available(cx, records) {
+        promotion_unavailable_dialog(ctx, cx, records);
         return;
     }
-    let candidate = current_candidate(app, records).cloned();
-    let exact_candidate_count = app
+    let candidate = current_candidate(cx, records).cloned();
+    let exact_candidate_count = cx
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -44,28 +43,18 @@ pub(super) fn promotion_review_dialog(
                 .count()
         })
         .unwrap_or_default();
-    let project_writable = app.state.platform.project_lifecycle.is_open()
-        && !app.state.model.safe_mode.project_read_only()
-        && app
-            .state
-            .models
-            .model_editor
-            .qualification_execution
-            .is_none();
+    let project_writable = cx.platform.project_lifecycle.is_open()
+        && !cx.model.safe_mode.project_read_only()
+        && cx.state.model_editor.qualification_execution.is_none();
     let already_promoted = candidate.as_ref().is_some_and(|candidate| {
-        app.state
-            .models
-            .model_editor
-            .draft
-            .as_ref()
-            .is_some_and(|draft| {
-                draft.qualification.promotions.iter().any(|promotion| {
-                    promotion
-                        .candidate_identity
-                        .id
-                        .eq_ignore_ascii_case(&candidate.identity.id)
-                })
+        cx.state.model_editor.draft.as_ref().is_some_and(|draft| {
+            draft.qualification.promotions.iter().any(|promotion| {
+                promotion
+                    .candidate_identity
+                    .id
+                    .eq_ignore_ascii_case(&candidate.identity.id)
             })
+        })
     });
     let promotable = candidate
         .as_ref()
@@ -73,7 +62,7 @@ pub(super) fn promotion_review_dialog(
         && !already_promoted
         && project_writable;
     let inputs_complete = {
-        let editor = &app.state.models.model_editor;
+        let editor = &cx.state.model_editor;
         !editor.promotion_record_id.trim().is_empty()
             && !editor.promotion_release_id.trim().is_empty()
             && !editor.promotion_release_version.trim().is_empty()
@@ -112,7 +101,7 @@ pub(super) fn promotion_review_dialog(
                     "More than one release candidate is saved for this model source. Promotion stays blocked until the project's qualification record is repaired to one candidate.",
                 );
             } else {
-                promotion_candidate_authoring_form(ui, app, project_writable);
+                promotion_candidate_authoring_form(ui, cx, project_writable);
             }
             return;
         };
@@ -163,7 +152,7 @@ pub(super) fn promotion_review_dialog(
         } else if checklist.is_complete() {
             dialog_subheading(ui, "Release identity");
             let [promotion, release, version] = qualification_three_rects(ui);
-            let editor = &mut app.state.models.model_editor;
+            let editor = &mut cx.state.model_editor;
             qualification_text_field(
                 ui,
                 promotion,
@@ -203,24 +192,24 @@ pub(super) fn promotion_review_dialog(
                 None,
                 "Promotion remains blocked. Correct the failed fields below; qualification and platform results stay tied to the saved source revision.",
             );
-            promotion_candidate_authoring_form(ui, app, project_writable);
+            promotion_candidate_authoring_form(ui, cx, project_writable);
         }
     });
     match choice {
         DialogChoice::Primary if promotable => {
             if let Some(candidate) = candidate.as_ref() {
                 crate::workbench::documents::model_editor::promote_open_candidate(
-                    &mut app.state.model_editor_parts(),
+                    &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
                     &candidate.identity.id,
                 );
             }
         }
         DialogChoice::Primary if authoring || editing => {
-            app.state.models.model_editor.commit_release_candidate();
+            cx.state.model_editor.commit_release_candidate();
         }
         DialogChoice::Primary | DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.models.model_editor.promotion_review_open = false;
-            app.state.models.model_editor.promotion_error = None;
+            cx.state.model_editor.promotion_review_open = false;
+            cx.state.model_editor.promotion_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -228,10 +217,10 @@ pub(super) fn promotion_review_dialog(
 
 fn promotion_unavailable_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    let rows = promotion_gate_rows(app, records);
+    let rows = promotion_gate_rows(cx, records);
     let mut open_plan = false;
     let mut review_disposition = false;
     let choice = Dialog::new("Model promotion unavailable", "Close")
@@ -296,24 +285,25 @@ fn promotion_unavailable_dialog(
         });
     });
     if open_plan || review_disposition {
-        app.state.models.model_editor.promotion_review_open = false;
-        app.state.models.model_editor.qualification_plan_open = true;
-        app.state.models.model_editor.qualification_execution_notice = Some(
-            if review_disposition {
-                "Select the unresolved vector and review its disposition. The failure stays visible and cannot count as a pass."
+        cx.state.model_editor.promotion_review_open = false;
+        cx.state.model_editor.qualification_plan_open = true;
+        cx.state.model_editor.qualification_execution_notice = Some(if review_disposition {
+            "Select the unresolved vector and review its disposition. The failure stays visible and cannot count as a pass."
                 .to_owned()
-            } else {
-                "Review and rerun the qualification plan for this source before returning to promotion."
+        } else {
+            "Review and rerun the qualification plan for this source before returning to promotion."
                 .to_owned()
-            },
-        );
+        });
     } else if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.models.model_editor.promotion_review_open = false;
+        cx.state.model_editor.promotion_review_open = false;
     }
 }
 
-fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<Vec<DisplayCell>> {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+fn promotion_gate_rows(
+    cx: &Cx<'_, ModelsFeature>,
+    records: &PersistedModelRecords,
+) -> Vec<Vec<DisplayCell>> {
+    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return Vec::new();
     };
     let Ok(source) = ModelSourceEvidenceBinding::try_new_project_bound(
@@ -431,9 +421,9 @@ fn promotion_gate_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<
     ]
 }
 
-fn promotion_candidate_authoring_form(ui: &mut Ui, app: &mut RSpiceApp, writable: bool) {
+fn promotion_candidate_authoring_form(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, writable: bool) {
     ui.spacing_mut().item_spacing = Vec2::new(8.0, 8.0);
-    let fields = &mut app.state.models.model_editor.promotion_candidate;
+    let fields = &mut cx.state.model_editor.promotion_candidate;
 
     dialog_subheading(ui, "Candidate and qualification record");
     let [candidate_id, candidate_version] = qualification_pair_rects(ui);

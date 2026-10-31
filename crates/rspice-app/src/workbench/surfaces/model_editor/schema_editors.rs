@@ -10,28 +10,28 @@ use super::*;
 
 pub(super) fn parameter_schema_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     _records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.parameter_schema_open {
+    if !cx.state.model_editor.parameter_schema_open {
         return;
     }
-    let writable = !app.state.model.safe_mode.project_read_only();
+    let writable = !cx.model.safe_mode.project_read_only();
     let choice = Dialog::new("Parameter schema", "Close")
     .description("Edit parameter declarations and process-section overrides. Nothing is saved until Save model revision succeeds.")
     .size(DialogSize::Transaction)
     .fixed_height(680.0)
     .show(ctx, |ui| {
-        section_override_editor(ui, app, writable);
-        parameter_schema_editor(ui, app, writable);
+        section_override_editor(ui, cx, writable);
+        parameter_schema_editor(ui, cx, writable);
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.models.model_editor.parameter_schema_open = false;
+        cx.state.model_editor.parameter_schema_open = false;
     }
 }
 
-pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable: bool) {
-    let (sections, parameters) = app.state.models.model_editor.draft.as_ref().map_or_else(
+pub(super) fn section_override_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, writable: bool) {
+    let (sections, parameters) = cx.state.model_editor.draft.as_ref().map_or_else(
         || (Vec::new(), Vec::new()),
         |draft| {
             (
@@ -67,7 +67,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
     let [section_rect, parameter_rect, value_rect] = qualification_three_rects(ui);
     let mut selection_changed = false;
     {
-        let editor = &mut app.state.models.model_editor;
+        let editor = &mut cx.state.model_editor;
         selection_changed |= section_override_combo(
             ui,
             section_rect,
@@ -88,8 +88,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         );
     }
     if selection_changed {
-        app.state
-            .models
+        cx.state
             .model_editor
             .refresh_parameter_schema_override_editor();
     }
@@ -97,20 +96,12 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         ui,
         value_rect,
         "Section value",
-        &mut app
-            .state
-            .models
-            .model_editor
-            .parameter_schema_override_value,
+        &mut cx.state.model_editor.parameter_schema_override_value,
         true,
         writable,
     );
 
-    let override_exists = app
-        .state
-        .models
-        .model_editor
-        .parameter_schema_override_exists();
+    let override_exists = cx.state.model_editor.parameter_schema_override_exists();
     let (actions_rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width().max(1.0), 38.0),
         Sense::hover(),
@@ -131,10 +122,7 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
     .show(&mut actions)
     .clicked()
     {
-        app.state
-            .models
-            .model_editor
-            .commit_parameter_schema_override();
+        cx.state.model_editor.commit_parameter_schema_override();
     }
     if Button::new("Remove override")
         .enabled(writable && override_exists)
@@ -146,14 +134,10 @@ pub(super) fn section_override_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         })
         .clicked()
     {
-        app.state
-            .models
-            .model_editor
-            .remove_parameter_schema_override();
+        cx.state.model_editor.remove_parameter_schema_override();
     }
-    let error = app
+    let error = cx
         .state
-        .models
         .model_editor
         .parameter_schema_override_error
         .clone();
@@ -216,7 +200,7 @@ pub(super) fn section_override_combo(
     *value != before
 }
 
-pub(super) fn parameter_schema_editor(ui: &mut Ui, app: &mut RSpiceApp, writable: bool) {
+pub(super) fn parameter_schema_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, writable: bool) {
     const COLUMNS: [(&str, f32); 5] = [
         ("Parameter", 0.16),
         ("Type", 0.14),
@@ -231,7 +215,7 @@ pub(super) fn parameter_schema_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
         .show(ui, |ui| {
             let width = ui.available_width().max(TABLE_MIN_W);
             table_header(ui, width, &COLUMNS);
-            let Some(draft) = app.state.models.model_editor.draft.as_mut() else {
+            let Some(draft) = cx.state.model_editor.draft.as_mut() else {
                 table_empty(ui, width, "No open model parameter schema.");
                 return;
             };
@@ -301,10 +285,7 @@ pub(super) fn parameter_schema_editor(ui: &mut Ui, app: &mut RSpiceApp, writable
             }
         });
     if changed {
-        app.state
-            .models
-            .model_editor
-            .invalidate_candidate_evidence();
+        cx.state.model_editor.invalidate_candidate_evidence();
     }
 }
 
@@ -383,14 +364,14 @@ pub(super) fn bounds_edit_enabled(
 
 pub(super) fn new_section_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.new_section_open {
+    if !cx.state.model_editor.new_section_open {
         return;
     }
-    let writable = !app.state.model.safe_mode.project_read_only();
-    let primary_enabled = writable && !app.state.models.model_editor.new_section_name.is_empty();
+    let writable = !cx.model.safe_mode.project_read_only();
+    let primary_enabled = writable && !cx.state.model_editor.new_section_name.is_empty();
     let choice = Dialog::new("New process section", "Add section")
     .description(
         "Create one validated inheritance node. The section remains part of the candidate until Save model revision commits it atomically.",
@@ -406,7 +387,7 @@ pub(super) fn new_section_dialog(
             ui,
             "Section name",
             "Case-insensitive SPICE section identity",
-            &mut app.state.models.model_editor.new_section_name,
+            &mut cx.state.model_editor.new_section_name,
         );
         let parent_names = records
             .metadata
@@ -421,12 +402,10 @@ pub(super) fn new_section_dialog(
             .unwrap_or_default();
         model_parent_field(
             ui,
-            &mut app.state.models.model_editor.new_section_parent,
+            &mut cx.state.model_editor.new_section_parent,
             &parent_names,
         );
-        if let Some(error) = app
-            .state
-            .models
+        if let Some(error) = cx.state
             .model_editor
             .new_section_error
             .as_deref()
@@ -436,11 +415,11 @@ pub(super) fn new_section_dialog(
     });
     match choice {
         DialogChoice::Primary => {
-            app.state.models.model_editor.commit_new_section();
+            cx.state.model_editor.commit_new_section();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.models.model_editor.new_section_open = false;
-            app.state.models.model_editor.new_section_error = None;
+            cx.state.model_editor.new_section_open = false;
+            cx.state.model_editor.new_section_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -540,13 +519,13 @@ pub(super) fn model_parent_field(ui: &mut Ui, value: &mut String, parents: &[Str
 
 pub(super) fn correlation_matrix_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     _records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.correlation_matrix_open {
+    if !cx.state.model_editor.correlation_matrix_open {
         return;
     }
-    let writable = !app.state.model.safe_mode.project_read_only();
+    let writable = !cx.model.safe_mode.project_read_only();
     let choice = Dialog::new("Correlation matrix", "Apply matrix")
     .description("Edit the candidate's ordered correlation coefficients. Symmetric entries are kept synchronized and the complete positive-semidefinite matrix is validated atomically.")
     .size(DialogSize::Transaction)
@@ -557,9 +536,7 @@ pub(super) fn correlation_matrix_dialog(
         if !writable {
             ui.disable();
         }
-        let matrices = app
-            .state
-            .models
+        let matrices = cx.state
             .model_editor
             .correlation_matrix_candidates
             .clone();
@@ -603,9 +580,7 @@ pub(super) fn correlation_matrix_dialog(
                         paint_cell(ui, cells[column_index + 1], &DisplayCell::mono("1"));
                         continue;
                     }
-                    let Some(current) = app
-                        .state
-                        .models
+                    let Some(current) = cx.state
                         .model_editor
                         .correlation_matrix_edits
                         .get(matrix_index)
@@ -632,9 +607,7 @@ pub(super) fn correlation_matrix_dialog(
                             matrix.group
                         ),
                     )
-                        && let Some(rows) = app
-                            .state
-                            .models
+                        && let Some(rows) = cx.state
                             .model_editor
                             .correlation_matrix_edits
                             .get_mut(matrix_index)
@@ -646,9 +619,7 @@ pub(super) fn correlation_matrix_dialog(
             }
         }
             });
-        if let Some(error) = app
-            .state
-            .models
+        if let Some(error) = cx.state
             .model_editor
             .correlation_matrix_error
             .as_deref()
@@ -658,24 +629,13 @@ pub(super) fn correlation_matrix_dialog(
     });
     match choice {
         DialogChoice::Primary => {
-            app.state
-                .models
-                .model_editor
-                .commit_correlation_matrix_edit();
+            cx.state.model_editor.commit_correlation_matrix_edit();
         }
         DialogChoice::Secondary | DialogChoice::Cancelled => {
-            app.state.models.model_editor.correlation_matrix_open = false;
-            app.state
-                .models
-                .model_editor
-                .correlation_matrix_candidates
-                .clear();
-            app.state
-                .models
-                .model_editor
-                .correlation_matrix_edits
-                .clear();
-            app.state.models.model_editor.correlation_matrix_error = None;
+            cx.state.model_editor.correlation_matrix_open = false;
+            cx.state.model_editor.correlation_matrix_candidates.clear();
+            cx.state.model_editor.correlation_matrix_edits.clear();
+            cx.state.model_editor.correlation_matrix_error = None;
         }
         DialogChoice::None | DialogChoice::Ghost => {}
     }
@@ -683,10 +643,10 @@ pub(super) fn correlation_matrix_dialog(
 
 pub(super) fn temperature_preview_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.temperature_preview_open {
+    if !cx.state.model_editor.temperature_preview_open {
         return;
     }
     let choice = Dialog::new("Temperature-law plot", "Close")
@@ -719,7 +679,7 @@ pub(super) fn temperature_preview_dialog(
         }
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.models.model_editor.temperature_preview_open = false;
+        cx.state.model_editor.temperature_preview_open = false;
     }
 }
 

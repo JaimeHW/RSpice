@@ -10,13 +10,14 @@ pub(crate) mod model_editor_workflow;
 pub(crate) mod workspace_state;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::Model;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::model_editor::{
     ModelEditorParts, ModelEditorReads, create_editable_project_copy_and_open, open_project_model,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
+    held_back,
 };
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -71,10 +72,47 @@ fn show_inspector(cx: &mut Cx<'_, ModelsFeature>, ui: &mut egui::Ui) {
     );
 }
 
-/// What the model commands' selection rules read, from what the feature
-/// reads.
-fn model_editor_reads<'a>(reads: &Reads<'a, ModelsFeature>) -> ModelEditorReads<'a> {
+/// What the model commands' rules read: the feature's state, the model and
+/// the platform state, whether the shell asks or the editor does as it draws.
+struct CommandReads<'a> {
+    state: &'a ModelsState,
+    model: &'a Model,
+    platform: &'a PlatformState,
+}
+
+/// What the model commands' selection rules read.
+fn model_editor_reads<'a>(reads: &CommandReads<'a>) -> ModelEditorReads<'a> {
     reads.state.model_editor_reads(reads.model, reads.platform)
+}
+
+/// Whether `command` can run here, and why not, as the shell answers it for
+/// a command the feature declares: the shell's own guards on what the
+/// command declares, then the feature's rule.
+pub(crate) fn command_availability(
+    command: ModelsCommand,
+    cx: &Cx<'_, ModelsFeature>,
+) -> CommandAvailability {
+    if let Some(reason) = held_back(command.declared_spec().flags, cx.platform) {
+        return CommandAvailability::Disabled(reason);
+    }
+    rule_availability(
+        command,
+        &CommandReads {
+            state: cx.state,
+            model: cx.model,
+            platform: cx.platform,
+        },
+    )
+}
+
+/// Whether `command` can run, and why not, once the shell's guards have
+/// passed.
+fn rule_availability(command: ModelsCommand, reads: &CommandReads<'_>) -> CommandAvailability {
+    if command_enabled(command, reads) {
+        CommandAvailability::Available
+    } else {
+        CommandAvailability::Disabled(disabled_reason(command, reads))
+    }
 }
 
 /// What opening a model in the editor writes, from the feature's context.
@@ -84,7 +122,7 @@ fn model_editor_parts<'a>(cx: &'a mut Cx<'_, ModelsFeature>) -> ModelEditorParts
 
 /// Whether `command` can run, once the shell's guards (a project operation
 /// in flight, no project open) have passed.
-fn command_enabled(command: ModelsCommand, reads: &Reads<'_, ModelsFeature>) -> bool {
+fn command_enabled(command: ModelsCommand, reads: &CommandReads<'_>) -> bool {
     let state = reads.state;
     match command {
         ModelsCommand::ModelCreateProjectCopy => {
@@ -159,7 +197,7 @@ fn command_enabled(command: ModelsCommand, reads: &Reads<'_, ModelsFeature>) -> 
 }
 
 /// Why `command` cannot run while [`command_enabled`] says it cannot.
-fn disabled_reason(command: ModelsCommand, reads: &Reads<'_, ModelsFeature>) -> &'static str {
+fn disabled_reason(command: ModelsCommand, reads: &CommandReads<'_>) -> &'static str {
     let state = reads.state;
     match command {
         ModelsCommand::ModelCreateProjectCopy => {
@@ -218,11 +256,14 @@ impl CommandSet for ModelsCommand {
     /// correlation need one coherent selected model, and the editor's
     /// workflows need the candidate it has open in the state each one acts on.
     fn availability(self, reads: &Reads<'_, ModelsFeature>) -> CommandAvailability {
-        if command_enabled(self, reads) {
-            CommandAvailability::Available
-        } else {
-            CommandAvailability::Disabled(disabled_reason(self, reads))
-        }
+        rule_availability(
+            self,
+            &CommandReads {
+                state: reads.state,
+                model: reads.model,
+                platform: reads.platform,
+            },
+        )
     }
 
     fn execute(self, cx: &mut Cx<'_, ModelsFeature>) {

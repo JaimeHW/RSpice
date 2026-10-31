@@ -306,8 +306,12 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
     assert!(app.command_key_enabled(ModelsCommand::ModelValidate.key()));
     app.execute_command_key(ModelsCommand::ModelValidate.key());
     assert_eq!(
-        active_model_editor_workflow(app.state.model_editor_reads())
-            .map(|request| request.workflow),
+        active_model_editor_workflow(
+            app.state
+                .models
+                .model_editor_reads(&app.state.model, &app.state.platform)
+        )
+        .map(|request| request.workflow),
         Some(ModelEditorWorkflow::ValidateCandidate)
     );
     close_model_editor_workflow();
@@ -349,7 +353,11 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
     );
     assert!(!app.command_key_enabled(ModelsCommand::ModelEditor.key()));
     assert_eq!(
-        selected_project_model_for_editor(app.state.model_editor_reads()),
+        selected_project_model_for_editor(
+            app.state
+                .models
+                .model_editor_reads(&app.state.model, &app.state.platform)
+        ),
         Err("open a project before editing a device model")
     );
 }

@@ -78,7 +78,7 @@ impl Host for RSpiceApp {
             // from the workspace's page.
             Point::Surface(workspace) => {
                 use crate::workbench::surfaces::{
-                    automation, design, library_cellview_manager, model_editor, models, netlist,
+                    automation, design, library_cellview_manager, models, netlist,
                     pdk_technology_admin, project, simulate, stimulus, verify,
                 };
 
@@ -91,7 +91,7 @@ impl Host for RSpiceApp {
                 }
                 if app.state.workbench.current_route().surface_id() == super::SurfaceId::ModelEditor
                 {
-                    model_editor::show(ui, app);
+                    ModelsFeature::show_model_editor(&mut features::cx(app), ui);
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()

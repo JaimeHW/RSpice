@@ -32,7 +32,8 @@ use crate::state::model_library::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark};
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 
 use super::super::design_system::{self, WorkbenchIcon};
 use crate::workbench::documents::model_editor::{
@@ -250,17 +251,19 @@ impl DisplayCell {
     }
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+impl ModelsFeature {
+    /// Draw the device-model editor route's surface in the feature's
+    /// context, with the workflow and inspection dialogs it opens.
+    pub(in crate::workbench) fn show_model_editor(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
+        show(ui, cx);
+    }
+}
+
+fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     crate::workbench::documents::model_editor::advance_qualification_execution(
-        &mut app.state.model_editor_parts(),
+        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
     );
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if cx.state.model_editor.qualification_execution.is_some() {
         ui.ctx().request_repaint();
     }
     let t = Tokens::get(ui.ctx());
@@ -274,14 +277,14 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     surface.spacing_mut().item_spacing = Vec2::ZERO;
 
-    let records = persisted_records(app);
-    let current_section = app.state.models.model_editor.active_section;
+    let records = persisted_records(cx);
+    let current_section = cx.state.model_editor.active_section;
     let mut requested_action = None;
 
-    outer_identity_header(&mut surface, app);
-    specialist_header(&mut surface, app, &records);
+    outer_identity_header(&mut surface, cx);
+    specialist_header(&mut surface, cx, &records);
 
-    if app.state.models.model_editor.draft.is_none() {
+    if cx.state.model_editor.draft.is_none() {
         design_system::empty_state(
             &mut surface,
             WorkbenchIcon::Sliders,
@@ -291,7 +294,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         workspace_body(
             &mut surface,
-            app,
+            cx,
             &records,
             current_section,
             &mut requested_action,
@@ -299,16 +302,16 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     if let Some(action) = requested_action {
-        apply_action(app, action);
+        apply_action(cx, action);
     }
-    if active_model_editor_workflow(app.state.model_editor_reads()).is_some() {
-        show_model_editor_workflow(ui.ctx(), app, &records);
+    if active_model_editor_workflow(cx.state.model_editor_reads(cx.model, cx.platform)).is_some() {
+        show_model_editor_workflow(ui.ctx(), cx, &records);
     } else {
-        show_inspection_dialogs(ui.ctx(), app, &records);
+        show_inspection_dialogs(ui.ctx(), cx, &records);
     }
 }
 
-fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
+fn outer_identity_header(ui: &mut Ui, cx: &Cx<'_, ModelsFeature>) {
     let t = Tokens::get(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(
         Vec2::new(ui.available_width().max(1.0), OUTER_IDENTITY_H),
@@ -342,7 +345,7 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
             .max_rect(button_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let enabled = app.state.models.model_editor.draft.is_some();
+    let enabled = cx.state.model_editor.draft.is_some();
     let response = Button::new("Validate model candidate")
         .accent()
         .enabled(enabled)
@@ -357,14 +360,14 @@ fn outer_identity_header(ui: &mut Ui, app: &RSpiceApp) {
         .on_disabled_hover_text("No project-owned model candidate is open.");
     if response.clicked() {
         request_model_editor_workflow(
-            app.state.model_editor_reads(),
+            cx.state.model_editor_reads(cx.model, cx.platform),
             ModelEditorWorkflow::ValidateCandidate,
         );
     }
 }
 
-fn persisted_records(app: &RSpiceApp) -> PersistedModelRecords {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+fn persisted_records(cx: &Cx<'_, ModelsFeature>) -> PersistedModelRecords {
+    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return PersistedModelRecords {
             metadata: None,
             qualification: None,
@@ -424,7 +427,7 @@ fn action_button(
     }
 }
 
-fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecords) {
+fn specialist_header(ui: &mut Ui, cx: &Cx<'_, ModelsFeature>, records: &PersistedModelRecords) {
     let t = Tokens::get(ui.ctx());
     let available_width = ui.available_width().max(1.0);
     let (rect, _) = ui.allocate_exact_size(
@@ -442,7 +445,7 @@ fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecor
         Pos2::new(left, rect.top()),
         Pos2::new(text_right, rect.bottom()),
     );
-    let title = app.state.models.model_editor.draft.as_ref().map_or_else(
+    let title = cx.state.model_editor.draft.as_ref().map_or_else(
         || "No model candidate".to_owned(),
         |draft| format!("{} model candidate", draft.name),
     );
@@ -456,7 +459,7 @@ fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecor
         t.color.text,
     );
 
-    let Some((status, problem)) = candidate_status(app, records) else {
+    let Some((status, problem)) = candidate_status(cx, records) else {
         return;
     };
     let status_rect = Rect::from_min_max(
@@ -493,7 +496,7 @@ fn specialist_header(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecor
 /// nothing to say: a validated candidate is the normal state, and the normal
 /// state is not announced.
 fn candidate_status(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) -> Option<(String, Option<Problem>)> {
     if let Some(error) = records.metadata_error.as_ref() {
@@ -508,7 +511,7 @@ fn candidate_status(
             Some(Problem::Failure),
         ));
     }
-    let editor = &app.state.models.model_editor;
+    let editor = &cx.state.model_editor;
     if let Some(diagnostic) = editor.diagnostics.first() {
         return Some((diagnostic.message.clone(), Some(Problem::Failure)));
     }
@@ -545,7 +548,7 @@ fn parameter_source_split(metadata: &ModelDefinitionMetadata) -> (usize, usize, 
 /// The one scalar a rail entry's own section owns. A section whose page states
 /// its counts per row carries none, so the rail never restates a table column.
 fn navigation_meta(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
 ) -> Option<String> {
@@ -555,8 +558,7 @@ fn navigation_meta(
             // only parameters the section can list, so they are what it counts.
             let count = records.metadata.as_ref().map_or_else(
                 || {
-                    app.state
-                        .models
+                    cx.state
                         .model_editor
                         .draft
                         .as_ref()
@@ -574,7 +576,7 @@ fn navigation_meta(
                 .to_string(),
         ),
         ModelEditorSection::Tests => {
-            let qualification = qualification_totals(app, records);
+            let qualification = qualification_totals(cx, records);
             Some(format!(
                 "{}/{}",
                 qualification.desktop_passed, qualification.total
@@ -589,7 +591,7 @@ fn navigation_meta(
 /// The aggregate a section owns but cannot state in any one of its rows. A fact
 /// the rows already carry is never repeated in the header.
 fn section_header_fact(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
 ) -> Option<String> {
@@ -605,7 +607,7 @@ fn section_header_fact(
             // Suite rows state desktop and WebAssembly runs one suite at a
             // time; runtime parity is a property of the candidate as a whole.
             // The detail after it was the Tests table's own Status column.
-            let qualification = qualification_totals(app, records);
+            let qualification = qualification_totals(cx, records);
             Some(format!(
                 "{} / {} WebAssembly",
                 qualification.wasm_passed, qualification.total
@@ -625,7 +627,10 @@ struct QualificationTotals {
     wasm_passed: usize,
 }
 
-fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> QualificationTotals {
+fn qualification_totals(
+    cx: &Cx<'_, ModelsFeature>,
+    records: &PersistedModelRecords,
+) -> QualificationTotals {
     let Some(qualification) = records.qualification.as_ref() else {
         return QualificationTotals {
             total: 0,
@@ -644,7 +649,7 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
             wasm_passed: 0,
         };
     }
-    let source = app.state.models.model_editor.draft.as_ref();
+    let source = cx.state.model_editor.draft.as_ref();
     let mut total = 0;
     let mut desktop_passed = 0;
     let mut wasm_passed = 0;
@@ -674,7 +679,7 @@ fn qualification_totals(app: &RSpiceApp, records: &PersistedModelRecords) -> Qua
 
 fn workspace_body(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     current_section: ModelEditorSection,
     action: &mut Option<SurfaceAction>,
@@ -699,7 +704,7 @@ fn workspace_body(
             .layout(Layout::top_down(Align::Min)),
     );
     nav.spacing_mut().item_spacing = Vec2::ZERO;
-    render_navigation(&mut nav, app, records, current_section, action);
+    render_navigation(&mut nav, cx, records, current_section, action);
 
     let mut content = ui.new_child(
         egui::UiBuilder::new()
@@ -707,12 +712,12 @@ fn workspace_body(
             .layout(Layout::top_down(Align::Min)),
     );
     content.spacing_mut().item_spacing = Vec2::ZERO;
-    render_section(&mut content, app, records, current_section, action);
+    render_section(&mut content, cx, records, current_section, action);
 }
 
 fn render_navigation(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     current: ModelEditorSection,
     action: &mut Option<SurfaceAction>,
@@ -760,7 +765,7 @@ fn render_navigation(
                 );
                 // The entry's own count is laid out first: the label is elided
                 // against what the meta leaves, never painted under it.
-                let meta = navigation_meta(app, records, spec.section);
+                let meta = navigation_meta(cx, records, spec.section);
                 let accessible = meta.as_ref().map_or_else(
                     || spec.section.label().to_owned(),
                     |value| format!("{} · {value}", spec.section.label()),
@@ -828,13 +833,13 @@ fn render_navigation(
 
 fn render_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     section: ModelEditorSection,
     action: &mut Option<SurfaceAction>,
 ) {
     let spec = section_spec(section);
-    section_header(ui, app, spec, records, action);
+    section_header(ui, cx, spec, records, action);
     let height = ui.available_height().max(1.0);
     ScrollArea::vertical()
         .id_salt(("model-editor-section", section.label()))
@@ -843,12 +848,12 @@ fn render_section(
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
             match section {
-                ModelEditorSection::Parameters => parameters_table(ui, app, records),
+                ModelEditorSection::Parameters => parameters_table(ui, cx, records),
                 ModelEditorSection::Sections => sections_table(ui, records),
                 ModelEditorSection::Statistics => statistics_table(ui, records),
                 ModelEditorSection::Temperature => temperature_table(ui, records),
-                ModelEditorSection::Tests => qualification_table(ui, app, records),
-                ModelEditorSection::Release => release_panel(ui, app, records, action),
+                ModelEditorSection::Tests => qualification_table(ui, cx, records),
+                ModelEditorSection::Release => release_panel(ui, cx, records, action),
             }
         });
 }
@@ -862,7 +867,7 @@ fn section_spec(section: ModelEditorSection) -> &'static SectionSpec {
 
 fn section_header(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     spec: &SectionSpec,
     records: &PersistedModelRecords,
     action: &mut Option<SurfaceAction>,
@@ -889,7 +894,7 @@ fn section_header(
     );
     // The section's aggregate shares the kicker line: it is elided first so the
     // kicker gives up width to it rather than overprinting it.
-    let fact = section_header_fact(app, records, spec.section);
+    let fact = section_header_fact(cx, records, spec.section);
     let fact_galley = fact.as_ref().map(|text| {
         let font = theme::mono(tokens::FS_0, FontWeight::Regular);
         let text = design_system::elide_text(ui, text, &font, (copy_rect.width() * 0.66).max(1.0));
@@ -942,7 +947,7 @@ fn section_header(
         return;
     };
     let (mut enabled, mut blocker, value) = section_action_state(spec.section, records);
-    if app.state.model.safe_mode.project_read_only()
+    if cx.model.safe_mode.project_read_only()
         && matches!(
             spec.section,
             ModelEditorSection::Parameters
@@ -1020,7 +1025,7 @@ fn section_action_state(
     }
 }
 
-fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRecords) {
+fn parameters_table(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, records: &PersistedModelRecords) {
     const COLUMNS: [(&str, f32); 6] = [
         ("Parameter", 0.16),
         ("Value", 0.19),
@@ -1030,10 +1035,9 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
         ("Status", 0.18),
     ];
     let metadata = records.metadata.as_ref().map(parameter_metadata_index);
-    let diagnostics = app.state.models.model_editor.diagnostics.clone();
-    let changed = app
+    let diagnostics = cx.state.model_editor.diagnostics.clone();
+    let changed = cx
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -1047,8 +1051,8 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
                 .collect::<BTreeSet<_>>()
         })
         .unwrap_or_default();
-    let selected = app.state.models.model_editor.selected_parameter;
-    let read_only = app.state.model.safe_mode.project_read_only();
+    let selected = cx.state.model_editor.selected_parameter;
+    let read_only = cx.model.safe_mode.project_read_only();
     let mut changed_value = false;
     let mut selected_parameter = selected;
 
@@ -1058,7 +1062,7 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
         .show(ui, |ui| {
             let width = ui.available_width().max(TABLE_MIN_W);
             table_header(ui, width, &COLUMNS);
-            let Some(draft) = app.state.models.model_editor.draft.as_mut() else {
+            let Some(draft) = cx.state.model_editor.draft.as_mut() else {
                 table_empty(ui, width, "No open model parameter source.");
                 return;
             };
@@ -1157,12 +1161,9 @@ fn parameters_table(ui: &mut Ui, app: &mut RSpiceApp, records: &PersistedModelRe
                 paint_cell(ui, row[5], &DisplayCell::toned(status, tone));
             }
         });
-    app.state.models.model_editor.selected_parameter = selected_parameter;
+    cx.state.model_editor.selected_parameter = selected_parameter;
     if changed_value {
-        app.state
-            .models
-            .model_editor
-            .invalidate_candidate_evidence();
+        cx.state.model_editor.invalidate_candidate_evidence();
     }
 }
 
@@ -1379,7 +1380,7 @@ fn interpolation_label(value: LookupInterpolation) -> &'static str {
     }
 }
 
-fn qualification_table(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRecords) {
+fn qualification_table(ui: &mut Ui, cx: &Cx<'_, ModelsFeature>, records: &PersistedModelRecords) {
     const COLUMNS: [(&str, f32); 6] = [
         ("Suite", 0.18),
         ("Vectors", 0.12),
@@ -1388,7 +1389,7 @@ fn qualification_table(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRec
         ("Reference error", 0.18),
         ("Status", 0.18),
     ];
-    let rows = qualification_rows(app, records)
+    let rows = qualification_rows(cx, records)
         .into_iter()
         .map(|row| {
             vec![
@@ -1410,11 +1411,14 @@ fn qualification_table(ui: &mut Ui, app: &RSpiceApp, records: &PersistedModelRec
     );
 }
 
-fn qualification_rows(app: &RSpiceApp, records: &PersistedModelRecords) -> Vec<QualificationRow> {
+fn qualification_rows(
+    cx: &Cx<'_, ModelsFeature>,
+    records: &PersistedModelRecords,
+) -> Vec<QualificationRow> {
     let Some(state) = records.qualification.as_ref() else {
         return Vec::new();
     };
-    let source = app.state.models.model_editor.draft.as_ref();
+    let source = cx.state.model_editor.draft.as_ref();
     state
         .suites
         .iter()
@@ -1570,13 +1574,13 @@ fn format_percentage(value: f64) -> String {
 
 fn release_panel(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
     action: &mut Option<SurfaceAction>,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
-    let candidate = current_candidate(app, records);
+    let candidate = current_candidate(cx, records);
     let split = width >= 720.0;
     let left_w = if split { width * 0.5 } else { width };
     let facts = release_facts(candidate);
@@ -1652,9 +1656,8 @@ fn release_panel(
             .max_rect(button_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let base_enabled = app
+    let base_enabled = cx
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -1671,8 +1674,11 @@ fn release_panel(
     );
 }
 
-fn exact_passing_evidence_available(app: &RSpiceApp, records: &PersistedModelRecords) -> bool {
-    let Some(draft) = app.state.models.model_editor.draft.as_ref() else {
+fn exact_passing_evidence_available(
+    cx: &Cx<'_, ModelsFeature>,
+    records: &PersistedModelRecords,
+) -> bool {
+    let Some(draft) = cx.state.model_editor.draft.as_ref() else {
         return false;
     };
     if draft.definition_is_dirty() {
@@ -1702,10 +1708,10 @@ fn exact_passing_evidence_available(app: &RSpiceApp, records: &PersistedModelRec
 }
 
 fn current_candidate<'a>(
-    app: &'a RSpiceApp,
+    cx: &'a Cx<'_, ModelsFeature>,
     _records: &PersistedModelRecords,
 ) -> Option<&'a ModelReleaseCandidate> {
-    let draft = app.state.models.model_editor.draft.as_ref()?;
+    let draft = cx.state.model_editor.draft.as_ref()?;
     if draft.definition_is_dirty() {
         return None;
     }
@@ -1841,41 +1847,38 @@ fn release_no_candidate_row(ui: &mut Ui) {
     );
 }
 
-fn apply_action(app: &mut RSpiceApp, action: SurfaceAction) {
+fn apply_action(cx: &mut Cx<'_, ModelsFeature>, action: SurfaceAction) {
     match action {
         SurfaceAction::SelectSection(section) => {
-            app.state.models.model_editor.active_section = section;
+            cx.state.model_editor.active_section = section;
         }
         SurfaceAction::OpenParameterSchema => {
-            app.state.models.model_editor.begin_parameter_schema();
+            cx.state.model_editor.begin_parameter_schema();
         }
         SurfaceAction::OpenNewSection => {
-            app.state.models.model_editor.begin_new_section();
+            cx.state.model_editor.begin_new_section();
         }
         SurfaceAction::OpenCorrelationMatrix => {
-            app.state
-                .models
-                .model_editor
-                .begin_correlation_matrix_edit();
+            cx.state.model_editor.begin_correlation_matrix_edit();
         }
         SurfaceAction::OpenTemperaturePreview => {
-            app.state.models.model_editor.temperature_preview_open = true;
+            cx.state.model_editor.temperature_preview_open = true;
         }
         SurfaceAction::OpenQualificationPlan => {
-            app.state.models.model_editor.qualification_plan_open = true;
+            cx.state.model_editor.qualification_plan_open = true;
         }
         SurfaceAction::OpenPromotionReview => {
-            app.state.models.model_editor.begin_promotion_review();
+            cx.state.model_editor.begin_promotion_review();
         }
     }
 }
 
 fn release_comparison_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) {
-    if !app.state.models.model_editor.comparison_open {
+    if !cx.state.model_editor.comparison_open {
         return;
     }
     let releases = records
@@ -1894,18 +1897,13 @@ fn release_comparison_dialog(
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    if app
-        .state
-        .models
-        .model_editor
-        .comparison_release_id
-        .is_empty()
+    if cx.state.model_editor.comparison_release_id.is_empty()
         && let Some((release_id, _)) = releases.first()
     {
-        app.state.models.model_editor.comparison_release_id = release_id.clone();
+        cx.state.model_editor.comparison_release_id = release_id.clone();
     }
-    let selected_release = app.state.models.model_editor.comparison_release_id.clone();
-    let comparison = app.state.models.model_editor.draft.as_ref().map_or_else(
+    let selected_release = cx.state.model_editor.comparison_release_id.clone();
+    let comparison = cx.state.model_editor.draft.as_ref().map_or_else(
         || Err("No project-owned model candidate is open".to_owned()),
         |draft| draft.compare_release(&selected_release),
     );
@@ -1946,7 +1944,7 @@ fn release_comparison_dialog(
             .show_ui(&mut selector, |ui| {
                 for (id, version) in &releases {
                     ui.selectable_value(
-                        &mut app.state.models.model_editor.comparison_release_id,
+                        &mut cx.state.model_editor.comparison_release_id,
                         id.clone(),
                         format!("{id} · {version}"),
                     );
@@ -1998,7 +1996,7 @@ fn release_comparison_dialog(
         );
     });
     if matches!(choice, DialogChoice::Primary | DialogChoice::Cancelled) {
-        app.state.models.model_editor.comparison_open = false;
+        cx.state.model_editor.comparison_open = false;
     }
 }
 
