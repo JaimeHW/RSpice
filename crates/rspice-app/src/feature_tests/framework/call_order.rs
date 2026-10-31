@@ -1387,12 +1387,12 @@ fn of_the_project_contributions_only_the_inspector_answers_what_it_raised_once_i
 
 /// Where a configuration the Project inspector used for runs is refused, the
 /// order from the inspector's drawing to the Configuration page's refusal
-/// strip: the docked inspector draws before the stage, the shell answers
-/// what it raised as it returns, that answer writes the refusal, and the
-/// stage's Configuration page states it. A docked inspector's refusal is
-/// stated in the frame its button was pressed in; an inspector in its drawer
-/// draws after the stage, so its refusal is stated in the next, as it always
-/// was.
+/// strip: the docked inspector draws before the stage, the project feature
+/// commits the configuration it raised in the inspector's own step and writes
+/// the refusal there, and the stage's Configuration page states it. A docked
+/// inspector's refusal is stated in the frame its button was pressed in; an
+/// inspector in its drawer draws after the stage, so its refusal is stated in
+/// the next, as it always was.
 const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
     (
         "workbench::show",
@@ -1412,19 +1412,14 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
              app.after_contribution();"],
     ),
     (
-        "RSpiceApp::after_contribution",
-        DISPATCH,
-        "pub(crate) fn after_contribution(",
-        &["|app, request: ProjectRequest| answer_project_request(app, request)"],
-    ),
-    (
-        "answer_project_request",
-        COMMAND_HELPERS,
-        "fn answer_project_request(",
+        "ProjectFeature's inspector",
+        PROJECT,
+        "fn show_inspector(",
         &[
-            "ProjectRequest::UseForRuns(target) => {",
-            "commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))",
-            "app.state.project.configuration.refusal = refusal;",
+            "Some(ProjectInspectorAction::UseForRuns(target)) => {",
+            "let refusal = commit_configuration(",
+            "ConfigurationTransaction::UseForRuns(target),",
+            "cx.state.configuration.refusal = refusal;",
         ],
     ),
     (

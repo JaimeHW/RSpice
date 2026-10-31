@@ -13,8 +13,12 @@ use crate::state::{
     ConfigurationSetError, ConfigurationSetId,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
-use crate::workbench::project::configuration_state::{ConfigurationSelection, plain_refusal};
+use crate::workbench::app_state::Model;
+use crate::workbench::project::configuration_state::{
+    ConfigurationPageState, ConfigurationSelection, plain_refusal,
+};
+use rspice_app_runs::simulation::SimulationController;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// One change to the project's configuration catalog.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -68,26 +72,41 @@ pub(in crate::workbench) fn commit_configuration_transaction(
     app: &mut RSpiceApp,
     transaction: ConfigurationTransaction,
 ) -> Result<(), String> {
+    commit_configuration(
+        &mut app.state.project.configuration,
+        &mut app.state.model,
+        &mut app.state.runs,
+        &mut app.simulation_controller,
+        transaction,
+    )
+}
+
+/// [`commit_configuration_transaction`] over what it reads and writes: the
+/// Configuration page, the model, and the run tier a committed change voids.
+pub(in crate::workbench) fn commit_configuration(
+    page: &mut ConfigurationPageState,
+    model: &mut Model,
+    runs: &mut RunsState,
+    run_controller: &mut SimulationController,
+    transaction: ConfigurationTransaction,
+) -> Result<(), String> {
     let applies_draft = transaction == ConfigurationTransaction::Apply;
     let renamed = match &transaction {
         ConfigurationTransaction::Rename { id, name } => Some((*id, name.clone())),
         _ => None,
     };
-    let Some(prepared) = prepare(&app.state, transaction)? else {
+    let Some(prepared) = prepare(page, model, transaction)? else {
         if applies_draft {
-            app.state.project.configuration.revert();
+            page.revert();
         }
         return Ok(());
     };
-    publish(&mut app.state, prepared.candidate)?;
-    let page = &mut app.state.project.configuration;
+    publish(model, prepared.candidate)?;
     if applies_draft {
         page.revert();
     }
     if let Some((id, name)) = renamed
-        && let Some(revision) = app
-            .state
-            .model
+        && let Some(revision) = model
             .workspace
             .content
             .configuration_sets
@@ -100,18 +119,20 @@ pub(in crate::workbench) fn commit_configuration_transaction(
         page.select(selection);
     }
     let message = prepared.message;
-    app.invalidate_simulation_preflight();
-    app.state
-        .record(LogSeverity::Info, LogSource::Studio, message);
+    // The next two calls are what RSpiceApp::invalidate_simulation_preflight does.
+    runs.preflight.invalidate();
+    run_controller.clear_prepared_run();
+    model.record(LogSeverity::Info, LogSource::Studio, message);
     Ok(())
 }
 
 /// What `transaction` produces, or `None` when it changes nothing.
 fn prepare(
-    state: &AppState,
+    page: &ConfigurationPageState,
+    model: &Model,
     transaction: ConfigurationTransaction,
 ) -> Result<Option<Prepared>, String> {
-    let current: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
+    let current: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
     match transaction {
         ConfigurationTransaction::UseForRuns(ConfigurationSelection::Default) => {
             if current.active_configuration_id().is_none() {
@@ -140,7 +161,7 @@ fn prepare(
             candidate
                 .activate(id)
                 .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
-            validate_candidate_configuration(state, &candidate)
+            validate_candidate_configuration(model, &candidate)
                 .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
             Ok(Some(Prepared::new(
                 candidate,
@@ -148,7 +169,7 @@ fn prepare(
             )))
         }
         ConfigurationTransaction::Apply => {
-            let Some(draft) = state.project.configuration.draft() else {
+            let Some(draft) = page.draft() else {
                 return Ok(None);
             };
             let name = current.find(draft.id).map_or_else(
@@ -171,7 +192,7 @@ fn prepare(
             // Runs read the configuration they use the moment it changes, so
             // only that one has to prove it still netlists.
             if current.active_configuration_id() == Some(draft.id) {
-                validate_candidate_configuration(state, &candidate)
+                validate_candidate_configuration(model, &candidate)
                     .map_err(|error| format!("Cannot apply {name}: {error}"))?;
             }
             Ok(Some(Prepared::new(
@@ -189,7 +210,7 @@ fn prepare(
                 .create(*definition)
                 .map_err(|error| format!("Cannot create {name}: {}", plain_refusal(&error)))?;
             added(
-                state,
+                model,
                 current,
                 candidate,
                 id,
@@ -222,7 +243,7 @@ fn prepare(
                         plain_refusal(&error)
                     )
                 })?;
-            added(state, current, candidate, id, &name, use_for_runs, "Cloned")
+            added(model, current, candidate, id, &name, use_for_runs, "Cloned")
         }
         ConfigurationTransaction::Rename { id, name } => {
             let committed = current
@@ -271,7 +292,7 @@ pub(in crate::workbench) fn delete_refusal(name: &str) -> String {
 /// Finish adding configuration `id` to `candidate`: runs use it when asked,
 /// and otherwise keep what they used before it was added, whichever that was.
 fn added(
-    state: &AppState,
+    model: &Model,
     current: &ConfigurationSetCatalog,
     mut candidate: ConfigurationSetCatalog,
     id: ConfigurationSetId,
@@ -283,7 +304,7 @@ fn added(
         candidate
             .activate(id)
             .map_err(|error| format!("Cannot use {name} for runs: {}", plain_refusal(&error)))?;
-        validate_candidate_configuration(state, &candidate)
+        validate_candidate_configuration(model, &candidate)
             .map_err(|error| format!("Cannot use {name} for runs: {error}"))?;
         format!("{verb} {name}; runs now use it.")
     } else {
@@ -303,17 +324,13 @@ fn added(
 
 /// Replace the catalog and the project revision as one transaction; the
 /// generated netlist's input identity no longer describes the catalog.
-fn publish(state: &mut AppState, candidate: ConfigurationSetCatalog) -> Result<(), String> {
-    state
-        .model
+fn publish(model: &mut Model, candidate: ConfigurationSetCatalog) -> Result<(), String> {
+    model
         .workspace
         .content
         .replace_configuration_sets(candidate)
         .map_err(|error| error.to_string())?;
-    state
-        .model
-        .netlist_artifacts
-        .current_generation_input_digest = None;
+    model.netlist_artifacts.current_generation_input_digest = None;
     Ok(())
 }
 
@@ -321,16 +338,16 @@ fn publish(state: &mut AppState, candidate: ConfigurationSetCatalog) -> Result<(
 /// the project's connectivity holds, a netlist generates, and every source
 /// it names seals. Each failure says which of the four failed.
 pub(in crate::workbench) fn validate_candidate_configuration(
-    state: &AppState,
+    model: &Model,
     catalog: &ConfigurationSetCatalog,
 ) -> Result<(), String> {
-    let mut workspace = state.model.workspace.clone();
+    let mut workspace = model.workspace.clone();
     *workspace.content.configuration_sets = catalog.clone();
     let projection = workspace
         .configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| match error {
             // Each unbound instance's own sentence names its cell and the
@@ -348,7 +365,7 @@ pub(in crate::workbench) fn validate_candidate_configuration(
         .root_schematic()
         .ok_or_else(|| "its top cell has no schematic open in the project.".to_owned())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_execution_projection(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
     );
     let generated = rspice_simulation::netlist_gen::generate_netlist_hierarchical(
@@ -371,9 +388,9 @@ pub(in crate::workbench) fn validate_candidate_configuration(
     rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
         &generated,
         root.current_file(),
-        &state.include_search_chain(),
-        state.model.model_library_manager.catalog(),
-        state.model.model_library_manager.resolution_records(),
+        &model.include_search_chain(),
+        model.model_library_manager.catalog(),
+        model.model_library_manager.resolution_records(),
     )
     .map_err(|error| format!("a source it includes cannot be read: {error}"))?;
     Ok(())

@@ -23,7 +23,6 @@ use crate::state::{
 };
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{Drain, Request};
-use crate::workbench::project::configuration_state::ConfigurationSelection;
 use crate::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectPage};
 
 /// One command of the project feature.
@@ -258,7 +257,7 @@ impl ProjectCommand {
 /// What the project feature hands the shell, which carries it out over the
 /// whole application as the feature once did in place: the Configurations
 /// command of the shell's own table, opening the selected view in the
-/// workspace that edits it, using a configuration for runs, and what a
+/// workspace that edits it, and what a
 /// library catalog change, or a created or deleted cell or view, left
 /// outside the model. Each place that raises one raises one, carrying
 /// everything it once did after that point, in order. Taken straight after
@@ -267,7 +266,6 @@ impl ProjectCommand {
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
-    UseForRuns(ConfigurationSelection),
     /// What a catalog change left outside the model, then the revision a
     /// deletion reserved, then the change's own line in the log, in the
     /// order the change once wrote them.

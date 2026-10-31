@@ -16,6 +16,9 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::design_management::{
     DesignManagementParts, render_design_management_dialog,
 };
+use crate::workbench::app::dialogs::project::configuration::{
+    ConfigurationTransaction, commit_configuration,
+};
 use crate::workbench::app::open_design_management_dialog;
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
@@ -123,8 +126,9 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
 /// The Project workspace's inspector: the page in front, over the feature's
 /// state and the model, with what the design checks read of the other
 /// features and the project as its lifecycle reads it. What the reader asked
-/// of it is raised once it has drawn: a command, or what only the shell
-/// carries out.
+/// of it is raised once it has drawn: a command, a configuration to use for
+/// runs, which the feature commits in place so the Configuration page states
+/// a refusal in the same frame, or what only the shell carries out.
 fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     let model = &*cx.model;
     let project = &mut *cx.state;
@@ -151,6 +155,17 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     );
     match action {
         Some(ProjectInspectorAction::Execute(key)) => cx.execute(key),
+        Some(ProjectInspectorAction::UseForRuns(target)) => {
+            let refusal = commit_configuration(
+                &mut cx.state.configuration,
+                cx.model,
+                cx.runs,
+                cx.handles.run_controller,
+                ConfigurationTransaction::UseForRuns(target),
+            )
+            .err();
+            cx.state.configuration.refusal = refusal;
+        }
         Some(ProjectInspectorAction::Shell(request)) => cx.wb.outbox.push(request),
         None => {}
     }

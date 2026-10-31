@@ -3,9 +3,6 @@
 use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
-use crate::workbench::app::dialogs::project::configuration::{
-    ConfigurationTransaction, commit_configuration_transaction,
-};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
@@ -338,8 +335,7 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
 
 /// Carry out what the project feature handed over, as the feature did in
 /// place: the Configurations command, opening the selected view where it is
-/// edited, using a configuration for runs, whose refusal the Configuration
-/// page states, and what a library catalog change or a created or deleted
+/// edited, and what a library catalog change or a created or deleted
 /// cell or view left outside the model, each with the revision it reserved,
 /// in the order the change once did it.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
@@ -357,12 +353,6 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 _ => Workspace::Design,
             };
             Command::OpenWorkspace(workspace).execute(app);
-        }
-        ProjectRequest::UseForRuns(target) => {
-            let refusal =
-                commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
-                    .err();
-            app.state.project.configuration.refusal = refusal;
         }
         ProjectRequest::CatalogChanged {
             pruned,

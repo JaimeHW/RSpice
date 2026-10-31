@@ -15,7 +15,9 @@ use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, dirty_docume
 
 use super::super::super::design_system::{property_row, property_row_problem};
 use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
-use crate::workbench::project::configuration_state::ConfigurationPageState;
+use crate::workbench::project::configuration_state::{
+    ConfigurationPageState, ConfigurationSelection,
+};
 use crate::workbench::project::workspace_state::ProjectPage;
 
 /// What the Project workspace's inspector reads and writes: the project
@@ -40,6 +42,10 @@ pub(in crate::workbench) struct ProjectInspector<'a> {
 pub(in crate::workbench) enum ProjectInspectorAction {
     /// Run the command this key names.
     Execute(CommandKey),
+    /// Use this configuration for runs. The feature commits it as the
+    /// inspector returns, and its refusal is stated on the Configuration
+    /// page.
+    UseForRuns(ConfigurationSelection),
     /// Hand the shell what only it carries out.
     Shell(ProjectRequest),
 }
@@ -53,7 +59,7 @@ pub(in crate::workbench) fn project(
         ProjectPage::Library => project_library(ui, inspector),
         ProjectPage::Configuration => {
             configuration::project_configuration(ui, inspector.configuration, inspector.model)
-                .map(|target| ProjectInspectorAction::Shell(ProjectRequest::UseForRuns(target)))
+                .map(ProjectInspectorAction::UseForRuns)
         }
         ProjectPage::Dependencies => project_dependency(ui, inspector),
         ProjectPage::Recovery => {
