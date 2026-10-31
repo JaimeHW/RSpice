@@ -1046,6 +1046,7 @@ impl Engine {
         let mut limit_cycle_hits = 0usize;
         let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
+        let voltage_box = damping::NoGainVoltageBox::of(circuit);
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
             if abort.is_aborted() {
@@ -1155,9 +1156,16 @@ impl Engine {
                 circuit.enforce_dc_ideal_voltage_constraints(new_solution)?;
             }
             // Device limiting and the selected damping strategy govern finite
-            // Newton updates. Absolute node voltages are not a physical domain
-            // constraint; acceptance still requires the nonlinear residual.
+            // Newton updates; acceptance still requires the nonlinear residual.
             Self::reset_nonfinite_values(new_solution);
+            // A linearisation can leave a node no DC conductance but gmin: a
+            // CMOS gate whose pull-up sits at vgd = 0 on the saturation edge
+            // while its pull-down is cut off solves for I/gmin there, and each
+            // gate downstream multiplies that by gm/gmin. Where no element
+            // has gain, such a node is outside every reachable operating point.
+            if let Some(voltage_box) = &voltage_box {
+                voltage_box.project(new_solution);
+            }
             // Check convergence (both voltage change and device convergence)
             let voltage_converged = self.dc_newton_update_convergence_met(
                 &solution,

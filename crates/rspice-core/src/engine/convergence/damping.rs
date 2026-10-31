@@ -2,6 +2,102 @@
 
 use super::*;
 
+/// The box every DC node voltage of a no-gain circuit lies in.
+///
+/// A network of positive resistors, inductors, capacitors, switches,
+/// independent voltage sources and semiconductor devices whose terminal
+/// currents flow from higher to lower potential has the no-gain property
+/// (A. N. Willson, "The no-gain property for networks containing
+/// three-terminal elements", IEEE Trans. Circuits Syst. CAS-22, 1975): no
+/// DC node voltage leaves the range of the potentials its sources fix.
+/// Projecting a Newton iterate onto a box that holds the solution moves no
+/// component further from it.
+#[derive(Debug, Clone, PartialEq)]
+pub(in crate::engine::convergence) struct NoGainVoltageBox {
+    low: Value,
+    high: Value,
+    /// Rows of the nodal prefix that hold a state other than a potential.
+    unbounded: Vec<bool>,
+}
+
+impl NoGainVoltageBox {
+    /// The box for `circuit`, or `None` when an element can supply gain or a
+    /// row holds a state the no-gain argument does not cover (temperature,
+    /// a memristor's state, a code model's private unknown).
+    pub(in crate::engine::convergence) fn of(circuit: &CircuitData) -> Option<Self> {
+        if !circuit.vcvs.is_empty()
+            || !circuit.vccs.is_empty()
+            || !circuit.cccs.is_empty()
+            || !circuit.ccvs.is_empty()
+            || !circuit.behavioral_sources.is_empty()
+            // A current source can drive a node to any potential.
+            || circuit.current_sources.dc_values.iter().any(|&i| i != 0.0)
+            || circuit.resistors.conductances.iter().any(|&g| g < 0.0)
+            || !circuit.multi_winding_transformers.is_empty()
+            || !circuit.jiles_atherton_inductors.is_empty()
+            || !circuit.xyce_core_groups.is_empty()
+            || !circuit.xyce_memristors.is_empty()
+            || circuit.has_xspice_devices()
+            || circuit.has_any_veriloga_devices()
+            // Self-heating and SOI body/temperature states are not potentials.
+            || circuit.has_b3soi_devices()
+            || !circuit.vdmoses.is_empty()
+            || !circuit.ekv26s.is_empty()
+            || !circuit.ekv3s.is_empty()
+            || circuit.bjts.devices.iter().any(|bjt| bjt.node_rth != 0)
+        {
+            return None;
+        }
+        #[cfg(feature = "veriloga")]
+        if circuit.has_mixed_signal_hosts() {
+            return None;
+        }
+        let sources = &circuit.voltage_sources;
+        let (mut low, mut high, mut stacked) = (0.0_f64, 0.0_f64, 0.0_f64);
+        for ((&value, &pos), &neg) in sources
+            .dc_values
+            .iter()
+            .zip(&sources.node_pos)
+            .zip(&sources.node_neg)
+        {
+            if !value.is_finite() {
+                return None;
+            }
+            match (pos, neg) {
+                (_, 0) => (low, high) = (low.min(value), high.max(value)),
+                (0, _) => (low, high) = (low.min(-value), high.max(-value)),
+                // A floating source fixes no potential, only a difference,
+                // and can stack on any other source in either direction.
+                _ => stacked += value.abs(),
+            }
+        }
+        let mut unbounded = circuit.non_electrical_state_mask();
+        for bjt in &circuit.bjts.devices {
+            for node in [bjt.node_xf1, bjt.node_xf2] {
+                if node > 0
+                    && let Some(row) = unbounded.get_mut(node - 1)
+                {
+                    *row = true;
+                }
+            }
+        }
+        Some(Self {
+            low: low - stacked,
+            high: high + stacked,
+            unbounded,
+        })
+    }
+
+    /// Clamp each node potential of `solution` into the box.
+    pub(in crate::engine::convergence) fn project(&self, solution: &mut [Value]) {
+        for (value, &unbounded) in solution.iter_mut().zip(&self.unbounded) {
+            if !unbounded {
+                *value = value.clamp(self.low, self.high);
+            }
+        }
+    }
+}
+
 impl Engine {
     #[inline]
     pub(in crate::engine::convergence) fn has_nonfinite_values(solution: &[Value]) -> bool {
@@ -644,5 +740,106 @@ mod tests {
         circuit.bjts.devices.clear();
         circuit.bjts.add(Box::new(bjt));
         assert!(!Engine::junction_limiting_owns_newton_steps(&circuit));
+    }
+
+    fn built(deck: &str) -> CircuitData {
+        let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+        Engine::default()
+            .resolved_for_netlist(&netlist)
+            .build_circuit(&netlist)
+            .unwrap()
+    }
+
+    #[test]
+    fn no_gain_box_spans_the_grounded_sources_and_every_floating_one() {
+        let circuit = built(concat!(
+            "box\n",
+            "V1 a 0 5\n",
+            "V2 0 n 2\n",
+            "V3 b a 3\n",
+            "R1 b n 1k\n",
+            "M1 b a n n nm\n",
+            ".model nm nmos\n",
+            ".op\n",
+            ".end\n",
+        ));
+        let voltage_box = NoGainVoltageBox::of(&circuit).unwrap();
+        assert_eq!((voltage_box.low, voltage_box.high), (-5.0, 8.0));
+        let mut solution = vec![1.0e138; circuit.matrix_size()];
+        voltage_box.project(&mut solution);
+        let nodes = circuit.num_nodes();
+        assert!(solution[..nodes].iter().all(|&v| v == 8.0), "{solution:?}");
+        assert!(
+            solution[nodes..].iter().all(|&i| i == 1.0e138),
+            "{solution:?}"
+        );
+    }
+
+    #[test]
+    fn an_element_with_gain_has_no_voltage_box() {
+        for element in [
+            "E1 c 0 a 0 100",
+            "G1 c 0 a 0 1m",
+            "I1 0 c 1m",
+            "B1 c 0 V=10*V(a)",
+        ] {
+            let circuit = built(&format!(
+                "gain\nV1 a 0 1\nR1 a 0 1k\nR2 c 0 1k\n{element}\n.op\n.end\n"
+            ));
+            assert_eq!(NoGainVoltageBox::of(&circuit), None, "{element}");
+        }
+    }
+
+    /// Twenty default-card inverters: the linear presolve leaves every
+    /// output at 0 V, where each gate's pull-up sits at vgd = 0 on the
+    /// saturation edge (gds = 0) and its pull-down is cut off. The first
+    /// Newton solve then put the last output near 1e138 V.
+    #[test]
+    fn an_inverter_chain_reaches_its_rails_without_leaving_them() {
+        let mut deck = String::from(concat!(
+            "chain\n",
+            ".subckt inv in out vdd\n",
+            "M2 out in 0 0 n1 w=1.8u l=1.2u\n",
+            "M1 out in vdd vdd p1 w=3.6u l=1.2u\n",
+            ".ends\n",
+            "VDD vdd 0 2\n",
+            "VIN in 0 2\n",
+        ));
+        for stage in 1..=20 {
+            let input = if stage == 1 {
+                "in".to_string()
+            } else {
+                format!("o{}", stage - 1)
+            };
+            deck.push_str(&format!("X{stage} {input} o{stage} vdd inv\n"));
+        }
+        deck.push_str(".model n1 nmos (level=1)\n.model p1 pmos (level=1)\n.op\n.end\n");
+        let netlist = crate::netlist::Netlist::parse(&deck).unwrap();
+        let mut config = crate::engine::SimulationConfig::default();
+        config.convergence_config.gmin_stepping = false;
+        config.convergence_config.source_stepping = false;
+        config.convergence_config.pseudo_transient = false;
+        config.convergence_config.arc_length = false;
+        let engine = Engine::new_with_resolved_config(config);
+        let result = engine.run_dc_op(&netlist).unwrap();
+        let output = |stage: usize| {
+            let name = format!("o{stage}");
+            let index = result
+                .node_names
+                .iter()
+                .position(|n| n.eq_ignore_ascii_case(&name))
+                .unwrap();
+            result.node_voltages[index]
+        };
+        for stage in 1..=20 {
+            let rail = if stage % 2 == 0 { 2.0 } else { 0.0 };
+            assert!(
+                (output(stage) - rail).abs() < 1e-6,
+                "o{stage} = {}",
+                output(stage)
+            );
+        }
+        let iterations = engine.convergence_quality().total_iterations;
+        assert!(iterations <= 8, "{iterations} Newton iterations");
     }
 }
