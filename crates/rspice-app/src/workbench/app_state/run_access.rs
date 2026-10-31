@@ -51,6 +51,13 @@ impl ViewerHost for AppState {
 }
 
 impl RunHost for AppState {
+    type Frozen = AppState;
+
+    /// The whole state, as a campaign has always frozen it.
+    fn freeze(&self) -> AppState {
+        self.clone()
+    }
+
     fn model_mut(&mut self) -> &mut Model {
         &mut self.model
     }

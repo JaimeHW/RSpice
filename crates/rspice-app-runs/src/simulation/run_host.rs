@@ -31,11 +31,14 @@ pub trait ViewerHost: RunEventSink {
 }
 
 /// The application, as the run tier sees it.
-///
-/// `Clone` because a campaign prepares every member from a frozen copy of the
-/// whole application before any engine work begins, so a later member never
-/// observes edits made while an earlier one runs.
-pub trait RunHost: ViewerHost + Clone {
+pub trait RunHost: ViewerHost {
+    /// The host [`Self::freeze`] returns, which owns everything it reads.
+    type Frozen: RunHost;
+
+    /// A copy of what a campaign reads, taken now. A campaign prepares every
+    /// member from this copy before any engine work begins, so a later
+    /// member never observes edits made while an earlier one runs.
+    fn freeze(&self) -> Self::Frozen;
     /// The shared model, to change.
     fn model_mut(&mut self) -> &mut Model;
     /// The runs' own slot.

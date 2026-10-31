@@ -128,6 +128,12 @@ impl ViewerHost for RunTestHost {
 }
 
 impl RunHost for RunTestHost {
+    type Frozen = RunTestHost;
+
+    fn freeze(&self) -> RunTestHost {
+        self.clone()
+    }
+
     fn model_mut(&mut self) -> &mut Model {
         &mut self.model
     }

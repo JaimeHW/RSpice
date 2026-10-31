@@ -741,7 +741,7 @@ impl SimulationController {
     }
 
     /// Freeze and start a declared-order campaign of independent simulation
-    /// plans. Every member is prepared in a cloned project view before any
+    /// plans. Every member is prepared in a frozen copy of the host before any
     /// engine work begins, so a later member never observes edits made while
     /// an earlier member is executing.
     pub fn prepare_and_start_campaign(
@@ -780,7 +780,7 @@ impl SimulationController {
             ));
         }
 
-        let mut frozen_state = state.clone();
+        let mut frozen_state = state.freeze();
         let mut members = VecDeque::with_capacity(member_ids.len());
         let mut task_count = 0_usize;
         for plan_id in member_ids {
