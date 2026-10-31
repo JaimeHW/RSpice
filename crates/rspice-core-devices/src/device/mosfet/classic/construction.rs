@@ -1771,7 +1771,7 @@ mod tests {
         let held = |mos: &Mosfet| (mos.eval_vgs, mos.eval_vds, mos.eval_vbs) == (0.0, 0.0, 0.0);
         let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
         mos.set_initially_off(true);
-        mos.enter_operating_point();
+        mos.enter_operating_point(false);
         for bias in [
             [5.0, 5.0, 0.0, 0.0],
             [5.0, 4.0, 0.0, 0.0],
@@ -1792,9 +1792,25 @@ mod tests {
         assert!(!held(&mos));
 
         // A spent state is not re-armed by a later solve's prime.
-        mos.enter_operating_point();
+        mos.enter_operating_point(false);
         mos.update(&[3.0, 3.0, 0.0, 0.0]);
         assert_ne!((mos.eval_vgs, mos.eval_vds), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_warm_started_solve_skips_the_off_hold() {
+        use crate::device::NonlinearDevice;
+
+        // A solve that starts from a solved bias replays neither MODEINITJCT
+        // nor MODEINITFIX, like ngspice's MODEINITPRED sweep points: the OFF
+        // instance evaluates its terminal bias at once, and a later cold
+        // prime cannot re-arm the spent state.
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.set_initially_off(true);
+        mos.enter_operating_point(true);
+        mos.enter_operating_point(false);
+        mos.update(&[5.0, 5.0, 0.0, 0.0]);
+        assert_eq!((mos.eval_vgs, mos.eval_vds), (5.0, 5.0));
     }
 
     #[test]

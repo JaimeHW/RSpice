@@ -726,12 +726,16 @@ impl Mosfet {
         self.initial_off = off;
     }
 
-    /// Enter an operating-point solve, which starts with the MODEINITJCT
-    /// load: a pending startup state arms, and a spent one stays spent, so
-    /// continuation retries and later sweep points cannot replay it.
+    /// Enter an operating-point solve. A cold one starts with the
+    /// MODEINITJCT load and arms a pending startup state; a spent one stays
+    /// spent, so continuation retries and later sweep points cannot replay
+    /// it. A solve warm-started from a solved bias skips the startup state, as
+    /// ngspice's later sweep points do (MODEINITPRED).
     #[doc(hidden)]
-    pub fn enter_operating_point(&mut self) {
-        if self.initial_off
+    pub fn enter_operating_point(&mut self, warm_start: bool) {
+        if warm_start {
+            self.retire_startup_state();
+        } else if self.initial_off
             && self.initial_off_seed_pending
             && self.operating_point_startup().is_none()
         {

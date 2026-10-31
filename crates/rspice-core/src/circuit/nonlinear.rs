@@ -1287,6 +1287,14 @@ impl CircuitData {
         self.update_nonlinear_impl(voltages, None, true);
     }
 
+    /// Start the next operating-point solve from a solved bias: no device
+    /// replays its MODEINITJCT startup state.
+    pub(crate) fn skip_operating_point_startup(&mut self) {
+        for mosfet in &mut self.mosfets.devices {
+            mosfet.enter_operating_point(true);
+        }
+    }
+
     /// Enter the one-shot SPICE initial-junction phase for every switch in a
     /// freshly built circuit. Each device ignores repeated calls after the
     /// phase starts, so continuation retries and sweep points cannot replay
@@ -1368,7 +1376,7 @@ impl CircuitData {
         }
         if preserve_initial_load {
             for mosfet in &mut self.mosfets.devices {
-                mosfet.enter_operating_point();
+                mosfet.enter_operating_point(false);
             }
         }
         #[cfg(feature = "parallel")]

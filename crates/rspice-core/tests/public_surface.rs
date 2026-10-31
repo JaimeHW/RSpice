@@ -505,9 +505,9 @@ const MAX_PUBLIC_ITEMS: usize = 5234;
 // `NonlinearDevice::reopen_operating_point`, a method of the documented trait,
 // so `Bjt::reset_vbic_operating_point_history` is private again. The census is
 // 1,603.
-// `Mosfet::enter_operating_point` adds one: the operating-point prime
-// (`rspice-core` circuit/nonlinear.rs) enters every classic MOSFET's
-// MODEINITJCT load with it. The census is 1,604, with no slack.
+// `Mosfet::enter_operating_point` adds one: the operating-point prime and a
+// warm-started solve (`rspice-core` circuit/nonlinear.rs) enter or skip every
+// classic MOSFET's MODEINITJCT load with it. The census is 1,604, with no slack.
 const MAX_HIDDEN_FAMILY_ITEMS: usize = 1604;
 
 /// How far under the ceiling the count may sit before the ceiling is

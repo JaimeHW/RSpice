@@ -1704,6 +1704,7 @@ impl Engine {
                     ));
                 }
                 if circuit.has_nonlinear_devices() || !circuit.generic_switches.is_empty() {
+                    circuit.skip_operating_point_startup();
                     self.solve_nonlinear_with_guess_and_abort(
                         circuit,
                         matrix,
