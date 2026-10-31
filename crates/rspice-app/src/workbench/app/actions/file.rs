@@ -86,6 +86,7 @@ impl RSpiceApp {
                     )
                 );
                 if project_action
+                    // Read in the models feature's state until it answers through its port.
                     && self.state.models.model_editor_has_unsaved_changes()
                     && let Err(error) = self.save_open_model_candidate()
                 {
@@ -222,6 +223,7 @@ impl RSpiceApp {
         &mut self,
         destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
     ) {
+        // Read in the models feature's state until it answers through its port.
         if self.state.models.model_editor_has_unsaved_changes()
             && let Err(error) = self.save_open_model_candidate()
         {
@@ -342,6 +344,7 @@ impl RSpiceApp {
         }
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
             || (recent.kind == crate::services::recent_files::RecentKind::Project
+                // Read in the models feature's state until it answers through its port.
                 && self.state.models.model_editor_has_unsaved_changes())
         {
             self.state

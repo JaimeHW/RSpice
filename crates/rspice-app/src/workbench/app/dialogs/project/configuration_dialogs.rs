@@ -393,6 +393,7 @@ fn go_on_leaving(
             .show_close_project(destination);
         return None;
     }
+    // Read in the models feature's state until it answers through its port.
     let drafts = if action == ConfirmationAction::Exit {
         state.models.has_unsaved_authoring_changes()
     } else {

@@ -789,10 +789,7 @@ impl ConfirmationHost for RSpiceApp {
     }
 
     fn revert_active_document(&mut self, token: &RevertReviewToken) {
-        crate::workbench::workflows::project_workflow::confirm_revert_active_document(
-            &mut self.state,
-            token,
-        );
+        self.state.confirm_revert_active_document(token);
     }
 
     fn close_project_after_save(&mut self, destination: ProjectCloseDestination) {
@@ -811,7 +808,8 @@ impl ConfirmationHost for RSpiceApp {
     #[cfg(target_arch = "wasm32")]
     fn cancel_browser_file_operation(&mut self) {
         crate::workbench::workflows::project_workflow::cancel_pending_browser_file_operation(
-            &mut self.state,
+            &mut self.state.platform,
+            &mut self.state.workbench,
         );
     }
 }

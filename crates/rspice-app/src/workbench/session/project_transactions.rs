@@ -21,7 +21,8 @@ use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::{
-    LifecycleParts, PersistenceBinding, ProjectCloseDestination, has_unsaved_changes,
+    LifecycleParts, PersistenceBinding, ProjectCloseDestination, RevertReviewToken,
+    has_unsaved_changes,
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
@@ -367,6 +368,17 @@ impl AppState {
                 )
             }
         }
+    }
+}
+
+/// Reverting the active document to what its project last saved, answered
+/// from the revert review: the shell's revert over the whole project, then
+/// the project's report of it.
+impl AppState {
+    /// Revert the document `token` reviewed. Returns whether it was reverted.
+    pub(crate) fn confirm_revert_active_document(&mut self, token: &RevertReviewToken) -> bool {
+        let reverted = services_access::confirm_revert_active_document(self, token);
+        project_workflow::report_revert(&mut self.model, &mut self.workbench, token, reverted)
     }
 }
 

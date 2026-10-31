@@ -960,20 +960,20 @@ pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
 /// underlying JavaScript promise may still resolve, but transaction and import
 /// lease generations make that completion unable to mutate current state.
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn cancel_pending_browser_file_operation(state: &mut AppState) -> bool {
+pub(crate) fn cancel_pending_browser_file_operation(
+    platform: &mut PlatformState,
+    workbench: &mut WorkbenchSession,
+) -> bool {
     let import_cancelled =
         crate::workbench::browser::file_import::cancel_active_text_import().is_some();
     let lifecycle_cancelled =
-        crate::workbench::lifecycle::project_lifecycle::cancel_pending_browser_operation(
-            &mut state.platform,
-        );
-    let continuation_cancelled = state
-        .workbench
+        crate::workbench::lifecycle::project_lifecycle::cancel_pending_browser_operation(platform);
+    let continuation_cancelled = workbench
         .confirmation_dialog
         .cancel_awaiting_canonical_save();
     let cancelled = import_cancelled || lifecycle_cancelled || continuation_cancelled;
     if cancelled {
-        state.prompt("Cancelled the browser file operation.");
+        workbench.prompt("Cancelled the browser file operation.");
     }
     cancelled
 }
@@ -991,14 +991,17 @@ pub(crate) fn request_revert_active_document(state: &mut AppState) -> bool {
     }
 }
 
-pub(crate) fn confirm_revert_active_document(
-    state: &mut AppState,
+/// Say how the reverted document's revert went: record it, or answer the
+/// refusal or failure. Returns whether it was reverted.
+pub(crate) fn report_revert(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     token: &crate::workbench::lifecycle::project_lifecycle::RevertReviewToken,
+    reverted: Result<(), ProjectLifecycleError>,
 ) -> bool {
-    match crate::workbench::app_state::services_access::confirm_revert_active_document(state, token)
-    {
+    match reverted {
         Ok(()) => {
-            state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("Reverted {}.", token.document_label()),
@@ -1006,7 +1009,7 @@ pub(crate) fn confirm_revert_active_document(
             true
         }
         Err(error) => {
-            lifecycle_error(state, error, "Revert failed");
+            report_lifecycle_error(model, workbench, error, "Revert failed");
             false
         }
     }
@@ -1062,6 +1065,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 /// something to lose.
 pub(crate) fn closing_loses_nothing(state: &AppState) -> bool {
     !state.model.simulation.execution.has_active_execution()
+        // Read in the models feature's state until it answers through its port.
         && !state.models.model_editor_has_unsaved_changes()
         && !state
             .project
