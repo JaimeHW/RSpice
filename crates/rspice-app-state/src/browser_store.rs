@@ -64,6 +64,18 @@ pub const PDK_CONFIG: Schema = Schema {
     refusal: "too many browser PDK storage operations are still pending",
 };
 
+/// Browser project bindings, each a file handle under its binding id, and
+/// the recovery checkpoints kept beside them.
+pub const PROJECT_BINDINGS: Schema = Schema {
+    database: "rspice-project-bindings",
+    version: 2,
+    store: "canonical-file-handles",
+    timeout_ms: 15_000,
+    blocked: "IndexedDB schema upgrade is blocked by another RSpice tab; close the older tab and retry",
+    pending: 32,
+    refusal: "too many browser storage operations are still pending",
+};
+
 #[cfg(target_arch = "wasm32")]
 pub use browser::*;
 
@@ -649,6 +661,10 @@ mod tests {
         assert_eq!(
             identity(PDK_CONFIG),
             ("rspice-pdk-config", 1, "content-addressed-pdk-config")
+        );
+        assert_eq!(
+            identity(PROJECT_BINDINGS),
+            ("rspice-project-bindings", 2, "canonical-file-handles")
         );
     }
 }

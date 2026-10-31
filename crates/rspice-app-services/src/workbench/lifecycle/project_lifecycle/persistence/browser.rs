@@ -10,6 +10,8 @@
 // need the parent's names.
 #[cfg(target_arch = "wasm32")]
 use super::*;
+#[cfg(target_arch = "wasm32")]
+use rspice_app_state::browser_store::{self, PROJECT_BINDINGS};
 
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn start_browser_binding_persist(
@@ -684,103 +686,9 @@ pub(super) fn set_js_field(
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) struct BrowserDatabase {
-    value: wasm_bindgen::JsValue,
-    _on_version_change: wasm_bindgen::closure::Closure<dyn FnMut()>,
-}
-
-#[cfg(target_arch = "wasm32")]
-impl Drop for BrowserDatabase {
-    fn drop(&mut self) {
-        let _ = call_value_method(&self.value, "close", &[]);
-    }
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn open_binding_database() -> Result<BrowserDatabase, String> {
-    let window = web_sys::window().ok_or("browser window is unavailable")?;
-    let factory = js_sys::Reflect::get(&window, &wasm_bindgen::JsValue::from_str("indexedDB"))
-        .map_err(js_error)?;
-    if factory.is_null() || factory.is_undefined() {
-        return Err("IndexedDB is unavailable".to_owned());
-    }
-    let request = call_value_method(
-        &factory,
-        "open",
-        &[
-            wasm_bindgen::JsValue::from_str(BROWSER_BINDING_DATABASE),
-            wasm_bindgen::JsValue::from_f64(BROWSER_BINDING_SCHEMA_VERSION as f64),
-        ],
-    )?;
-    let upgrade_request = request.clone();
-    let on_upgrade = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        let Ok(database) =
-            js_sys::Reflect::get(&upgrade_request, &wasm_bindgen::JsValue::from_str("result"))
-        else {
-            return;
-        };
-        let exists = js_sys::Reflect::get(
-            &database,
-            &wasm_bindgen::JsValue::from_str("objectStoreNames"),
-        )
-        .ok()
-        .and_then(|names| {
-            call_value_method(
-                &names,
-                "contains",
-                &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-            )
-            .ok()
-        })
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false);
-        if !exists {
-            let _ = call_value_method(
-                &database,
-                "createObjectStore",
-                &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-            );
-        }
-    });
-    let database = await_idb_open_request(&request, on_upgrade).await?;
-    let database_for_change = database.clone();
-    let on_version_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        let _ = call_value_method(&database_for_change, "close", &[]);
-    });
-    js_sys::Reflect::set(
-        &database,
-        &wasm_bindgen::JsValue::from_str("onversionchange"),
-        on_version_change.as_ref(),
-    )
-    .map_err(js_error)?;
-    Ok(BrowserDatabase {
-        value: database,
-        _on_version_change: on_version_change,
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
 pub(super) async fn indexed_db_get(key: &str) -> Result<Option<wasm_bindgen::JsValue>, String> {
-    let database = open_binding_database().await?;
-    async {
-        let transaction = call_value_method(
-            &database.value,
-            "transaction",
-            &[
-                wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE),
-                wasm_bindgen::JsValue::from_str("readonly"),
-            ],
-        )?;
-        let store = call_value_method(
-            &transaction,
-            "objectStore",
-            &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-        )?;
-        let request = call_value_method(&store, "get", &[wasm_bindgen::JsValue::from_str(key)])?;
-        let value = await_idb_request(&request).await?;
-        Ok((!value.is_undefined()).then_some(value))
-    }
-    .await
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    database.read()?.get(key).await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -813,63 +721,33 @@ pub(super) async fn indexed_db_compare_exchange_put(
     expected_generation: Option<u64>,
     next_generation: u64,
 ) -> Result<(), String> {
-    let database = open_binding_database().await?;
-    async {
-        let transaction = strict_readwrite_transaction(&database.value)?;
-        let completion = await_idb_transaction(&transaction);
-        let store = call_value_method(
-            &transaction,
-            "objectStore",
-            &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-        )?;
-        let get = call_value_method(&store, "get", &[wasm_bindgen::JsValue::from_str(key)])?;
-        let existing = await_idb_request(&get).await?;
-        let metadata = (!existing.is_undefined())
-            .then(|| metadata_from_record(&existing))
-            .transpose()?;
-        if let Err(error) = validate_binding_generation_commit(
-            metadata.as_ref(),
-            binding_id,
-            project_id,
-            backend,
-            expected_generation,
-            next_generation,
-        ) {
-            let _ = call_value_method(&transaction, "abort", &[]);
-            return Err(error);
-        }
-        let put = call_value_method(
-            &store,
-            "put",
-            &[record.clone(), wasm_bindgen::JsValue::from_str(key)],
-        )?;
-        let _ = await_idb_request(&put).await?;
-        completion.await
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    let transaction = database.write()?;
+    let existing = transaction.get(key).await?;
+    let metadata = existing.as_ref().map(metadata_from_record).transpose()?;
+    if let Err(error) = validate_binding_generation_commit(
+        metadata.as_ref(),
+        binding_id,
+        project_id,
+        backend,
+        expected_generation,
+        next_generation,
+    ) {
+        transaction.abort();
+        return Err(error);
     }
-    .await
+    transaction.put(key, record).await?;
+    transaction.commit().await
 }
 
 #[cfg(target_arch = "wasm32")]
 pub(super) async fn indexed_db_delete(key: &str) -> Result<(), String> {
-    let database = open_binding_database().await?;
-    async {
-        let transaction = strict_readwrite_transaction(&database.value)?;
-        let completion = await_idb_transaction(&transaction);
-        let store = call_value_method(
-            &transaction,
-            "objectStore",
-            &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-        )?;
-        let request = call_value_method(&store, "delete", &[wasm_bindgen::JsValue::from_str(key)])?;
-        let _ = await_idb_request(&request).await?;
-        completion.await
-    }
-    .await
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    let transaction = database.write()?;
+    transaction.delete(key).await?;
+    transaction.commit().await
 }
 
-/// Publish one browser recovery checkpoint without putting project-sized
-/// bytes on the synchronous Web Storage path. Snapshot and manifest use
-/// separate strict IndexedDB transactions: exact snapshot readback succeeds
 /// before the small manifest becomes visible.
 #[cfg(target_arch = "wasm32")]
 pub(crate) fn start_browser_checkpoint_publish(
@@ -1016,23 +894,12 @@ pub(super) async fn indexed_db_add_unique(
     key: &str,
     value: &wasm_bindgen::JsValue,
 ) -> Result<(), String> {
-    let database = open_binding_database().await?;
-    let transaction = strict_readwrite_transaction(&database.value)?;
-    let completion = await_idb_transaction(&transaction);
-    let store = call_value_method(
-        &transaction,
-        "objectStore",
-        &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-    )?;
-    let request = call_value_method(
-        &store,
-        "add",
-        &[value.clone(), wasm_bindgen::JsValue::from_str(key)],
-    )?;
-    let _ = await_idb_request(&request).await.map_err(|error| {
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    let transaction = database.write()?;
+    transaction.add(key, value).await.map_err(|error| {
         format!("project checkpoint identity already exists or could not be reserved: {error}")
     })?;
-    completion.await
+    transaction.commit().await
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1040,335 +907,12 @@ pub(super) async fn indexed_db_matching_keys(
     prefix: &str,
     suffix: &str,
 ) -> Result<Vec<String>, String> {
-    let database = open_binding_database().await?;
-    let transaction = call_value_method(
-        &database.value,
-        "transaction",
-        &[
-            wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE),
-            wasm_bindgen::JsValue::from_str("readonly"),
-        ],
-    )?;
-    let store = call_value_method(
-        &transaction,
-        "objectStore",
-        &[wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE)],
-    )?;
-    let keys_request = call_value_method(&store, "getAllKeys", &[])?;
-    let keys = js_sys::Array::from(&await_idb_request(&keys_request).await?);
+    let database = browser_store::open(&PROJECT_BINDINGS).await?;
+    let keys = database.read()?.keys().await?;
     Ok(keys
-        .iter()
-        .filter_map(|key| key.as_string())
+        .into_iter()
         .filter(|key| key.starts_with(prefix) && key.ends_with(suffix))
         .collect())
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn strict_readwrite_transaction(
-    database: &wasm_bindgen::JsValue,
-) -> Result<wasm_bindgen::JsValue, String> {
-    let options = js_sys::Object::new();
-    set_js_field(
-        &options,
-        "durability",
-        &wasm_bindgen::JsValue::from_str("strict"),
-    )?;
-    call_value_method(
-        database,
-        "transaction",
-        &[
-            wasm_bindgen::JsValue::from_str(BROWSER_BINDING_STORE),
-            wasm_bindgen::JsValue::from_str("readwrite"),
-            options.into(),
-        ],
-    )
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn await_idb_open_request(
-    request: &wasm_bindgen::JsValue,
-    on_upgrade: wasm_bindgen::closure::Closure<dyn FnMut()>,
-) -> Result<wasm_bindgen::JsValue, String> {
-    let success_request = request.clone();
-    let error_request = request.clone();
-    let request_for_handlers = request.clone();
-    let mut on_upgrade = Some(on_upgrade);
-    let reported = std::rc::Rc::new(std::cell::Cell::new(false));
-    let reported_for_promise = reported.clone();
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let reported = reported_for_promise.clone();
-        // A blocked request is reported immediately but retained until its
-        // eventual success/error event so a late database is always closed.
-        let retire = std::rc::Rc::new(std::cell::Cell::new(false));
-
-        let success_reported = reported.clone();
-        let success_retire = retire.clone();
-        let success_resolve = resolve.clone();
-        let success_request = success_request.clone();
-        let success = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            let result =
-                js_sys::Reflect::get(&success_request, &wasm_bindgen::JsValue::from_str("result"))
-                    .unwrap_or(wasm_bindgen::JsValue::UNDEFINED);
-            if success_reported.replace(true) {
-                let _ = call_value_method(&result, "close", &[]);
-            } else {
-                let _ = success_resolve.call1(&wasm_bindgen::JsValue::UNDEFINED, &result);
-            }
-            success_retire.set(true);
-        });
-
-        let failure_reported = reported.clone();
-        let failure_retire = retire.clone();
-        let failure_reject = reject.clone();
-        let error_request = error_request.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if !failure_reported.replace(true) {
-                let error =
-                    js_sys::Reflect::get(&error_request, &wasm_bindgen::JsValue::from_str("error"))
-                        .unwrap_or_else(|_| {
-                            wasm_bindgen::JsValue::from_str("IndexedDB open request failed")
-                        });
-                let _ = failure_reject.call1(&wasm_bindgen::JsValue::UNDEFINED, &error);
-            }
-            failure_retire.set(true);
-        });
-
-        let blocked_reported = reported.clone();
-        let blocked_reject = reject.clone();
-        let blocked = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if !blocked_reported.replace(true) {
-                let _ = blocked_reject.call1(
-                    &wasm_bindgen::JsValue::UNDEFINED,
-                    &wasm_bindgen::JsValue::from_str(
-                        "IndexedDB schema upgrade is blocked by another RSpice tab; close the older tab and retry",
-                    ),
-                );
-            }
-        });
-
-        let upgrade = on_upgrade.take().expect("single IndexedDB open setup");
-        let success_value = success.as_ref().clone();
-        let failure_value = failure.as_ref().clone();
-        let blocked_value = blocked.as_ref().clone();
-        let upgrade_value = upgrade.as_ref().clone();
-        if let Err(error) =
-            retain_browser_event_handlers(retire.clone(), vec![success, failure, blocked, upgrade])
-        {
-            retire.set(true);
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-            return;
-        }
-        for (property, value) in [
-            ("onsuccess", success_value),
-            ("onerror", failure_value),
-            ("onblocked", blocked_value),
-            ("onupgradeneeded", upgrade_value),
-        ] {
-            if let Err(error) = js_sys::Reflect::set(
-                &request_for_handlers,
-                &wasm_bindgen::JsValue::from_str(property),
-                &value,
-            ) {
-                retire.set(true);
-                let _ = reject.call1(&wasm_bindgen::JsValue::UNDEFINED, &error);
-                return;
-            }
-        }
-    });
-    let result = await_browser_promise(promise, "IndexedDB open").await;
-    if result.is_err() {
-        // A late success observes this and closes the database instead of
-        // leaking a connection after the lifecycle operation has timed out.
-        reported.set(true);
-    }
-    result
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn await_idb_request(
-    request: &wasm_bindgen::JsValue,
-) -> Result<wasm_bindgen::JsValue, String> {
-    await_idb_request_with_handlers(request, Vec::new()).await
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) async fn await_idb_request_with_handlers(
-    request: &wasm_bindgen::JsValue,
-    extra_handlers: Vec<BrowserEventHandlerBinding>,
-) -> Result<wasm_bindgen::JsValue, String> {
-    let success_request = request.clone();
-    let error_request = request.clone();
-    let request_for_handlers = request.clone();
-    let mut extra_handlers = Some(extra_handlers);
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let success_request = success_request.clone();
-        let error_request = error_request.clone();
-        let request_for_handlers = request_for_handlers.clone();
-        let extras = extra_handlers.take().unwrap_or_default();
-        let done = std::rc::Rc::new(std::cell::Cell::new(false));
-        let success_done = done.clone();
-        let resolve = resolve.clone();
-        let success = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if success_done.replace(true) {
-                return;
-            }
-            let result =
-                js_sys::Reflect::get(&success_request, &wasm_bindgen::JsValue::from_str("result"))
-                    .unwrap_or(wasm_bindgen::JsValue::UNDEFINED);
-            let _ = resolve.call1(&wasm_bindgen::JsValue::UNDEFINED, &result);
-        });
-        let failure_done = done.clone();
-        let callback_reject = reject.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if failure_done.replace(true) {
-                return;
-            }
-            let error =
-                js_sys::Reflect::get(&error_request, &wasm_bindgen::JsValue::from_str("error"))
-                    .unwrap_or_else(|_| {
-                        wasm_bindgen::JsValue::from_str("IndexedDB request failed")
-                    });
-            let _ = callback_reject.call1(&wasm_bindgen::JsValue::UNDEFINED, &error);
-        });
-        let success_value = success.as_ref().clone();
-        let failure_value = failure.as_ref().clone();
-        let extra_values = extras
-            .iter()
-            .map(|(property, callback)| (*property, callback.as_ref().clone()))
-            .collect::<Vec<_>>();
-        let mut callbacks = Vec::with_capacity(2 + extras.len());
-        callbacks.push(success);
-        callbacks.push(failure);
-        callbacks.extend(extras.into_iter().map(|(_, callback)| callback));
-        if let Err(error) = retain_browser_event_handlers(done.clone(), callbacks) {
-            done.set(true);
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-            return;
-        }
-        let set_handler = |property: &str, value: &wasm_bindgen::JsValue| {
-            js_sys::Reflect::set(
-                &request_for_handlers,
-                &wasm_bindgen::JsValue::from_str(property),
-                value,
-            )
-            .map(|_| ())
-            .map_err(js_error)
-        };
-        let result = set_handler("onsuccess", &success_value)
-            .and_then(|()| set_handler("onerror", &failure_value))
-            .and_then(|()| {
-                for (property, value) in &extra_values {
-                    set_handler(property, value)?;
-                }
-                Ok(())
-            });
-        if let Err(error) = result {
-            done.set(true);
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-        }
-    });
-    let result = await_browser_promise(promise, "IndexedDB request").await;
-    if result.is_err()
-        && let Ok(transaction) =
-            js_sys::Reflect::get(request, &wasm_bindgen::JsValue::from_str("transaction"))
-        && !transaction.is_null()
-        && !transaction.is_undefined()
-    {
-        let _ = call_value_method(&transaction, "abort", &[]);
-    }
-    result
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn await_idb_transaction(
-    transaction: &wasm_bindgen::JsValue,
-) -> impl std::future::Future<Output = Result<(), String>> + 'static {
-    let transaction_for_handlers = transaction.clone();
-    let error_transaction = transaction.clone();
-    let transaction_for_abort = transaction.clone();
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let error_transaction = error_transaction.clone();
-        let transaction_for_handlers = transaction_for_handlers.clone();
-        let done = std::rc::Rc::new(std::cell::Cell::new(false));
-        let complete_done = done.clone();
-        let resolve = resolve.clone();
-        let complete = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if complete_done.replace(true) {
-                return;
-            }
-            let _ = resolve.call0(&wasm_bindgen::JsValue::UNDEFINED);
-        });
-        let failure_done = done.clone();
-        let callback_reject = reject.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if failure_done.replace(true) {
-                return;
-            }
-            let error = js_sys::Reflect::get(
-                &error_transaction,
-                &wasm_bindgen::JsValue::from_str("error"),
-            )
-            .unwrap_or_else(|_| wasm_bindgen::JsValue::from_str("IndexedDB transaction failed"));
-            let _ = callback_reject.call1(&wasm_bindgen::JsValue::UNDEFINED, &error);
-        });
-        let complete_value = complete.as_ref().clone();
-        let failure_value = failure.as_ref().clone();
-        if let Err(error) = retain_browser_event_handlers(done.clone(), vec![complete, failure]) {
-            done.set(true);
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-            return;
-        }
-        let result = js_sys::Reflect::set(
-            &transaction_for_handlers,
-            &wasm_bindgen::JsValue::from_str("oncomplete"),
-            &complete_value,
-        )
-        .map_err(js_error)
-        .and_then(|_| {
-            js_sys::Reflect::set(
-                &transaction_for_handlers,
-                &wasm_bindgen::JsValue::from_str("onabort"),
-                &failure_value,
-            )
-            .map_err(js_error)
-        })
-        .and_then(|_| {
-            js_sys::Reflect::set(
-                &transaction_for_handlers,
-                &wasm_bindgen::JsValue::from_str("onerror"),
-                &failure_value,
-            )
-            .map_err(js_error)
-        });
-        if let Err(error) = result {
-            done.set(true);
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-        }
-    });
-    async move {
-        let result = await_browser_promise(promise, "IndexedDB transaction")
-            .await
-            .map(|_| ());
-        if result.is_err() {
-            let _ = call_value_method(&transaction_for_abort, "abort", &[]);
-        }
-        result
-    }
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -1376,68 +920,11 @@ pub(super) async fn await_browser_promise(
     promise: js_sys::Promise,
     operation: &str,
 ) -> Result<wasm_bindgen::JsValue, String> {
-    let timeout = browser_timeout_promise(operation);
-    let race = js_sys::Array::new();
-    race.push(&promise);
-    race.push(&timeout);
-    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::race(&race))
-        .await
-        .map_err(js_error)
+    browser_store::await_promise(promise, operation, BROWSER_ASYNC_TIMEOUT_MS).await
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn browser_timeout_promise(operation: &str) -> js_sys::Promise {
-    let operation = operation.to_owned();
-    js_sys::Promise::new(&mut move |_resolve, reject| {
-        let timeout_reject = reject.clone();
-        let message = browser_timeout_message(&operation);
-        let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
-            let _ = timeout_reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&message),
-            );
-        });
-        let Some(window) = web_sys::window() else {
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str("browser window is unavailable"),
-            );
-            return;
-        };
-        if let Err(error) = call_value_method(
-            &window.into(),
-            "setTimeout",
-            &[
-                callback,
-                wasm_bindgen::JsValue::from_f64(BROWSER_ASYNC_TIMEOUT_MS as f64),
-            ],
-        ) {
-            let _ = reject.call1(
-                &wasm_bindgen::JsValue::UNDEFINED,
-                &wasm_bindgen::JsValue::from_str(&error),
-            );
-        }
-    })
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn call_value_method(
-    receiver: &wasm_bindgen::JsValue,
-    name: &str,
-    arguments: &[wasm_bindgen::JsValue],
-) -> Result<wasm_bindgen::JsValue, String> {
-    use wasm_bindgen::JsCast as _;
-
-    let function = js_sys::Reflect::get(receiver, &wasm_bindgen::JsValue::from_str(name))
-        .map_err(js_error)?
-        .dyn_into::<js_sys::Function>()
-        .map_err(|_| format!("browser object has no callable {name} method"))?;
-    let args = js_sys::Array::new();
-    for argument in arguments {
-        args.push(argument);
-    }
-    function.apply(receiver, &args).map_err(js_error)
-}
+pub(super) use rspice_app_state::browser_store::{call as call_value_method, js_error};
 
 #[cfg(target_arch = "wasm32")]
 pub(super) fn register_browser_handle(handle: wasm_bindgen::JsValue) -> u64 {
@@ -1729,15 +1216,6 @@ pub(super) fn call_promise_method(
         .map_err(js_error)?
         .dyn_into::<js_sys::Promise>()
         .map_err(|_| format!("browser {name} method did not return a Promise"))
-}
-
-#[cfg(target_arch = "wasm32")]
-pub(super) fn js_error(value: wasm_bindgen::JsValue) -> String {
-    js_sys::Reflect::get(&value, &wasm_bindgen::JsValue::from_str("message"))
-        .ok()
-        .and_then(|message| message.as_string())
-        .or_else(|| value.as_string())
-        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
 }
 
 #[cfg(target_arch = "wasm32")]

@@ -37,11 +37,6 @@ use crate::product::ContentDigest;
 use rspice_project::persistence::{ProjectBytes, digest_bytes};
 
 #[cfg(target_arch = "wasm32")]
-const BROWSER_BINDING_DATABASE: &str = "rspice-project-bindings";
-#[cfg(target_arch = "wasm32")]
-const BROWSER_BINDING_STORE: &str = "canonical-file-handles";
-
-#[cfg(target_arch = "wasm32")]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum PersistenceBinding {
     Browser {
@@ -139,12 +134,8 @@ thread_local! {
     static BROWSER_FILE_HANDLES: std::cell::RefCell<std::collections::HashMap<u64, wasm_bindgen::JsValue>> =
         std::cell::RefCell::new(std::collections::HashMap::new());
     static NEXT_BROWSER_HANDLE_ID: std::cell::Cell<u64> = const { std::cell::Cell::new(1) };
-    static RETAINED_BROWSER_EVENT_HANDLERS: std::cell::RefCell<Vec<RetainedBrowserEventHandlers>> =
-        const { std::cell::RefCell::new(Vec::new()) };
 }
 
-#[cfg(target_arch = "wasm32")]
-const MAX_RETAINED_BROWSER_EVENT_OPERATIONS: usize = 32;
 #[cfg(any(test, target_arch = "wasm32"))]
 const BROWSER_ASYNC_TIMEOUT_MS: u32 = 15_000;
 
@@ -154,37 +145,6 @@ fn browser_timeout_message(operation: &str) -> String {
         "{operation} timed out after {} seconds",
         BROWSER_ASYNC_TIMEOUT_MS / 1_000
     )
-}
-
-#[cfg(target_arch = "wasm32")]
-struct RetainedBrowserEventHandlers {
-    done: std::rc::Rc<std::cell::Cell<bool>>,
-    _callbacks: Vec<BrowserEventHandler>,
-}
-
-#[cfg(target_arch = "wasm32")]
-type BrowserEventHandler = wasm_bindgen::closure::Closure<dyn FnMut()>;
-
-#[cfg(target_arch = "wasm32")]
-type BrowserEventHandlerBinding = (&'static str, BrowserEventHandler);
-
-#[cfg(target_arch = "wasm32")]
-fn retain_browser_event_handlers(
-    done: std::rc::Rc<std::cell::Cell<bool>>,
-    callbacks: Vec<BrowserEventHandler>,
-) -> Result<(), String> {
-    RETAINED_BROWSER_EVENT_HANDLERS.with(|retained| {
-        let mut retained = retained.borrow_mut();
-        retained.retain(|operation| !operation.done.get());
-        if retained.len() >= MAX_RETAINED_BROWSER_EVENT_OPERATIONS {
-            return Err("too many browser storage operations are still pending".to_owned());
-        }
-        retained.push(RetainedBrowserEventHandlers {
-            done,
-            _callbacks: callbacks,
-        });
-        Ok(())
-    })
 }
 
 #[cfg(target_arch = "wasm32")]
