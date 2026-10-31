@@ -1569,6 +1569,18 @@ z1 d g 0 hfet l=1u w=10u
 .op
 .end
 ",
+        "\
+* VDMOS
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 2m
+rg1 g 0 1k
+rd1 vcc d 1k
+m1 d g 0 vmod
+.model vmod vdmos (vto=1 kp=0.1)
+.op
+.end
+",
     ];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load

@@ -3041,6 +3041,44 @@ impl Vdmos {
 }
 
 impl NonlinearDevice for Vdmos {
+    fn reopen_operating_point(&mut self) {
+        // vdmosload.c's MODEINITJCT load: the first iterate passes unlimited,
+        // the body diode included, and an `OFF` instance opens at zero bias
+        // again.
+        self.region = VdmosRegion::Cutoff;
+        self.id = 0.0;
+        self.id_diode = 0.0;
+        self.power = 0.0;
+        self.prev_vgs = 0.0;
+        self.prev_vds = 0.0;
+        self.prev_vbs = 0.0;
+        self.vgs_prev = Value::NAN;
+        self.vds_prev = Value::NAN;
+        self.vbs_prev = Value::NAN;
+        self.eval_vgs = Value::NAN;
+        self.eval_vds = Value::NAN;
+        self.eval_vbs = Value::NAN;
+        self.eval_vgs_prev = Value::NAN;
+        self.eval_vds_prev = Value::NAN;
+        self.eval_vbs_prev = Value::NAN;
+        self.id_prev = Value::NAN;
+        self.gm = Value::NAN;
+        self.gds = Value::NAN;
+        self.gmb = Value::NAN;
+        self.gm_prev = Value::NAN;
+        self.gds_prev = Value::NAN;
+        self.gmb_prev = Value::NAN;
+        self.id_eq = Value::NAN;
+        self.limiter_applied = false;
+        self.update_open = false;
+        self.d1_vd_raw = Value::NAN;
+        self.d1_vd = Value::NAN;
+        self.d1_vd_prev = Value::NAN;
+        self.has_branch_history = false;
+        self.initial_off_seed_pending = true;
+        self.initial_off_seed_evaluations = 0;
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         let g = self.gate;
         let b = self.bulk;
