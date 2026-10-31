@@ -1,8 +1,9 @@
 //! Source guards for the persisted model.
 //!
 //! `rspice-app` re-exports this crate's modules at the paths they had inside
-//! it, so a module the application reaches by path has to be `pub mod` here.
-//! That is the only reason a module is public: the list below is exact, and a
+//! it, so a module the application reaches by path has to be `pub mod` here,
+//! as does one a higher application crate calls, such as the browser store.
+//! Those are the only reasons a module is public: the list below is exact, and a
 //! module that turns public for any other reason fails it, as does one that
 //! stops being reached and is left public. Lint suppressions are counted the
 //! way `rspice-app` counts its own.
@@ -15,6 +16,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("diagnostics.rs", "engine_log"),
     ("lib.rs", "app"),
     ("lib.rs", "app_state"),
+    ("lib.rs", "browser_store"),
     ("lib.rs", "cell_usage"),
     ("lib.rs", "design_checks"),
     ("lib.rs", "design_history"),

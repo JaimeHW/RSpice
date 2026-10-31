@@ -17,6 +17,7 @@
 #![deny(clippy::print_stdout, clippy::print_stderr)]
 #![cfg_attr(test, allow(clippy::field_reassign_with_default))]
 
+pub mod browser_store;
 pub mod diagnostics;
 #[cfg(any(test, feature = "test-support"))]
 pub mod fixture_root;
