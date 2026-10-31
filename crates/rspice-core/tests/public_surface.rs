@@ -374,7 +374,10 @@ use rspice_core::analysis::harmonic_balance::{
 // Deleting the core items only the Python bindings used brings it to 5,255.
 // B3SOI's shared instance state, `SoiInstanceCore`, brings it to 5,234: its
 // eleven accessors replace a copy in each of DD, FD and PD.
-const MAX_PUBLIC_ITEMS: usize = 5234;
+// `analysis::transient::resolve_dialect_transient_maximum_step` adds one: the
+// CLI's transient run and the engine adapter resolve the Xyce dialect's
+// default TMAX through it. The census is 5,235, with no slack.
+const MAX_PUBLIC_ITEMS: usize = 5235;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
