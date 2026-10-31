@@ -237,10 +237,7 @@ impl RSpiceApp {
         match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.workbench.project_review_dialog.close();
-                crate::workbench::workflows::project_workflow::close_project_discard(
-                    &mut self.state,
-                    destination,
-                );
+                self.state.close_project_discard(destination);
             }
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalPending(
                 transaction,
@@ -313,10 +310,7 @@ impl RSpiceApp {
                 );
             }
             ConfirmationAction::CloseProject(destination) => {
-                crate::workbench::workflows::project_workflow::close_project_discard(
-                    &mut self.state,
-                    destination,
-                );
+                self.state.close_project_discard(destination);
             }
             ConfirmationAction::FileOpen => self.do_file_open(),
             ConfirmationAction::OpenRecent => {
@@ -901,12 +895,9 @@ mod tests {
 
         let project_id = state.model.workspace.content.project.id();
         state.model.simulation.execution.is_running = true;
-        assert!(
-            !crate::workbench::workflows::project_workflow::close_project_discard(
-                &mut state,
-                crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
-            )
-        );
+        assert!(!state.close_project_discard(
+            crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
+        ));
         assert!(state.platform.project_lifecycle.is_open());
         assert_eq!(state.model.workspace.content.project.id(), project_id);
         assert!(matches!(

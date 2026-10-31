@@ -1046,7 +1046,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
         return true;
     }
     if closing_loses_nothing(state) {
-        return close_project_discard(state, destination);
+        return state.close_project_discard(destination);
     }
     state
         .workbench
@@ -1059,7 +1059,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 /// model candidate, no configuration edits left unapplied, and no local run
 /// that would have to stop. A project never saved to a file always has
 /// something to lose.
-fn closing_loses_nothing(state: &AppState) -> bool {
+pub(crate) fn closing_loses_nothing(state: &AppState) -> bool {
     !state.model.simulation.execution.has_active_execution()
         && !state.models.model_editor_has_unsaved_changes()
         && !state
@@ -1069,30 +1069,20 @@ fn closing_loses_nothing(state: &AppState) -> bool {
         && crate::workbench::lifecycle::project_lifecycle::dirty_documents(state).is_empty()
 }
 
-/// Bind the project the restored session holds, then apply Projects and
-/// files ▸ On startup. Called once the session and preferences are restored,
-/// because the choice is read from them. A session saved after Close Project
-/// starts with no project whichever is chosen.
-pub(crate) fn open_session_project(state: &mut AppState) {
-    crate::workbench::app_state::services_access::initialize_from_session(state);
-    #[cfg(not(target_arch = "wasm32"))]
-    apply_startup_project_choice(state);
+/// Whether Projects and files ▸ On startup keeps the project the restored
+/// session reopened: it does when the reader reopens the last project, and
+/// there is nothing to close when no project was reopened.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn startup_keeps_project(model: &Model, platform: &PlatformState) -> bool {
+    model.preferences.reopen_last_project() || !platform.project_lifecycle.is_open()
 }
 
-/// "Start with no project" closes the reopened project when that loses
-/// nothing, as Close Project would without asking. Unsaved work keeps it open.
-/// Desktop only: the browser binds its project file after startup, once its
-/// storage answers, so there is nothing settled to close here.
+/// Record why "Start with no project" left the reopened project open: it has
+/// unsaved changes.
 #[cfg(not(target_arch = "wasm32"))]
-fn apply_startup_project_choice(state: &mut AppState) {
-    if state.model.preferences.reopen_last_project() || !state.platform.project_lifecycle.is_open()
-    {
-        return;
-    }
-    if closing_loses_nothing(state) {
-        close_project_discard(state, ProjectCloseDestination::EmptyWorkbench);
-    } else if state.platform.project_lifecycle.accepted().is_some() {
-        state.record(
+pub(crate) fn report_startup_project_kept(model: &mut Model, platform: &PlatformState) {
+    if platform.project_lifecycle.accepted().is_some() {
+        model.record(
             LogSeverity::Info,
             LogSource::Studio,
             "The last project was reopened because it has unsaved changes.",
@@ -1100,41 +1090,56 @@ fn apply_startup_project_choice(state: &mut AppState) {
     }
 }
 
-/// Close the open project without saving it, leaving the reader at
-/// `destination`.
-pub(crate) fn close_project_discard(
-    state: &mut AppState,
-    destination: ProjectCloseDestination,
-) -> bool {
-    if state.model.simulation.execution.has_active_execution() {
-        lifecycle_error(
-            state,
+/// Refuse to close the open project while a run is in progress, answering
+/// the gesture with the refusal. Returns whether it refused.
+pub(crate) fn refuse_project_close(model: &mut Model, workbench: &mut WorkbenchSession) -> bool {
+    if model.simulation.execution.has_active_execution() {
+        report_lifecycle_error(
+            model,
+            workbench,
             ProjectLifecycleError::ActiveRun,
             "Close project blocked",
         );
-        return false;
+        return true;
     }
-    let closed = format!(
+    false
+}
+
+/// The empty project a close leaves open, built off to the side, with the
+/// announcement that retires the closed project's execution context.
+pub(crate) struct ClosedProject {
+    pub(crate) library_manager: crate::state::LibraryManager,
+    pub(crate) workspace: crate::state::ProjectWorkspace,
+    pub(crate) announcement: String,
+}
+
+/// Build the empty project a close of the open one leaves behind.
+pub(crate) fn build_closed_project(model: &Model) -> ClosedProject {
+    let announcement = format!(
         "Closed project {}.",
-        state.model.workspace.content.project.display_name()
+        model.workspace.content.project.display_name()
     );
-    let mut libraries = crate::state::LibraryManager::with_primitives();
-    let mut workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut libraries);
-    let schematic = state.new_schematic_document();
-    workspace.save_active_schematic(&schematic);
-    state.replace_project_execution_context(closed);
-    state.model.library_manager = libraries;
-    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.model.workspace = workspace;
-    state.model.schematic = schematic;
-    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
-    state.bump_active_schematic_epoch();
-    state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-        &state.model.preferences,
-    );
-    let restored_model_catalog = crate::workbench::app_state::restore_session_model_library_manager(
-        &mut state.model.pdk_config,
-    );
+    let mut library_manager = crate::state::LibraryManager::with_primitives();
+    let workspace = crate::state::ProjectWorkspace::new_bootstrapped(&mut library_manager);
+    ClosedProject {
+        library_manager,
+        workspace,
+        announcement,
+    }
+}
+
+/// Give the empty project a close leaves open the session's first plan and
+/// the session's PDK model catalog, restored again. It has never been
+/// saved, so it has no browser save name. Returns why the catalog could not
+/// be restored, reported once the close has stated itself.
+pub(crate) fn settle_closed_project(
+    model: &mut Model,
+    platform: &mut PlatformState,
+) -> Vec<String> {
+    model.sim_setup =
+        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&model.preferences);
+    let restored_model_catalog =
+        crate::workbench::app_state::restore_session_model_library_manager(&mut model.pdk_config);
     let (model_library_manager, model_restore_errors) = match restored_model_catalog {
         Ok((manager, _loaded)) => (manager, Vec::new()),
         Err(errors) => (
@@ -1142,21 +1147,9 @@ pub(crate) fn close_project_discard(
             errors,
         ),
     };
-    state.model.model_library_manager = model_library_manager;
-    state.platform.browser_project_save_name = None;
-    crate::workbench::app_state::services_access::mark_project_closed(state);
-    emit_session_model_restore_errors(&mut state.model, "project close", model_restore_errors);
-    state.project.project_launcher_open = false;
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Project);
-    if destination == ProjectCloseDestination::LiveMirror {
-        state
-            .workbench
-            .outbox
-            .push(crate::workbench::framework::requests::LiveMirrorEntry);
-    }
-    true
+    model.model_library_manager = model_library_manager;
+    platform.browser_project_save_name = None;
+    model_restore_errors
 }
 
 #[cfg(not(target_arch = "wasm32"))]

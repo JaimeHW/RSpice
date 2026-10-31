@@ -338,8 +338,7 @@ fn binding_row(binding: &ShortcutBinding) -> String {
 fn no_project_app() -> RSpiceApp {
     let mut app = RSpiceApp::test_instance();
     assert!(
-        crate::workbench::workflows::project_workflow::close_project_discard(
-            &mut app.state,
+        app.state.close_project_discard(
             crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
         ),
         "an idle test instance closes its project"

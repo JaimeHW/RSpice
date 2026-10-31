@@ -769,7 +769,7 @@ const SAVE: &[Step] = &[
 /// stores start reading in this order, the models feature's PDK and pack
 /// stores after the surface navigation and before the license backfill.
 const STARTUP: &[Step] = &[
-    ("1", &["project_workflow::open_session_project(&mut state)"]),
+    ("1", &["state.open_session_project()"]),
     (
         "2",
         &["initialize_browser_surface_navigation(&mut state, &cc.egui_ctx)"],

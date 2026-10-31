@@ -2158,9 +2158,7 @@ fn every_row_announces_as_an_option_of_the_list() {
 #[test]
 fn closing_or_replacing_the_project_forgets_the_reading_position() {
     use crate::workbench::app_state::problems_view::ProblemsView;
-    use crate::workbench::workflows::project_workflow::{
-        close_project_discard, create_new_project,
-    };
+    use crate::workbench::workflows::project_workflow::create_new_project;
 
     fn read_narrowly(state: &mut AppState) {
         let view = &mut state.problems_view;
@@ -2176,8 +2174,7 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
 
     let mut state = AppState::default();
     read_narrowly(&mut state);
-    assert!(close_project_discard(
-        &mut state,
+    assert!(state.close_project_discard(
         crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
     ));
     assert_eq!(state.problems_view, ProblemsView::default());

@@ -800,10 +800,7 @@ impl ConfirmationHost for RSpiceApp {
     }
 
     fn close_project_discarding(&mut self, destination: ProjectCloseDestination) {
-        crate::workbench::workflows::project_workflow::close_project_discard(
-            &mut self.state,
-            destination,
-        );
+        self.state.close_project_discard(destination);
     }
 
     #[cfg(target_arch = "wasm32")]

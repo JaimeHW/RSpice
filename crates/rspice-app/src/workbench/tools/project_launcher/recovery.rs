@@ -503,8 +503,7 @@ pub(super) fn start_local_safe_mode(
         .map_err(|error| format!("The current session could not be protected: {error}"))?;
 
     if options.isolate_prior_documents && state.platform.project_lifecycle.is_open() {
-        if !crate::workbench::workflows::project_workflow::close_project_discard(
-            state,
+        if !state.close_project_discard(
             crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
         ) {
             return Err("The current project could not be isolated safely".to_owned());

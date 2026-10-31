@@ -22,10 +22,11 @@ use crate::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, has_unsaved_changes,
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
+use crate::workbench::state::Workspace;
 use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 use crate::workbench::workflows::project_workflow::{
-    self, LiveProjectApply, NewProject, NewProjectParams, apply_live_project_snapshot,
-    close_project_discard,
+    self, ClosedProject, LiveProjectApply, NewProject, NewProjectParams,
+    apply_live_project_snapshot,
 };
 
 /// Replacing the open project with a new one: the project's phases over its
@@ -175,6 +176,86 @@ fn replace_active_schematic_document(state: &mut AppState, mut schematic: Schema
             }
         }
     }
+}
+
+/// Closing the open project without saving it, and opening the project the
+/// restored session holds at startup: the project's phases over its own
+/// parts, with the shell's steps between them, in the order each has always
+/// run.
+impl AppState {
+    /// Close the open project without saving it, leaving the reader at
+    /// `destination`. Returns whether it closed.
+    pub(crate) fn close_project_discard(&mut self, destination: ProjectCloseDestination) -> bool {
+        close_project_discard(self, destination)
+    }
+
+    /// Bind the project the restored session holds, then apply Projects and
+    /// files ▸ On startup. Called once the session and preferences are
+    /// restored, because the choice is read from them. A session saved after
+    /// Close Project starts with no project whichever is chosen.
+    pub(crate) fn open_session_project(&mut self) {
+        services_access::initialize_from_session(self);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.apply_startup_project_choice();
+    }
+
+    /// "Start with no project" closes the reopened project when that loses
+    /// nothing, as Close Project would without asking. Unsaved work keeps it
+    /// open. Desktop only: the browser binds its project file after startup,
+    /// once its storage answers, so there is nothing settled to close here.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn apply_startup_project_choice(&mut self) {
+        if project_workflow::startup_keeps_project(&self.model, &self.platform) {
+            return;
+        }
+        if project_workflow::closing_loses_nothing(self) {
+            close_project_discard(self, ProjectCloseDestination::EmptyWorkbench);
+        } else {
+            project_workflow::report_startup_project_kept(&mut self.model, &self.platform);
+        }
+    }
+}
+
+/// The close every route shares. The empty project left open is built off
+/// to the side; the previous project's execution context is retired under
+/// the close's announcement before the empty project is installed with the
+/// drawing the editor opens on; the editor takes that drawing, the empty
+/// project takes the session's first plan and model catalog, the features
+/// let go of what they kept of the closed project, and the reader lands on
+/// the no-project screen, or in the live session's mirror.
+fn close_project_discard(state: &mut AppState, destination: ProjectCloseDestination) -> bool {
+    if project_workflow::refuse_project_close(&mut state.model, &mut state.workbench) {
+        return false;
+    }
+    let ClosedProject {
+        library_manager,
+        workspace,
+        announcement,
+    } = project_workflow::build_closed_project(&state.model);
+    let schematic = state.new_schematic_document();
+    state.replace_project_execution_context(announcement);
+    project_workflow::install_project_drawing(
+        &mut state.model,
+        library_manager,
+        workspace,
+        schematic,
+    );
+    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
+    state.bump_active_schematic_epoch();
+    let model_restore_errors =
+        project_workflow::settle_closed_project(&mut state.model, &mut state.platform);
+    services_access::mark_project_closed(state);
+    project_workflow::emit_session_model_restore_errors(
+        &mut state.model,
+        "project close",
+        model_restore_errors,
+    );
+    state.project.project_launcher_open = false;
+    state.workbench.activate(Workspace::Project);
+    if destination == ProjectCloseDestination::LiveMirror {
+        state.workbench.outbox.push(requests::LiveMirrorEntry);
+    }
+    true
 }
 
 impl RSpiceApp {
@@ -470,12 +551,15 @@ mod tests {
     }
 
     /// Assert that the body of this module's function `name` runs `steps` in
-    /// order, each first found after the one before it.
+    /// order, each first found after the one before it. A free fn of that
+    /// name is the transaction itself, read before a method that enters it.
     fn assert_runs_in_order(name: &str, steps: &[&str]) {
         const SOURCE: &str = include_str!("project_transactions.rs");
         let definition = format!("fn {name}(");
         let start = SOURCE
-            .find(&definition)
+            .find(&format!("\n{definition}"))
+            .map(|newline| newline + 1)
+            .or_else(|| SOURCE.find(&definition))
             .unwrap_or_else(|| panic!("`{definition}` is defined here"))
             + definition.len();
         // The body ends where the next item begins.
@@ -538,6 +622,83 @@ mod tests {
                 "replace_active_schematic_document(self, schematic)",
                 "self.clear_design_execution_context()",
                 "file_workflow::settle_loaded_schematic(",
+            ],
+        );
+    }
+
+    /// The empty project a close leaves open holds, as its active view, the
+    /// drawing the editor opens on, with the same unsaved mark: the drawing
+    /// is saved into its workspace, a value no other step reads, wherever
+    /// the close does it among its steps.
+    #[test]
+    fn a_closed_project_holds_the_drawing_the_editor_opens_on() {
+        let mut state = AppState::default();
+        assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
+
+        let workspace = &state.model.workspace;
+        let saved = workspace
+            .clone_schematic_editor(&workspace.content.active_key())
+            .expect("the empty project opens on its schematic");
+        assert_eq!(
+            format!("{:?}", saved.document()),
+            format!("{:?}", state.model.schematic.document())
+        );
+        let active = workspace
+            .content
+            .open_views
+            .iter()
+            .find(|open| open.reference == workspace.content.active_view)
+            .expect("the active view is open");
+        assert_eq!(active.dirty, state.model.schematic.session.is_dirty);
+    }
+
+    /// The open project closes in the order it always has: the refusal
+    /// before anything changes, the empty project built off to the side and
+    /// its drawing made, the execution context retired before the empty
+    /// project is installed, the editor's snap and epoch, the plan and model
+    /// catalog, the features let go, the restore errors reported, and then
+    /// the reader lands where the close was asked to leave them.
+    #[test]
+    fn a_project_closes_in_the_order_it_always_has() {
+        assert_runs_in_order(
+            "close_project_discard",
+            &[
+                "project_workflow::refuse_project_close(",
+                "project_workflow::build_closed_project(",
+                "state.new_schematic_document()",
+                "state.replace_project_execution_context(announcement)",
+                "project_workflow::install_project_drawing(",
+                "state.design.schematic_snap =",
+                "state.bump_active_schematic_epoch()",
+                "project_workflow::settle_closed_project(",
+                "services_access::mark_project_closed(state)",
+                "project_workflow::emit_session_model_restore_errors(",
+                "state.project.project_launcher_open = false",
+                "state.workbench.activate(Workspace::Project)",
+                "state.workbench.outbox.push(requests::LiveMirrorEntry)",
+            ],
+        );
+    }
+
+    /// The session's project opens at startup in the order it always has:
+    /// bound from the restored session, then Projects and files ▸ On
+    /// startup applied to it, which closes it only when that loses nothing.
+    #[test]
+    fn the_session_project_opens_in_the_order_it_always_has() {
+        assert_runs_in_order(
+            "open_session_project",
+            &[
+                "services_access::initialize_from_session(self)",
+                "self.apply_startup_project_choice()",
+            ],
+        );
+        assert_runs_in_order(
+            "apply_startup_project_choice",
+            &[
+                "project_workflow::startup_keeps_project(",
+                "project_workflow::closing_loses_nothing(self)",
+                "close_project_discard(self, ProjectCloseDestination::EmptyWorkbench)",
+                "project_workflow::report_startup_project_kept(",
             ],
         );
     }
