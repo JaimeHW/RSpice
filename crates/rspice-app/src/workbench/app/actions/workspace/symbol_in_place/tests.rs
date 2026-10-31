@@ -243,7 +243,12 @@ impl Fixture {
     }
 
     fn symbol_pin(&self, name: &str) -> Option<Point> {
-        let document = self.app.state.load_symbol_document(&self.symbol).unwrap();
+        let document = self
+            .app
+            .state
+            .model
+            .load_symbol_document(&self.symbol)
+            .unwrap();
         document.pin(name).and_then(|pin| pin.position)
     }
 
@@ -400,11 +405,13 @@ fn saving_in_place_updates_every_instance_of_the_symbol() {
         let document = fixture
             .app
             .state
+            .model
             .load_symbol_document(&fixture.symbol)
             .unwrap();
         fixture
             .app
             .state
+            .model
             .load_symbol_editor_metadata(&fixture.symbol, &document)
             .unwrap()
             .revision

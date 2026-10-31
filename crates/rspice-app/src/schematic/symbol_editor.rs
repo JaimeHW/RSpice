@@ -59,7 +59,7 @@ fn symbol_canvas_accessibility_label(
 /// whose built-in part symbols `symbol_library` draws.
 pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLibrary>) {
     let ports = state.active_symbol_ports();
-    let mut document = match state.load_active_symbol_document() {
+    let mut document = match state.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(error) => {
             surface::invalid_symbol_document_state(ui, &error);
@@ -105,6 +105,7 @@ pub fn show(ui: &mut Ui, state: &mut AppState, symbol_library: Option<&SymbolLib
             return;
         }
         document = state
+            .model
             .load_active_symbol_document()
             .unwrap_or_else(|_| SymbolDocument::generated_from_ports(&ports));
     }

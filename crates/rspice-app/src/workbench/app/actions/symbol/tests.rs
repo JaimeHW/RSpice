@@ -77,7 +77,7 @@ fn duplicate_leaves_the_symbol_clipboard_alone() {
     app.state.design.symbol.editor.set_selection(dot);
     Command::Duplicate.execute(&mut app);
 
-    let document = app.state.load_active_symbol_document().unwrap();
+    let document = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(document.body.len(), 3, "the dot was duplicated");
     assert!(matches!(document.body[2], SymbolShape::Dot { .. }));
     assert_eq!(app.state.design.symbol.editor.clipboard, clipboard);
@@ -86,7 +86,7 @@ fn duplicate_leaves_the_symbol_clipboard_alone() {
 #[test]
 fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     let mut app = open_symbol();
-    let before = app.state.load_active_symbol_document().unwrap();
+    let before = app.state.model.load_active_symbol_document().unwrap();
     let mut selection = SymbolSelection::single_pin("IN");
     selection.shapes.extend([0, 1]);
     app.state.design.symbol.editor.set_selection(selection);
@@ -98,6 +98,7 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
     );
     assert!(
         app.state
+            .model
             .load_active_symbol_document()
             .unwrap()
             .body
@@ -112,13 +113,16 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
             .is_empty()
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
 
     // The clipboard's bounds center is (-9, 1); hover wins over viewport center.
     app.state.design.canvas_hover = Some((31.0, 21.0));
     app.state.design.canvas_view_center = Some((100.0, 100.0));
     Command::Paste.execute(&mut app);
-    let pasted = app.state.load_active_symbol_document().unwrap();
+    let pasted = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(pasted.body.len(), 4);
     let pin = pasted.pin("IN_copy2").unwrap();
     assert_eq!(pin.position, Some(Point::new(0, 30)));
@@ -133,15 +137,21 @@ fn cut_paste_commands_preserve_order_unique_pin_names_and_undo() {
         ["IN_copy2".to_owned()].into()
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
     assert!(app.state.redo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), pasted);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        pasted
+    );
 }
 
 #[test]
 fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     let mut app = open_symbol();
-    let mut before = app.state.load_active_symbol_document().unwrap();
+    let mut before = app.state.model.load_active_symbol_document().unwrap();
     before.origin = Point::new(10, 20);
     before.name_anchor = Point::new(30, 40);
     let metadata = SymbolEditorMetadata::for_document(&before);
@@ -154,7 +164,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     selection.attributes.insert(SymbolAttributeKind::Reference);
     app.state.design.symbol.editor.set_selection(selection);
     app.transform_selected_symbol_item(SymbolTransform::Rotate);
-    let after = app.state.load_active_symbol_document().unwrap();
+    let after = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(after.pin("IN").unwrap().position, Some(Point::new(20, -30)));
     assert_eq!(
         after.pin("IN").unwrap().side(),
@@ -179,12 +189,15 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
         1
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
     assert_eq!(metadata_encoding(&app.state), encoded);
 
     app.state.design.symbol.editor.select_pin("IN");
     Command::SymbolRotatePin.execute(&mut app);
-    let rotated = app.state.load_active_symbol_document().unwrap();
+    let rotated = app.state.model.load_active_symbol_document().unwrap();
     assert_eq!(
         rotated.pin("IN").unwrap().side(),
         crate::state::SymbolPinSide::Top
@@ -193,6 +206,7 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
     Command::SymbolMirrorPin.execute(&mut app);
     assert_eq!(
         app.state
+            .model
             .load_active_symbol_document()
             .unwrap()
             .pin("IN")
@@ -201,7 +215,10 @@ fn symbol_transforms_keep_geometry_and_metadata_in_one_undo_entry() {
         -10
     );
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), rotated);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        rotated
+    );
 }
 
 #[test]
@@ -226,7 +243,7 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
                 target: Point::new(100, 100),
             },
         );
-        let before = app.state.load_active_symbol_document().unwrap();
+        let before = app.state.model.load_active_symbol_document().unwrap();
         match change {
             "revision" => app.state.store_active_symbol_document(&before).unwrap(),
             "view" => {
@@ -252,7 +269,7 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
         let clipboard = app.state.design.symbol.editor.clipboard.clone();
         apply_edit_request(&mut app.state, request);
         assert_eq!(
-            app.state.load_active_symbol_document().unwrap(),
+            app.state.model.load_active_symbol_document().unwrap(),
             before,
             "{change}"
         );
@@ -272,14 +289,19 @@ fn queued_symbol_commands_recheck_source_selection_tool_clipboard_and_authority(
 #[test]
 fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stale_requests() {
     let mut app = open_symbol();
-    let before = app.state.load_active_symbol_document().unwrap();
+    let before = app.state.model.load_active_symbol_document().unwrap();
     assert!(metadata_encoding(&app.state).is_none());
     app.state.design.symbol.editor.tool = SymbolTool::Polygon;
     let points = vec![Point::origin(), Point::new(10, 20), Point::new(20, 0)];
     app.state.design.symbol.editor.pending_polyline = points.clone();
     app.execute_shortcut_command(Command::Cancel);
     assert_eq!(
-        app.state.load_active_symbol_document().unwrap().body.last(),
+        app.state
+            .model
+            .load_active_symbol_document()
+            .unwrap()
+            .body
+            .last(),
         Some(&SymbolShape::Polyline {
             points: points.clone(),
             closed: false
@@ -289,7 +311,10 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
     assert!(app.state.design.symbol.editor.pending_polyline.is_empty());
     assert_eq!(app.state.design.symbol.editor.tool, SymbolTool::Select);
     assert!(app.state.undo_active_symbol_document().unwrap());
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
 
     let source = app.state.symbol_editor_request_source();
     bind_canvas_source(&mut app.state.design.symbol.editor, source);
@@ -306,7 +331,10 @@ fn cancel_finishes_open_geometry_without_materializing_metadata_and_rejects_stal
     app.state
         .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     apply_edit_request(&mut app.state, pending);
-    assert_eq!(app.state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(
+        app.state.model.load_active_symbol_document().unwrap(),
+        before
+    );
     assert_eq!(app.state.design.symbol.editor.pending_polyline, points);
     assert!(!app.state.can_undo_active_symbol_document());
 }

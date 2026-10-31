@@ -29,7 +29,6 @@ use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
     FindingKey, mint_canonical,
 };
-use crate::workbench::app_state::symbol_contract::SymbolPinCheckInputs;
 use crate::workbench::{SymbolCommitIntent, SymbolDocumentSnapshot};
 use rspice_design::symbol::publication::{
     EncodedSymbolEditorBundle, SymbolSaveCheck, check_symbol_pins, symbol_save_checks,
@@ -144,51 +143,21 @@ impl AppState {
     }
 
     pub(crate) fn active_symbol_ports(&self) -> Vec<PortSpec> {
-        self.symbol_ports(&self.model.workspace.content.active_view)
-    }
-
-    /// The interface contract one cell's symbol is checked against.
-    ///
-    /// Addressed by reference rather than only by what is in front of the
-    /// reader, because the currency of a published pin finding is decided by
-    /// the contract that finding was derived from — and navigating away from
-    /// a symbol does not change that symbol's contract.
-    pub(crate) fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
-        self.model.symbol_ports(reference)
-    }
-
-    pub(crate) fn load_active_symbol_document(&self) -> Result<SymbolDocument, String> {
-        self.model.load_active_symbol_document()
-    }
-
-    /// One cell's symbol artwork, as published in the library.
-    pub(crate) fn load_symbol_document(
-        &self,
-        reference: &CellViewRef,
-    ) -> Result<SymbolDocument, String> {
-        self.model.load_symbol_document(reference)
+        self.model
+            .symbol_ports(&self.model.workspace.content.active_view)
     }
 
     pub(crate) fn load_active_symbol_editor_metadata(
         &self,
         document: &SymbolDocument,
     ) -> Result<SymbolEditorMetadata, String> {
-        self.load_symbol_editor_metadata(&self.model.workspace.content.active_view, document)
-    }
-
-    /// One cell's symbol authoring metadata, which is where its published
-    /// revision is recorded.
-    pub(crate) fn load_symbol_editor_metadata(
-        &self,
-        reference: &CellViewRef,
-        document: &SymbolDocument,
-    ) -> Result<SymbolEditorMetadata, String> {
-        self.model.load_symbol_editor_metadata(reference, document)
+        self.model
+            .load_symbol_editor_metadata(&self.model.workspace.content.active_view, document)
     }
 
     fn active_symbol_snapshot(&self, fallback: &SymbolDocument) -> SymbolDocumentSnapshot {
         let reference = &self.model.workspace.content.active_view;
-        let current_document = self.load_active_symbol_document().ok();
+        let current_document = self.model.load_active_symbol_document().ok();
         self.model
             .library_manager
             .get_library(&reference.library)
@@ -286,7 +255,7 @@ impl AppState {
     /// resolving over it would read its half-moved vertices as the baseline.
     pub(crate) fn begin_symbol_parent_edit(&mut self) {
         self.finish_symbol_parent_edit();
-        let Ok(base) = self.load_active_symbol_document() else {
+        let Ok(base) = self.model.load_active_symbol_document() else {
             return;
         };
         let key = self.model.workspace.content.active_key();
@@ -515,7 +484,7 @@ impl AppState {
     /// refused by name rather than by a disabled button.
     pub(crate) fn refuse_unsavable_active_symbol(&self) -> Option<String> {
         let ports = self.active_symbol_ports();
-        let document = match self.load_active_symbol_document() {
+        let document = match self.model.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => return Some(error),
         };
@@ -569,7 +538,7 @@ impl AppState {
                     .to_owned(),
             );
         }
-        let before = self.load_active_symbol_document()?;
+        let before = self.model.load_active_symbol_document()?;
         let metadata = self.load_active_symbol_editor_metadata(&before)?;
         let mut document = before.clone();
         document.reconcile_ports(&ports);
@@ -695,7 +664,7 @@ impl AppState {
         let Some(previous) = self.design.symbol.history.pop_undo(&key) else {
             return Ok(false);
         };
-        let current = self.load_active_symbol_document()?;
+        let current = self.model.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = previous.inverted_renames();
         self.design
@@ -714,7 +683,7 @@ impl AppState {
         let Some(next) = self.design.symbol.history.pop_redo(&key) else {
             return Ok(false);
         };
-        let current = self.load_active_symbol_document()?;
+        let current = self.model.load_active_symbol_document()?;
         let mut current_snapshot = self.active_symbol_metadata_snapshot(&current);
         current_snapshot.renames = next.inverted_renames();
         self.design
@@ -723,18 +692,6 @@ impl AppState {
             .finish_redo(key, current_snapshot);
         self.restore_active_symbol_snapshot(&next)?;
         Ok(true)
-    }
-
-    /// Everything the symbol pin checks read for one symbol view.
-    ///
-    /// One accessor, because the digest that decides whether a published pin
-    /// finding still describes the design has to be taken over exactly what
-    /// the check compared — and the check and the digest both read it here.
-    pub(in crate::workbench) fn symbol_pin_check_inputs(
-        &self,
-        reference: &CellViewRef,
-    ) -> Result<SymbolPinCheckInputs, String> {
-        self.model.symbol_pin_check_inputs(reference)
     }
 }
 
@@ -759,7 +716,7 @@ impl AppState {
         let mut records = symbol_pin_records(self, &subject, result);
         // The symbol's own waivers that do not do what they say are stated
         // with the pass that found that out.
-        if let Ok(document) = self.load_symbol_document(&subject) {
+        if let Ok(document) = self.model.load_symbol_document(&subject) {
             records.extend(crate::workbench::app_state::waivers::stored_waiver_records(
                 &self.model,
                 &subject,
@@ -857,7 +814,7 @@ impl AppState {
 
     pub(crate) fn run_active_symbol_pin_checks(&mut self) {
         let reference = self.model.workspace.content.active_view.clone();
-        let inputs = match self.symbol_pin_check_inputs(&reference) {
+        let inputs = match self.model.symbol_pin_check_inputs(&reference) {
             Ok(inputs) => inputs,
             Err(error) => {
                 self.record(

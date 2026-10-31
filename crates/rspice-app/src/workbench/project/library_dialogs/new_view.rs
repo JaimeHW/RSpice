@@ -1049,6 +1049,7 @@ mod tests {
             .open_workspace_view(CellViewRef::new("marker_test", "amp", "symbol"));
         let document = app
             .state
+            .model
             .load_active_symbol_document()
             .expect("the generated symbol loads into the editor");
 

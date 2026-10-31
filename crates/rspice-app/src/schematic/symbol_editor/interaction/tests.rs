@@ -58,7 +58,7 @@ fn request(state: &AppState, input: SymbolCanvasInput) -> SymbolCanvasRequest {
 }
 
 fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
-    let mut document = state.load_active_symbol_document().unwrap();
+    let mut document = state.model.load_active_symbol_document().unwrap();
     let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
     apply_canvas_request(state, &mut document, &mut metadata, request);
 }
@@ -66,7 +66,7 @@ fn apply(state: &mut AppState, request: SymbolCanvasRequest) {
 #[test]
 fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     let mut state = open_symbol();
-    let before = state.load_active_symbol_document().unwrap();
+    let before = state.model.load_active_symbol_document().unwrap();
     state.design.symbol.editor.dragging_origin = true;
     for point in [Point::new(10, 20), Point::new(20, 30)] {
         bind_active_canvas(&mut state);
@@ -80,7 +80,7 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
         );
         apply(&mut state, request);
     }
-    let after = state.load_active_symbol_document().unwrap();
+    let after = state.model.load_active_symbol_document().unwrap();
     assert_eq!(after.origin, Point::new(20, 30));
     assert_eq!(
         state
@@ -101,15 +101,15 @@ fn drag_symbol_edit_records_one_undo_snapshot_per_gesture() {
     apply(&mut state, request);
     assert!(!state.design.symbol.editor.drag_undo_recorded);
     assert!(state.undo_active_symbol_document().unwrap());
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(state.redo_active_symbol_document().unwrap());
-    assert_eq!(state.load_active_symbol_document().unwrap(), after);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), after);
 }
 
 #[test]
 fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
     let mut state = open_symbol();
-    let before = state.load_active_symbol_document().unwrap();
+    let before = state.model.load_active_symbol_document().unwrap();
     let mut selection = SymbolSelection::single_pin("IN");
     selection.toggle_shape(0);
     state.design.symbol.editor.set_selection(selection);
@@ -147,7 +147,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
                     bind_active_canvas(&mut state);
                     // accessibility-pointer-shim: synthetic input for the canvas handler test.
                     let response = ui.allocate_rect(viewport().rect, egui::Sense::click_and_drag());
-                    let mut document = state.load_active_symbol_document().unwrap();
+                    let mut document = state.model.load_active_symbol_document().unwrap();
                     let mut metadata = state.load_active_symbol_editor_metadata(&document).unwrap();
                     handle_canvas(
                         &mut state,
@@ -163,7 +163,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
             assert!(state.design.symbol.editor.dragging_group.is_some());
         }
     }
-    let after = state.load_active_symbol_document().unwrap();
+    let after = state.model.load_active_symbol_document().unwrap();
     assert_eq!(
         after.pin("IN").and_then(|pin| pin.position),
         Some(Point::new(-20, 30))
@@ -181,7 +181,7 @@ fn a_multi_object_grab_moves_the_whole_selection_as_one_edit() {
     );
     assert!(!state.design.symbol.editor.drag_undo_recorded);
     assert!(state.undo_active_symbol_document().unwrap());
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
 }
 
 #[test]
@@ -195,14 +195,14 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
             ..Default::default()
         },
     );
-    let before = state.load_active_symbol_document().unwrap();
+    let before = state.model.load_active_symbol_document().unwrap();
     let mut metadata = state.load_active_symbol_editor_metadata(&before).unwrap();
     metadata.revision += 1;
     state
         .store_active_symbol_editor_bundle(&before, &metadata)
         .unwrap();
     apply(&mut state, pending);
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 
     bind_active_canvas(&mut state);
@@ -217,7 +217,7 @@ fn stale_symbol_input_cannot_edit_a_replaced_view_or_revision() {
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
     bind_active_canvas(&mut state);
     apply(&mut state, pending);
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 }
 
@@ -241,7 +241,7 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
         .content
         .set_active_read_only_reference(true);
     state.design.symbol.editor.tool = SymbolTool::Text;
-    let before = state.load_active_symbol_document().unwrap();
+    let before = state.model.load_active_symbol_document().unwrap();
     let request = request(
         &state,
         SymbolCanvasInput {
@@ -250,7 +250,7 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
         },
     );
     apply(&mut state, request);
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 
     state
@@ -267,7 +267,7 @@ fn changed_symbol_scope_discards_drafts_and_read_only_input_cannot_publish() {
         },
     );
     apply(&mut state, pending);
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 }
 
@@ -297,7 +297,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
             ..Default::default()
         },
     );
-    let before = state.load_active_symbol_document().unwrap();
+    let before = state.model.load_active_symbol_document().unwrap();
     state
         .model
         .workspace
@@ -306,7 +306,7 @@ fn symbol_gesture_cannot_follow_the_same_master_into_another_occurrence() {
     apply(&mut state, pending);
     bind_active_canvas(&mut state);
     assert!(!state.design.symbol.editor.dragging_origin);
-    assert_eq!(state.load_active_symbol_document().unwrap(), before);
+    assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
     assert!(!state.can_undo_active_symbol_document());
 }
 
@@ -417,7 +417,7 @@ fn parent_bits(state: &AppState) -> serde_json::Value {
 /// `top` against the symbol as it stands now.
 fn parent_nets(state: &AppState) -> std::collections::BTreeMap<String, Vec<u64>> {
     use rspice_design::resolved_symbol::ResolvedCellSymbol;
-    let symbol = state.load_active_symbol_document().unwrap();
+    let symbol = state.model.load_active_symbol_document().unwrap();
     let parent = parent_document(state);
     let extracted = rspice_design::connectivity::extract(
         &parent,
@@ -486,7 +486,7 @@ fn dragging_a_pin_past_another_leaves_every_parent_net_as_it_was() {
 
     drag_inp(&mut state, &PAST_INN);
 
-    let symbol = state.load_active_symbol_document().unwrap();
+    let symbol = state.model.load_active_symbol_document().unwrap();
     assert_eq!(
         symbol.pin("INP").and_then(|pin| pin.position),
         Some(Point::new(-30, 30))
@@ -557,7 +557,7 @@ fn a_pin_is_never_dropped_on_another_pin() {
 
     drag_inp(&mut state, &[Point::new(-30, 0), Point::new(-30, 10)]);
 
-    let symbol = state.load_active_symbol_document().unwrap();
+    let symbol = state.model.load_active_symbol_document().unwrap();
     assert_eq!(
         symbol.pin("INP").and_then(|pin| pin.position),
         Some(Point::new(-30, 0)),
@@ -574,7 +574,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
         let mut state = open_symbol();
         state.open_project_session();
         let symbol = state.model.workspace.content.active_view.clone();
-        let before = state.load_active_symbol_document().unwrap();
+        let before = state.model.load_active_symbol_document().unwrap();
         let points = vec![Point::origin(), Point::new(20, 10)];
         state.design.symbol.editor.tool = SymbolTool::Line;
         state.design.symbol.editor.pending_polyline = points.clone();
@@ -642,7 +642,7 @@ fn retained_symbol_drafts_require_the_same_open_view_revision_and_window() {
         }
         apply(&mut state, pending);
         assert_eq!(
-            state.load_active_symbol_document().unwrap(),
+            state.model.load_active_symbol_document().unwrap(),
             before,
             "{change}"
         );

@@ -139,7 +139,12 @@ fn symbol_draft_survives_passive_window_projection() {
             primary_view
         );
         assert_eq!(
-            fixture.app.state.load_active_symbol_document().unwrap(),
+            fixture
+                .app
+                .state
+                .model
+                .load_active_symbol_document()
+                .unwrap(),
             document
         );
         assert_eq!(
@@ -170,7 +175,12 @@ fn symbol_draft_survives_passive_window_projection() {
         fixture
             .app
             .execute_shortcut_command(crate::workbench::commands::vocabulary::Command::Cancel);
-        let edited = fixture.app.state.load_active_symbol_document().unwrap();
+        let edited = fixture
+            .app
+            .state
+            .model
+            .load_active_symbol_document()
+            .unwrap();
         assert_eq!(edited.body.len(), document.body.len() + 1);
         assert_eq!(
             fixture
@@ -184,12 +194,22 @@ fn symbol_draft_survives_passive_window_projection() {
         );
         assert!(fixture.app.state.undo_active_symbol_document().unwrap());
         assert_eq!(
-            fixture.app.state.load_active_symbol_document().unwrap(),
+            fixture
+                .app
+                .state
+                .model
+                .load_active_symbol_document()
+                .unwrap(),
             document
         );
         assert!(fixture.app.state.redo_active_symbol_document().unwrap());
         assert_eq!(
-            fixture.app.state.load_active_symbol_document().unwrap(),
+            fixture
+                .app
+                .state
+                .model
+                .load_active_symbol_document()
+                .unwrap(),
             edited
         );
     }

@@ -15,6 +15,10 @@ use crate::state::{
 
 impl Model {
     /// Everything the symbol pin checks read for one symbol view.
+    ///
+    /// One accessor, because the digest that decides whether a published pin
+    /// finding still describes the design has to be taken over exactly what
+    /// the check compared — and the check and the digest both read it here.
     pub fn symbol_pin_check_inputs(
         &self,
         reference: &CellViewRef,
@@ -32,6 +36,11 @@ impl Model {
     }
 
     /// The interface contract one cell's symbol is checked against.
+    ///
+    /// Addressed by reference rather than only by what is in front of the
+    /// reader, because the currency of a published pin finding is decided by
+    /// the contract that finding was derived from — and navigating away from
+    /// a symbol does not change that symbol's contract.
     pub fn symbol_ports(&self, reference: &CellViewRef) -> Vec<PortSpec> {
         let schematic_ref = CellViewRef::new(&reference.library, &reference.cell, "schematic");
         if self.workspace.content.active_view == schematic_ref {

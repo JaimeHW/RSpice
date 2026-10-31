@@ -418,7 +418,7 @@ impl AppState {
         if self.active_view_read_only() {
             return Err(self.read_only_master_message());
         }
-        let before = self.load_active_symbol_document()?;
+        let before = self.model.load_active_symbol_document()?;
         let ports = self.active_symbol_ports();
         let document = SymbolDocument::generated_from_ports(&ports);
         if document != before {

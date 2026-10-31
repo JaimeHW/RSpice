@@ -15,7 +15,7 @@ use rspice_schematic_editor::symbol_editor::session::{
 impl RSpiceApp {
     pub(crate) fn activate_symbol_tool(&mut self, tool: SymbolTool) {
         let document = (tool == SymbolTool::PlacePin)
-            .then(|| self.state.load_active_symbol_document().ok())
+            .then(|| self.state.model.load_active_symbol_document().ok())
             .flatten();
         commands::activate_tool(
             &mut self.state.design.symbol.editor,
@@ -25,7 +25,7 @@ impl RSpiceApp {
     }
 
     pub(crate) fn select_all_symbol_items(&mut self) {
-        let document = match self.state.load_active_symbol_document() {
+        let document = match self.state.model.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
                 self.state.prompt(error);
@@ -63,7 +63,7 @@ impl RSpiceApp {
 
     /// The selected pins and shapes, as a clipboard would hold them.
     fn selected_symbol_items(&mut self) -> Option<SymbolClipboard> {
-        let document = match self.state.load_active_symbol_document() {
+        let document = match self.state.model.load_active_symbol_document() {
             Ok(document) => document,
             Err(error) => {
                 self.state.prompt(error);
@@ -199,7 +199,7 @@ fn apply_current_edit_request(state: &mut AppState, request: SymbolEditRequest) 
     if state.deny_read_only_edit() {
         return;
     }
-    let mut document = match state.load_active_symbol_document() {
+    let mut document = match state.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(error) => {
             state.prompt(error);

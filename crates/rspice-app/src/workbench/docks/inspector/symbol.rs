@@ -8,7 +8,7 @@ use rspice_ui_kit::panels::inspector::muted_inspector_copy;
 
 pub(in crate::workbench) fn show(ui: &mut Ui, state: &mut AppState) {
     let ports = state.active_symbol_ports();
-    let Ok(document) = state.load_active_symbol_document() else {
+    let Ok(document) = state.model.load_active_symbol_document() else {
         muted_inspector_copy(
             ui,
             "This symbol could not be read. The symbol editor shows why.",

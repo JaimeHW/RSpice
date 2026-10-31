@@ -153,7 +153,10 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         "an untouched symbol is not dirty"
     );
 
-    let before = state.load_active_symbol_document().expect("document loads");
+    let before = state
+        .model
+        .load_active_symbol_document()
+        .expect("document loads");
     state.record_symbol_edit(&before);
     state
         .store_active_symbol_editor_bundle(&document, &metadata)
@@ -175,7 +178,10 @@ fn the_save_point_tracks_publication_not_the_stored_view() {
         "publication is the save point"
     );
 
-    let published = state.load_active_symbol_document().expect("document loads");
+    let published = state
+        .model
+        .load_active_symbol_document()
+        .expect("document loads");
     state.record_symbol_edit(&published);
     let mut edited = document.clone();
     edited.body.push(SymbolShape::Circle {
@@ -284,7 +290,10 @@ fn updating_pins_from_the_contract_adds_only_what_is_missing() {
     assert!(summary.contains("1 added"), "{summary}");
     assert!(summary.contains("1 left orphaned"), "{summary}");
 
-    let updated = state.load_active_symbol_document().expect("document loads");
+    let updated = state
+        .model
+        .load_active_symbol_document()
+        .expect("document loads");
     assert_eq!(updated.body, art, "body artwork is never regenerated");
     let names: Vec<&str> = updated.pins.iter().map(|pin| pin.name.as_str()).collect();
     assert!(names.contains(&"IN"), "{names:?}");
@@ -324,7 +333,10 @@ fn the_contract_update_reorders_only_on_an_exact_name_match() {
         .update_active_symbol_pins_from_contract()
         .expect("the contract update runs");
 
-    let updated = state.load_active_symbol_document().expect("document loads");
+    let updated = state
+        .model
+        .load_active_symbol_document()
+        .expect("document loads");
     let names: Vec<String> = updated.pins.iter().map(|pin| pin.name.clone()).collect();
     assert_eq!(names, declared, "netlist order follows the interface");
 }
@@ -341,7 +353,10 @@ fn a_pin_rename_reaches_every_placed_instance() {
     let mut renamed = document.clone();
     let out = pin_index(&renamed, "OUT");
     renamed.pins[out].name = "VOUT".to_owned();
-    let before = state.load_active_symbol_document().expect("document loads");
+    let before = state
+        .model
+        .load_active_symbol_document()
+        .expect("document loads");
     state.record_symbol_edit(&before);
     state
         .commit_active_symbol_edit(

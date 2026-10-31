@@ -96,6 +96,7 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
             DiagnosticOwner::SymbolPins => {
                 // The artwork the pins are drawn on.
                 let mut symbol = state
+                    .model
                     .load_active_symbol_document()
                     .expect("the fixture symbol loads");
                 symbol.pins.push(crate::state::SymbolPin::new(

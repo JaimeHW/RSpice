@@ -1030,6 +1030,7 @@ fn updating_pins_from_contract_needs_an_open_symbol_with_an_interface() {
 
     let document = app
         .state
+        .model
         .load_active_symbol_document()
         .expect("document loads");
     assert!(

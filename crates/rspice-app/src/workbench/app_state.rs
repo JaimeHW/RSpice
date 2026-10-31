@@ -34,7 +34,6 @@ pub(crate) mod session;
 pub(in crate::workbench) use rspice_app_state::workbench::app_state::sim_setup;
 #[cfg(test)]
 mod stack_budget;
-pub(in crate::workbench) use rspice_app_state::workbench::app_state::symbol_contract;
 #[cfg(test)]
 mod technology_demand_tests;
 mod transaction;

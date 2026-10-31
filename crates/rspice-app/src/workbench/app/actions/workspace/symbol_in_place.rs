@@ -248,7 +248,7 @@ impl AppState {
     pub(crate) fn symbol_in_place_bounds(&self) -> Option<(f64, f64, f64, f64)> {
         const MARGIN: f64 = 20.0;
         let placement = self.symbol_in_place_placement()?;
-        let document = self.load_active_symbol_document().ok()?;
+        let document = self.model.load_active_symbol_document().ok()?;
         let body = document.drawn_body_bounds();
         let points = document
             .pins
@@ -298,10 +298,13 @@ impl AppState {
         else {
             return false;
         };
-        let baseline = match self.load_symbol_document(&symbol).and_then(|document| {
-            let metadata = self.load_symbol_editor_metadata(&symbol, &document)?;
-            Ok((document, metadata))
-        }) {
+        let baseline = match self
+            .model
+            .load_symbol_document(&symbol)
+            .and_then(|document| {
+                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
+                Ok((document, metadata))
+            }) {
             Ok(baseline) => baseline,
             Err(error) => {
                 self.prompt(error);
@@ -358,10 +361,12 @@ impl AppState {
         if !self.design.symbol.history.is_dirty(&session.symbol.key()) {
             return false;
         }
-        let Ok(document) = self.load_symbol_document(&session.symbol) else {
+        let Ok(document) = self.model.load_symbol_document(&session.symbol) else {
             return false;
         };
-        let metadata = self.load_symbol_editor_metadata(&session.symbol, &document);
+        let metadata = self
+            .model
+            .load_symbol_editor_metadata(&session.symbol, &document);
         document != session.baseline.0 || metadata.ok().as_ref() != Some(&session.baseline.1)
     }
 
@@ -445,10 +450,13 @@ impl AppState {
             return;
         };
         let depth = self.design.symbol.history.undo_depth(&symbol.key());
-        let baseline = self.load_symbol_document(&symbol).and_then(|document| {
-            let metadata = self.load_symbol_editor_metadata(&symbol, &document)?;
-            Ok((document, metadata))
-        });
+        let baseline = self
+            .model
+            .load_symbol_document(&symbol)
+            .and_then(|document| {
+                let metadata = self.model.load_symbol_editor_metadata(&symbol, &document)?;
+                Ok((document, metadata))
+            });
         let Some(session) = self.symbol_in_place_mut() else {
             return;
         };
@@ -489,7 +497,7 @@ impl AppState {
         self.design.symbol.history.discard_redo(&key);
         // A stack trimmed to its cap cannot walk back that far; the
         // baseline itself is what the symbol returns to.
-        let document = self.load_active_symbol_document()?;
+        let document = self.model.load_active_symbol_document()?;
         let metadata = self.load_active_symbol_editor_metadata(&document)?;
         if (document, metadata) != baseline {
             self.store_active_symbol_editor_bundle(&baseline.0, &baseline.1)?;

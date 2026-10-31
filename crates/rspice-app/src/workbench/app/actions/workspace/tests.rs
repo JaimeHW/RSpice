@@ -552,6 +552,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
         "the generated document should undo in one step"
     );
     let undone = state
+        .model
         .load_active_symbol_document()
         .expect("undone symbol document loads");
     assert!(
@@ -566,6 +567,7 @@ fn generate_symbol_document_is_one_undoable_transaction() {
     );
     assert!(
         !state
+            .model
             .load_active_symbol_document()
             .expect("redone symbol document loads")
             .body
@@ -684,6 +686,7 @@ fn undo_first_manual_symbol_edit_restores_generated_fallback_source() {
     state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
 
     let before = state
+        .model
         .load_active_symbol_document()
         .expect("pre-edit fallback document loads");
     assert!(
@@ -1122,6 +1125,7 @@ fn symbol_undo_history_is_scoped_to_active_view() {
     );
     assert_eq!(
         state
+            .model
             .load_active_symbol_document()
             .expect("amp_b symbol loads")
             .name_anchor,
@@ -1137,6 +1141,7 @@ fn symbol_undo_history_is_scoped_to_active_view() {
     );
     assert_eq!(
         state
+            .model
             .load_active_symbol_document()
             .expect("amp_a symbol loads")
             .name_anchor,

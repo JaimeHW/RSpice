@@ -19,7 +19,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     let ports = app.state.active_symbol_ports();
     // A document that will not load says why. The navigator must not invent
     // a structure for one it cannot read.
-    let mut document = match app.state.load_active_symbol_document() {
+    let mut document = match app.state.model.load_active_symbol_document() {
         Ok(document) => document,
         Err(reason) => {
             super::empty_navigator_row(ui, &format!("Symbol file is corrupt: {reason}"));
@@ -126,7 +126,7 @@ fn pins_section(
                 contract_command.execute(app);
                 // The command rewrote the stored view; the rows below must
                 // list what it produced rather than the pins it replaced.
-                if let Ok(refreshed) = app.state.load_active_symbol_document() {
+                if let Ok(refreshed) = app.state.model.load_active_symbol_document() {
                     *document = refreshed;
                 }
             }

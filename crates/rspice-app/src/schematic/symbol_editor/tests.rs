@@ -20,7 +20,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
             library.add_cell(cell);
             state.model.library_manager.add_library(library);
             state.open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
-            let before = state.load_active_symbol_document().unwrap();
+            let before = state.model.load_active_symbol_document().unwrap();
             let request = SymbolSurfaceRequest {
                 source: state.symbol_editor_request_source(),
                 action,
@@ -40,7 +40,7 @@ fn symbol_surface_requests_recheck_the_view_and_write_authority() {
                 "{action:?}, stale view: {stale_view}"
             );
             assert!(!state.project.copy_cell_dialog);
-            assert_eq!(state.load_active_symbol_document().unwrap(), before);
+            assert_eq!(state.model.load_active_symbol_document().unwrap(), before);
             assert!(!state.can_undo_active_symbol_document());
 
             state
