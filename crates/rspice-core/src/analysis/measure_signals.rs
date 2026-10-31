@@ -2128,10 +2128,73 @@ fn evaluate_dc_output_columns_with_abort(
             output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
         }
     })?;
+    let mut outer_values = Vec::new();
     let mut signals = series.signal_map();
     alias_projection.augment(&mut signals).map_err(|detail| {
         output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
     })?;
+    // Xyce prints a swept device or parameter (`.DC R1 ...` with `.PRINT DC
+    // R1`) by its bare name: the column is the sweep value at each row. Only
+    // a deck's single .DC names its sweeps unambiguously, and a node or
+    // signal of that name keeps its meaning.
+    let mut dc_sweeps = netlist
+        .analyses
+        .iter()
+        .filter_map(|analysis| match analysis {
+            crate::netlist::AnalysisCommand::Dc {
+                source,
+                start,
+                stop,
+                step,
+                mode,
+                sweep2,
+                ..
+            } => Some((source, start, stop, step, mode, sweep2)),
+            _ => None,
+        });
+    let mut swept = Vec::new();
+    if let (Some((source, start, stop, step, mode, sweep2)), None) =
+        (dc_sweeps.next(), dc_sweeps.next())
+    {
+        swept.push((source.trim(), false));
+        if let Some(sweep2) = sweep2 {
+            let inner = crate::netlist::DcSweepSpec {
+                start: *start,
+                stop: *stop,
+                step: *step,
+                mode: mode.clone(),
+                restart: false,
+            }
+            .points()
+            .len();
+            let outer = sweep2.spec().points();
+            if inner > 0 && inner.checked_mul(outer.len()) == Some(series.axis.len()) {
+                outer_values = outer
+                    .iter()
+                    .flat_map(|&value| std::iter::repeat_n(value, inner))
+                    .collect();
+                swept.push((sweep2.source.trim(), true));
+            }
+        }
+    }
+    for (source, outer) in swept {
+        let unnamed = !node_metadata.is_some_and(|nodes| {
+            nodes
+                .names
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(source))
+        }) && [
+            source.to_string(),
+            source.to_ascii_lowercase(),
+            source.to_ascii_uppercase(),
+        ]
+        .iter()
+        .all(|name| !signals.contains_key(name));
+        if unnamed {
+            let values = if outer { &outer_values } else { &series.axis };
+            insert_case_variants(&mut signals, source, values);
+        }
+    }
     evaluate_real_output_requests(
         &requests,
         OutputAnalysisKind::Dc,
@@ -2470,7 +2533,30 @@ pub(crate) fn evaluate_output_operand(
                 )
                     .into());
             }
-            let direct = direct_output_values(authored, signal, signal_index, axis.len(), abort)?;
+            let direct =
+                match direct_output_values(authored, signal, signal_index, axis.len(), abort) {
+                    Ok(direct) => direct,
+                    // Xyce prints a .GLOBAL_PARAM by its bare name. A signal of
+                    // that name wins, so a swept parameter reads its sweep value.
+                    Err(error) => {
+                        if let OutputOperandEvaluationError::Detail { .. } = error
+                            && let SaveSignal::Raw(name) = signal
+                            && params.has_any_parameter_binding(name.trim())
+                        {
+                            return evaluate_output_operand(
+                                authored,
+                                &OutputOperandKind::Expression {
+                                    body: name.trim().to_string(),
+                                },
+                                axis,
+                                signal_index,
+                                params,
+                                abort,
+                            );
+                        }
+                        return Err(error);
+                    }
+                };
             let values = match direct {
                 DirectOutputValues::Borrowed(direct) => {
                     let mut values = Vec::with_capacity(axis.len());
@@ -7608,6 +7694,71 @@ mod tests {
         );
         assert_eq!(projected[0].values, vec![1.0, 10.0]);
         assert_eq!(projected[1].values, vec![2.0, 20.0]);
+    }
+
+    #[test]
+    fn dc_bare_names_print_the_swept_device_and_a_global_parameter() {
+        // Xyce 7.10 prints `R1` as the sweep value (1, 2) and `G` as 3.
+        let netlist = xyce_netlist(
+            "DC bare names\n\
+             .GLOBAL_PARAM G=3\n\
+             V1 1 0 1\n\
+             R1 1 2 1\n\
+             R2 2 0 1\n\
+             .DC R1 1 2 1\n\
+             .PRINT DC R1 G V(2)\n\
+             .END\n",
+        );
+        let point = |v2: Value| {
+            let mut result = SimulationResult::new(2, 0);
+            result.node_names = ["0", "1", "2"].map(str::to_string).to_vec();
+            result.node_voltages = vec![0.0, 1.0, v2];
+            result
+        };
+        let sweep = vec![(1.0, point(0.5)), (2.0, point(1.0 / 3.0))];
+        let projected = evaluate_dc_output_requests(&netlist, &sweep)
+            .expect("bare sweep and parameter names resolve");
+        assert_eq!(
+            projected
+                .iter()
+                .map(|column| column.name.as_str())
+                .collect::<Vec<_>>(),
+            ["R1", "G", "V(2)"]
+        );
+        assert_eq!(projected[0].values, vec![1.0, 2.0]);
+        assert_eq!(projected[1].values, vec![3.0, 3.0]);
+    }
+
+    #[test]
+    fn dc_bare_swept_parameters_print_their_sweep_values_not_their_defaults() {
+        // Xyce 7.10 prints P as 1, 2 (inner) and Q as 7, 7, 8, 8 (outer),
+        // not the .PARAM defaults.
+        let netlist = xyce_netlist(
+            "DC swept parameters\n\
+             .PARAM P=5 Q=6\n\
+             V1 1 0 1\n\
+             R1 1 0 {P+Q}\n\
+             .DC P 1 2 1 Q 7 8 1\n\
+             .PRINT DC P Q\n\
+             .END\n",
+        );
+        let point = || {
+            let mut result = SimulationResult::new(2, 0);
+            result.node_names = ["0", "1"].map(str::to_string).to_vec();
+            result.node_voltages = vec![0.0, 1.0];
+            result
+        };
+        let sweep = vec![
+            (1.0, point()),
+            (2.0, point()),
+            (1.0, point()),
+            (2.0, point()),
+        ];
+        let projected =
+            evaluate_dc_output_requests(&netlist, &sweep).expect("the swept parameters resolve");
+        assert_eq!(projected[0].name, "P");
+        assert_eq!(projected[0].values, vec![1.0, 2.0, 1.0, 2.0]);
+        assert_eq!(projected[1].values, vec![7.0, 7.0, 8.0, 8.0]);
     }
 
     #[test]
