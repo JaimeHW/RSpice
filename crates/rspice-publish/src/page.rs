@@ -55,16 +55,13 @@ pub(crate) const PAGE_FONTS: [(&str, &[u8]); 4] = [
 ];
 
 /// The faces every page letters its own text in, as the product does: IBM
-/// Plex Sans in the three weights the page and its figures use, and the
-/// licence every Plex face is distributed under.
-pub(crate) const TEXT_FONTS: [(&str, &[u8]); 4] = [
+/// Plex Sans in the two weights the page's stylesheet and its figures ask
+/// of it (every heavier weight the stylesheet sets resolves to SemiBold),
+/// and the licence every Plex face is distributed under.
+pub(crate) const TEXT_FONTS: [(&str, &[u8]); 3] = [
     (
         "assets/fonts/ibm-plex-sans-regular.ttf",
         Face::SansRegular.bytes(),
-    ),
-    (
-        "assets/fonts/ibm-plex-sans-medium.ttf",
-        Face::SansMedium.bytes(),
     ),
     (
         "assets/fonts/ibm-plex-sans-semibold.ttf",

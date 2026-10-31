@@ -35,20 +35,14 @@
     U+2B58;
 }
 /* The face the page and its figures letter their text in, as the product
-   paints and prints it, in the three weights they use. */
+   paints and prints it, in the two weights they ask of it: every heavier
+   weight below resolves to SemiBold, and none asks for Medium. */
 @font-face {
   font-family: "RSpice Plex Sans";
   font-style: normal;
   font-weight: 400;
   font-display: swap;
   src: url("fonts/ibm-plex-sans-regular.ttf") format("truetype");
-}
-@font-face {
-  font-family: "RSpice Plex Sans";
-  font-style: normal;
-  font-weight: 500;
-  font-display: swap;
-  src: url("fonts/ibm-plex-sans-medium.ttf") format("truetype");
 }
 @font-face {
   font-family: "RSpice Plex Sans";

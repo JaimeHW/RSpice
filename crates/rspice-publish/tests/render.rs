@@ -646,7 +646,6 @@ fn withheld_sections_yield_no_assets_at_all() {
     assert_eq!(
         bundle.keys().collect::<Vec<_>>(),
         vec![
-            "assets/fonts/ibm-plex-sans-medium.ttf",
             "assets/fonts/ibm-plex-sans-regular.ttf",
             "assets/fonts/ibm-plex-sans-semibold.ttf",
             "assets/fonts/ofl-ibm-plex.txt",
@@ -705,8 +704,8 @@ const SCRIPT_FACES: [(&str, rspice_fonts::Role, rspice_fonts::Face, u16); 6] = [
     ),
 ];
 
-/// Every bundle letters its page in IBM Plex Sans, at the three weights
-/// the stylesheet declares, and carries a face for a script Plex Sans lacks
+/// Every bundle letters its page in IBM Plex Sans, at the two weights the
+/// stylesheet declares, and carries a face for a script Plex Sans lacks
 /// only when its text is written in that script.
 #[test]
 fn a_bundle_carries_the_faces_its_text_is_lettered_in_and_no_others() {
@@ -715,7 +714,6 @@ fn a_bundle_carries_the_faces_its_text_is_lettered_in_and_no_others() {
     let styles = utf8(&latin["assets/page.css"]).replace("\r\n", "\n");
     for (file, weight) in [
         ("ibm-plex-sans-regular.ttf", 400),
-        ("ibm-plex-sans-medium.ttf", 500),
         ("ibm-plex-sans-semibold.ttf", 600),
     ] {
         assert!(
@@ -730,6 +728,10 @@ fn a_bundle_carries_the_faces_its_text_is_lettered_in_and_no_others() {
         );
     }
     assert!(latin.contains_key("assets/fonts/ofl-ibm-plex.txt"));
+    assert!(
+        !latin.contains_key("assets/fonts/ibm-plex-sans-medium.ttf"),
+        "no rule asks Plex Sans for Medium, so no bundle carries it"
+    );
     assert!(
         !latin.keys().any(|path| path.contains("arabic")
             || path.contains("hebrew")
