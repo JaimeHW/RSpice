@@ -84,10 +84,10 @@ pub(crate) use rspice_app_workbench::workbench::app::command_palette;
 pub(crate) mod dialogs;
 #[cfg(test)]
 pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
-#[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) mod pack_persistence;
 mod schematic;
 
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::models::pack_persistence;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::models::pdk_persistence;
 #[cfg(target_arch = "wasm32")]

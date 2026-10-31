@@ -822,6 +822,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // frame. It names the session's parts and lower crates, never the
     // application, so the root starts it from above.
     "models/pdk_persistence",
+    // The models feature's browser pack restore: the application starts it
+    // at launch, and the feature takes the packs it kept on the frame they
+    // land. It names the hub's handle, the model and the feature's view
+    // state, never the application, so the root starts it from above.
+    "models/pack_persistence",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",

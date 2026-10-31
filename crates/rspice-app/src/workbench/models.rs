@@ -8,6 +8,8 @@
 pub(crate) mod commands;
 pub(crate) mod model_editor_workflow;
 #[cfg(target_arch = "wasm32")]
+pub(in crate::workbench) mod pack_persistence;
+#[cfg(target_arch = "wasm32")]
 pub(in crate::workbench) mod pdk_persistence;
 pub(in crate::workbench) mod pdk_workflow;
 pub(crate) mod workspace_state;
@@ -84,7 +86,7 @@ impl ModelsFeature {
         cx: &mut Cx<'_, ModelsFeature>,
         ctx: &egui::Context,
     ) {
-        use crate::workbench::app::pack_persistence::{
+        use crate::workbench::models::pack_persistence::{
             PackRestoreParts, poll_browser_pack_restore,
         };
         poll_browser_pack_restore(

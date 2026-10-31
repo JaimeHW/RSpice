@@ -34,7 +34,7 @@ thread_local! {
 }
 
 /// Starts reading what this origin kept.
-pub(super) fn initialize_browser_pack_restore(ctx: &Context) {
+pub(in crate::workbench) fn initialize_browser_pack_restore(ctx: &Context) {
     let repaint = ctx.clone();
     start_browser_pack_restore(move |result| {
         COMPLETION.with(|slot| *slot.borrow_mut() = Some(result));
