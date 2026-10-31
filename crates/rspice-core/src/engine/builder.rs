@@ -8064,6 +8064,21 @@ impl Engine {
                         },
                     );
 
+                    // A B4SOI card reaches this point only when the generated
+                    // BSIM-SOI route above is not compiled in.
+                    if matches!(level, 10 | 58) {
+                        let version =
+                            card_version_metadata(params_map.as_ref(), native_string_params);
+                        if selects_b4soi(self.config.spice_dialect, level, version) {
+                            return Err(missing_b4soi_builtin_error(
+                                &element.name,
+                                model,
+                                level,
+                                version,
+                            ));
+                        }
+                    }
+
                     // BSIMSOI variants are distinct devices with their own SOI node
                     // topology and charge model. Route each native level to its port:
                     // 55 -> FD (fully depleted), 56 -> DD (dynamic depletion),

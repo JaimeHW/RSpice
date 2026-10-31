@@ -228,3 +228,53 @@ M1 d g s e NSOI W=10u L=.18u
         "diagnostic must identify the rejected generated-model VERSION metadata: {error}"
     );
 }
+
+#[test]
+fn b4soi_cards_route_to_generated_bsimsoi461_by_dialect_and_version() {
+    for (spice_dialect, model_selector, expected_kind) in [
+        (SpiceDialect::Ngspice, "LEVEL=10", "BSIMSOI_VA"),
+        (SpiceDialect::Ngspice, "LEVEL=58", "BSIMSOI_VA"),
+        (
+            SpiceDialect::BestAvailable,
+            "LEVEL=10 VERSION=4.4",
+            "BSIMSOI_VA",
+        ),
+        (SpiceDialect::BestAvailable, "LEVEL=58", "BSIMSOI_VA"),
+        (
+            SpiceDialect::BestAvailable,
+            "LEVEL=10 VERSION=3.2",
+            "B3SOIPD",
+        ),
+        (SpiceDialect::BestAvailable, "LEVEL=10", "B3SOIPD"),
+    ] {
+        let source = format!(
+            r#"
+* B4SOI routing by dialect and VERSION
+VD d 0 1
+VG g 0 .8
+M1 d g 0 0 NSOI W=4u L=1u
+.MODEL NSOI NMOS {model_selector} CAPMOD=2
+.OP
+.END
+"#
+        );
+        let netlist = Netlist::parse(&source).expect("B4SOI routing fixture parses");
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        });
+        let (_, report) = engine
+            .run_dc_op_with_report(&netlist)
+            .unwrap_or_else(|error| panic!("{model_selector} under {spice_dialect:?}: {error}"));
+        let device = report
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case("M1"))
+            .unwrap_or_else(|| panic!("{model_selector} must produce an M1 OP report"));
+        assert_eq!(
+            device.device_kind.to_ascii_uppercase(),
+            expected_kind,
+            "{model_selector} under {spice_dialect:?}"
+        );
+    }
+}

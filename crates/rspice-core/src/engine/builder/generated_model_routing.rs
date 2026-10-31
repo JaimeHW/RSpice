@@ -165,7 +165,15 @@ pub(super) fn generated_card_terminals(
             instance_params,
             config.temperature,
         )
-        .and_then(|model_def| generated_mos_route(element, model, model_def, *compact_syntax)),
+        .and_then(|model_def| {
+            generated_mos_route(
+                element,
+                model,
+                model_def,
+                *compact_syntax,
+                config.spice_dialect,
+            )
+        }),
         _ => return None,
     };
     let route = route.ok().flatten()?;
@@ -344,7 +352,13 @@ pub(super) fn try_route_generated_mos_model(
     compact_syntax: bool,
     context: GeneratedRoutingContext<'_>,
 ) -> Result<bool, SimulationError> {
-    match generated_mos_route(element, model_name, model_def, compact_syntax)? {
+    match generated_mos_route(
+        element,
+        model_name,
+        model_def,
+        compact_syntax,
+        context.spice_dialect,
+    )? {
         Some(route) => route.build(circuit, netlist, element, context),
         None => Ok(false),
     }
@@ -355,8 +369,9 @@ fn generated_mos_route<'a>(
     model_name: &str,
     model_def: Option<&'a ModelDef>,
     compact_syntax: bool,
+    spice_dialect: crate::config::SpiceDialect,
 ) -> Result<Option<GeneratedCardRoute<'a>>, SimulationError> {
-    let target = generated_mos_target(model_name, model_def)?;
+    let target = generated_mos_target(model_name, model_def, spice_dialect)?;
     let Some(target) = target.filter(|target| target.is_available()) else {
         return Ok(None);
     };
@@ -565,6 +580,7 @@ fn generated_bjt_target(
 fn generated_mos_target(
     model_name: &str,
     model_def: Option<&ModelDef>,
+    spice_dialect: crate::config::SpiceDialect,
 ) -> Result<Option<GeneratedTarget>, SimulationError> {
     let type_name = model_def
         .map(|model| model.model_type.as_str())
@@ -590,6 +606,14 @@ fn generated_mos_target(
         // they must not be shadowed merely because this generated artifact is
         // compiled into the same binary.
         Some(70) => Some(GeneratedTarget::new("bsimsoi_va")),
+        // B4SOI, BSIM-SOI 4.x, as `selects_b4soi` reads LEVEL=10 and 58 under
+        // the deck's dialect. ngspice runs it at VERSION 4.4 unless the card
+        // says otherwise (b4soiset.c:124); the 4.6.1 equations branch on
+        // VERSION only at 4.1, 4.2 and 4.4 (bsimsoi.va:3095, 4170, 4773,
+        // 4921), so a 4.4 card runs the code path it names.
+        Some(level @ (10 | 58)) if selects_b4soi(spice_dialect, level, card_version(model)) => {
+            Some(GeneratedTarget::new("bsimsoi_va"))
+        }
         // Xyce registers each BSIM-CMG release it ships as its own LEVEL: 107,
         // 108, 110 and 111 (111.2.1). The built-in is BSIM-CMG 112.1.0, a later
         // release with its own equations and parameter set, so a LEVEL that
@@ -2208,7 +2232,8 @@ mod release_routing_tests {
     fn mos_model_target(card: &str) -> Option<GeneratedTarget> {
         let netlist = mos_model(card);
         let model = find_model_def(&netlist, "model").expect("fixture model exists");
-        generated_mos_target("model", Some(model)).expect("level classification succeeds")
+        generated_mos_target("model", Some(model), crate::config::SpiceDialect::Xyce)
+            .expect("level classification succeeds")
     }
 
     #[test]
@@ -2244,6 +2269,39 @@ mod release_routing_tests {
             !should_pass_model_param(by_version, "VERSION"),
             "the selecting VERSION is not a bsimcmg_va parameter"
         );
+    }
+
+    #[test]
+    fn b4soi_levels_run_on_the_bsimsoi_built_in_under_the_dialect_that_reads_them_so() {
+        use crate::config::SpiceDialect::{BestAvailable, Ngspice, Xyce};
+        for (card, dialect, expected) in [
+            ("LEVEL=10", Ngspice, Some("bsimsoi_va")),
+            ("LEVEL=10 VERSION=3.2", Ngspice, Some("bsimsoi_va")),
+            ("LEVEL=58", Ngspice, Some("bsimsoi_va")),
+            ("LEVEL=58", BestAvailable, Some("bsimsoi_va")),
+            ("LEVEL=10 VERSION=4.4", BestAvailable, Some("bsimsoi_va")),
+            (
+                "LEVEL=10 VERSION=\"4.6.1\"",
+                BestAvailable,
+                Some("bsimsoi_va"),
+            ),
+            ("LEVEL=10", BestAvailable, None),
+            ("LEVEL=10 VERSION=3.2", BestAvailable, None),
+            ("LEVEL=10 VERSION=2.2", BestAvailable, None),
+            ("LEVEL=10 VERSION=4.4", Xyce, None),
+            ("LEVEL=58", Xyce, None),
+            ("LEVEL=57", Ngspice, None),
+        ] {
+            let netlist = mos_model(&format!("NMOS {card}"));
+            let model = find_model_def(&netlist, "model").expect("fixture model exists");
+            let target = generated_mos_target("model", Some(model), dialect)
+                .expect("level classification succeeds");
+            assert_eq!(
+                target.map(|target| target.model_name),
+                expected,
+                "{card} under {dialect:?}"
+            );
+        }
     }
 
     #[test]
@@ -2283,9 +2341,10 @@ mod release_routing_tests {
                 let card = format!("{polarity} LEVEL={level}");
                 let netlist = mos_model(&card);
                 let model = find_model_def(&netlist, "model").expect("fixture model exists");
-                let target = generated_mos_target("model", Some(model))
-                    .expect("level classification succeeds")
-                    .unwrap_or_else(|| panic!("`{card}` selects a generated module"));
+                let target =
+                    generated_mos_target("model", Some(model), crate::config::SpiceDialect::Xyce)
+                        .expect("level classification succeeds")
+                        .unwrap_or_else(|| panic!("`{card}` selects a generated module"));
                 assert_eq!(target.model_name, module, "{card}");
                 let mut params = Vec::new();
                 append_generated_mos_polarity_param(target, Some(model), &mut params);
@@ -2305,7 +2364,7 @@ mod release_routing_tests {
     fn a_card_that_sets_type_itself_keeps_it() {
         let netlist = mos_model("PMOS LEVEL=70470 TYPE=1");
         let model = find_model_def(&netlist, "model").expect("fixture model exists");
-        let target = generated_mos_target("model", Some(model))
+        let target = generated_mos_target("model", Some(model), crate::config::SpiceDialect::Xyce)
             .expect("level classification succeeds")
             .expect("LEVEL=70470 selects BSIM-SOI 4.7.0");
         let mut params = vec![BuiltinParameterAssignment::model_card(

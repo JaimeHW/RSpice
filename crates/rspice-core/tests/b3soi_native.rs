@@ -2934,3 +2934,67 @@ m1 d g s e b p1 l=0.258u w=19.585u
         "I(vb) = {body_current:e}, BSIMSOI3 3.49681e-8"
     );
 }
+
+/// Without the generated BSIM-SOI builtin a B4SOI card is refused by name,
+/// never run on the native BSIM3-SOI equations: on the CMC BSIM-SOI 4.4 QA
+/// card those give a drain current 9x low.
+#[cfg(not(feature = "veriloga-model-bsimsoi-va"))]
+#[test]
+fn a_b4soi_card_is_refused_rather_than_run_on_bsim3soi_without_the_builtin() {
+    for (spice_dialect, model_selector, version) in [
+        (
+            rspice_core::SpiceDialect::Ngspice,
+            "LEVEL=10",
+            "VERSION 4.4, ngspice's default",
+        ),
+        (
+            rspice_core::SpiceDialect::Ngspice,
+            "LEVEL=58",
+            "VERSION 4.4, ngspice's default",
+        ),
+        (
+            rspice_core::SpiceDialect::BestAvailable,
+            "LEVEL=10 VERSION=4.4",
+            "VERSION=4.4",
+        ),
+    ] {
+        let netlist = Netlist::parse(&format!(
+            "B4SOI refusal
+VD d 0 1
+VG g 0 .8
+M1 d g 0 0 NSOI W=4u L=1u
+             .MODEL NSOI NMOS {model_selector}
+.OP
+.END
+"
+        ))
+        .expect("B4SOI refusal fixture parses");
+        let error = Engine::new(SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        })
+        .build_circuit(&netlist)
+        .expect_err("a B4SOI card must not run on BSIM3-SOI")
+        .to_string();
+        assert!(
+            error.contains("B4SOI")
+                && error.contains(version)
+                && error.contains("veriloga-model-bsimsoi-va"),
+            "{model_selector} under {spice_dialect:?}: {error}"
+        );
+    }
+    let native = Netlist::parse(
+        "BSIM3-SOI card
+VD d 0 1
+VG g 0 .8
+M1 d g 0 0 NSOI W=4u L=1u
+         .MODEL NSOI NMOS LEVEL=10 VERSION=3.2
+.OP
+.END
+",
+    )
+    .expect("BSIM3-SOI fixture parses");
+    engine()
+        .build_circuit(&native)
+        .expect("a VERSION=3.2 LEVEL=10 card stays on native BSIM3-SOI");
+}

@@ -386,6 +386,63 @@ pub(super) fn known_advanced_mos_level_without_native(level: i32) -> bool {
     )
 }
 
+/// Whether a MOS card is B4SOI, BSIM-SOI 4.x, under the deck's dialect.
+///
+/// ngspice registers B4SOI at LEVEL=10 and LEVEL=58 (inpdomod.c:347-348).
+/// Xyce registers its BSIM3-SOI 3.2 at LEVEL=10 (N_DEV_MOSFET_B3SOI.C:19144)
+/// and nothing at 58. The default dialect takes 58, which has no other
+/// reading, as B4SOI, and decides LEVEL=10 by the card's VERSION: 4.x is
+/// B4SOI, while 2.x/3.x or no VERSION at all (as Xyce's BSIMSOI3 cards are
+/// written) stays on the native BSIM3-SOI family.
+pub(super) fn selects_b4soi(spice_dialect: SpiceDialect, level: i32, version: Option<f64>) -> bool {
+    match (spice_dialect, level) {
+        (SpiceDialect::Ngspice, 10 | 58) | (SpiceDialect::BestAvailable, 58) => true,
+        (SpiceDialect::BestAvailable, 10) => {
+            version.is_some_and(|version| (4.0..5.0).contains(&version))
+        }
+        _ => false,
+    }
+}
+
+/// A card's VERSION metadata, numeric or dotted (`4.6.1`).
+pub(super) fn card_version_metadata(
+    params: Option<&HashMap<String, f64>>,
+    string_params: &[(String, String)],
+) -> Option<f64> {
+    params
+        .and_then(|params| params.get("VERSION").copied())
+        .or_else(|| {
+            string_params
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("VERSION"))
+                .and_then(|(_, value)| parse_dotted_version_metadata(value))
+        })
+}
+
+/// Refuse a B4SOI card in a build without the generated BSIM-SOI builtin.
+///
+/// The native BSIM3-SOI family is an older, different model: on the CMC
+/// BSIM-SOI 4.4 QA card its drain current is 9x low, so running a B4SOI card
+/// on it would be a silent wrong answer.
+pub(super) fn missing_b4soi_builtin_error(
+    element_name: &str,
+    model_name: &str,
+    level: i32,
+    version: Option<f64>,
+) -> SimulationError {
+    let version = version.map_or_else(
+        || "VERSION 4.4, ngspice's default".to_string(),
+        |version| format!("VERSION={version}"),
+    );
+    SimulationError::Circuit(format!(
+        "MOSFET '{element_name}': model '{model_name}' requests LEVEL={level} B4SOI \
+         (BSIM-SOI 4.x, {version}), which only the generated BSIM-SOI 4.6.1 builtin \
+         'bsimsoi_va' implements, and that builtin is not compiled into this build. Enable \
+         the 'veriloga-model-bsimsoi-va' feature to run this card; the native BSIM3-SOI \
+         equations are a different model and must not stand in for it."
+    ))
+}
+
 pub(super) fn missing_advanced_mos_builtin_error(
     element_name: &str,
     model_name: &str,
