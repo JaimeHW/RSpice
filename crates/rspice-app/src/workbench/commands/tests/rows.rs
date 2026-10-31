@@ -29,6 +29,7 @@ use crate::workbench::commands::vocabulary::{
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::models::commands::ModelsCommand;
 
 /// The retired ids `from_stable_id` still answers, each with the live id it
 /// resolves to. Shortcut profiles written by older builds name them.
@@ -137,6 +138,7 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                             .find(|command| command.key() == key)
                             .map(CloudCommand::declared_spec)
                     })
+                    .or_else(|| ModelsCommand::from_key(key).map(ModelsCommand::declared_spec))
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };
