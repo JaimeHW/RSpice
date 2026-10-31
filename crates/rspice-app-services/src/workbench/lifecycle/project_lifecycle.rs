@@ -982,6 +982,9 @@ pub fn prepare_browser_save(
         let binding = existing_binding.map(|binding| match binding {
             PersistenceBinding::Browser { binding, .. } => binding,
         });
+        // A project already saved keeps the name it was saved under, which a
+        // reload does not carry into the default save name.
+        let suggested_name = binding.map_or(suggested_name, |binding| binding.display_name.clone());
         let save = staged.bind(binding, || {
             if project_copy || persistence::browser_external_canonical_supported() {
                 BrowserBindingBackend::ExternalFile

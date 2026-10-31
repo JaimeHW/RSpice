@@ -88,7 +88,7 @@ pub(super) async fn run_browser_write(
     bytes: &[u8],
 ) -> BrowserWriteResult {
     let prepared = match operation {
-        BrowserWriteStart::Existing { handle, target } => (handle, target, false, None),
+        BrowserWriteStart::Existing { handle, target } => (handle, target, false),
         BrowserWriteStart::Picker { picker, target } => {
             let handle = match wasm_bindgen_futures::JsFuture::from(picker).await {
                 Ok(handle) => handle,
@@ -103,7 +103,7 @@ pub(super) async fn run_browser_write(
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
             target.handle_id = Some(handle_id);
-            (handle, target, true, None)
+            (handle, target, true)
         }
         BrowserWriteStart::Opfs { target } => {
             let handle = match open_opfs_binding_handle(target.intent.binding_id, true).await {
@@ -116,10 +116,10 @@ pub(super) async fn run_browser_write(
             let handle_id = register_browser_handle(handle.clone());
             let mut target = target;
             target.handle_id = Some(handle_id);
-            (handle, target, true, Some(suggested_name.to_owned()))
+            (handle, target, true)
         }
     };
-    let (handle, target, newly_registered, display_name_override) = prepared;
+    let (handle, target, newly_registered) = prepared;
     let lock = match acquire_browser_web_lock(
         target.intent.binding_id,
         persist_binding || target.intent.backend == BrowserBindingBackend::Opfs,
@@ -134,14 +134,8 @@ pub(super) async fn run_browser_write(
             return BrowserWriteResult::Failed(error.into());
         }
     };
-    let result = run_browser_write_locked(
-        &handle,
-        &target,
-        display_name_override.as_deref(),
-        persist_binding,
-        bytes,
-    )
-    .await;
+    let result =
+        run_browser_write_locked(&handle, &target, suggested_name, persist_binding, bytes).await;
     let release = release_browser_web_lock(lock).await;
     if let Err(error) = release {
         log::warn!("browser canonical lock release reported an error: {error}");
@@ -163,7 +157,7 @@ pub(super) async fn run_browser_write(
 pub(super) async fn run_browser_write_locked(
     handle: &wasm_bindgen::JsValue,
     target: &BrowserWriteTarget,
-    display_name_override: Option<&str>,
+    save_name: &str,
     persist_binding: bool,
     bytes: &[u8],
 ) -> BrowserWriteResult {
@@ -216,12 +210,14 @@ pub(super) async fn run_browser_write_locked(
         }
         Err(error) => return BrowserWriteResult::Failed(error),
     };
-    let display_name = display_name_override.map(str::to_owned).unwrap_or_else(|| {
-        js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("name"))
-            .ok()
-            .and_then(|name| name.as_string())
-            .unwrap_or_else(|| "project.rspiceproj".to_owned())
-    });
+    let handle_name = js_sys::Reflect::get(handle, &wasm_bindgen::JsValue::from_str("name"))
+        .ok()
+        .and_then(|name| name.as_string());
+    let display_name = rspice_project::persistence::browser::browser_save_display_name(
+        target.intent.backend,
+        save_name,
+        handle_name.as_deref(),
+    );
     let handle_id = target.handle_id.expect("prepared browser handle");
     if persist_binding {
         let commit = classify_browser_binding_commit(

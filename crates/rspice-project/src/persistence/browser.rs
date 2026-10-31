@@ -298,10 +298,61 @@ pub fn browser_backend_from_name(value: &str) -> Result<BrowserBindingBackend, S
     }
 }
 
+/// What a saved browser project is called. A file the user picked is called
+/// what its handle is called. Browser storage keeps a project under its
+/// binding id, a name nobody chose, so a project kept there goes by the name
+/// it is saved under.
+pub fn browser_save_display_name(
+    backend: BrowserBindingBackend,
+    save_name: &str,
+    handle_name: Option<&str>,
+) -> String {
+    match backend {
+        BrowserBindingBackend::Opfs => save_name.to_owned(),
+        BrowserBindingBackend::ExternalFile => {
+            handle_name.unwrap_or("project.rspiceproj").to_owned()
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::persistence::digest_bytes;
+
+    #[test]
+    fn a_project_in_browser_storage_keeps_its_name_across_saves() {
+        // The storage file is named by the binding id; the project is not.
+        let storage_file = "7d9a1db3-55f2-4da2-82e1-992f6e650f42.rspiceproj";
+        for name in ["untitled.rspiceproj", "amplifier.rspiceproj"] {
+            assert_eq!(
+                browser_save_display_name(BrowserBindingBackend::Opfs, name, Some(storage_file)),
+                name
+            );
+        }
+    }
+
+    #[test]
+    fn a_picked_file_and_a_copy_take_the_name_the_user_chose() {
+        // A copy is always written through the save picker, so the name of the
+        // project it was copied from has no say in what the copy is called.
+        assert_eq!(
+            browser_save_display_name(
+                BrowserBindingBackend::ExternalFile,
+                "untitled.rspiceproj",
+                Some("amplifier copy.rspiceproj"),
+            ),
+            "amplifier copy.rspiceproj"
+        );
+        assert_eq!(
+            browser_save_display_name(
+                BrowserBindingBackend::ExternalFile,
+                "untitled.rspiceproj",
+                None
+            ),
+            "project.rspiceproj"
+        );
+    }
 
     fn browser_receipt(project_id: &str, digest: ContentDigest) -> BrowserBindingReceipt {
         BrowserBindingReceipt {
