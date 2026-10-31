@@ -224,7 +224,10 @@ fn render_run_details(cx: &mut Cx<'_, ResultsFeature>, ctx: &egui::Context) {
     let routes =
         crate::workbench::docks::show_run_details(ctx, &mut cx.state.run_details, cx.model);
     if let Some(run_id) = routes.open_deck {
-        cx.wb.outbox().push(RevealExecutedDeck(run_id));
+        cx.wb.outbox().push(RevealExecutedDeck {
+            seq: run_id,
+            close_manager_on_success: false,
+        });
     }
     if routes.open_plan {
         cx.execute(ResultsCommand::OpenProducingPlan.key());
@@ -571,7 +574,10 @@ impl CommandSet for ResultsCommand {
             // or a check-mark cleared between the frame that greyed the row
             // and the keystroke that took it.
             Self::OpenTaskDeck => match task_deck_hop(cx.state.reads(cx.model, cx.wb)) {
-                Ok(sequence) => cx.wb.outbox().push(RevealExecutedDeck(sequence)),
+                Ok(sequence) => cx.wb.outbox().push(RevealExecutedDeck {
+                    seq: sequence,
+                    close_manager_on_success: false,
+                }),
                 Err(reason) => cx
                     .wb
                     .prompt(format!("Could not open the task deck: {reason}.")),

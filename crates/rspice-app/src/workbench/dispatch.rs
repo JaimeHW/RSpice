@@ -182,8 +182,9 @@ impl RSpiceApp {
     /// workflow it asked for, the snap that follows a new schematic grid, the
     /// shortcut resolver's reset when a shortcut library was put in use, the
     /// open waveform view starting again from changed defaults, the dataset
-    /// export, the analysis instance and the executed deck a results command
-    /// asked for, the waveforms and the family member a hand-off into Results
+    /// export, the analysis instance a results command asked for, the
+    /// executed deck a results command or the run history asked for, the
+    /// waveforms and the family member a hand-off into Results
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
@@ -241,8 +242,14 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
-            |app, RevealExecutedDeck(sequence)| {
-                open_task_deck(&mut app.state, sequence);
+            |app,
+             RevealExecutedDeck {
+                 seq,
+                 close_manager_on_success,
+             }| {
+                if open_task_deck(&mut app.state, seq) && close_manager_on_success {
+                    crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);
+                }
             },
         );
         requests::drain(

@@ -1787,7 +1787,11 @@ mod tests {
                     ctx,
                     crate::workbench::framework::dialogs::DialogKey("cloud.account_organization"),
                 );
-                tools::jobs_manager::show(ctx, &mut app);
+                crate::workbench::simulate::SimulateFeature::render_jobs_manager(
+                    &mut crate::workbench::features::cx(&mut app),
+                    ctx,
+                );
+                app.after_contribution();
                 surfaces::show_simulation_workflow_dialogs(ctx, &mut app);
             },
         );
@@ -2093,6 +2097,145 @@ mod tests {
                 .as_ref()
                 .map(|prompt| prompt.text.as_str()),
             Some("Nothing was deleted.")
+        );
+    }
+
+    /// One pass of the run history's step in the frame's dialog order, and
+    /// the primary it published: whether it is enabled, and where it is.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn run_history_pass(
+        ctx: &Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> Option<(bool, egui::Rect)> {
+        let step = dialog_order::DIALOG_ORDER
+            .iter()
+            .find(|spec| {
+                spec.key == crate::workbench::framework::dialogs::DialogKey("simulate.jobs_manager")
+            })
+            .expect("the run history is a step of the frame's dialogs");
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1_440.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| (step.render)(app, ctx),
+        );
+        let update = output.platform_output.accesskit_update?;
+        let primaries = update
+            .nodes
+            .iter()
+            .filter(|(_, node)| {
+                node.role() == egui::accesskit::Role::Button
+                    && node.label() == Some("Run active plan")
+            })
+            .filter_map(|(_, node)| {
+                let bounds = node.bounds()?;
+                Some((
+                    !node.is_disabled(),
+                    egui::Rect::from_min_max(
+                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                    ),
+                ))
+            })
+            .collect::<Vec<_>>();
+        assert!(primaries.len() <= 1, "one primary, not {}", primaries.len());
+        primaries.first().copied()
+    }
+
+    /// The run history open on its own route over the Netlist workspace, laid
+    /// out against its fonts, and its primary.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn run_history_over_the_netlist(ctx: &Context, app: &mut RSpiceApp) -> (bool, egui::Rect) {
+        use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+
+        app.state.workbench.workspace = Workspace::Netlist;
+        app.state
+            .workbench
+            .navigate(
+                SurfaceRoute::surface(SurfaceId::JobsManager),
+                RouteTransitionSource::User,
+            )
+            .expect("the run history opens");
+        assert_eq!(
+            app.state.workbench.workspace,
+            Workspace::Netlist,
+            "the run history keeps the workspace behind it"
+        );
+        run_history_pass(ctx, app, Vec::new());
+        run_history_pass(ctx, app, Vec::new()).expect("the run history draws its primary")
+    }
+
+    /// The run history's primary runs what Run would if raised now. On the
+    /// Netlist workspace that is the deck the page shows, not the active
+    /// plan: a deck that cannot run yet leaves the primary disabled, and once
+    /// it is validated the primary is enabled and a click runs that deck.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_run_history_primary_runs_the_netlist_deck_on_the_netlist_workspace() {
+        use crate::state::SimulationRunIntent;
+        use crate::workbench::workflows::netlist_workflow::{
+            apply_imported_netlist, validate_visible_netlist_source,
+        };
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
+
+        let (enabled, _) = run_history_over_the_netlist(&ctx, &mut app);
+        assert!(
+            !enabled,
+            "a deck that cannot run yet leaves the primary disabled"
+        );
+
+        assert!(apply_imported_netlist(
+            &mut app.state,
+            "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+            None,
+            "standalone.cir",
+        ));
+        assert!(validate_visible_netlist_source(&mut app));
+        let (enabled, primary) = run_history_over_the_netlist(&ctx, &mut app);
+        assert!(enabled, "a validated deck enables the primary");
+
+        let at = primary.center();
+        run_history_pass(
+            &ctx,
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(at),
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::default(),
+                },
+                egui::Event::PointerButton {
+                    pos: at,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::default(),
+                },
+            ],
+        );
+        let execution = &app.state.model.simulation.execution;
+        assert!(execution.trigger_simulation, "the click runs");
+        assert_eq!(execution.run_intent, SimulationRunIntent::ManualDeck);
+        assert!(
+            !app.state.runs.preflight.take_run_and_queue_request(),
+            "the click runs the page's deck, not the active plan"
         );
     }
 }

@@ -555,7 +555,17 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         is_open: Some(|state| {
             state.workbench.current_route().surface_id() == SurfaceId::JobsManager
         }),
-        render: |app, ctx| crate::workbench::tools::jobs_manager::show(ctx, app),
+        // Run's and Stop's answers are taken only while the run history is
+        // open: it reads them only then.
+        render: |app, ctx| {
+            SimulateFeature::render_jobs_manager(
+                &mut features::cx_with_foreign_answers(app, |app| {
+                    crate::workbench::simulate::jobs_manager_open(&app.state.workbench)
+                }),
+                ctx,
+            );
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("simulate.workflow_dialogs"),

@@ -22,12 +22,13 @@ use crate::ui::{
     tokens::{self, Tokens},
     widgets::{Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark},
 };
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::requests::RevealExecutedDeck;
 use crate::workbench::simulate::commands::SimulateCommand;
+use crate::workbench::simulate::{SimulateFeature, close_jobs_manager, jobs_manager_open};
 use crate::workbench::state::JobsPlanScope;
-use crate::workbench::{AppState, RSpiceApp};
-
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const TITLE: &str = "Run history";
 const DESCRIPTION: &str =
@@ -104,17 +105,16 @@ struct RunRow {
 }
 
 impl RunRow {
-    fn from_run(state: &AppState, run: &SimulationRun, active: bool) -> Self {
+    fn from_run(model: &Model, run: &SimulationRun, active: bool) -> Self {
         let executor_owned = active && !run.lifecycle.is_terminal();
-        let current_analysis_progress =
-            state.model.simulation.execution.progress.clamp(0.0, 1.0) as f32;
+        let current_analysis_progress = model.simulation.execution.progress.clamp(0.0, 1.0) as f32;
         let (status, tone) = match run.lifecycle {
             SimulationRunLifecycle::LegacyUnknown => {
                 ("Legacy status not retained".to_owned(), RunTone::Neutral)
             }
             SimulationRunLifecycle::Preparing => ("Preparing".to_owned(), RunTone::Active),
             SimulationRunLifecycle::Running => {
-                let detail = state.model.simulation.execution.status.trim();
+                let detail = model.simulation.execution.status.trim();
                 (
                     if active && !detail.is_empty() {
                         detail.to_owned()
@@ -142,8 +142,7 @@ impl RunRow {
         // borrowing a name across that boundary would label a task after an
         // analysis that never produced it.
         let run_plan = plan_id.and_then(|plan_id| {
-            state
-                .model
+            model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
@@ -152,16 +151,14 @@ impl RunRow {
         let (scope, source_revision, tasks) =
             run_authority_rows(run, executor_owned, current_analysis_progress, run_plan);
         let mut scope = plan_id.map_or(scope, |plan_id| {
-            let name = state
-                .model
+            let name = model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
                 .filter(|plan| plan.id() == plan_id)
-                .map(|_| state.model.sim_setup.active_plan_name().to_string())
+                .map(|_| model.sim_setup.active_plan_name().to_string())
                 .or_else(|| {
-                    state
-                        .model
+                    model
                         .sim_setup
                         .inactive_plans()
                         .iter()
@@ -185,8 +182,7 @@ impl RunRow {
         // completed task prefixes and the active task must be folded together.
         let progress = batch_progress(&tasks);
         let task_count = tasks.len().max(run.analyses.len());
-        let executed_deck_points = state
-            .model
+        let executed_deck_points = model
             .simulation
             .retained
             .executed_decks
@@ -241,26 +237,23 @@ struct JobsSnapshot {
 }
 
 impl JobsSnapshot {
-    fn capture(state: &AppState, requested: Option<RunId>, scope: JobsPlanScope) -> Self {
-        let active_run_id = state
-            .model
+    fn capture(model: &Model, requested: Option<RunId>, scope: JobsPlanScope) -> Self {
+        let active_run_id = model
             .simulation
             .execution
             .active_execution
             .map(|execution| execution.run_id);
-        let active_plan_id = state
-            .model
+        let active_plan_id = model
             .sim_setup
             .stable_analysis_plan()
             .ok()
             .map(|plan| plan.id());
-        let rows = state
-            .model
+        let rows = model
             .simulation
             .retained
             .runs
             .iter()
-            .map(|run| RunRow::from_run(state, run, Some(run.run_id) == active_run_id))
+            .map(|run| RunRow::from_run(model, run, Some(run.run_id) == active_run_id))
             .filter(|row| match scope {
                 JobsPlanScope::AllPlans => true,
                 JobsPlanScope::ActivePlan => row.plan_id == active_plan_id,
@@ -306,8 +299,7 @@ impl JobsSnapshot {
             selected_run_id,
             running: active_run_id.is_some(),
             cancelling: active_run_id.is_some_and(|run_id| {
-                state
-                    .model
+                model
                     .simulation
                     .retained
                     .run_by_stable_id(run_id)
@@ -323,101 +315,114 @@ impl JobsSnapshot {
     }
 }
 
-pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if app.state.workbench.current_route().surface_id() != SurfaceId::JobsManager {
-        return;
-    }
-
-    let scope = app.state.simulate.jobs_manager.plan_scope;
-    let snapshot = JobsSnapshot::capture(
-        &app.state,
-        app.state.simulate.jobs_manager.selected_run_id,
-        scope,
-    );
-    app.state.simulate.jobs_manager.selected_run_id = snapshot.selected_run_id;
-    let mut requested_selection = None;
-    let mut requested_open = None;
-    let mut requested_open_deck: Option<u64> = None;
-    let mut requested_scope = scope;
-    let mut body_scroll_offset = app.state.simulate.jobs_manager.scroll_offset;
-    let run_label = if snapshot.cancelling {
-        "Cancelling…"
-    } else if snapshot.running {
-        "Stop active run"
-    } else {
-        "Run active plan"
-    };
-    let export_enabled = snapshot.selected().is_some();
-    let run_enabled = if snapshot.cancelling {
-        false
-    } else if snapshot.running {
-        app.command_key_enabled(SimulateCommand::Stop.key())
-    } else {
-        app.command_key_enabled(SimulateCommand::Run.key())
-    };
-    let dialog = Dialog::new(TITLE, run_label)
-        .description(DESCRIPTION)
-        .size(DialogSize::JobsManager)
-        .primary_enabled(run_enabled)
-        .primary_on_enter(false)
-        .ghost("Close")
-        .flush_body()
-        .manual_body_scroll();
-    let dialog = if export_enabled {
-        dialog.secondary("Export run manifest")
-    } else {
-        dialog
-    };
-    let choice = dialog.show(ctx, |ui| {
-        render_plan_scope(ui, scope, &mut requested_scope, &snapshot);
-        let output = ScrollArea::vertical()
-            .id_salt("workbench.jobs-manager.body")
-            .vertical_scroll_offset(body_scroll_offset)
-            .auto_shrink([false, false])
-            .show(ui, |ui| {
-                render_content(
-                    ui,
-                    &snapshot,
-                    &mut requested_selection,
-                    &mut requested_open,
-                    &mut requested_open_deck,
-                );
-            });
-        body_scroll_offset = output.state.offset.y;
-    });
-
-    app.state.simulate.jobs_manager.scroll_offset = body_scroll_offset;
-    if requested_scope != scope {
-        app.state.simulate.jobs_manager.plan_scope = requested_scope;
-        app.state.simulate.jobs_manager.selected_run_id = None;
-    }
-    if let Some(run_id) = requested_selection {
-        app.state.simulate.jobs_manager.selected_run_id = Some(run_id);
-    }
-    // The history is where a reader finds a run; opening one is what they came
-    // to do next. Routed before the dialog's own choices so the manager closes
-    // onto the dataset rather than back onto whatever was behind it.
-    if let Some(run_id) = requested_open {
-        open_run_in_results(app, run_id);
-        return;
-    }
-    // The same route the Netlist run strip offers, from the surface that lists
-    // the runs. The Accept named both places; only the strip had it.
-    if let Some(sequence) = requested_open_deck {
-        open_task_deck(&mut app.state, sequence);
-        return;
-    }
-    match choice {
-        DialogChoice::Primary => {
-            if snapshot.running {
-                app.execute_command_key(SimulateCommand::Stop.key());
-            } else {
-                app.execute_command_key(SimulateCommand::Run.key());
-            }
+impl SimulateFeature {
+    /// Draw the run history while its route is in front, and carry out what
+    /// the reader chose in it.
+    ///
+    /// The primary runs or stops what Run or Stop would if raised now, which
+    /// on the Netlist workspace is that page's deck rather than the active
+    /// plan, so it is enabled by the dispatcher's answer and raises the
+    /// command itself.
+    pub(in crate::workbench) fn render_jobs_manager(cx: &mut Cx<'_, Self>, ctx: &egui::Context) {
+        if !jobs_manager_open(cx.wb) {
+            return;
         }
-        DialogChoice::Secondary if export_enabled => export_selected_manifest(app),
-        DialogChoice::Ghost | DialogChoice::Cancelled => close_to_source(&mut app.state),
-        DialogChoice::Secondary | DialogChoice::None => {}
+
+        let scope = cx.state.jobs_manager.plan_scope;
+        let snapshot =
+            JobsSnapshot::capture(cx.model, cx.state.jobs_manager.selected_run_id, scope);
+        cx.state.jobs_manager.selected_run_id = snapshot.selected_run_id;
+        let mut requested_selection = None;
+        let mut requested_open = None;
+        let mut requested_open_deck: Option<u64> = None;
+        let mut requested_scope = scope;
+        let mut body_scroll_offset = cx.state.jobs_manager.scroll_offset;
+        let run_label = if snapshot.cancelling {
+            "Cancelling…"
+        } else if snapshot.running {
+            "Stop active run"
+        } else {
+            "Run active plan"
+        };
+        let export_enabled = snapshot.selected().is_some();
+        let run_enabled = if snapshot.cancelling {
+            false
+        } else if snapshot.running {
+            cx.foreign_available(SimulateCommand::Stop.key())
+        } else {
+            cx.foreign_available(SimulateCommand::Run.key())
+        };
+        let dialog = Dialog::new(TITLE, run_label)
+            .description(DESCRIPTION)
+            .size(DialogSize::JobsManager)
+            .primary_enabled(run_enabled)
+            .primary_on_enter(false)
+            .ghost("Close")
+            .flush_body()
+            .manual_body_scroll();
+        let dialog = if export_enabled {
+            dialog.secondary("Export run manifest")
+        } else {
+            dialog
+        };
+        let choice = dialog.show(ctx, |ui| {
+            render_plan_scope(ui, scope, &mut requested_scope, &snapshot);
+            let output = ScrollArea::vertical()
+                .id_salt("workbench.jobs-manager.body")
+                .vertical_scroll_offset(body_scroll_offset)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    render_content(
+                        ui,
+                        &snapshot,
+                        &mut requested_selection,
+                        &mut requested_open,
+                        &mut requested_open_deck,
+                    );
+                });
+            body_scroll_offset = output.state.offset.y;
+        });
+
+        cx.state.jobs_manager.scroll_offset = body_scroll_offset;
+        if requested_scope != scope {
+            cx.state.jobs_manager.plan_scope = requested_scope;
+            cx.state.jobs_manager.selected_run_id = None;
+        }
+        if let Some(run_id) = requested_selection {
+            cx.state.jobs_manager.selected_run_id = Some(run_id);
+        }
+        // The history is where a reader finds a run; opening one is what they
+        // came to do next. Routed before the dialog's own choices so the
+        // manager closes onto the dataset rather than back onto whatever was
+        // behind it.
+        if let Some(run_id) = requested_open {
+            open_run_in_results(cx, run_id);
+            return;
+        }
+        // The same route the Netlist run strip offers, from the surface that
+        // lists the runs. The Accept named both places; only the strip had
+        // it. The shell opens the deck straight after this step, through the
+        // owner every route to the executed deck shares, and leaves the
+        // manager only once the deck is in front.
+        if let Some(sequence) = requested_open_deck {
+            cx.wb.outbox.push(RevealExecutedDeck {
+                seq: sequence,
+                close_manager_on_success: true,
+            });
+            return;
+        }
+        match choice {
+            DialogChoice::Primary => {
+                if snapshot.running {
+                    cx.execute(SimulateCommand::Stop.key());
+                } else {
+                    cx.execute(SimulateCommand::Run.key());
+                }
+            }
+            DialogChoice::Secondary if export_enabled => export_selected_manifest(cx),
+            DialogChoice::Ghost | DialogChoice::Cancelled => close_jobs_manager(cx.wb),
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
     }
 }
 
@@ -426,9 +431,8 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
 /// The stable run identity is what the history rows carry, so it is resolved
 /// against the retained history here rather than assumed to still be there —
 /// pruning runs while this dialog is open is legal.
-fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
-    let Some(index) = app
-        .state
+fn open_run_in_results(cx: &mut Cx<'_, SimulateFeature>, run_id: RunId) {
+    let Some(index) = cx
         .model
         .simulation
         .retained
@@ -436,32 +440,19 @@ fn open_run_in_results(app: &mut RSpiceApp, run_id: RunId) {
         .iter()
         .position(|run| run.run_id == run_id)
     else {
-        app.state.prompt(format!(
+        cx.wb.prompt(format!(
             "Run {run_id} is no longer retained, so it could not be opened in Results."
         ));
         return;
     };
-    if !app.state.model.simulation.select_run(index) {
-        app.state.prompt(format!(
+    if !cx.model.simulation.select_run(index) {
+        cx.wb.prompt(format!(
             "Run {run_id} could not be selected, so Results was left unchanged."
         ));
         return;
     }
-    close_to_source(&mut app.state);
-    app.execute_command_key(ids::OPEN_RUN_IN_RESULTS);
-}
-
-/// Leave the manager in front of the source one run's engine was handed.
-///
-/// Routed through `commands::result_navigation::open_task_deck`, the owner
-/// every route to the executed deck shares — the Netlist run strip's control,
-/// this row, and the palette command. The document reached from each is
-/// byte-identical, and a deck released between the frame that drew the control
-/// and the click is refused by one name rather than three.
-fn open_task_deck(state: &mut AppState, sequence: u64) {
-    if crate::workbench::dispatch::open_task_deck(state, sequence) {
-        close_to_source(state);
-    }
+    close_jobs_manager(cx.wb);
+    cx.execute(ids::OPEN_RUN_IN_RESULTS);
 }
 
 /// The page's one toolbar row: the history scope, and one line saying what
@@ -517,23 +508,6 @@ fn jobs_summary_line(snapshot: &JobsSnapshot) -> String {
         if snapshot.rows.len() == 1 { "" } else { "s" },
         snapshot.current_target.label()
     )
-}
-
-fn close_to_source(state: &mut AppState) {
-    if state
-        .workbench
-        .navigate_back(RouteTransitionSource::User)
-        .is_some()
-    {
-        return;
-    }
-    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(state.workbench.workspace));
-    if let Err(error) = state
-        .workbench
-        .replace_route(fallback, RouteTransitionSource::User)
-    {
-        state.prompt(format!("Could not close {TITLE}: {error}"));
-    }
 }
 
 /// A campaign's roll-up in counts, and whether any member failed. Members
@@ -1286,12 +1260,11 @@ fn legacy_task_rows(run: &SimulationRun) -> Vec<TaskRow> {
         .collect()
 }
 
-fn export_selected_manifest(app: &mut RSpiceApp) {
-    let selected_id = app.state.simulate.jobs_manager.selected_run_id;
-    let Some(run) =
-        selected_id.and_then(|id| app.state.model.simulation.retained.run_by_stable_id(id))
+fn export_selected_manifest(cx: &mut Cx<'_, SimulateFeature>) {
+    let selected_id = cx.state.jobs_manager.selected_run_id;
+    let Some(run) = selected_id.and_then(|id| cx.model.simulation.retained.run_by_stable_id(id))
     else {
-        app.state
+        cx.wb
             .prompt("No retained run is selected for manifest export.");
         return;
     };
@@ -1299,7 +1272,7 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
     let payload = match serialize_manifest(run) {
         Ok(payload) => payload,
         Err(error) => {
-            app.state.record(
+            cx.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Run manifest export failed: {error}"),
@@ -1314,11 +1287,11 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
         filter_name: "RSpice Run Manifest",
         filter_extensions: &["json"],
     };
-    let io = app.export_workflow_io.as_ref();
+    let io = cx.handles.export_io;
     let Some(mut path) = (match io.show_save_dialog(config) {
         Ok(path) => path,
         Err(error) => {
-            app.state.record(
+            cx.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Run manifest export picker failed: {error}"),
@@ -1350,7 +1323,7 @@ fn export_selected_manifest(app: &mut RSpiceApp) {
             ),
         ),
     };
-    app.state.record(severity, LogSource::Studio, text);
+    cx.model.record(severity, LogSource::Studio, text);
 }
 
 fn serialize_manifest(run: &SimulationRun) -> Result<String, String> {
@@ -1476,6 +1449,8 @@ mod tests {
         AnalysisResult, AnalysisResultSourceDomain, AnalysisType, PreparedRunReceipt,
         PreparedRunTaskReceipt, PreparedSourceCheckReceipt, SimulationState,
     };
+    use crate::workbench::features;
+    use crate::workbench::{AppState, RSpiceApp, SurfaceId};
 
     fn plan_receipt(plan_id: crate::product::SimulationPlanId, byte: u8) -> PreparedRunReceipt {
         PreparedRunReceipt::new(crate::state::PreparedRunReceiptInput {
@@ -1532,7 +1507,8 @@ mod tests {
             "the newest run is selected before the hop"
         );
 
-        open_run_in_results(&mut app, first);
+        open_run_in_results(&mut features::cx(&mut app), first);
+        app.after_contribution();
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Results
@@ -1553,7 +1529,8 @@ mod tests {
             .runs
             .retain(|run| run.run_id != second);
         let before = app.state.model.log_buffer.revision();
-        open_run_in_results(&mut app, second);
+        open_run_in_results(&mut features::cx(&mut app), second);
+        app.after_contribution();
         assert_eq!(
             app.state.workbench.workspace,
             crate::workbench::state::Workspace::Simulate,
@@ -1585,7 +1562,7 @@ mod tests {
             .retained
             .run_by_stable_id(second)
             .and_then(SimulationRun::execution_identity);
-        let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
+        let snapshot = JobsSnapshot::capture(&state.model, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(first));
 
         state
@@ -1594,7 +1571,7 @@ mod tests {
             .retained
             .runs
             .retain(|run| run.run_id != first);
-        let snapshot = JobsSnapshot::capture(&state, Some(first), JobsPlanScope::AllPlans);
+        let snapshot = JobsSnapshot::capture(&state.model, Some(first), JobsPlanScope::AllPlans);
         assert_eq!(snapshot.selected_run_id, Some(second));
     }
 
@@ -1647,16 +1624,16 @@ mod tests {
         };
         let manual_run = state.model.simulation.start_run().run_id;
 
-        let active = JobsSnapshot::capture(&state, None, JobsPlanScope::ActivePlan);
+        let active = JobsSnapshot::capture(&state.model, None, JobsPlanScope::ActivePlan);
         assert_eq!(active.rows.len(), 1);
         assert_eq!(active.rows[0].run_id, active_run);
         assert_eq!(active.selected_run_id, Some(active_run));
 
-        let manual = JobsSnapshot::capture(&state, None, JobsPlanScope::ManualDeck);
+        let manual = JobsSnapshot::capture(&state.model, None, JobsPlanScope::ManualDeck);
         assert_eq!(manual.rows.len(), 1);
         assert_eq!(manual.rows[0].run_id, manual_run);
 
-        let all = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        let all = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         assert_eq!(all.rows.len(), 3);
         assert!(all.rows.iter().any(|row| row.run_id == inactive_run));
         assert_eq!(all.campaigns.len(), 1);
@@ -1737,7 +1714,7 @@ mod tests {
         );
 
         let state = AppState::default();
-        snapshot = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         let expected = format!(
             "{} run{} \u{00b7} {}",
             snapshot.rows.len(),
@@ -1854,7 +1831,7 @@ mod tests {
     fn execution_target_card_lists_only_the_live_runtime() {
         let mut state = AppState::default();
         state.model.simulation.start_run();
-        let snapshot = JobsSnapshot::capture(&state, None, JobsPlanScope::AllPlans);
+        let snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();

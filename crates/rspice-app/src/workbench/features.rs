@@ -23,7 +23,7 @@ use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    Cx, Feature, FeatureRegistry, LowerHandles, Peers, Reads, ToolbarTool,
+    Cx, Feature, FeatureRegistry, ForeignAvailability, LowerHandles, Peers, Reads, ToolbarTool,
 };
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::models::ModelsFeature;
@@ -50,6 +50,23 @@ pub(crate) trait Registered: Feature {
 /// runs, and the application's handles on the services below the workbench.
 pub(crate) fn cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
     F::cx(app)
+}
+
+/// The context `F`'s call runs in, as [`cx`] lends it, holding the
+/// dispatcher's answers for the commands `F` reads when `reads(app)` says
+/// the call reads them. They are taken only after that check, so a step
+/// that reads them only while it is open costs nothing more while it is
+/// closed.
+pub(crate) fn cx_with_foreign_answers<F: Registered>(
+    app: &mut RSpiceApp,
+    reads: impl FnOnce(&RSpiceApp) -> bool,
+) -> Cx<'_, F> {
+    if !reads(app) {
+        return F::cx(app);
+    }
+    let answers =
+        ForeignAvailability::take(F::FOREIGN_AVAILABILITY, |key| app.command_key_enabled(key));
+    F::cx(app).with_foreign_availability(answers)
 }
 
 /// The results peer a context over `state` holds for the feature whose slot
@@ -454,7 +471,6 @@ mod tests {
     #[test]
     fn every_command_a_feature_reads_is_one_the_dispatcher_answers() {
         use crate::workbench::commands::vocabulary::legacy_command;
-        use crate::workbench::framework::feature::ForeignAvailability;
 
         for (slot, keys) in foreign_availability() {
             assert!(keys.len() <= ForeignAvailability::CAPACITY, "{slot}");

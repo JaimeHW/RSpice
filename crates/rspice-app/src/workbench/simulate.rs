@@ -5,6 +5,7 @@ pub(crate) mod commands;
 mod run_host;
 
 use crate::state::SimulationPage;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
@@ -24,6 +25,11 @@ impl Feature for SimulateFeature {
     type State = SimulateState;
     type Session = WorkbenchSession;
     type Handles = NoHandles;
+    /// The run history's primary runs or stops what the dispatcher would:
+    /// on the Netlist workspace the shell runs that page's deck in place
+    /// of the active plan.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] =
+        &[SimulateCommand::Run.key(), SimulateCommand::Stop.key()];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SimulateCommand>();
@@ -171,6 +177,26 @@ fn open_jobs_manager(wb: &mut WorkbenchSession) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);
     if let Err(error) = wb.navigate(route, RouteTransitionSource::User) {
         wb.prompt(error.to_string());
+    }
+}
+
+/// Whether the run history is in front, on its own route.
+pub(in crate::workbench) fn jobs_manager_open(wb: &WorkbenchSession) -> bool {
+    wb.current_route().surface_id() == SurfaceId::JobsManager
+}
+
+/// Leave the run history for the route it was opened from, or for the
+/// workspace's own surface where nothing opened it.
+pub(in crate::workbench) fn close_jobs_manager(wb: &mut WorkbenchSession) {
+    if wb.navigate_back(RouteTransitionSource::User).is_some() {
+        return;
+    }
+    let fallback = SurfaceRoute::surface(SurfaceId::from_workspace(wb.workspace));
+    if let Err(error) = wb.replace_route(fallback, RouteTransitionSource::User) {
+        wb.prompt(format!(
+            "Could not close {}: {error}",
+            SurfaceId::JobsManager.label()
+        ));
     }
 }
 

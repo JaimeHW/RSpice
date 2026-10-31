@@ -422,7 +422,7 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
 /// the top modal. The dialog order lists each as a step of its own.
 const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("features::render_dialog", "cloud"),
-    ("tools::jobs_manager::show", "simulate"),
+    ("SimulateFeature::render_jobs_manager", "simulate"),
     ("surfaces::show_simulation_workflow_dialogs", "simulate"),
 ];
 
@@ -482,8 +482,9 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     (
         "8",
         &[
-            "|app, RevealExecutedDeck(sequence)|",
-            "open_task_deck(&mut app.state, sequence)",
+            "|app, RevealExecutedDeck { seq, close_manager_on_success, }|",
+            "if open_task_deck(&mut app.state, seq) && close_manager_on_success {",
+            "crate::workbench::simulate::close_jobs_manager(&mut app.state.workbench);",
         ],
     ),
     (

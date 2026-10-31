@@ -241,11 +241,16 @@ impl Request for SelectAnalysisInstance {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// Open the source the engine executed for the run of this sequence, or
-/// say why it cannot be. Raised by the results feature's Open task deck
-/// command, and taken straight after it returns.
+/// Open the source the engine executed for the run of sequence `seq`, or
+/// say why it cannot be; and once it is open, leave the run history when
+/// `close_manager_on_success` says the history asked. Raised by the
+/// results feature's Open task deck command and by the run history's
+/// executed-deck row, and taken straight after the call that raised it.
 #[derive(Clone, Copy, Debug)]
-pub struct RevealExecutedDeck(pub u64);
+pub struct RevealExecutedDeck {
+    pub seq: u64,
+    pub close_manager_on_success: bool,
+}
 
 impl Request for RevealExecutedDeck {
     const DRAIN: Drain = Drain::AfterContribution;
