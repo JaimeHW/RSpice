@@ -58,7 +58,7 @@ use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::models::workspace_state::{
     ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
     ProjectModelFacet, RSpicePartFacet,

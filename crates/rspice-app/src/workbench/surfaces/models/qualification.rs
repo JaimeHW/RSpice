@@ -948,7 +948,7 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
         QualificationPageAction::RunSuite => {
             app.state.models.model_editor.active_section = ModelEditorSection::Tests;
             model_editor::validate_open_candidate(app);
-            let key = Command::ModelRunQualificationTests.key();
+            let key = ModelsCommand::ModelRunQualificationTests.key();
             if app.command_key_enabled(key) {
                 app.execute_command_key(key);
             } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {
@@ -958,7 +958,7 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
         }
         QualificationPageAction::CompareRelease => {
             app.state.models.model_editor.active_section = ModelEditorSection::Release;
-            let key = Command::ModelCompareRelease.key();
+            let key = ModelsCommand::ModelCompareRelease.key();
             if app.command_key_enabled(key) {
                 app.execute_command_key(key);
             } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {

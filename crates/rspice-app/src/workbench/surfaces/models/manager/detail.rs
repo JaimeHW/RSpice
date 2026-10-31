@@ -413,9 +413,9 @@ pub(super) fn selected_model_detail(
                     .clicked()
                     {
                         if detail.project_owned {
-                            app.queue_command(Command::ModelEditor.key());
+                            app.queue_command(ModelsCommand::ModelEditor.key());
                         } else {
-                            app.queue_command(Command::ModelCreateProjectCopy.key());
+                            app.queue_command(ModelsCommand::ModelCreateProjectCopy.key());
                         }
                     }
                     if Button::new("Compare…").show(ui).clicked() {

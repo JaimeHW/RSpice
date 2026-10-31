@@ -122,7 +122,7 @@ pub(super) fn render_dialog(
             });
             match choice {
                 DialogChoice::Primary => {
-                    app.queue_command(Command::ModelEditor.key());
+                    app.queue_command(ModelsCommand::ModelEditor.key());
                     app.state.models.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
@@ -450,7 +450,7 @@ pub(super) fn render_dialog(
             }
             match choice {
                 DialogChoice::Secondary => {
-                    app.queue_command(Command::ModelEditor.key());
+                    app.queue_command(ModelsCommand::ModelEditor.key());
                     app.state.models.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Cancelled => {

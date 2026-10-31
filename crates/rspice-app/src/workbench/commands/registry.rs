@@ -409,16 +409,6 @@ impl Command {
                 | Self::SimulationOptions
                 | Self::GenerateNetlist
                 | Self::VerificationPage(_)
-                | Self::ModelsPage(_)
-                | Self::ModelBrowser
-                | Self::ModelCreateProjectCopy
-                | Self::ModelEditor
-                | Self::ModelSaveRevision
-                | Self::ModelValidate
-                | Self::ModelRunQualificationTests
-                | Self::ModelCompareRelease
-                | Self::PdkSettings
-                | Self::RescanModelLibraries
                 | Self::StimulusNewDefinition
                 | Self::StimulusDuplicateDefinition
                 | Self::StimulusDeleteDefinition
@@ -457,7 +447,6 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
-                | Self::RescanModelLibraries
                 | Self::CheckAndSave
                 | Self::ConnectivityManager
                 | Self::DesignManagement
@@ -468,10 +457,6 @@ impl Command {
                 | Self::ReviewComments
                 | Self::RevisionHistory
                 | Self::CreateHierarchy
-                | Self::ModelCreateProjectCopy
-                | Self::ModelEditor
-                | Self::ModelSaveRevision
-                | Self::ModelRunQualificationTests
         )
     }
 
@@ -989,53 +974,7 @@ impl Command {
             Self::StopSimulation => "no simulation is running",
             Self::PreflightChecks => "the engine is still building the decks of the last check",
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
-            Self::ModelCreateProjectCopy => {
-                super::selected_model_for_project_copy(app.state.model_editor_reads())
-                    .err()
-                    .unwrap_or("the selected model cannot be copied into the project")
-            }
-            // Correlation opens on the same selected model the editor does.
-            Self::ModelEditor | Self::ModelCorrelation => {
-                super::selected_project_model_for_editor(app.state.model_editor_reads())
-                    .err()
-                    .unwrap_or("the selected model cannot be opened for inspection")
-            }
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
-            Self::ModelSaveRevision if app.state.model.safe_mode.project_read_only() => {
-                "the project is open read-only"
-            }
-            Self::ModelSaveRevision
-                if app
-                    .state
-                    .models
-                    .model_editor
-                    .qualification_execution
-                    .is_some() =>
-            {
-                "qualification execution is active"
-            }
-            Self::ModelSaveRevision if app.state.models.model_editor.draft.is_none() => {
-                "no project-owned model candidate is open"
-            }
-            Self::ModelSaveRevision => "the open model candidate has no changes to save",
-            Self::ModelValidate => "no project-owned model candidate is open",
-            Self::ModelRunQualificationTests if app.state.model.safe_mode.project_read_only() => {
-                "qualification cannot run while the project is read-only"
-            }
-            Self::ModelRunQualificationTests
-                if app
-                    .state
-                    .models
-                    .model_editor
-                    .qualification_execution
-                    .is_some() =>
-            {
-                "a model qualification run is already active"
-            }
-            Self::ModelRunQualificationTests => {
-                "validate a clean candidate with at least one qualification suite first"
-            }
-            Self::ModelCompareRelease => "a clean candidate and a released model are required",
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"
             }

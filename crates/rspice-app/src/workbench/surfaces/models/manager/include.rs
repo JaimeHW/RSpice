@@ -787,7 +787,7 @@ fn instance_binding_card(
             .editor
             .selection
             .select_only_component(component_id);
-        app.queue_command(Command::ModelsPage(ModelsPage::Models).key());
+        app.queue_command(ModelsCommand::Page(ModelsPage::Models).key());
     }
     if let Some(component_id) = locate {
         app.state

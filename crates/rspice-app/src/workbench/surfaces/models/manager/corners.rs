@@ -1330,7 +1330,7 @@ fn corner_detail(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &CornerRo
             app.state.models.models_page = ModelsPage::Include;
         }
         if Button::new("Model editor…").show(ui).clicked() {
-            app.queue_command(Command::ModelEditor.key());
+            app.queue_command(ModelsCommand::ModelEditor.key());
         }
     });
     if activate {

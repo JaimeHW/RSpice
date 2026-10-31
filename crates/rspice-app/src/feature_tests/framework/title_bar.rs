@@ -23,6 +23,7 @@ use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
@@ -439,9 +440,12 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         listed.contains(&ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key()),
         "no menu lists the waveform viewer"
     );
+    assert!(
+        listed.contains(&ModelsCommand::Page(ModelsPage::Models).key()),
+        "no menu lists the model catalog"
+    );
     for command in [
         Command::VerificationPage(VerificationPage::Yield),
-        Command::ModelsPage(ModelsPage::Models),
         Command::AutomationConsole,
         Command::WindowManager,
         Command::JobsManager,
@@ -659,13 +663,17 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
         Command::PlaceBusTap,
         Command::PlaceJunction,
         Command::RunSimulation,
-        Command::PdkSettings,
         Command::AutomationConsole,
     ];
     assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
     assert!(
         command_registry()
             .spec(ResultsCommand::WaveformCalculator.key())
+            .is_some()
+    );
+    assert!(
+        command_registry()
+            .spec(ModelsCommand::PdkSettings.key())
             .is_some()
     );
 }
@@ -1046,7 +1054,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::CompileVerilogA, WorkbenchIcon::Netlist),
         (Command::RunSimulation, WorkbenchIcon::Run),
         (Command::AutomationConsole, WorkbenchIcon::Terminal),
-        (Command::ModelCompareRelease, WorkbenchIcon::Compare),
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1055,6 +1062,10 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             command.spec().id
         );
     }
+    assert_eq!(
+        app.command_icon(ModelsCommand::ModelCompareRelease.key()),
+        Some(WorkbenchIcon::Compare)
+    );
     assert_eq!(
         app.command_icon(ids::PRINT_HARDCOPY),
         Some(WorkbenchIcon::File)

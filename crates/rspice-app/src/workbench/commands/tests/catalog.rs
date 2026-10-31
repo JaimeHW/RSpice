@@ -7,6 +7,8 @@
 //! can see.
 
 use super::*;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::models::commands::ModelsCommand;
 
 #[test]
 fn command_catalog_has_unique_stable_ids() {
@@ -92,11 +94,13 @@ fn command_catalog_titles_name_exactly_one_action() {
 #[test]
 fn legacy_model_metadata_audit_identity_migrates_to_qualification() {
     assert_eq!(
-        Command::from_stable_id("model-metadata-audit"),
-        Some(Command::ModelsPage(ModelsPage::Qualification))
+        command_registry().resolve("model-metadata-audit"),
+        Some(ModelsCommand::Page(ModelsPage::Qualification).key())
     );
     assert_eq!(
-        Command::ModelsPage(ModelsPage::Qualification).stable_id(),
+        ModelsCommand::Page(ModelsPage::Qualification)
+            .key()
+            .as_str(),
         "model-qualification"
     );
 }
@@ -177,7 +181,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(SheetsCommand::NewSheet.key().as_str(), "new-sheet");
     assert_eq!(SheetsCommand::DeleteSheet.key().as_str(), "delete-sheet");
     assert_eq!(Command::ShowInNetlist.spec().id, "show-in-netlist");
-    assert_eq!(Command::ModelEditor.spec().id, "model-editor");
+    assert_eq!(ModelsCommand::ModelEditor.key().as_str(), "model-editor");
     assert_eq!(
         ResultsCommand::ImportResultDataset.key().as_str(),
         "import-dataset"
@@ -211,7 +215,9 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         }
     );
     assert_eq!(
-        Command::ModelsPage(ModelsPage::Models).spec().label,
+        ModelsCommand::Page(ModelsPage::Models)
+            .declared_spec()
+            .label,
         "Model & library catalog"
     );
 }

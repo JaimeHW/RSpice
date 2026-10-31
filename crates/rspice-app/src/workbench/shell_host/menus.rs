@@ -11,6 +11,7 @@ use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
@@ -48,6 +49,11 @@ const fn hardcopy(command: HardcopyCommand) -> MenuEntry {
 
 /// The cloud feature's command's row under the label it declares.
 const fn cloud(command: CloudCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The models feature's command's row under the label it declares.
+const fn models(command: ModelsCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -340,12 +346,12 @@ const VERIFY_MENU: &[MenuEntry] = &[
 ];
 
 const MODELS_MENU: &[MenuEntry] = &[
-    command_as(
-        Command::ModelsPage(ModelsPage::Models),
+    MenuEntry::command_as(
+        ModelsCommand::Page(ModelsPage::Models).key(),
         "Model & library catalog",
     ),
-    command(Command::ModelEditor),
-    command(Command::ModelCorrelation),
+    models(ModelsCommand::ModelEditor),
+    models(ModelsCommand::ModelCorrelation),
     Separator,
     command_as(Command::CompileVerilogA, "Verilog-A/AMS compiler"),
 ];
@@ -455,8 +461,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::PlaceText => WorkbenchIcon::Text,
         Command::ProjectLauncher | Command::ManageSourceDocument => WorkbenchIcon::Folder,
         Command::NewProject | Command::NewCell => WorkbenchIcon::Add,
-        Command::Save | Command::SymbolSave | Command::ModelSaveRevision => WorkbenchIcon::Save,
-        Command::RescanModelLibraries => WorkbenchIcon::Refresh,
+        Command::Save | Command::SymbolSave => WorkbenchIcon::Save,
         // The Models toolbar's button; the Verilog-A view's wears Run.
         Command::CompileVerilogA => WorkbenchIcon::Netlist,
         Command::RotateSelection => WorkbenchIcon::Rotate,
@@ -476,14 +481,13 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::CheckCellview
         | Command::CheckDesign
         | Command::PreflightChecks
-        | Command::ModelValidate
         | Command::ValidateCodeDocument => WorkbenchIcon::Check,
         Command::VerilogABuildSettings | Command::SimulationOptions => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
         Command::SourceLanguageTools => WorkbenchIcon::Target,
-        Command::ModelCompareRelease | Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
+        Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice) => WorkbenchIcon::Export,
-        Command::RunSimulation | Command::ModelRunQualificationTests => WorkbenchIcon::Run,
+        Command::RunSimulation => WorkbenchIcon::Run,
         Command::StopSimulation => WorkbenchIcon::Stop,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         _ => return None,
@@ -500,6 +504,16 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             HardcopyCommand::SaveReportDocument => Some(WorkbenchIcon::Save),
             HardcopyCommand::ReportPageProperties => Some(WorkbenchIcon::Sliders),
             HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
+            _ => None,
+        };
+    }
+    if let Some(command) = ModelsCommand::from_key(key) {
+        return match command {
+            ModelsCommand::ModelSaveRevision => Some(WorkbenchIcon::Save),
+            ModelsCommand::RescanModelLibraries => Some(WorkbenchIcon::Refresh),
+            ModelsCommand::ModelValidate => Some(WorkbenchIcon::Check),
+            ModelsCommand::ModelCompareRelease => Some(WorkbenchIcon::Compare),
+            ModelsCommand::ModelRunQualificationTests => Some(WorkbenchIcon::Run),
             _ => None,
         };
     }

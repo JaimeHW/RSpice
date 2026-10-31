@@ -5,6 +5,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::results::commands::ResultsCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
@@ -36,8 +37,7 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::OpenProject
         | Command::ProjectLauncher
         | Command::RecentProjects
-        | Command::OpenDocument
-        | Command::ModelBrowser => Icon::Folder,
+        | Command::OpenDocument => Icon::Folder,
         Command::NewProject
         | Command::Save
         | Command::SaveAs
@@ -58,6 +58,9 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
             _ => None,
         };
+    }
+    if ModelsCommand::from_key(key) == Some(ModelsCommand::ModelBrowser) {
+        return Some(Icon::Folder);
     }
     match ResultsCommand::from_key(key)? {
         ResultsCommand::ExportWaveformsCsv => Some(Icon::File),

@@ -233,7 +233,9 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
 fn qualification_tab_uses_the_mockup_contract_label() {
     assert_eq!(ModelsPage::Qualification.label(), "Qualification");
     assert_eq!(
-        Command::ModelsPage(ModelsPage::Qualification).stable_id(),
+        ModelsCommand::Page(ModelsPage::Qualification)
+            .key()
+            .as_str(),
         "model-qualification"
     );
 }

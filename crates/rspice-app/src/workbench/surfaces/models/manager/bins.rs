@@ -194,7 +194,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
             if Button::new("Edit cards…").accent().show(ui).clicked() {
-                app.queue_command(Command::ModelEditor.key());
+                app.queue_command(ModelsCommand::ModelEditor.key());
             }
             if Button::new("Import bin map")
                 .enabled(!app.state.models.models_view.model_import_in_progress)
@@ -283,7 +283,7 @@ fn bins_body(
                 });
             }
             if Button::new("Edit cards…").show(ui).clicked() {
-                app.queue_command(Command::ModelEditor.key());
+                app.queue_command(ModelsCommand::ModelEditor.key());
             }
             if Button::new("Import bin map")
                 .enabled(!app.state.models.models_view.model_import_in_progress)

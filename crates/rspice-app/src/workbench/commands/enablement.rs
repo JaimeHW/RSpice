@@ -501,30 +501,6 @@ impl Command {
                 state.runs.preflight.checking.is_some()
                     || stop_simulation_enabled(&state.model.simulation)
             }
-            Self::ModelCreateProjectCopy => {
-                selected_model_for_project_copy(app.state.model_editor_reads()).is_ok()
-            }
-            Self::ModelEditor | Self::ModelCorrelation => {
-                selected_project_model_for_editor(app.state.model_editor_reads()).is_ok()
-            }
-            Self::ModelSaveRevision => {
-                state
-                    .models
-                    .model_editor
-                    .draft
-                    .as_ref()
-                    .is_some_and(|draft| {
-                        draft.is_dirty()
-                            && !state.model.safe_mode.project_read_only()
-                            && state.platform.project_lifecycle.is_open()
-                            && state
-                                .models
-                                .model_editor
-                                .qualification_execution
-                                .is_none()
-                    })
-            }
-            Self::ModelValidate => state.models.model_editor.draft.is_some(),
             // Every library verb needs the instrument open, because they all
             // act on the definition it is reading; New and Validate need only
             // that, because a library with nothing in it is exactly where New
@@ -552,59 +528,6 @@ impl Command {
                     && crate::workbench::app::actions::stimulus::selected_definition_has_adopter(
                         state,
                     )
-            }
-            Self::ModelRunQualificationTests => state
-                .models
-                .model_editor
-                .draft
-                .as_ref()
-                .is_some_and(|draft| {
-                    state.platform.project_lifecycle.is_open()
-                        && !state.model.safe_mode.project_read_only()
-                        && !draft.definition_is_dirty()
-                        && draft
-                            .qualification
-                            .validate_for_model(&draft.model_name)
-                            .is_ok()
-                        && crate::state::model_library::ModelSourceEvidenceBinding::try_new_project_bound(
-                            &draft.model_name,
-                            draft.source_id,
-                            draft.base_source_digest,
-                            draft.base_source_revision,
-                        )
-                        .is_ok_and(|source| {
-                            draft
-                                .qualification
-                                .exact_suites_for_source(&source)
-                                .is_ok_and(|suites| !suites.is_empty())
-                        })
-                        && state.models.model_editor.validation.is_some()
-                        && state
-                            .models
-                            .model_editor
-                            .qualification_execution
-                            .is_none()
-                }),
-            Self::ModelCompareRelease => {
-                state
-                    .models
-                    .model_editor
-                    .draft
-                    .as_ref()
-                    .is_some_and(|draft| {
-                        !draft.definition_is_dirty()
-                            && !draft.qualification.candidates.is_empty()
-                            && !draft.qualification.releases.is_empty()
-                            && draft
-                                .qualification
-                                .validate_for_model(&draft.model_name)
-                                .is_ok()
-                            && state
-                                .models
-                                .model_editor
-                                .qualification_execution
-                                .is_none()
-                    })
             }
             // A run's log is a record; only the session's log is cleared.
             Self::ClearConsole => match state.workbench.console_page {

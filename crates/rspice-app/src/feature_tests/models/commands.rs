@@ -5,13 +5,16 @@
 //! an ambiguous selection, on a source the project does not own, or on a
 //! selection retained from a project that has since closed.
 
+use crate::state::ModelsPage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::{self, Command};
-use crate::workbench::commands::{
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
+use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::models::model_editor_workflow::{
     ModelEditorWorkflow, active_model_editor_workflow, close_model_editor_workflow,
     selected_project_model_for_editor,
 };
-use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::state::Workspace;
 
 #[test]
 fn model_editor_command_has_fail_closed_selection_authority() {
@@ -22,7 +25,7 @@ fn model_editor_command_has_fail_closed_selection_authority() {
     app.state.model.model_library_manager.selected_library = None;
     app.state.models.selected_model = None;
     assert_eq!(
-        Command::ModelEditor.availability(&app),
+        app.command_availability(ModelsCommand::ModelEditor.key()),
         CommandAvailability::Disabled("select one model in Model & library catalog")
     );
 
@@ -36,7 +39,7 @@ fn model_editor_command_has_fail_closed_selection_authority() {
         .expect("the fixture library is loaded");
     app.state.models.selected_model = Some("readonly_nch".to_owned());
     assert_eq!(
-        Command::ModelEditor.availability(&app),
+        app.command_availability(ModelsCommand::ModelEditor.key()),
         CommandAvailability::Disabled(
             "the selected model is built-in; create an editable project copy first"
         )
@@ -47,24 +50,23 @@ fn model_editor_command_has_fail_closed_selection_authority() {
 fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     use crate::state::model_library::{DeviceModel, ModelLibrary, ModelSourceAuthority, ModelType};
 
+    let copy = ModelsCommand::ModelCreateProjectCopy;
+    assert_eq!(copy.key().as_str(), "model-create-project-copy");
+    assert_eq!(copy.declared_spec().label, "Create editable project copy");
+    assert_eq!(copy.declared_spec().group, "Models");
     assert_eq!(
-        Command::ModelCreateProjectCopy.stable_id(),
-        "model-create-project-copy"
-    );
-    assert_eq!(
-        Command::ModelCreateProjectCopy.spec().label,
-        "Create editable project copy"
-    );
-    assert_eq!(Command::ModelCreateProjectCopy.spec().group, "Models");
-    assert_eq!(
-        Command::from_stable_id("model-create-project-copy"),
-        Some(Command::ModelCreateProjectCopy)
+        command_registry().resolve("model-create-project-copy"),
+        Some(copy.key())
     );
     assert!(
-        vocabulary::COMMAND_REGISTRY.contains(&Command::ModelCreateProjectCopy),
+        command_registry().order().contains(&copy.key()),
         "project-copy action must be reachable through the command registry"
     );
-    assert!(Command::ModelCreateProjectCopy.blocked_by_project_operation());
+    assert!(
+        copy.declared_spec()
+            .flags
+            .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+    );
 
     let mut app = RSpiceApp::test_instance();
     app.state.open_project_session();
@@ -87,11 +89,11 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
     app.state.models.selected_model = Some("copy_nch".to_owned());
 
     assert_eq!(
-        Command::ModelCreateProjectCopy.availability(&app),
+        app.command_availability(ModelsCommand::ModelCreateProjectCopy.key()),
         CommandAvailability::Available
     );
-    assert!(!Command::ModelEditor.is_enabled(&app));
-    Command::ModelCreateProjectCopy.execute(&mut app);
+    assert!(!app.command_key_enabled(ModelsCommand::ModelEditor.key()));
+    app.execute_command_key(ModelsCommand::ModelCreateProjectCopy.key());
 
     assert!(
         app.state.model.workspace.content.project.revision() > initial_project_revision,
@@ -136,7 +138,7 @@ fn editable_project_copy_command_publishes_opens_and_records_undo_history() {
         draft.base_project_revision,
         app.state.model.workspace.content.project.revision()
     );
-    assert!(Command::ModelEditor.is_enabled(&app));
+    assert!(app.command_key_enabled(ModelsCommand::ModelEditor.key()));
 
     assert!(app.state.model.can_undo_project_design());
     let undo_description = app
@@ -189,7 +191,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .expect("the fixture library is loaded");
     app.state.models.selected_model = Some("external_nch".to_owned());
     assert_eq!(
-        Command::ModelCreateProjectCopy.availability(&app),
+        app.command_availability(ModelsCommand::ModelCreateProjectCopy.key()),
         CommandAvailability::Available
     );
 
@@ -214,7 +216,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         .expect("the fixture library is loaded");
     app.state.models.selected_model = Some("owned_nch".to_owned());
     assert_eq!(
-        Command::ModelCreateProjectCopy.availability(&app),
+        app.command_availability(ModelsCommand::ModelCreateProjectCopy.key()),
         CommandAvailability::Disabled("the selected model is already an editable project copy")
     );
 
@@ -232,7 +234,7 @@ fn editable_project_copy_command_accepts_external_models_and_rejects_owned_or_re
         "read-only copy test".to_owned(),
     );
     assert_eq!(
-        Command::ModelCreateProjectCopy.availability(&app),
+        app.command_availability(ModelsCommand::ModelCreateProjectCopy.key()),
         CommandAvailability::Disabled("the project is open read-only")
     );
 }
@@ -271,10 +273,10 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
     app.state.models.selected_model = Some(commit.model_name);
 
     assert_eq!(
-        Command::ModelEditor.availability(&app),
+        app.command_availability(ModelsCommand::ModelEditor.key()),
         CommandAvailability::Available
     );
-    assert!(Command::ModelEditor.is_enabled(&app));
+    assert!(app.command_key_enabled(ModelsCommand::ModelEditor.key()));
 
     app.state.model.safe_mode.activate(
         crate::state::write_policy::LocalSafeModeOptions {
@@ -284,25 +286,25 @@ fn model_editor_command_accepts_one_coherent_project_owned_definition() {
         "read-only model review".to_owned(),
     );
     assert_eq!(
-        Command::ModelEditor.availability(&app),
+        app.command_availability(ModelsCommand::ModelEditor.key()),
         CommandAvailability::Available
     );
-    Command::ModelEditor.execute(&mut app);
+    app.execute_command_key(ModelsCommand::ModelEditor.key());
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
         crate::workbench::SurfaceId::ModelEditor
     );
     assert!(app.state.models.model_editor.draft.is_some());
     assert_eq!(
-        Command::ModelSaveRevision.availability(&app),
+        app.command_availability(ModelsCommand::ModelSaveRevision.key()),
         CommandAvailability::Disabled("the project is open read-only")
     );
     assert_eq!(
-        Command::ModelRunQualificationTests.availability(&app),
+        app.command_availability(ModelsCommand::ModelRunQualificationTests.key()),
         CommandAvailability::Disabled("qualification cannot run while the project is read-only")
     );
-    assert!(Command::ModelValidate.is_enabled(&app));
-    Command::ModelValidate.execute(&mut app);
+    assert!(app.command_key_enabled(ModelsCommand::ModelValidate.key()));
+    app.execute_command_key(ModelsCommand::ModelValidate.key());
     assert_eq!(
         active_model_editor_workflow(app.state.model_editor_reads())
             .map(|request| request.workflow),
@@ -342,10 +344,10 @@ fn model_editor_command_requires_an_open_project_even_with_a_retained_selection(
     app.state.close_project_session();
 
     assert_eq!(
-        Command::ModelEditor.availability(&app),
+        app.command_availability(ModelsCommand::ModelEditor.key()),
         CommandAvailability::Disabled("no project is open")
     );
-    assert!(!Command::ModelEditor.is_enabled(&app));
+    assert!(!app.command_key_enabled(ModelsCommand::ModelEditor.key()));
     assert_eq!(
         selected_project_model_for_editor(app.state.model_editor_reads()),
         Err("open a project before editing a device model")
@@ -405,7 +407,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
             .model_editor
             .validate_candidate(&app.state.model.model_library_manager, project_revision)
     );
-    assert!(Command::ModelRunQualificationTests.is_enabled(&app));
+    assert!(app.command_key_enabled(ModelsCommand::ModelRunQualificationTests.key()));
 
     app.state
         .models
@@ -429,7 +431,7 @@ fn qualification_command_requires_a_suite_for_the_exact_open_source() {
             .validate_for_model("qualification_nch")
             .is_ok()
     );
-    assert!(!Command::ModelRunQualificationTests.is_enabled(&app));
+    assert!(!app.command_key_enabled(ModelsCommand::ModelRunQualificationTests.key()));
 }
 
 #[test]
@@ -455,7 +457,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     // all say the same. A clean rescan answers the gesture on the status bar
     // and in the Console; it interrupts nobody.
     let ctx = egui::Context::default();
-    Command::RescanModelLibraries.execute(&mut app);
+    app.execute_command_key(ModelsCommand::RescanModelLibraries.key());
     app.state.drain_notices(&ctx);
 
     assert_eq!(app.state.model.pdk_config.discovered_files.len(), 1);
@@ -481,7 +483,7 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
         .model
         .pdk_config
         .add_library_path(root.join("missing").to_string_lossy().into_owned());
-    Command::RescanModelLibraries.execute(&mut app);
+    app.execute_command_key(ModelsCommand::RescanModelLibraries.key());
     app.state.drain_notices(&ctx);
 
     assert_eq!(app.state.model.pdk_config.discovered_files.len(), 1);
@@ -506,4 +508,33 @@ fn model_library_rescan_discovers_files_and_reports_path_errors() {
     );
 
     std::fs::remove_dir_all(&root).expect("remove model-library fixture");
+}
+
+/// The model catalog and the PDK paths are raised by the keys other
+/// features name them by, behind the prologue every command shares: with no
+/// project open the catalog is refused and the workspace stays where it was;
+/// with one, the catalog opens the Models workspace on its catalog page, and
+/// the PDK paths open their dialog.
+#[test]
+fn model_commands_raised_by_key_run_behind_the_shared_prologue() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.close_project_session();
+    let workspace = app.state.workbench.workspace;
+    assert_ne!(workspace, Workspace::Models);
+    assert_eq!(
+        app.command_availability(ids::MODELS_CATALOG),
+        CommandAvailability::Disabled("no project is open")
+    );
+    app.execute_command_key(ids::MODELS_CATALOG);
+    assert_eq!(app.state.workbench.workspace, workspace);
+
+    app.state.open_project_session();
+    app.state.models.models_page = ModelsPage::Bins;
+    app.execute_command_key(ids::MODELS_CATALOG);
+    assert_eq!(app.state.workbench.workspace, Workspace::Models);
+    assert_eq!(app.state.models.models_page, ModelsPage::Models);
+
+    assert!(!app.state.models.pdk_settings_dialog.open);
+    app.execute_command_key(ids::PDK_SETTINGS);
+    assert!(app.state.models.pdk_settings_dialog.open);
 }

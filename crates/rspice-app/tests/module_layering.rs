@@ -715,6 +715,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "hardcopy/commands",
     // What the cloud feature's commands declare, the same way.
     "cloud/commands",
+    // What the models feature's commands declare, the same way.
+    "models/commands",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into

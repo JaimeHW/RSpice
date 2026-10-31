@@ -25,6 +25,7 @@ use crate::state::{DrawnObject, PreflightRemediation};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::{SimulationPage, Workspace};
 
@@ -224,7 +225,7 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                     .as_deref()
                     .map(|corner| format!("{library}\u{1f}{corner}"));
             }
-            app.execute_command_key(Command::ModelsPage(page).key());
+            app.execute_command_key(ModelsCommand::Page(page).key());
         }
         PreflightRemediation::NetlistSource { line } => {
             use crate::workbench::documents::netlist_document;

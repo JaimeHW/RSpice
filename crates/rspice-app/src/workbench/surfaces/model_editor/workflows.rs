@@ -44,7 +44,7 @@ pub(super) fn show_model_editor_workflow(
 pub(super) fn save_revision_workflow(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
-    request: &super::super::super::commands::ModelEditorWorkflowRequest,
+    request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
     let writable = app.state.platform.project_lifecycle.is_open()
         && !app.state.model.safe_mode.project_read_only()
@@ -167,7 +167,7 @@ pub(super) fn validation_review_workflow(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
-    request: &super::super::super::commands::ModelEditorWorkflowRequest,
+    request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
     let prepared = request.prepared;
     let choice = Dialog::new(
@@ -203,7 +203,7 @@ pub(super) fn validation_review_body(
     ui: &mut Ui,
     app: &RSpiceApp,
     records: &PersistedModelRecords,
-    request: &super::super::super::commands::ModelEditorWorkflowRequest,
+    request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
     prepared: bool,
 ) {
     workflow_purpose_note(
@@ -331,9 +331,9 @@ pub(super) fn qualification_run_workflow(
     ctx: &egui::Context,
     app: &mut RSpiceApp,
     records: &PersistedModelRecords,
-    request: &super::super::super::commands::ModelEditorWorkflowRequest,
+    request: &crate::workbench::models::model_editor_workflow::ModelEditorWorkflowRequest,
 ) {
-    let runnable = app.command_key_enabled(Command::ModelRunQualificationTests.key());
+    let runnable = app.command_key_enabled(ModelsCommand::ModelRunQualificationTests.key());
     let choice = Dialog::new("Run model qualification tests", "Queue qualification tests")
     .description("Confirm the saved source, the suites to run, the runtime target, and how results are kept before starting.")
     .size(DialogSize::Transaction)
@@ -353,7 +353,7 @@ pub(super) fn qualification_run_workflow(
         if let Some(error) = request.error.as_deref() {
             blocker_note(ui, error);
         } else if !runnable {
-            let reason = match app.command_availability(Command::ModelRunQualificationTests.key()) {
+            let reason = match app.command_availability(ModelsCommand::ModelRunQualificationTests.key()) {
                 CommandAvailability::Disabled(reason) => reason,
                 CommandAvailability::Available | CommandAvailability::Hidden => {
                     "Qualification is unavailable in this context."

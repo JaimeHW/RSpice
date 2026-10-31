@@ -20,6 +20,7 @@ use crate::state::{ComponentType, ModelsPage};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
@@ -238,18 +239,7 @@ pub enum Command {
     CompareGeneratedRevisions,
     VerificationPage(VerificationPage),
     ProjectPage(ProjectPage),
-    ModelsPage(ModelsPage),
     SimulationPage(SimulationPage),
-    ModelBrowser,
-    ModelCreateProjectCopy,
-    ModelEditor,
-    ModelCorrelation,
-    ModelSaveRevision,
-    ModelValidate,
-    ModelRunQualificationTests,
-    ModelCompareRelease,
-    PdkSettings,
-    RescanModelLibraries,
     StimulusNewDefinition,
     StimulusDuplicateDefinition,
     StimulusDeleteDefinition,
@@ -713,20 +703,6 @@ impl Command {
             Self::ProjectPage(ProjectPage::Recovery) => {
                 spec("project-recovery", "Open recovery center", "Project")
             }
-            Self::ModelsPage(ModelsPage::Models) => {
-                spec("models-catalog", "Model & library catalog", "Models")
-            }
-            Self::ModelsPage(ModelsPage::Symbols) => spec("symbols-cdf", "Symbols & CDF", "Models"),
-            Self::ModelsPage(ModelsPage::Corners) => {
-                spec("corner-sections", "Corners & sections", "Models")
-            }
-            Self::ModelsPage(ModelsPage::Bins) => spec("model-bins", "Bins & geometry", "Models"),
-            Self::ModelsPage(ModelsPage::Include) => {
-                spec("include-graph", "Include graph", "Models")
-            }
-            Self::ModelsPage(ModelsPage::Qualification) => {
-                spec("model-qualification", "Model qualification", "Models")
-            }
             // Every setup route is addressable, the way the Project, Verify and
             // Models pages are. The Solver route keeps its own dedicated
             // command as well, because that one is also a menu action.
@@ -761,30 +737,6 @@ impl Command {
                 "Save, streaming & retention policy",
                 "Simulate",
             ),
-            Self::ModelBrowser => spec("model-browser", "Model browser…", "Models"),
-            Self::ModelCreateProjectCopy => spec(
-                "model-create-project-copy",
-                "Create editable project copy",
-                "Models",
-            ),
-            Self::ModelEditor => spec(
-                "model-editor",
-                "Device model and parameter editor…",
-                "Models",
-            ),
-            Self::ModelCorrelation => {
-                spec("model-correlation", "Measurement correlation…", "Models")
-            }
-            Self::ModelSaveRevision => spec("model-save-revision", "Save model revision", "Models"),
-            Self::ModelValidate => spec("model-validate", "Validate model", "Models"),
-            Self::ModelRunQualificationTests => {
-                spec("model-run-tests", "Run qualification tests", "Models")
-            }
-            Self::ModelCompareRelease => spec("model-compare", "Compare with release", "Models"),
-            Self::PdkSettings => spec("pdk-settings", "PDK and model paths…", "Models"),
-            Self::RescanModelLibraries => {
-                spec("rescan-model-libraries", "Rescan model libraries", "Models")
-            }
             Self::StimulusNewDefinition => {
                 spec("stimulus-new", "New stimulus definition", "Stimulus")
             }
@@ -936,14 +888,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SimulationPage(SimulationPage::Solver),
     Command::SimulationPage(SimulationPage::Save),
     Command::VerificationPage(VerificationPage::Yield),
-    Command::ModelsPage(ModelsPage::Models),
-    Command::ModelCreateProjectCopy,
-    Command::ModelEditor,
-    Command::ModelCorrelation,
-    Command::ModelSaveRevision,
-    Command::ModelValidate,
-    Command::ModelRunQualificationTests,
-    Command::ModelCompareRelease,
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
@@ -1082,14 +1026,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::VerificationPage(VerificationPage::Optimization),
     Command::VerificationPage(VerificationPage::DeviceSafety),
     Command::VerificationPage(VerificationPage::Regression),
-    Command::ModelsPage(ModelsPage::Symbols),
-    Command::ModelsPage(ModelsPage::Corners),
-    Command::ModelsPage(ModelsPage::Bins),
-    Command::ModelsPage(ModelsPage::Include),
-    Command::ModelsPage(ModelsPage::Qualification),
-    Command::ModelBrowser,
-    Command::PdkSettings,
-    Command::RescanModelLibraries,
     Command::StimulusNewDefinition,
     Command::StimulusDuplicateDefinition,
     Command::StimulusDeleteDefinition,
@@ -1189,14 +1125,14 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SimulationPage(SimulationPage::Save).key(),
     ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key(),
     Command::VerificationPage(VerificationPage::Yield).key(),
-    Command::ModelsPage(ModelsPage::Models).key(),
-    Command::ModelCreateProjectCopy.key(),
-    Command::ModelEditor.key(),
-    Command::ModelCorrelation.key(),
-    Command::ModelSaveRevision.key(),
-    Command::ModelValidate.key(),
-    Command::ModelRunQualificationTests.key(),
-    Command::ModelCompareRelease.key(),
+    ModelsCommand::Page(ModelsPage::Models).key(),
+    ModelsCommand::ModelCreateProjectCopy.key(),
+    ModelsCommand::ModelEditor.key(),
+    ModelsCommand::ModelCorrelation.key(),
+    ModelsCommand::ModelSaveRevision.key(),
+    ModelsCommand::ModelValidate.key(),
+    ModelsCommand::ModelRunQualificationTests.key(),
+    ModelsCommand::ModelCompareRelease.key(),
     Command::ZoomIn.key(),
     Command::ZoomOut.key(),
     Command::ZoomFit.key(),
@@ -1381,14 +1317,14 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::VerificationPage(VerificationPage::Optimization).key(),
     Command::VerificationPage(VerificationPage::DeviceSafety).key(),
     Command::VerificationPage(VerificationPage::Regression).key(),
-    Command::ModelsPage(ModelsPage::Symbols).key(),
-    Command::ModelsPage(ModelsPage::Corners).key(),
-    Command::ModelsPage(ModelsPage::Bins).key(),
-    Command::ModelsPage(ModelsPage::Include).key(),
-    Command::ModelsPage(ModelsPage::Qualification).key(),
-    Command::ModelBrowser.key(),
-    Command::PdkSettings.key(),
-    Command::RescanModelLibraries.key(),
+    ModelsCommand::Page(ModelsPage::Symbols).key(),
+    ModelsCommand::Page(ModelsPage::Corners).key(),
+    ModelsCommand::Page(ModelsPage::Bins).key(),
+    ModelsCommand::Page(ModelsPage::Include).key(),
+    ModelsCommand::Page(ModelsPage::Qualification).key(),
+    ModelsCommand::ModelBrowser.key(),
+    ModelsCommand::PdkSettings.key(),
+    ModelsCommand::RescanModelLibraries.key(),
     Command::StimulusNewDefinition.key(),
     Command::StimulusDuplicateDefinition.key(),
     Command::StimulusDeleteDefinition.key(),
@@ -1427,7 +1363,7 @@ const LEGACY_ALIASES: &[(&str, CommandKey)] = &[
     // temporary audit.
     (
         "model-metadata-audit",
-        Command::ModelsPage(ModelsPage::Qualification).key(),
+        ModelsCommand::Page(ModelsPage::Qualification).key(),
     ),
     ("fit-canvas", Command::ZoomFit.key()),
     ("export-waveforms", ResultsCommand::ExportWaveformsCsv.key()),
@@ -1462,6 +1398,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(HardcopyCommand::LISTED.map(HardcopyCommand::declared_spec))
                 .chain(ResultsCommand::ALL.map(ResultsCommand::declared_spec))
                 .chain(CloudCommand::ALL.map(CloudCommand::declared_spec))
+                .chain(ModelsCommand::ALL.map(ModelsCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

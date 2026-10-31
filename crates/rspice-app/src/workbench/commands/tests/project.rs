@@ -11,6 +11,7 @@ use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
+use crate::workbench::models::commands::ModelsCommand;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -74,7 +75,6 @@ fn project_operation_gate_covers_every_mutating_project_command() {
         Command::ImportNetlist,
         Command::ImportVerilogA,
         Command::CheckAndSave,
-        Command::ModelEditor,
     ] {
         assert!(
             command.blocked_by_project_operation(),
@@ -90,6 +90,12 @@ fn project_operation_gate_covers_every_mutating_project_command() {
     };
     assert!(blocked(ResultsCommand::ImportResultDataset));
     assert!(!blocked(ResultsCommand::ExportWaveformsCsv));
+    assert!(
+        ModelsCommand::ModelEditor
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION)
+    );
 }
 
 #[test]
@@ -138,11 +144,6 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::SimulationOptions,
         Command::GenerateNetlist,
         Command::VerificationPage(VerificationPage::Yield),
-        Command::ModelsPage(ModelsPage::Models),
-        Command::ModelBrowser,
-        Command::ModelEditor,
-        Command::PdkSettings,
-        Command::RescanModelLibraries,
         Command::CompileVerilogA,
         Command::AutomationConsole,
     ] {
@@ -158,6 +159,21 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         ResultsCommand::CompareResultDatasets,
         ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
         ResultsCommand::EditSpecifications,
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+            "missing closed-project boundary: {command:?}"
+        );
+    }
+    for command in [
+        ModelsCommand::Page(ModelsPage::Models),
+        ModelsCommand::ModelBrowser,
+        ModelsCommand::ModelEditor,
+        ModelsCommand::PdkSettings,
+        ModelsCommand::RescanModelLibraries,
     ] {
         assert!(
             command

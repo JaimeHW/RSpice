@@ -3,10 +3,10 @@
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::RouteTransitionSource;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::models::commands::ModelsCommand;
 
 use super::{
     context_separator, explicit_label_width, take_projected_tool_slot, toolbar_icon_command,
@@ -17,7 +17,7 @@ const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = 
     (ids::SAVE, WorkbenchIcon::Save, None),
     (ids::PDK_SETTINGS, WorkbenchIcon::Add, Some("Add library")),
     (
-        Command::RescanModelLibraries.key(),
+        ModelsCommand::RescanModelLibraries.key(),
         WorkbenchIcon::Refresh,
         None,
     ),
@@ -52,7 +52,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelSaveRevision.key(),
+        ModelsCommand::ModelSaveRevision.key(),
         WorkbenchIcon::Save,
         "Save model revision",
         layout,
@@ -60,7 +60,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelValidate.key(),
+        ModelsCommand::ModelValidate.key(),
         WorkbenchIcon::Check,
         "Validate model",
         layout,
@@ -68,7 +68,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelRunQualificationTests.key(),
+        ModelsCommand::ModelRunQualificationTests.key(),
         WorkbenchIcon::Run,
         "Run qualification tests",
         layout,
@@ -76,7 +76,7 @@ pub(in crate::workbench) fn model_editor_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ModelCompareRelease.key(),
+        ModelsCommand::ModelCompareRelease.key(),
         WorkbenchIcon::Compare,
         "Compare with release",
         layout,
