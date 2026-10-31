@@ -35,6 +35,7 @@ impl Bsim3v3Device {
     pub fn update_periodic_noise_probe(&mut self, solution: &[Value]) -> Result<(), String> {
         self.op = self.periodic_op(solution)?;
         self.bias = self.raw_branch_voltages(solution);
+        self.forget_last_update();
         Ok(())
     }
 

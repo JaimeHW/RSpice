@@ -217,6 +217,7 @@ impl Bsim3v3Device {
         self.von_prev = self.op.von;
         self.has_history = true;
         self.limit_anchor_valid.set(true);
+        self.forget_last_update();
         self.last_limited.set(false);
         self.initial_off_seed_pending = false;
         self.initial_off_seed_evaluations = 0;

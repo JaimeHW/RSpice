@@ -222,6 +222,7 @@ impl Bsim3v3Device {
         ] = state.values;
         self.has_history = state.flags[0];
         self.limit_anchor_valid.set(state.flags[1]);
+        self.forget_last_update();
         self.last_limited.set(state.flags[2]);
         self.initial_off_seed_pending = state.flags[4];
         self.initial_off_seed_raw = state.flags[5].then_some(raw);

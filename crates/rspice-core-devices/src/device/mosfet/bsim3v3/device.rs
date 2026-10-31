@@ -56,6 +56,16 @@ pub struct Bsim3v3ChargeMatrix {
     pub gcbsb: Value,
 }
 
+/// One iterate's raw branch voltages with the state they are limited
+/// against.
+#[derive(Debug, Clone, Copy, PartialEq)]
+struct Bsim3v3LimitAnchor {
+    raw: Bsim3v3Bias,
+    bias: Bsim3v3Bias,
+    von: Value,
+    valid: bool,
+}
+
 /// One BSIM3v3.3 instance wired into the engine.
 #[derive(Debug, Clone)]
 pub struct Bsim3v3Device {
@@ -86,6 +96,12 @@ pub struct Bsim3v3Device {
     /// The previous iterate exists, so the b3ld.c limiting sequence applies
     /// (the first iterate of an analysis phase passes through unlimited).
     limit_anchor_valid: std::cell::Cell<bool>,
+    /// The raw voltages the last `update` limited and the state it limited
+    /// them against ([`Self::limit_anchor`]).
+    last_update: Option<Bsim3v3LimitAnchor>,
+    /// No matrix load and no second `update` has seen the iterate
+    /// `last_update` holds yet ([`Self::begin_update`]).
+    last_update_open: std::cell::Cell<bool>,
     /// `DEVpnjlim` flagged the body junction on the last update (ngspice
     /// bumps `CKTnoncon`; here it vetoes device convergence for the iterate).
     last_limited: std::cell::Cell<bool>,
@@ -137,6 +153,8 @@ impl Bsim3v3Device {
             von_prev: 0.0,
             has_history: false,
             limit_anchor_valid: std::cell::Cell::new(false),
+            last_update: None,
+            last_update_open: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
             initial_off,
             initial_off_seed_pending: true,
@@ -203,10 +221,53 @@ impl Bsim3v3Device {
             );
         }
         let raw = self.raw_branch_voltages(v);
-        if !self.limit_anchor_valid.get() {
+        let anchor = self.limit_anchor(raw);
+        if !anchor.valid {
             return (raw, false);
         }
-        self.core.limit_voltages(raw, self.bias, self.von_prev)
+        self.core.limit_voltages(raw, anchor.bias, anchor.von)
+    }
+
+    /// The state an iterate is limited against: b3ld.c's `CKTstate0`, the
+    /// bias of the previous iterate. The engine updates and stamps one
+    /// iterate more than once, and each update overwrites `bias`; limiting
+    /// the same raw voltages again against the bias the first pass stored
+    /// would compound the `DEVfetlim`/`DEVlimvds`/`DEVpnjlim` steps. So an
+    /// iterate the last `update` saw is limited against what that update
+    /// limited it against, and any other against the present state.
+    fn limit_anchor(&self, raw: Bsim3v3Bias) -> Bsim3v3LimitAnchor {
+        match self.last_update {
+            Some(anchor) if anchor.raw == raw => anchor,
+            _ => self.present_limit_anchor(raw),
+        }
+    }
+
+    fn present_limit_anchor(&self, raw: Bsim3v3Bias) -> Bsim3v3LimitAnchor {
+        Bsim3v3LimitAnchor {
+            raw,
+            bias: self.bias,
+            von: self.von_prev,
+            valid: self.limit_anchor_valid.get(),
+        }
+    }
+
+    /// Record the iterate an `update` limits. The second update of one
+    /// iterate keeps the first one's anchor; once a matrix load or that
+    /// second update has used it, the same raw voltages are a new iterate (a
+    /// solve that repeats them must still advance the limiter towards them).
+    fn begin_update(&mut self, raw: Bsim3v3Bias) {
+        let same_iterate = self.last_update.is_some_and(|anchor| anchor.raw == raw)
+            && self.last_update_open.replace(false);
+        if !same_iterate {
+            self.last_update = Some(self.present_limit_anchor(raw));
+            self.last_update_open.set(true);
+        }
+    }
+
+    /// Forget the iterate the last `update` limited.
+    fn forget_last_update(&mut self) {
+        self.last_update = None;
+        self.last_update_open.set(false);
     }
 
     /// Charge state at the limited bias (the same bias the conductance stamp
@@ -1105,11 +1166,16 @@ impl NonlinearDevice for Bsim3v3Device {
             let moved = self.initial_off_seed_raw.is_some_and(|prev| prev != raw);
             if moved || self.initial_off_seed_evaluations >= 2 {
                 self.initial_off_seed_pending = false;
+                // The startup bias is the state the first Newton iterate is
+                // limited against, as b3ld.c limits against the zeroed
+                // CKTstate0, whatever an earlier pass anchored.
+                self.forget_last_update();
             } else {
                 self.initial_off_seed_evaluations += 1;
                 self.initial_off_seed_raw = Some(raw);
             }
         }
+        self.begin_update(self.raw_branch_voltages(voltages));
         let (bias, check) = self.limited_branch_voltages(voltages);
         self.last_limited.set(check);
         self.bias = bias;
@@ -1133,6 +1199,9 @@ impl NonlinearDevice for Bsim3v3Device {
         _rhs: &mut [Value],
     ) {
         let (bias, _) = self.limited_branch_voltages(voltages);
+        // The load closes the iterate: an update at the same raw voltages
+        // after it is the next Newton iteration.
+        self.last_update_open.set(false);
         if bias == self.bias {
             self.stamp_op(&self.op, bias, matrix);
         } else {
@@ -1176,5 +1245,62 @@ fn stamp(matrix: &mut impl MatrixStamper, row: NodeId, col: NodeId, value: Value
 fn stamp_rhs(matrix: &mut impl MatrixStamper, node: NodeId, value: Value) {
     if node != 0 && value != 0.0 {
         matrix.stamp_rhs(node, value);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::device::mosfet::bsim3v3::{Bsim3v3Geometry, Bsim3v3Model};
+
+    struct NoStamp;
+
+    impl MatrixStamper for NoStamp {
+        fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
+        fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    fn nmos() -> Bsim3v3Device {
+        let model = std::sync::Arc::new(Bsim3v3Model::from_params(
+            &std::collections::HashMap::new(),
+            false,
+            300.15,
+        ));
+        let geometry = Bsim3v3Geometry {
+            l: 0.18e-6,
+            w: 1.0e-6,
+            ..Bsim3v3Geometry::default()
+        };
+        let core = Bsim3v3::new("m1".to_string(), model, geometry, 300.15).expect("BSIM3 instance");
+        // Drain on node 1, gate on node 2, source and body grounded.
+        Bsim3v3Device::new("m1".to_string(), 1, 2, 0, 0, 0, 1.0, core)
+    }
+
+    #[test]
+    fn an_iterate_updated_twice_is_limited_once() {
+        let mut device = nmos();
+        device.update(&[0.0, 0.0]);
+        let (anchor, von) = (device.bias, device.op.von);
+
+        // A 4 V gate step, which DEVfetlim holds to `von + 4`.
+        let iterate = [0.05, 4.0];
+        let raw = device.raw_branch_voltages(&iterate);
+        let (once, _) = device.core.limit_voltages(raw, anchor, von);
+        assert!(once.vgs < raw.vgs - 1.0, "the step is limited: {once:?}");
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes, the stamp and the charge see one limiting.
+        device.update(&iterate);
+        device.update(&iterate);
+        assert_eq!(device.bias, once);
+        assert_eq!(device.limited_branch_voltages(&iterate).0, once);
+        device.stamp_nonlinear(&iterate, &mut NoStamp, &mut []);
+
+        // A solve that returns the same voltages after the load is the next
+        // iteration, which limits again from where this one stopped.
+        let (twice, _) = device.core.limit_voltages(raw, once, device.op.von);
+        assert_ne!(twice, once);
+        device.update(&iterate);
+        assert_eq!(device.bias, twice);
     }
 }
