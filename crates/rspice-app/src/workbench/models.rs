@@ -76,6 +76,26 @@ impl ModelsFeature {
             ctx,
         );
     }
+
+    /// Take the model packs this browser kept, on the frame their restore
+    /// lands: the hub's store takes them, and a pack that does not prove
+    /// goes on the workspace's operation ladder.
+    pub(in crate::workbench) fn poll_browser_pack_restore(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &egui::Context,
+    ) {
+        use crate::workbench::app::pack_persistence::{
+            PackRestoreParts, poll_browser_pack_restore,
+        };
+        poll_browser_pack_restore(
+            &mut PackRestoreParts {
+                models_view: &mut cx.state.models_view,
+                model: cx.model,
+                model_hub: cx.handles.model_hub,
+            },
+            ctx,
+        );
+    }
 }
 
 /// The Models workspace's navigator: its pages and the loaded model

@@ -240,6 +240,7 @@ pub struct FeatureHarness<F: Feature> {
     /// What the run tier keeps: the run preflight among it.
     pub runs: RunsState,
     pub(crate) run_controller: SimulationController,
+    pub(crate) model_hub: rspice_app_services::services::model_hub::ModelHubService,
     /// Every command the feature reads as registered.
     pub commands: &'static Registry,
 }
@@ -259,6 +260,9 @@ where
             platform: PlatformState::default(),
             runs: RunsState::default(),
             run_controller: SimulationController::new(),
+            model_hub: rspice_app_services::services::model_hub::ModelHubService::unavailable(
+                "The feature harness runs without a model-pack store.",
+            ),
             commands: &NO_COMMANDS,
         }
     }
@@ -290,6 +294,7 @@ where
             LowerHandles {
                 export_io: &NullExportIo,
                 run_controller: &mut self.run_controller,
+                model_hub: &mut self.model_hub,
             },
             Peers::new(
                 &mut NullPorts,

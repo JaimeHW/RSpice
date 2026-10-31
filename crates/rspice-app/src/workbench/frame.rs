@@ -246,6 +246,13 @@ impl RSpiceApp {
     pub(in crate::workbench) fn poll_browser_pdk_persistence(&mut self, ctx: &Context) {
         ModelsFeature::poll_browser_pdk_persistence(&mut features::cx(self), ctx);
     }
+
+    /// Have the models feature take the model packs this browser kept, in
+    /// its context.
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::workbench) fn poll_browser_pack_restore(&mut self, ctx: &Context) {
+        ModelsFeature::poll_browser_pack_restore(&mut features::cx(self), ctx);
+    }
 }
 
 /// The requests the result documents and the data browser raise while they

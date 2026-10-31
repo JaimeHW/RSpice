@@ -22,9 +22,10 @@
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::services::model_hub::ModelHubService;
 use crate::state::model_hub::durable::{PersistedHubState, start_browser_pack_restore};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::models::workspace_state::ModelsOperationalState;
+use crate::workbench::app_state::Model;
+use crate::workbench::models::workspace_state::{ModelsOperationalState, ModelsWorkbenchViewState};
 
 thread_local! {
     /// The restore, once storage has answered. At most one ever arrives.
@@ -41,78 +42,89 @@ pub(super) fn initialize_browser_pack_restore(ctx: &Context) {
     });
 }
 
-impl RSpiceApp {
-    /// Takes the restore, if this is the frame it landed on.
-    pub(super) fn poll_browser_pack_restore(&mut self, _ctx: &Context) {
-        let Some(completion) = COMPLETION.with(|slot| slot.borrow_mut().take()) else {
-            return;
-        };
-        match completion {
-            Ok((persisted, unrestored)) => {
-                for reason in unrestored {
-                    self.state
-                        .record(LogSeverity::Warning, LogSource::Studio, reason);
-                }
-                self.apply_restored_packs(persisted);
+/// What taking the restore writes: the hub's pack store, the Models & PDKs
+/// workspace's operation ladder, and the log in the model.
+pub(in crate::workbench) struct PackRestoreParts<'a> {
+    pub(in crate::workbench) models_view: &'a mut ModelsWorkbenchViewState,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) model_hub: &'a mut ModelHubService,
+}
+
+/// Takes the restore, if this is the frame it landed on.
+pub(in crate::workbench) fn poll_browser_pack_restore(
+    parts: &mut PackRestoreParts<'_>,
+    _ctx: &Context,
+) {
+    let Some(completion) = COMPLETION.with(|slot| slot.borrow_mut().take()) else {
+        return;
+    };
+    match completion {
+        Ok((persisted, unrestored)) => {
+            for reason in unrestored {
+                parts
+                    .model
+                    .record(LogSeverity::Warning, LogSource::Studio, reason);
             }
-            Err(error) => {
-                // Storage that will not open is not a failed operation — this
-                // session simply keeps its packs in memory, which is what it
-                // did before there was anywhere else to keep them. The note on
-                // the packs page already states that, derived from the same
-                // standing this failure recorded, so the console carries the
-                // reason and the workspace is not put into a failure state
-                // over something no reader asked for.
-                self.state.record(
-                    LogSeverity::Warning,
-                    LogSource::Studio,
-                    format!("Installed model packs cannot be kept between sessions: {error}"),
-                );
-            }
+            apply_restored_packs(parts, persisted);
+        }
+        Err(error) => {
+            // Storage that will not open is not a failed operation — this
+            // session simply keeps its packs in memory, which is what it
+            // did before there was anywhere else to keep them. The note on
+            // the packs page already states that, derived from the same
+            // standing this failure recorded, so the console carries the
+            // reason and the workspace is not put into a failure state
+            // over something no reader asked for.
+            parts.model.record(
+                LogSeverity::Warning,
+                LogSource::Studio,
+                format!("Installed model packs cannot be kept between sessions: {error}"),
+            );
         }
     }
+}
 
-    fn apply_restored_packs(&mut self, persisted: PersistedHubState) {
-        let Some((report, reload_error)) = self.model_hub.restore_persisted_packs(persisted) else {
-            return;
-        };
-        if let Some(error) = reload_error {
-            self.state
-                .record(LogSeverity::Error, LogSource::Studio, error);
-        }
-        if report.is_empty() {
-            return;
-        }
-        if report.restored > 0 {
-            self.state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
-                format!(
-                    "Restored {} kept by this browser; each signature was verified.",
-                    crate::ui::accessibility::counted(report.restored, "model pack", "model packs")
-                ),
-            );
-        }
-        // A discarded archive is a real refusal and is depicted as one: the
-        // bytes claimed to be a pack, did not prove, and were dropped. It goes
-        // on the workspace's own ladder rather than into a sentence of its
-        // own, so the packs page reports it the way it reports every other
-        // refusal.
-        if let Some(refusal) = report.refusal() {
-            self.state.models.models_view.attempted_operation = Some(
-                crate::workbench::models::workspace_state::ModelsAttemptedOperation {
-                    label: "restoring model packs kept by this browser".to_owned(),
-                    // Nothing to re-issue: the bytes are gone, and the remedy
-                    // is to install the release again from the hub, which is a
-                    // row the reader picks rather than a button that guesses.
-                    reissuable: false,
-                    landing_pack: None,
-                },
-            );
-            self.state.models.models_view.operational_state =
-                ModelsOperationalState::from_failure(&refusal);
-            self.state
-                .record(LogSeverity::Warning, LogSource::Studio, refusal);
-        }
+fn apply_restored_packs(parts: &mut PackRestoreParts<'_>, persisted: PersistedHubState) {
+    let Some((report, reload_error)) = parts.model_hub.restore_persisted_packs(persisted) else {
+        return;
+    };
+    if let Some(error) = reload_error {
+        parts
+            .model
+            .record(LogSeverity::Error, LogSource::Studio, error);
+    }
+    if report.is_empty() {
+        return;
+    }
+    if report.restored > 0 {
+        parts.model.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            format!(
+                "Restored {} kept by this browser; each signature was verified.",
+                crate::ui::accessibility::counted(report.restored, "model pack", "model packs")
+            ),
+        );
+    }
+    // A discarded archive is a real refusal and is depicted as one: the
+    // bytes claimed to be a pack, did not prove, and were dropped. It goes
+    // on the workspace's own ladder rather than into a sentence of its
+    // own, so the packs page reports it the way it reports every other
+    // refusal.
+    if let Some(refusal) = report.refusal() {
+        parts.models_view.attempted_operation = Some(
+            crate::workbench::models::workspace_state::ModelsAttemptedOperation {
+                label: "restoring model packs kept by this browser".to_owned(),
+                // Nothing to re-issue: the bytes are gone, and the remedy
+                // is to install the release again from the hub, which is a
+                // row the reader picks rather than a button that guesses.
+                reissuable: false,
+                landing_pack: None,
+            },
+        );
+        parts.models_view.operational_state = ModelsOperationalState::from_failure(&refusal);
+        parts
+            .model
+            .record(LogSeverity::Warning, LogSource::Studio, refusal);
     }
 }

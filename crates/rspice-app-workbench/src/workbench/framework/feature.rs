@@ -271,13 +271,15 @@ impl<'a> Peers<'a> {
 
 /// The application's handles on the services below the workbench that a
 /// feature's command reaches through: the export IO that asks where a file
-/// goes and writes it, and the run controller, which holds the prepared run
-/// and loads the transient viewers' derived data. The shell lends them
-/// beside the application state for the one call.
+/// goes and writes it, the run controller, which holds the prepared run and
+/// loads the transient viewers' derived data, and the Model Hub service,
+/// which holds the model-pack store and the hub's catalog. The shell lends
+/// them beside the application state for the one call.
 pub struct LowerHandles<'a> {
     pub export_io:
         &'a dyn rspice_app_services::workbench::workflows::export_workflow::ExportWorkflowIo,
     pub run_controller: &'a mut rspice_app_runs::simulation::SimulationController,
+    pub model_hub: &'a mut rspice_app_services::services::model_hub::ModelHubService,
 }
 
 impl CanvasGesturePort for Peers<'_> {

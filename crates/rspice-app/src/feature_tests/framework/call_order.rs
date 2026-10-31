@@ -1242,6 +1242,32 @@ fn the_models_feature_takes_browser_pdk_storage_news_where_the_frame_did() {
 }
 
 #[test]
+fn the_models_feature_takes_the_browser_pack_restore_where_the_frame_did() {
+    assert_eq!(
+        without_whitespace(&body(FRAME, "fn poll_browser_pack_restore(")),
+        without_whitespace(
+            "ModelsFeature::poll_browser_pack_restore(&mut features::cx(self), ctx);"
+        ),
+        "the frame's browser pack restore step runs in the models feature's context, and only that"
+    );
+    assert_runs_in_order(
+        "ModelsFeature::poll_browser_pack_restore",
+        &body(MODELS, "fn poll_browser_pack_restore("),
+        &[(
+            "5.20",
+            &["poll_browser_pack_restore(\
+                 &mut PackRestoreParts {\
+                 models_view: &mut cx.state.models_view,\
+                 model: cx.model,\
+                 model_hub: cx.handles.model_hub,\
+                 },\
+                 ctx,\
+                 );"],
+        )],
+    );
+}
+
+#[test]
 fn the_models_feature_keeps_its_authoring_recovery_where_the_shell_did() {
     assert_runs_in_order(
         "RSpiceApp::end_frame",

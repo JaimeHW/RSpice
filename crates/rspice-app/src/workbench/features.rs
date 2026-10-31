@@ -129,6 +129,7 @@ macro_rules! features {
                     let handles = LowerHandles {
                         export_io: app.export_workflow_io.as_ref(),
                         run_controller: &mut app.simulation_controller,
+                        model_hub: &mut app.model_hub,
                     };
                     let state = &mut app.state;
                     Cx::new(
