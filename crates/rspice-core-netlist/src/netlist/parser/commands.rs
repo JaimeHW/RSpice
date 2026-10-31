@@ -1679,10 +1679,38 @@ fn ignore_unknown_option(
             message,
         ));
     }
-    if has_equals
-        && try_value(stream, params).is_none()
-        && matches!(stream.peek().kind, TokenKind::Ident(_))
-    {
+    if has_equals {
+        skip_ignored_option_value(stream, params);
+    }
+}
+
+/// Consume an ignored option's value: one value, or Xyce's comma list of them
+/// (`initialvalue=0.0,0.0`, `conparam=mosfet:gainscale,mosfet:nltermscale`,
+/// `outputs={v(5)},{v(2)}`), each a number, a name, a brace expression or a
+/// quoted string. A comma before `key=` starts the next option instead.
+fn skip_ignored_option_value(stream: &mut TokenStream, params: &ParamContext) {
+    loop {
+        if try_value(stream, params).is_none() {
+            if !matches!(
+                stream.peek().kind,
+                TokenKind::Ident(_) | TokenKind::Expression(_) | TokenKind::StringLit(_)
+            ) {
+                return;
+            }
+            stream.advance();
+            while matches!(stream.peek().kind, TokenKind::Other(':'))
+                && matches!(stream.peek_n(1).kind, TokenKind::Ident(_))
+            {
+                stream.advance();
+                stream.advance();
+            }
+        }
+        if !matches!(stream.peek().kind, TokenKind::Comma)
+            || matches!(stream.peek_n(1).kind, TokenKind::Ident(_))
+                && matches!(stream.peek_n(2).kind, TokenKind::Equals)
+        {
+            return;
+        }
         stream.advance();
     }
 }
@@ -8709,6 +8737,27 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{card}: {error}"));
             assert_eq!(transient_fields(&netlist), expected, "{card}");
         }
+    }
+
+    /// Xyce gives an option a comma list (HOMOTOPY's `.options loca`,
+    /// `SENSITIVITY adjointTimePoints`), a brace expression (`SAMPLES outputs`)
+    /// or a quoted string (`MPDE oscout`); an ignored option takes all of it,
+    /// and the options after it still apply.
+    #[test]
+    fn an_ignored_xyce_option_takes_its_whole_value() {
+        let netlist = parse_in(
+            "ignored option values\nV1 1 0 1\nR1 1 0 1k\n\
+             .options loca stepper=0\n\
+             + conparam=mosfet:gainscale,mosfet:nltermscale\n\
+             + initialvalue=0.0,0.0 minvalue=-1.0,-1.0\n\
+             .options samples numsamples=10\n+ outputs={v(1)},{v(1)+1}\n\
+             .options mpde oscout=\"I(R1)\" phase=1\n\
+             .options SENSITIVITY adjoint=1\n+ adjointTimePoints=0.25,0.5,0.75\n\
+             .options timeint reltol=1e-4\n.op\n.end\n",
+            crate::config::SpiceDialect::Xyce,
+        )
+        .expect("ignored Xyce option values parse");
+        assert_eq!(netlist.options.timeint_reltol, Some(1e-4));
     }
 
     /// ngspice prints a branch current as `<device>#branch` (the mes/subth
