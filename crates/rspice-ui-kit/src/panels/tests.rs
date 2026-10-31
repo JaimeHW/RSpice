@@ -1447,3 +1447,68 @@ fn a_value_typed_in_arabic_is_drawn_in_the_order_it_is_read() {
         );
     }
 }
+
+/// One pass over a title-block field holding `value`, at `time` seconds,
+/// returning the field's editor.
+fn title_field_pass(
+    ctx: &egui::Context,
+    time: f64,
+    events: Vec<egui::Event>,
+    value: &mut String,
+) -> Response {
+    let mut field = None;
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(Pos2::ZERO, Vec2::new(480.0, 120.0))),
+            time: Some(time),
+            events,
+            ..Default::default()
+        },
+        |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                ui.set_width(400.0);
+                field = Some(property_row_input(ui, "Title", value, false));
+            });
+        },
+    );
+    field.expect("the row ran")
+}
+
+#[test]
+fn a_title_field_holding_arabic_is_edited_in_the_order_it_is_typed() {
+    let ctx = egui::Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Nix);
+    crate::Theme::default().apply(&ctx);
+    let mut value = String::from("عدد 123 مرحبا");
+    let mut time = 0.0;
+    let mut pass = |events: Vec<egui::Event>, value: &mut String| {
+        time += 1.0 / 60.0;
+        title_field_pass(&ctx, time, events, value)
+    };
+    pass(Vec::new(), &mut value);
+    let at = pass(Vec::new(), &mut value).rect.center();
+    let button = |pressed| egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    };
+    pass(
+        vec![egui::Event::PointerMoved(at), button(true)],
+        &mut value,
+    );
+    assert!(pass(vec![button(false)], &mut value).has_focus());
+    let key = |key| egui::Event::Key {
+        key,
+        physical_key: None,
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    pass(vec![key(egui::Key::End)], &mut value);
+    for _ in 0..3 {
+        pass(vec![key(egui::Key::ArrowLeft)], &mut value);
+    }
+    pass(vec![egui::Event::Text("x".to_owned())], &mut value);
+    assert_eq!(value, "عدد 123 مرxحبا");
+}

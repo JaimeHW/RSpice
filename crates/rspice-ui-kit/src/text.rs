@@ -23,6 +23,10 @@ use rspice_fonts::bidi::{BidiText, is_logical_order};
 
 use crate::fonts::role_of;
 
+mod edit;
+
+pub use edit::ReadingOrderEdit;
+
 /// `text` laid out in `format`, wrapped as `wrap` says, in the order it is
 /// read.
 ///

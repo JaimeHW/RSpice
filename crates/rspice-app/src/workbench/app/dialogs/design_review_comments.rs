@@ -826,14 +826,33 @@ fn review_thread_detail(
             .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(t.color.text_dim),
     );
-    ui.add_enabled(
-        write_allowed,
-        TextEdit::multiline(&mut dialog.reply)
-            .id(reply_id())
-            .desired_rows(3)
-            .desired_width(f32::INFINITY)
-            .hint_text("Add a finding, mention a teammate, or record a decision\u{2026}"),
+    // A reply holding Arabic or Hebrew is edited in the order it is read.
+    let reading = rspice_ui_kit::text::ReadingOrderEdit::new(
+        ui,
+        &dialog.reply,
+        egui::FontSelection::Default,
+        None,
+        true,
     );
+    let mut lay_out = reading
+        .as_ref()
+        .map(rspice_ui_kit::text::ReadingOrderEdit::layouter);
+    let mut reply = TextEdit::multiline(&mut dialog.reply)
+        .id(reply_id())
+        .desired_rows(3)
+        .desired_width(f32::INFINITY)
+        .hint_text("Add a finding, mention a teammate, or record a decision\u{2026}");
+    if let Some(lay_out) = lay_out.as_mut() {
+        reply = reply.layouter(lay_out);
+    }
+    match &reading {
+        Some(reading) => {
+            ui.add_enabled_ui(write_allowed, |ui| reading.show(ui, |ui| reply.show(ui)));
+        }
+        None => {
+            ui.add_enabled(write_allowed, reply);
+        }
+    }
 
     if dialog.assignment_editor_open {
         Frame::new()

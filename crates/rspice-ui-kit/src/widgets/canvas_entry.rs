@@ -15,6 +15,7 @@
 
 use egui::{Align, Context, Id, Key, Layout, Modifiers, Order, Response, Ui, vec2};
 
+use crate::text::ReadingOrderEdit;
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
@@ -104,14 +105,31 @@ impl<'u> CanvasEntryRows<'u> {
     pub fn text(&mut self, label: &str, id: Id, value: &mut String, hint: &str) -> Response {
         self.row(label, |ui, width| {
             let t = Tokens::get(ui.ctx());
-            let response = ui.add_sized(
-                vec2(width, t.metrics.ctl_h),
-                egui::TextEdit::singleline(value)
-                    .id(id)
-                    .font(egui::TextStyle::Monospace)
-                    .hint_text(hint)
-                    .margin(egui::Margin::symmetric(6, 4)),
-            );
+            let reading = ReadingOrderEdit::new(ui, value, egui::TextStyle::Monospace, None, false);
+            let mut lay_out = reading.as_ref().map(ReadingOrderEdit::layouter);
+            let mut edit = egui::TextEdit::singleline(value)
+                .id(id)
+                .font(egui::TextStyle::Monospace)
+                .hint_text(hint)
+                .margin(egui::Margin::symmetric(6, 4));
+            if let Some(lay_out) = lay_out.as_mut() {
+                edit = edit.layouter(lay_out);
+            }
+            let size = vec2(width, t.metrics.ctl_h);
+            let response = match &reading {
+                // `Ui::add_sized`, keeping the editor's output.
+                Some(reading) => {
+                    reading
+                        .show(ui, |ui| {
+                            let layout = Layout::centered_and_justified(ui.layout().main_dir());
+                            ui.allocate_ui_with_layout(size, layout, |ui| edit.show(ui))
+                                .inner
+                        })
+                        .response
+                        .response
+                }
+                None => ui.add_sized(size, edit),
+            };
             form::name_control(ui, &response, label);
             response
         })

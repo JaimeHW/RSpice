@@ -1212,12 +1212,13 @@ pub fn property_row_input_with_hint(
     invalid: bool,
 ) -> Response {
     let stand_in = hint_shows(value, hint).then_some(StandIn::Form);
-    let mut resting = resting_layout(ui, invalid);
+    let field = FieldText::new(ui, value, invalid);
+    let mut layout = field.layouter();
     property_row_text_edit_in(
         ui,
         label,
         hinted_edit(value, hint),
-        Some(&mut resting),
+        Some((&field, &mut layout)),
         invalid,
         None,
         stand_in,
@@ -1237,12 +1238,13 @@ pub fn property_row_input_with_default(
     invalid: bool,
 ) -> Response {
     let stand_in = hint_shows(value, default).then_some(StandIn::Default);
-    let mut resting = resting_layout(ui, invalid);
+    let field = FieldText::new(ui, value, invalid);
+    let mut layout = field.layouter();
     property_row_text_edit_in(
         ui,
         label,
         hinted_edit(value, default),
-        Some(&mut resting),
+        Some((&field, &mut layout)),
         invalid,
         None,
         stand_in,
@@ -1269,12 +1271,13 @@ pub fn property_row_input_with_hint_labelled(
     label_width: f32,
 ) -> Response {
     let stand_in = hint_shows(value, hint).then_some(StandIn::Form);
-    let mut resting = resting_layout(ui, invalid);
+    let field = FieldText::new(ui, value, invalid);
+    let mut layout = field.layouter();
     property_row_text_edit_in(
         ui,
         label,
         hinted_edit(value, hint),
-        Some(&mut resting),
+        Some((&field, &mut layout)),
         invalid,
         Some(label_width),
         stand_in,
@@ -1315,19 +1318,34 @@ pub(crate) fn hinted_edit<'t>(value: &'t mut String, hint: &str) -> egui::TextEd
 /// does: a row whose value is inherited is still an empty field.
 fn show_property_field(ui: &mut Ui, rect: Rect, edit: egui::TextEdit<'_>) -> Response {
     let faint = Tokens::get(ui.ctx()).color.text_faint;
-    show_property_field_toned(ui, rect, edit, faint)
+    show_property_field_toned(ui, rect, edit, faint, None)
 }
 
 /// [`show_property_field`] with what stands in for an empty value painted in
-/// `stand_in`.
+/// `stand_in`, and shown through `reading` where the editor lays its text
+/// out in the order it is read.
 fn show_property_field_toned(
     ui: &mut Ui,
     rect: Rect,
     edit: egui::TextEdit<'_>,
     stand_in: Color32,
+    reading: Option<&crate::text::ReadingOrderEdit>,
 ) -> Response {
     let restored = ui.visuals_mut().weak_text_color.replace(stand_in);
-    let response = ui.put(rect, edit);
+    let response =
+        match reading {
+            // `Ui::put`, keeping the editor's output.
+            Some(reading) => {
+                let builder = egui::UiBuilder::new().max_rect(rect).layout(
+                    egui::Layout::centered_and_justified(egui::Direction::TopDown),
+                );
+                reading
+                    .show(ui, |ui| ui.scope_builder(builder, |ui| edit.show(ui)).inner)
+                    .response
+                    .response
+            }
+            None => ui.put(rect, edit),
+        };
     ui.visuals_mut().weak_text_color = restored;
     response
 }
@@ -1342,27 +1360,58 @@ pub fn property_row_text_edit(
     property_row_text_edit_in(ui, label, edit, None, invalid, None, None)
 }
 
-/// How a resting field lays its value out: on one line, cut to the field
-/// with an ellipsis ending what is cut, in the field's own face and ink.
-type RestingLayout<'t> =
+/// A [`FieldText`]'s layout, handed to the field's editor.
+type FieldLayout<'t> =
     &'t mut dyn FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley>;
 
-/// The [`RestingLayout`] of a field painted in value ink, or in the error
-/// tone where its text is `invalid`.
-fn resting_layout(
-    ui: &Ui,
-    invalid: bool,
-) -> impl FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley> + use<> {
-    let t = Tokens::get(ui.ctx());
-    let ink = if invalid { t.color.err } else { t.color.text };
-    let font = egui::TextStyle::Monospace.resolve(ui.style());
-    move |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
-        let mut job = egui::text::LayoutJob::single_section(
-            text.as_str().to_owned(),
-            egui::TextFormat::simple(font.clone(), ink),
-        );
-        job.wrap = egui::text::TextWrapping::truncate_at_width(wrap_width);
-        ui.fonts_mut(|fonts| fonts.layout_job(job))
+/// How a property field lays its value out, in its own face and in value
+/// ink, or in the error tone where its text is `invalid`. Resting: on one
+/// line, cut to the field with an ellipsis ending what is cut, in the order
+/// it is read. Being edited: whole, as egui's editor lays it out, or for
+/// text holding right-to-left characters in the order it is read, with the
+/// caret and selection [`crate::text::ReadingOrderEdit`] draws over it.
+struct FieldText {
+    font: egui::FontId,
+    ink: Color32,
+    editing: std::cell::Cell<bool>,
+    reading: Option<crate::text::ReadingOrderEdit>,
+}
+
+impl FieldText {
+    fn new(ui: &Ui, value: &str, invalid: bool) -> Self {
+        let t = Tokens::get(ui.ctx());
+        let ink = if invalid { t.color.err } else { t.color.text };
+        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        Self {
+            reading: crate::text::ReadingOrderEdit::new(ui, value, font.clone(), Some(ink), false),
+            font,
+            ink,
+            editing: std::cell::Cell::new(false),
+        }
+    }
+
+    /// The layout to give the field's editor: the resting one, or while
+    /// [`Self::editing`] is set, the one [`Self::reading`] lays out.
+    fn layouter(
+        &self,
+    ) -> impl FnMut(&Ui, &dyn egui::TextBuffer, f32) -> std::sync::Arc<egui::Galley> + '_ {
+        let mut reading = self
+            .reading
+            .as_ref()
+            .map(crate::text::ReadingOrderEdit::layouter);
+        move |ui: &Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
+            if let Some(reading) = reading.as_mut().filter(|_| self.editing.get()) {
+                return reading(ui, text, wrap_width);
+            }
+            ui.fonts_mut(|fonts| {
+                crate::text::layout(
+                    fonts,
+                    text.as_str(),
+                    egui::TextFormat::simple(self.font.clone(), self.ink),
+                    egui::text::TextWrapping::truncate_at_width(wrap_width),
+                )
+            })
+        }
     }
 }
 
@@ -1370,7 +1419,7 @@ fn property_row_text_edit_in<'t>(
     ui: &mut Ui,
     label: &str,
     edit: egui::TextEdit<'t>,
-    resting: Option<RestingLayout<'t>>,
+    field: Option<(&'t FieldText, FieldLayout<'t>)>,
     invalid: bool,
     label_width: Option<f32>,
     stand_in: Option<StandIn>,
@@ -1387,7 +1436,7 @@ fn property_row_text_edit_in<'t>(
     // editor is its field, so whether that editor holds the focus is read
     // before it is shown, and read without side effects: a response read
     // ahead would surrender a focus the press of that pass took elsewhere.
-    let editing = resting.is_some()
+    let editing = field.is_some()
         && ui
             .data_mut(|data| data.get_temp::<egui::Id>(row.id))
             .is_some_and(|field| ui.memory(|memory| memory.has_focus(field)));
@@ -1401,16 +1450,29 @@ fn property_row_text_edit_in<'t>(
         ))
         .desired_width(value_rect.width())
         .text_color(ink);
-    let rests = resting.is_some();
-    if let Some(resting) = resting.filter(|_| !editing) {
-        edit = edit.layouter(resting);
+    let rests = field.is_some();
+    let mut reading = None;
+    if let Some((text, layout)) = field {
+        // A press on a resting field of right-to-left text lays it out as
+        // being edited already, so the caret lands where the press was.
+        let editing = editing
+            || (text.reading.is_some()
+                && ui.rect_contains_pointer(value_rect)
+                && ui.input(|input| input.pointer.primary_pressed()));
+        text.editing.set(editing);
+        if !editing {
+            edit = edit.layouter(layout);
+        } else if let Some(text_reading) = &text.reading {
+            edit = edit.layouter(layout);
+            reading = Some(text_reading);
+        }
     }
     let stand_in_tone = if stand_in == Some(StandIn::Default) {
         t.color.text_dim
     } else {
         t.color.text_faint
     };
-    let response = show_property_field_toned(ui, value_rect, edit, stand_in_tone);
+    let response = show_property_field_toned(ui, value_rect, edit, stand_in_tone, reading);
     if rests {
         ui.data_mut(|data| data.insert_temp(row.id, response.id));
     }
