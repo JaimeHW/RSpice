@@ -6,9 +6,9 @@
 //! been closed since; the design's top schematic is offered instead, and
 //! nothing at all when the design has none to offer.
 
+use crate::state::VerilogAPlacementHandoff;
 use crate::state::{CellViewRef, ViewType, library_cell_placement_candidates};
 use crate::workbench::app_state::AppState;
-use crate::workbench::documents::code_workspace::VerilogAPlacementHandoff;
 
 impl AppState {
     /// Where `handoff`'s device is offered for placement: the schematic the

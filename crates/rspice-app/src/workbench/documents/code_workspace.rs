@@ -48,8 +48,8 @@ pub use page::{
     CodeSourceFileDialogState, CodeSourceHistoryState, CodeSourceImportState,
     CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
     CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
-    VerilogACompileOutcome, VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState,
-    VerilogAPlacementHandoff, VerilogAReplaceReview, VerilogAReplaceTarget,
+    VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
+    VerilogAReplaceTarget,
 };
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,
@@ -83,8 +83,6 @@ pub(crate) use veriloga_inspector::{
     VerilogAInspectorAction, show_veriloga_inspector, symbol_drift_text, veriloga_compile_status,
     veriloga_diagnostics, veriloga_receipt,
 };
-#[cfg(test)]
-pub(crate) use veriloga_interface::VerilogAInterfaceOutcome;
 pub(crate) use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, apply_receipt_interface, interface_check_finding,
     interface_finding, interface_mismatch_detail, reconciled_symbol, refresh_symbol_standing,

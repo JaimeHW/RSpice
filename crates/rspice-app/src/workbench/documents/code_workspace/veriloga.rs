@@ -22,9 +22,9 @@ use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
     CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, VerilogACompileOutcome,
-    VerilogACompileReceipt, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
-    VerilogAReplaceTarget,
+    VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
+use crate::state::VerilogACompileReceipt;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 #[cfg(target_arch = "wasm32")]
@@ -1130,9 +1130,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                             if applied.wrote {
                                 app.state.model.workspace.content.project_metadata_dirty = true;
                             }
-                            if let super::veriloga_interface::VerilogAInterfaceOutcome::Refused(
-                                reason,
-                            ) = &applied.outcome
+                            if let crate::state::VerilogAInterfaceOutcome::Refused(reason) =
+                                &applied.outcome
                             {
                                 app.state.record(
                                     LogSeverity::Warning,

@@ -39,12 +39,12 @@ use crate::state::{
     Cell, CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
 };
+use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::documents::code_workspace::{
-    VerilogACompileReceipt, VerilogAPlacementHandoff, apply_receipt_interface,
-    compile_project_bundle_receipt, writable_libraries,
+    apply_receipt_interface, compile_project_bundle_receipt, writable_libraries,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 

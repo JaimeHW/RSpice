@@ -33,6 +33,7 @@ mod simulation;
 pub mod stimulus_library;
 use rspice_design::symbol;
 pub(crate) mod symbol_resolver;
+mod veriloga_receipt;
 mod viewer_cache;
 pub mod workspace;
 pub mod write_policy;
@@ -138,6 +139,9 @@ pub use rspice_vocabulary::hierarchy_path::{
     MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
 pub use simulate_pages::{SimulationPage, VerificationPage};
+pub use veriloga_receipt::{
+    VerilogACompileReceipt, VerilogAInterfaceOutcome, VerilogAPlacementHandoff,
+};
 // The design-management model is a crate of its own so the offline
 // drawing-sheet publisher can link it without linking the GUI. It is
 // re-exported here because it is still the application's state authority and

@@ -25,13 +25,10 @@ use crate::workbench::{MessageCatalog, MessageId};
 use rspice_design::library::metadata::{CellParameter, ParameterValueType};
 
 use super::page::VerilogAWorkbenchState;
-use super::veriloga_interface::{
-    VerilogACellSymbol, VerilogAInterfaceOutcome, VerilogASymbolDrift, compiled_parameters,
-};
-use super::{
-    CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource, VerilogACompileReceipt,
-};
+use super::veriloga_interface::{VerilogACellSymbol, VerilogASymbolDrift, compiled_parameters};
+use super::{CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
 
 /// The compile receipt for exactly this source, if the last compile was of it.
 pub(crate) fn veriloga_receipt<'a>(

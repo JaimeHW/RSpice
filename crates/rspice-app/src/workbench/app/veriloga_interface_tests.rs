@@ -8,6 +8,7 @@ use std::sync::{Arc, Mutex, mpsc};
 
 use super::veriloga_design_tests::{open_in_design, open_project_app};
 use super::*;
+use crate::state::VerilogAInterfaceOutcome;
 use crate::state::{
     Cell, CellViewRef, Library, LibraryCellInstance, Point, PortDirection, ProjectSourceBundle,
     ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View,
@@ -15,7 +16,6 @@ use crate::state::{
 };
 use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
-    VerilogAInterfaceOutcome,
 };
 use rspice_design::library::metadata::{PortDomain, SourceViewPort, decode_source_view_ports};
 use rspice_design::symbol::generated::{

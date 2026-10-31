@@ -47,27 +47,12 @@ use crate::state::{
 };
 
 use super::page::VerilogAWorkbenchState;
-use super::{CodeEditorDiagnostic, CodeEditorSeverity, VerilogACompileReceipt};
+use super::{CodeEditorDiagnostic, CodeEditorSeverity};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};
 
 /// The view whose ports define a cell when it has one.
 const SCHEMATIC_VIEW: &str = "schematic";
-
-/// What a clean compile did to its cell's interface.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum VerilogAInterfaceOutcome {
-    /// The module's ports are the cell's interface.
-    Defined,
-    /// The cell's schematic defines its ports, and the module agrees.
-    MatchesSchematic,
-    /// The cell's schematic defines its ports, and the module's differ.
-    SchematicMismatch {
-        schematic: Vec<PortSpec>,
-        module: Vec<PortSpec>,
-    },
-    /// Nothing was written, for the reason given.
-    Refused(String),
-}
 
 /// A clean compile's interface outcome, and whether it changed the library.
 #[derive(Debug)]

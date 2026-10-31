@@ -7,8 +7,8 @@
 use super::veriloga_design_tests::open_project_app;
 use super::veriloga_interface_tests::{compile_and_publish, edit_source};
 use super::*;
+use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
-use crate::workbench::documents::code_workspace::VerilogAPlacementHandoff;
 use crate::workbench::state::Workspace;
 
 const LIBRARY: &str = "behavioral";
