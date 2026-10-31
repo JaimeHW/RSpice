@@ -1298,7 +1298,7 @@ pub(super) fn rollback_project_library_publication(
         authority_id: authority_id.into(),
         reason: reason.into(),
     };
-    let prepared = state.preflight_project_library_mutation(mutation)?;
+    let prepared = state.model.preflight_project_library_mutation(mutation)?;
 
     let project_id = artifact.file.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) =
@@ -1342,7 +1342,7 @@ pub(super) fn rollback_project_library_publication(
         &mut candidate.model.simulation,
     )
     .map_err(|error| format!("project library rollback result history is invalid: {error}"))?;
-    candidate.publish_project_library_mutation(prepared);
+    candidate.model.publish_project_library_mutation(prepared);
     candidate
         .model
         .workspace

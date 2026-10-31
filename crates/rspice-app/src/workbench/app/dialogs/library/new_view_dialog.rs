@@ -295,7 +295,7 @@ impl RSpiceApp {
             View::new(&view_name, view_type)
         };
 
-        let project_mutation = match self.state.preflight_project_library_mutation(
+        let project_mutation = match self.state.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {
                 library: library.clone(),
                 cell: cell.clone(),
@@ -322,6 +322,7 @@ impl RSpiceApp {
                         .insert_schematic_editor(reference.key(), seeded_schematic);
                 }
                 self.state
+                    .model
                     .publish_project_library_mutation(project_mutation);
                 self.state.record(
                     LogSeverity::Info,
@@ -429,7 +430,7 @@ impl RSpiceApp {
             cell,
             crate::state::View::new(view_name, crate::state::ViewType::Layout),
         );
-        let project_mutation = match self.state.preflight_project_library_mutation(
+        let project_mutation = match self.state.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {
                 library: library.to_owned(),
                 cell: cell.to_owned(),
@@ -450,6 +451,7 @@ impl RSpiceApp {
             .content
             .commit_prepared_physical_layout_catalog(candidate_layouts);
         self.state
+            .model
             .publish_project_library_mutation(project_mutation);
         self.state.project.new_view_error = None;
         self.state.open_workspace_view(reference);
@@ -587,7 +589,7 @@ impl RSpiceApp {
         }
         candidate_library.add_view(cell, view);
 
-        let project_mutation = match self.state.preflight_project_library_mutation(
+        let project_mutation = match self.state.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateView {
                 library: library.to_owned(),
                 cell: cell.to_owned(),
@@ -604,6 +606,7 @@ impl RSpiceApp {
         self.state.model.workspace.content.project_sources_dirty = true;
         self.state.model.library_manager = candidate_libraries;
         self.state
+            .model
             .publish_project_library_mutation(project_mutation);
         self.state.project.new_view_error = None;
         // The new view is a cell view, so it opens as a Design document.

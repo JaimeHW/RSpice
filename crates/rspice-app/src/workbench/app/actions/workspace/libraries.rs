@@ -15,7 +15,7 @@ impl AppState {
                 "Library '{name}' conflicts with the existing library '{conflict}', whose name differs only in case or normalization"
             ));
         }
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateLibrary {
                 library: name.to_owned(),
             },
@@ -24,7 +24,8 @@ impl AppState {
         self.model
             .library_manager
             .add_library(crate::state::Library::new(name));
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         self.model.library_manager.select_library(name);
         Ok(())
@@ -87,7 +88,7 @@ impl AppState {
             .map_err(|error| {
                 format!("Could not move the library's Design Management ownership: {error}")
             })?;
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::RenameLibrary {
                 from_library: library.to_owned(),
                 to_library: new_name.to_owned(),
@@ -157,7 +158,8 @@ impl AppState {
         if self.model.workspace.content.project.root_library == library {
             self.model.workspace.content.project.root_library = new_name.to_owned();
         }
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         self.model.library_manager.select_library(new_name);
         Ok(remapped)
@@ -195,7 +197,7 @@ impl AppState {
             design_management_changed |=
                 receipt.affected_sheet_catalogs > 0 || receipt.remapped_annotation_objects > 0;
         }
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::DeleteLibrary {
                 library: library.to_owned(),
             },
@@ -224,7 +226,8 @@ impl AppState {
                 .remove_physical_layout_document(owner);
         }
         self.prune_workspace_after_library_deleted(library);
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         Ok(cells.len())
     }

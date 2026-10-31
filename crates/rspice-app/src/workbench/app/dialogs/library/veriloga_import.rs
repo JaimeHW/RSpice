@@ -291,11 +291,14 @@ impl RSpiceApp {
                 view: first.view.clone(),
             }
         };
-        let prepared = self.state.preflight_project_library_mutation(mutation)?;
+        let prepared = self
+            .state
+            .model
+            .preflight_project_library_mutation(mutation)?;
         self.state.model.workspace.content.project_sources = sources;
         self.state.model.workspace.content.project_sources_dirty = true;
         self.state.model.library_manager = libraries;
-        self.state.publish_project_library_mutation(prepared);
+        self.state.model.publish_project_library_mutation(prepared);
         self.state.code.code_workspace.veriloga.import_form = None;
         if form.library == VERILOGA_LIBRARY_NAME {
             self.persist_global_veriloga_library_with_feedback();

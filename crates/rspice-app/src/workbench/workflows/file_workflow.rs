@@ -229,10 +229,12 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
     };
     candidate_library.add_cell(cell);
     let mutation =
-        state.preflight_project_library_mutation(ProjectLibraryMutation::CreateCell {
-            library: library.clone(),
-            cell: name.clone(),
-        })?;
+        state
+            .model
+            .preflight_project_library_mutation(ProjectLibraryMutation::CreateCell {
+                library: library.clone(),
+                cell: name.clone(),
+            })?;
 
     schematic.session.current_file = None;
     schematic.session.is_dirty = true;
@@ -244,7 +246,7 @@ pub(crate) fn import_loaded_schematic_as_cell_view(
         .model
         .workspace
         .insert_schematic_editor(reference.key(), schematic);
-    state.publish_project_library_mutation(mutation);
+    state.model.publish_project_library_mutation(mutation);
     state.open_workspace_view(reference.clone());
     Ok(reference)
 }

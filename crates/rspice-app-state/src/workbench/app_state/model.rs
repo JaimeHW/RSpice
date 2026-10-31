@@ -14,6 +14,7 @@ mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
+mod library_catalog;
 mod owned_source;
 mod project_technology;
 mod run_specifications;

@@ -140,58 +140,6 @@ impl AppState {
         );
     }
 
-    /// Reserve the next project revision before a library membership
-    /// transaction publishes any live state.
-    pub(crate) fn preflight_project_library_mutation(
-        &self,
-        mutation: crate::state::ProjectLibraryMutation,
-    ) -> Result<crate::state::PreparedProjectLibraryMutation, String> {
-        let operation = mutation.operation_label();
-        if self.model.safe_mode.project_read_only() {
-            return Err(format!(
-                "{operation} is unavailable because the project is open read-only."
-            ));
-        }
-        self.model
-            .library_edit_locks
-            .require_mutation_authority(
-                self.model.workspace.content.project.id(),
-                self.model.workspace.content.project.revision(),
-                self.model.library_manager.revision(),
-                &mutation,
-            )
-            .map_err(|error| format!("Could not reserve {operation}: {error}"))?;
-        self.model
-            .workspace
-            .content
-            .project
-            .prepare_library_mutation(mutation, self.model.library_manager.revision())
-            .map_err(|error| format!("Could not reserve {operation}: {error}"))
-    }
-
-    /// Publish the single project revision reserved immediately before a
-    /// successful library membership transaction.
-    pub(crate) fn publish_project_library_mutation(
-        &mut self,
-        prepared: crate::state::PreparedProjectLibraryMutation,
-    ) {
-        let observed_library_revision = self.model.library_manager.revision();
-        assert!(
-            observed_library_revision >= prepared.minimum_library_revision(),
-            "library mutation did not advance the library revision"
-        );
-        self.model
-            .workspace
-            .content
-            .project
-            .publish_library_mutation(prepared, observed_library_revision)
-            .expect("the library mutation receipt was fully preflighted");
-        self.model.workspace.content.project_metadata_dirty = true;
-        self.model.design_execution_epoch = self.model.design_execution_epoch.wrapping_add(1);
-        self.model.netlist_artifacts.current_generation_input_digest = None;
-        self.model.clear_project_design_history();
-    }
-
     /// [`Model::technology_inputs`].
     pub(crate) fn technology_inputs(
         &self,

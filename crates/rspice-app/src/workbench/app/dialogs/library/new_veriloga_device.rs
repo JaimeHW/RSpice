@@ -420,7 +420,7 @@ impl RSpiceApp {
             &reference,
             &ports,
         )?;
-        let prepared = self.state.preflight_project_library_mutation(
+        let prepared = self.state.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateCell {
                 library: library.clone(),
                 cell: cell.clone(),
@@ -430,7 +430,7 @@ impl RSpiceApp {
         self.state.model.workspace.content.project_sources = sources;
         self.state.model.workspace.content.project_sources_dirty = true;
         self.state.model.library_manager = libraries;
-        self.state.publish_project_library_mutation(prepared);
+        self.state.model.publish_project_library_mutation(prepared);
         let form = std::mem::take(&mut self.state.code.new_veriloga_device);
         // The starter compile above is not the reader's: the device is offered
         // for placement after the first compile they start leaves it a port.

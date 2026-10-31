@@ -1524,6 +1524,7 @@ mod tests {
             .clone();
         let prepared = app
             .state
+            .model
             .preflight_project_library_mutation(crate::state::ProjectLibraryMutation::CreateCell {
                 library: writable_library.clone(),
                 cell: "post_publication_change".to_owned(),
@@ -1535,7 +1536,7 @@ mod tests {
             .get_library_mut(&writable_library)
             .expect("writable library")
             .add_cell(crate::state::Cell::new("post_publication_change"));
-        app.state.publish_project_library_mutation(prepared);
+        app.state.model.publish_project_library_mutation(prepared);
         assert!(
             app.state
                 .model
@@ -1657,6 +1658,7 @@ mod tests {
             .clone();
         let prepared_mutation = app
             .state
+            .model
             .preflight_project_library_mutation(crate::state::ProjectLibraryMutation::CreateCell {
                 library: writable_library.clone(),
                 cell: "intervening_change".to_owned(),
@@ -1669,6 +1671,7 @@ mod tests {
             .expect("writable library")
             .add_cell(crate::state::Cell::new("intervening_change"));
         app.state
+            .model
             .publish_project_library_mutation(prepared_mutation);
         let revision_after_mutation = app.state.model.workspace.content.project.revision();
 

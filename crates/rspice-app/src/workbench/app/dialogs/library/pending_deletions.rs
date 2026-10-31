@@ -363,7 +363,7 @@ impl RSpiceApp {
                         return;
                     }
                 };
-            let project_mutation = match self.state.preflight_project_library_mutation(
+            let project_mutation = match self.state.model.preflight_project_library_mutation(
                 crate::state::ProjectLibraryMutation::DeleteCell {
                     library: lib_name.clone(),
                     cell: cell_name.clone(),
@@ -389,6 +389,7 @@ impl RSpiceApp {
                     self.state
                         .prune_workspace_after_cell_deleted(&lib_name, &cell_name);
                     self.state
+                        .model
                         .publish_project_library_mutation(project_mutation);
                     // After the library mutation, never before it: publishing
                     // one retires the project design history, and the answer
@@ -430,7 +431,7 @@ impl RSpiceApp {
                     return;
                 }
             };
-            let project_mutation = match self.state.preflight_project_library_mutation(
+            let project_mutation = match self.state.model.preflight_project_library_mutation(
                 crate::state::ProjectLibraryMutation::DeleteView {
                     library: lib_name.clone(),
                     cell: cell_name.clone(),
@@ -459,6 +460,7 @@ impl RSpiceApp {
                     self.state
                         .prune_workspace_after_view_deleted(&lib_name, &cell_name, &view_name);
                     self.state
+                        .model
                         .publish_project_library_mutation(project_mutation);
                     apply_instance_resolution(&mut self.state, &target, resolution);
                     self.state.record(

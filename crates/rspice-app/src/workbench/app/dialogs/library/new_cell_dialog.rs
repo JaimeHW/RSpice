@@ -234,7 +234,7 @@ impl RSpiceApp {
             None
         };
 
-        let project_mutation = match self.state.preflight_project_library_mutation(
+        let project_mutation = match self.state.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CreateCell {
                 library: library.clone(),
                 cell: name.clone(),
@@ -274,6 +274,7 @@ impl RSpiceApp {
                     .insert_schematic_editor(reference.key(), seeded_schematic.clone());
             }
             self.state
+                .model
                 .publish_project_library_mutation(project_mutation);
             self.state.record(
                 LogSeverity::Info,

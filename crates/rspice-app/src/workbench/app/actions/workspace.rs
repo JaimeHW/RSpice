@@ -942,7 +942,7 @@ impl AppState {
             .content
             .prepare_copy_physical_layout_cell_documents(src_library, cell, dst_library, new_name)
             .map_err(|error| format!("Could not copy the cell's physical layouts: {error}"))?;
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::CopyCell {
                 source_library: src_library.to_owned(),
                 source_cell: cell.to_owned(),
@@ -991,7 +991,8 @@ impl AppState {
         if copied_sheet_catalogs > 0 {
             self.model.workspace.content.design_management = candidate_design_management;
         }
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         self.model
             .library_manager
@@ -1062,7 +1063,7 @@ impl AppState {
             .content
             .prepare_rename_physical_layout_cell_documents(library, cell, new_name)
             .map_err(|error| format!("Could not rename the cell's physical layouts: {error}"))?;
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::RenameCell {
                 library: library.to_owned(),
                 from_cell: cell.to_owned(),
@@ -1165,7 +1166,8 @@ impl AppState {
         {
             self.model.workspace.content.project.top_cell = new_name.to_owned();
         }
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         self.model.library_manager.select_cell(library, new_name);
         Ok(remapped)
@@ -1237,7 +1239,7 @@ impl AppState {
             .map_err(|error| {
                 format!("Could not move the view's Design Management ownership: {error}")
             })?;
-        let project_mutation = self.preflight_project_library_mutation(
+        let project_mutation = self.model.preflight_project_library_mutation(
             crate::state::ProjectLibraryMutation::RenameView {
                 library: library.to_owned(),
                 cell: cell.to_owned(),
@@ -1300,7 +1302,8 @@ impl AppState {
         {
             self.model.workspace.content.design_management = candidate_design_management;
         }
-        self.publish_project_library_mutation(project_mutation);
+        self.model
+            .publish_project_library_mutation(project_mutation);
 
         self.model
             .library_manager
