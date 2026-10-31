@@ -55,6 +55,28 @@ fn timeout_interrupts_parameter_evaluation_during_parsing() {
 }
 
 #[test]
+fn timeout_interrupts_loading_a_deck_with_one_long_card() {
+    // Xyce's ISSUE_740 deck lists 100000 OUTPUTTIMEPOINTS on one line. The
+    // deadline is polled between cards, and lexing that one card used to
+    // take minutes, so `--timeout 5` stopped the run only after 116 s.
+    let dir = common::test_dir("long-card-timeout");
+    let deck = dir.join("time-list.cir");
+    let points = (0..200_000)
+        .map(|index| format!("{:.6e}", 1e-12 * f64::from(index)))
+        .collect::<Vec<_>>()
+        .join(",");
+    std::fs::write(
+        &deck,
+        format!(
+            "* long card deadline\nV1 1 0 1\nR1 1 0 1k\n.TRAN 0 2e-7\n\
+             .OPTIONS OUTPUT OUTPUTTIMEPOINTS={points}\n.END\n"
+        ),
+    )
+    .unwrap();
+    assert_times_out(&deck, "OUTPUTTIMEPOINTS", false);
+}
+
+#[test]
 fn timeout_interrupts_numeric_cards_and_forward_reference_retries() {
     let functions = work_functions();
     let dir = common::test_dir("numeric-card-expression-timeout");
