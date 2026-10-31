@@ -69,11 +69,12 @@ use crate::workbench::models::commands::ModelsCommand;
 #[cfg(test)]
 use crate::workbench::models::tests::harness;
 use crate::workbench::models::workspace_state::{
-    ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
-    ProjectModelFacet, RSpicePartFacet,
+    ModelHubFacet, ModelPackFacet, ModelsCatalogScope, ModelsCatalogSortKey,
+    ModelsOperationalState, ModelsTableSort, ModelsWorkbenchDialog, ProjectModelFacet,
+    RSpicePartFacet,
 };
 use crate::workbench::slots::ModelsState;
-use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog, WorkbenchSession};
+use crate::workbench::state::WorkbenchSession;
 
 use bindings::{ConsumerIndex, effective_model_consumers};
 use catalog_scan::project_catalog_scan;

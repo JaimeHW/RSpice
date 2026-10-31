@@ -1792,7 +1792,7 @@ fn poll_browser_model_imports(cx: &mut Cx<'_, ModelsFeature>) {
         if let Some(candidates) = completion.root_candidates {
             if authority_current {
                 cx.state.models_view.dialog = Some(
-                    crate::workbench::state::ModelsWorkbenchDialog::SelectBrowserImportRoot {
+                    super::workspace_state::ModelsWorkbenchDialog::SelectBrowserImportRoot {
                         candidates,
                         selected: 0,
                     },

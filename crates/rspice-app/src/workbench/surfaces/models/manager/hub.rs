@@ -42,8 +42,9 @@ use crate::state::model_hub::{ArchiveEvidence, ReleaseDiff, missing_capabilities
 use crate::state::model_library::PackPartPin;
 use crate::ui::accessibility::counted;
 use crate::workbench::models::pdk_workflow::ModelHubRequest;
-use crate::workbench::models::workspace_state::{ModelHubFacet, PackReProof};
-use crate::workbench::state::PackReleaseConfirmation;
+use crate::workbench::models::workspace_state::{
+    ModelHubFacet, PackReProof, PackReleaseConfirmation,
+};
 
 /// One published release, as the inspector's Releases pane lists it.
 #[derive(Debug, Clone, PartialEq, Eq)]

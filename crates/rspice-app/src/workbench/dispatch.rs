@@ -334,7 +334,7 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, ShowProjectModels| {
                 app.state.models.models_view.catalog_scope =
-                    crate::workbench::state::ModelsCatalogScope::Project;
+                    crate::workbench::models::workspace_state::ModelsCatalogScope::Project;
                 app.execute_command_key(ids::MODELS_CATALOG);
             },
         );

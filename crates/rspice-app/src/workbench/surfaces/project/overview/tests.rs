@@ -6,7 +6,6 @@
 //! it were the length of the history.
 
 use super::*;
-use crate::workbench::state::ModelsCatalogScope;
 use crate::workbench::surfaces::project::library_publication::{
     commit_project_library_publication, prepare_project_library_publication,
 };
@@ -308,18 +307,16 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     );
 }
 
+/// The overview's model closure asks the shell to show the project's models;
+/// the scope the Models workspace then opens on is the shell's to set, and
+/// `feature_tests::models::studio` holds that half.
 #[test]
-fn overview_model_closure_always_opens_the_project_catalog_scope() {
+fn overview_model_closure_opens_the_models_workspace() {
     let mut app = RSpiceApp::test_instance();
-    app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
     OverviewIntent::OpenProjectModels.execute(&mut app);
     app.after_contribution();
 
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
-    assert_eq!(
-        app.state.models.models_view.catalog_scope,
-        ModelsCatalogScope::Project
-    );
 }
 
 #[test]

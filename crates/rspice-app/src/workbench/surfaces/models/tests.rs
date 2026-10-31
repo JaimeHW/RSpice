@@ -16,7 +16,7 @@ use crate::state::model_library::{
 };
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::models::tests::harness;
-use crate::workbench::state::ModelsCatalogScope;
+use crate::workbench::models::workspace_state::ModelsCatalogScope;
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
 #[derive(Clone, Copy)]
@@ -663,7 +663,7 @@ fn no_models_page_ends_in_unpainted_canvas() {
     // Every catalog scope, not only the default: the shelf shipped 250 px
     // short with this guard green because the probe only ever saw the
     // project scope's composition.
-    use crate::workbench::state::ModelsCatalogScope;
+    use crate::workbench::models::workspace_state::ModelsCatalogScope;
     const SCOPES: [ModelsCatalogScope; 3] = [
         ModelsCatalogScope::Project,
         ModelsCatalogScope::InstalledPacks,

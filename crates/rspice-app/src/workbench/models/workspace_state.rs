@@ -8,7 +8,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog, WorkbenchSession};
+use crate::workbench::state::WorkbenchSession;
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// Select a model library, stating on the status bar the model library
@@ -677,6 +677,219 @@ pub struct PdkTechnologyAuthoringRecovery {
     pub(crate) working_draft: Option<crate::state::pdk_config::PdkTechnologyDraft>,
     #[serde(default)]
     pub(crate) dirty: bool,
+}
+
+/// Corpus projection selected in the Models & PDKs catalog. This is
+/// presentation state only: attaching a source or adding a project model is a
+/// separate guarded engineering transaction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ModelsCatalogScope {
+    #[default]
+    Project,
+    InstalledPacks,
+    RSpiceLibrary,
+}
+
+impl ModelsCatalogScope {
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Project => "Project",
+            Self::InstalledPacks => "Installed packs",
+            Self::RSpiceLibrary => "RSpice library",
+        }
+    }
+}
+
+/// Everything a distributed-release confirmation states before it acts.
+///
+/// It is a captured projection rather than a live query: the dialog must show
+/// the same release it will install, and re-reading the catalog while the
+/// dialog is open could change the answer between the sentence and the click.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackReleaseConfirmation {
+    pub name: String,
+    pub version: String,
+    pub spdx: String,
+    pub archive_length: u64,
+    pub parts: usize,
+    pub capabilities: Vec<String>,
+    /// Capabilities this engine build does not offer. Non-empty disables the
+    /// action and is the reason shown for it.
+    pub missing: Vec<String>,
+    /// The one part this confirmation came to add, when it came from the
+    /// component shelf rather than from the pack table.
+    pub part: Option<String>,
+    /// The installed version this replaces, when the action is an update.
+    pub replaces: Option<String>,
+}
+
+impl PackReleaseConfirmation {
+    /// Describes one published release from whatever the session already
+    /// proved about it.
+    ///
+    /// The signed catalog is preferred because it is the only source that
+    /// knows the download size; an installed release whose catalog entry has
+    /// since been withdrawn is still described, from its own signed manifest,
+    /// so a part already on this machine never becomes undescribable.
+    #[must_use]
+    pub fn for_release(
+        service: &crate::services::model_hub::ModelHubService,
+        pack_id: &str,
+        version: &str,
+        part: Option<String>,
+    ) -> Option<Self> {
+        let hub = service.hub()?;
+        let listed = hub.snapshot().and_then(|snapshot| {
+            snapshot
+                .packs
+                .iter()
+                .find(|pack| pack.id == pack_id)
+                .and_then(|pack| {
+                    pack.releases
+                        .iter()
+                        .find(|release| release.version == version)
+                        .map(|release| (pack, release))
+                })
+        });
+        let missing =
+            |capabilities: &[String]| crate::state::model_hub::missing_capabilities(capabilities);
+        if let Some((pack, release)) = listed {
+            return Some(Self {
+                name: pack.name.clone(),
+                version: release.version.clone(),
+                spdx: release.spdx.clone(),
+                archive_length: release.archive_length,
+                parts: release.parts.len(),
+                capabilities: release.capabilities.clone(),
+                missing: missing(&release.capabilities),
+                part,
+                replaces: None,
+            });
+        }
+        let installed = hub
+            .installed()
+            .iter()
+            .find(|pack| pack.pack_id() == pack_id && pack.version() == version)?;
+        Some(Self {
+            name: installed.manifest.pack.name.clone(),
+            version: installed.version().to_owned(),
+            spdx: installed.manifest.license.spdx.clone(),
+            archive_length: 0,
+            parts: installed.manifest.parts.len(),
+            capabilities: installed.manifest.requires.capabilities.clone(),
+            missing: missing(&installed.manifest.requires.capabilities),
+            part,
+            replaces: None,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ModelsWorkbenchDialog {
+    #[cfg(target_arch = "wasm32")]
+    SelectBrowserImportRoot {
+        candidates: Vec<String>,
+        selected: usize,
+    },
+    SourcePreview {
+        title: String,
+        subtitle: String,
+        source: String,
+        /// Whether this source can be authored, which offers a route into
+        /// Model Editor. The preview itself is never a writable buffer — it
+        /// holds a copy of the retained bytes with nowhere to write back to.
+        editable: bool,
+    },
+    CompareModels {
+        left_library: String,
+        left_model: String,
+        /// The chosen counterpart as `(library, model)`. `None` means the
+        /// dialog is still asking: a comparison against an arbitrary
+        /// definition is not a comparison, so there is no default beyond the
+        /// same card in another library.
+        right: Option<(String, String)>,
+    },
+    ConfirmPack {
+        pack_id: String,
+        attach: bool,
+        /// The distributed release this confirmation is about, when it is one.
+        ///
+        /// A shipped-corpus attach and a signed-release install are the same
+        /// user decision — "commit this pack to this project" — asked about
+        /// two different objects. One dialog asks it, and this is what makes
+        /// the release case able to state its version, licence, size, and
+        /// capability verdict before the user says yes.
+        release: Option<Box<PackReleaseConfirmation>>,
+    },
+    ConfirmPart {
+        pack_id: String,
+        part_name: String,
+    },
+    /// The Model Hub's reference material, in one place: what the held catalog
+    /// is, the contract it is accepted under, and the last thing this session
+    /// tried to do with it.
+    ///
+    /// It carries no fields because it states nothing the workspace does not
+    /// already hold. Capturing a copy would let the card and the page it was
+    /// opened from disagree after a refresh lands underneath it.
+    HeldCatalog,
+    AuthorTechnologySymbolVariant {
+        package_id: String,
+        source_cell: String,
+        target_library: String,
+        target_cell: String,
+    },
+    DefinitionConflict {
+        definition: String,
+        scope: crate::state::model_library::ModelConsumerScope,
+        providers: Vec<String>,
+        selected_provider: String,
+        reason: String,
+        error: Option<String>,
+    },
+    BindingTrace {
+        model: String,
+        consumers: Vec<String>,
+    },
+    AddCorner {
+        library: String,
+        name: String,
+        temperature_c: String,
+        supply_factor: String,
+    },
+    EditCorner {
+        library: String,
+        original_name: String,
+        duplicate: bool,
+        name: String,
+        description: String,
+        nmos_corner: String,
+        pmos_corner: String,
+        temperature_c: String,
+        supply_factor: String,
+        minimum_temperature_c: String,
+        maximum_temperature_c: String,
+        required_domains: Vec<crate::state::model_library::CornerSectionDomain>,
+        make_default: bool,
+    },
+    ConfirmDeleteCorner {
+        library: String,
+        corner: String,
+    },
+    BindCornerSection {
+        library: String,
+        corner: String,
+        domain: crate::state::model_library::CornerSectionDomain,
+        section: String,
+    },
+    /// The findings one library's last source-drift scan produced, and the
+    /// one repair. It names the library rather than carrying the findings so
+    /// the dialog and the pages behind it read the same retained report.
+    ResolveDrift {
+        library: String,
+    },
 }
 
 #[cfg(test)]

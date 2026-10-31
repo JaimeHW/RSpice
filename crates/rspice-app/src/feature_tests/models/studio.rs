@@ -11,8 +11,7 @@ use crate::state::model_library::{DeviceModel, ModelLibrary, ModelQualificationS
 use crate::state::{Component, ComponentType, ModelsPage, Point};
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::tests::painted_text;
-use crate::workbench::models::workspace_state::ModelsOperationalState;
-use crate::workbench::state::ModelsCatalogScope;
+use crate::workbench::models::workspace_state::{ModelsCatalogScope, ModelsOperationalState};
 use crate::workbench::{RSpiceApp, features};
 
 mod binned_family;
@@ -305,4 +304,27 @@ fn a_parameter_states_where_its_card_is_written() {
             "the parameter card never painted {expected:?}"
         );
     }
+}
+
+/// The project overview's model closure raises `ShowProjectModels`; the shell
+/// answers it by opening the Models workspace on the project's own catalog,
+/// whatever scope the workspace was left on.
+#[test]
+fn showing_the_project_models_always_opens_the_project_catalog_scope() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.models.models_view.catalog_scope = ModelsCatalogScope::InstalledPacks;
+    app.state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::requests::ShowProjectModels);
+    app.after_contribution();
+
+    assert_eq!(
+        app.state.workbench.workspace,
+        crate::workbench::state::Workspace::Models
+    );
+    assert_eq!(
+        app.state.models.models_view.catalog_scope,
+        ModelsCatalogScope::Project
+    );
 }

@@ -55,7 +55,7 @@ const APPLICATION_GATE: &[GateRow] = &[
     }),
     ("workbench.models_view.dialog", |state| {
         state.models.models_view.dialog = Some(
-            crate::workbench::state::ModelsWorkbenchDialog::SourcePreview {
+            crate::workbench::models::workspace_state::ModelsWorkbenchDialog::SourcePreview {
                 title: "nch".to_owned(),
                 subtitle: "foundation.lib".to_owned(),
                 source: ".model nch nmos".to_owned(),
