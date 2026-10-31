@@ -22,6 +22,19 @@
 //! never shrinks to fit: a value or caption longer than its cell holds is cut
 //! with an ellipsis, a cell / view path at its start, since the names of the
 //! cell and the view are at its end.
+//!
+//! A cut falls only between grapheme clusters, so a mark is never parted
+//! from the letter it sits on. Latin text is measured here, since IBM Plex
+//! Mono advances every character it letters alike; the width of any other
+//! text is asked of a [`DrawingSheetTitleMeasure`], which the canvas and
+//! print answer with the shaped width of the faces that letter it, so both
+//! cut a value at the same place. The cut is made in the order the value was
+//! typed, and the ellipsis after it stands at the end of the line as it is
+//! read. A value whose paragraph is read right to left, such as Arabic or
+//! Hebrew, is set against the right of its cell.
+
+use unicode_segmentation::UnicodeSegmentation;
+use unicode_width::UnicodeWidthStr;
 
 use super::*;
 
@@ -32,6 +45,56 @@ pub const DRAWING_SHEET_TITLE_OUTLINE_UM: u64 = 700;
 /// Width of the rules between a title block's cells on paper: ISO 128-20's
 /// narrow line, half the outline's width.
 pub const DRAWING_SHEET_TITLE_RULE_UM: u64 = 350;
+
+/// The width a line of title-block lettering is set at.
+///
+/// The layout draws no glyphs, so the width of text it cannot count is
+/// asked of whoever letters it. [`DrawingSheetTitleCells`] answers without
+/// faces.
+pub trait DrawingSheetTitleMeasure {
+    /// Width on paper of `text` lettered at the ISO 3098 height
+    /// `lettering_um`, in the heavier weight when `emphasised`.
+    fn width_um(&self, text: &str, lettering_um: u64, emphasised: bool) -> u64;
+}
+
+/// The width of a line counted without faces: one IBM Plex Mono advance for
+/// each grapheme cluster, and two for an East Asian wide or fullwidth one.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct DrawingSheetTitleCells;
+
+impl DrawingSheetTitleMeasure for DrawingSheetTitleCells {
+    fn width_um(&self, text: &str, lettering_um: u64, _emphasised: bool) -> u64 {
+        let cells = text
+            .graphemes(true)
+            .map(|cluster| cluster.width().clamp(1, 2) as u64)
+            .sum::<u64>();
+        cells * drawing_sheet_mono_advance_um(lettering_um)
+    }
+}
+
+/// The edge of its run a line of title-block lettering is set against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DrawingSheetTitleAlign {
+    /// The left, at the line's `x_um`: a caption, and a value whose
+    /// paragraph is read left to right.
+    Left,
+    /// The right, at the line's `x_um + width_um`: a value whose paragraph
+    /// is read right to left.
+    Right,
+}
+
+impl DrawingSheetTitleAlign {
+    /// The edge a value's lines are set against: the right for a paragraph
+    /// whose first strongly directional character is read right to left
+    /// (UAX #9 rules P2 and P3), and the left otherwise.
+    #[must_use]
+    pub fn of(value: &str) -> Self {
+        match unicode_bidi::get_base_direction(value) {
+            unicode_bidi::Direction::Rtl => Self::Right,
+            unicode_bidi::Direction::Ltr | unicode_bidi::Direction::Mixed => Self::Left,
+        }
+    }
+}
 
 /// What a value line of a title cell letters.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -78,7 +141,13 @@ impl DrawingSheetTitleCaption {
     /// The caption as the cell letters it.
     #[must_use]
     pub fn letter(self) -> String {
-        elide_title_text(self.text, self.capacity())
+        let room = Room::new(
+            self.width_um,
+            self.lettering_um,
+            false,
+            &DrawingSheetTitleCells,
+        );
+        elide_title_text(self.text, &room)
     }
 }
 
@@ -116,7 +185,7 @@ impl DrawingSheetTitleValue {
         }
     }
 
-    /// Characters one line holds at the value's height. IBM Plex Mono
+    /// Latin characters one line holds at the value's height. IBM Plex Mono
     /// advances every glyph alike, so this is a measurement, and it holds on
     /// every renderer that letters the height.
     #[must_use]
@@ -124,33 +193,54 @@ impl DrawingSheetTitleValue {
         chars_across(self.width_um, self.lettering_um)
     }
 
+    /// `value` as the cell letters it, line by line, with the width of text
+    /// other than Latin counted by [`DrawingSheetTitleCells`]; see
+    /// [`Self::letter_measured`].
+    #[must_use]
+    pub fn letter(self, value: &str) -> Vec<String> {
+        self.letter_measured(value, &DrawingSheetTitleCells)
+    }
+
     /// `value` as the cell letters it, line by line: whole when it fits, and
     /// otherwise wrapped at its spaces and cut with an ellipsis where the
     /// last line runs out. A cell / view path on one line is cut at its
-    /// start instead (see [`elide_title_path`]).
+    /// start instead (see [`elide_title_path`]). `measure` gives the width
+    /// of text other than Latin.
     #[must_use]
-    pub fn letter(self, value: &str) -> Vec<String> {
-        self.wrap(value).0
+    pub fn letter_measured(
+        self,
+        value: &str,
+        measure: &dyn DrawingSheetTitleMeasure,
+    ) -> Vec<String> {
+        self.wrap(value, measure).0
     }
 
-    /// Whether the cell cuts `value` short.
+    /// Whether the cell cuts `value` short, measured as [`Self::letter`]
+    /// measures it.
     #[must_use]
     pub fn elides(self, value: &str) -> bool {
-        self.wrap(value).1
+        self.elides_measured(value, &DrawingSheetTitleCells)
     }
 
-    fn wrap(self, value: &str) -> (Vec<String>, bool) {
+    /// Whether the cell cuts `value` short, measured as
+    /// [`Self::letter_measured`] measures it.
+    #[must_use]
+    pub fn elides_measured(self, value: &str, measure: &dyn DrawingSheetTitleMeasure) -> bool {
+        self.wrap(value, measure).1
+    }
+
+    fn wrap(self, value: &str, measure: &dyn DrawingSheetTitleMeasure) -> (Vec<String>, bool) {
         let value = if self.upper_case {
             std::borrow::Cow::Owned(value.to_uppercase())
         } else {
             std::borrow::Cow::Borrowed(value)
         };
-        let capacity = self.capacity();
+        let room = Room::new(self.width_um, self.lettering_um, self.emphasised, measure);
         if self.field() == Some(DrawingSheetTitleFieldId::CellView) && self.max_lines <= 1 {
-            let cut = value.chars().count() > capacity;
-            return (vec![elide_title_path(&value, capacity)], cut);
+            let cut = !room.holds(&value);
+            return (vec![elide_title_path(&value, &room)], cut);
         }
-        wrap_title_text(&value, capacity, usize::from(self.max_lines.max(1)))
+        wrap_title_text(&value, &room, usize::from(self.max_lines.max(1)))
     }
 }
 
@@ -218,7 +308,12 @@ pub enum DrawingSheetTitleLetteringRole {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DrawingSheetTitleLettering {
     pub text: String,
+    /// Where the line's run starts, from the block's left edge.
     pub x_um: u64,
+    /// How far the run reaches.
+    pub width_um: u64,
+    /// Which edge of the run the line is set against.
+    pub align: DrawingSheetTitleAlign,
     /// See [`DrawingSheetTitleCaption::seat_um`].
     pub seat_um: u64,
     pub lettering_um: u64,
@@ -313,12 +408,27 @@ impl DrawingSheetTitleLayout {
     }
 
     /// Every line the block letters with `fields`, the resolved values of the
-    /// sheet, in cell order: each cell's caption, then its values. A field
-    /// with no value letters nothing, so its cell is a box to fill in.
+    /// sheet, with the width of text other than Latin counted by
+    /// [`DrawingSheetTitleCells`]; see [`Self::lettering_measured`].
     #[must_use]
     pub fn lettering(
         &self,
         fields: &[ResolvedDrawingSheetTitleField],
+    ) -> Vec<DrawingSheetTitleLettering> {
+        self.lettering_measured(fields, &DrawingSheetTitleCells)
+    }
+
+    /// Every line the block letters with `fields`, the resolved values of the
+    /// sheet, in cell order: each cell's caption, then its values, each cut
+    /// to its cell with `measure` giving the width of text other than Latin.
+    /// A field with no value letters nothing, so its cell is a box to fill
+    /// in. Every line of a value read right to left is set against the right
+    /// of its run.
+    #[must_use]
+    pub fn lettering_measured(
+        &self,
+        fields: &[ResolvedDrawingSheetTitleField],
+        measure: &dyn DrawingSheetTitleMeasure,
     ) -> Vec<DrawingSheetTitleLettering> {
         let mut lettering = Vec::new();
         for (index, cell) in self.cells.iter().enumerate() {
@@ -326,6 +436,8 @@ impl DrawingSheetTitleLayout {
                 lettering.push(DrawingSheetTitleLettering {
                     text: caption.letter(),
                     x_um: caption.x_um,
+                    width_um: caption.width_um,
+                    align: DrawingSheetTitleAlign::Left,
                     seat_um: caption.seat_um,
                     lettering_um: caption.lettering_um,
                     role: DrawingSheetTitleLetteringRole::Caption,
@@ -344,11 +456,14 @@ impl DrawingSheetTitleLayout {
                 if text.trim().is_empty() {
                     continue;
                 }
+                let align = DrawingSheetTitleAlign::of(text);
                 let mut seat_um = value.seat_um;
-                for line in value.letter(text) {
+                for line in value.letter_measured(text, measure) {
                     lettering.push(DrawingSheetTitleLettering {
                         text: line,
                         x_um: value.x_um,
+                        width_um: value.width_um,
+                        align,
                         seat_um,
                         lettering_um: value.lettering_um,
                         role: DrawingSheetTitleLetteringRole::Value,
@@ -362,20 +477,32 @@ impl DrawingSheetTitleLayout {
         lettering
     }
 
-    /// The fields among `fields`, the resolved values of the sheet, that the
-    /// block cuts short. Lettering never shrinks to fit, so each of them
-    /// prints with an ellipsis, and the place that checks a sheet's title
-    /// values says so beside it with [`DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY`].
+    /// The fields among `fields` the block cuts short, measured as
+    /// [`Self::lettering`] measures them; see [`Self::cut_fields_measured`].
     #[must_use]
     pub fn cut_fields(
         &self,
         fields: &[ResolvedDrawingSheetTitleField],
     ) -> Vec<DrawingSheetTitleFieldId> {
+        self.cut_fields_measured(fields, &DrawingSheetTitleCells)
+    }
+
+    /// The fields among `fields`, the resolved values of the sheet, that the
+    /// block cuts short, with `measure` giving the width of text other than
+    /// Latin. Lettering never shrinks to fit, so each of them prints with an
+    /// ellipsis, and the place that checks a sheet's title values says so
+    /// beside it with [`DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY`].
+    #[must_use]
+    pub fn cut_fields_measured(
+        &self,
+        fields: &[ResolvedDrawingSheetTitleField],
+        measure: &dyn DrawingSheetTitleMeasure,
+    ) -> Vec<DrawingSheetTitleFieldId> {
         fields
             .iter()
             .filter(|field| {
                 self.value(field.id)
-                    .is_some_and(|value| value.elides(&field.value))
+                    .is_some_and(|value| value.elides_measured(&field.value, measure))
             })
             .map(|field| field.id)
             .collect()
@@ -418,60 +545,129 @@ const fn chars_across(width_um: u64, lettering_um: u64) -> usize {
     if chars == 0 { 1 } else { chars as usize }
 }
 
-pub(super) fn elide_title_text(text: &str, max_chars: usize) -> String {
-    if text.chars().count() <= max_chars {
+/// The ellipsis a cut line ends in, or a cut path starts with.
+const ELLIPSIS: char = '\u{2026}';
+
+/// The run one line of lettering may fill, and how the width of what it
+/// letters is taken.
+struct Room<'a> {
+    width_um: u64,
+    lettering_um: u64,
+    emphasised: bool,
+    measure: &'a dyn DrawingSheetTitleMeasure,
+}
+
+impl<'a> Room<'a> {
+    /// A run `width_um` wide, and never narrower than one character:
+    /// lettering never shrinks to fit, so a cell too narrow for one character
+    /// still letters one, or an ellipsis, rather than smaller text.
+    fn new(
+        width_um: u64,
+        lettering_um: u64,
+        emphasised: bool,
+        measure: &'a dyn DrawingSheetTitleMeasure,
+    ) -> Self {
+        Self {
+            width_um: width_um.max(drawing_sheet_mono_advance_um(lettering_um)),
+            lettering_um,
+            emphasised,
+            measure,
+        }
+    }
+
+    /// Whether `text` fits the run. Latin text and the ellipsis are counted,
+    /// since IBM Plex Mono advances each of them alike; the width of anything
+    /// else is the measure's.
+    fn holds(&self, text: &str) -> bool {
+        let width_um = if text
+            .chars()
+            .all(|character| character.is_ascii() || character == ELLIPSIS)
+        {
+            text.chars().count() as u64 * drawing_sheet_mono_advance_um(self.lettering_um)
+        } else {
+            self.measure
+                .width_um(text, self.lettering_um, self.emphasised)
+        };
+        width_um <= self.width_um
+    }
+}
+
+/// Where `text` may be cut: the byte offset of every boundary between two of
+/// its grapheme clusters, in order.
+fn cut_points(text: &str) -> Vec<usize> {
+    text.grapheme_indices(true)
+        .skip(1)
+        .map(|(at, _)| at)
+        .collect()
+}
+
+/// `text` whole when it fits `room`, and otherwise as much of its start as
+/// fits with an ellipsis after it, cut between clusters. The ellipsis ends
+/// the line as it is read: on the right of a paragraph read left to right,
+/// and on the left of one read right to left.
+fn elide_title_text(text: &str, room: &Room<'_>) -> String {
+    if room.holds(text) {
         return text.to_owned();
     }
-    let mut kept = text
-        .chars()
-        .take(max_chars.saturating_sub(1))
-        .collect::<String>();
-    kept.push('…');
-    kept
+    let kept = |at: usize| format!("{}{ELLIPSIS}", &text[..at]);
+    let cuts = cut_points(text);
+    // A line only widens as clusters are added to it.
+    let fitting = cuts.partition_point(|&at| room.holds(&kept(at)));
+    fitting
+        .checked_sub(1)
+        .map_or_else(|| ELLIPSIS.to_string(), |last| kept(cuts[last]))
 }
 
 /// `path`, a `/`-separated cell / view path such as `lib/cell/view`, cut to
-/// `max_chars` from its start: an ellipsis and as much of its end as fits,
-/// since that is where the cell and view are named. Where the first name
-/// kept would be only part of one and the end still holds two whole names,
-/// the cut moves to the separator after it, so `…/top/schematic` rather
-/// than `…t/top/schematic`.
-fn elide_title_path(path: &str, max_chars: usize) -> String {
-    let count = path.chars().count();
-    if count <= max_chars {
+/// `room` from its start: an ellipsis and as much of its end as fits, since
+/// that is where the cell and view are named. Where the first name kept
+/// would be only part of one and the end still holds two whole names, the
+/// cut moves to the separator after it, so `…/top/schematic` rather than
+/// `…t/top/schematic`.
+fn elide_title_path(path: &str, room: &Room<'_>) -> String {
+    if room.holds(path) {
         return path.to_owned();
     }
-    let dropped = count - max_chars.saturating_sub(1);
-    let tail = path.chars().skip(dropped).collect::<String>();
-    let starts_whole = path.chars().nth(dropped - 1) == Some('/');
-    let kept = match tail.find('/') {
-        Some(at) if !starts_whole && tail[at + 1..].contains('/') => &tail[at..],
-        _ => tail.as_str(),
+    let kept = |from: usize| format!("{ELLIPSIS}{}", &path[from..]);
+    let cuts = cut_points(path);
+    // The shorter the end kept, the more surely it fits.
+    let first = cuts.partition_point(|&from| !room.holds(&kept(from)));
+    let Some(&dropped) = cuts.get(first) else {
+        return ELLIPSIS.to_string();
     };
-    format!("…{kept}")
+    let tail = &path[dropped..];
+    let starts_whole = path[..dropped].ends_with('/');
+    let tail = match tail.find('/') {
+        Some(at) if !starts_whole && tail[at + 1..].contains('/') => &tail[at..],
+        _ => tail,
+    };
+    format!("{ELLIPSIS}{tail}")
 }
 
-/// `text` broken at its spaces into at most `max_lines` lines of at most
-/// `max_chars` characters, and whether any of it is cut. A word longer than
-/// a line is broken where the line ends, and what the last line cannot hold
+/// `text` broken at its spaces into at most `max_lines` lines that fit
+/// `room`, and whether any of it is cut. A word wider than a line is broken
+/// where the line ends, between clusters, and what the last line cannot hold
 /// is cut with an ellipsis.
-fn wrap_title_text(text: &str, max_chars: usize, max_lines: usize) -> (Vec<String>, bool) {
-    let cut = |text: &str| text.chars().count() > max_chars;
-    if max_lines <= 1 || !cut(text) {
-        return (vec![elide_title_text(text, max_chars)], cut(text));
+fn wrap_title_text(text: &str, room: &Room<'_>, max_lines: usize) -> (Vec<String>, bool) {
+    let whole = room.holds(text);
+    if max_lines <= 1 || whole {
+        return (vec![elide_title_text(text, room)], !whole);
     }
     let mut lines = Vec::new();
     let mut rest = text.trim();
     while !rest.is_empty() {
-        if lines.len() + 1 == max_lines || !cut(rest) {
-            lines.push(elide_title_text(rest, max_chars));
-            return (lines, cut(rest));
+        if lines.len() + 1 == max_lines || room.holds(rest) {
+            lines.push(elide_title_text(rest, room));
+            return (lines, !room.holds(rest));
         }
-        // Break at the last space the line holds, or where it is full.
-        let fits = rest
-            .char_indices()
-            .nth(max_chars)
-            .map_or(rest.len(), |(at, _)| at);
+        // Break at the last space the line holds, or where it is full; a
+        // first cluster wider than the line still takes a line of its own.
+        let cuts = cut_points(rest);
+        let fitting = cuts.partition_point(|&at| room.holds(&rest[..at]));
+        let fits = fitting.checked_sub(1).map_or_else(
+            || cuts.first().copied().unwrap_or(rest.len()),
+            |last| cuts[last],
+        );
         let head = &rest[..fits];
         let next = &rest[fits..];
         let (line, after) = if next.starts_with(' ') {

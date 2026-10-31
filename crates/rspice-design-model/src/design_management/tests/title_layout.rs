@@ -589,6 +589,14 @@ fn every_lettered_line_stays_inside_its_cell() {
                 line.text
             );
             assert!(line.x_um >= cell.x_um + DRAWING_SHEET_TITLE_CELL_PADDING_UM);
+            // A line set against the right of its run stays inside the cell
+            // too.
+            assert!(
+                line.x_um + line.width_um
+                    <= cell.x_um + cell.width_um - DRAWING_SHEET_TITLE_CELL_PADDING_UM,
+                "{:?} runs past its cell",
+                line.text
+            );
             if let Some(next) = lines.get(index + 1).filter(|next| next.cell == line.cell) {
                 let next_top_um =
                     next.seat_um - drawing_sheet_mono_em_um(next.lettering_um) * 7 / 20;
@@ -1003,4 +1011,137 @@ fn the_layout_names_the_fields_it_cuts_short() {
     let mut cut = layout.cut_fields(&fields);
     cut.sort_unstable();
     assert_eq!(cut, [Field::DrawnBy, Field::DocumentId]);
+}
+
+/// A one-field value line `cells` IBM Plex Mono advances wide, at the title
+/// block's value height, holding up to `max_lines` lines.
+fn value_line(cells: u64, max_lines: u8) -> DrawingSheetTitleValue {
+    let lettering_um = DRAWING_SHEET_TITLE_BLOCK_LETTERING.data_um;
+    DrawingSheetTitleValue {
+        text: DrawingSheetTitleText::Field(Field::SheetTitle),
+        x_um: 0,
+        seat_um: 0,
+        width_um: drawing_sheet_mono_advance_um(lettering_um) * cells,
+        lettering_um,
+        emphasised: false,
+        max_lines,
+        line_pitch_um: 4_000,
+        upper_case: false,
+    }
+}
+
+#[test]
+fn a_cut_falls_only_between_grapheme_clusters() {
+    // A decomposed accent is one cluster with its letter: counted once, and
+    // never parted from it.
+    assert_eq!(value_line(5, 1).letter("Cafe\u{301}s"), ["Cafe\u{301}s"]);
+    assert!(!value_line(5, 1).elides("Cafe\u{301}s"));
+    assert_eq!(value_line(5, 1).letter("Cafe\u{301}st"), ["Cafe\u{301}…"]);
+    // Arabic keeps each letter's vowel mark, and Thai each consonant's vowel
+    // and tone marks.
+    assert_eq!(
+        value_line(4, 1).letter("\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}\u{628}\u{64b}\u{627}"),
+        ["\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}…"]
+    );
+    assert_eq!(
+        value_line(4, 1)
+            .letter("\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}\u{e04}\u{e23}\u{e31}\u{e1a}"),
+        ["\u{e2a}\u{e27}\u{e31}\u{e2a}…"]
+    );
+}
+
+#[test]
+fn an_east_asian_wide_character_takes_two_cells() {
+    assert_eq!(value_line(4, 1).letter("直骨"), ["直骨"]);
+    assert_eq!(value_line(5, 1).letter("直骨角度計"), ["直骨…"]);
+    assert!(value_line(5, 1).elides("直骨角度計"));
+    // A line with no space to break at breaks where it is full.
+    assert_eq!(
+        value_line(5, 2).letter("日本語のテキスト"),
+        ["日本", "語の…"]
+    );
+}
+
+#[test]
+fn the_measure_decides_the_width_of_all_but_latin_text() {
+    /// Half as wide again as counting cells says.
+    struct Wider;
+    impl DrawingSheetTitleMeasure for Wider {
+        fn width_um(&self, text: &str, lettering_um: u64, emphasised: bool) -> u64 {
+            DrawingSheetTitleCells.width_um(text, lettering_um, emphasised) * 3 / 2
+        }
+    }
+    let line = value_line(8, 1);
+    let hebrew = "\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{5e2}\u{5d5}\u{5dc}\u{5dd}";
+    assert_eq!(
+        line.letter(hebrew),
+        ["\u{5e9}\u{5dc}\u{5d5}\u{5dd} \u{5e2}\u{5d5}…"]
+    );
+    assert_eq!(
+        line.letter_measured(hebrew, &Wider),
+        ["\u{5e9}\u{5dc}\u{5d5}\u{5dd}…"]
+    );
+    assert!(line.elides_measured("\u{5e9}\u{5dc}\u{5d5}\u{5dd}\u{5e2}\u{5d5}", &Wider));
+    assert!(!line.elides("\u{5e9}\u{5dc}\u{5d5}\u{5dd}\u{5e2}\u{5d5}"));
+    // IBM Plex Mono letters Latin text at one advance a character, so the
+    // measure is not asked.
+    assert_eq!(line.letter_measured("ABCDEFGHIJ", &Wider), ["ABCDEFG…"]);
+    assert_eq!(line.letter_measured("ABCDEFGH", &Wider), ["ABCDEFGH"]);
+}
+
+#[test]
+fn a_value_read_right_to_left_is_set_against_the_right_of_its_cell() {
+    use DrawingSheetTitleAlign::{Left, Right};
+    // The paragraph's first strongly directional character decides.
+    assert_eq!(
+        DrawingSheetTitleAlign::of("\u{645}\u{631}\u{62d}\u{628}\u{627} R1"),
+        Right
+    );
+    assert_eq!(
+        DrawingSheetTitleAlign::of("(\u{5de}\u{5d2}\u{5d1}\u{5e8}) 10 k"),
+        Right
+    );
+    assert_eq!(
+        DrawingSheetTitleAlign::of("R1 \u{5de}\u{5d2}\u{5d1}\u{5e8}"),
+        Left
+    );
+    assert_eq!(DrawingSheetTitleAlign::of("12-34"), Left);
+    assert_eq!(DrawingSheetTitleAlign::of("直骨"), Left);
+
+    let format = SchematicSheetFormat::default();
+    let layout = layout_of(&format);
+    let hebrew_title = "\u{5de}\u{5d2}\u{5d1}\u{5e8} \u{5e9}\u{5e8}\u{5ea}";
+    let fields = [
+        (Field::SheetTitle, hebrew_title),
+        (Field::DrawnBy, "J. Whitfield"),
+    ]
+    .into_iter()
+    .map(|(id, value)| ResolvedDrawingSheetTitleField {
+        id,
+        value: value.to_owned(),
+        authority: DrawingSheetTitleFieldValueAuthority::Authored,
+    })
+    .collect::<Vec<_>>();
+    let lettering = layout.lettering(&fields);
+    let title_value = layout.value(Field::SheetTitle).unwrap();
+    let title = lettering
+        .iter()
+        .find(|line| line.text == hebrew_title)
+        .expect("the title is lettered whole");
+    assert_eq!(title.align, Right);
+    assert_eq!(
+        (title.x_um, title.width_um),
+        (title_value.x_um, title_value.width_um)
+    );
+    let drawn_by = lettering
+        .iter()
+        .find(|line| line.text == "J. Whitfield")
+        .unwrap();
+    assert_eq!(drawn_by.align, Left);
+    assert!(
+        lettering
+            .iter()
+            .filter(|line| line.role == DrawingSheetTitleLetteringRole::Caption)
+            .all(|caption| caption.align == Left)
+    );
 }
