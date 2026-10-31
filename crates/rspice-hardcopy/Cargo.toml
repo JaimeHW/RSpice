@@ -32,7 +32,12 @@ krilla = { version = "0.8.2", default-features = false, features = ["raster-imag
 resvg = { version = "0.48", default-features = false, features = ["text"] }
 tiff = { version = "0.11.3", default-features = false, features = ["deflate"] }
 ttf-parser = "0.25.1"
-rspice-fonts.workspace = true
+# Print shapes each run and lays right-to-left text out in display order.
+rspice-fonts = { workspace = true, features = ["bidi"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# A desktop prints what no embedded face has from the faces installed there.
+rspice-fonts = { workspace = true, features = ["bidi", "system"] }
 
 [dev-dependencies]
 lopdf = { version = "0.45", default-features = false }
