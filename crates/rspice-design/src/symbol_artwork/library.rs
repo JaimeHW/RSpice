@@ -235,12 +235,7 @@ impl SymbolLibrary {
         let mut assets = HashMap::with_capacity(self::embedded_symbols::EMBEDDED_SYMBOLS.len());
 
         for &(filename, svg_data) in self::embedded_symbols::EMBEDDED_SYMBOLS {
-            let mut symbol = parse_svg(svg_data).map_err(|err| {
-                SymbolError::ParseError(format!(
-                    "Failed to parse embedded symbol asset '{}': {}",
-                    filename, err
-                ))
-            })?;
+            let mut symbol = parse_asset(filename, svg_data)?;
             symbol.name = filename.to_string();
             symbol.target_width = (symbol.bounds.2 - symbol.bounds.0).max(1.0);
             symbol.target_height = (symbol.bounds.3 - symbol.bounds.1).max(1.0);
@@ -643,9 +638,48 @@ mod tests {
     }
 }
 
+/// `svg_data` parsed as the embedded asset `filename`, whose name any
+/// refusal carries.
+fn parse_asset(filename: &str, svg_data: &str) -> Result<Symbol, SymbolError> {
+    parse_svg(svg_data).map_err(|err| {
+        SymbolError::ParseError(format!(
+            "Failed to parse embedded symbol asset '{}': {}",
+            filename, err
+        ))
+    })
+}
+
 #[cfg(test)]
 mod parse_sanity {
     use super::*;
+
+    /// No embedded asset letters text, which the parser refuses: every one
+    /// of them parses.
+    #[test]
+    fn no_embedded_asset_letters_text() {
+        let assets = self::embedded_symbols::EMBEDDED_SYMBOLS;
+        assert_eq!(assets.len(), 149);
+        for &(filename, svg_data) in assets {
+            if let Err(error) = parse_asset(filename, svg_data) {
+                panic!("{error}");
+            }
+        }
+    }
+
+    /// An asset that letters text is refused by its name.
+    #[test]
+    fn an_asset_that_letters_text_is_refused_by_name() {
+        let error = parse_asset(
+            "labelled_resistor.svg",
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><path d="M0 10 H40" stroke="black"/><text x="20" y="8">R1</text></svg>"#,
+        )
+        .expect_err("a symbol may not letter text");
+        let message = error.to_string();
+        assert!(
+            message.contains("'labelled_resistor.svg'") && message.contains("\"R1\""),
+            "{message}"
+        );
+    }
 
     /// Every embedded asset must keep all of its SVG paths through the
     /// parse (none dropped, none collapsed), and stroked outlines must

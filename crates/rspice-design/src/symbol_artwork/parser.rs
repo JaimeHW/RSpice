@@ -1,7 +1,9 @@
 //! Parsing a symbol from SVG.
 //!
-//! Reads the subset of SVG a symbol body uses — paths, lines, circles, and
-//! text — and rejects anything else rather than dropping it silently.
+//! Reads the subset of SVG a symbol body uses — paths, lines and circles —
+//! and rejects anything else rather than dropping it silently. Text is
+//! refused: a symbol's lettering is drawn as paths, since the parser letters
+//! no text and would otherwise drop it unseen.
 
 use super::error::SymbolError;
 use super::types::{PathCommand, Symbol, SymbolPath};
@@ -15,6 +17,8 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         .replace(";filter:url(#filter5647)", "")
         .replace("filter:url(#filter5647);", "")
         .replace("filter:url(#filter5647)", "");
+
+    refuse_text(&sanitized_svg)?;
 
     // Parse using usvg
     let options = usvg::Options::default();
@@ -35,7 +39,7 @@ pub fn parse_svg(svg_data: &str) -> Result<Symbol, SymbolError> {
         &mut min_y,
         &mut max_x,
         &mut max_y,
-    );
+    )?;
 
     if paths.is_empty() {
         return Err(SymbolError::ParseError(
@@ -195,7 +199,7 @@ fn extract_paths(
     min_y: &mut f32,
     max_x: &mut f32,
     max_y: &mut f32,
-) {
+) -> Result<(), SymbolError> {
     for node in group.children() {
         match node {
             usvg::Node::Path(path) => {
@@ -266,11 +270,53 @@ fn extract_paths(
                 }
             }
             usvg::Node::Group(nested_group) => {
-                extract_paths(nested_group, paths, min_x, min_y, max_x, max_y);
+                extract_paths(nested_group, paths, min_x, min_y, max_x, max_y)?;
             }
-            _ => {}
+            usvg::Node::Text(text) => {
+                let lettered: String = text.chunks().iter().map(|chunk| chunk.text()).collect();
+                return Err(lettered_text(&lettered));
+            }
+            usvg::Node::Image(_) => {}
         }
     }
+    Ok(())
+}
+
+/// Refuses SVG that letters text, which a symbol's artwork may not: without
+/// a font the parser drops a text element before any node reaches the tree,
+/// so the symbol would draw without its lettering and nothing would say so.
+/// SVG 1.2's flowed text, which no renderer here draws, is refused alike.
+fn refuse_text(svg: &str) -> Result<(), SymbolError> {
+    let options = usvg::roxmltree::ParsingOptions {
+        allow_dtd: true,
+        ..usvg::roxmltree::ParsingOptions::default()
+    };
+    // A document that does not parse is refused by the SVG parser itself.
+    let Ok(document) = usvg::roxmltree::Document::parse_with_options(svg, options) else {
+        return Ok(());
+    };
+    let lettering = document.descendants().find(|node| {
+        node.tag_name().namespace() == Some("http://www.w3.org/2000/svg")
+            && matches!(node.tag_name().name(), "text" | "flowRoot")
+    });
+    match lettering {
+        Some(node) => {
+            let lettered: String = node
+                .descendants()
+                .filter(|descendant| descendant.is_text())
+                .filter_map(|descendant| descendant.text())
+                .collect();
+            Err(lettered_text(&lettered))
+        }
+        None => Ok(()),
+    }
+}
+
+fn lettered_text(lettered: &str) -> SymbolError {
+    SymbolError::ParseError(format!(
+        "SVG letters text \"{}\"; a symbol draws its lettering as paths",
+        lettered.split_whitespace().collect::<Vec<_>>().join(" ")
+    ))
 }
 
 fn update_bounds(
@@ -297,5 +343,27 @@ mod tests {
             parse_svg(r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"/>"#)
                 .expect_err("an empty canonical asset is not renderable");
         assert!(error.to_string().contains("no drawable symbol paths"));
+    }
+
+    /// Text in a symbol is refused rather than dropped, flowed text too,
+    /// however deep it sits.
+    #[test]
+    fn text_is_refused_rather_than_dropped() {
+        for lettering in [
+            r#"<text x="20" y="10">R</text>"#,
+            r#"<g><g><text x="20" y="10"><tspan>V</tspan><tspan>CC</tspan></text></g></g>"#,
+            r#"<flowRoot><flowPara>GND</flowPara></flowRoot>"#,
+        ] {
+            let svg = format!(
+                r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><path d="M0 10 H40" stroke="black"/>{lettering}</svg>"#
+            );
+            let error = parse_svg(&svg).expect_err("a symbol may not letter text");
+            assert!(error.to_string().contains("SVG letters text"), "{error}");
+        }
+        let error = parse_svg(
+            r#"<svg xmlns="http://www.w3.org/2000/svg" width="40" height="20"><path d="M0 10 H40" stroke="black"/><text x="20" y="10"><tspan>V</tspan><tspan>CC</tspan></text></svg>"#,
+        )
+        .expect_err("a symbol may not letter text");
+        assert!(error.to_string().contains("\"VCC\""), "{error}");
     }
 }
