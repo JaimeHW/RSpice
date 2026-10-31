@@ -496,6 +496,27 @@ impl Engine {
         )
     }
 
+    /// One pseudo-transient stage's backward-Euler pseudo-capacitor from
+    /// every node to ground, anchored at the last accepted stage.
+    ///
+    /// Branch rows take none. They are the voltage equations of ideal sources
+    /// and inductors, and a term there turns `V = E` into
+    /// `V = E - g (I - I_anchor)`; the ideal-source projection of every
+    /// iterate then breaks that equation, so no stage on a source-driven
+    /// circuit can ever converge.
+    pub(in crate::engine::convergence) fn stamp_pseudo_transient_anchor(
+        circuit: &CircuitData,
+        matrix: &mut StaticMatrix,
+        rhs: &mut [Value],
+        anchor: &[Value],
+        conductance: Value,
+    ) {
+        for node in 0..circuit.num_nodes().min(rhs.len()) {
+            matrix.add(node, node, conductance);
+            rhs[node] += conductance * anchor[node];
+        }
+    }
+
     fn walk_pseudo_transient_nonlinear(
         &self,
         circuit: &mut CircuitData,
@@ -543,10 +564,13 @@ impl Engine {
                 rhs.fill(0.0);
                 matrix.clear_values();
 
-                for i in 0..size {
-                    matrix.add(i, i, pseudo_conductance);
-                    rhs[i] += pseudo.current(anchor_solution[i]);
-                }
+                Self::stamp_pseudo_transient_anchor(
+                    circuit,
+                    matrix,
+                    &mut rhs,
+                    &anchor_solution,
+                    pseudo_conductance,
+                );
                 Self::stamp_matrix_conditioning_diagonal(circuit, matrix, size, 1e-12);
 
                 circuit.stamp_dc_direct(matrix, &mut rhs);
@@ -1489,9 +1513,6 @@ mod operating_point_rule_tests {
     }
 
     /// One deck for each family that reopens on its MODEINITJCT load.
-    /// Norton supplies drive them: with ideal voltage sources in their place,
-    /// pseudo-transient continuation does not solve the first stage of the
-    /// bipolar deck even from its operating point.
     const REOPENED_FAMILIES: &[&str] = &[
         "\
 * bipolar and SOI
@@ -1825,5 +1846,58 @@ m2 d2 g 0 0 nmos150 w=150e-9 l=150e-9 nf=1 off
         assert_eq!(failure.aid, ContinuationAid::PseudoTransient);
         assert_eq!(failure.unsolved, ContinuationStage::UnmodifiedCircuit);
         assert!(failure.reached.is_some(), "{failure}");
+    }
+
+    /// ngspice's OPtran and Xyce's pseudo-transient both solve a resistive
+    /// divider in their first step. The old stages also put a
+    /// pseudo-capacitor on every branch row, so on any circuit an ideal
+    /// voltage source drives no stage converged, from zero or from the
+    /// operating point itself.
+    #[test]
+    fn pseudo_transient_solves_circuits_ideal_voltage_sources_drive() {
+        let decks = [
+            "* resistor divider\nv1 in 0 2\nr1 in out 1k\nr2 out 0 1k\n.op\n.end\n",
+            "* diode divider\nv1 in 0 5\nr1 in out 1k\nd1 out 0 dmod\n\
+             .model dmod d is=1e-14\n.op\n.end\n",
+            "* bipolar stage\nvcc vcc 0 5\nvb b 0 0.7\nrc vcc c 1k\nq1 c b 0 qmod\n\
+             .model qmod npn is=1e-16 bf=100\n.op\n.end\n",
+        ];
+        for deck in decks {
+            let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+            let title = deck.lines().next().unwrap_or_default();
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: crate::engine::SpiceDialect::Ngspice,
+                ..SimulationConfig::default()
+            })
+            .resolved_for_netlist(&netlist);
+            let fresh = || linked(&engine, engine.build_circuit(&netlist).unwrap());
+            let (mut circuit, mut matrix) = fresh();
+            let zero = vec![0.0; circuit.matrix_size()];
+            let direct = engine
+                .solve_nonlinear_with_guess_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    Some(&zero),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{title}: direct solve: {error}"));
+            for (start, seed) in [("zero", &zero), ("its operating point", &direct)] {
+                let (mut circuit, mut matrix) = fresh();
+                let stepped = engine
+                    .pseudo_transient_nonlinear_with_guess_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        seed,
+                        &NoAbort,
+                    )
+                    .unwrap_or_else(|error| panic!("{title} from {start}: {error}"));
+                for (index, (&stepped, &direct)) in stepped.iter().zip(&direct).enumerate() {
+                    assert!(
+                        (stepped - direct).abs() <= 1e-6 * direct.abs() + 1e-12,
+                        "{title} from {start}: x[{index}] = {stepped:e}, direct {direct:e}"
+                    );
+                }
+            }
+        }
     }
 }

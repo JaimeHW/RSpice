@@ -986,10 +986,13 @@ impl Engine {
             solution,
             self.effective_device_junction_gmin(self.config.convergence_config.gmin_target),
             |circuit, matrix, rhs| {
-                for i in 0..rhs.len() {
-                    matrix.add(i, i, pseudo_conductance);
-                    rhs[i] += pseudo_conductance * anchor_solution[i];
-                }
+                Self::stamp_pseudo_transient_anchor(
+                    circuit,
+                    matrix,
+                    rhs,
+                    anchor_solution,
+                    pseudo_conductance,
+                );
                 Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), 1e-12);
                 circuit.stamp_dc_direct(matrix, rhs);
             },
@@ -1195,10 +1198,13 @@ impl Engine {
     ) -> Option<Value> {
         let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         self.nonlinear_merit_with_linear_stamp(circuit, matrix, solution, |circuit, matrix, rhs| {
-            for i in 0..rhs.len() {
-                matrix.add(i, i, pseudo_conductance);
-                rhs[i] += pseudo_conductance * anchor_solution[i];
-            }
+            Self::stamp_pseudo_transient_anchor(
+                circuit,
+                matrix,
+                rhs,
+                anchor_solution,
+                pseudo_conductance,
+            );
             Self::stamp_matrix_conditioning_diagonal(circuit, matrix, rhs.len(), gmin_floor);
             circuit.stamp_dc_direct(matrix, rhs);
         })
