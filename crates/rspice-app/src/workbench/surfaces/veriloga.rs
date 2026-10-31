@@ -17,6 +17,7 @@ use crate::workbench::{MessageId, RSpiceApp};
 use super::super::design_system::{PROBLEM_MARK_GAP, PROBLEM_MARK_SIDE, paint_problem_mark};
 
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
+use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::documents::code_workspace::{
     CodeEditorLanguage, show_code_document_interaction_versioned,
 };
@@ -434,7 +435,7 @@ fn interface_strip(
             let Some((receipt, target)) = receipt.and_then(|receipt| {
                 let handoff = receipt.placement.as_ref()?;
                 (&handoff.view == reference)
-                    .then(|| state.veriloga_placement_target(handoff))
+                    .then(|| veriloga_placement_target(&state.model, handoff))
                     .flatten()
                     .map(|target| (receipt, target))
             }) else {

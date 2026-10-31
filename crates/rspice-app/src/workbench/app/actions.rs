@@ -16,8 +16,8 @@ pub(crate) use rspice_app_sheets::workbench::app::actions::sheets;
 pub(in crate::workbench) mod stimulus;
 pub(in crate::workbench) mod stimulus_placement;
 mod symbol;
-mod veriloga_placement;
-mod veriloga_symbol;
+pub(in crate::workbench) mod veriloga_placement;
+pub(in crate::workbench) mod veriloga_symbol;
 pub(in crate::workbench) mod workspace;
 
 use egui::{Context, Popup};

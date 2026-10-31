@@ -9,6 +9,7 @@ use super::veriloga_interface_tests::{compile_and_publish, edit_source};
 use super::*;
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{Cell, CellViewRef, ComponentType, Library, Tool, View, ViewType};
+use crate::workbench::app::actions::veriloga_placement::veriloga_placement_target;
 use crate::workbench::state::Workspace;
 
 const LIBRARY: &str = "behavioral";
@@ -163,17 +164,17 @@ fn a_closed_origin_offers_the_designs_top_schematic_and_otherwise_nothing() {
     let top = CellViewRef::new(&project.root_library, &project.top_cell, "schematic");
 
     assert_eq!(
-        app.state.veriloga_placement_target(&handoff),
+        veriloga_placement_target(&app.state.model, &handoff),
         Some(top.clone()),
         "bench's tab is not open"
     );
     app.state.open_workspace_view(bench.clone());
     assert_eq!(
-        app.state.veriloga_placement_target(&handoff),
+        veriloga_placement_target(&app.state.model, &handoff),
         Some(bench.clone())
     );
 
     app.state.model.workspace.content.close_view(&bench);
     app.state.model.workspace.content.project.top_cell = "gain".to_owned();
-    assert_eq!(app.state.veriloga_placement_target(&handoff), None);
+    assert_eq!(veriloga_placement_target(&app.state.model, &handoff), None);
 }

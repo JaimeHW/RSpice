@@ -8,49 +8,48 @@
 
 use crate::state::VerilogAPlacementHandoff;
 use crate::state::{CellViewRef, ViewType, library_cell_placement_candidates};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+
+/// Where `handoff`'s device is offered for placement: the schematic the form
+/// was opened from while its tab is open, else the design's top schematic.
+/// Never the device's own cell.
+pub(in crate::workbench) fn veriloga_placement_target(
+    model: &Model,
+    handoff: &VerilogAPlacementHandoff,
+) -> Option<CellViewRef> {
+    let schematic = |reference: &CellViewRef| {
+        reference.cell != handoff.view.cell
+            && model
+                .library_manager
+                .get_library(&reference.library)
+                .and_then(|library| library.get_cell(&reference.cell))
+                .and_then(|cell| cell.get_view(&reference.view))
+                .is_some_and(|view| {
+                    matches!(view.view_type, ViewType::Schematic | ViewType::Testbench)
+                })
+    };
+    let open = |reference: &CellViewRef| {
+        model
+            .workspace
+            .content
+            .open_views
+            .iter()
+            .any(|open| &open.reference == reference)
+    };
+    let project = &model.workspace.content.project;
+    let top = CellViewRef::new(
+        &project.root_library,
+        &project.top_cell,
+        crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+    );
+    handoff
+        .schematic
+        .clone()
+        .filter(|remembered| open(remembered) && schematic(remembered))
+        .or_else(|| schematic(&top).then_some(top))
+}
 
 impl AppState {
-    /// Where `handoff`'s device is offered for placement: the schematic the
-    /// form was opened from while its tab is open, else the design's top
-    /// schematic. Never the device's own cell.
-    pub(crate) fn veriloga_placement_target(
-        &self,
-        handoff: &VerilogAPlacementHandoff,
-    ) -> Option<CellViewRef> {
-        let schematic = |reference: &CellViewRef| {
-            reference.cell != handoff.view.cell
-                && self
-                    .model
-                    .library_manager
-                    .get_library(&reference.library)
-                    .and_then(|library| library.get_cell(&reference.cell))
-                    .and_then(|cell| cell.get_view(&reference.view))
-                    .is_some_and(|view| {
-                        matches!(view.view_type, ViewType::Schematic | ViewType::Testbench)
-                    })
-        };
-        let open = |reference: &CellViewRef| {
-            self.model
-                .workspace
-                .content
-                .open_views
-                .iter()
-                .any(|open| &open.reference == reference)
-        };
-        let project = &self.model.workspace.content.project;
-        let top = CellViewRef::new(
-            &project.root_library,
-            &project.top_cell,
-            crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-        );
-        handoff
-            .schematic
-            .clone()
-            .filter(|remembered| open(remembered) && schematic(remembered))
-            .or_else(|| schematic(&top).then_some(top))
-    }
-
     /// The placement the open Verilog-A view's compile result offers: the
     /// device and where it would go.
     pub(crate) fn offered_veriloga_placement(
@@ -64,7 +63,7 @@ impl AppState {
             .as_ref()?
             .placement
             .clone()?;
-        let target = self.veriloga_placement_target(&handoff)?;
+        let target = veriloga_placement_target(&self.model, &handoff)?;
         Some((handoff, target))
     }
 

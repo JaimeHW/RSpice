@@ -14,6 +14,7 @@ use crate::state::{
     ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, SymbolElectricalType, View,
     ViewType,
 };
+use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
 use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACellSymbol, VerilogACompileOutcome,
 };
@@ -725,10 +726,8 @@ fn a_hand_edited_symbol_reports_its_drift_and_updates_as_one_undo_step() {
     );
     assert!(!app.state.model.can_undo_project_design());
 
-    let summary = app
-        .state
-        .update_veriloga_symbol(&reference)
-        .expect("the update applies");
+    let summary =
+        update_veriloga_symbol(&mut app.state.model, &reference).expect("the update applies");
     assert!(summary.contains("Pin n is not a module port"), "{summary}");
     assert_eq!(
         pin_names(&symbol(&app, &reference)),
