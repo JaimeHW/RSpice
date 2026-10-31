@@ -1013,8 +1013,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
-    ("commands", "preflight", 1),
-    ("commands", "tools/jobs_manager", 1),
     ("commands", "tools/specialist_tool_browser", 1),
     ("surfaces", "preflight", 1),
     // The shell's own persisted state reaching up into the window session.

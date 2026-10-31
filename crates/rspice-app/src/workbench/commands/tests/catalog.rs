@@ -10,6 +10,7 @@ use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
 fn command_catalog_has_unique_stable_ids() {
@@ -117,8 +118,8 @@ fn all_workspace_commands_are_discoverable() {
 fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::CommandPalette.spec().id, "command-palette");
     assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
-    assert_eq!(Command::RunSimulation.spec().id, "start-run");
-    assert_eq!(Command::StopSimulation.spec().id, "stop-run");
+    assert_eq!(SimulateCommand::Run.key().as_str(), "start-run");
+    assert_eq!(SimulateCommand::Stop.key().as_str(), "stop-run");
     assert_eq!(ProjectCommand::OpenProject.key().as_str(), "open-project");
     assert_eq!(Command::OpenNetlist.spec().id, "open-netlist");
     assert_eq!(ProjectCommand::NewProject.key().as_str(), "new-project");

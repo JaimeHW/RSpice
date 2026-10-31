@@ -490,17 +490,14 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
         Command::VisibilityOptions => WorkbenchIcon::Visibility,
         Command::CycleGrid => WorkbenchIcon::Grid,
-        Command::CheckCellview
-        | Command::CheckDesign
-        | Command::PreflightChecks
-        | Command::ValidateCodeDocument => WorkbenchIcon::Check,
-        Command::VerilogABuildSettings | Command::SimulationOptions => WorkbenchIcon::Sliders,
+        Command::CheckCellview | Command::CheckDesign | Command::ValidateCodeDocument => {
+            WorkbenchIcon::Check
+        }
+        Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
         Command::SourceLanguageTools => WorkbenchIcon::Target,
         Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice) => WorkbenchIcon::Export,
-        Command::RunSimulation => WorkbenchIcon::Run,
-        Command::StopSimulation => WorkbenchIcon::Stop,
         Command::AutomationConsole => WorkbenchIcon::Terminal,
         _ => return None,
     };
@@ -524,6 +521,15 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             ProjectCommand::ProjectLauncher => Some(WorkbenchIcon::Folder),
             ProjectCommand::NewProject | ProjectCommand::NewCell => Some(WorkbenchIcon::Add),
             ProjectCommand::Save => Some(WorkbenchIcon::Save),
+            _ => None,
+        };
+    }
+    if let Some(command) = SimulateCommand::from_key(key) {
+        return match command {
+            SimulateCommand::Run => Some(WorkbenchIcon::Run),
+            SimulateCommand::Stop => Some(WorkbenchIcon::Stop),
+            SimulateCommand::Preflight => Some(WorkbenchIcon::Check),
+            SimulateCommand::Options => Some(WorkbenchIcon::Sliders),
             _ => None,
         };
     }

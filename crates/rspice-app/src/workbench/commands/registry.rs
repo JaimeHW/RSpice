@@ -307,18 +307,6 @@ const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
     primary(chord(Key::OpenBracket, false, false, false, "["), ALL),
     alternate(chord(Key::F8, false, false, true, "Shift+F8"), ALL),
 ];
-const RUN_SIMULATION: &[ShortcutBinding] = &[
-    primary(chord(Key::F5, false, false, false, "F5"), DESKTOP),
-    alternate(chord(Key::Enter, true, false, false, "Ctrl+Enter"), HOST),
-];
-const STOP_SIMULATION: &[ShortcutBinding] = &[
-    primary(chord(Key::F5, false, false, true, "Shift+F5"), DESKTOP),
-    alternate(
-        chord(Key::Enter, true, false, true, "Ctrl+Shift+Enter"),
-        HOST,
-    ),
-];
-const PREFLIGHT: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
 const GENERATED_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, false, "Ctrl+L"), DESKTOP),
     alternate(chord(Key::L, true, true, false, "Ctrl+Alt+L"), HOST),
@@ -361,13 +349,7 @@ impl Command {
                 | Self::RuleSetup
                 | Self::ReviewComments
                 | Self::CreateHierarchy
-                | Self::SimulationPage(_)
-                | Self::PreflightChecks
-                | Self::ManageSimulationPlans
-                | Self::AddAnalysis
-                | Self::SimulationOptions
                 | Self::GenerateNetlist
-                | Self::VerificationPage(_)
                 | Self::StimulusNewDefinition
                 | Self::StimulusDuplicateDefinition
                 | Self::StimulusDeleteDefinition
@@ -491,13 +473,6 @@ impl Command {
             | Self::RuleSetup
             | Self::ReviewComments
             | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
-            Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
-            // Deliberately global, unlike the Simulation-workspace commands
-            // above it: the plan chip that owns this action lives in the
-            // context toolbar, which is chrome shown in every workspace. A
-            // `SimulationWorkspace` context would withdraw the keyboard route
-            // from every place the chip itself is still clickable.
-            Self::ManageSimulationPlans => ShortcutContext::Global,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
@@ -511,8 +486,6 @@ impl Command {
             | Self::SymbolUpdatePinsFromContract
             | Self::SymbolSave
             | Self::ExitSymbolInPlace => ShortcutContext::SymbolCanvas,
-            Self::VerificationPage(_) => ShortcutContext::VerificationWorkspace,
-            Self::RunSimulation | Self::StopSimulation => ShortcutContext::RunnableProject,
             Self::ToggleLineComment
             | Self::IndentLines
             | Self::OutdentLines
@@ -659,9 +632,6 @@ impl Command {
             Self::CheckDesign => NONE,
             Self::NextViolation => NEXT_VIOLATION,
             Self::PreviousViolation => PREVIOUS_VIOLATION,
-            Self::RunSimulation => RUN_SIMULATION,
-            Self::StopSimulation => STOP_SIMULATION,
-            Self::PreflightChecks => PREFLIGHT,
             Self::GenerateNetlist => GENERATED_NETLIST,
             Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::CommandPalette => COMMAND_PALETTE,
@@ -861,22 +831,6 @@ impl Command {
                 .state
                 .selected_instance_netlist_block()
                 .unwrap_or("command is unavailable in this context"),
-            // An unrunnable plan stays enabled on purpose, so the run says
-            // why it cannot start; this row is grey only while one runs, or,
-            // on the netlist page, while the deck there cannot run.
-            Self::RunSimulation
-                if app.state.model.simulation.execution.has_active_execution()
-                    || app.state.model.simulation.execution.trigger_simulation =>
-            {
-                "a run is already in progress"
-            }
-            Self::RunSimulation => "the netlist on this page cannot run yet",
-            Self::ManageSimulationPlans => {
-                "the active simulation plan has no stable analysis identity to manage"
-            }
-            Self::AddAnalysis => {
-                "the active simulation plan has no stable analysis identity to add to"
-            }
             Self::OpenNetlist | Self::ImportNetlist
                 if app.state.model.simulation.execution.has_active_execution() =>
             {
@@ -886,14 +840,6 @@ impl Command {
                 "the project is open read-only"
             }
             Self::NewVerilogADevice => "no library can be written",
-            Self::StopSimulation if app.state.model.simulation.cancellation_is_pending() => {
-                "simulation cancellation is already in progress"
-            }
-            Self::StopSimulation if app.state.model.simulation.execution.has_active_execution() => {
-                "the active simulation execution cannot accept cancellation"
-            }
-            Self::StopSimulation => "no simulation is running",
-            Self::PreflightChecks => "the engine is still building the decks of the last check",
             Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
@@ -934,9 +880,7 @@ impl Command {
         platform.has_browser_reserved_primary()
             && matches!(
                 self,
-                Self::RunSimulation
-                    | Self::StopSimulation
-                    | Self::CloseActiveDocument
+                Self::CloseActiveDocument
                     | Self::ToggleFullScreen
                     | Self::GenerateNetlist
                     | Self::ToggleConsole
@@ -951,6 +895,7 @@ mod tests {
     use crate::state::command_catalog::CommandCatalog;
     use crate::workbench::ResultViewer;
     use crate::workbench::results::commands::ResultsCommand;
+    use crate::workbench::simulate::commands::SimulateCommand;
 
     fn binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<Command> {
         crate::workbench::commands::vocabulary::COMMAND_REGISTRY
@@ -1003,8 +948,8 @@ mod tests {
                 .is_empty()
         );
         assert!(
-            Command::VerificationPage(VerificationPage::Yield)
-                .shortcut_bindings()
+            crate::workbench::commands::vocabulary::CommandRegistry
+                .default_bindings(SimulateCommand::Verify(VerificationPage::Yield).key())
                 .is_empty()
         );
     }

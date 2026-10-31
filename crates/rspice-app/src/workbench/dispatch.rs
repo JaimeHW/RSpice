@@ -45,6 +45,7 @@ use crate::workbench::framework::requests::{
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
 use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::state::Workspace;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -75,6 +76,9 @@ impl RSpiceApp {
         }
         if let Some(reason) = held_back(spec.flags, &self.state.platform) {
             return CommandAvailability::Disabled(reason);
+        }
+        if self.netlist_takes_run(key) {
+            return self.netlist_run_availability();
         }
         features::availability(self, key).unwrap_or(CommandAvailability::Hidden)
     }
@@ -127,8 +131,39 @@ impl RSpiceApp {
         {
             return;
         }
-        features::execute(self, spec.key);
+        if self.netlist_takes_run(spec.key) {
+            if self.manual_deck_run_block_reason().is_none() {
+                self.state.request_netlist_manual_deck_run();
+            }
+        } else {
+            features::execute(self, spec.key);
+        }
         self.after_contribution();
+    }
+
+    /// Whether `key` is Run on the Netlist workspace, which runs the deck
+    /// the page shows rather than the active plan. The shell answers it
+    /// there, ahead of simulate.
+    // Deleted when code registers its own handler for Run on the Netlist
+    // workspace.
+    fn netlist_takes_run(&self, key: CommandKey) -> bool {
+        key == ids::RUN_SIMULATION && self.state.workbench.workspace == Workspace::Netlist
+    }
+
+    /// Whether Run on the Netlist workspace can run the deck there, and why
+    /// not: a run in progress first, then whatever the deck still lacks.
+    fn netlist_run_availability(&self) -> CommandAvailability {
+        if self.manual_deck_run_block_reason().is_none() {
+            return CommandAvailability::Available;
+        }
+        let execution = &self.state.model.simulation.execution;
+        CommandAvailability::Disabled(
+            if execution.has_active_execution() || execution.trigger_simulation {
+                "a run is already in progress"
+            } else {
+                "the netlist on this page cannot run yet"
+            },
+        )
     }
 
     /// Open the hardcopy feature's `workflow` on the active view, in its
@@ -552,5 +587,64 @@ mod tests {
             }
         }
         assert_eq!(Command::from_stable_id("place-component"), None);
+    }
+
+    /// Run on the Netlist workspace runs the deck the page shows, and only
+    /// that: the shell's arm answers there ahead of simulate's, which would
+    /// queue the active plan instead. Everywhere else Run is simulate's.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn run_on_the_netlist_workspace_runs_the_deck_and_not_the_plan() {
+        use crate::state::SimulationRunIntent;
+        use crate::workbench::RSpiceApp;
+        use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+        use crate::workbench::state::Workspace;
+        use crate::workbench::workflows::netlist_workflow::{
+            apply_imported_netlist, validate_visible_netlist_source,
+        };
+
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .model
+            .schematic
+            .document_mut_for_test()
+            .components
+            .clear();
+        app.state.workbench.workspace = Workspace::Netlist;
+        assert_eq!(
+            app.command_availability(ids::RUN_SIMULATION),
+            CommandAvailability::Disabled("the netlist on this page cannot run yet")
+        );
+        app.execute_command_key(ids::RUN_SIMULATION);
+        assert!(!app.state.model.simulation.execution.trigger_simulation);
+        assert!(!app.state.runs.preflight.take_run_and_queue_request());
+
+        assert!(apply_imported_netlist(
+            &mut app.state,
+            "standalone\nV1 out 0 1\nR1 out 0 1k\n.op\n.end\n".to_owned(),
+            None,
+            "standalone.cir",
+        ));
+        assert!(validate_visible_netlist_source(&mut app));
+        app.state.workbench.workspace = Workspace::Netlist;
+        assert_eq!(
+            app.command_availability(ids::RUN_SIMULATION),
+            CommandAvailability::Available
+        );
+        app.execute_command_key(ids::RUN_SIMULATION);
+        assert_eq!(
+            app.state.model.simulation.execution.run_intent,
+            SimulationRunIntent::ManualDeck
+        );
+        assert!(app.state.model.simulation.execution.trigger_simulation);
+        assert!(
+            !app.state.runs.preflight.take_run_and_queue_request(),
+            "simulate's arm stays out of the Netlist workspace"
+        );
+
+        app.state.model.simulation.execution.trigger_simulation = false;
+        app.state.workbench.workspace = Workspace::Simulate;
+        app.execute_command_key(ids::RUN_SIMULATION);
+        assert!(app.state.runs.preflight.take_run_and_queue_request());
     }
 }

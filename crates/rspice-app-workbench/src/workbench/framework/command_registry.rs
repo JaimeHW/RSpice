@@ -185,8 +185,9 @@ impl Registry {
     /// Whether the registry holds together: every key is declared by exactly
     /// one owner, the order lists each declared key once and nothing else,
     /// every alias names a declared key without being one, every key in
-    /// `named` names a declared command, and every command an owner leaves
-    /// out is declared once, by no listed command's key, and not ordered.
+    /// `named` names a declared command, listed or left out, and every
+    /// command an owner leaves out is declared once, by no listed command's
+    /// key, and not ordered.
     /// `named` pairs each key a menu or framework code names a command by
     /// with what names it. The error lists every problem, one per line.
     pub fn validate(
@@ -235,8 +236,11 @@ impl Registry {
                 ));
             }
         }
+        // A command left out still runs by its key, so naming it is naming a
+        // declared command.
+        let unlisted: HashSet<&str> = self.unlisted.iter().map(|spec| spec.key.as_str()).collect();
         for (namer, key) in named {
-            if !owners.contains_key(key.as_str()) {
+            if !owners.contains_key(key.as_str()) && !unlisted.contains(key.as_str()) {
                 problems.push(format!(
                     "{namer} names `{}`, which no owner declares",
                     key.as_str()
@@ -365,6 +369,7 @@ pub mod ids {
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";
         TOGGLE_FOCUS_MODE = "toggle-focus-mode";
         TOGGLE_SPLIT_VIEW = "toggle-split-view";
+        TUNING = "tuning";
         VERIFY_WORKSPACE = "verify";
         VISIBILITY_OPTIONS = "visibility-options";
         WORKSPACE_LAYOUTS = "workspace-layouts";
@@ -538,5 +543,25 @@ mod tests {
         // A command left out is never answered by key or id.
         assert!(registry.spec(CommandKey::new("save-page")).is_none());
         assert_eq!(registry.resolve("save-page"), None);
+    }
+
+    #[test]
+    fn a_command_left_out_may_be_named_by_its_key() {
+        static ORDER: [CommandKey; 1] = [CommandKey::new("open")];
+        let registry = Registry::new(&ORDER, vec![spec("open", CommandOwner::Project)], &[])
+            .with_unlisted(vec![spec("tune", CommandOwner::Simulate)]);
+        assert_eq!(
+            registry.validate([("framework code", CommandKey::new("tune"))]),
+            Ok(())
+        );
+        // Only a key some owner leaves out is excused: a named key nobody
+        // declares, listed or left out, is still refused.
+        assert_eq!(
+            registry.validate([
+                ("framework code", CommandKey::new("tune")),
+                ("framework code", CommandKey::new("retired")),
+            ]),
+            Err("framework code names `retired`, which no owner declares".to_owned())
+        );
     }
 }

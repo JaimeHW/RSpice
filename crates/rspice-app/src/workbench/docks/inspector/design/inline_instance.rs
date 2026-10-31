@@ -7,6 +7,7 @@
 //! — a coerced value would persist a number the operator never typed.
 
 use super::*;
+use crate::workbench::framework::command_registry::ids;
 
 #[cfg(test)]
 mod tests;
@@ -607,7 +608,7 @@ pub(super) fn component_tuning_action_block_reason(
     app: &RSpiceApp,
     component: &Component,
 ) -> Option<String> {
-    match Command::VerificationPage(VerificationPage::Tuning).availability(app) {
+    match app.command_availability(ids::TUNING) {
         CommandAvailability::Available => prepare_component_tuning(app, component).err(),
         CommandAvailability::Disabled(reason) => Some(reason.to_owned()),
         CommandAvailability::Hidden => {
@@ -779,7 +780,6 @@ pub(super) fn edit_row_with_hint(
         })
         && ui.input(|input| input.key_pressed(egui::Key::Escape));
 
-    let tuning = Command::VerificationPage(VerificationPage::Tuning);
     let (response, tuning_response) = ui
         .push_id((component.id, &field), |ui| {
             if matches!(field, InlineEditField::Value) {
@@ -864,7 +864,7 @@ pub(super) fn edit_row_with_hint(
                 .map(str::to_owned);
         }
         match stage_component_tuning(app, component.id) {
-            Ok(()) => tuning.execute(app),
+            Ok(()) => app.execute_command_key(ids::TUNING),
             Err(error) => {
                 let problem = format!("Could not tune {}: {error}", component.name);
                 app.state.simulate.verification.action_problem = Some(problem.clone());

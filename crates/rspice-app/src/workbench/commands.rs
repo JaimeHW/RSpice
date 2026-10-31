@@ -60,10 +60,6 @@ pub(crate) mod dispatch_probe {
     }
 }
 
-fn stop_simulation_enabled(simulation: &crate::state::SimulationState) -> bool {
-    simulation.can_request_abort_active_run()
-}
-
 fn selection_layout_command(
     command: Command,
 ) -> Option<crate::schematic::view::selection_layout::SelectionLayoutCommand> {
@@ -224,14 +220,10 @@ impl Command {
                     | Self::AscendHierarchy
                     | Self::DescendHierarchy
                     | Self::DescendHierarchyDirect
-                    | Self::RunSimulation
                     | Self::GenerateNetlist
                     | Self::CheckCellview
                     | Self::CheckDesign
-                    | Self::PreflightChecks
                     | Self::ShowInNetlist
-                    | Self::SimulationPage(_)
-                    | Self::VerificationPage(_)
                     | Self::ToggleInspector
                     | Self::ToggleFocusMode
                     | Self::ResetLayout
@@ -374,15 +366,6 @@ impl Command {
             | Self::StimulusValidateLibrary
             | Self::StimulusPlaceDefinition
             | Self::StimulusShowAdopter => CommandOwner::Design,
-            Self::RunSimulation
-            | Self::StopSimulation
-            | Self::JobsManager
-            | Self::PreflightChecks
-            | Self::ManageSimulationPlans
-            | Self::AddAnalysis
-            | Self::SimulationOptions
-            | Self::SimulationPage(_)
-            | Self::VerificationPage(_) => CommandOwner::Simulate,
             Self::NewVerilogADevice
             | Self::OpenNetlist
             | Self::ImportNetlist
@@ -1036,65 +1019,6 @@ impl Command {
             Self::PreviousViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, -1);
             }
-            Self::RunSimulation => {
-                if app.state.workbench.workspace == Workspace::Netlist {
-                    if app.manual_deck_run_block_reason().is_none() {
-                        app.state.request_netlist_manual_deck_run();
-                    }
-                } else {
-                    app.state.runs.preflight.request_run_and_queue();
-                }
-            }
-            // Stop is disabled, and names why, while the run cannot take it.
-            Self::StopSimulation => {
-                if app.state.runs.preflight.checking.is_some() {
-                    // The frame loop stops it before it looks for a verdict.
-                    app.state.runs.preflight.request_check_cancel();
-                } else if stop_simulation_enabled(&app.state.model.simulation)
-                    && let Err(error) = app.state.model.simulation.request_abort_active_run()
-                {
-                    app.state.prompt(error);
-                }
-            }
-            Self::JobsManager => crate::workbench::tools::jobs_manager::open(&mut app.state),
-            Self::PreflightChecks => {
-                super::preflight::start(&mut app.state, &mut app.simulation_controller, false);
-            }
-            // Sole owner of "open the plan manager". The toolbar plan chip,
-            // the palette and the Simulation Studio title row all route here
-            // instead of building the draft themselves.
-            Self::ManageSimulationPlans => {
-                match app
-                    .state
-                    .model
-                    .sim_setup
-                    .stable_analysis_plan()
-                    .map(|plan| plan.id())
-                {
-                    Ok(plan_id) => {
-                        let name = app.state.model.sim_setup.active_plan_name().clone();
-                        app.state.simulate.simulation_workflow =
-                            Some(super::state::SimulationWorkflowDialog::PlanManager(
-                                super::state::SimulationPlanManagerDraft::new(
-                                    plan_id,
-                                    name.as_str(),
-                                ),
-                            ));
-                    }
-                    Err(error) => app.state.prompt(error),
-                }
-            }
-            Self::AddAnalysis => app.state.open_analysis_catalog(),
-            Self::SimulationOptions => {
-                // The Solver & convergence page is the only editor of the
-                // plan's engine options: every field of `SimulationOptions`
-                // reaches the engine from a control on that page, so the
-                // command routes there rather than opening a second surface
-                // over the same state.
-                crate::workbench::menu_bar::open_simulation_options(&mut app.state);
-                app.state.simulate.simulation_page = crate::state::SimulationPage::Solver;
-                activate_workspace(app, Workspace::Simulate);
-            }
             Self::GenerateNetlist => {
                 crate::workbench::menu_bar::action_view_netlist(&mut app.state);
                 activate_workspace(app, Workspace::Netlist);
@@ -1155,14 +1079,6 @@ impl Command {
                     .generated_history
                     .len()
                     .saturating_sub(1);
-            }
-            Self::VerificationPage(page) => {
-                activate_workspace(app, Workspace::Verify);
-                app.state.simulate.verification_page = page;
-            }
-            Self::SimulationPage(page) => {
-                activate_workspace(app, Workspace::Simulate);
-                app.state.simulate.simulation_page = page;
             }
             Self::StimulusNewDefinition => {
                 crate::workbench::app::actions::stimulus::new_definition(&mut app.state);

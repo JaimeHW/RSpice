@@ -14,11 +14,14 @@ fn tuning_command_opens_the_transactional_sandbox() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
     app.state.simulate.verification_page = VerificationPage::Yield;
-    let command = Command::VerificationPage(VerificationPage::Tuning);
+    let command = SimulateCommand::Verify(VerificationPage::Tuning).key();
 
-    assert!(command.is_enabled(&app));
-    assert_eq!(command.availability(&app), CommandAvailability::Available);
-    command.execute(&mut app);
+    assert!(app.command_key_enabled(command));
+    assert_eq!(
+        app.command_availability(command),
+        CommandAvailability::Available
+    );
+    app.execute_command_key(command);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Verify);
     assert_eq!(
@@ -56,18 +59,24 @@ fn clear_results_cannot_remove_the_executor_owned_run() {
 
 #[test]
 fn stop_command_is_enabled_only_while_an_abort_can_be_requested() {
-    let mut simulation = crate::state::SimulationState::default();
-    assert!(!stop_simulation_enabled(&simulation));
+    let mut app = RSpiceApp::test_instance();
+    let stop = SimulateCommand::Stop.key();
+    assert!(!app.command_key_enabled(stop));
+    let simulation = &mut app.state.model.simulation;
     let identity = simulation
         .start_run()
         .execution_identity()
         .expect("current run has execution identity");
     simulation.execution.active_execution = Some(identity);
     simulation.execution.is_running = false;
-    assert!(stop_simulation_enabled(&simulation));
+    assert!(app.command_key_enabled(stop));
 
-    simulation.request_abort_active_run().unwrap();
-    assert!(!stop_simulation_enabled(&simulation));
+    app.state
+        .model
+        .simulation
+        .request_abort_active_run()
+        .unwrap();
+    assert!(!app.command_key_enabled(stop));
 }
 
 #[test]

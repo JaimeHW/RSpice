@@ -8,6 +8,7 @@ use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
 /// scope's.
@@ -29,9 +30,7 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::ConnectivityManager => Icon::Bus,
         Command::ConfigurationSets => Icon::Grid,
         Command::RuleSetup => Icon::Check,
-        Command::RunSimulation => Icon::Run,
-        Command::StopSimulation => Icon::Stop,
-        Command::CheckCellview | Command::CheckDesign | Command::PreflightChecks => Icon::Check,
+        Command::CheckCellview | Command::CheckDesign => Icon::Check,
         Command::ImportNetlist | Command::ImportVerilogA | Command::ExportNetlist(_) => Icon::File,
         _ => return None,
     };
@@ -44,6 +43,14 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
     if let Some(command) = HardcopyCommand::from_key(key) {
         return match command {
             HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
+            _ => None,
+        };
+    }
+    if let Some(command) = SimulateCommand::from_key(key) {
+        return match command {
+            SimulateCommand::Run => Some(Icon::Run),
+            SimulateCommand::Stop => Some(Icon::Stop),
+            SimulateCommand::Preflight => Some(Icon::Check),
             _ => None,
         };
     }

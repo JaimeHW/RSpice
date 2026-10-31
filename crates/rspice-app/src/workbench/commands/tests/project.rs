@@ -15,6 +15,7 @@ use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectLauncherFilter;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -149,12 +150,7 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         Command::FindInDesign,
         Command::SelectionBulkEdit,
         Command::ConnectivityManager,
-        Command::SimulationPage(SimulationPage::Variables),
-        Command::PreflightChecks,
-        Command::ManageSimulationPlans,
-        Command::SimulationOptions,
         Command::GenerateNetlist,
-        Command::VerificationPage(VerificationPage::Yield),
         Command::CompileVerilogA,
         Command::AutomationConsole,
     ] {
@@ -170,6 +166,21 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
         ResultsCommand::CompareResultDatasets,
         ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves),
         ResultsCommand::EditSpecifications,
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+            "missing closed-project boundary: {command:?}"
+        );
+    }
+    for command in [
+        SimulateCommand::Page(SimulationPage::Variables),
+        SimulateCommand::Preflight,
+        SimulateCommand::ManagePlans,
+        SimulateCommand::Options,
+        SimulateCommand::Verify(VerificationPage::Yield),
     ] {
         assert!(
             command

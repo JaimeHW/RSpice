@@ -415,8 +415,6 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
         .app
         .execute_command_key(crate::workbench::framework::command_registry::ids::RUN_SIMULATION);
     assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());
-    editor.app.execute_shortcut_command(Command::RunSimulation);
-    assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());
     assert_eq!(
         editor.app.state.model.schematic.document().components[0].name,
         "V1"

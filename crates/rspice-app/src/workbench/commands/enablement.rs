@@ -395,21 +395,6 @@ impl Command {
                 .active_design_check_status()
                 .current_receipt()
                 .is_some_and(|receipt| !receipt.result.violations().is_empty()),
-            Self::RunSimulation => {
-                if state.workbench.workspace == Workspace::Netlist {
-                    app.manual_deck_run_block_reason().is_none()
-                } else {
-                    !state.model.simulation.execution.has_active_execution()
-                        && !state.model.simulation.execution.trigger_simulation
-                }
-            }
-            Self::PreflightChecks => state.runs.preflight.checking.is_none(),
-            // Both edit the plan catalog through the active plan's stable
-            // identity, so a project whose plan never migrated to it has
-            // nothing to select, nothing to add to, and no dialog worth opening.
-            Self::ManageSimulationPlans | Self::AddAnalysis => {
-                state.model.sim_setup.stable_analysis_plan().is_ok()
-            }
             // Each of these opens a window that only the netlist page draws.
             // Availability therefore has to name the page, not just the
             // workspace: from Automation they would set a dialog open with
@@ -475,10 +460,6 @@ impl Command {
                 netlist_page_is_visible(state)
                     && !state.code.netlist.generated_history.is_empty()
                     && state.model.netlist_artifacts.generated_document.is_some()
-            }
-            Self::StopSimulation => {
-                state.runs.preflight.checking.is_some()
-                    || stop_simulation_enabled(&state.model.simulation)
             }
             // Every library verb needs the instrument open, because they all
             // act on the definition it is reading; New and Validate need only

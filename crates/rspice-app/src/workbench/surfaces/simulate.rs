@@ -1219,7 +1219,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     let mut open_prior = false;
     let mut toggle_split = false;
     // The standing every other setup route states, from the same owner. This
-    // route already offers the *action* — "Validate plan" is `PreflightChecks`
+    // route already offers the *action* — "Validate plan" is `SimulateCommand::Preflight`
     // — and stated none of the standing, so the one page that lists what a run
     // will dispatch was the one page that never said whether the report
     // authorizing it still held.

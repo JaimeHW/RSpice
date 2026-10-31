@@ -992,10 +992,6 @@ mod tests {
                 Command::OpenWorkspace(Workspace::Results),
             ),
             (
-                ids::SIMULATION_ANALYSES,
-                Command::SimulationPage(crate::state::SimulationPage::Analyses),
-            ),
-            (
                 ids::SIMULATE_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Simulate),
             ),
@@ -1057,6 +1053,31 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");
+            assert_eq!(legacy_command(id), None, "{command:?}");
+        }
+    }
+
+    /// Each key framework code names by an id for a simulate command is the
+    /// key that command declares, the tuning sandbox's too, which the
+    /// registry leaves out.
+    #[test]
+    fn each_simulate_id_names_its_command() {
+        use crate::state::{SimulationPage, VerificationPage};
+        use crate::workbench::simulate::commands::SimulateCommand;
+        for (id, command) in [
+            (ids::RUN_SIMULATION, SimulateCommand::Run),
+            (ids::STOP_SIMULATION, SimulateCommand::Stop),
+            (
+                ids::SIMULATION_ANALYSES,
+                SimulateCommand::Page(SimulationPage::Analyses),
+            ),
+            (
+                ids::TUNING,
+                SimulateCommand::Verify(VerificationPage::Tuning),
+            ),
+        ] {
+            assert_eq!(id, command.key(), "{command:?}");
+            assert_eq!(SimulateCommand::from_key(id), Some(command), "{command:?}");
             assert_eq!(legacy_command(id), None, "{command:?}");
         }
     }

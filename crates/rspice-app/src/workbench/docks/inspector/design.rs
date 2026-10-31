@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use egui::Ui;
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
-use crate::state::VerificationPage;
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, PropertyDefinition,
     PropertyType, PropertyValue, SoaRuleVerdictEvidence,

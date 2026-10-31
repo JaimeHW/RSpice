@@ -134,12 +134,8 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     // The sandbox itself, rather than a paragraph recommending it.
-    let tuning = crate::workbench::commands::vocabulary::Command::VerificationPage(
-        crate::state::VerificationPage::Tuning,
-    );
-    if let crate::workbench::framework::command_registry::CommandAvailability::Available =
-        tuning.availability(app)
-    {
+    let tuning = crate::workbench::framework::command_registry::ids::TUNING;
+    if app.command_availability(tuning).is_available() {
         section_header(
             ui,
             &messages.text(crate::workbench::MessageId::NetlistParameterExploration),
@@ -151,7 +147,7 @@ fn netlist(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui)
         .clicked()
         {
-            tuning.execute(app);
+            app.execute_command_key(tuning);
         }
     }
 

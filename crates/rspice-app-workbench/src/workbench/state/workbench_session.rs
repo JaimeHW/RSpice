@@ -553,6 +553,16 @@ impl WorkbenchSession {
         });
     }
 
+    /// Bring the reader to the findings a pass or a check just filed: the
+    /// Problems page, listing them. A filter left from earlier reading could
+    /// hide the very findings that stopped a run, or that a check the reader
+    /// asked for found, so the filters are cleared.
+    pub fn show_problem_findings(&mut self) {
+        self.console_visible = true;
+        self.console_page = ConsolePage::Problems;
+        self.problems_view.clear_filters();
+    }
+
     /// [`Self::prompt`] what an operation that answers either way said,
     /// whether it was done or refused, and hand the outcome on.
     pub fn report(&mut self, outcome: Result<String, String>) -> Result<String, String> {

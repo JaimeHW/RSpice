@@ -29,6 +29,7 @@ use crate::workbench::project::ProjectFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
+use crate::workbench::simulate::SimulateFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
@@ -308,6 +309,7 @@ features! {
     results: ResultsFeature,
     cloud: CloudFeature => cloud,
     models: ModelsFeature,
+    simulate: SimulateFeature,
     project: ProjectFeature,
 }
 
@@ -372,6 +374,7 @@ mod tests {
         let results = <ResultsFeature as Registered>::registry();
         let cloud = <CloudFeature as Registered>::registry();
         let models = <ModelsFeature as Registered>::registry();
+        let simulate = <SimulateFeature as Registered>::registry();
         let project = <ProjectFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
@@ -386,6 +389,7 @@ mod tests {
                 results.command(*key).is_some(),
                 cloud.command(*key).is_some(),
                 models.command(*key).is_some(),
+                simulate.command(*key).is_some(),
                 project.command(*key).is_some(),
             ];
             assert_eq!(
@@ -406,6 +410,7 @@ mod tests {
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()
                 + crate::workbench::cloud::commands::CloudCommand::ALL.len()
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
+                + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
         );
     }
@@ -415,10 +420,14 @@ mod tests {
     #[test]
     fn a_command_left_out_of_the_registry_is_reached_by_its_key() {
         use crate::workbench::hardcopy::commands::HardcopyCommand;
+        use crate::workbench::simulate::commands::SimulateCommand;
 
         let registry = command_registry();
-        for command in HardcopyCommand::REPORT_TOOLBAR {
-            let key = command.key();
+        let left_out = HardcopyCommand::REPORT_TOOLBAR
+            .map(HardcopyCommand::key)
+            .into_iter()
+            .chain(SimulateCommand::UNLISTED.map(SimulateCommand::key));
+        for key in left_out {
             assert!(!registry.order().contains(&key), "{key:?}");
             assert!(registry.spec(key).is_none(), "{key:?}");
             assert_eq!(

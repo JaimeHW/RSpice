@@ -28,6 +28,7 @@ use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -298,7 +299,7 @@ fn rendered_simulate_menu_rows(
     if !stable_analysis_plan {
         app.state.model.sim_setup.analysis_plan = None;
     }
-    let availability = Command::ManageSimulationPlans.availability(&app);
+    let availability = app.command_availability(SimulateCommand::ManagePlans.key());
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -357,10 +358,10 @@ fn rendered_simulate_menu_rows(
 #[cfg(not(target_arch = "wasm32"))]
 fn simulate_menu_row_description(
     rows: &[(String, Option<String>)],
-    command: Command,
+    command: SimulateCommand,
 ) -> Option<Option<String>> {
     rows.iter()
-        .find(|(label, _)| label.as_str() == command.spec().label)
+        .find(|(label, _)| label.as_str() == command.declared_spec().label)
         .map(|(_, description)| description.clone())
 }
 
@@ -447,13 +448,17 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         "no menu lists the model catalog"
     );
     for command in [
-        Command::VerificationPage(VerificationPage::Yield),
         Command::AutomationConsole,
         Command::WindowManager,
-        Command::JobsManager,
         Command::ToggleFocusMode,
         Command::ToggleConsole,
         Command::HelpCenter,
+    ] {
+        assert!(listed.contains(&command.key()), "no menu lists {command:?}");
+    }
+    for command in [
+        SimulateCommand::Verify(VerificationPage::Yield),
+        SimulateCommand::JobsManager,
     ] {
         assert!(listed.contains(&command.key()), "no menu lists {command:?}");
     }
@@ -463,9 +468,12 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
     );
     assert!(
         listed_commands(application_menu_entries(ApplicationMenu::Simulate))
-            .contains(&Command::JobsManager.key())
+            .contains(&SimulateCommand::JobsManager.key())
     );
-    assert_eq!(Command::JobsManager.spec().label, "Run history\u{2026}");
+    assert_eq!(
+        SimulateCommand::JobsManager.declared_spec().label,
+        "Run history\u{2026}"
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -623,9 +631,12 @@ fn application_menu_height_is_viewport_bounded() {
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
     let platform = crate::state::command_catalog::CommandPlatform::Desktop;
     let app = RSpiceApp::test_instance();
-    for command in [ProjectCommand::OpenProject, ProjectCommand::Save] {
+    for command in [
+        ProjectCommand::OpenProject.declared_spec(),
+        ProjectCommand::Save.declared_spec(),
+        SimulateCommand::Run.declared_spec(),
+    ] {
         let declared = command
-            .declared_spec()
             .bindings
             .iter()
             .find(|binding| binding.supports(platform))
@@ -635,14 +646,13 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
                 &app,
                 platform,
                 egui::os::OperatingSystem::Windows,
-                command.key(),
+                command.key,
                 None
             ),
             declared
         );
     }
     for command in [
-        Command::RunSimulation,
         Command::ToggleFullScreen,
         Command::GenerateNetlist,
         Command::ToggleConsole,
@@ -678,7 +688,6 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
         Command::PlaceBus,
         Command::PlaceBusTap,
         Command::PlaceJunction,
-        Command::RunSimulation,
         Command::AutomationConsole,
     ];
     assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
@@ -698,6 +707,11 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
             "{command:?}"
         );
     }
+    assert!(
+        command_registry()
+            .spec(SimulateCommand::Run.key())
+            .is_some()
+    );
 }
 
 /// No View-menu row is drawn twice.
@@ -1000,7 +1014,7 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
 /// check it - acts on whatever it selected.
 ///
 /// Adding to that plan reads second, directly under choosing it. Before
-/// `Command::AddAnalysis` existed, the catalogue had exactly one route - the
+/// `SimulateCommand::AddAnalysis` existed, the catalogue had exactly one route - the
 /// navigator's creating action - and a reader with the panel collapsed, or in
 /// focus mode, had no way to add an analysis at all.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1032,14 +1046,20 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
     // the vocabulary publishes, so renaming a command renames its row.
     assert_eq!(
         labels.first().copied(),
-        Some(Command::ManageSimulationPlans.spec().label)
+        Some(SimulateCommand::ManagePlans.declared_spec().label)
     );
-    assert_eq!(Command::ManageSimulationPlans.spec().group, "Simulate");
+    assert_eq!(
+        SimulateCommand::ManagePlans.declared_spec().group,
+        "Simulate"
+    );
     assert_eq!(
         labels.get(1).copied(),
-        Some(Command::AddAnalysis.spec().label)
+        Some(SimulateCommand::AddAnalysis.declared_spec().label)
     );
-    assert_eq!(Command::AddAnalysis.spec().group, "Simulate");
+    assert_eq!(
+        SimulateCommand::AddAnalysis.declared_spec().group,
+        "Simulate"
+    );
 }
 
 /// The menu row has to be exactly as honest as the command behind it: a project
@@ -1051,7 +1071,7 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
     let (availability, available) = rendered_simulate_menu_rows(true);
     assert_eq!(availability, CommandAvailability::Available);
     assert_eq!(
-        simulate_menu_row_description(&available, Command::ManageSimulationPlans),
+        simulate_menu_row_description(&available, SimulateCommand::ManagePlans),
         Some(None),
         "an available plan manager row must not describe itself as unavailable: {available:?}"
     );
@@ -1061,7 +1081,7 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
         panic!("the plan manager stayed available with no stable analysis plan");
     };
     assert_eq!(
-        simulate_menu_row_description(&disabled, Command::ManageSimulationPlans),
+        simulate_menu_row_description(&disabled, SimulateCommand::ManagePlans),
         Some(Some(reason.to_owned())),
         "the disabled row must name the command's own reason: {disabled:?}"
     );
@@ -1084,7 +1104,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
         (Command::VisibilityOptions, WorkbenchIcon::Visibility),
         (Command::CompileVerilogA, WorkbenchIcon::Netlist),
-        (Command::RunSimulation, WorkbenchIcon::Run),
         (Command::AutomationConsole, WorkbenchIcon::Terminal),
     ] {
         assert_eq!(
@@ -1097,6 +1116,10 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     assert_eq!(
         app.command_icon(ModelsCommand::ModelCompareRelease.key()),
         Some(WorkbenchIcon::Compare)
+    );
+    assert_eq!(
+        app.command_icon(SimulateCommand::Run.key()),
+        Some(WorkbenchIcon::Run)
     );
     for (command, icon) in [
         (ProjectCommand::NewProject, WorkbenchIcon::Add),
@@ -1230,7 +1253,7 @@ fn a_grey_run_row_says_a_run_is_already_in_progress() {
     let mut app = title_test_app();
     app.state.model.simulation.execution.trigger_simulation = true;
     assert_eq!(
-        Command::RunSimulation.availability(&app),
+        app.command_availability(SimulateCommand::Run.key()),
         CommandAvailability::Disabled("a run is already in progress")
     );
     let rows = menu_pin(application_menu_entries(ApplicationMenu::Simulate), &app);

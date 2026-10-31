@@ -795,6 +795,7 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
     "workbench/results/commands.rs",
     "workbench/cloud/commands.rs",
     "workbench/models/commands.rs",
+    "workbench/simulate/commands.rs",
     "workbench/project/commands.rs",
 ];
 

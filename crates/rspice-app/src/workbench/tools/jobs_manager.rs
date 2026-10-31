@@ -323,13 +323,6 @@ impl JobsSnapshot {
     }
 }
 
-pub(crate) fn open(state: &mut AppState) {
-    let route = SurfaceRoute::surface(SurfaceId::JobsManager);
-    if let Err(error) = state.workbench.navigate(route, RouteTransitionSource::User) {
-        state.prompt(error.to_string());
-    }
-}
-
 pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     if app.state.workbench.current_route().surface_id() != SurfaceId::JobsManager {
         return;

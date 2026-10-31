@@ -416,25 +416,6 @@ impl AppState {
         crate::workbench::framework::dialogs::application_modal_open(self)
     }
 
-    /// Arm the analysis catalogue, from wherever the reader asked for it.
-    ///
-    /// Beside [`Self::application_modal_open`] because `palette_open` is one of
-    /// its terms: setting it withdraws the application's keyboard, and the
-    /// three routes that do so — the navigator's creating action, the empty
-    /// analysis rail and `Command::AddAnalysis` — each used to write some of
-    /// these four fields themselves. A route that forgot the query left the
-    /// catalogue filtered by whatever the last search had been.
-    pub(crate) fn open_analysis_catalog(&mut self) {
-        // On tablet and phone the creating action is hosted by the navigator
-        // drawer. Close that transient layer first, so the modal is never
-        // obscured by its own invoker.
-        self.workbench.close_drawer();
-        self.model.sim_setup.session.palette_open = true;
-        self.model.sim_setup.session.palette_query.clear();
-        self.model.sim_setup.session.palette_active = 0;
-        self.model.sim_setup.session.palette_scroll_to_active = true;
-    }
-
     /// Whether static authored state permits a run. Interactive Run commands
     /// intentionally remain available while this is false so the complete
     /// preflight can explain every blocker and offer its remediation route.
@@ -681,15 +662,12 @@ impl AppState {
         self.model.report_failure(title, detail);
     }
 
-    /// Bring the reader to the findings a pass or a check just filed: the
-    /// Problems page, listing them. A filter left from earlier reading could
-    /// hide the very findings that stopped a run, or that a check the reader
-    /// asked for found, so the filters are cleared.
+    /// [`WorkbenchSession::show_problem_findings`] for the session.
+    ///
+    /// [`WorkbenchSession::show_problem_findings`]: crate::workbench::state::WorkbenchSession::show_problem_findings
     // A workbench write the checks ask for; it becomes a request.
     pub(crate) fn show_problem_findings(&mut self) {
-        self.workbench.console_visible = true;
-        self.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
-        self.workbench.problems_view.clear_filters();
+        self.workbench.show_problem_findings();
     }
 
     /// Raise every reported notice as a toast, in the order reported.

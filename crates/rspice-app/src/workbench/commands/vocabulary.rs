@@ -27,6 +27,7 @@ use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -180,22 +181,6 @@ pub enum Command {
     ClearChecks,
     NextViolation,
     PreviousViolation,
-    RunSimulation,
-    StopSimulation,
-    JobsManager,
-    PreflightChecks,
-    /// Global route into the versioned Simulation Plan Manager. The toolbar's
-    /// plan chip, the palette and the shortcut map all reach the manager
-    /// through this one command rather than constructing its draft themselves.
-    ManageSimulationPlans,
-    /// Open the analysis catalogue over whatever workspace the reader is on.
-    ///
-    /// The navigator's creating action, the empty analysis rail and the
-    /// Simulate menu all arm the catalogue through this one command. They used
-    /// to set the four palette fields themselves, which is how the navigator
-    /// came to arm a modal on eight routes that had nothing drawing it.
-    AddAnalysis,
-    SimulationOptions,
     GenerateNetlist,
     FindCodeDocument,
     ValidateCodeDocument,
@@ -224,8 +209,6 @@ pub enum Command {
     FindReferences,
     RenameSymbol,
     CompareGeneratedRevisions,
-    VerificationPage(VerificationPage),
-    SimulationPage(SimulationPage),
     StimulusNewDefinition,
     StimulusDuplicateDefinition,
     StimulusDeleteDefinition,
@@ -578,21 +561,6 @@ impl Command {
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
             Self::NextViolation => spec("next-violation", "Next violation", "Verify"),
             Self::PreviousViolation => spec("previous-violation", "Previous violation", "Verify"),
-            Self::RunSimulation => spec("start-run", "Run active plan", "Simulate"),
-            Self::StopSimulation => spec("stop-run", "Stop active run", "Simulate"),
-            Self::JobsManager => spec("jobs-manager", "Run history…", "Simulate"),
-            Self::PreflightChecks => spec("check", "Preflight checks", "Simulate"),
-            Self::ManageSimulationPlans => spec(
-                "manage-simulation-plans",
-                "Manage simulation plans\u{2026}",
-                "Simulate",
-            ),
-            Self::AddAnalysis => spec(
-                "add-analysis",
-                "Add analysis or workflow\u{2026}",
-                "Simulate",
-            ),
-            Self::SimulationOptions => spec("solver", "Global solver & convergence", "Simulate"),
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
@@ -633,58 +601,6 @@ impl Command {
                 "compare-generated-revisions",
                 "Compare generated revisions",
                 "Code",
-            ),
-            Self::VerificationPage(VerificationPage::Yield) => {
-                spec("yield", "Verification cockpit", "Verify")
-            }
-            Self::VerificationPage(VerificationPage::Corners) => {
-                spec("corners", "Corner matrix", "Verify")
-            }
-            Self::VerificationPage(VerificationPage::Tuning) => {
-                spec("tuning", "Parameter tuning sandbox", "Verify")
-            }
-            Self::VerificationPage(VerificationPage::Optimization) => {
-                spec("optimization", "Optimization", "Verify")
-            }
-            Self::VerificationPage(VerificationPage::DeviceSafety) => {
-                spec("device-safety", "Safe operating area", "Verify")
-            }
-            Self::VerificationPage(VerificationPage::Regression) => {
-                spec("regression", "Regression plan", "Verify")
-            }
-            // Every setup route is addressable, the way the Project, Verify and
-            // Models pages are. The Solver route keeps its own dedicated
-            // command as well, because that one is also a menu action.
-            Self::SimulationPage(SimulationPage::Analyses) => {
-                spec("simulation-analyses", "Analyses", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Excitations) => {
-                spec("simulation-excitations", "Excitations", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Variables) => {
-                spec("simulation-variables", "Design variables", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Outputs) => {
-                spec("simulation-outputs", "Outputs & expressions", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Specifications) => spec(
-                "simulation-specifications",
-                "Requirements & specifications",
-                "Simulate",
-            ),
-            Self::SimulationPage(SimulationPage::RunSet) => {
-                spec("simulation-run-set", "PVT, sweeps & variation", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Models) => {
-                spec("simulation-models", "Models & sections", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Solver) => {
-                spec("simulation-solver", "Solver & convergence", "Simulate")
-            }
-            Self::SimulationPage(SimulationPage::Save) => spec(
-                "simulation-save-policy",
-                "Save, streaming & retention policy",
-                "Simulate",
             ),
             Self::StimulusNewDefinition => {
                 spec("stimulus-new", "New stimulus definition", "Stimulus")
@@ -811,16 +727,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
-    Command::SimulationPage(SimulationPage::Analyses),
-    Command::SimulationPage(SimulationPage::Excitations),
-    Command::SimulationPage(SimulationPage::Variables),
-    Command::SimulationPage(SimulationPage::Outputs),
-    Command::SimulationPage(SimulationPage::Specifications),
-    Command::SimulationPage(SimulationPage::RunSet),
-    Command::SimulationPage(SimulationPage::Models),
-    Command::SimulationPage(SimulationPage::Solver),
-    Command::SimulationPage(SimulationPage::Save),
-    Command::VerificationPage(VerificationPage::Yield),
     Command::ZoomIn,
     Command::ZoomOut,
     Command::ZoomFit,
@@ -922,13 +828,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ClearChecks,
     Command::NextViolation,
     Command::PreviousViolation,
-    Command::RunSimulation,
-    Command::StopSimulation,
-    Command::JobsManager,
-    Command::PreflightChecks,
-    Command::ManageSimulationPlans,
-    Command::AddAnalysis,
-    Command::SimulationOptions,
     Command::GenerateNetlist,
     Command::FindCodeDocument,
     Command::ValidateCodeDocument,
@@ -952,10 +851,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::FindReferences,
     Command::RenameSymbol,
     Command::CompareGeneratedRevisions,
-    Command::VerificationPage(VerificationPage::Corners),
-    Command::VerificationPage(VerificationPage::Optimization),
-    Command::VerificationPage(VerificationPage::DeviceSafety),
-    Command::VerificationPage(VerificationPage::Regression),
     Command::StimulusNewDefinition,
     Command::StimulusDuplicateDefinition,
     Command::StimulusDeleteDefinition,
@@ -1044,17 +939,17 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Page(ProjectPage::Configuration).key(),
     ProjectCommand::Page(ProjectPage::Dependencies).key(),
     ProjectCommand::Page(ProjectPage::Recovery).key(),
-    Command::SimulationPage(SimulationPage::Analyses).key(),
-    Command::SimulationPage(SimulationPage::Excitations).key(),
-    Command::SimulationPage(SimulationPage::Variables).key(),
-    Command::SimulationPage(SimulationPage::Outputs).key(),
-    Command::SimulationPage(SimulationPage::Specifications).key(),
-    Command::SimulationPage(SimulationPage::RunSet).key(),
-    Command::SimulationPage(SimulationPage::Models).key(),
-    Command::SimulationPage(SimulationPage::Solver).key(),
-    Command::SimulationPage(SimulationPage::Save).key(),
+    SimulateCommand::Page(SimulationPage::Analyses).key(),
+    SimulateCommand::Page(SimulationPage::Excitations).key(),
+    SimulateCommand::Page(SimulationPage::Variables).key(),
+    SimulateCommand::Page(SimulationPage::Outputs).key(),
+    SimulateCommand::Page(SimulationPage::Specifications).key(),
+    SimulateCommand::Page(SimulationPage::RunSet).key(),
+    SimulateCommand::Page(SimulationPage::Models).key(),
+    SimulateCommand::Page(SimulationPage::Solver).key(),
+    SimulateCommand::Page(SimulationPage::Save).key(),
     ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Waves).key(),
-    Command::VerificationPage(VerificationPage::Yield).key(),
+    SimulateCommand::Verify(VerificationPage::Yield).key(),
     ModelsCommand::Page(ModelsPage::Models).key(),
     ModelsCommand::ModelCreateProjectCopy.key(),
     ModelsCommand::ModelEditor.key(),
@@ -1174,13 +1069,13 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ClearChecks.key(),
     Command::NextViolation.key(),
     Command::PreviousViolation.key(),
-    Command::RunSimulation.key(),
-    Command::StopSimulation.key(),
-    Command::JobsManager.key(),
-    Command::PreflightChecks.key(),
-    Command::ManageSimulationPlans.key(),
-    Command::AddAnalysis.key(),
-    Command::SimulationOptions.key(),
+    SimulateCommand::Run.key(),
+    SimulateCommand::Stop.key(),
+    SimulateCommand::JobsManager.key(),
+    SimulateCommand::Preflight.key(),
+    SimulateCommand::ManagePlans.key(),
+    SimulateCommand::AddAnalysis.key(),
+    SimulateCommand::Options.key(),
     Command::GenerateNetlist.key(),
     Command::FindCodeDocument.key(),
     Command::ValidateCodeDocument.key(),
@@ -1243,10 +1138,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Optimization).key(),
     ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Manifest).key(),
     ResultsCommand::EditSpecifications.key(),
-    Command::VerificationPage(VerificationPage::Corners).key(),
-    Command::VerificationPage(VerificationPage::Optimization).key(),
-    Command::VerificationPage(VerificationPage::DeviceSafety).key(),
-    Command::VerificationPage(VerificationPage::Regression).key(),
+    SimulateCommand::Verify(VerificationPage::Corners).key(),
+    SimulateCommand::Verify(VerificationPage::Optimization).key(),
+    SimulateCommand::Verify(VerificationPage::DeviceSafety).key(),
+    SimulateCommand::Verify(VerificationPage::Regression).key(),
     ModelsCommand::Page(ModelsPage::Symbols).key(),
     ModelsCommand::Page(ModelsPage::Corners).key(),
     ModelsCommand::Page(ModelsPage::Bins).key(),
@@ -1329,6 +1224,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(ResultsCommand::ALL.map(ResultsCommand::declared_spec))
                 .chain(CloudCommand::ALL.map(CloudCommand::declared_spec))
                 .chain(ModelsCommand::ALL.map(ModelsCommand::declared_spec))
+                .chain(SimulateCommand::ALL.map(SimulateCommand::declared_spec))
                 .chain(ProjectCommand::ALL.map(ProjectCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
@@ -1336,7 +1232,9 @@ pub(crate) fn command_registry() -> &'static Registry {
         .with_unlisted(
             HardcopyCommand::REPORT_TOOLBAR
                 .map(HardcopyCommand::declared_spec)
-                .to_vec(),
+                .into_iter()
+                .chain(SimulateCommand::UNLISTED.map(SimulateCommand::declared_spec))
+                .collect(),
         );
         debug_assert_eq!(registry.validate(command_registry::ids::named()), Ok(()));
         registry

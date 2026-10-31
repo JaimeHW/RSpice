@@ -12,6 +12,9 @@
 
 use super::*;
 use crate::state::command_catalog::ShortcutContext;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// Every Simulation Studio setup route is addressable, the way the Project,
 /// Verify and Models pages are. A route reachable only by clicking the
@@ -31,16 +34,21 @@ fn every_simulation_setup_route_has_one_discoverable_command_with_a_stable_ident
     ];
     assert_eq!(SimulationPage::NAVIGATION.len(), expected.len());
 
+    let registry = command_registry();
     for (page, stable_id) in expected {
-        let command = Command::SimulationPage(page);
+        let command = SimulateCommand::Page(page);
         assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
+            registry.order().contains(&command.key()),
             "setup route is absent from the command registry: {page:?}"
         );
-        assert_eq!(command.stable_id(), stable_id);
-        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert_eq!(command.key().as_str(), stable_id);
+        assert_eq!(registry.resolve(stable_id), Some(command.key()));
+        assert_eq!(SimulateCommand::from_key(command.key()), Some(command));
         assert!(
-            command.requires_open_project(),
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "setup route bypasses the open-project boundary: {page:?}"
         );
     }
@@ -54,7 +62,7 @@ fn simulation_route_commands_activate_the_simulate_workspace_and_exact_route() {
         app.state.workbench.workspace = Workspace::Results;
         app.state.simulate.simulation_page = SimulationPage::Analyses;
 
-        Command::SimulationPage(page).execute(&mut app);
+        app.execute_command_key(SimulateCommand::Page(page).key());
 
         assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
         assert_eq!(app.state.simulate.simulation_page, page);
@@ -81,11 +89,12 @@ fn managing_simulation_plans_opens_the_plan_manager_on_the_active_plan() {
         .rename_plan(plan_id, "Regression envelope")
         .expect("rename the active plan");
 
+    let manage = SimulateCommand::ManagePlans.key();
     assert_eq!(
-        Command::ManageSimulationPlans.availability(&app),
+        app.command_availability(manage),
         CommandAvailability::Available
     );
-    Command::ManageSimulationPlans.execute(&mut app);
+    app.execute_command_key(manage);
 
     let Some(crate::workbench::state::SimulationWorkflowDialog::PlanManager(draft)) =
         app.state.simulate.simulation_workflow.as_ref()
@@ -109,15 +118,16 @@ fn managing_simulation_plans_is_disabled_without_a_stable_analysis_plan() {
     app.state.open_project_session();
     app.state.model.sim_setup.analysis_plan = None;
 
-    assert!(!Command::ManageSimulationPlans.is_enabled(&app));
+    let manage = SimulateCommand::ManagePlans.key();
+    assert!(!app.command_key_enabled(manage));
     assert_eq!(
-        Command::ManageSimulationPlans.availability(&app),
+        app.command_availability(manage),
         CommandAvailability::Disabled(
             "the active simulation plan has no stable analysis identity to manage"
         )
     );
 
-    Command::ManageSimulationPlans.execute(&mut app);
+    app.execute_command_key(manage);
 
     assert!(app.state.simulate.simulation_workflow.is_none());
 }
@@ -127,22 +137,13 @@ fn managing_simulation_plans_is_disabled_without_a_stable_analysis_plan() {
 /// from most of the places the chip itself is still clickable.
 #[test]
 fn managing_simulation_plans_is_a_global_route_not_a_simulation_workspace_one() {
-    assert_eq!(
-        Command::ManageSimulationPlans.shortcut_context(),
-        ShortcutContext::Global
-    );
-    assert_eq!(
-        Command::ManageSimulationPlans.spec(),
-        CommandSpec {
-            id: "manage-simulation-plans",
-            label: "Manage simulation plans\u{2026}",
-            group: "Simulate",
-        }
-    );
-    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ManageSimulationPlans));
-    assert!(Command::ManageSimulationPlans.palette_visible());
-    assert_eq!(
-        Command::from_stable_id("manage-simulation-plans"),
-        Some(Command::ManageSimulationPlans)
-    );
+    let spec = SimulateCommand::ManagePlans.declared_spec();
+    assert_eq!(spec.context, ShortcutContext::Global);
+    assert_eq!(spec.key.as_str(), "manage-simulation-plans");
+    assert_eq!(spec.label, "Manage simulation plans\u{2026}");
+    assert_eq!(spec.group, "Simulate");
+    let registry = command_registry();
+    assert!(registry.order().contains(&spec.key));
+    assert!(spec.flags.contains(CommandFlags::PALETTE_VISIBLE));
+    assert_eq!(registry.resolve("manage-simulation-plans"), Some(spec.key));
 }
