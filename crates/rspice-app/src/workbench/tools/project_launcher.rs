@@ -30,9 +30,9 @@ use crate::workbench::RSpiceApp;
 
 use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::services_access::open_comparison;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, painted_label};
 use crate::workbench::features;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
@@ -354,7 +354,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
             }
             LauncherAction::OpenNetlist => {
                 dismiss_launcher(app);
-                Command::OpenNetlist.execute(app);
+                app.execute_command_key(ids::OPEN_NETLIST);
             }
             LauncherAction::Open(recent) => {
                 dismiss_launcher(app);

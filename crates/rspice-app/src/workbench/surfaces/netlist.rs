@@ -268,7 +268,7 @@ pub(in crate::workbench) fn show_prepared(ui: &mut Ui, app: &mut RSpiceApp) {
                         }
                     }
                     Some(EmptyNetlistAction::ImportDeck) => {
-                        crate::workbench::commands::vocabulary::Command::ImportNetlist.execute(app);
+                        app.execute_command_key(crate::workbench::code::commands::CodeCommand::ImportNetlist.key());
                     }
                     None => {}
                 }

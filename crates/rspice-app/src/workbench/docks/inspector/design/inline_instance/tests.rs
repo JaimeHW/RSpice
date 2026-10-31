@@ -1,6 +1,7 @@
 //! Rendered inspector edits preserve drafts, reference ownership, and history.
 
 use super::*;
+use crate::workbench::commands::vocabulary::Command;
 
 struct Editor {
     ctx: egui::Context,

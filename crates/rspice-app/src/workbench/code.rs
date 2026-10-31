@@ -3,6 +3,8 @@
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
+pub(crate) mod commands;
+
 use crate::workbench::framework::feature::{Feature, FeatureRegistry, NoHandles};
 use crate::workbench::slots::CodeState;
 use crate::workbench::state::WorkbenchSession;

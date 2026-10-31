@@ -2,7 +2,7 @@
 //! the Code & Automation workspace's netlist and automation pages.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
@@ -32,7 +32,7 @@ pub(in crate::workbench) fn veriloga_tools(
         toolbar_text_command(
             ui,
             app,
-            Command::CancelVerilogACompile.key(),
+            CodeCommand::CancelVerilogACompile.key(),
             WorkbenchIcon::Stop,
             "Cancel Verilog-A/AMS compile",
             layout,
@@ -41,7 +41,7 @@ pub(in crate::workbench) fn veriloga_tools(
         toolbar_text_command(
             ui,
             app,
-            Command::CompileVerilogA.key(),
+            CodeCommand::CompileVerilogA.key(),
             WorkbenchIcon::Run,
             "Compile Verilog-A/AMS",
             layout,
@@ -51,7 +51,7 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::VerilogAOpenSymbol.key(),
+        CodeCommand::VerilogAOpenSymbol.key(),
         WorkbenchIcon::Instance,
         "Open symbol",
         layout,
@@ -59,7 +59,7 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::VerilogABuildSettings.key(),
+        CodeCommand::VerilogABuildSettings.key(),
         WorkbenchIcon::Sliders,
         layout,
     );
@@ -68,14 +68,14 @@ pub(in crate::workbench) fn veriloga_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::FindCodeDocument.key(),
+        CodeCommand::FindCodeDocument.key(),
         WorkbenchIcon::Search,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::ManageSourceDocument.key(),
+        CodeCommand::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
         layout,
     );
@@ -193,7 +193,7 @@ pub(in crate::workbench) fn netlist_tools(
             toolbar_text_command(
                 ui,
                 app,
-                Command::AutomationConsole.key(),
+                CodeCommand::AutomationConsole.key(),
                 WorkbenchIcon::Terminal,
                 "Automation console",
                 layout,
@@ -211,14 +211,14 @@ fn source_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec)
     toolbar_icon_command(
         ui,
         app,
-        Command::ManageSourceDocument.key(),
+        CodeCommand::ManageSourceDocument.key(),
         WorkbenchIcon::Folder,
         layout,
     );
     toolbar_icon_command(
         ui,
         app,
-        Command::FindCodeDocument.key(),
+        CodeCommand::FindCodeDocument.key(),
         WorkbenchIcon::Search,
         layout,
     );
@@ -233,7 +233,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+            CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
             WorkbenchIcon::Export,
             "Export generated deck",
             layout,
@@ -241,7 +241,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::ValidateCodeDocument.key(),
+            CodeCommand::ValidateCodeDocument.key(),
             WorkbenchIcon::Check,
             "Validate generated netlist",
             layout,
@@ -250,7 +250,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         toolbar_text_command(
             ui,
             app,
-            Command::CompareGeneratedRevisions.key(),
+            CodeCommand::CompareGeneratedRevisions.key(),
             WorkbenchIcon::Compare,
             "Compare generated revisions",
             layout,
@@ -261,7 +261,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     toolbar_text_command(
         ui,
         app,
-        Command::ValidateCodeDocument.key(),
+        CodeCommand::ValidateCodeDocument.key(),
         WorkbenchIcon::Check,
         "Validate source",
         layout,
@@ -270,7 +270,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
     toolbar_text_command(
         ui,
         app,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
+        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
         WorkbenchIcon::Export,
         "Export deck copy",
         layout,

@@ -15,9 +15,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::PlatformState;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
 use crate::workbench::features;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
 use crate::workbench::project::ProjectFeature;
@@ -978,7 +978,7 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
     match action {
         LandingAction::NewProject => app.execute_command_key(ProjectCommand::NewProject.key()),
         LandingAction::OpenProject => app.execute_command_key(ProjectCommand::OpenProject.key()),
-        LandingAction::OpenNetlist => Command::OpenNetlist.execute(app),
+        LandingAction::OpenNetlist => app.execute_command_key(ids::OPEN_NETLIST),
         LandingAction::OpenSchematic => {
             app.execute_command_key(ProjectCommand::OpenSchematic.key())
         }

@@ -782,7 +782,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             open_ownership_dialog(&mut app.state, strategy);
         }
         Some(NetlistToolbarAction::Validate) => {
-            crate::workbench::commands::vocabulary::Command::ValidateCodeDocument.execute(app);
+            app.execute_command_key(crate::workbench::code::commands::CodeCommand::ValidateCodeDocument.key());
         }
         Some(NetlistToolbarAction::Save) => {
             crate::workbench::documents::netlist_document::open_netlist_save_dialog(
@@ -791,7 +791,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             );
         }
         Some(NetlistToolbarAction::Find) => {
-            crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(app);
+            app.execute_command_key(crate::workbench::code::commands::CodeCommand::FindCodeDocument.key());
         }
         Some(NetlistToolbarAction::GoToDefinition) => {
             let answer =

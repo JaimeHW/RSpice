@@ -13,6 +13,7 @@ use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
@@ -69,6 +70,11 @@ const fn simulate(command: SimulateCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
+/// The code feature's command's row under the label it declares.
+const fn code(command: CodeCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
 /// The project feature's command's row under the label it declares.
 const fn project(command: ProjectCommand) -> MenuEntry {
     MenuEntry::command(command.key())
@@ -111,7 +117,7 @@ const FILE_MENU: &[MenuEntry] = &[
         &[project(ProjectCommand::OpenSchematic).access('M')],
     ),
     project(ProjectCommand::OpenProject).access('O'),
-    command(Command::OpenNetlist).access('T'),
+    code(CodeCommand::OpenNetlist).access('T'),
     MenuEntry::submenu("Open recent", OPEN_RECENT_MENU).access('R'),
     Separator,
     command(Command::CloseActiveDocument).access('C'),
@@ -151,8 +157,8 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
 ];
 
 const IMPORT_MENU: &[MenuEntry] = &[
-    command_as(Command::ImportNetlist, "SPICE deck\u{2026}").access('S'),
-    command_as(Command::ImportVerilogA, "Verilog-A\u{2026}").access('V'),
+    MenuEntry::command_as(CodeCommand::ImportNetlist.key(), "SPICE deck\u{2026}").access('S'),
+    MenuEntry::command_as(CodeCommand::ImportVerilogA.key(), "Verilog-A\u{2026}").access('V'),
     command_as(
         Command::ImportLtspiceSchematic,
         "LTspice schematic (.asc)\u{2026}",
@@ -184,13 +190,13 @@ const EXPORT_MENU: &[MenuEntry] = &[
         "Image or PDF\u{2026}",
     )
     .access('I'),
-    command_as(
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+    MenuEntry::command_as(
+        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
         "SPICE netlist\u{2026}",
     )
     .access('S'),
-    command_as(
-        Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
+    MenuEntry::command_as(
+        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
         "Spectre netlist\u{2026}",
     )
     .access('N'),
@@ -225,7 +231,7 @@ const EDIT_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
-            command(Command::DuplicateLine).access('L'),
+            code(CodeCommand::DuplicateLine).access('L'),
             command(Command::DeleteLine).access('D'),
         ],
     ),
@@ -254,11 +260,11 @@ const EDIT_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
-            command(Command::ToggleLineComment).access('M'),
-            command(Command::FormatDocument).access('O'),
-            command(Command::GoToLine).access('G'),
+            code(CodeCommand::ToggleLineComment).access('M'),
+            code(CodeCommand::FormatDocument).access('O'),
+            code(CodeCommand::GoToLine).access('G'),
             Separator,
-            command(Command::FindCodeDocument).access('F'),
+            code(CodeCommand::FindCodeDocument).access('F'),
         ],
     ),
     // What is done to the selection, then to one object, then finding one.
@@ -359,10 +365,10 @@ const GRID_MENU: &[MenuEntry] = &[
 ];
 
 const FOLDING_MENU: &[MenuEntry] = &[
-    command(Command::FoldSelection).access('F'),
-    command(Command::UnfoldAtCaret).access('C'),
-    command(Command::FoldAll).access('A'),
-    command(Command::UnfoldAll).access('U'),
+    code(CodeCommand::FoldSelection).access('F'),
+    code(CodeCommand::UnfoldAtCaret).access('C'),
+    code(CodeCommand::FoldAll).access('A'),
+    code(CodeCommand::UnfoldAll).access('U'),
 ];
 
 /// Design: move through the hierarchy, place, arrange and lay out sheets,
@@ -426,9 +432,9 @@ const DESIGN_MENU: &[MenuEntry] = &[
         MenuContext::VerilogAView,
         &[
             Separator,
-            command(Command::CompileVerilogA).access('M'),
-            command(Command::CancelVerilogACompile).access('V'),
-            command(Command::VerilogABuildSettings).access('B'),
+            code(CodeCommand::CompileVerilogA).access('M'),
+            code(CodeCommand::CancelVerilogACompile).access('V'),
+            code(CodeCommand::VerilogABuildSettings).access('B'),
         ],
     ),
 ];
@@ -575,7 +581,7 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Preflight).access('C'),
     MenuEntry::command_as(SimulateCommand::Run.key(), "Run").access('R'),
     MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop").access('S'),
-    command(Command::GenerateNetlist).access('G'),
+    code(CodeCommand::GenerateNetlist).access('G'),
     simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
     command_as(Command::PlaceProbe, "Probe").access('P'),
@@ -703,7 +709,7 @@ const TOOLS_MENU: &[MenuEntry] = &[
         "Netlist and script editor",
     )
     .access('N'),
-    command(Command::AutomationConsole).access('S'),
+    code(CodeCommand::AutomationConsole).access('S'),
 ];
 
 /// Window: the application's windows and the document in front, the
@@ -843,9 +849,9 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
-            command(Command::GoToDefinition).access('G'),
-            command(Command::FindReferences).access('F'),
-            command(Command::RenameSymbol).access('R'),
+            code(CodeCommand::GoToDefinition).access('G'),
+            code(CodeCommand::FindReferences).access('F'),
+            code(CodeCommand::RenameSymbol).access('R'),
             Separator,
         ],
     ),
@@ -853,8 +859,8 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     command(Command::Copy).access('C'),
     command(Command::Paste).access('P'),
     Separator,
-    command(Command::ToggleLineComment).access('M'),
-    command(Command::FormatDocument).access('O'),
+    code(CodeCommand::ToggleLineComment).access('M'),
+    code(CodeCommand::FormatDocument).access('O'),
 ];
 
 /// The icon a menu row shows: the one the command's toolbar button wears

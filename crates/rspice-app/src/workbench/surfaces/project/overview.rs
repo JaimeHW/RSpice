@@ -1107,7 +1107,7 @@ fn overview_header(
                         intent = Some(OverviewIntent::Command(ProjectCommand::NewCell.key()));
                     }
                     let (open_deck_enabled, open_deck_disabled_reason) =
-                        command_gate(cx, Command::OpenNetlist.key());
+                        command_gate(cx, ids::OPEN_NETLIST);
                     let import_deck = Button::new("Import deck…")
                         .enabled(open_deck_enabled)
                         .show(ui);
@@ -1142,7 +1142,7 @@ fn run_plan_intent() -> OverviewIntent {
 }
 
 fn import_deck_intent() -> OverviewIntent {
-    OverviewIntent::Command(Command::OpenNetlist.key())
+    OverviewIntent::Command(ids::OPEN_NETLIST)
 }
 
 /// The bindings the next run executes against, stated as a property ledger.

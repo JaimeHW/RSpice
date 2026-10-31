@@ -64,7 +64,7 @@ impl Feature for ProjectFeature {
         Command::OpenWorkspace(Workspace::Netlist).key(),
         Command::ConfigurationSets.key(),
         ids::MODELS_CATALOG,
-        Command::OpenNetlist.key(),
+        ids::OPEN_NETLIST,
         ProjectCommand::NewCell.key(),
         ProjectCommand::RevisionHistory.key(),
         ProjectCommand::Page(ProjectPage::Library).key(),

@@ -25,6 +25,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::requests::FocusNavigatorSearch;
 use rspice_design::connectivity::summary::DesignNet;
 
@@ -1918,11 +1919,11 @@ fn navigator_object_context_menu(
         // never offers the jump rather than offering a permanently dead one.
         if matches!(object, NavigatorObject::Component { .. }) {
             let show_in_netlist = ui.add_enabled(
-                Command::ShowInNetlist.is_enabled(app),
+                app.command_key_enabled(ids::SHOW_IN_NETLIST),
                 egui::Button::new("Show in netlist"),
             );
             if show_in_netlist.clicked() {
-                Command::ShowInNetlist.execute(app);
+                app.execute_command_key(ids::SHOW_IN_NETLIST);
                 ui.close();
             }
         }

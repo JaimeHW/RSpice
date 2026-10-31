@@ -341,7 +341,9 @@ pub mod ids {
         NETLIST_WORKSPACE = "netlist";
         NEW_CELL = "new-cell";
         NEW_PROJECT = "new-project";
+        NEW_VERILOGA_DEVICE = "new-veriloga-device";
         OPEN_CONSOLE = "open-console";
+        OPEN_NETLIST = "open-netlist";
         OPEN_NOTIFICATIONS = "open-notifications";
         OPEN_RUN_IN_RESULTS = "open-run-in-results";
         PDK_SETTINGS = "pdk-settings";
@@ -358,6 +360,7 @@ pub mod ids {
         RUN_SIMULATION = "start-run";
         SAVE = "save-project";
         SHEET_PROPERTIES = "page-setup";
+        SHOW_IN_NETLIST = "show-in-netlist";
         SIMULATION_ANALYSES = "simulation-analyses";
         SIMULATE_WORKSPACE = "simulate";
         STIMULUS_WORKSPACE = "stimulus";

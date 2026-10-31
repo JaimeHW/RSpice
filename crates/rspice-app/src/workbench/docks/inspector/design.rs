@@ -27,7 +27,6 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
     Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row, property_row_captioned,
     property_row_combo, property_row_flagged, property_row_input_action,

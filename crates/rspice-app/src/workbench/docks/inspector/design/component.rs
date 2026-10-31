@@ -7,6 +7,7 @@
 //! rather than displayed as this component's state.
 
 use super::*;
+use crate::workbench::framework::command_registry::ids;
 
 pub(super) fn component_panel(
     ui: &mut Ui,
@@ -170,7 +171,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
     // The deck the instance emits is part of its identity, so the jump to it
     // belongs beside the symbol, master and model routes rather than in a
     // section of its own. It appears only once a deck states the instance.
-    let netlist_card = Command::ShowInNetlist.is_enabled(app);
+    let netlist_card = app.command_key_enabled(ids::SHOW_IN_NETLIST);
     if symbol_view.is_some() || hierarchy_master.is_some() || model_source.is_some() || netlist_card
     {
         action_stack(ui, |ui| {
@@ -195,7 +196,7 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
             }
 
             if netlist_card && Button::new("Show in netlist").ghost().show(ui).clicked() {
-                Command::ShowInNetlist.execute(app);
+                app.execute_command_key(ids::SHOW_IN_NETLIST);
             }
 
             if let Some(target) = model_source.as_ref() {

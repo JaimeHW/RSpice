@@ -721,6 +721,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "models/commands",
     // What the simulate feature's commands declare, the same way.
     "simulate/commands",
+    // What the code feature's commands declare, the same way.
+    "code/commands",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into

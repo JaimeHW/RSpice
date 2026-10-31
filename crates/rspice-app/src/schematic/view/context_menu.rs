@@ -211,7 +211,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::NewVerilogADevice,
         icon: ContextIcon::VerilogA,
         label: "New Verilog-A device…",
-        shortcut_command: Some(Command::NewVerilogADevice.key()),
+        shortcut_command: Some(ids::NEW_VERILOGA_DEVICE),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::UpdateInstanceInterface,
@@ -267,7 +267,7 @@ const CONTEXT_ENTRIES: &[ContextEntry] = &[
         action: ContextAction::ShowInNetlist,
         icon: ContextIcon::Code,
         label: "Show in netlist",
-        shortcut_command: Some(Command::ShowInNetlist.key()),
+        shortcut_command: Some(ids::SHOW_IN_NETLIST),
     }),
     ContextEntry::Command(ContextCommand {
         action: ContextAction::Probe,
