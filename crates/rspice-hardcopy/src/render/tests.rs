@@ -10,6 +10,7 @@ mod printer_margin;
 mod provenance;
 mod receipt_faces;
 mod schematic_labels;
+mod shaped_text;
 mod sheet_frame;
 mod title_lettering;
 

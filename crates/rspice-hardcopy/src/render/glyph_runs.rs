@@ -10,7 +10,7 @@
 
 use std::sync::OnceLock;
 
-use rspice_fonts::{PrintFace, Role, Run};
+use rspice_fonts::{PrintFace, Role};
 
 use super::*;
 
@@ -55,19 +55,6 @@ impl PrintFaces {
         &self.faces[face as usize]
     }
 
-    /// Advance of one run, in units of `font`'s first face's em.
-    pub(crate) fn run_advance_units(&self, font: SceneFont, run: &Run) -> u64 {
-        let face = self.face(run.face);
-        let advance = run
-            .text
-            .chars()
-            .filter_map(|character| face.glyph_index(character))
-            .filter_map(|glyph| face.glyph_hor_advance(glyph))
-            .map(u64::from)
-            .sum();
-        self.to_primary_units(font, run.face, advance)
-    }
-
     /// Inked width of one grapheme lettered in `font`, from the leftmost ink
     /// or the origin to the rightmost ink or the advance, in units of `font`'s
     /// first face's em. Overhangs count as well as advances, so a grapheme
@@ -98,11 +85,6 @@ impl PrintFaces {
     /// The em of `font`'s first face, in its own units.
     pub(crate) fn units_per_em(&self, font: SceneFont) -> u64 {
         u64::from(self.face(font.role().print_primary()).units_per_em())
-    }
-
-    fn to_primary_units(&self, font: SceneFont, face: PrintFace, value: u64) -> u64 {
-        let primary = self.units_per_em(font);
-        value * primary / u64::from(self.face(face).units_per_em())
     }
 }
 

@@ -19,7 +19,7 @@ use egui::{Context, FontData, FontDefinitions, FullOutput, Shape, text::LayoutJo
 pub use rspice_fonts::HanVariant;
 use rspice_fonts::system::SystemFace;
 pub use rspice_fonts::system::{FaceClass, KnownFace, Source, SystemFonts};
-use rspice_fonts::{HanPreference, Role, Sink, han_order};
+use rspice_fonts::{HanPreference, Role, han_order};
 
 use super::role_of;
 
@@ -139,8 +139,7 @@ impl SystemFontsPlugin {
 
     /// Whether `character` letters from a face of `role`'s family.
     fn covers(&self, role: Role, character: char) -> bool {
-        role.covers(Sink::Screen, character)
-            || self.joined.iter().any(|face| face.covers(character))
+        role.covers(character) || self.joined.iter().any(|face| face.covers(character))
     }
 
     fn scan(&mut self, shape: &Shape, wanted: &mut Vec<char>) {

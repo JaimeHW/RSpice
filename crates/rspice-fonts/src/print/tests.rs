@@ -213,3 +213,81 @@ fn a_paragraph_separator_is_not_set() {
     let pieces = line(Role::Sans, text);
     assert!(!texts(text, &pieces).contains(&"\n"));
 }
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn arabic_is_joined_and_lam_alef_is_one_glyph_for_both_letters() {
+    let text = "ببب لا";
+    let pieces = line(Role::Sans, text);
+    let arabic: Vec<&Piece> = pieces
+        .iter()
+        .filter(|piece| piece.face == PrintFace::SansArabicRegular)
+        .collect();
+    assert_eq!(arabic.len(), 2, "{pieces:?}");
+    assert!(arabic.iter().all(|piece| piece.right_to_left));
+    // A joined beh is not the isolated form the character map names.
+    let isolated = glyph_of(PrintFace::SansArabicRegular, 'ب');
+    let beh = arabic
+        .iter()
+        .find(|piece| piece.glyphs.len() == 3)
+        .expect("the three behs are one piece");
+    assert!(
+        beh.glyphs.iter().all(|glyph| glyph.id != isolated),
+        "{beh:?}"
+    );
+    let lam_alef = arabic
+        .iter()
+        .find(|piece| piece.glyphs.len() == 1)
+        .expect("lam-alef is one glyph");
+    assert_eq!(&text[lam_alef.glyphs[0].text.clone()], "لا");
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_mark_in_a_right_to_left_run_stands_for_itself() {
+    // A mark is a glyph of its own text unless the face composes it with its
+    // base, as Plex Sans Hebrew does a shin and its dot; the glyphs of one
+    // composed cluster share its text. So a right-to-left piece's text falls
+    // from left to right, and a reader that reverses its clusters reads the
+    // word as typed.
+    for text in ["שָׁלוֹם", "مَرْحَبًا", "בְּרֵאשִׁית"] {
+        let pieces = line(Role::Sans, text);
+        assert_eq!(pieces.len(), 1, "{text}: {pieces:?}");
+        let glyphs = &pieces[0].glyphs;
+        assert!(
+            glyphs
+                .windows(2)
+                .all(|pair| pair[0].text == pair[1].text || pair[0].text.start >= pair[1].text.end),
+            "{text}: {glyphs:?}"
+        );
+        let mut clusters: Vec<Range<usize>> = glyphs
+            .iter()
+            .rev()
+            .map(|glyph| glyph.text.clone())
+            .collect();
+        clusters.dedup();
+        let read: String = clusters.into_iter().map(|range| &text[range]).collect();
+        assert_eq!(read, text);
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn thai_is_set_in_its_face_with_every_mark_drawn() {
+    let text = "ภาษาไทย น้ำ";
+    let pieces = line(Role::Sans, text);
+    assert!(pieces.iter().all(|piece| !piece.right_to_left));
+    assert!(
+        pieces
+            .iter()
+            .filter(|piece| piece.face != PrintFace::SansRegular)
+            .all(|piece| piece.face == PrintFace::SansThaiRegular),
+        "{pieces:?}"
+    );
+    assert!(
+        pieces
+            .iter()
+            .flat_map(|piece| &piece.glyphs)
+            .all(|glyph| glyph.id != 0)
+    );
+}

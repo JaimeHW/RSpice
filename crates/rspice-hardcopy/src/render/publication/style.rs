@@ -20,6 +20,15 @@ pub(super) const PUBLICATION_MONO: &str = "RSpice Plex Mono";
 /// See [`PUBLICATION_SANS`]. The symbols face is the product's own, so its
 /// published family is its own name.
 pub(super) const PUBLICATION_SYMBOLS: &str = "RSpice Symbols";
+/// See [`PUBLICATION_SANS`].
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) const PUBLICATION_SANS_ARABIC: &str = "RSpice Plex Sans Arabic";
+/// See [`PUBLICATION_SANS`].
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) const PUBLICATION_SANS_HEBREW: &str = "RSpice Plex Sans Hebrew";
+/// See [`PUBLICATION_SANS`].
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) const PUBLICATION_SANS_THAI: &str = "RSpice Plex Sans Thai";
 
 /// The family and CSS weight each embedded face is published under.
 pub(super) const fn publication_face(face: PrintFace) -> (&'static str, &'static str) {
@@ -30,6 +39,18 @@ pub(super) const fn publication_face(face: PrintFace) -> (&'static str, &'static
         PrintFace::MonoRegular => (PUBLICATION_MONO, "400"),
         PrintFace::MonoMedium => (PUBLICATION_MONO, "500"),
         PrintFace::Symbols => (PUBLICATION_SYMBOLS, "400"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansArabicRegular => (PUBLICATION_SANS_ARABIC, "400"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansArabicSemibold => (PUBLICATION_SANS_ARABIC, "600"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansHebrewRegular => (PUBLICATION_SANS_HEBREW, "400"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansHebrewSemibold => (PUBLICATION_SANS_HEBREW, "600"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansThaiRegular => (PUBLICATION_SANS_THAI, "400"),
+        #[cfg(not(target_arch = "wasm32"))]
+        PrintFace::SansThaiSemibold => (PUBLICATION_SANS_THAI, "600"),
     }
 }
 

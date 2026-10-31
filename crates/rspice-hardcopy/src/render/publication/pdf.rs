@@ -567,12 +567,19 @@ struct PdfTextStyle {
     opacity: NormalizedF32,
 }
 
-/// Letter `text` run by run, each in the face that carries its glyphs, and
-/// place the whole by its measured advance.
+/// Letter `text` as print sets it: each piece shaped in the face that
+/// carries its glyphs, the pieces left to right in display order, and the
+/// whole placed by its shaped advance.
+///
+/// The line is written in the order it is read, each stretch at its place on
+/// the line. A right-to-left stretch's glyphs carry falling text ranges,
+/// which krilla marks `/ReversedChars`; a composed cluster, whose glyphs
+/// share one range, is a stretch of its own, which krilla spans with its
+/// `/ActualText`. Text copied out of the PDF therefore reads as typed.
 fn draw_pdf_text(
     surface: &mut krilla::surface::Surface<'_>,
     fonts: &PdfFonts,
-    (mut x, y): (f32, f32),
+    (x, y): (f32, f32),
     text: &str,
     anchor: TextAnchor,
     style: PdfTextStyle,
@@ -584,31 +591,99 @@ fn draw_pdf_text(
         outlined,
         opacity,
     } = style;
-    let runs = font.role().runs(text);
-    let em = fonts.faces.units_per_em(font) as f32;
-    let advances = runs
+    let pieces = rspice_fonts::print::line(font.role(), text);
+    let ems: Vec<f32> = pieces
         .iter()
-        .map(|run| fonts.faces.run_advance_units(font, run) as f32 * size / em)
-        .collect::<Vec<_>>();
-    let width: f32 = advances.iter().sum();
-    match anchor {
-        TextAnchor::Start => {}
-        TextAnchor::Middle => x -= width / 2.0,
-        TextAnchor::End => x -= width,
+        .map(|piece| f32::from(fonts.faces.face(piece.face).units_per_em()))
+        .collect();
+    let width: f32 = pieces
+        .iter()
+        .zip(&ems)
+        .map(|(piece, em)| piece.advance() as f32 * size / em)
+        .sum();
+    let mut left = match anchor {
+        TextAnchor::Start => x,
+        TextAnchor::Middle => x - width / 2.0,
+        TextAnchor::End => x - width,
+    };
+    let mut stretches = Vec::new();
+    for (piece, &em) in pieces.iter().zip(&ems) {
+        let glyphs: Vec<KrillaGlyph> = piece
+            .glyphs
+            .iter()
+            .map(|glyph| {
+                KrillaGlyph::new(
+                    GlyphId::new(glyph.id),
+                    glyph.advance as f32 / em,
+                    glyph.x_offset as f32 / em,
+                    glyph.y_offset as f32 / em,
+                    0.0,
+                    glyph.text.clone(),
+                    None,
+                )
+            })
+            .collect();
+        for range in written_stretches(piece) {
+            let advance: f32 = glyphs[range.clone()]
+                .iter()
+                .map(|glyph| glyph.x_advance * size)
+                .sum();
+            stretches.push((left, piece.face, glyphs[range].to_vec()));
+            left += advance;
+        }
     }
+    stretches.sort_by_key(|(_, _, glyphs)| glyphs.iter().map(|glyph| glyph.text_range.start).min());
     set_pdf_fill(surface, color, opacity);
     surface.set_stroke(None);
-    for (run, advance) in runs.iter().zip(advances) {
-        surface.draw_text(
-            Point::from_xy(x, y),
-            fonts.font(run.face).clone(),
+    for (left, face, glyphs) in stretches {
+        surface.draw_glyphs(
+            Point::from_xy(left, y),
+            &glyphs,
+            fonts.font(face).clone(),
+            text,
             size,
-            &run.text,
             outlined,
-            TextDirection::LeftToRight,
         );
-        x += advance;
     }
+}
+
+/// The stretches of `piece` written with one glyph run each, as ranges of
+/// its glyphs from left to right. A left-to-right piece is one stretch. A
+/// right-to-left piece is cut around each composed cluster, so every
+/// stretch's text either falls glyph by glyph or is one cluster's.
+fn written_stretches(piece: &rspice_fonts::print::Piece) -> Vec<std::ops::Range<usize>> {
+    let glyphs = &piece.glyphs;
+    if !piece.right_to_left {
+        return std::iter::once(0..glyphs.len()).collect();
+    }
+    let mut clusters: Vec<std::ops::Range<usize>> = Vec::new();
+    for (at, glyph) in glyphs.iter().enumerate() {
+        match clusters.last_mut() {
+            Some(cluster) if glyphs[cluster.start].text == glyph.text => cluster.end = at + 1,
+            _ => clusters.push(at..at + 1),
+        }
+    }
+    let mut stretches: Vec<std::ops::Range<usize>> = Vec::new();
+    for cluster in clusters {
+        let single = cluster.len() == 1;
+        match stretches.last_mut() {
+            Some(stretch) if single && is_single_glyphs(glyphs, stretch) => {
+                stretch.end = cluster.end;
+            }
+            _ => stretches.push(cluster),
+        }
+    }
+    stretches
+}
+
+/// Whether no two glyphs of `stretch` share their text.
+fn is_single_glyphs(
+    glyphs: &[rspice_fonts::print::Glyph],
+    stretch: &std::ops::Range<usize>,
+) -> bool {
+    glyphs[stretch.clone()]
+        .windows(2)
+        .all(|pair| pair[0].text != pair[1].text)
 }
 
 pub(super) fn draw_pdf_decorations(

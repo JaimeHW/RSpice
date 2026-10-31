@@ -7,18 +7,23 @@
 //! direction, which joins Arabic, stacks Thai marks, mirrors a bracket in a
 //! right-to-left run and hands the glyphs back from left to right.
 //!
-//! Every glyph keeps the logical bytes of the cluster it letters, so a PDF
-//! maps it back to the text it stands for and copied text comes out in the
-//! order it was typed, whatever order the glyphs stand in.
+//! Every glyph keeps the logical bytes of the characters it letters: its own
+//! character, every character of a ligature, or, where the face composes a
+//! mark with its base, the whole composed cluster, which each of its glyphs
+//! shares. The text of a right-to-left piece's glyphs therefore falls from
+//! left to right, and a PDF can map each glyph back to what it stands for,
+//! giving copied text in the order it was typed whatever order the glyphs
+//! stand in.
 //!
-//! A cluster no face has is set as [`REPLACEMENT`] from RSpice Symbols, and
-//! so is a cluster its face shapes to the missing glyph, as when a face has
-//! a base but not the mark on it: no sink ever draws a face's notdef box.
+//! A grapheme cluster no face has is set as [`crate::REPLACEMENT`] from
+//! RSpice Symbols, and so is one its face shapes to the missing glyph, as
+//! when a face has a base but not the mark on it: print never draws a face's
+//! notdef box.
 
 use std::ops::Range;
 use std::sync::OnceLock;
 
-use harfrust::{BufferFlags, Direction, FontRef, ShaperData, UnicodeBuffer};
+use harfrust::{BufferClusterLevel, BufferFlags, Direction, FontRef, ShaperData, UnicodeBuffer};
 use unicode_bidi::{BidiClass, BidiInfo, bidi_class};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -131,28 +136,43 @@ fn stretches(role: Role, text: &str, run: Range<usize>) -> Vec<Stretch> {
     stretches
 }
 
-/// Sets `stretch` in its face, adding its pieces to `pieces`. A cluster the
-/// face shapes to the missing glyph is set as the replacement instead, as
-/// a piece of its own.
+/// Sets `stretch` in its face, adding its pieces to `pieces`. A grapheme
+/// cluster the face shapes to the missing glyph is set as the replacement
+/// instead, as a piece of its own.
 fn set(text: &str, stretch: &Stretch, right_to_left: bool, pieces: &mut Vec<Piece>) {
     let Some(face) = stretch.face else {
         push_replacements(text, stretch.text.clone(), right_to_left, pieces);
         return;
     };
     let shaped = shape(face, text, stretch.text.clone(), right_to_left);
+    let clusters: Vec<Range<usize>> = text[stretch.text.clone()]
+        .grapheme_indices(true)
+        .map(|(offset, cluster)| {
+            let start = stretch.text.start + offset;
+            start..start + cluster.len()
+        })
+        .collect();
+    let cluster_of = |glyph: &Glyph| {
+        clusters
+            .iter()
+            .find(|cluster| cluster.contains(&glyph.text.start))
+            .cloned()
+            .unwrap_or_else(|| glyph.text.clone())
+    };
     let missing: Vec<Range<usize>> = shaped
         .iter()
         .filter(|glyph| glyph.id == 0)
-        .map(|glyph| glyph.text.clone())
+        .map(cluster_of)
         .collect();
     let mut kept = Vec::new();
     let mut replaced: Vec<Range<usize>> = Vec::new();
     for glyph in shaped {
-        if missing.contains(&glyph.text) {
-            if !replaced.contains(&glyph.text) {
+        let cluster = cluster_of(&glyph);
+        if missing.contains(&cluster) {
+            if !replaced.contains(&cluster) {
                 flush(face, right_to_left, &mut kept, pieces);
-                replaced.push(glyph.text.clone());
-                push_replacements(text, glyph.text, right_to_left, pieces);
+                replaced.push(cluster.clone());
+                push_replacements(text, cluster, right_to_left, pieces);
             }
         } else {
             kept.push(glyph);
@@ -247,9 +267,11 @@ fn shaping(face: PrintFace) -> Option<&'static Shaping> {
         .as_ref()
 }
 
-/// `text[range]` shaped in `face`, from left to right. Each glyph's text is
-/// its cluster's bytes in `text`. A face that does not parse sets nothing;
-/// the tests hold every embedded face to parsing.
+/// `text[range]` shaped in `face`, from left to right. Each character is a
+/// cluster of its own unless the face ligates it with others, so a glyph's
+/// text is its characters' bytes in `text`, and the clusters stand in order
+/// of the run's direction. A face that does not parse sets nothing; the
+/// tests hold every embedded face to parsing.
 fn shape(face: PrintFace, text: &str, range: Range<usize>, right_to_left: bool) -> Vec<Glyph> {
     let Some(shaping) = shaping(face) else {
         return Vec::new();
@@ -263,6 +285,7 @@ fn shape(face: PrintFace, text: &str, range: Range<usize>, right_to_left: bool) 
         flags |= BufferFlags::END_OF_TEXT;
     }
     buffer.set_flags(flags);
+    buffer.set_cluster_level(BufferClusterLevel::MonotoneCharacters);
     buffer.push_str(&text[range.clone()]);
     buffer.set_direction(if right_to_left {
         Direction::RightToLeft

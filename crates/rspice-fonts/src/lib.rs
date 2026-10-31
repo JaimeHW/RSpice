@@ -13,12 +13,9 @@
 //! A desktop build goes on to IBM Plex Sans Arabic, Hebrew and Thai; a
 //! browser does not embed them.
 //!
-//! A [`Sink`] is where text is lettered. The screen letters from every face
-//! in a chain. Print does not yet order right-to-left text, join Arabic or
-//! stack Thai marks, so it letters none of those scripts' faces, and their
-//! characters print as the replacement square. Print names its faces with
-//! [`PrintFace`], which has no name for those faces, so a face resolved for
-//! the screen cannot reach a print table.
+//! Screen and print letter from every face in a chain. Print names its faces
+//! with [`PrintFace`], and [`print`] sets its text: shaped, and in the order
+//! it is read.
 //!
 //! The faces are distributed under the SIL Open Font License 1.1; each
 //! face's [`Face::licence`] is the text that must travel with it.
@@ -380,39 +377,31 @@ impl Role {
         self.chain()[0]
     }
 
-    /// The faces of the chain that `sink` letters from, in order.
-    pub fn faces_in(self, sink: Sink) -> impl Iterator<Item = Face> {
+    /// The first face in the chain that has `character`.
+    #[must_use]
+    pub fn face_for(self, character: char) -> Option<Face> {
         self.chain()
             .iter()
             .copied()
-            .filter(move |face| sink.letters(*face))
+            .find(|face| face.covers(character))
     }
 
-    /// The first face in the chain that `sink` letters from and that has
-    /// `character`.
+    /// Whether some face in the chain has `character`.
     #[must_use]
-    pub fn face_for(self, sink: Sink, character: char) -> Option<Face> {
-        self.faces_in(sink).find(|face| face.covers(character))
+    pub fn covers(self, character: char) -> bool {
+        self.face_for(character).is_some()
     }
 
-    /// Whether some face in the chain that `sink` letters from has
-    /// `character`.
+    /// The face that letters `character`, and the character it letters: the
+    /// character itself from the first face that has it, or [`REPLACEMENT`]
+    /// from RSpice Symbols.
     #[must_use]
-    pub fn covers(self, sink: Sink, character: char) -> bool {
-        self.face_for(sink, character).is_some()
-    }
-
-    /// The face that letters `character` in `sink`, and the character it
-    /// letters: the character itself from the first face that has it, or
-    /// [`REPLACEMENT`] from RSpice Symbols.
-    #[must_use]
-    pub fn resolve(self, sink: Sink, character: char) -> (Face, char) {
-        self.face_for(sink, character)
+    pub fn resolve(self, character: char) -> (Face, char) {
+        self.face_for(character)
             .map_or((Face::Symbols, REPLACEMENT), |face| (face, character))
     }
 
-    /// The face print letters the role's own text in: [`Self::primary`],
-    /// which every sink letters from.
+    /// The face print letters the role's own text in: [`Self::primary`].
     #[must_use]
     pub const fn print_primary(self) -> PrintFace {
         match self {
@@ -447,9 +436,9 @@ impl Role {
         runs
     }
 
-    /// The faces of the chain print letters from, in order.
+    /// The faces of the chain, as print names them, in order.
     fn print_faces(self) -> impl Iterator<Item = PrintFace> {
-        self.chain().iter().filter_map(|face| face.printed())
+        self.chain().iter().map(|face| face.printed())
     }
 
     fn letter_cluster(self, cluster: &str) -> (PrintFace, &str) {
@@ -477,34 +466,8 @@ impl Role {
     }
 }
 
-/// Where a run of text is lettered.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum Sink {
-    /// The screen. egui shapes every run, and ui-kit lays right-to-left
-    /// lines out in display order.
-    Screen,
-    /// Print and export: PDF, SVG and raster pages. They do not yet order
-    /// right-to-left text, join Arabic or stack Thai marks, so they letter
-    /// none of those scripts' faces. Arabic set out unjoined and in reverse
-    /// would look like text and read wrong; the replacement square says
-    /// plainly that the glyph is missing.
-    Print,
-}
-
-impl Sink {
-    /// Whether the sink letters from `face`.
-    #[must_use]
-    pub const fn letters(self, face: Face) -> bool {
-        match self {
-            Self::Screen => true,
-            Self::Print => face.printed().is_some(),
-        }
-    }
-}
-
-/// A face print letters from. It cannot name a face of a script print does
-/// not yet shape, so a print table indexed by it holds every face print can
-/// ask for, and print cannot be handed a face the screen resolved.
+/// A face print letters from: every embedded face. A print table indexed by
+/// it holds every face print can ask for.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PrintFace {
     SansRegular,
@@ -513,17 +476,30 @@ pub enum PrintFace {
     MonoRegular,
     MonoMedium,
     Symbols,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansArabicRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansArabicSemibold,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansHebrewRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansHebrewSemibold,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansThaiRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansThaiSemibold,
 }
 
 impl PrintFace {
-    pub const ALL: [Self; 6] = [
-        Self::SansRegular,
-        Self::SansMedium,
-        Self::SansSemibold,
-        Self::MonoRegular,
-        Self::MonoMedium,
-        Self::Symbols,
-    ];
+    pub const ALL: [Self; Face::ALL.len()] = {
+        let mut all = [Self::SansRegular; Face::ALL.len()];
+        let mut at = 0;
+        while at < all.len() {
+            all[at] = Face::ALL[at].printed();
+            at += 1;
+        }
+        all
+    };
 
     /// The embedded face.
     #[must_use]
@@ -535,6 +511,18 @@ impl PrintFace {
             Self::MonoRegular => Face::MonoRegular,
             Self::MonoMedium => Face::MonoMedium,
             Self::Symbols => Face::Symbols,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular => Face::SansArabicRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold => Face::SansArabicSemibold,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular => Face::SansHebrewRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewSemibold => Face::SansHebrewSemibold,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular => Face::SansThaiRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiSemibold => Face::SansThaiSemibold,
         }
     }
 
@@ -552,25 +540,28 @@ impl PrintFace {
 }
 
 impl Face {
-    /// The face as print names it, or `None` for a face of a script that
-    /// must be ordered right to left, or have its marks stacked, before it
-    /// reads correctly, which print does not yet do.
+    /// The face as print names it.
     #[must_use]
-    pub const fn printed(self) -> Option<PrintFace> {
+    pub const fn printed(self) -> PrintFace {
         match self {
-            Self::SansRegular => Some(PrintFace::SansRegular),
-            Self::SansMedium => Some(PrintFace::SansMedium),
-            Self::SansSemibold => Some(PrintFace::SansSemibold),
-            Self::MonoRegular => Some(PrintFace::MonoRegular),
-            Self::MonoMedium => Some(PrintFace::MonoMedium),
-            Self::Symbols => Some(PrintFace::Symbols),
+            Self::SansRegular => PrintFace::SansRegular,
+            Self::SansMedium => PrintFace::SansMedium,
+            Self::SansSemibold => PrintFace::SansSemibold,
+            Self::MonoRegular => PrintFace::MonoRegular,
+            Self::MonoMedium => PrintFace::MonoMedium,
+            Self::Symbols => PrintFace::Symbols,
             #[cfg(not(target_arch = "wasm32"))]
-            Self::SansArabicRegular
-            | Self::SansArabicSemibold
-            | Self::SansHebrewRegular
-            | Self::SansHebrewSemibold
-            | Self::SansThaiRegular
-            | Self::SansThaiSemibold => None,
+            Self::SansArabicRegular => PrintFace::SansArabicRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold => PrintFace::SansArabicSemibold,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular => PrintFace::SansHebrewRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewSemibold => PrintFace::SansHebrewSemibold,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular => PrintFace::SansThaiRegular,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiSemibold => PrintFace::SansThaiSemibold,
         }
     }
 }
