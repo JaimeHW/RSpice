@@ -29,6 +29,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
 /// Apply the route a consumer asked for, if one is outstanding.
@@ -200,10 +201,10 @@ pub(crate) fn apply_remediation(app: &mut RSpiceApp, remediation: PreflightRemed
                     );
                 }
             }
-            Command::SimulationPage(SimulationPage::Analyses).execute(app);
+            app.execute_command_key(SimulateCommand::Page(SimulationPage::Analyses).key());
         }
         PreflightRemediation::SolverOptions => {
-            Command::SimulationPage(SimulationPage::Solver).execute(app);
+            app.execute_command_key(SimulateCommand::Page(SimulationPage::Solver).key());
         }
         PreflightRemediation::ProjectTechnology => {
             app.execute_command_key(ProjectCommand::Page(ProjectPage::Dependencies).key());

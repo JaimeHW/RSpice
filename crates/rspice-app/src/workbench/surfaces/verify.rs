@@ -28,7 +28,6 @@ use crate::ui::widgets::{Button, Problem};
 use crate::workbench::RSpiceApp;
 use crate::workbench::framework::ports::ResultsPort as _;
 
-use super::super::commands::vocabulary::Command;
 use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
 use tuning::{sync_tuning_session, tuning, tuning_review_dialog};

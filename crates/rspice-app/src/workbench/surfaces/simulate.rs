@@ -60,11 +60,12 @@ use rspice_simulation::output_contract::SavedOutputSemanticStatus;
 use rspice_simulation::output_contract::SavedOutputStorageEstimate;
 use rspice_simulation::runner::{TfRunConfig, infer_tf_run_config};
 
-use super::super::commands::vocabulary::Command;
 use super::super::design_system::{
     StatusMark, WorkbenchIcon, elide_text, heading, property_row, property_row_control_columns,
     property_row_problem, property_row_wrapped, workspace_title_row,
 };
+use crate::workbench::framework::host::Host;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 const SIMULATION_STACK_BREAKPOINT: f32 = 820.0;
 const TITLE_ACTION_STACK_BREAKPOINT: f32 = 560.0;
@@ -374,7 +375,7 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 ///
 /// The frame calls this, not [`show`]. Only one of the nine overlays is
 /// genuinely chrome: the plan manager, which the toolbar's run configuration
-/// chip and `Command::ManageSimulationPlans` open from the menu bar, the
+/// chip and `SimulateCommand::ManagePlans` open from the menu bar, the
 /// palette and the shortcut map, on any workspace. The other seven drafts are
 /// each opened by a control on one setup page — cloning the plan and renaming
 /// an analysis from the Analyses route, a design variable from Variables, a
@@ -382,7 +383,7 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 ///
 /// The catalogue is the reason they are hosted together anyway. Its invoker is
 /// the navigator's creating action, which the panel draws on all nine setup
-/// routes, and `Command::AddAnalysis`, which reaches it from the Simulate menu
+/// routes, and `SimulateCommand::AddAnalysis`, which reaches it from the Simulate menu
 /// and the palette on any workspace — but the catalogue itself was drawn from
 /// the Analyses rail, so pressing that action anywhere else set
 /// `palette_open` with nothing to render it. That flag is one of the terms of
@@ -576,7 +577,7 @@ fn ordered_instance_stack(
             flat_notice(ui, |ui| {
                 page_kit::note_line(ui, "No analysis instances", page_kit::Tone::Text);
                 ui.add_space(4.0);
-                add_analysis = Button::new(Command::AddAnalysis.spec().label)
+                add_analysis = Button::new(app.label(SimulateCommand::AddAnalysis.key()))
                     .accent()
                     .min_width(ui.available_width())
                     .show(ui)
@@ -616,7 +617,7 @@ fn ordered_instance_stack(
     });
 
     if add_analysis {
-        Command::AddAnalysis.execute(app);
+        app.execute_command_key(SimulateCommand::AddAnalysis.key());
     }
 
     match action {
@@ -1305,7 +1306,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
         });
     }
     if manage_plans {
-        Command::ManageSimulationPlans.execute(app);
+        app.execute_command_key(SimulateCommand::ManagePlans.key());
     }
     if clone_plan {
         app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
@@ -1324,7 +1325,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // the standing and the offer to refresh it, and the accent action is the
     // same refresh named as a step.
     if validate || rerun_preflight {
-        Command::PreflightChecks.execute(app);
+        app.execute_command_key(SimulateCommand::Preflight.key());
     }
     if open_prior && let Some(PriorPlanRun { index, .. }) = prior {
         // Selecting first is what carries the object: the command owns the

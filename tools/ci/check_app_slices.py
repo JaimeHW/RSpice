@@ -201,6 +201,7 @@ SLICE_RULES = [
     (W + r"cloud(\.rs$|/)", "cloud"),
     (W + r"models(\.rs$|/)", "models"),
     (W + r"project(\.rs$|/)", "project"),
+    (W + r"simulate(\.rs$|/)", "simulate"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/waveform_export", "results"),
     (W + r"menu_bar/netlist_compat", "code"),

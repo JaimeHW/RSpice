@@ -10,6 +10,7 @@
 use super::table::{Cell, Column, DataTable, TABLE_EDGE_INSET};
 use super::toolbar::{PageToolbar, RunChoice, Summary, ToolbarAction, empty_line};
 use super::*;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// Least and greatest height of the variables and response panes.
 const TUNING_PANE_MIN_H: f32 = 240.0;
@@ -623,7 +624,9 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
             "No active simulation plan. Add an analysis in the Simulation setup.",
             Some("Open analyses"),
         ) {
-            Command::SimulationPage(crate::state::SimulationPage::Analyses).execute(app);
+            app.execute_command_key(
+                SimulateCommand::Page(crate::state::SimulationPage::Analyses).key(),
+            );
         }
         return;
     };
@@ -715,7 +718,9 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
             "No design variables are configured. Add variables in the Simulation setup.",
             Some("Open variables"),
         ) {
-            Command::SimulationPage(crate::state::SimulationPage::Variables).execute(app);
+            app.execute_command_key(
+                SimulateCommand::Page(crate::state::SimulationPage::Variables).key(),
+            );
         }
         return;
     }

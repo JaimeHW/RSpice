@@ -4,13 +4,16 @@
 use egui::containers::menu::MenuButton;
 use egui::{Align, Layout, Vec2};
 
+use crate::state::command_catalog::CommandKey;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
 use super::{
@@ -26,7 +29,7 @@ pub(in crate::workbench) fn simulation_tools(
     toolbar_icon_command(
         ui,
         app,
-        Command::SimulationOptions.key(),
+        SimulateCommand::Options.key(),
         WorkbenchIcon::Sliders,
         layout,
     );
@@ -34,7 +37,7 @@ pub(in crate::workbench) fn simulation_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::PreflightChecks.key(),
+        SimulateCommand::Preflight.key(),
         WorkbenchIcon::Check,
         "Run preflight",
         layout,
@@ -66,9 +69,9 @@ pub(in crate::workbench) fn run_controls(
     let execution_active = app.state.model.simulation.execution.has_active_execution() || checking;
     let cancellation_pending = app.state.model.simulation.cancellation_is_pending();
     let command = if execution_active {
-        Command::StopSimulation
+        SimulateCommand::Stop.key()
     } else {
-        Command::RunSimulation
+        SimulateCommand::Run.key()
     };
     let icon = if execution_active {
         WorkbenchIcon::Stop
@@ -116,7 +119,7 @@ pub(in crate::workbench) fn run_controls(
             };
             let shortcut = app.state.model.preferences.shortcuts().resolved_label(
                 &CommandRegistry,
-                command.key(),
+                command,
                 crate::workbench::app_state::runtime_command_platform(ui.ctx()),
                 ui.ctx().os(),
             );
@@ -125,7 +128,7 @@ pub(in crate::workbench) fn run_controls(
             } else {
                 format!("{accessibility_label} ({shortcut})")
             };
-            let enabled = command.is_enabled(app);
+            let enabled = app.command_key_enabled(command);
             let (rect, response) = ui.allocate_exact_size(
                 Vec2::new(primary_width, layout.run_control_height),
                 if enabled {
@@ -195,14 +198,14 @@ pub(in crate::workbench) fn run_controls(
             );
             theme::paint_focus_ring_outset(ui, &response, rect);
             if response.clicked() && enabled {
-                command.execute(app);
+                app.execute_command_key(command);
             }
             if enabled {
                 response.clone().on_hover_text(&accessibility_label);
             }
             if !enabled {
                 let reason = if execution_active {
-                    match command.availability(app) {
+                    match app.command_availability(command) {
                         CommandAvailability::Disabled(reason) => reason.to_owned(),
                         CommandAvailability::Available | CommandAvailability::Hidden => {
                             "Command unavailable".to_owned()
@@ -231,14 +234,14 @@ pub(in crate::workbench) fn run_controls(
                         ui.set_min_width(210.0);
                         ui.spacing_mut().item_spacing.y = 0.0;
                         let primary = if execution_active {
-                            Command::StopSimulation
+                            SimulateCommand::Stop.key()
                         } else {
-                            Command::RunSimulation
+                            SimulateCommand::Run.key()
                         };
                         run_menu_item(ui, app, primary);
-                        run_menu_item(ui, app, Command::PreflightChecks);
+                        run_menu_item(ui, app, SimulateCommand::Preflight.key());
                         ui.separator();
-                        run_menu_item(ui, app, Command::SimulationOptions);
+                        run_menu_item(ui, app, SimulateCommand::Options.key());
                     })
                 })
                 .inner;
@@ -279,18 +282,18 @@ pub(in crate::workbench) fn run_controls(
     );
 }
 
-fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
-    let enabled = command.is_enabled(app);
+fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: CommandKey) {
+    let enabled = app.command_key_enabled(command);
     let shortcut = app.state.model.preferences.shortcuts().resolved_label(
         &CommandRegistry,
-        command.key(),
+        command,
         crate::workbench::app_state::runtime_command_platform(ui.ctx()),
         ui.ctx().os(),
     );
     let label = if shortcut.is_empty() {
-        command.spec().label.to_owned()
+        app.label(command).to_owned()
     } else {
-        format!("{} ({shortcut})", command.spec().label)
+        format!("{} ({shortcut})", app.label(command))
     };
     let response = ui.add_enabled(enabled, egui::Button::new(label).frame(false));
     if enabled && !shortcut.is_empty() {
@@ -299,7 +302,7 @@ fn run_menu_item(ui: &mut egui::Ui, app: &mut RSpiceApp, command: Command) {
         });
     }
     if response.clicked() {
-        command.execute(app);
+        app.execute_command_key(command);
         ui.close();
     }
 }

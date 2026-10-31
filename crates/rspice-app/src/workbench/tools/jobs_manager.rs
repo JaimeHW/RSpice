@@ -23,12 +23,11 @@ use crate::ui::{
     widgets::{Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark},
 };
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::JobsPlanScope;
 use crate::workbench::{AppState, RSpiceApp};
 
-use crate::workbench::{
-    RouteTransitionSource, SurfaceId, SurfaceRoute, commands::vocabulary::Command,
-};
+use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
 const TITLE: &str = "Run history";
 const DESCRIPTION: &str =
@@ -359,9 +358,9 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     let run_enabled = if snapshot.cancelling {
         false
     } else if snapshot.running {
-        Command::StopSimulation.is_enabled(app)
+        app.command_key_enabled(SimulateCommand::Stop.key())
     } else {
-        Command::RunSimulation.is_enabled(app)
+        app.command_key_enabled(SimulateCommand::Run.key())
     };
     let dialog = Dialog::new(TITLE, run_label)
         .description(DESCRIPTION)
@@ -418,9 +417,9 @@ pub(crate) fn show(ctx: &egui::Context, app: &mut RSpiceApp) {
     match choice {
         DialogChoice::Primary => {
             if snapshot.running {
-                Command::StopSimulation.execute(app);
+                app.execute_command_key(SimulateCommand::Stop.key());
             } else {
-                Command::RunSimulation.execute(app);
+                app.execute_command_key(SimulateCommand::Run.key());
             }
         }
         DialogChoice::Secondary if export_enabled => export_selected_manifest(app),

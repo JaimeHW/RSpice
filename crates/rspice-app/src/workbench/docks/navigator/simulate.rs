@@ -8,10 +8,11 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{WorkbenchIcon, section_header};
 use super::{nav_matches, nav_row};
 use crate::state::SimulationPage;
+use crate::workbench::framework::host::Host;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.
@@ -171,11 +172,11 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
 /// The row is the command's, not a look-alike: the panel draws it on all nine
 /// setup routes, and it was writing the catalogue's four palette fields itself
 /// while only the Analyses route drew the catalogue. Routing through
-/// `Command::AddAnalysis` puts the arming and the drawing under one owner.
+/// `SimulateCommand::AddAnalysis` puts the arming and the drawing under one owner.
 fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.add_space(SIMULATION_CREATOR_GAP);
     let width = ui.available_width();
-    if Button::new(Command::AddAnalysis.spec().label)
+    if Button::new(app.label(SimulateCommand::AddAnalysis.key()))
         .accent()
         .min_width(width)
         .min_height(Tokens::get(ui.ctx()).metrics.row_h + SIMULATION_CREATOR_EXTRA_HEIGHT)
@@ -183,7 +184,7 @@ fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui)
         .clicked()
     {
-        Command::AddAnalysis.execute(app);
+        app.execute_command_key(SimulateCommand::AddAnalysis.key());
     }
 }
 

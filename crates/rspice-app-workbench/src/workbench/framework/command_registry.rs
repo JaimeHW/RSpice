@@ -359,6 +359,7 @@ pub mod ids {
         SIMULATE_WORKSPACE = "simulate";
         SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
         STIMULUS_WORKSPACE = "stimulus";
+        STOP_SIMULATION = "stop-run";
         SUPPORT_BUNDLE = "support-bundle";
         TOGGLE_CONSOLE = "console";
         TOGGLE_CONSOLE_MAXIMIZED = "console-maximize";

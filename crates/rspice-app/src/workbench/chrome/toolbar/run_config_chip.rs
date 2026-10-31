@@ -13,10 +13,10 @@ use egui::Vec2;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::layout::RUN_CONFIG_CHIP_MAX_WIDTH;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// Every string the plan chip measures, paints, and announces.
 struct RunConfigChipCopy {
@@ -58,7 +58,7 @@ pub(in crate::workbench) fn run_config_selector(
 ) {
     let t = Tokens::get(ui.ctx());
     let copy = run_config_chip_copy(app);
-    let availability = Command::ManageSimulationPlans.availability(app);
+    let availability = app.command_availability(SimulateCommand::ManagePlans.key());
     let enabled = availability == CommandAvailability::Available && ui.is_enabled();
     let title_width = ui
         .painter()
@@ -155,7 +155,7 @@ pub(in crate::workbench) fn run_config_selector(
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
     if response.clicked() && enabled {
-        Command::ManageSimulationPlans.execute(app);
+        app.execute_command_key(SimulateCommand::ManagePlans.key());
     }
     if enabled {
         response.on_hover_text(&copy.accessibility);
@@ -247,7 +247,7 @@ mod tests {
         app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Design;
 
-        Command::ManageSimulationPlans.execute(&mut app);
+        app.execute_command_key(SimulateCommand::ManagePlans.key());
 
         assert!(matches!(
             app.state.simulate.simulation_workflow,

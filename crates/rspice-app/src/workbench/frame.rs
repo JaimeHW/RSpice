@@ -1761,7 +1761,7 @@ mod tests {
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_plan_manager_paints_from_a_workspace_that_is_not_simulate() {
-        use crate::workbench::commands::vocabulary::Command;
+        use crate::workbench::simulate::commands::SimulateCommand;
 
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
@@ -1770,7 +1770,7 @@ mod tests {
         app.state.open_project_session();
         app.state.workbench.workspace = Workspace::Design;
 
-        Command::ManageSimulationPlans.execute(&mut app);
+        app.execute_command_key(SimulateCommand::ManagePlans.key());
         assert_ne!(app.state.workbench.workspace, Workspace::Simulate);
 
         let output = ctx.run_ui(

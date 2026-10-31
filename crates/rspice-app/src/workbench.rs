@@ -212,6 +212,7 @@ mod session {
 pub(crate) use rspice_app_settings::workbench::settings;
 pub(crate) use rspice_app_sheets::workbench::sheets;
 mod shell_host;
+pub(crate) mod simulate;
 #[cfg(test)]
 pub(crate) use rspice_app_settings::workbench::shortcuts;
 pub(crate) mod slots;

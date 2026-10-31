@@ -15,8 +15,8 @@ use crate::state::{
     SpecificationPolicy, SpecificationRole,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::SpecificationEvidenceFilter;
 
 use crate::ui::widgets::{Button, select};
@@ -1061,7 +1061,7 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
     // arrives on the same row this card describes without a second copy of it.
     if select_producer && let Some(id) = producer_id {
         app.state.simulate.active_analysis_instance = Some(id);
-        Command::SimulationPage(SimulationPage::Analyses).execute(app);
+        app.execute_command_key(SimulateCommand::Page(SimulationPage::Analyses).key());
     } else if open_evidence {
         app.state.simulate.selected_specification = Some(spec.measurement.clone());
         app.execute_command_key(ids::RESULT_SPECIFICATIONS);

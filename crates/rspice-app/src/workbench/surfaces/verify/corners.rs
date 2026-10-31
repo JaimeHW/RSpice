@@ -16,6 +16,7 @@ use super::table::{Cell, Column, DataTable, Verdict};
 use super::toolbar::{PageToolbar, Summary, ToolbarAction, empty_line};
 use super::*;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 /// A value within this fraction of its limit is near it: of the limit's own
 /// magnitude for a one-sided limit, of the span for a range.
@@ -558,7 +559,9 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
         if empty_line(ui, &text, Some("Open run set")) {
-            Command::SimulationPage(crate::state::SimulationPage::RunSet).execute(app);
+            app.execute_command_key(
+                SimulateCommand::Page(crate::state::SimulationPage::RunSet).key(),
+            );
         }
         return;
     };
@@ -568,7 +571,9 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             "This corner run kept no outputs. Add measurements to the plan's outputs, then run it again.",
             Some("Open outputs"),
         ) {
-            Command::SimulationPage(crate::state::SimulationPage::Outputs).execute(app);
+            app.execute_command_key(
+                SimulateCommand::Page(crate::state::SimulationPage::Outputs).key(),
+            );
         }
         return;
     }

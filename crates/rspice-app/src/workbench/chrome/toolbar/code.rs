@@ -187,13 +187,7 @@ pub(in crate::workbench) fn netlist_tools(
             source_page_tools(ui, app, layout);
         }
     }
-    toolbar_icon_command(
-        ui,
-        app,
-        Command::RunSimulation.key(),
-        WorkbenchIcon::Run,
-        layout,
-    );
+    toolbar_icon_command(ui, app, ids::RUN_SIMULATION, WorkbenchIcon::Run, layout);
 }
 
 /// The Automation page's source tools: navigate the index, manage the

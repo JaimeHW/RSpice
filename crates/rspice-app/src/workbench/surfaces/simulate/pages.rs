@@ -12,7 +12,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::run_preflight::PreflightCurrency;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 use super::super::super::design_system::{heading, workspace_title_row};
 use super::page_kit::setup_page;
@@ -112,7 +112,7 @@ fn page_heading(ui: &mut Ui, app: &mut RSpiceApp, page: SimulationPage) {
             if let Some(chip) = &chip {
                 ui.add_space(CHIP_GAP);
                 if chip.show(ui) {
-                    Command::PreflightChecks.execute(app);
+                    app.execute_command_key(SimulateCommand::Preflight.key());
                 }
             }
         });

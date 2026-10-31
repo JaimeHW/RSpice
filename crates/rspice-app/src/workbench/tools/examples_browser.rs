@@ -179,7 +179,7 @@ mod tests {
     use super::*;
     use crate::state::AnalysisType;
     use crate::workbench::app::RSpiceApp;
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::simulate::commands::SimulateCommand;
 
     /// Every example opens as a project whose default plan the engine
     /// prepares and authorizes, through the path the toolbar's Run takes:
@@ -274,8 +274,8 @@ mod tests {
         // dropped with that design.
         app.simulation_controller
             .update(&mut app.state, &*app.export_workflow_io);
-        assert!(Command::RunSimulation.is_enabled(&app));
-        Command::RunSimulation.execute(&mut app);
+        assert!(app.command_key_enabled(SimulateCommand::Run.key()));
+        app.execute_command_key(SimulateCommand::Run.key());
         assert!(app.state.runs.preflight.take_run_and_queue_request());
         crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
         app.settle_preflight();

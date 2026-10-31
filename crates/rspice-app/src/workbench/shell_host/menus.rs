@@ -17,6 +17,7 @@ use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
 /// The command's row under the vocabulary's label.
@@ -56,6 +57,11 @@ const fn cloud(command: CloudCommand) -> MenuEntry {
 
 /// The models feature's command's row under the label it declares.
 const fn models(command: ModelsCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
+/// The simulate feature's command's row under the label it declares.
+const fn simulate(command: SimulateCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
@@ -280,16 +286,16 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     // that plan - "Run active plan", "Stop active run", its job history, its
     // preflight checks. Choosing the plan therefore reads above the actions
     // taken on it, in the same group they belong to.
-    command(Command::ManageSimulationPlans),
+    simulate(SimulateCommand::ManagePlans),
     // Filling the chosen plan reads directly under choosing it, and above the
     // actions that dispatch what it holds. It is here because the navigator is
     // the only other route to the catalogue, and the navigator is a panel a
     // reader can collapse.
-    command(Command::AddAnalysis),
-    command(Command::RunSimulation),
-    command(Command::StopSimulation),
-    command(Command::JobsManager),
-    command(Command::PreflightChecks),
+    simulate(SimulateCommand::AddAnalysis),
+    simulate(SimulateCommand::Run),
+    simulate(SimulateCommand::Stop),
+    simulate(SimulateCommand::JobsManager),
+    simulate(SimulateCommand::Preflight),
     Separator,
     command_as(
         Command::OpenWorkspace(Workspace::Simulate),
@@ -301,7 +307,7 @@ const SIMULATE_MENU: &[MenuEntry] = &[
         Command::OpenWorkspace(Workspace::Stimulus),
         "Stimulus Library",
     ),
-    command(Command::SimulationOptions),
+    simulate(SimulateCommand::Options),
     command(Command::GenerateNetlist),
     results(ResultsCommand::EditSpecifications),
 ];
@@ -330,24 +336,24 @@ const RESULTS_MENU: &[MenuEntry] = &[
 ];
 
 const VERIFY_MENU: &[MenuEntry] = &[
-    command_as(
-        Command::VerificationPage(VerificationPage::Yield),
+    MenuEntry::command_as(
+        SimulateCommand::Verify(VerificationPage::Yield).key(),
         "Verification cockpit",
     ),
-    command_as(
-        Command::VerificationPage(VerificationPage::Corners),
+    MenuEntry::command_as(
+        SimulateCommand::Verify(VerificationPage::Corners).key(),
         "Corner matrix",
     ),
-    command_as(
-        Command::VerificationPage(VerificationPage::Optimization),
+    MenuEntry::command_as(
+        SimulateCommand::Verify(VerificationPage::Optimization).key(),
         "Optimization",
     ),
-    command_as(
-        Command::VerificationPage(VerificationPage::DeviceSafety),
+    MenuEntry::command_as(
+        SimulateCommand::Verify(VerificationPage::DeviceSafety).key(),
         "Safe operating area",
     ),
-    command_as(
-        Command::VerificationPage(VerificationPage::Regression),
+    MenuEntry::command_as(
+        SimulateCommand::Verify(VerificationPage::Regression).key(),
         "Regression plan",
     ),
 ];

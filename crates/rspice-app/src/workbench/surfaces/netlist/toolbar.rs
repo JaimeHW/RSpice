@@ -753,10 +753,10 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             crate::workbench::documents::netlist_document::close_run_deck_snapshot(&mut app.state);
         }
         Some(NetlistToolbarAction::RunDeck) => {
-            crate::workbench::commands::vocabulary::Command::RunSimulation.execute(app);
+            app.execute_command_key(crate::workbench::framework::command_registry::ids::RUN_SIMULATION);
         }
         Some(NetlistToolbarAction::StopRun) => {
-            crate::workbench::commands::vocabulary::Command::StopSimulation.execute(app);
+            app.execute_command_key(crate::workbench::framework::command_registry::ids::STOP_SIMULATION);
         }
         Some(NetlistToolbarAction::CloseDependency) => {
             crate::workbench::documents::netlist_document::close_active_dependency(&mut app.state);
@@ -904,16 +904,15 @@ fn run_control(
     app: &RSpiceApp,
     messages: crate::workbench::MessageCatalog,
 ) -> Option<NetlistToolbarAction> {
-    use crate::workbench::commands::vocabulary::Command;
-    use crate::workbench::framework::command_registry::CommandAvailability;
+    use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 
     let (execution_active, label) = run_control_label(app, messages);
     let (command, action) = if execution_active {
-        (Command::StopSimulation, NetlistToolbarAction::StopRun)
+        (ids::STOP_SIMULATION, NetlistToolbarAction::StopRun)
     } else {
-        (Command::RunSimulation, NetlistToolbarAction::RunDeck)
+        (ids::RUN_SIMULATION, NetlistToolbarAction::RunDeck)
     };
-    let availability = command.availability(app);
+    let availability = app.command_availability(command);
     let enabled = availability == CommandAvailability::Available;
     // The registry's generic reason names the run set's plan, which this page
     // does not have. The deck gate is the authority here, exactly as the

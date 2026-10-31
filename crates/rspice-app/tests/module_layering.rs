@@ -719,6 +719,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "cloud/commands",
     // What the models feature's commands declare, the same way.
     "models/commands",
+    // What the simulate feature's commands declare, the same way.
+    "simulate/commands",
     // The documents module's own vocabulary: which Code page is showing and
     // what a source-file action is. Each document engine has its own entry;
     // a document file without one is owned here, where its first reach into
@@ -883,6 +885,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "models",
     // The project feature's home.
     "project",
+    // The simulate feature's home.
+    "simulate",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",
