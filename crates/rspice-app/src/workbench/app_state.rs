@@ -156,6 +156,7 @@ impl AppState {
     }
 
     /// The parts opening a model in the editor writes.
+    #[cfg(test)]
     pub(crate) fn model_editor_parts(
         &mut self,
     ) -> crate::workbench::documents::model_editor::ModelEditorParts<'_> {

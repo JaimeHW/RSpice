@@ -14,6 +14,7 @@
 use super::*;
 
 use crate::ui::accessibility::plural_suffix;
+use crate::workbench::framework::feature::Cx;
 
 use super::super::{
     QualificationDomain, QualificationGate, QualificationModelSummary, QualificationPageAction,
@@ -69,19 +70,19 @@ const DOMAIN_COLUMN: usize = 1;
 const REFERENCES_COLUMN: usize = 5;
 const GATE_COLUMN: usize = 6;
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let summaries = qualification_summaries(app);
-    if selected_qualification_summary(app, &summaries).is_none()
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
+    let summaries = qualification_summaries(cx.model, &cx.state.model_editor);
+    if selected_qualification_summary(cx, &summaries).is_none()
         && let Some(first) = summaries.first()
     {
         crate::workbench::models::workspace_state::select_library_or_prompt(
-            &mut app.state.model,
-            &mut app.state.workbench,
+            cx.model,
+            cx.wb,
             &first.library,
         );
-        app.state.models.selected_model = Some(first.model.clone());
+        cx.state.selected_model = Some(first.model.clone());
     }
-    let selected = selected_qualification_summary(app, &summaries).cloned();
+    let selected = selected_qualification_summary(cx, &summaries).cloned();
     let total_vectors = summaries
         .iter()
         .map(|summary| summary.vectors)
@@ -95,22 +96,19 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     let mut requested_action = None;
     let compare_blocker = qualification_action_block_reason(
-        app,
+        cx,
         selected.as_ref(),
         QualificationPageAction::CompareRelease,
     );
     let release_blocker = qualification_action_block_reason(
-        app,
+        cx,
         selected.as_ref(),
         QualificationPageAction::ReviewReleaseBinding,
     );
-    let run_blocker = qualification_action_block_reason(
-        app,
-        selected.as_ref(),
-        QualificationPageAction::RunSuite,
-    );
+    let run_blocker =
+        qualification_action_block_reason(cx, selected.as_ref(), QualificationPageAction::RunSuite);
     let review_blocker = qualification_action_block_reason(
-        app,
+        cx,
         selected.as_ref(),
         QualificationPageAction::ReviewVectors,
     );
@@ -177,7 +175,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     ui.set_min_size(egui::vec2(matrix_w, body));
                     family_matrix(
                         ui,
-                        &mut app.state,
+                        cx,
                         &summaries,
                         selected.as_ref(),
                         review_blocker.as_deref(),
@@ -191,14 +189,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 Layout::top_down(Align::Min),
                 |ui| {
                     ui.set_min_size(egui::vec2(contract_w, body));
-                    contract_rail(ui, app, selected.as_ref(), &mut requested_action, body);
+                    contract_rail(ui, cx, selected.as_ref(), &mut requested_action, body);
                 },
             );
         });
     }
 
     if let Some(action) = requested_action {
-        execute_qualification_action(app, action);
+        execute_qualification_action(cx, action);
     }
 }
 
@@ -491,7 +489,7 @@ fn closure_ledger(
 /// The family × domain matrix, filling the track it was handed.
 fn family_matrix(
     ui: &mut Ui,
-    state: &mut crate::workbench::AppState,
+    cx: &mut Cx<'_, ModelsFeature>,
     summaries: &[QualificationModelSummary],
     selected: Option<&QualificationModelSummary>,
     review_blocker: Option<&str>,
@@ -564,11 +562,11 @@ fn family_matrix(
                             .clicked()
                         {
                             crate::workbench::models::workspace_state::select_library_or_prompt(
-                                &mut state.model,
-                                &mut state.workbench,
+                                cx.model,
+                                cx.wb,
                                 &summary.library,
                             );
-                            state.models.selected_model = Some(summary.model.clone());
+                            cx.state.selected_model = Some(summary.model.clone());
                         }
                     }
                 });
@@ -851,7 +849,7 @@ fn selection_footer(
 /// The three contract cards, filling the track they were handed.
 fn contract_rail(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     selected: Option<&QualificationModelSummary>,
     requested_action: &mut Option<QualificationPageAction>,
     height: f32,
@@ -874,7 +872,7 @@ fn contract_rail(
     }
     let card_h = (height / 3.0).max(DETAIL_PANE_MIN_H);
     if card_h * 3.0 <= height + 1.0 {
-        dispositions_pane(ui, app, selected, requested_action, card_h);
+        dispositions_pane(ui, cx, selected, requested_action, card_h);
         tolerance_pane(ui, selected, card_h);
         contract_pane(ui, selected, card_h);
     } else {
@@ -885,7 +883,7 @@ fn contract_rail(
             .auto_shrink([false, false])
             .max_height(height)
             .show(ui, |ui| {
-                dispositions_pane(ui, app, selected, requested_action, card_h);
+                dispositions_pane(ui, cx, selected, requested_action, card_h);
                 tolerance_pane(ui, selected, card_h);
                 contract_pane(ui, selected, card_h);
             });
@@ -898,7 +896,7 @@ fn contract_rail(
 
 fn dispositions_pane(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     selected: &QualificationModelSummary,
     requested_action: &mut Option<QualificationPageAction>,
     height: f32,
@@ -923,7 +921,7 @@ fn dispositions_pane(
                 );
             }
             let blocker = qualification_action_block_reason(
-                app,
+                cx,
                 Some(selected),
                 QualificationPageAction::ReviewVectors,
             );

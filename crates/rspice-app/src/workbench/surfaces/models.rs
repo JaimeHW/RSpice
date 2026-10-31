@@ -20,10 +20,13 @@ use crate::state::model_library::{
     ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform, short_digest,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-use crate::workbench::documents::model_editor::{self, ModelEditorSection};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection, ModelEditorState};
 use crate::workbench::framework::command_registry::CommandAvailability;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {

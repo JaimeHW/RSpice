@@ -205,9 +205,12 @@ pub(super) enum QualificationPageAction {
     OpenCorrelation,
 }
 
-pub(crate) fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModelSummary> {
+pub(crate) fn qualification_summaries(
+    model: &Model,
+    editor: &ModelEditorState,
+) -> Vec<QualificationModelSummary> {
     let mut summaries = Vec::new();
-    for library in app.state.model.model_library_manager.libraries_sorted() {
+    for library in model.model_library_manager.libraries_sorted() {
         // Authenticating the closure digests every retained byte, and it
         // depends on the library alone. Doing it per model — which is what
         // resolving each model separately does — made this whole function cost
@@ -217,7 +220,7 @@ pub(crate) fn qualification_summaries(app: &RSpiceApp) -> Vec<QualificationModel
         models.sort_by(|left, right| left.name.cmp(&right.name));
         for model in models {
             summaries.push(qualification_model_summary(
-                app,
+                editor,
                 library,
                 model,
                 closure.as_ref(),
@@ -250,7 +253,7 @@ pub(in crate::workbench::surfaces) struct ModelGateFact {
 
 /// Every model in the closure, projected to what a reading surface may know.
 pub(in crate::workbench::surfaces) fn model_gate_facts(app: &RSpiceApp) -> Vec<ModelGateFact> {
-    qualification_summaries(app)
+    qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .map(|summary| ModelGateFact {
             library: summary.library,
@@ -266,22 +269,16 @@ pub(in crate::workbench::surfaces) fn model_gate_facts(app: &RSpiceApp) -> Vec<M
 }
 
 pub(super) fn qualification_model_summary(
-    app: &RSpiceApp,
+    editor: &ModelEditorState,
     library: &ModelLibrary,
     model: &DeviceModel,
     closure: Result<&model_editor::VerifiedProjectClosure<'_>, &String>,
 ) -> QualificationModelSummary {
     let key = model_key(&library.name, &model.name);
-    let open_draft = app
-        .state
-        .models
-        .model_editor
-        .draft
-        .as_ref()
-        .filter(|draft| {
-            draft.library_name.eq_ignore_ascii_case(&library.name)
-                && draft.model_name.eq_ignore_ascii_case(&model.name)
-        });
+    let open_draft = editor.draft.as_ref().filter(|draft| {
+        draft.library_name.eq_ignore_ascii_case(&library.name)
+            && draft.model_name.eq_ignore_ascii_case(&model.name)
+    });
     // Asked before the source is resolved, not after it fails to be. An
     // engine-owned library has no project source, so resolving one can only
     // manufacture a "not source-owned" error — and that manufactured error was
@@ -796,30 +793,25 @@ pub(super) fn qualification_rail_rows(
 }
 
 pub(super) fn selected_qualification_summary<'a>(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     summaries: &'a [QualificationModelSummary],
 ) -> Option<&'a QualificationModelSummary> {
-    let library = app
-        .state
-        .model
-        .model_library_manager
-        .selected_library
-        .as_deref()?;
-    let model = app.state.models.selected_model.as_deref()?;
+    let library = cx.model.model_library_manager.selected_library.as_deref()?;
+    let model = cx.state.selected_model.as_deref()?;
     summaries.iter().find(|summary| {
         summary.library.eq_ignore_ascii_case(library) && summary.model.eq_ignore_ascii_case(model)
     })
 }
 
 pub(super) fn qualification_action_block_reason(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     selected: Option<&QualificationModelSummary>,
     action: QualificationPageAction,
 ) -> Option<String> {
     let Some(selected) = selected else {
         return Some("Select a model family first".to_owned());
     };
-    if !app.state.platform.project_lifecycle.is_open() {
+    if !cx.platform.project_lifecycle.is_open() {
         return Some("Open a project before using model qualification".to_owned());
     }
     // Asked before the source-owned refusal below, which would otherwise
@@ -836,19 +828,13 @@ pub(super) fn qualification_action_block_reason(
     if selected.source_error.is_some() {
         return Some("Select a project-owned model revision".to_owned());
     }
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if cx.state.model_editor.qualification_execution.is_some() {
         return Some(
             "Finish or cancel the active model qualification run before changing workflows"
                 .to_owned(),
         );
     }
-    if let Some(draft) = app.state.models.model_editor.draft.as_ref() {
+    if let Some(draft) = cx.state.model_editor.draft.as_ref() {
         let same_model = draft.library_name.eq_ignore_ascii_case(&selected.library)
             && draft.model_name.eq_ignore_ascii_case(&selected.model);
         if draft.is_dirty() && !same_model {
@@ -874,7 +860,7 @@ pub(super) fn qualification_action_block_reason(
         QualificationPageAction::ReviewVectors
         | QualificationPageAction::ReviewReleaseBinding
         | QualificationPageAction::OpenCorrelation => None,
-        QualificationPageAction::RunSuite if app.state.model.safe_mode.project_read_only() => {
+        QualificationPageAction::RunSuite if cx.model.safe_mode.project_read_only() => {
             Some("Qualification cannot run while the project is read-only".to_owned())
         }
         QualificationPageAction::RunSuite if selected.suites == 0 => {
@@ -888,81 +874,85 @@ pub(super) fn qualification_action_block_reason(
     }
 }
 
-pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: QualificationPageAction) {
-    let summaries = qualification_summaries(app);
-    let selected = selected_qualification_summary(app, &summaries);
+pub(super) fn execute_qualification_action(
+    cx: &mut Cx<'_, ModelsFeature>,
+    action: QualificationPageAction,
+) {
+    let summaries = qualification_summaries(cx.model, &cx.state.model_editor);
+    let selected = selected_qualification_summary(cx, &summaries);
     // The page disables a blocked action and names the blocker on hover.
-    if qualification_action_block_reason(app, selected, action).is_some() {
+    if qualification_action_block_reason(cx, selected, action).is_some() {
         return;
     }
     if action == QualificationPageAction::OpenCorrelation {
-        if let Err(error) = app.state.workbench.navigate(
+        if let Err(error) = cx.wb.navigate(
             SurfaceRoute::surface(SurfaceId::ModelCorrelation),
             RouteTransitionSource::User,
         ) {
-            app.state
+            cx.wb
                 .prompt(format!("Measurement correlation cannot be opened: {error}"));
         }
         return;
     }
-    let Some(library) = app
-        .state
-        .model
-        .model_library_manager
-        .selected_library
-        .clone()
-    else {
-        app.state
+    let Some(library) = cx.model.model_library_manager.selected_library.clone() else {
+        cx.wb
             .prompt("Select a model family before opening qualification.");
         return;
     };
-    let Some(model) = app.state.models.selected_model.clone() else {
-        app.state
+    let Some(model) = cx.state.selected_model.clone() else {
+        cx.wb
             .prompt("Select a model family before opening qualification.");
         return;
     };
-    if let Err(error) =
-        model_editor::open_project_model(&mut app.state.model_editor_parts(), &library, &model)
-    {
-        app.state
+    if let Err(error) = model_editor::open_project_model(
+        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
+        &library,
+        &model,
+    ) {
+        cx.wb
             .prompt(format!("Qualification cannot be opened: {error}"));
         return;
     }
-    if let Err(error) = app.state.workbench.navigate(
+    if let Err(error) = cx.wb.navigate(
         SurfaceRoute::surface(SurfaceId::ModelEditor),
         RouteTransitionSource::User,
     ) {
-        app.state
+        cx.wb
             .prompt(format!("Qualification editor cannot be shown: {error}"));
         return;
     }
 
     match action {
         QualificationPageAction::ReviewVectors => {
-            app.state.models.model_editor.active_section = ModelEditorSection::Tests;
-            app.state.models.model_editor.qualification_plan_open = true;
+            cx.state.model_editor.active_section = ModelEditorSection::Tests;
+            cx.state.model_editor.qualification_plan_open = true;
         }
         QualificationPageAction::ReviewReleaseBinding => {
-            app.state.models.model_editor.active_section = ModelEditorSection::Release;
+            cx.state.model_editor.active_section = ModelEditorSection::Release;
         }
         QualificationPageAction::RunSuite => {
-            app.state.models.model_editor.active_section = ModelEditorSection::Tests;
-            model_editor::validate_open_candidate(&mut app.state.model_editor_parts());
-            let key = ModelsCommand::ModelRunQualificationTests.key();
-            if app.command_key_enabled(key) {
-                app.execute_command_key(key);
-            } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {
-                app.state
-                    .prompt(format!("Qualification cannot run: {reason}."));
+            cx.state.model_editor.active_section = ModelEditorSection::Tests;
+            model_editor::validate_open_candidate(&mut cx.state.model_editor_parts(
+                cx.model,
+                cx.wb,
+                cx.platform,
+            ));
+            let command = ModelsCommand::ModelRunQualificationTests;
+            let availability = crate::workbench::models::command_availability(command, cx);
+            if availability.is_available() {
+                cx.execute(command.key());
+            } else if let CommandAvailability::Disabled(reason) = availability {
+                cx.wb.prompt(format!("Qualification cannot run: {reason}."));
             }
         }
         QualificationPageAction::CompareRelease => {
-            app.state.models.model_editor.active_section = ModelEditorSection::Release;
-            let key = ModelsCommand::ModelCompareRelease.key();
-            if app.command_key_enabled(key) {
-                app.execute_command_key(key);
-            } else if let CommandAvailability::Disabled(reason) = app.command_availability(key) {
-                app.state.prompt(format!(
+            cx.state.model_editor.active_section = ModelEditorSection::Release;
+            let command = ModelsCommand::ModelCompareRelease;
+            let availability = crate::workbench::models::command_availability(command, cx);
+            if availability.is_available() {
+                cx.execute(command.key());
+            } else if let CommandAvailability::Disabled(reason) = availability {
+                cx.wb.prompt(format!(
                     "Approved-model comparison is unavailable: {reason}."
                 ));
             }

@@ -535,7 +535,8 @@ fn report_page_cost_at_production_scale() {
     // Reported separately because it is the one derivation a page cannot
     // narrow to what is on screen: the metric strip totals every model.
     let summaries = std::time::Instant::now();
-    let count = super::qualification_summaries(&app).len();
+    let count =
+        super::qualification_summaries(&app.state.model, &app.state.models.model_editor).len();
     writeln!(
         report_output,
         "qualification_summaries: {count} summaries in {:?}",

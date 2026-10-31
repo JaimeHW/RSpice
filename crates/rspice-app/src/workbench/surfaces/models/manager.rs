@@ -274,7 +274,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         pending_actions.push(ManagerAction::ModelHub(request));
     }
     if page == ModelsPage::Qualification {
-        qualification_page::show(ui, app);
+        qualification_page::show(ui, &mut features::cx(app));
     } else {
         // The releases this machine holds, read beside the session's own state
         // rather than cloned into it: the shelf offers parts of an installed

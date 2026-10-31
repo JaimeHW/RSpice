@@ -42,7 +42,7 @@ fn source_owned_app() -> RSpiceApp {
         .create_project_model("owned-models", &definition)
         .expect("create project model");
 
-    let summary = qualification_summaries(&app)
+    let summary = qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("the project-owned family is summarized");
@@ -52,7 +52,10 @@ fn source_owned_app() -> RSpiceApp {
         .select_library(&summary.library)
         .expect("the fixture library is loaded");
     app.state.models.selected_model = Some(summary.model.clone());
-    execute_qualification_action(&mut app, QualificationPageAction::ReviewVectors);
+    execute_qualification_action(
+        &mut features::cx(&mut app),
+        QualificationPageAction::ReviewVectors,
+    );
 
     let editor = &mut app.state.models.model_editor;
 
@@ -133,7 +136,7 @@ fn source_owned_app() -> RSpiceApp {
 }
 
 fn owned_summary(app: &RSpiceApp) -> QualificationModelSummary {
-    qualification_summaries(app)
+    qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("the project-owned family is summarized")
@@ -219,7 +222,7 @@ fn run_page(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
 #[test]
 fn the_closure_inputs_count_gate_subjects_and_not_the_exempt_population() {
     let app = RSpiceApp::test_instance();
-    let summaries = qualification_summaries(&app);
+    let summaries = qualification_summaries(&app.state.model, &app.state.models.model_editor);
     let exempt = summaries
         .iter()
         .filter(|summary| !summary.gate.is_gate_subject())
@@ -242,7 +245,7 @@ fn the_closure_inputs_count_gate_subjects_and_not_the_exempt_population() {
     );
 
     let app = source_owned_app();
-    let summaries = qualification_summaries(&app);
+    let summaries = qualification_summaries(&app.state.model, &app.state.models.model_editor);
     let inputs = closure_inputs(&summaries);
     assert_eq!(
         inputs
@@ -512,7 +515,7 @@ fn an_undeclared_domain_reads_absent_and_a_declared_one_reads_its_own_counts() {
 #[test]
 fn an_engine_owned_family_leaves_the_gate_column_to_the_band_above_it() {
     let mut app = RSpiceApp::test_instance();
-    let summaries = qualification_summaries(&app);
+    let summaries = qualification_summaries(&app.state.model, &app.state.models.model_editor);
     let summary = summaries
         .iter()
         .find(|summary| !summary.gate.is_gate_subject())
@@ -690,24 +693,24 @@ fn the_qualification_body_fills_the_document_in_two_tracks() {
 /// only place either action is authored now.
 #[test]
 fn the_selection_strip_keeps_both_family_workflows_reachable() {
-    let app = source_owned_app();
+    let mut app = source_owned_app();
     let summary = owned_summary(&app);
     assert_eq!(
         qualification_action_block_reason(
-            &app,
+            &features::cx(&mut app),
             Some(&summary),
             QualificationPageAction::ReviewVectors
         ),
         None,
         "a family with retained vectors can be reviewed"
     );
-    let engine_owned = qualification_summaries(&app)
+    let engine_owned = qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .find(|summary| !summary.gate.is_gate_subject());
     if let Some(engine_owned) = engine_owned {
         assert!(
             qualification_action_block_reason(
-                &app,
+                &features::cx(&mut app),
                 Some(&engine_owned),
                 QualificationPageAction::ReviewVectors
             )

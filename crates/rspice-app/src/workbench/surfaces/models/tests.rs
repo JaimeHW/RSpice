@@ -9,6 +9,7 @@ use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSui
 
 use super::*;
 use crate::state::ModelsPage;
+use crate::workbench::features;
 use crate::workbench::state::ModelsCatalogScope;
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
@@ -350,7 +351,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         .create_project_model("owned-models", &definition)
         .expect("create project model");
 
-    let summary = qualification_summaries(&app)
+    let summary = qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("qualification summary");
@@ -369,19 +370,26 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         .expect("the fixture library is loaded");
     app.state.models.selected_model = Some(summary.model.clone());
     assert_eq!(
-        qualification_action_block_reason(&app, Some(&summary), QualificationPageAction::RunSuite)
-            .as_deref(),
+        qualification_action_block_reason(
+            &features::cx(&mut app),
+            Some(&summary),
+            QualificationPageAction::RunSuite
+        )
+        .as_deref(),
         Some("Author at least one executable qualification suite first")
     );
     assert_eq!(
         qualification_action_block_reason(
-            &app,
+            &features::cx(&mut app),
             Some(&summary),
             QualificationPageAction::ReviewVectors
         ),
         None
     );
-    execute_qualification_action(&mut app, QualificationPageAction::ReviewVectors);
+    execute_qualification_action(
+        &mut features::cx(&mut app),
+        QualificationPageAction::ReviewVectors,
+    );
     assert_eq!(
         app.state.models.model_editor.active_section,
         ModelEditorSection::Tests
@@ -412,7 +420,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         editor.qualification_authoring.error
     );
 
-    let working_summary = qualification_summaries(&app)
+    let working_summary = qualification_summaries(&app.state.model, &app.state.models.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("working qualification summary");
@@ -425,7 +433,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     );
     assert_eq!(
         qualification_action_block_reason(
-            &app,
+            &features::cx(&mut app),
             Some(&working_summary),
             QualificationPageAction::RunSuite
         ),
@@ -443,7 +451,12 @@ fn engine_owned_model_is_exempt_and_never_receives_synthetic_qualification_evide
     );
 
     let closure = model_editor::verify_project_library_closure(&library, &library.name);
-    let summary = qualification_model_summary(&app, &library, &model, closure.as_ref());
+    let summary = qualification_model_summary(
+        &app.state.models.model_editor,
+        &library,
+        &model,
+        closure.as_ref(),
+    );
 
     // No evidence is invented for it — and no failure is either: the source
     // resolution that cannot succeed for a compiled-in card is never run, so
@@ -467,7 +480,12 @@ fn a_library_that_should_be_source_owned_and_is_not_stays_blocked() {
     let model = DeviceModel::new("nch", crate::state::model_library::ModelType::Nmos);
 
     let closure = model_editor::verify_project_library_closure(&library, &library.name);
-    let summary = qualification_model_summary(&app, &library, &model, closure.as_ref());
+    let summary = qualification_model_summary(
+        &app.state.models.model_editor,
+        &library,
+        &model,
+        closure.as_ref(),
+    );
 
     assert!(summary.source_error.is_some());
     assert_eq!(summary.gate, QualificationGate::Blocked);
@@ -482,8 +500,8 @@ fn a_library_that_should_be_source_owned_and_is_not_stays_blocked() {
 /// release-gate failures, which is RSpice shipping red against its own library.
 #[test]
 fn a_fresh_project_reports_no_blocked_release_gates() {
-    let app = RSpiceApp::test_instance();
-    let summaries = qualification_summaries(&app);
+    let mut app = RSpiceApp::test_instance();
+    let summaries = qualification_summaries(&app.state.model, &app.state.models.model_editor);
     assert!(
         !summaries.is_empty(),
         "a fresh project loads the compiled-in foundation library"
@@ -539,8 +557,9 @@ fn a_fresh_project_reports_no_blocked_release_gates() {
         QualificationPageAction::ReviewReleaseBinding,
         QualificationPageAction::CompareRelease,
     ] {
-        let reason = qualification_action_block_reason(&app, Some(selected), action)
-            .expect("an engine-owned selection blocks every qualification workflow");
+        let reason =
+            qualification_action_block_reason(&features::cx(&mut app), Some(selected), action)
+                .expect("an engine-owned selection blocks every qualification workflow");
         assert!(
             reason.contains("exempt from the source-owned release gate"),
             "{action:?} blocked for the wrong reason: {reason}"
@@ -616,7 +635,12 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         .unwrap();
     let model = library.models.get("nch_correlated").unwrap();
     let closure = model_editor::verify_project_library_closure(library, &library.name);
-    let mut summary = qualification_model_summary(&app, library, model, closure.as_ref());
+    let mut summary = qualification_model_summary(
+        &app.state.models.model_editor,
+        library,
+        model,
+        closure.as_ref(),
+    );
     summary.gate = QualificationGate::Qualified;
 
     apply_correlation_qualification_contract(&mut summary, Some(&correlation), Some(&source));
