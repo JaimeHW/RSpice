@@ -265,6 +265,44 @@ impl Face {
     }
 }
 
+/// Whether some face this build embeds has `character`.
+#[must_use]
+pub fn embedded_covers(character: char) -> bool {
+    Face::ALL.iter().any(|face| face.covers(character))
+}
+
+/// Whether a character is drawn: controls, spaces, format characters and
+/// variation selectors steer the text around them, private-use characters
+/// belong to faces that name them, and none asks a face for a glyph.
+#[must_use]
+pub fn needs_a_glyph(character: char) -> bool {
+    !(character.is_control()
+        || character.is_whitespace()
+        || matches!(
+            character,
+            '\u{00AD}'
+                | '\u{034F}'
+                | '\u{061C}'
+                | '\u{115F}'..='\u{1160}'
+                | '\u{17B4}'..='\u{17B5}'
+                | '\u{180B}'..='\u{180F}'
+                | '\u{200B}'..='\u{200F}'
+                | '\u{202A}'..='\u{202E}'
+                | '\u{2060}'..='\u{206F}'
+                | '\u{3164}'
+                | '\u{E000}'..='\u{F8FF}'
+                | '\u{FE00}'..='\u{FE0F}'
+                | '\u{FEFF}'
+                | '\u{FFA0}'
+                | '\u{FFF0}'..='\u{FFFB}'
+                | '\u{FFFE}'..='\u{FFFF}'
+                | '\u{1BCA0}'..='\u{1BCA3}'
+                | '\u{1D173}'..='\u{1D17A}'
+                | '\u{E0000}'..='\u{E0FFF}'
+                | '\u{F0000}'..='\u{10FFFF}'
+        ))
+}
+
 /// The face's character map, read once per process. A face that does not
 /// parse maps nothing, so its characters fall through to the next face in
 /// the chain; the tests hold every embedded face to parsing.

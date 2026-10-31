@@ -19,7 +19,7 @@ use egui::{Context, FontData, FontDefinitions, FullOutput, Shape, text::LayoutJo
 pub use rspice_fonts::HanVariant;
 use rspice_fonts::system::SystemFace;
 pub use rspice_fonts::system::{FaceClass, KnownFace, Source, SystemFonts};
-use rspice_fonts::{HanPreference, Role, han_order};
+use rspice_fonts::{HanPreference, Role, han_order, needs_a_glyph};
 
 use super::role_of;
 
@@ -204,6 +204,17 @@ impl egui::Plugin for SystemFontsPlugin {
     }
 
     fn on_begin_pass(&mut self, ui: &mut egui::Ui) {
+        // Characters asked about for what they are, rather than because a
+        // frame painted them (see `super::coverage::ask`).
+        let asked: Vec<char> = rspice_fonts::system::take_asked()
+            .into_iter()
+            .filter(|character| !self.asked.contains(character))
+            .collect();
+        if !asked.is_empty() {
+            self.asked.extend(&asked);
+            self.fonts.request(asked);
+            self.outstanding += 1;
+        }
         let mut arrived = false;
         while let Some(resolution) = self.fonts.try_resolution() {
             self.outstanding = self.outstanding.saturating_sub(1);
@@ -249,38 +260,6 @@ fn definitions(joined: &[SystemFace]) -> FontDefinitions {
         }
     }
     fonts
-}
-
-/// Whether a character is drawn: controls, spaces, format characters and
-/// variation selectors steer the text around them, private-use characters
-/// belong to faces that name them, and none is worth reading every installed
-/// face for.
-fn needs_a_glyph(character: char) -> bool {
-    !(character.is_control()
-        || character.is_whitespace()
-        || matches!(
-            character,
-            '\u{00AD}'
-                | '\u{034F}'
-                | '\u{061C}'
-                | '\u{115F}'..='\u{1160}'
-                | '\u{17B4}'..='\u{17B5}'
-                | '\u{180B}'..='\u{180F}'
-                | '\u{200B}'..='\u{200F}'
-                | '\u{202A}'..='\u{202E}'
-                | '\u{2060}'..='\u{206F}'
-                | '\u{3164}'
-                | '\u{E000}'..='\u{F8FF}'
-                | '\u{FE00}'..='\u{FE0F}'
-                | '\u{FEFF}'
-                | '\u{FFA0}'
-                | '\u{FFF0}'..='\u{FFFB}'
-                | '\u{FFFE}'..='\u{FFFF}'
-                | '\u{1BCA0}'..='\u{1BCA3}'
-                | '\u{1D173}'..='\u{1D17A}'
-                | '\u{E0000}'..='\u{E0FFF}'
-                | '\u{F0000}'..='\u{10FFFF}'
-        ))
 }
 
 #[cfg(test)]

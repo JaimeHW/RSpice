@@ -18,6 +18,7 @@
 use egui::{Context, FontDefinitions, FontFamily};
 use rspice_fonts::Role;
 
+pub mod coverage;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod system;
 

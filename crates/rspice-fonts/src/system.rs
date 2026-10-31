@@ -22,8 +22,9 @@ pub mod print;
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Mutex, PoisonError};
 use std::time::Duration;
 
 use skrifa::{FontRef, MetadataProvider, charmap::Charmap};
@@ -228,6 +229,71 @@ fn precedence(class: FaceClass, position: usize, order: &[HanVariant; 5]) -> (u8
     }
 }
 
+/// What the worker has found of each character it was asked about: whether
+/// some face installed on the machine has it.
+static SETTLED: Mutex<BTreeMap<char, bool>> = Mutex::new(BTreeMap::new());
+
+/// How many times the worker has settled characters it had not before.
+static SETTLED_CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// Characters asked about through [`ask`] and not yet taken.
+static ASKED: Mutex<Vec<char>> = Mutex::new(Vec::new());
+
+/// Whether a face installed on this machine has `character`: `Some(true)`
+/// once the worker has found one, `Some(false)` once it has looked in every
+/// face it reads and found none, and `None` until it has been asked.
+#[must_use]
+pub fn installed_has(character: char) -> Option<bool> {
+    SETTLED
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&character)
+        .copied()
+}
+
+/// A count that moves each time the worker settles a character it had not
+/// settled before.
+#[must_use]
+pub fn settled_changes() -> u64 {
+    SETTLED_CHANGES.load(Ordering::Acquire)
+}
+
+/// Asks about `characters` no embedded face has, through the worker of
+/// whichever handle next takes them ([`take_asked`]). A character already
+/// settled or already asked about is not asked again.
+pub fn ask(characters: impl IntoIterator<Item = char>) {
+    // Read before either lock is taken: the caller's iterator may itself
+    // read what is settled.
+    let characters: Vec<char> = characters.into_iter().collect();
+    let settled = SETTLED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut asked = ASKED.lock().unwrap_or_else(PoisonError::into_inner);
+    for character in characters {
+        if !settled.contains_key(&character) && !asked.contains(&character) {
+            asked.push(character);
+        }
+    }
+}
+
+/// The characters asked about since this was last called.
+#[must_use]
+pub fn take_asked() -> Vec<char> {
+    std::mem::take(&mut *ASKED.lock().unwrap_or_else(PoisonError::into_inner))
+}
+
+/// Records that of `asked`, sorted, the installed faces lack exactly
+/// `missing`, sorted.
+fn settle(asked: &[char], missing: &[char]) {
+    let mut settled = SETTLED.lock().unwrap_or_else(PoisonError::into_inner);
+    let mut changed = false;
+    for &character in asked {
+        let installed = missing.binary_search(&character).is_err();
+        changed |= settled.insert(character, installed) != Some(installed);
+    }
+    if changed {
+        SETTLED_CHANGES.fetch_add(1, Ordering::AcqRel);
+    }
+}
+
 /// What the worker made of one request.
 #[derive(Debug, Default)]
 pub struct Resolution {
@@ -317,12 +383,14 @@ fn run(
         };
         pending.sort_unstable();
         pending.dedup();
+        let asked = pending.clone();
         let mut resolution = Resolution::default();
         known.resolve(&order, &mut joined, &mut pending, &mut resolution);
         if !pending.is_empty() && scan {
             let found = found.get_or_insert_with(|| Catalog::scan(&known));
             found.resolve(&order, &mut joined, &mut pending, &mut resolution);
         }
+        settle(&asked, &pending);
         resolution.missing = pending;
         if resolutions.send(resolution).is_err() {
             return;

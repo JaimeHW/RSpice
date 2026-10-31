@@ -236,3 +236,31 @@ fn reinstalling_the_fonts_keeps_the_faces_that_joined() {
     assert_eq!(ink(&ctx, &frame(&ctx, "한국")), joined);
     assert_eq!(joined_families(&ctx), ["IBM Plex Sans KR"]);
 }
+
+#[test]
+fn coverage_is_settled_by_the_installed_faces() {
+    use crate::fonts::coverage::{Coverage, ask, changes, coverage};
+    // The embedded faces answer at once, and a joiner draws nothing.
+    for character in ['R', '\u{3a9}', '\u{2300}', '\u{5d0}', '\u{200d}'] {
+        assert_eq!(coverage(character), Coverage::Lettered, "{character:?}");
+    }
+    let ctx = context(Source::files(vec![japanese()]));
+    // A kana only the installed Japanese face has, once a frame paints it.
+    let kana = '\u{3090}';
+    assert_eq!(coverage(kana), Coverage::Unsettled);
+    let before = changes();
+    settle(&ctx, &kana.to_string());
+    assert_eq!(coverage(kana), Coverage::Lettered);
+    assert!(changes() > before);
+    // A code point no face has, asked about without being painted: whichever
+    // worker takes the question, no face it reads has it.
+    let unassigned = '\u{0378}';
+    ask([unassigned]);
+    let deadline = Instant::now() + PATIENCE;
+    while coverage(unassigned) == Coverage::Unsettled {
+        assert!(Instant::now() < deadline, "the question is answered");
+        frame(&ctx, "");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(coverage(unassigned), Coverage::Missing);
+}

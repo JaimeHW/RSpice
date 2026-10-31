@@ -185,3 +185,21 @@ fn system_faces_stand_scripts_then_cjk_in_order_then_extras_then_found() {
         ]
     );
 }
+
+#[test]
+fn what_the_worker_answers_is_kept_for_any_reader() {
+    let before = settled_changes();
+    let fonts = SystemFonts::spawn(Source::files(vec![japanese()]), Japanese.order());
+    // A kana only the Japanese face has, and a code point no face has.
+    fonts.request(vec!['\u{3091}', '\u{0379}']);
+    assert_eq!(answer(&fonts).missing, ['\u{0379}']);
+    assert_eq!(installed_has('\u{3091}'), Some(true));
+    assert_eq!(installed_has('\u{0379}'), Some(false));
+    assert_eq!(installed_has('\u{0380}'), None);
+    assert!(settled_changes() > before);
+    // A settled character is not asked about again; an unsettled one is,
+    // once.
+    ask(['\u{3091}', '\u{0380}', '\u{0380}']);
+    assert_eq!(take_asked(), ['\u{0380}']);
+    assert!(take_asked().is_empty());
+}
