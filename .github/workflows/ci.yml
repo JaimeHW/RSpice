@@ -817,6 +817,7 @@ jobs:
         run: rustup toolchain install ${{ env.RUST_TOOLCHAIN }} --profile minimal --target wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
       - name: Install pinned wasm-bindgen CLI
+        id: bindgen
         run: cargo install wasm-bindgen-cli --version 0.2.126 --locked
       - name: Test cloud transport in a browser window
         env:
@@ -857,6 +858,11 @@ jobs:
         env:
           WASM_BINDGEN_USE_DEDICATED_WORKER: '1'
         run: cargo test --locked -p rspice-app-state --target wasm32-unknown-unknown --test browser_clock
+      - name: Test the browser store against IndexedDB in a browser window
+        if: ${{ !cancelled() && steps.bindgen.outcome == 'success' }}
+        env:
+          WASM_BINDGEN_USE_BROWSER: '1'
+        run: cargo test --locked -p rspice-app-state --target wasm32-unknown-unknown --test browser_store
       - name: Test worker structured-clone transport in Node
         run: |
           node --version

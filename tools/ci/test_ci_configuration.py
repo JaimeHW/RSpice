@@ -702,6 +702,10 @@ class CiConfigurationTests(unittest.TestCase):
         self.assertIn("cargo test --locked -p rspice-cloud-client --lib --target wasm32-unknown-unknown", job)
         self.assertIn("--test wasm_engine_numerics", job)
         self.assertEqual(job.count("--test browser_clock"), 2)
+        self.assertIn(
+            "cargo test --locked -p rspice-app-state --target wasm32-unknown-unknown --test browser_store",
+            job,
+        )
         self.assertIn("cargo test --locked -p rspice-worker --target wasm32-unknown-unknown --test browser_worker_transport", job)
 
     def test_browser_size_reports_measure_the_delivered_bindgen_modules(self) -> None:
