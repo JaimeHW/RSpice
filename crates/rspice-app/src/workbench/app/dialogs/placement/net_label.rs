@@ -17,8 +17,10 @@ use rspice_schematic_editor::session::net_label_sequence::{NetLabelSequence, ent
 use crate::state::{CrossSheetPortDirection, NetLabel, NetLabelKind, Point, Tool};
 use crate::ui::widgets::{CanvasEntry, CanvasEntryChoice};
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 /// Isolated draft for one snapped, typed net-label placement.
 ///
@@ -142,95 +144,87 @@ pub(crate) fn open_net_label_placement(state: &mut AppState, anchor: Point) -> b
     true
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_net_label_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.net_label_placement.open {
-            return;
-        }
+/// Draw the net-label entry over its draft, publishing to the model.
+pub(in crate::workbench) fn render_net_label_dialog(
+    dialog: &mut NetLabelPlacementDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
 
-        let validation = validate_draft(&self.state);
-        let refusal = self
-            .state
-            .design
-            .net_label_placement
-            .validation_error
-            .clone()
-            .or_else(|| validation.refusal().map(str::to_owned));
-        let off_sheet = self
-            .state
-            .design
-            .net_label_placement
-            .kind
-            .off_sheet_direction()
-            .is_some();
-        // The pointer is still where the click that opened this was, so the
-        // entry can take its place from it without the canvas having to hand
-        // one over.
-        let anchor = self.state.design.net_label_placement.screen_anchor_or(
-            ctx.pointer_latest_pos()
-                .unwrap_or_else(|| ctx.viewport_rect().center()),
-        );
+    let validation = validate_draft(dialog, model);
+    let refusal = dialog
+        .validation_error
+        .clone()
+        .or_else(|| validation.refusal().map(str::to_owned));
+    let off_sheet = dialog.kind.off_sheet_direction().is_some();
+    // The pointer is still where the click that opened this was, so the
+    // entry can take its place from it without the canvas having to hand
+    // one over.
+    let anchor = dialog.screen_anchor_or(
+        ctx.pointer_latest_pos()
+            .unwrap_or_else(|| ctx.viewport_rect().center()),
+    );
 
-        let typed_before = self.state.design.net_label_placement.name.clone();
-        let draft = &mut self.state.design.net_label_placement;
-        let choice = CanvasEntry::new(
-            "place-net-label",
-            if off_sheet { CONNECTOR_TITLE } else { TITLE },
-            anchor,
-        )
-        .commit_enabled(validation.can_commit())
-        .status(match refusal.as_deref() {
-            Some(message) => Err(message),
-            None => Ok(None),
-        })
-        .show(ctx, |rows| {
-            net_label_placement::show(rows, &mut draft.name, &mut draft.kind)
-        });
-        // Typing answers the refusal the last attempt recorded.
-        if self.state.design.net_label_placement.name != typed_before {
-            self.state.design.net_label_placement.validation_error = None;
-        }
+    let typed_before = dialog.name.clone();
+    let draft = &mut *dialog;
+    let choice = CanvasEntry::new(
+        "place-net-label",
+        if off_sheet { CONNECTOR_TITLE } else { TITLE },
+        anchor,
+    )
+    .commit_enabled(validation.can_commit())
+    .status(match refusal.as_deref() {
+        Some(message) => Err(message),
+        None => Ok(None),
+    })
+    .show(ctx, |rows| {
+        net_label_placement::show(rows, &mut draft.name, &mut draft.kind)
+    });
+    // Typing answers the refusal the last attempt recorded.
+    if dialog.name != typed_before {
+        dialog.validation_error = None;
+    }
 
-        match choice {
-            CanvasEntryChoice::Commit => {
-                // Revalidate after this frame's text edit so Enter can never
-                // publish a candidate that became invalid in the same pass.
-                match validate_draft(&self.state) {
-                    DraftValidation::Valid(commit) => {
-                        match apply_commit(&mut self.state, *commit) {
-                            // The label is on the sheet: the drawing is the
-                            // report, and a second one would only cover it.
-                            Ok(_) => self.state.design.net_label_placement.close(),
-                            Err(error) => {
-                                self.state.design.net_label_placement.validation_error =
-                                    Some(error);
-                            }
+    match choice {
+        CanvasEntryChoice::Commit => {
+            // Revalidate after this frame's text edit so Enter can never
+            // publish a candidate that became invalid in the same pass.
+            match validate_draft(dialog, model) {
+                DraftValidation::Valid(commit) => {
+                    match apply_commit(model, workbench, *commit) {
+                        // The label is on the sheet: the drawing is the
+                        // report, and a second one would only cover it.
+                        Ok(_) => dialog.close(),
+                        Err(error) => {
+                            dialog.validation_error = Some(error);
                         }
                     }
-                    DraftValidation::Incomplete(message) => {
-                        self.state.design.net_label_placement.validation_error =
-                            Some(message.to_owned());
-                    }
-                    DraftValidation::Invalid(message) => {
-                        self.state.design.net_label_placement.validation_error = Some(message);
-                    }
+                }
+                DraftValidation::Incomplete(message) => {
+                    dialog.validation_error = Some(message.to_owned());
+                }
+                DraftValidation::Invalid(message) => {
+                    dialog.validation_error = Some(message);
                 }
             }
-            CanvasEntryChoice::Cancelled => self.state.design.net_label_placement.close(),
-            CanvasEntryChoice::None => {}
         }
+        CanvasEntryChoice::Cancelled => dialog.close(),
+        CanvasEntryChoice::None => {}
     }
 }
 
-fn validate_draft(state: &AppState) -> DraftValidation {
-    let draft = &state.design.net_label_placement;
+fn validate_draft(draft: &NetLabelPlacementDialogState, model: &Model) -> DraftValidation {
     let Some(authority) = draft.authority.as_ref() else {
         return DraftValidation::Invalid(
             "The placement authority is unavailable. Cancel and select the anchor again."
                 .to_owned(),
         );
     };
-    if let Err(error) = authority.validate(state, "Place net label") {
+    if let Err(error) = authority.validate(model, "Place net label") {
         return DraftValidation::Invalid(error);
     }
     let Some(anchor) = draft.anchor else {
@@ -240,14 +234,14 @@ fn validate_draft(state: &AppState) -> DraftValidation {
     };
     // A list or a bus range names one label per click; on a bus, a range
     // names the bus whole.
-    let names = entry_names(&draft.name, anchor_on_bus(state, anchor));
+    let names = entry_names(&draft.name, anchor_on_bus(model, anchor));
     let Some(first) = names.first() else {
         return DraftValidation::Incomplete("Enter the electrical net name.");
     };
     if names.len() > MAX_NAMES {
         return DraftValidation::Invalid(format!("Name at most {MAX_NAMES} nets at once."));
     }
-    let policy = state.model.schematic.document().document_policy.net_naming;
+    let policy = model.schematic.document().document_policy.net_naming;
     for name in &names {
         if let Err(reason) = NetLabel::validate_name(name, policy) {
             return DraftValidation::Invalid(if names.len() > 1 {
@@ -267,10 +261,10 @@ fn validate_draft(state: &AppState) -> DraftValidation {
 }
 
 /// Whether a bus on the active sheet runs through `anchor`.
-fn anchor_on_bus(state: &AppState, anchor: Point) -> bool {
-    state.model.schematic.document().buses.iter().any(|bus| {
+fn anchor_on_bus(model: &Model, anchor: Point) -> bool {
+    model.schematic.document().buses.iter().any(|bus| {
         bus.contains_point(anchor)
-            && crate::schematic::view::sheet_visibility::object_is_on_active_sheet(state, bus.id)
+            && crate::schematic::view::sheet_visibility::object_is_on_active_sheet(model, bus.id)
     })
 }
 
@@ -338,17 +332,21 @@ pub(crate) fn place_sequenced_net_label(state: &mut AppState, anchor: Point) -> 
     true
 }
 
-fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
+fn apply_commit(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    commit: NetLabelPlacementCommit,
+) -> Result<u64, String> {
     let kind = commit.kind;
     let off_sheet = kind.off_sheet_direction().is_some();
     // History and authority errors name what was actually placed, so a
     // connector never appears in either as an ordinary label.
     commit
         .authority
-        .validate(state, if off_sheet { CONNECTOR_TITLE } else { TITLE })?;
+        .validate(&*model, if off_sheet { CONNECTOR_TITLE } else { TITLE })?;
     NetLabel::validate_name(
         &commit.name,
-        state.model.schematic.document().document_policy.net_naming,
+        model.schematic.document().document_policy.net_naming,
     )
     .map_err(|reason| format!("Net name: {reason}."))?;
 
@@ -358,20 +356,15 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
     } else {
         "place net label"
     };
-    let changed = state.model.schematic.with_undo(undo_label, |schematic| {
+    let changed = model.schematic.with_undo(undo_label, |schematic| {
         let id = schematic.add_net_label_with_kind(commit.anchor, commit.name, kind);
         placed_id = Some(id);
     });
     match (changed, placed_id) {
         (true, Some(id)) => {
             // The tool stays armed with the next name, which the ghost shows.
-            state
-                .model
-                .schematic
-                .session
-                .editor
-                .pending_net_label_sequence = commit.following;
-            state.sync_active_schematic_to_workspace();
+            model.schematic.session.editor.pending_net_label_sequence = commit.following;
+            sync_active_schematic(model, workbench);
             Ok(id)
         }
         _ => Err(
@@ -384,6 +377,27 @@ fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
+
+    /// Draw the entry as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        render_net_label_dialog(
+            &mut app.state.design.net_label_placement,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            ctx,
+        );
+    }
+
+    /// The draft's validation, over what the entry reads.
+    fn validate_draft(state: &AppState) -> DraftValidation {
+        super::validate_draft(&state.design.net_label_placement, &state.model)
+    }
+
+    /// The entry's publication, over what it writes.
+    fn apply_commit(state: &mut AppState, commit: NetLabelPlacementCommit) -> Result<u64, String> {
+        super::apply_commit(&mut state.model, &mut state.workbench, commit)
+    }
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -431,12 +445,12 @@ mod tests {
             // frame that builds it is the frame before the one that can be
             // typed into.
             let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-                app.render_net_label_dialog(ctx);
+                render(&mut app, ctx);
             });
             let _ = ctx.run_ui(
                 dialog_input(vec![egui::Event::Paste("BUSY".into())]),
                 |ctx| {
-                    app.render_net_label_dialog(ctx);
+                    render(&mut app, ctx);
                 },
             );
             assert_eq!(app.state.design.net_label_placement.name, "BUSY");
@@ -640,11 +654,9 @@ mod tests {
         open_at(&mut app, Point::new(30, 50));
         app.state.design.net_label_placement.name = "sense_out".to_owned();
 
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_net_label_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_net_label_dialog(ctx)
+            render(&mut app, ctx)
         });
         assert!(!app.state.design.net_label_placement.open);
         assert_eq!(
@@ -655,11 +667,9 @@ mod tests {
 
         open_at(&mut app, Point::new(60, 50));
         app.state.design.net_label_placement.name = "discard_me".to_owned();
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_net_label_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_net_label_dialog(ctx)
+            render(&mut app, ctx)
         });
         assert!(!app.state.design.net_label_placement.open);
         assert_eq!(app.state.model.schematic.document().net_labels.len(), 1);
@@ -676,7 +686,7 @@ mod tests {
         let click = egui::pos2(420.0, 260.0);
         let mut input = dialog_input(vec![egui::Event::PointerMoved(click)]);
         input.events.push(egui::Event::PointerMoved(click));
-        let _ = ctx.run_ui(input, |ctx| app.render_net_label_dialog(ctx));
+        let _ = ctx.run_ui(input, |ctx| render(&mut app, ctx));
         let anchored = app
             .state
             .design
@@ -687,7 +697,7 @@ mod tests {
 
         let _ = ctx.run_ui(
             dialog_input(vec![egui::Event::PointerMoved(egui::pos2(900.0, 700.0))]),
-            |ctx| app.render_net_label_dialog(ctx),
+            |ctx| render(&mut app, ctx),
         );
         assert_eq!(
             app.state.design.net_label_placement.screen_anchor,

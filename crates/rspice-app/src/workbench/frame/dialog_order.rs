@@ -8,6 +8,7 @@
 
 use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
+use crate::workbench::design::DesignFeature;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::project::ProjectFeature;
@@ -101,7 +102,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.bus_tap"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.bus_tap.open),
-        render: |app, ctx| app.render_bus_tap_dialog(ctx),
+        render: |app, ctx| DesignFeature::render_bus_tap_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("design.builtin_xspice_placement"),
@@ -113,7 +114,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.net_label"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.net_label_placement.open),
-        render: |app, ctx| app.render_net_label_dialog(ctx),
+        render: |app, ctx| DesignFeature::render_net_label_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("design.grid_snap_routing"),
@@ -153,7 +154,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.pin_port"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.pin_port.open),
-        render: |app, ctx| app.render_pin_port_dialog(ctx),
+        render: |app, ctx| DesignFeature::render_pin_port_dialog(&mut features::cx(app), ctx),
     },
     // New comment hands input to the note editor in this same frame.
     DialogSpec {
@@ -166,19 +167,23 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.design_note"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.design_note.open),
-        render: |app, ctx| app.render_design_note_dialog(ctx),
+        render: |app, ctx| DesignFeature::render_design_note_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("design.documentation_shape"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.documentation_shape.open),
-        render: |app, ctx| app.render_documentation_shape_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_documentation_shape_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.array_selection"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.array_selection.open),
-        render: |app, ctx| app.render_array_selection_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_array_selection_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.replace_instance"),
@@ -336,25 +341,31 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.object_properties"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.object_properties.open),
-        render: |app, ctx| app.render_object_properties_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_object_properties_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.rename_selection"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.rename_selection.open),
-        render: |app, ctx| app.render_rename_selection_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_rename_selection_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.find_replace"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.find_replace.open),
-        render: |app, ctx| app.render_find_replace_dialog(ctx),
+        render: |app, ctx| DesignFeature::render_find_replace_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("design.shared_properties"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.shared_properties.open),
-        render: |app, ctx| app.render_shared_properties_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_shared_properties_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("framework.window_session"),

@@ -2,8 +2,7 @@
 
 use crate::state::Tool;
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use egui::Context;
 use rspice_schematic_editor::{
     bus_tap_placement::{self, DraftValidation},
@@ -49,58 +48,54 @@ const TITLE: &str = "Place bus tap";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Connect one bit or a range of a bus.";
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_bus_tap_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.bus_tap.open {
-            return;
-        }
+/// Draw the bus-tap form over its draft and the model it arms.
+pub(in crate::workbench) fn render_bus_tap_dialog(
+    dialog: &mut BusTapDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
 
-        let validation = match placement_source(&self.state) {
-            Ok(_) => self.state.design.bus_tap.fields.validate(),
-            Err(message) => DraftValidation::Invalid(message),
-        };
-        // The sheet this tap goes on: the one thing about the form that is not
-        // in the form.
-        let view_path = self
-            .state
-            .model
-            .workspace
-            .content
-            .active_view
-            .display_path();
+    let validation = match placement_source(dialog, model) {
+        Ok(_) => dialog.fields.validate(),
+        Err(message) => DraftValidation::Invalid(message),
+    };
+    // The sheet this tap goes on: the one thing about the form that is not
+    // in the form.
+    let view_path = model.workspace.content.active_view.display_path();
 
-        let fields = &mut self.state.design.bus_tap.fields;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(view_path.as_str()))
-            .describe(DESCRIPTION)
-            .primary_enabled(validation.can_commit())
-            .status(validation.status())
-            .status_lines(2)
-            .show(ctx, |rows| {
-                bus_tap_placement::show(rows, &validation, fields)
-            });
+    let fields = &mut dialog.fields;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(view_path.as_str()))
+        .describe(DESCRIPTION)
+        .primary_enabled(validation.can_commit())
+        .status(validation.status())
+        .status_lines(2)
+        .show(ctx, |rows| {
+            bus_tap_placement::show(rows, &validation, fields)
+        });
 
-        match choice {
-            DialogChoice::Primary => {
-                // The footer follows the body in the same immediate-mode
-                // frame. Re-parse the post-edit draft so Enter can never
-                // publish the prior frame's valid contract after a field was
-                // changed to an invalid value.
-                if let Ok(source) = placement_source(&self.state)
-                    && let DraftValidation::Valid(pending) =
-                        self.state.design.bus_tap.fields.validate()
-                {
-                    let placement = PendingBusTapPlacement::new(pending, source.clone());
-                    self.state.model.schematic.session.editor.pending_bus_tap = Some(placement);
-                    self.state.model.schematic.arm_tool(Tool::BusTap);
-                    self.state.design.bus_tap.close();
-                }
+    match choice {
+        DialogChoice::Primary => {
+            // The footer follows the body in the same immediate-mode
+            // frame. Re-parse the post-edit draft so Enter can never
+            // publish the prior frame's valid contract after a field was
+            // changed to an invalid value.
+            if let Ok(source) = placement_source(dialog, model)
+                && let DraftValidation::Valid(pending) = dialog.fields.validate()
+            {
+                let placement = PendingBusTapPlacement::new(pending, source.clone());
+                model.schematic.session.editor.pending_bus_tap = Some(placement);
+                model.schematic.arm_tool(Tool::BusTap);
+                dialog.close();
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.bus_tap.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
@@ -135,14 +130,17 @@ fn sole_declared_bus(state: &AppState) -> String {
     }
 }
 
-fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
-    if state.schematic_edit_read_only() {
+fn placement_source<'a>(
+    dialog: &'a BusTapDialogState,
+    model: &Model,
+) -> Result<&'a EditorRequestSource, String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    let source = state.design.bus_tap.source.as_ref().ok_or_else(|| {
+    let source = dialog.source.as_ref().ok_or_else(|| {
         "The bus-tap placement context is unavailable. Close and reopen Place bus tap.".to_owned()
     })?;
-    if source != &crate::workbench::app::schematic_editor_request_source(state) {
+    if source != &crate::workbench::app::schematic_editor_request_source(model) {
         return Err(
             "The schematic source or editing scope changed. Close and reopen Place bus tap."
                 .to_owned(),
@@ -155,6 +153,12 @@ fn placement_source(state: &AppState) -> Result<&EditorRequestSource, String> {
 mod tests {
     use super::*;
     use crate::state::{Bus, BusDeclaration, BusTapOrientation, Point};
+    use crate::workbench::app::RSpiceApp;
+
+    /// Draw the form as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        render_bus_tap_dialog(&mut app.state.design.bus_tap, &mut app.state.model, ctx);
+    }
 
     fn test_source() -> EditorRequestSource {
         crate::workbench::app::schematic_editor_request_source(&AppState::default())
@@ -219,11 +223,9 @@ mod tests {
 
         // The form asks for the caret once its rows exist, so the frame that
         // builds them is the frame before the one that can be typed into.
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(replace_text("DATA[31:0]")), |ctx| {
-            app.render_bus_tap_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert_eq!(app.state.design.bus_tap.fields.bus, "DATA[31:0]");
@@ -293,11 +295,9 @@ mod tests {
         open_bus_tap(&mut app.state);
         fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_bus_tap_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert!(!app.state.design.bus_tap.open);
@@ -321,11 +321,9 @@ mod tests {
         open_bus_tap(&mut app.state);
         fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
 
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_bus_tap_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_bus_tap_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert!(!app.state.design.bus_tap.open);
@@ -380,9 +378,7 @@ mod tests {
                 .unwrap();
             open_bus_tap(&mut app.state);
             fill(&mut app.state, "DATA[15:0]", "DATA[7:0]");
-            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-                app.render_bus_tap_dialog(ctx)
-            });
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
             match change {
                 "design" => app.state.model.design_execution_epoch += 1,
                 "buffer" => app.state.model.active_schematic_epoch += 1,
@@ -433,11 +429,14 @@ mod tests {
                 "missing" => app.state.design.bus_tap.source = None,
                 _ => unreachable!(),
             }
-            assert!(placement_source(&app.state).is_err(), "{change}");
+            assert!(
+                placement_source(&app.state.design.bus_tap, &app.state.model).is_err(),
+                "{change}"
+            );
             let content = app.state.model.schematic.content_version();
             let topology = app.state.model.schematic.topology_version();
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-                app.render_bus_tap_dialog(ctx)
+                render(&mut app, ctx)
             });
             assert!(app.state.design.bus_tap.open, "{change}");
             assert_eq!(

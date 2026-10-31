@@ -6,8 +6,8 @@ use rspice_schematic_editor::annotations::shape_placement;
 use crate::state::{PendingDocumentationShapePlacement, Tool};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
-use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::schematic_editor_request_source;
+use crate::workbench::app_state::Model;
 
 /// Isolated draft for the Draw documentation shape transaction.
 #[derive(Debug, Clone, Default)]
@@ -41,91 +41,86 @@ const TITLE: &str = "Draw documentation shape";
 const PRIMARY: &str = "Draw";
 const DESCRIPTION: &str = "Pick the shape, then drag it on the sheet.";
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_documentation_shape_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.documentation_shape.open {
-            return;
-        }
-        let validation = validate_draft(&self.state);
-        let refusal = validation.as_ref().err().cloned();
+pub(in crate::workbench) fn render_documentation_shape_dialog(
+    dialog: &mut DocumentationShapeDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let validation = validate_draft(dialog, model);
+    let refusal = validation.as_ref().err().cloned();
 
-        let draft = &mut self.state.design.documentation_shape;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .describe(DESCRIPTION)
-            .primary_enabled(validation.is_ok())
-            .status(match refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .status_fixed_at_open()
-            .status_lines(2)
-            .show(ctx, |rows| shape_placement::show(rows, &mut draft.kind));
-        match choice {
-            DialogChoice::Primary => {
-                if let Ok(pending) = validate_draft(&self.state) {
-                    self.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .pending_documentation_shape = Some(pending);
-                    self.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .documentation_shape_drawing
-                        .clear();
-                    self.state
-                        .model
-                        .schematic
-                        .arm_tool(Tool::DocumentationShape);
-                    self.state.design.documentation_shape.close();
-                }
+    let draft = &mut *dialog;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .describe(DESCRIPTION)
+        .primary_enabled(validation.is_ok())
+        .status(match refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .status_fixed_at_open()
+        .status_lines(2)
+        .show(ctx, |rows| shape_placement::show(rows, &mut draft.kind));
+    match choice {
+        DialogChoice::Primary => {
+            if let Ok(pending) = validate_draft(dialog, model) {
+                model.schematic.session.editor.pending_documentation_shape = Some(pending);
+                model
+                    .schematic
+                    .session
+                    .editor
+                    .documentation_shape_drawing
+                    .clear();
+                model.schematic.arm_tool(Tool::DocumentationShape);
+                dialog.close();
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.documentation_shape.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
-fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement, String> {
-    let draft = &state.design.documentation_shape;
-    if state.schematic_edit_read_only() {
+fn validate_draft(
+    draft: &DocumentationShapeDialogState,
+    model: &Model,
+) -> Result<PendingDocumentationShapePlacement, String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
     let Some(source) = draft.source.as_ref() else {
         return Err("Reopen Draw documentation shape to capture the active schematic.".to_owned());
     };
-    if source.design_epoch != state.model.design_execution_epoch {
+    if source.design_epoch != model.design_execution_epoch {
         return Err(
             "The design document changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if source.document_epoch != state.model.active_schematic_epoch {
+    if source.document_epoch != model.active_schematic_epoch {
         return Err(
             "The active schematic buffer changed. Close and reopen Draw documentation shape."
                 .to_owned(),
         );
     }
-    if source.topology_version != state.model.schematic.topology_version() {
+    if source.topology_version != model.schematic.topology_version() {
         return Err(
             "The schematic topology changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if source.document.display_path() != state.model.workspace.content.active_view.display_path() {
+    if source.document.display_path() != model.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if draft.expected_shapes != state.model.schematic.document().documentation_shapes {
+    if draft.expected_shapes != model.schematic.document().documentation_shapes {
         return Err(
             "The schematic graphics changed. Close and reopen Draw documentation shape.".to_owned(),
         );
     }
-    if *source != schematic_editor_request_source(state) {
+    if *source != schematic_editor_request_source(model) {
         return Err(
             "The active schematic context changed. Close and reopen Draw documentation shape."
                 .to_owned(),
@@ -142,6 +137,12 @@ fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app_state::AppState;
+
+    /// The draft's validation, over what the form reads.
+    fn validate_draft(state: &AppState) -> Result<PendingDocumentationShapePlacement, String> {
+        super::validate_draft(&state.design.documentation_shape, &state.model)
+    }
 
     #[test]
     fn arming_preserves_the_dialog_source_and_rejects_a_different_occurrence() {

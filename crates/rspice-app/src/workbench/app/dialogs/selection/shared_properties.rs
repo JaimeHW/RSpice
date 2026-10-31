@@ -11,14 +11,16 @@ use std::collections::HashMap;
 
 use egui::{Context, Id};
 
+use crate::properties::PropertyEditorSchema;
 use crate::properties::property_bridge::{
     apply_properties_to_component, collect_properties_from_component, property_value_to_string,
     validate_component_properties,
 };
 use crate::state::{Component, ComponentType, PropertyValue};
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Properties";
 const PRIMARY: &str = "Apply";
@@ -102,8 +104,8 @@ pub(crate) fn open_shared_properties(state: &mut AppState) -> bool {
     true
 }
 
-fn instances<'a>(state: &'a AppState, ids: &[u64]) -> Vec<&'a Component> {
-    let document = state.model.schematic.document();
+fn instances<'a>(model: &'a Model, ids: &[u64]) -> Vec<&'a Component> {
+    let document = model.schematic.document();
     ids.iter()
         .filter_map(|id| {
             document
@@ -117,7 +119,7 @@ fn instances<'a>(state: &'a AppState, ids: &[u64]) -> Vec<&'a Component> {
 /// The properties every instance in `ids` owns, in the first one's sheet
 /// order, each with the value they agree on if they do.
 fn shared_fields(state: &AppState, ids: &[u64]) -> Vec<SharedField> {
-    let components = instances(state, ids);
+    let components = instances(&state.model, ids);
     let registry = &state.design.property_registry;
     let Some(sheet) = components
         .first()
@@ -190,9 +192,14 @@ fn retyped(current: &PropertyValue, text: &str) -> PropertyValue {
 
 /// Write every edited field to every instance, as one undo step. Returns
 /// how many instances changed, or which one refused and why.
-pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {
-    let form = state.design.shared_properties.clone();
-    if form.content_version != state.model.schematic.content_version() {
+pub(crate) fn apply_shared_properties(
+    form: &SharedPropertiesDialogState,
+    registry: &PropertyEditorSchema,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<usize, String> {
+    let form = form.clone();
+    if form.content_version != model.schematic.content_version() {
         return Err(
             "The drawing changed while the form was open. Close it and press Q again.".to_owned(),
         );
@@ -201,9 +208,8 @@ pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, Str
     if edited.is_empty() {
         return Ok(0);
     }
-    let registry = &state.design.property_registry;
     let mut edits = Vec::new();
-    for expected in instances(state, &form.ids) {
+    for expected in instances(model, &form.ids) {
         let sheet = registry.get(expected.kind);
         let mut properties = collect_properties_from_component(expected, registry);
         for field in &edited {
@@ -231,68 +237,76 @@ pub(crate) fn apply_shared_properties(state: &mut AppState) -> Result<usize, Str
         return Err("A selected instance no longer exists.".to_owned());
     }
     let changed = crate::state::bulk_edit::replace_components(
-        &mut state.model.schematic,
+        &mut model.schematic,
         edits,
         "edit selected instances",
     )?;
     if changed > 0 {
-        state.sync_active_schematic_to_workspace();
+        sync_active_schematic(model, workbench);
     }
     Ok(changed)
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_shared_properties_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.shared_properties.open {
-            return;
-        }
-        let names: Vec<String> = instances(&self.state, &self.state.design.shared_properties.ids)
-            .into_iter()
-            .map(|component| component.name.clone())
-            .collect();
-        let context = format!("{} instances \u{b7} {}", names.len(), names.join(" "));
-        let form = &mut self.state.design.shared_properties;
-        let any_edited = form.fields.iter().any(SharedField::edited);
-        let status = match (&form.error, form.fields.is_empty()) {
-            (Some(error), _) => Err(error.as_str()),
-            (None, true) => Ok(Some("The selected instances share no property.")),
-            (None, false) => Ok(None),
-        };
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(context.as_str()))
-            .describe(DESCRIPTION)
-            .primary_enabled(any_edited)
-            .status(status)
-            .status_lines(2)
-            .show(ctx, |rows| {
-                let mut first = None;
-                for field in &mut form.fields {
-                    let id = Id::new(("shared-property", field.key.as_str()));
-                    // An empty box no instance sets stays empty: a default
-                    // drawn as a hint reads as a value someone set.
-                    let hint = if field.common.is_none() { MIXED } else { "" };
-                    rows.text(&field.label, id, &mut field.text, hint);
-                    first.get_or_insert(id);
-                }
-                first
-            });
-        match choice {
-            DialogChoice::Primary => match apply_shared_properties(&mut self.state) {
+/// Draw the shared-properties form over its draft, the property sheets it
+/// reads, and the model it edits.
+pub(in crate::workbench) fn render_shared_properties_dialog(
+    dialog: &mut SharedPropertiesDialogState,
+    registry: &PropertyEditorSchema,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let names: Vec<String> = instances(model, &dialog.ids)
+        .into_iter()
+        .map(|component| component.name.clone())
+        .collect();
+    let context = format!("{} instances \u{b7} {}", names.len(), names.join(" "));
+    let form = &mut *dialog;
+    let any_edited = form.fields.iter().any(SharedField::edited);
+    let status = match (&form.error, form.fields.is_empty()) {
+        (Some(error), _) => Err(error.as_str()),
+        (None, true) => Ok(Some("The selected instances share no property.")),
+        (None, false) => Ok(None),
+    };
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(context.as_str()))
+        .describe(DESCRIPTION)
+        .primary_enabled(any_edited)
+        .status(status)
+        .status_lines(2)
+        .show(ctx, |rows| {
+            let mut first = None;
+            for field in &mut form.fields {
+                let id = Id::new(("shared-property", field.key.as_str()));
+                // An empty box no instance sets stays empty: a default
+                // drawn as a hint reads as a value someone set.
+                let hint = if field.common.is_none() { MIXED } else { "" };
+                rows.text(&field.label, id, &mut field.text, hint);
+                first.get_or_insert(id);
+            }
+            first
+        });
+    match choice {
+        DialogChoice::Primary => {
+            match apply_shared_properties(dialog, registry, model, workbench) {
                 Ok(changed) => {
-                    self.state.design.shared_properties.open = false;
-                    self.state.prompt(match changed {
+                    dialog.open = false;
+                    workbench.prompt(match changed {
                         0 => "Nothing changed.".to_owned(),
                         1 => "Changed 1 instance.".to_owned(),
                         count => format!("Changed {count} instances."),
                     });
                 }
-                Err(error) => self.state.design.shared_properties.error = Some(error),
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.shared_properties.open = false;
+                Err(error) => dialog.error = Some(error),
             }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.open = false;
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
@@ -300,6 +314,16 @@ impl RSpiceApp {
 mod tests {
     use super::*;
     use crate::state::Point;
+
+    /// The apply, over the parts it reads and edits.
+    fn apply_shared_properties(state: &mut AppState) -> Result<usize, String> {
+        super::apply_shared_properties(
+            &state.design.shared_properties,
+            &state.design.property_registry,
+            &mut state.model,
+            &mut state.workbench,
+        )
+    }
 
     fn resistor(id: u64, name: &str, value: &str) -> Component {
         let mut component =

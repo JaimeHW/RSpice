@@ -6,8 +6,8 @@ use rspice_schematic_editor::annotations::note_placement;
 use crate::state::{PendingDesignNotePlacement, Tool, entered_text};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
-use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::schematic_editor_request_source;
+use crate::workbench::app_state::Model;
 
 /// Isolated draft for the Place text or design note transaction.
 ///
@@ -41,91 +41,84 @@ const TITLE: &str = "Place text or design note";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Write the note, then click to place it.";
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_design_note_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.design_note.open {
-            return;
-        }
-        let validation = validate_draft(&self.state);
-        // An untouched form has nothing to answer for: the primary is off and
-        // the slot stays blank until the reader has typed something to refuse.
-        let refusal = if self.state.design.design_note.text.trim().is_empty() {
-            None
-        } else {
-            validation.as_ref().err().cloned()
-        };
-        let view_path = self
-            .state
-            .model
-            .workspace
-            .content
-            .active_view
-            .display_path();
+pub(in crate::workbench) fn render_design_note_dialog(
+    dialog: &mut DesignNoteDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let validation = validate_draft(dialog, model);
+    // An untouched form has nothing to answer for: the primary is off and
+    // the slot stays blank until the reader has typed something to refuse.
+    let refusal = if dialog.text.trim().is_empty() {
+        None
+    } else {
+        validation.as_ref().err().cloned()
+    };
+    let view_path = model.workspace.content.active_view.display_path();
 
-        let draft = &mut self.state.design.design_note;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(view_path.as_str()))
-            .describe(DESCRIPTION)
-            .primary_enabled(validation.is_ok())
-            // Enter types a line of the note; the primary places it.
-            .primary_on_enter(false)
-            .status(match refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .status_lines(2)
-            .show(ctx, |rows| {
-                note_placement::show(rows, &mut draft.kind, &mut draft.text)
-            });
+    let draft = &mut *dialog;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(view_path.as_str()))
+        .describe(DESCRIPTION)
+        .primary_enabled(validation.is_ok())
+        // Enter types a line of the note; the primary places it.
+        .primary_on_enter(false)
+        .status(match refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .status_lines(2)
+        .show(ctx, |rows| {
+            note_placement::show(rows, &mut draft.kind, &mut draft.text)
+        });
 
-        match choice {
-            DialogChoice::Primary => {
-                if let Ok(pending) = validate_draft(&self.state) {
-                    self.state
-                        .model
-                        .schematic
-                        .session
-                        .editor
-                        .pending_design_note = Some(pending);
-                    self.state.model.schematic.arm_tool(Tool::DesignNote);
-                    self.state.design.design_note.close();
-                }
+    match choice {
+        DialogChoice::Primary => {
+            if let Ok(pending) = validate_draft(dialog, model) {
+                model.schematic.session.editor.pending_design_note = Some(pending);
+                model.schematic.arm_tool(Tool::DesignNote);
+                dialog.close();
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.design_note.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
-fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String> {
-    let draft = &state.design.design_note;
-    if state.schematic_edit_read_only() {
+fn validate_draft(
+    draft: &DesignNoteDialogState,
+    model: &Model,
+) -> Result<PendingDesignNotePlacement, String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
     let Some(source) = draft.source.as_ref() else {
         return Err("Reopen Place text or note to capture the active schematic.".to_owned());
     };
-    if source.design_epoch != state.model.design_execution_epoch {
+    if source.design_epoch != model.design_execution_epoch {
         return Err("The design document changed. Close and reopen Place text or note.".to_owned());
     }
-    if source.document_epoch != state.model.active_schematic_epoch {
+    if source.document_epoch != model.active_schematic_epoch {
         return Err(
             "The active schematic buffer changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if source.topology_version != state.model.schematic.topology_version() {
+    if source.topology_version != model.schematic.topology_version() {
         return Err(
             "The schematic topology changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if source.document.display_path() != state.model.workspace.content.active_view.display_path() {
+    if source.document.display_path() != model.workspace.content.active_view.display_path() {
         return Err(
             "The active cell/view changed. Close and reopen Place text or note.".to_owned(),
         );
     }
-    if *source != schematic_editor_request_source(state) {
+    if *source != schematic_editor_request_source(model) {
         return Err(
             "The active schematic context changed. Close and reopen Place text or note.".to_owned(),
         );
@@ -134,7 +127,7 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
         draft.kind,
         entered_text(&draft.text),
         source.topology_version,
-        &state.model.schematic.document().design_notes,
+        &model.schematic.document().design_notes,
     ) {
         Ok(pending) => Ok(pending.with_source(source.clone())),
         Err(error) => Err(error.to_string()),
@@ -144,6 +137,18 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
+
+    /// Draw the dialog as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        render_design_note_dialog(&mut app.state.design.design_note, &mut app.state.model, ctx);
+    }
+
+    /// The draft's validation, over what the form reads.
+    fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String> {
+        super::validate_draft(&state.design.design_note, &state.model)
+    }
 
     #[test]
     fn opening_input_reaches_design_note_text() {
@@ -163,7 +168,7 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| app.render_design_note_dialog(ctx),
+            |ctx| render(&mut app, ctx),
         );
         let _ = ctx.run_ui(
             egui::RawInput {
@@ -183,7 +188,7 @@ mod tests {
                 ],
                 ..Default::default()
             },
-            |ctx| app.render_design_note_dialog(ctx),
+            |ctx| render(&mut app, ctx),
         );
         assert_eq!(
             app.state.design.design_note.text,

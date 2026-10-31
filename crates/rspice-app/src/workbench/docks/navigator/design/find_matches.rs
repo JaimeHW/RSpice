@@ -20,7 +20,7 @@ pub(super) fn find_matches_section(ui: &mut Ui, state: &mut AppState) {
         return;
     }
     // A query that cannot run says why in the form, beside the field.
-    let Ok(found) = find_replace_matches(state) else {
+    let Ok(found) = find_replace_matches(&state.design.find_replace, &state.model) else {
         return;
     };
     let active = state

@@ -101,8 +101,8 @@ fn sheet_scope_id() -> Id {
     Id::new("schematic.sheet_scope")
 }
 
-pub(crate) fn object_is_on_active_sheet(state: &AppState, object_id: u64) -> bool {
-    object_is_on_active_sheet_in_workspace(&state.model.workspace, object_id)
+pub(crate) fn object_is_on_active_sheet(state: &impl AsRef<Model>, object_id: u64) -> bool {
+    object_is_on_active_sheet_in_workspace(&state.as_ref().workspace, object_id)
 }
 
 fn object_is_on_active_sheet_in_workspace(

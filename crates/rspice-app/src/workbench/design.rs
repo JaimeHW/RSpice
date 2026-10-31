@@ -3,7 +3,11 @@
 //!
 //! What it has not registered yet, the shell's legacy tables still serve.
 
-use crate::workbench::framework::feature::{Feature, FeatureRegistry, NoHandles};
+use egui::Context;
+
+use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
+use crate::workbench::app::dialogs::{find_replace, object_properties, placement};
+use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
 
@@ -16,4 +20,105 @@ impl Feature for DesignFeature {
     type Handles = NoHandles;
 
     fn register(_registry: &mut FeatureRegistry<Self>) {}
+}
+
+/// The dialogs the shell's dialog order draws, each over the parts of the
+/// design slot it owns.
+impl DesignFeature {
+    /// Place bus tap.
+    pub(in crate::workbench) fn render_bus_tap_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        placement::bus_tap::render_bus_tap_dialog(&mut cx.state.bus_tap, cx.model, ctx);
+    }
+
+    /// Net label, or the off-sheet connector form.
+    pub(in crate::workbench) fn render_net_label_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        placement::net_label::render_net_label_dialog(
+            &mut cx.state.net_label_placement,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Create pins.
+    pub(in crate::workbench) fn render_pin_port_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        placement::pin_port::render_pin_port_dialog(&mut cx.state.pin_port, cx.model, ctx);
+    }
+
+    /// Place text or design note.
+    pub(in crate::workbench) fn render_design_note_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        placement::design_note::render_design_note_dialog(&mut cx.state.design_note, cx.model, ctx);
+    }
+
+    /// Draw documentation shape.
+    pub(in crate::workbench) fn render_documentation_shape_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        placement::documentation_shape::render_documentation_shape_dialog(
+            &mut cx.state.documentation_shape,
+            cx.model,
+            ctx,
+        );
+    }
+
+    /// Create array.
+    pub(in crate::workbench) fn render_array_selection_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        array::render_array_selection_dialog(&mut cx.state.array_selection, cx.model, ctx);
+    }
+
+    /// Object properties.
+    pub(in crate::workbench) fn render_object_properties_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        object_properties::render_object_properties_dialog(
+            &mut cx.state.object_properties,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Rename.
+    pub(in crate::workbench) fn render_rename_selection_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        rename::render_rename_selection_dialog(
+            &mut cx.state.rename_selection,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Find and replace.
+    pub(in crate::workbench) fn render_find_replace_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        let edit_in_progress = cx.state.schematic_edit_in_progress(cx.model);
+        find_replace::render_find_replace_dialog(
+            &mut cx.state.find_replace,
+            edit_in_progress,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Properties, for the instances selected together.
+    pub(in crate::workbench) fn render_shared_properties_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        shared_properties::render_shared_properties_dialog(
+            &mut cx.state.shared_properties,
+            &cx.state.property_registry,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
 }

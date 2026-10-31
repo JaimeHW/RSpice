@@ -17,8 +17,8 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
-use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::schematic_editor_request_source;
+use crate::workbench::app_state::{AppState, Model};
 use rspice_schematic_editor::vector_preview::deck_bits;
 
 /// Draft for Create pins.
@@ -134,15 +134,14 @@ impl Draft {
     }
 }
 
-fn draft(state: &AppState) -> Draft {
-    let form = &state.design.pin_port;
-    if state.schematic_edit_read_only() {
+fn draft(form: &PinPortDialogState, model: &Model) -> Draft {
+    if model.schematic_edit_read_only() {
         return Draft::Blocked(READ_ONLY);
     }
     let current = form
         .authority
         .as_ref()
-        .is_some_and(|authority| authority.matches(&schematic_editor_request_source(state)));
+        .is_some_and(|authority| authority.matches(&schematic_editor_request_source(model)));
     if !current {
         return Draft::Blocked(DOCUMENT_CHANGED);
     }
@@ -168,7 +167,7 @@ fn draft(state: &AppState) -> Draft {
     }
     let several = names.len() > 1;
     for name in &names {
-        if let Err(error) = state.model.schematic.validate_new_port_name(name) {
+        if let Err(error) = model.schematic.validate_new_port_name(name) {
             // One name needs no prefix: the field it was typed in is the
             // subject. Several do, or the reader cannot tell which one.
             return Draft::Refused(if several {
@@ -183,12 +182,12 @@ fn draft(state: &AppState) -> Draft {
 
 /// What the names declare: the pins, the conductors under them, and where they
 /// will sit in the cell's port list.
-fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
+fn declaration_line(model: &Model, names: &[String]) -> Option<String> {
     if names.is_empty() {
         return None;
     }
     let conductors: usize = names.iter().map(|name| declared_width(name.as_str())).sum();
-    let first = state.model.schematic.next_interface_order();
+    let first = model.schematic.next_interface_order();
     let positions = if names.len() == 1 {
         format!("port-list position {first}")
     } else {
@@ -220,89 +219,83 @@ fn plural(count: usize, one: &'static str, many: &'static str) -> &'static str {
     if count == 1 { one } else { many }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_pin_port_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.pin_port.open {
-            return;
-        }
-        let current = draft(&self.state);
-        let declaration = declaration_line(&self.state, current.names());
-        let bits = deck_bits_line(current.names());
-        let usable = !matches!(current, Draft::Blocked(_));
-        let ready = matches!(current, Draft::Ready(_));
-        let refusal = current.refusal();
-        // The cell whose interface this batch will change. It is the one thing
-        // about the form that is not in the form, and the reason the
-        // document-changed refusal exists at all.
-        let view_path = self
-            .state
-            .model
-            .workspace
-            .content
-            .active_view
-            .display_path();
-
-        let form = &mut self.state.design.pin_port;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(view_path.as_str()))
-            .describe(DESCRIPTION)
-            .primary_enabled(usable && ready)
-            .fields_enabled(usable)
-            .status(match refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .status_lines(2)
-            .show(ctx, |rows| {
-                form.fields
-                    .show(rows, declaration.as_deref(), bits.as_deref())
-            });
-
-        match choice {
-            // Revalidate the post-edit frame: Enter must never arm a batch the
-            // same frame's keystroke just made invalid.
-            DialogChoice::Primary => {
-                if let Draft::Ready(names) = draft(&self.state) {
-                    self.arm_create_pins(ctx, names);
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.pin_port.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
+/// Draw the pin form over its draft, arming the model's port tool.
+pub(in crate::workbench) fn render_pin_port_dialog(
+    dialog: &mut PinPortDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
     }
+    let current = draft(dialog, model);
+    let declaration = declaration_line(model, current.names());
+    let bits = deck_bits_line(current.names());
+    let usable = !matches!(current, Draft::Blocked(_));
+    let ready = matches!(current, Draft::Ready(_));
+    let refusal = current.refusal();
+    // The cell whose interface this batch will change. It is the one thing
+    // about the form that is not in the form, and the reason the
+    // document-changed refusal exists at all.
+    let view_path = model.workspace.content.active_view.display_path();
 
-    /// Freeze the batch, arm the canvas tool, and give the canvas the keyboard
-    /// so R, M and Esc work before the pointer has moved over it.
-    fn arm_create_pins(&mut self, ctx: &Context, names: Vec<String>) {
-        let form = &self.state.design.pin_port;
-        let Some(authority) = form.authority.clone() else {
-            return;
-        };
-        let sequence = PendingPortSequence::new(
-            names.iter().cloned(),
-            form.fields.direction,
-            form.fields.signal_type,
-            form.fields.discipline,
-        )
-        .with_authority(authority);
-        let last_name = names.last().cloned().unwrap_or_default();
-        self.state
-            .model
-            .schematic
-            .arm_tool(Tool::Place(ComponentType::Port));
-        self.state
-            .model
-            .schematic
-            .session
-            .editor
-            .pending_port_sequence = Some(sequence);
-        rspice_schematic_editor::view::canvas::request_focus(ctx);
-        let form = &mut self.state.design.pin_port;
-        form.last_name = last_name;
-        form.close();
+    let form = &mut *dialog;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(view_path.as_str()))
+        .describe(DESCRIPTION)
+        .primary_enabled(usable && ready)
+        .fields_enabled(usable)
+        .status(match refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .status_lines(2)
+        .show(ctx, |rows| {
+            form.fields
+                .show(rows, declaration.as_deref(), bits.as_deref())
+        });
+
+    match choice {
+        // Revalidate the post-edit frame: Enter must never arm a batch the
+        // same frame's keystroke just made invalid.
+        DialogChoice::Primary => {
+            if let Draft::Ready(names) = draft(dialog, model) {
+                arm_create_pins(dialog, model, ctx, names);
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
+}
+
+/// Freeze the batch, arm the canvas tool, and give the canvas the keyboard
+/// so R, M and Esc work before the pointer has moved over it.
+fn arm_create_pins(
+    dialog: &mut PinPortDialogState,
+    model: &mut Model,
+    ctx: &Context,
+    names: Vec<String>,
+) {
+    let form = &*dialog;
+    let Some(authority) = form.authority.clone() else {
+        return;
+    };
+    let sequence = PendingPortSequence::new(
+        names.iter().cloned(),
+        form.fields.direction,
+        form.fields.signal_type,
+        form.fields.discipline,
+    )
+    .with_authority(authority);
+    let last_name = names.last().cloned().unwrap_or_default();
+    model.schematic.arm_tool(Tool::Place(ComponentType::Port));
+    model.schematic.session.editor.pending_port_sequence = Some(sequence);
+    rspice_schematic_editor::view::canvas::request_focus(ctx);
+    let form = dialog;
+    form.last_name = last_name;
+    form.close();
 }
 
 #[cfg(test)]

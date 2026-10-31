@@ -217,6 +217,13 @@ pub(crate) struct DesignState {
 }
 
 impl DesignState {
+    /// Whether a schematic edit is under way: an undo step still open, as
+    /// while a drag is held, or a copy floating under the pointer. History
+    /// waits for either to land or be cancelled.
+    pub(crate) fn schematic_edit_in_progress(&self, model: &Model) -> bool {
+        model.schematic.has_pending_operation() || self.floating_paste.is_some()
+    }
+
     pub(crate) fn set_grid_style(&mut self, style: GridStyle) {
         if style.visible() {
             self.grid_restore_style = style;

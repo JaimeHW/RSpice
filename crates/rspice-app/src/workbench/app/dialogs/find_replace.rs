@@ -18,8 +18,9 @@ use rspice_design::schematic::find_replace::{
 use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::CellViewRef;
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Find and replace";
 const PRIMARY: &str = "Replace all";
@@ -96,19 +97,21 @@ pub(crate) fn open_find_replace(state: &mut AppState) {
 
 /// Every text the form's query changes, cell view by cell view, the active
 /// one first; or why the query cannot run.
-pub(crate) fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
-    let form = &state.design.find_replace;
+pub(crate) fn find_replace_matches(
+    form: &FindReplaceDialogState,
+    model: &Model,
+) -> Result<Vec<DocumentMatches>, String> {
     let query = FindQuery::new(&form.find, &form.replace, form.options, form.targets)?;
-    let active = state.model.workspace.content.active_schematic_reference();
+    let active = model.workspace.content.active_schematic_reference();
     let scope = form.scope();
     let mut found = Vec::new();
-    for reference in documents_in_scope(state, scope) {
-        let Some(document) = document_for(state, &reference) else {
+    for reference in documents_in_scope(model, scope) {
+        let Some(document) = document_for(model, &reference) else {
             continue;
         };
         let on_canvas = reference == active;
         let matches = find_in_document(document, &query, |id| {
-            !(on_canvas && scope == FindScope::Sheet) || object_is_on_active_sheet(state, id)
+            !(on_canvas && scope == FindScope::Sheet) || object_is_on_active_sheet(model, id)
         });
         if !matches.is_empty() {
             found.push(DocumentMatches {
@@ -124,8 +127,8 @@ pub(crate) fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatch
 
 /// The cell views `scope` reaches: the one on the canvas, then, for the
 /// hierarchy, every editable schematic placed below it, each once.
-fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
-    let active = state.model.workspace.content.active_schematic_reference();
+fn documents_in_scope(model: &Model, scope: FindScope) -> Vec<CellViewRef> {
+    let active = model.workspace.content.active_schematic_reference();
     let mut order = vec![active.clone()];
     if scope != FindScope::Hierarchy {
         return order;
@@ -134,7 +137,7 @@ fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
     let mut next = 0;
     while let Some(reference) = order.get(next).cloned() {
         next += 1;
-        let Some(document) = document_for(state, &reference) else {
+        let Some(document) = document_for(model, &reference) else {
             continue;
         };
         for binding in document
@@ -143,13 +146,12 @@ fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
             .filter_map(|component| component.library_cell.as_ref())
         {
             let child = CellViewRef::new(&binding.library, &binding.cell, &binding.view);
-            if state
-                .model
+            if model
                 .workspace
                 .content
                 .schematic_buffers
                 .contains_key(&child.key())
-                && !read_only(state, &child)
+                && !read_only(model, &child)
                 && seen.insert(child.key())
             {
                 order.push(child);
@@ -159,12 +161,11 @@ fn documents_in_scope(state: &AppState, scope: FindScope) -> Vec<CellViewRef> {
     order
 }
 
-fn document_for<'a>(state: &'a AppState, reference: &CellViewRef) -> Option<&'a SchematicDocument> {
-    if *reference == state.model.workspace.content.active_schematic_reference() {
-        Some(state.model.schematic.document())
+fn document_for<'a>(model: &'a Model, reference: &CellViewRef) -> Option<&'a SchematicDocument> {
+    if *reference == model.workspace.content.active_schematic_reference() {
+        Some(model.schematic.document())
     } else {
-        state
-            .model
+        model
             .workspace
             .content
             .schematic_buffers
@@ -173,10 +174,9 @@ fn document_for<'a>(state: &'a AppState, reference: &CellViewRef) -> Option<&'a 
     }
 }
 
-fn read_only(state: &AppState, reference: &CellViewRef) -> bool {
-    state.model.safe_mode.project_read_only()
-        || state
-            .model
+fn read_only(model: &Model, reference: &CellViewRef) -> bool {
+    model.safe_mode.project_read_only()
+        || model
             .library_manager
             .get_library(&reference.library)
             .is_some_and(|library| library.read_only)
@@ -185,19 +185,24 @@ fn read_only(state: &AppState, reference: &CellViewRef) -> bool {
 /// Make every listed change, one undo step per cell view. Every cell view
 /// is checked before any changes. Returns the number of texts changed and
 /// of cell views they were in.
-pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String> {
-    if state.schematic_edit_read_only() {
+pub(crate) fn replace_all(
+    form: &FindReplaceDialogState,
+    edit_in_progress: bool,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<(usize, usize), String> {
+    if model.schematic_edit_read_only() {
         return Err("The active schematic is read-only.".to_owned());
     }
-    if state.schematic_edit_in_progress() {
+    if edit_in_progress {
         return Err("Finish or cancel the edit in progress first.".to_owned());
     }
-    let found = find_replace_matches(state)?;
+    let found = find_replace_matches(form, model)?;
     if found.is_empty() {
         return Err("Nothing matches.".to_owned());
     }
     for document in &found {
-        let source = document_for(state, &document.reference)
+        let source = document_for(model, &document.reference)
             .ok_or_else(|| format!("{} is no longer open.", document.path))?;
         if let Some(refusal) =
             rspice_design::schematic::find_replace::refusal(source, &document.matches)
@@ -209,12 +214,7 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
             });
         }
     }
-    let active = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let active = model.workspace.content.active_schematic_reference().key();
     let mut changed = 0;
     for document in &found {
         let renames = document
@@ -224,97 +224,96 @@ pub(crate) fn replace_all(state: &mut AppState) -> Result<(usize, usize), String
         changed += if renames {
             // An instance renamed here is renamed as the Rename form
             // renames it, references and all.
-            state
-                .model
-                .replace_text_carrying_references(&document.reference, &document.matches)?
+            model.replace_text_carrying_references(&document.reference, &document.matches)?
         } else if document.key == active {
-            state.model.schematic.replace_text(&document.matches)?
-        } else if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&document.key) {
+            model.schematic.replace_text(&document.matches)?
+        } else if let Some(mut buffer) = model.workspace.schematic_editor_mut(&document.key) {
             buffer.editor.replace_text(&document.matches)?
         } else {
             0
         };
     }
-    state.sync_active_schematic_to_workspace();
+    sync_active_schematic(model, workbench);
     Ok((changed, found.len()))
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_find_replace_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.find_replace.open {
-            return;
-        }
-        let found = find_replace_matches(&self.state);
-        let count: usize = found.as_ref().map_or(0, |found| {
-            found.iter().map(|document| document.matches.len()).sum()
+/// Draw Find and replace over its form and the model it searches.
+/// `edit_in_progress` is whether a schematic edit is under way, which Replace
+/// all waits for.
+pub(in crate::workbench) fn render_find_replace_dialog(
+    dialog: &mut FindReplaceDialogState,
+    edit_in_progress: bool,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let found = find_replace_matches(dialog, model);
+    let count: usize = found.as_ref().map_or(0, |found| {
+        found.iter().map(|document| document.matches.len()).sum()
+    });
+    let summary = match &found {
+        Ok(found) if count > 0 => Ok(Some(match found.len() {
+            1 => format!("{count} {}", plural(count, "match", "matches")),
+            documents => format!("{count} matches in {documents} cell views"),
+        })),
+        Ok(_) if dialog.find.is_empty() => Ok(None),
+        Ok(_) => Ok(Some("No matches".to_owned())),
+        Err(reason) => Err(reason.clone()),
+    };
+    let status = match &summary {
+        Ok(Some(text)) => Ok(Some(text.as_str())),
+        Ok(None) => Ok(None),
+        Err(reason) => Err(reason.as_str()),
+    };
+    let view_path = model.workspace.content.active_view.display_path();
+    let form = &mut *dialog;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(view_path.as_str()))
+        .describe(DESCRIPTION)
+        .primary_enabled(count > 0)
+        .status(status)
+        .status_lines(2)
+        .show(ctx, |rows| {
+            let find = Id::new(FIND_FIELD);
+            rows.text("Find", find, &mut form.find, "text or pattern");
+            rows.text("Replace", Id::new(REPLACE_FIELD), &mut form.replace, "");
+            rows.checks(
+                "Look in",
+                &mut [
+                    ("Instance names", &mut form.targets.instance_names),
+                    ("Net labels", &mut form.targets.net_labels),
+                    ("Values", &mut form.targets.values),
+                ],
+            );
+            rows.segmented("Scope", "find-replace-scope", &SCOPES, &mut form.scope);
+            rows.checks(
+                "Match",
+                &mut [
+                    ("Whole word", &mut form.options.whole_word),
+                    ("Case", &mut form.options.match_case),
+                    ("Regular expression", &mut form.options.regex),
+                ],
+            );
+            Some(find)
         });
-        let summary = match &found {
-            Ok(found) if count > 0 => Ok(Some(match found.len() {
-                1 => format!("{count} {}", plural(count, "match", "matches")),
-                documents => format!("{count} matches in {documents} cell views"),
-            })),
-            Ok(_) if self.state.design.find_replace.find.is_empty() => Ok(None),
-            Ok(_) => Ok(Some("No matches".to_owned())),
-            Err(reason) => Err(reason.clone()),
-        };
-        let status = match &summary {
-            Ok(Some(text)) => Ok(Some(text.as_str())),
-            Ok(None) => Ok(None),
-            Err(reason) => Err(reason.as_str()),
-        };
-        let view_path = self
-            .state
-            .model
-            .workspace
-            .content
-            .active_view
-            .display_path();
-        let form = &mut self.state.design.find_replace;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(view_path.as_str()))
-            .describe(DESCRIPTION)
-            .primary_enabled(count > 0)
-            .status(status)
-            .status_lines(2)
-            .show(ctx, |rows| {
-                let find = Id::new(FIND_FIELD);
-                rows.text("Find", find, &mut form.find, "text or pattern");
-                rows.text("Replace", Id::new(REPLACE_FIELD), &mut form.replace, "");
-                rows.checks(
-                    "Look in",
-                    &mut [
-                        ("Instance names", &mut form.targets.instance_names),
-                        ("Net labels", &mut form.targets.net_labels),
-                        ("Values", &mut form.targets.values),
-                    ],
-                );
-                rows.segmented("Scope", "find-replace-scope", &SCOPES, &mut form.scope);
-                rows.checks(
-                    "Match",
-                    &mut [
-                        ("Whole word", &mut form.options.whole_word),
-                        ("Case", &mut form.options.match_case),
-                        ("Regular expression", &mut form.options.regex),
-                    ],
-                );
-                Some(find)
-            });
-        match choice {
-            DialogChoice::Primary => match replace_all(&mut self.state) {
-                Ok((texts, documents)) => {
-                    self.state.design.find_replace.open = false;
-                    self.state.prompt(match documents {
-                        1 => format!("Replaced {texts} {}.", plural(texts, "match", "matches")),
-                        _ => format!("Replaced {texts} matches in {documents} cell views."),
-                    });
-                }
-                Err(reason) => self.state.prompt(reason),
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.find_replace.open = false;
+    match choice {
+        DialogChoice::Primary => match replace_all(dialog, edit_in_progress, model, workbench) {
+            Ok((texts, documents)) => {
+                dialog.open = false;
+                workbench.prompt(match documents {
+                    1 => format!("Replaced {texts} {}.", plural(texts, "match", "matches")),
+                    _ => format!("Replaced {texts} matches in {documents} cell views."),
+                });
             }
-            DialogChoice::None | DialogChoice::Secondary => {}
+            Err(reason) => workbench.prompt(reason),
+        },
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.open = false;
         }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
@@ -328,6 +327,23 @@ mod tests {
     use crate::state::{
         Component, ComponentType, LibraryCellInstance, NetLabel, Point, SchematicState,
     };
+    use crate::workbench::app::RSpiceApp;
+
+    /// The matches, over what the form reads.
+    fn find_replace_matches(state: &AppState) -> Result<Vec<DocumentMatches>, String> {
+        super::find_replace_matches(&state.design.find_replace, &state.model)
+    }
+
+    /// Replace all, over the parts it reads and edits.
+    fn replace_all(state: &mut AppState) -> Result<(usize, usize), String> {
+        let edit_in_progress = state.schematic_edit_in_progress();
+        super::replace_all(
+            &state.design.find_replace,
+            edit_in_progress,
+            &mut state.model,
+            &mut state.workbench,
+        )
+    }
 
     fn part(id: u64, name: &str, value: &str) -> Component {
         let mut component =

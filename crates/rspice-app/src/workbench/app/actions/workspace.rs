@@ -19,8 +19,8 @@ use crate::state::{
     ViewType,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
-use crate::workbench::state::WorkspaceDocumentId;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::{WorkbenchSession, WorkspaceDocumentId};
 
 fn schematic_for_workspace(state: &mut AppState, reference: &CellViewRef) -> SchematicState {
     let existing = state
@@ -504,9 +504,7 @@ impl AppState {
     ///
     /// [`Model::sync_active_schematic_to_workspace`]: crate::workbench::app_state::Model::sync_active_schematic_to_workspace
     pub(crate) fn sync_active_schematic_to_workspace(&mut self) {
-        if let Some(prompt) = self.model.sync_active_schematic_to_workspace() {
-            self.prompt(prompt);
-        }
+        sync_active_schematic(&mut self.model, &mut self.workbench);
     }
 
     pub(crate) fn restore_active_schematic_from_workspace(&mut self) {
@@ -897,6 +895,17 @@ struct GeneratedInstanceLocation {
     instance: String,
     /// Whether the retained artifact predates the current project input.
     stale: bool,
+}
+
+/// Sync the active schematic into the workspace through
+/// [`Model::sync_active_schematic_to_workspace`], stating what it has to say
+/// on the status bar, over the parts it reaches.
+///
+/// [`Model::sync_active_schematic_to_workspace`]: crate::workbench::app_state::Model::sync_active_schematic_to_workspace
+pub(crate) fn sync_active_schematic(model: &mut Model, workbench: &mut WorkbenchSession) {
+    if let Some(prompt) = model.sync_active_schematic_to_workspace() {
+        workbench.prompt(prompt);
+    }
 }
 
 /// Locate the selected schematic instance in the retained generated deck.

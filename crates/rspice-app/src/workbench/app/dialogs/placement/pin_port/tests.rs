@@ -11,6 +11,22 @@ use super::*;
 use crate::state::{Point, PortDirection, PortDiscipline, PortSignalType};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::ui::tokens::Mode;
+use crate::workbench::app::RSpiceApp;
+
+/// Draw the form as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &egui::Context) {
+    render_pin_port_dialog(&mut app.state.design.pin_port, &mut app.state.model, ctx);
+}
+
+/// The batch the form holds, over what it reads.
+fn draft(state: &AppState) -> Draft {
+    super::draft(&state.design.pin_port, &state.model)
+}
+
+/// What the names declare, over the model they are declared in.
+fn declaration_line(state: &AppState, names: &[String]) -> Option<String> {
+    super::declaration_line(&state.model, names)
+}
 
 fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
     egui::RawInput {
@@ -199,11 +215,9 @@ fn enter_arms_the_whole_sequence_without_touching_the_document() {
     app.state.design.pin_port.fields.signal_type = PortSignalType::Logic;
     app.state.design.pin_port.fields.discipline = PortDiscipline::Logic;
 
-    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-        app.render_pin_port_dialog(ctx)
-    });
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
     let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-        app.render_pin_port_dialog(ctx)
+        render(&mut app, ctx)
     });
 
     assert!(!app.state.design.pin_port.open);
@@ -252,11 +266,9 @@ fn reopening_while_armed_offers_the_remaining_names() {
     app.state.design.pin_port.fields.discipline_touched = true;
     app.state.design.pin_port.fields.discipline = PortDiscipline::Wreal;
 
-    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-        app.render_pin_port_dialog(ctx)
-    });
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
     let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-        app.render_pin_port_dialog(ctx)
+        render(&mut app, ctx)
     });
     app.state
         .model
@@ -293,11 +305,9 @@ fn the_prefill_is_empty_until_a_batch_has_been_armed() {
     assert_eq!(app.state.design.pin_port.fields.names, "");
 
     app.state.design.pin_port.fields.names = "BIAS".to_owned();
-    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-        app.render_pin_port_dialog(ctx)
-    });
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
     let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-        app.render_pin_port_dialog(ctx)
+        render(&mut app, ctx)
     });
     app.state.model.schematic.cancel_tool();
     place_port(&mut app.state, "BIAS");
@@ -356,9 +366,7 @@ fn a_blocked_form_never_arms_on_enter() {
             .bootstrap_for_cell_view(&master.key(), "Sheet 1", [])
             .unwrap();
         open_with(&mut app.state, "EN");
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_pin_port_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         match change {
             "document" => app.state.model.active_schematic_epoch += 1,
             "design" => app.state.model.design_execution_epoch += 1,
@@ -410,7 +418,7 @@ fn a_blocked_form_never_arms_on_enter() {
         };
         assert_eq!(draft(&app.state), Draft::Blocked(expected), "{change}");
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_pin_port_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert!(app.state.design.pin_port.open);
@@ -443,11 +451,9 @@ fn escape_closes_the_form_at_once() {
     let mut app = RSpiceApp::test_instance();
     open_with(&mut app.state, "INP INN");
 
-    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-        app.render_pin_port_dialog(ctx)
-    });
+    let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
     let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-        app.render_pin_port_dialog(ctx)
+        render(&mut app, ctx)
     });
 
     assert!(!app.state.design.pin_port.open);
@@ -531,7 +537,7 @@ fn create_pins_fits_every_viewport() {
                 let names = app.state.design.pin_port.fields.names.clone();
                 let painted =
                     crate::ui::widgets::painted_runs::painted_runs(screen, mode, 3, |ctx| {
-                        app.render_pin_port_dialog(ctx);
+                        render(&mut app, ctx);
                     });
                 let label = format!("{screen:?} {mode:?} {draft_stem}");
                 painted.assert_inside_clip_and_surface_with_horizontal_scroll(&label, &[&names]);

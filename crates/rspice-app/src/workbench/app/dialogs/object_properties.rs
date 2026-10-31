@@ -15,7 +15,8 @@ use crate::state::{
     Point, SchematicState, entered_text,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 use rspice_schematic_editor::object_properties::{
     self, BUS_DECLARATION_FIELD, BusObjectPropertiesDraft, BusTapObjectPropertiesDraft,
     DesignNoteObjectPropertiesDraft, DocumentationShapeObjectPropertiesDraft, LABEL_NAME_FIELD,
@@ -325,142 +326,135 @@ enum DraftResolutionSource {
     },
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_object_properties_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.object_properties.open {
-            return;
-        }
-        let Some(draft) = self.state.design.object_properties.draft.as_ref() else {
-            // Fail closed instead of retaining an invisible modal owner.
-            self.state.design.object_properties.close();
-            self.state
-                .prompt("Object properties closed: the edit was no longer open.");
-            return;
-        };
+pub(in crate::workbench) fn render_object_properties_dialog(
+    dialog: &mut ObjectPropertiesDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let Some(draft) = dialog.draft.as_ref() else {
+        // Fail closed instead of retaining an invisible modal owner.
+        dialog.close();
+        workbench.prompt("Object properties closed: the edit was no longer open.");
+        return;
+    };
 
-        let authority_error = object_property_session_error(&self.state);
-        let (validation, bus_choices) = authority_error.map_or_else(
-            || resolve_draft_for_repaint(ctx, &self.state, draft),
-            |message| {
-                (
-                    DraftValidation::Invalid {
-                        field: None,
-                        message,
-                    },
-                    Vec::new(),
-                )
-            },
-        );
-        // A refusal that names a field is stated under that field. One that
-        // names none — a stale document, a rejected commit — belongs to the
-        // form, so it goes in the status slot.
-        let refusal = self
-            .state
-            .design
-            .object_properties
-            .validation_error
-            .clone()
-            .or_else(|| validation.message().map(str::to_owned));
-        let invalid_field = validation.field();
-        let form_refusal = refusal.clone().filter(|_| invalid_field.is_none());
-        let can_commit = self.state.design.object_properties.dirty
-            && !self.state.schematic_edit_read_only()
-            && validation.can_commit();
-        let multiline_body = matches!(draft, ObjectPropertiesDraft::DesignNote(_));
-        let title = object_properties::title(draft);
+    let authority_error = object_property_session_error(dialog, model);
+    let (validation, bus_choices) = authority_error.map_or_else(
+        || resolve_draft_for_repaint(ctx, model, draft),
+        |message| {
+            (
+                DraftValidation::Invalid {
+                    field: None,
+                    message,
+                },
+                Vec::new(),
+            )
+        },
+    );
+    // A refusal that names a field is stated under that field. One that
+    // names none — a stale document, a rejected commit — belongs to the
+    // form, so it goes in the status slot.
+    let refusal = dialog
+        .validation_error
+        .clone()
+        .or_else(|| validation.message().map(str::to_owned));
+    let invalid_field = validation.field();
+    let form_refusal = refusal.clone().filter(|_| invalid_field.is_none());
+    let can_commit = dialog.dirty && !model.schematic_edit_read_only() && validation.can_commit();
+    let multiline_body = matches!(draft, ObjectPropertiesDraft::DesignNote(_));
+    let title = object_properties::title(draft);
 
-        let mut edited = false;
-        let choice = CommandForm::new(&title, PRIMARY)
-            .primary_enabled(can_commit)
-            .primary_on_enter(!multiline_body)
-            .status(match form_refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .status_lines(2)
-            .show(ctx, |rows| {
-                let draft = self
-                    .state
-                    .design
-                    .object_properties
-                    .draft
-                    .as_mut()
-                    .expect("an open object-properties form retains a typed draft");
-                let (focus, changed) = object_properties::show(
-                    rows,
-                    draft,
-                    validation.bus_impact(),
-                    &bus_choices,
-                    invalid_field,
-                    refusal.as_deref(),
-                );
-                edited = changed;
-                focus
-            });
-        if edited {
-            self.state.design.object_properties.mark_edited();
-        }
+    let mut edited = false;
+    let choice = CommandForm::new(&title, PRIMARY)
+        .primary_enabled(can_commit)
+        .primary_on_enter(!multiline_body)
+        .status(match form_refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .status_lines(2)
+        .show(ctx, |rows| {
+            let draft = dialog
+                .draft
+                .as_mut()
+                .expect("an open object-properties form retains a typed draft");
+            let (focus, changed) = object_properties::show(
+                rows,
+                draft,
+                validation.bus_impact(),
+                &bus_choices,
+                invalid_field,
+                refusal.as_deref(),
+            );
+            edited = changed;
+            focus
+        });
+    if edited {
+        dialog.mark_edited();
+    }
 
-        match choice {
-            DialogChoice::Primary => {
-                let Some(draft) = self.state.design.object_properties.draft.as_ref() else {
-                    return;
-                };
-                let validation = object_property_session_error(&self.state).map_or_else(
-                    || {
-                        validate_draft(&self.state.model.schematic, draft, &|id| {
-                            object_is_on_active_sheet(&self.state, id)
-                        })
-                    },
-                    |message| DraftValidation::Invalid {
-                        field: None,
-                        message,
-                    },
-                );
-                match validation {
-                    DraftValidation::Valid(commit, _) => {
-                        let content = &self.state.model.workspace.content;
-                        let catalog = content
-                            .design_management
-                            .sheet_catalog(&content.active_schematic_reference().key());
-                        let on_sheet = |id| {
-                            rspice_schematic_editor::view::design_view::object_is_on_active_sheet(
-                                catalog, id,
-                            )
-                        };
-                        match apply_commit(&mut self.state.model.schematic, *commit, &on_sheet) {
-                            // Closing is the report. A line saying the edit
-                            // landed, next to the canvas that now shows it,
-                            // is one more thing to read and nothing to act on.
-                            Ok(_) => {
-                                self.state.design.object_properties.close();
-                            }
-                            Err(error) => {
-                                self.state.design.object_properties.validation_error =
-                                    Some(error.to_string());
-                            }
+    match choice {
+        DialogChoice::Primary => {
+            let Some(draft) = dialog.draft.as_ref() else {
+                return;
+            };
+            let validation = object_property_session_error(dialog, model).map_or_else(
+                || {
+                    validate_draft(&model.schematic, draft, &|id| {
+                        object_is_on_active_sheet(model, id)
+                    })
+                },
+                |message| DraftValidation::Invalid {
+                    field: None,
+                    message,
+                },
+            );
+            match validation {
+                DraftValidation::Valid(commit, _) => {
+                    let content = &model.workspace.content;
+                    let catalog = content
+                        .design_management
+                        .sheet_catalog(&content.active_schematic_reference().key());
+                    let on_sheet = |id| {
+                        rspice_schematic_editor::view::design_view::object_is_on_active_sheet(
+                            catalog, id,
+                        )
+                    };
+                    match apply_commit(&mut model.schematic, *commit, &on_sheet) {
+                        // Closing is the report. A line saying the edit
+                        // landed, next to the canvas that now shows it,
+                        // is one more thing to read and nothing to act on.
+                        Ok(_) => {
+                            dialog.close();
+                        }
+                        Err(error) => {
+                            dialog.validation_error = Some(error.to_string());
                         }
                     }
-                    DraftValidation::Incomplete { message, .. }
-                    | DraftValidation::Invalid { message, .. } => {
-                        self.state.design.object_properties.validation_error = Some(message);
-                    }
+                }
+                DraftValidation::Incomplete { message, .. }
+                | DraftValidation::Invalid { message, .. } => {
+                    dialog.validation_error = Some(message);
                 }
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.object_properties.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
 fn resolve_draft_for_repaint(
     ctx: &Context,
-    state: &crate::workbench::app_state::AppState,
+    model: &Model,
     draft: &ObjectPropertiesDraft,
 ) -> (DraftValidation, Vec<(u64, String)>) {
-    let key = draft_resolution_key(state, draft);
+    let key = draft_resolution_key(model, draft);
     let cache_id = egui::Id::new("object-properties-draft-resolution-cache");
     if let Some(cached) = ctx.data(|data| data.get_temp::<CachedDraftResolution>(cache_id))
         && cached.key == key
@@ -468,8 +462,8 @@ fn resolve_draft_for_repaint(
         return (cached.validation, cached.bus_choices);
     }
 
-    let validation = validate_draft(&state.model.schematic, draft, &|id| {
-        object_is_on_active_sheet(state, id)
+    let validation = validate_draft(&model.schematic, draft, &|id| {
+        object_is_on_active_sheet(model, id)
     });
     let bus_choices = match draft {
         ObjectPropertiesDraft::Bus(_)
@@ -478,7 +472,7 @@ fn resolve_draft_for_repaint(
         | ObjectPropertiesDraft::DesignNote(_)
         | ObjectPropertiesDraft::DocumentationShape(_) => Vec::new(),
         ObjectPropertiesDraft::BusTap(draft) => {
-            bus_choices(&state.model.schematic, draft.original.bus_point)
+            bus_choices(&model.schematic, draft.original.bus_point)
         }
     };
     ctx.data_mut(|data| {
@@ -494,14 +488,10 @@ fn resolve_draft_for_repaint(
     (validation, bus_choices)
 }
 
-fn draft_resolution_key(
-    state: &crate::workbench::app_state::AppState,
-    draft: &ObjectPropertiesDraft,
-) -> DraftResolutionKey {
+fn draft_resolution_key(model: &Model, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
     let (target_matches_baseline, draft_source) = match draft {
         ObjectPropertiesDraft::Bus(draft) => (
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .buses
@@ -514,8 +504,7 @@ fn draft_resolution_key(
             },
         ),
         ObjectPropertiesDraft::BusTap(draft) => (
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .bus_taps
@@ -530,8 +519,7 @@ fn draft_resolution_key(
             },
         ),
         ObjectPropertiesDraft::NetLabel(draft) => (
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .net_labels
@@ -547,7 +535,7 @@ fn draft_resolution_key(
         ),
         ObjectPropertiesDraft::NamedNet(draft) => (
             crate::workbench::app::validate_named_net_rename(
-                &state.model.schematic,
+                &model.schematic,
                 &draft.original,
                 &draft.original.name,
             )
@@ -561,8 +549,7 @@ fn draft_resolution_key(
             },
         ),
         ObjectPropertiesDraft::DesignNote(draft) => (
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .design_notes
@@ -577,8 +564,7 @@ fn draft_resolution_key(
             },
         ),
         ObjectPropertiesDraft::DocumentationShape(draft) => (
-            state
-                .model
+            model
                 .schematic
                 .document()
                 .documentation_shapes
@@ -592,16 +578,18 @@ fn draft_resolution_key(
         ),
     };
     DraftResolutionKey {
-        source: crate::workbench::app::schematic_editor_request_source(state),
-        view_path: state.model.workspace.content.active_view.display_path(),
+        source: crate::workbench::app::schematic_editor_request_source(model),
+        view_path: model.workspace.content.active_view.display_path(),
         target_matches_baseline,
         draft_source,
     }
 }
 
-fn object_property_session_error(state: &crate::workbench::app_state::AppState) -> Option<String> {
-    let dialog = &state.design.object_properties;
-    if state.schematic_edit_read_only() {
+fn object_property_session_error(
+    dialog: &ObjectPropertiesDialogState,
+    model: &Model,
+) -> Option<String> {
+    if model.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no properties can be applied.".to_owned());
     }
     let Some(source) = dialog.source.as_ref() else {
@@ -610,7 +598,7 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
                 .to_owned(),
         );
     };
-    let current = crate::workbench::app::schematic_editor_request_source(state);
+    let current = crate::workbench::app::schematic_editor_request_source(model);
     if source.design_epoch != current.design_epoch {
         return Some(
             "The design document changed while properties were open. Close and reopen the current object."
@@ -629,7 +617,7 @@ fn object_property_session_error(state: &crate::workbench::app_state::AppState) 
                 .to_owned(),
         );
     }
-    if dialog.view_path != state.model.workspace.content.active_view.display_path() {
+    if dialog.view_path != model.workspace.content.active_view.display_path() {
         return Some(
             "The active cell/view changed while properties were open. Close and reopen the current object."
                 .to_owned(),
@@ -1074,6 +1062,28 @@ fn bus_choices(
 mod tests {
     use super::*;
     use crate::state::{BusParseError, BusTargetKind, NetLabel, Point, Wire};
+    use crate::workbench::app::RSpiceApp;
+    use crate::workbench::app_state::AppState;
+
+    /// Draw the dialog as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        render_object_properties_dialog(
+            &mut app.state.design.object_properties,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            ctx,
+        );
+    }
+
+    /// Why the open edit can no longer apply, over what the form reads.
+    fn object_property_session_error(state: &AppState) -> Option<String> {
+        super::object_property_session_error(&state.design.object_properties, &state.model)
+    }
+
+    /// What a repaint's cached resolution is keyed by, over the model it reads.
+    fn draft_resolution_key(state: &AppState, draft: &ObjectPropertiesDraft) -> DraftResolutionKey {
+        super::draft_resolution_key(&state.model, draft)
+    }
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -1564,9 +1574,7 @@ mod tests {
             };
             draft.declaration = "ADDR[7:0]".to_owned();
             app.state.design.object_properties.mark_edited();
-            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-                app.render_object_properties_dialog(ctx)
-            });
+            let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
             let cached = ctx
                 .data(|data| {
                     data.get_temp::<CachedDraftResolution>(egui::Id::new(
@@ -1674,7 +1682,7 @@ mod tests {
                 .undo_description()
                 .map(str::to_owned);
             let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-                app.render_object_properties_dialog(ctx)
+                render(&mut app, ctx)
             });
             assert!(app.state.design.object_properties.open, "{change}");
             assert!(
@@ -1721,11 +1729,9 @@ mod tests {
         draft.declaration = "ADDR<0:15>".to_owned();
         app.state.design.object_properties.mark_edited();
 
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_object_properties_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_object_properties_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert!(!app.state.design.object_properties.open);
@@ -1763,11 +1769,9 @@ mod tests {
         draft.declaration = "ADDR[7:0]".to_owned();
         app.state.design.object_properties.mark_edited();
 
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_object_properties_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_object_properties_dialog(ctx)
+            render(&mut app, ctx)
         });
 
         assert!(!app.state.design.object_properties.open);
@@ -1813,9 +1817,7 @@ mod tests {
             .push(bus.clone());
         open_bus_dialog(&mut app, &bus);
 
-        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_object_properties_dialog(ctx)
-        });
+        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let nodes = output
             .platform_output
             .accesskit_update

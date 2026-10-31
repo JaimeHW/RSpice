@@ -17,8 +17,8 @@ use crate::state::{BusDeclaration, Component, NetLabel, SchematicState};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use rspice_schematic_editor::object_properties::clause;
 
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
 mod transaction_tests;
@@ -203,121 +203,106 @@ fn selected_rename_target(state: &AppState) -> Option<RenameSelectionTarget> {
     None
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_rename_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.rename_selection.open {
-            return;
-        }
-        let Some(target) = self.state.design.rename_selection.target.as_ref() else {
-            self.state.design.rename_selection.close();
-            self.state
-                .prompt("Rename closed: the object it was renaming is gone.");
-            return;
-        };
+pub(in crate::workbench) fn render_rename_selection_dialog(
+    dialog: &mut RenameSelectionDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let Some(target) = dialog.target.as_ref() else {
+        dialog.close();
+        workbench.prompt("Rename closed: the object it was renaming is gone.");
+        return;
+    };
 
-        let authority_error = rename_session_error(&self.state);
-        let validation = authority_error.map_or_else(
-            || {
-                validate_draft(
-                    &self.state.model.schematic,
-                    target,
-                    &self.state.design.rename_selection.draft,
-                    &|id| object_is_on_active_sheet(&self.state, id),
-                )
-            },
-            RenameValidation::Invalid,
-        );
-        let object = object_context(target);
-        let previous = target.current_name().to_owned();
-        let scope = rename_scope(&self.state.model.schematic, target);
-        let validation_message = self
-            .state
-            .design
-            .rename_selection
-            .validation_error
-            .as_deref()
-            .or_else(|| validation.message())
-            .map(str::to_owned);
+    let authority_error = rename_session_error(dialog, model);
+    let validation = authority_error.map_or_else(
+        || {
+            validate_draft(&model.schematic, target, &dialog.draft, &|id| {
+                object_is_on_active_sheet(model, id)
+            })
+        },
+        RenameValidation::Invalid,
+    );
+    let object = object_context(target);
+    let previous = target.current_name().to_owned();
+    let scope = rename_scope(&model.schematic, target);
+    let validation_message = dialog
+        .validation_error
+        .as_deref()
+        .or_else(|| validation.message())
+        .map(str::to_owned);
 
-        let mut edited = false;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .context(Some(object.as_str()))
-            .primary_enabled(validation.can_commit())
-            .show(ctx, |rows| {
-                let field = Id::new(FIELD_ID);
-                let response = rows.text(
-                    "New name",
-                    field,
-                    &mut self.state.design.rename_selection.draft,
-                    "A SPICE-safe name",
-                );
-                // A prior publication error belongs to an older candidate;
-                // the live validation under this field now owns what is
-                // typed.
-                edited = response.changed();
-                rows.field_line(
-                    Some(field),
-                    match (validation_message.as_deref(), scope.as_deref()) {
-                        (Some(message), _) => FieldLine::Error(message),
-                        (None, Some(scope)) => FieldLine::Derived(scope),
-                        (None, None) => FieldLine::Blank,
-                    },
-                );
-                Some(field)
-            });
-        if edited {
-            self.state.design.rename_selection.validation_error = None;
-        }
+    let mut edited = false;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .context(Some(object.as_str()))
+        .primary_enabled(validation.can_commit())
+        .show(ctx, |rows| {
+            let field = Id::new(FIELD_ID);
+            let response = rows.text("New name", field, &mut dialog.draft, "A SPICE-safe name");
+            // A prior publication error belongs to an older candidate;
+            // the live validation under this field now owns what is
+            // typed.
+            edited = response.changed();
+            rows.field_line(
+                Some(field),
+                match (validation_message.as_deref(), scope.as_deref()) {
+                    (Some(message), _) => FieldLine::Error(message),
+                    (None, Some(scope)) => FieldLine::Derived(scope),
+                    (None, None) => FieldLine::Blank,
+                },
+            );
+            Some(field)
+        });
+    if edited {
+        dialog.validation_error = None;
+    }
 
-        match choice {
-            DialogChoice::Primary => {
-                let Some(target) = self.state.design.rename_selection.target.clone() else {
-                    return;
-                };
-                let validation = rename_session_error(&self.state).map_or_else(
-                    || {
-                        validate_draft(
-                            &self.state.model.schematic,
-                            &target,
-                            &self.state.design.rename_selection.draft,
-                            &|id| object_is_on_active_sheet(&self.state, id),
-                        )
-                    },
-                    RenameValidation::Invalid,
-                );
-                match validation {
-                    RenameValidation::Valid(commit) => {
-                        match apply_commit(&mut self.state, *commit) {
-                            // One line in the log, because a rename reaches
-                            // saved outputs and configuration paths the
-                            // canvas does not show.
-                            Ok(true) => {
-                                let renamed =
-                                    self.state.design.rename_selection.draft.trim().to_owned();
-                                self.state
-                                    .prompt(format!("Renamed {previous} to {renamed}."));
-                                self.state.design.rename_selection.close();
-                            }
-                            Ok(false) => {
-                                self.state.design.rename_selection.validation_error =
-                                    Some("That is already its name.".to_owned());
-                            }
-                            Err(error) => {
-                                self.state.design.rename_selection.validation_error = Some(error);
-                            }
+    match choice {
+        DialogChoice::Primary => {
+            let Some(target) = dialog.target.clone() else {
+                return;
+            };
+            let validation = rename_session_error(dialog, model).map_or_else(
+                || {
+                    validate_draft(&model.schematic, &target, &dialog.draft, &|id| {
+                        object_is_on_active_sheet(model, id)
+                    })
+                },
+                RenameValidation::Invalid,
+            );
+            match validation {
+                RenameValidation::Valid(commit) => {
+                    match apply_commit(model, *commit) {
+                        // One line in the log, because a rename reaches
+                        // saved outputs and configuration paths the
+                        // canvas does not show.
+                        Ok(true) => {
+                            let renamed = dialog.draft.trim().to_owned();
+                            workbench.prompt(format!("Renamed {previous} to {renamed}."));
+                            dialog.close();
+                        }
+                        Ok(false) => {
+                            dialog.validation_error = Some("That is already its name.".to_owned());
+                        }
+                        Err(error) => {
+                            dialog.validation_error = Some(error);
                         }
                     }
-                    RenameValidation::Invalid(message) => {
-                        self.state.design.rename_selection.validation_error = Some(message);
-                    }
-                    RenameValidation::Unchanged => {}
                 }
+                RenameValidation::Invalid(message) => {
+                    dialog.validation_error = Some(message);
+                }
+                RenameValidation::Unchanged => {}
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.rename_selection.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
@@ -373,30 +358,29 @@ fn count(value: usize, one: &str, many: &str) -> Option<String> {
     }
 }
 
-fn rename_session_error(state: &AppState) -> Option<String> {
-    let dialog = &state.design.rename_selection;
-    if state.schematic_edit_read_only() {
+fn rename_session_error(dialog: &RenameSelectionDialogState, model: &Model) -> Option<String> {
+    if model.schematic_edit_read_only() {
         return Some("The active schematic is read-only; no name can be changed.".to_owned());
     }
-    if dialog.design_execution_epoch != state.model.design_execution_epoch {
+    if dialog.design_execution_epoch != model.design_execution_epoch {
         return Some(
             "The design document changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.active_schematic_epoch != state.model.active_schematic_epoch {
+    if dialog.active_schematic_epoch != model.active_schematic_epoch {
         return Some(
             "The active schematic buffer changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    if dialog.topology_version != state.model.schematic.topology_version() {
+    if dialog.topology_version != model.schematic.topology_version() {
         return Some(
             "Schematic connectivity changed while Rename was open. Cancel and reopen the current object."
                 .to_owned(),
         );
     }
-    (dialog.view_path != state.model.workspace.content.active_view.display_path()).then(|| {
+    (dialog.view_path != model.workspace.content.active_view.display_path()).then(|| {
         "The active cell/view changed while Rename was open. Cancel and reopen the current object."
             .to_owned()
     })
@@ -538,17 +522,17 @@ fn stale(message: &str) -> RenameValidation {
     ))
 }
 
-fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
-    let content = &state.model.workspace.content;
+fn apply_commit(model: &mut Model, commit: RenameCommit) -> Result<bool, String> {
+    let content = &model.workspace.content;
     let catalog = content
         .design_management
         .sheet_catalog(&content.active_schematic_reference().key());
     let on_sheet =
         |id| rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id);
-    let schematic = &mut state.model.schematic;
+    let schematic = &mut model.schematic;
     match commit {
         RenameCommit::Component { expected, name } => {
-            state.model.rename_component_transaction(&expected, name)
+            model.rename_component_transaction(&expected, name)
         }
         RenameCommit::NetLabel { expected, name } => schematic.rename_net_label(expected, name),
         RenameCommit::NamedNet { expected, name } => {
@@ -567,6 +551,22 @@ fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, Stri
 mod tests {
     use super::*;
     use crate::state::{Bus, ComponentType, NetLabel, Point, Wire};
+    use crate::workbench::app::RSpiceApp;
+
+    /// Draw the dialog as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        render_rename_selection_dialog(
+            &mut app.state.design.rename_selection,
+            &mut app.state.model,
+            &mut app.state.workbench,
+            ctx,
+        );
+    }
+
+    /// The commit, over the model it edits.
+    fn apply_commit(state: &mut AppState, commit: RenameCommit) -> Result<bool, String> {
+        super::apply_commit(&mut state.model, commit)
+    }
 
     fn dialog_input(events: Vec<egui::Event>) -> egui::RawInput {
         egui::RawInput {
@@ -916,11 +916,9 @@ mod tests {
         let (mut app, id) = component_app();
         assert!(open_selected_object_rename(&mut app.state));
         app.state.design.rename_selection.draft = "R_ENTER".to_owned();
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_rename_selection_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Enter)]), |ctx| {
-            app.render_rename_selection_dialog(ctx)
+            render(&mut app, ctx)
         });
         assert!(!app.state.design.rename_selection.open);
         assert_eq!(app.state.model.schematic.document().components[0].id, id);
@@ -938,11 +936,9 @@ mod tests {
             .select_only_component(id);
         assert!(open_selected_object_rename(&mut app.state));
         app.state.design.rename_selection.draft = "R_ESCAPE".to_owned();
-        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| {
-            app.render_rename_selection_dialog(ctx)
-        });
+        let _ = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(&mut app, ctx));
         let _ = ctx.run_ui(dialog_input(vec![key_event(egui::Key::Escape)]), |ctx| {
-            app.render_rename_selection_dialog(ctx)
+            render(&mut app, ctx)
         });
         assert!(!app.state.design.rename_selection.open);
         assert_eq!(

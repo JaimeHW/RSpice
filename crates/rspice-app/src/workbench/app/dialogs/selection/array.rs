@@ -18,8 +18,8 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows};
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app_state::{AppState, Model};
 
 /// Isolated authority, typed draft, and canvas interaction state for the
 /// mockup-owned Create object array transaction. The complete replica set is
@@ -265,49 +265,46 @@ fn field_id(stable: &str) -> Id {
     Id::new(("array-selection", stable))
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_array_selection_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.array_selection.open {
-            return;
-        }
-        let validation = validate_draft(&self.state);
-        let form_refusal = validation.form_refusal();
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .primary_enabled(validation.can_commit())
-            .status(match form_refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .status_lines(2)
-            .show(ctx, |rows| {
-                array_form(rows, &validation, &mut self.state.design.array_selection)
-            });
-        match choice {
-            DialogChoice::Primary => {
-                if validate_draft(&self.state).can_commit() {
-                    let radial_center = if self.state.design.array_selection.kind
-                        == SchematicArrayKind::RadialDocumentation
-                    {
-                        radial_documentation_center(&self.state)
-                    } else {
-                        None
-                    };
-                    self.state.design.array_selection.arm();
-                    self.state.design.array_selection.canvas.anchor = radial_center;
-                    self.state.model.schematic.arm_tool(Tool::ArraySelection);
-                    rspice_schematic_editor::view::canvas::request_focus(ctx);
-                }
+pub(in crate::workbench) fn render_array_selection_dialog(
+    dialog: &mut ArraySelectionDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
+    let validation = validate_draft(dialog, model);
+    let form_refusal = validation.form_refusal();
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .primary_enabled(validation.can_commit())
+        .status(match form_refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .status_lines(2)
+        .show(ctx, |rows| array_form(rows, &validation, &mut *dialog));
+    match choice {
+        DialogChoice::Primary => {
+            if validate_draft(dialog, model).can_commit() {
+                let radial_center = if dialog.kind == SchematicArrayKind::RadialDocumentation {
+                    radial_documentation_center(model)
+                } else {
+                    None
+                };
+                dialog.arm();
+                dialog.canvas.anchor = radial_center;
+                model.schematic.arm_tool(Tool::ArraySelection);
+                rspice_schematic_editor::view::canvas::request_focus(ctx);
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.array_selection.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
     }
 }
 
-fn validate_draft(state: &AppState) -> DraftValidation {
-    let draft = &state.design.array_selection;
+fn validate_draft(draft: &ArraySelectionDialogState, model: &Model) -> DraftValidation {
     let mut errors = DraftErrors::default();
     let Some(authority) = draft.authority.as_ref() else {
         errors.messages.push(
@@ -316,11 +313,11 @@ fn validate_draft(state: &AppState) -> DraftValidation {
         );
         return DraftValidation::Invalid(errors);
     };
-    if let Err(message) = authority.validate(state, TITLE) {
+    if let Err(message) = authority.validate(model, TITLE) {
         errors.messages.push(message);
     }
     if draft.kind == SchematicArrayKind::RadialDocumentation {
-        let selection = &state.model.schematic.session.editor.selection;
+        let selection = &model.schematic.session.editor.selection;
         let documentation_count = selection
             .documentation_shapes
             .len()
@@ -366,12 +363,12 @@ fn validate_draft(state: &AppState) -> DraftValidation {
                 SchematicArrayPlacement::Center(Point::origin())
             }
             SchematicArrayKind::Linear => SchematicArrayPlacement::Pitch(Point::new(
-                state.model.schematic.document().grid_size.max(1),
-                state.model.schematic.document().grid_size.max(1),
+                model.schematic.document().grid_size.max(1),
+                model.schematic.document().grid_size.max(1),
             )),
             SchematicArrayKind::Rectangular => SchematicArrayPlacement::Pitch(Point::new(
-                state.model.schematic.document().grid_size.max(1),
-                state.model.schematic.document().grid_size.max(1),
+                model.schematic.document().grid_size.max(1),
+                model.schematic.document().grid_size.max(1),
             )),
         };
         if let Err(error) = SchematicArrayPlan::new(draft.kind, count, naming.clone(), placement) {
@@ -391,7 +388,7 @@ pub(crate) fn armed_array_selection_authority(state: &AppState) -> Result<(), St
     {
         return Err("Create array is not armed.".to_owned());
     }
-    match validate_draft(state) {
+    match validate_draft(&state.design.array_selection, &state.model) {
         DraftValidation::Valid => Ok(()),
         DraftValidation::Invalid(errors) => Err(errors.messages.join(" ")),
     }
@@ -470,8 +467,8 @@ fn error_or_blank(error: Option<&str>) -> FieldLine<'_> {
     error.map_or(FieldLine::Blank, FieldLine::Error)
 }
 
-fn radial_documentation_center(state: &AppState) -> Option<Point> {
-    let selection = &state.model.schematic.session.editor.selection;
+fn radial_documentation_center(model: &Model) -> Option<Point> {
+    let selection = &model.schematic.session.editor.selection;
     let mut min_x = i32::MAX;
     let mut min_y = i32::MAX;
     let mut max_x = i32::MIN;
@@ -482,12 +479,12 @@ fn radial_documentation_center(state: &AppState) -> Option<Point> {
         max_x = max_x.max(point.x);
         max_y = max_y.max(point.y);
     };
-    for note in &state.model.schematic.document().design_notes {
+    for note in &model.schematic.document().design_notes {
         if selection.has_design_note(note.id) {
             include(note.pos);
         }
     }
-    for shape in &state.model.schematic.document().documentation_shapes {
+    for shape in &model.schematic.document().documentation_shapes {
         if selection.has_documentation_shape(shape.id) {
             for point in shape.geometry.points() {
                 include(point);
@@ -505,6 +502,16 @@ fn radial_documentation_center(state: &AppState) -> Option<Point> {
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType, DesignNote, DesignNoteKind};
+
+    /// The draft's validation, over what the form reads.
+    fn validate_draft(state: &AppState) -> DraftValidation {
+        super::validate_draft(&state.design.array_selection, &state.model)
+    }
+
+    /// The radial array's centre, over the model it reads.
+    fn radial_documentation_center(state: &AppState) -> Option<Point> {
+        super::radial_documentation_center(&state.model)
+    }
 
     #[test]
     fn the_form_offers_every_array_kind_under_its_own_name() {

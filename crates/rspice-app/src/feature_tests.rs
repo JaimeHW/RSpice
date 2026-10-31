@@ -5,6 +5,10 @@
 //! the code it tests. One module per slice.
 
 mod cloud;
+// Its tests run the whole frame through eframe's native test frame, and the
+// browser runner runs no plain test.
+#[cfg(not(target_arch = "wasm32"))]
+mod design;
 mod framework;
 mod hardcopy;
 mod model;

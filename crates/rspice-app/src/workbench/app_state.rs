@@ -801,7 +801,7 @@ impl AppState {
     /// while a drag is held, or a copy floating under the pointer. History
     /// waits for either to land or be cancelled.
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
-        self.model.schematic.has_pending_operation() || self.design.floating_paste.is_some()
+        self.design.schematic_edit_in_progress(&self.model)
     }
 }
 
