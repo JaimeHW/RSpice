@@ -6,8 +6,9 @@ SLICE_RULES pattern its path matches. Three groups are measured: references
 between two feature slices; references from a lower slice to a feature or the
 shell, and from model to any other slice; and whole-app counts (inherent
 `impl RSpiceApp` methods outside the shell, inherent `impl AppState` methods
-outside the session aggregate, and functions outside the shell whose signature
-takes `&RSpiceApp` or `&mut RSpiceApp`, one of each per function).
+outside the session aggregate and the shell's project transactions, and
+functions outside the shell whose signature takes `&RSpiceApp` or
+`&mut RSpiceApp`, one of each per function).
 
 Method: a small Rust lexer tracks items, inline modules and `impl` blocks.
 Production code only: a file reached solely through `#[cfg(test)] mod x;` (or
@@ -62,6 +63,10 @@ FEATURES = (
 )
 SESSION = "session"  # the AppState/WorkbenchSession aggregate
 SHELL = "shell"
+# The shell's transactions over the whole project are AppState's own entry
+# points: the callers below the shell reach them as methods, until each
+# caller raises a request for the shell to run instead.
+PROJECT_TRANSACTIONS = "workbench/session/project_transactions.rs"
 SLICES = (*LOWER, SESSION, *FEATURES, SHELL)
 GROUPS = ("feature->feature", "lower->upper", "whole-app")
 
@@ -941,7 +946,12 @@ def measure(source_root: Path, lower_crates: dict[str, Path] | None = None):
             inherent = fn["scope"] == "impl" and fn["trait"] is None
             if inherent and fn["impl"] == "RSpiceApp" and owner[p] != SHELL:
                 whole["impl RSpiceApp methods outside shell"][p] += 1
-            if inherent and fn["impl"] == "AppState" and owner[p] != SESSION:
+            if (
+                inherent
+                and fn["impl"] == "AppState"
+                and owner[p] != SESSION
+                and p != PROJECT_TRANSACTIONS
+            ):
                 whole["impl AppState methods outside session"][p] += 1
             if owner[p] != SHELL:
                 for key in count_whole_app_signatures(tokens[p], fn):

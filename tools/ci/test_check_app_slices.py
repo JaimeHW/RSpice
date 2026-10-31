@@ -491,6 +491,22 @@ class MeasurementTests(unittest.TestCase):
         })
 
 
+    def test_the_shell_project_transactions_are_appstate_entry_points_not_coupling(self) -> None:
+        values, _, _ = measure_tree({
+            "workbench/app_state.rs": "pub struct AppState;\n",
+            "workbench/session/project_transactions.rs": (
+                "use crate::workbench::app_state::AppState;\n"
+                "impl AppState {\n    pub fn delete_library(&mut self) {}\n}\n"
+            ),
+            "workbench/session/other.rs": (
+                "use crate::workbench::app_state::AppState;\n"
+                "impl AppState {\n    pub fn elsewhere(&mut self) {}\n}\n"
+            ),
+        })
+        # Only the method outside the shell's project transactions counts.
+        self.assertEqual(values["whole-app"], {"impl AppState methods outside session": 1})
+
+
 class CeilingTests(unittest.TestCase):
     MEASURED = {
         "feature->feature": {"design->code": 3},
