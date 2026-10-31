@@ -323,6 +323,28 @@ impl NonlinearDevice for Mosfet {
         let voltage_tol = criteria.voltage_tolerance();
         let current_tol = criteria.current_tolerance();
 
+        // A load whose limiting moved the bias evaluated the device away from
+        // the iterate, so it cannot end the solve, as in Xyce, where a limited
+        // load clears the device's origFlag. The current checks below miss
+        // that gap when the current does not depend on the limited voltage:
+        // with KP=0 the solve ended on fetlim's walk down from the MODEINITJCT
+        // seed, and the transient started from the charges of that bias.
+        let limited = [
+            (self.vgs, self.eval_vgs),
+            (self.vds, self.eval_vds),
+            (self.vbs, self.eval_vbs),
+        ]
+        .iter()
+        .any(|&(raw, eval)| {
+            (raw - eval)
+                .abs()
+                .partial_cmp(&(reltol * raw.abs().max(eval.abs()) + voltage_tol))
+                != Some(std::cmp::Ordering::Less)
+        });
+        if limited {
+            return false;
+        }
+
         let vgs_diff = (self.vgs - self.vgs_prev).abs();
         let vds_diff = (self.vds - self.vds_prev).abs();
         let vbs_diff = (self.vbs - self.vbs_prev).abs();
