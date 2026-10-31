@@ -3,14 +3,13 @@
 //! # Why IndexedDB, and why this shape
 //!
 //! It is the mechanism this application already keeps large signed blobs in:
-//! `state::pdk_config::persistence::browser` commits content-addressed PDK
-//! archives the same way, for the same reason — Web Storage is synchronous,
-//! string-only, and capped somewhere around five megabytes, which a single
-//! pack archive can exceed on its own. What is *not* shared with that module
-//! is its transaction machinery, and the reason is measured rather than
-//! assumed: this store needs four operations over one object store, and that
-//! module needs a compare-and-exchange head, a generation counter and a legacy
-//! Web Storage migration, none of which a pack mirror has an equivalent of.
+//! the PDK configuration commits content-addressed archives the same way, for
+//! the same reason — Web Storage is synchronous, string-only, and capped
+//! somewhere around five megabytes, which a single pack archive can exceed on
+//! its own. Both go through [`crate::browser_store`]. What the PDK store builds
+//! on it (a compare-and-exchange head, a generation counter, a legacy Web
+//! Storage migration) has no equivalent in a pack mirror, which needs four
+//! operations over one object store.
 //!
 //! # Keys
 //!
@@ -40,21 +39,11 @@ use super::{
     DurableHubMirror, PackStorageStanding, PersistedHubState, StoredArchive,
     UNAVAILABLE_AFTER_WRITE, UNAVAILABLE_AT_OPEN,
 };
-
-const DATABASE: &str = "rspice-model-hub";
-const STORE: &str = "verified-packs";
-const SCHEMA_VERSION: u32 = 1;
+use crate::browser_store::{self, MODEL_HUB};
 
 const SNAPSHOT_KEY: &str = "catalog/snapshot";
 const SERIAL_KEY: &str = "catalog/serial";
 const ARCHIVE_PREFIX: &str = "archive/";
-
-/// How long any one browser call may take before it is abandoned.
-///
-/// A storage call that never settles would otherwise hold the restore in its
-/// loading phase for the life of the tab, which presents as a workspace that
-/// silently never lists a pack.
-const ASYNC_TIMEOUT_MS: u32 = 30_000;
 
 /// The most archives one origin may restore.
 ///
@@ -265,402 +254,54 @@ async fn storage_boolean(storage: &JsValue, method: &str) -> Option<bool> {
     if callable.is_null() || callable.is_undefined() {
         return None;
     }
-    let returned = call(storage, method, &[]).ok()?;
-    await_promise(js_sys::Promise::resolve(&returned), method)
-        .await
-        .ok()?
-        .as_bool()
+    let returned = browser_store::call(storage, method, &[]).ok()?;
+    browser_store::await_promise(
+        js_sys::Promise::resolve(&returned),
+        method,
+        MODEL_HUB.timeout_ms,
+    )
+    .await
+    .ok()?
+    .as_bool()
 }
 
 // ---------------------------------------------------------------------------
 // IndexedDB
 // ---------------------------------------------------------------------------
 
-/// An open database that closes itself when the last handle drops.
-struct Database {
-    value: JsValue,
-    _on_version_change: wasm_bindgen::closure::Closure<dyn FnMut()>,
-}
-
-impl Drop for Database {
-    fn drop(&mut self) {
-        let _ = call(&self.value, "close", &[]);
-    }
-}
-
 async fn get_bytes(key: &str) -> Result<Option<Vec<u8>>, String> {
-    let database = open().await?;
-    let transaction = call(
-        &database.value,
-        "transaction",
-        &[JsValue::from_str(STORE), JsValue::from_str("readonly")],
-    )?;
-    let store = call(&transaction, "objectStore", &[JsValue::from_str(STORE)])?;
-    let request = call(&store, "get", &[JsValue::from_str(key)])?;
-    let value = await_request(&request).await?;
-    if value.is_undefined() || value.is_null() {
+    let database = browser_store::open(&MODEL_HUB).await?;
+    let Some(value) = database.read()?.get(key).await? else {
+        return Ok(None);
+    };
+    if value.is_null() {
         return Ok(None);
     }
-    use wasm_bindgen::JsCast as _;
-    if !value.is_instance_of::<js_sys::Uint8Array>() {
-        // Stored bytes that are not bytes are a rewritten record. Reporting
-        // them as absent is the safe reading: the restore proves whatever it
-        // gets, and there is nothing here to prove.
-        return Err(format!("the stored record at {key} is not a byte array"));
-    }
-    Ok(Some(js_sys::Uint8Array::new(&value).to_vec()))
+    // Stored bytes that are not bytes are a rewritten record. Reporting them
+    // as absent is the safe reading: the restore proves whatever it gets, and
+    // there is nothing here to prove.
+    browser_store::bytes(&value)
+        .map(Some)
+        .ok_or_else(|| format!("the stored record at {key} is not a byte array"))
 }
 
 async fn all_keys() -> Result<Vec<String>, String> {
-    let database = open().await?;
-    let transaction = call(
-        &database.value,
-        "transaction",
-        &[JsValue::from_str(STORE), JsValue::from_str("readonly")],
-    )?;
-    let store = call(&transaction, "objectStore", &[JsValue::from_str(STORE)])?;
-    let request = call(&store, "getAllKeys", &[])?;
-    let value = await_request(&request).await?;
-    Ok(js_sys::Array::from(&value)
-        .iter()
-        .filter_map(|key| key.as_string())
-        .collect())
+    let database = browser_store::open(&MODEL_HUB).await?;
+    database.read()?.keys().await
 }
 
 async fn put(key: &str, bytes: &[u8]) -> Result<(), String> {
-    let database = open().await?;
-    let transaction = readwrite(&database.value)?;
-    let completion = await_transaction(&transaction);
-    let store = call(&transaction, "objectStore", &[JsValue::from_str(STORE)])?;
-    let request = call(
-        &store,
-        "put",
-        &[
-            js_sys::Uint8Array::from(bytes).into(),
-            JsValue::from_str(key),
-        ],
-    )?;
-    await_request(&request).await?;
-    completion.await
+    let database = browser_store::open(&MODEL_HUB).await?;
+    let transaction = database.write()?;
+    transaction
+        .put(key, &js_sys::Uint8Array::from(bytes).into())
+        .await?;
+    transaction.commit().await
 }
 
 async fn delete(key: &str) -> Result<(), String> {
-    let database = open().await?;
-    let transaction = readwrite(&database.value)?;
-    let completion = await_transaction(&transaction);
-    let store = call(&transaction, "objectStore", &[JsValue::from_str(STORE)])?;
-    let request = call(&store, "delete", &[JsValue::from_str(key)])?;
-    await_request(&request).await?;
-    completion.await
-}
-
-/// A read-write transaction, asking for strict durability where it is offered.
-fn readwrite(database: &JsValue) -> Result<JsValue, String> {
-    let options = js_sys::Object::new();
-    js_sys::Reflect::set(
-        &options,
-        &JsValue::from_str("durability"),
-        &JsValue::from_str("strict"),
-    )
-    .map_err(js_error)?;
-    call(
-        database,
-        "transaction",
-        &[
-            JsValue::from_str(STORE),
-            JsValue::from_str("readwrite"),
-            options.into(),
-        ],
-    )
-    .or_else(|_| {
-        // Browsers that do not know the option reject the three-argument form
-        // outright, and a durability hint is not worth failing a write over.
-        call(
-            database,
-            "transaction",
-            &[JsValue::from_str(STORE), JsValue::from_str("readwrite")],
-        )
-    })
-}
-
-async fn open() -> Result<Database, String> {
-    let window = web_sys::window().ok_or_else(|| "browser window is unavailable".to_owned())?;
-    let factory =
-        js_sys::Reflect::get(&window, &JsValue::from_str("indexedDB")).map_err(js_error)?;
-    if factory.is_null() || factory.is_undefined() {
-        return Err("IndexedDB is unavailable".to_owned());
-    }
-    let request = call(
-        &factory,
-        "open",
-        &[
-            JsValue::from_str(DATABASE),
-            JsValue::from_f64(f64::from(SCHEMA_VERSION)),
-        ],
-    )?;
-
-    let upgrade_request = request.clone();
-    let on_upgrade = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        let Ok(database) = js_sys::Reflect::get(&upgrade_request, &JsValue::from_str("result"))
-        else {
-            return;
-        };
-        let exists = js_sys::Reflect::get(&database, &JsValue::from_str("objectStoreNames"))
-            .ok()
-            .and_then(|names| call(&names, "contains", &[JsValue::from_str(STORE)]).ok())
-            .and_then(|value| value.as_bool())
-            .unwrap_or(false);
-        if !exists {
-            let _ = call(&database, "createObjectStore", &[JsValue::from_str(STORE)]);
-        }
-    });
-
-    let value = await_open(&request, on_upgrade).await?;
-    let closing = value.clone();
-    let on_version_change = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-        // Another tab is upgrading the schema. Holding the connection open
-        // would block it indefinitely, which presents in the other tab as a
-        // workspace that never finishes loading.
-        let _ = call(&closing, "close", &[]);
-    });
-    js_sys::Reflect::set(
-        &value,
-        &JsValue::from_str("onversionchange"),
-        on_version_change.as_ref(),
-    )
-    .map_err(js_error)?;
-    Ok(Database {
-        value,
-        _on_version_change: on_version_change,
-    })
-}
-
-/// Settles an `IDBOpenDBRequest`, keeping its handlers alive until it does.
-async fn await_open(
-    request: &JsValue,
-    on_upgrade: wasm_bindgen::closure::Closure<dyn FnMut()>,
-) -> Result<JsValue, String> {
-    let success_request = request.clone();
-    let error_request = request.clone();
-    let target = request.clone();
-    let mut on_upgrade = Some(on_upgrade);
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let settled = std::rc::Rc::new(std::cell::Cell::new(false));
-
-        let success_settled = settled.clone();
-        let success_request = success_request.clone();
-        let success = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if success_settled.replace(true) {
-                return;
-            }
-            let result = js_sys::Reflect::get(&success_request, &JsValue::from_str("result"))
-                .unwrap_or(JsValue::UNDEFINED);
-            let _ = resolve.call1(&JsValue::UNDEFINED, &result);
-        });
-
-        let failure_settled = settled.clone();
-        let error_request = error_request.clone();
-        let blocked_reject = reject.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if failure_settled.replace(true) {
-                return;
-            }
-            let error = js_sys::Reflect::get(&error_request, &JsValue::from_str("error"))
-                .unwrap_or_else(|_| JsValue::from_str("IndexedDB open failed"));
-            let _ = reject.call1(&JsValue::UNDEFINED, &error);
-        });
-
-        let blocked_settled = settled.clone();
-        let blocked = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if blocked_settled.replace(true) {
-                return;
-            }
-            let _ = blocked_reject.call1(
-                &JsValue::UNDEFINED,
-                &JsValue::from_str("another RSpice tab is upgrading pack storage"),
-            );
-        });
-
-        let upgrade = on_upgrade.take().expect("one open per request");
-        for (property, handler) in [
-            ("onsuccess", success.as_ref().clone()),
-            ("onerror", failure.as_ref().clone()),
-            ("onblocked", blocked.as_ref().clone()),
-            ("onupgradeneeded", upgrade.as_ref().clone()),
-        ] {
-            let _ = js_sys::Reflect::set(&target, &JsValue::from_str(property), &handler);
-        }
-        // The browser owns these until the request settles; the timeout below
-        // bounds how long that is, so leaking them is bounded too.
-        retain(vec![success, failure, blocked, upgrade]);
-    });
-    await_promise(promise, "IndexedDB open").await
-}
-
-/// Settles an `IDBRequest`.
-async fn await_request(request: &JsValue) -> Result<JsValue, String> {
-    let success_request = request.clone();
-    let error_request = request.clone();
-    let target = request.clone();
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let settled = std::rc::Rc::new(std::cell::Cell::new(false));
-        let success_settled = settled.clone();
-        let success_request = success_request.clone();
-        let success = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if success_settled.replace(true) {
-                return;
-            }
-            let result = js_sys::Reflect::get(&success_request, &JsValue::from_str("result"))
-                .unwrap_or(JsValue::UNDEFINED);
-            let _ = resolve.call1(&JsValue::UNDEFINED, &result);
-        });
-        let failure_settled = settled.clone();
-        let error_request = error_request.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if failure_settled.replace(true) {
-                return;
-            }
-            let error = js_sys::Reflect::get(&error_request, &JsValue::from_str("error"))
-                .unwrap_or_else(|_| JsValue::from_str("IndexedDB request failed"));
-            let _ = reject.call1(&JsValue::UNDEFINED, &error);
-        });
-        for (property, handler) in [
-            ("onsuccess", success.as_ref().clone()),
-            ("onerror", failure.as_ref().clone()),
-        ] {
-            let _ = js_sys::Reflect::set(&target, &JsValue::from_str(property), &handler);
-        }
-        retain(vec![success, failure]);
-    });
-    await_promise(promise, "IndexedDB request").await
-}
-
-/// Settles when the transaction commits, so a caller can report a write only
-/// after the browser has actually taken it.
-fn await_transaction(
-    transaction: &JsValue,
-) -> impl std::future::Future<Output = Result<(), String>> + 'static {
-    let target = transaction.clone();
-    let error_transaction = transaction.clone();
-    let promise = js_sys::Promise::new(&mut move |resolve, reject| {
-        let settled = std::rc::Rc::new(std::cell::Cell::new(false));
-        let complete_settled = settled.clone();
-        let complete = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if !complete_settled.replace(true) {
-                let _ = resolve.call0(&JsValue::UNDEFINED);
-            }
-        });
-        let failure_settled = settled.clone();
-        let error_transaction = error_transaction.clone();
-        let failure = wasm_bindgen::closure::Closure::<dyn FnMut()>::new(move || {
-            if failure_settled.replace(true) {
-                return;
-            }
-            // A quota refusal arrives here, as an aborted transaction whose
-            // error names the reason. It is the sentence the reader is shown.
-            let error = js_sys::Reflect::get(&error_transaction, &JsValue::from_str("error"))
-                .unwrap_or_else(|_| JsValue::from_str("IndexedDB transaction failed"));
-            let _ = reject.call1(&JsValue::UNDEFINED, &error);
-        });
-        for (property, handler) in [
-            ("oncomplete", complete.as_ref().clone()),
-            ("onabort", failure.as_ref().clone()),
-            ("onerror", failure.as_ref().clone()),
-        ] {
-            let _ = js_sys::Reflect::set(&target, &JsValue::from_str(property), &handler);
-        }
-        retain(vec![complete, failure]);
-    });
-    async move {
-        await_promise(promise, "IndexedDB transaction")
-            .await
-            .map(|_| ())
-    }
-}
-
-type RetainedCallbacks = Vec<wasm_bindgen::closure::Closure<dyn FnMut()>>;
-
-thread_local! {
-    /// Handlers the browser still owns.
-    ///
-    /// A `Closure` dropped while an event source still points at it leaves the
-    /// browser calling into freed memory, so each set is held until the
-    /// operation that armed it can no longer fire. Every operation here is
-    /// bounded by [`ASYNC_TIMEOUT_MS`], and the list is drained from the front
-    /// once it grows past what a healthy session ever holds at once.
-    static RETAINED: std::cell::RefCell<Vec<RetainedCallbacks>> =
-        const { std::cell::RefCell::new(Vec::new()) };
-}
-
-/// The most in-flight operations one session keeps handlers for.
-const MAX_RETAINED_OPERATIONS: usize = 64;
-
-fn retain(callbacks: RetainedCallbacks) {
-    RETAINED.with(|retained| {
-        let mut retained = retained.borrow_mut();
-        if retained.len() >= MAX_RETAINED_OPERATIONS {
-            retained.remove(0);
-        }
-        retained.push(callbacks);
-    });
-}
-
-/// Awaits a promise, or gives up on it.
-async fn await_promise(promise: js_sys::Promise, operation: &str) -> Result<JsValue, String> {
-    let race = js_sys::Array::new();
-    race.push(&promise);
-    race.push(&timeout(operation));
-    wasm_bindgen_futures::JsFuture::from(js_sys::Promise::race(&race))
-        .await
-        .map_err(js_error)
-}
-
-fn timeout(operation: &str) -> js_sys::Promise {
-    let message = format!(
-        "{operation} timed out after {} seconds",
-        ASYNC_TIMEOUT_MS / 1_000
-    );
-    js_sys::Promise::new(&mut move |_resolve, reject| {
-        let message = message.clone();
-        let expire = reject.clone();
-        let callback = wasm_bindgen::closure::Closure::once_into_js(move || {
-            let _ = expire.call1(&JsValue::UNDEFINED, &JsValue::from_str(&message));
-        });
-        let Some(window) = web_sys::window() else {
-            let _ = reject.call1(
-                &JsValue::UNDEFINED,
-                &JsValue::from_str("browser window is unavailable"),
-            );
-            return;
-        };
-        if let Err(error) = call(
-            &window.into(),
-            "setTimeout",
-            &[callback, JsValue::from_f64(f64::from(ASYNC_TIMEOUT_MS))],
-        ) {
-            let _ = reject.call1(&JsValue::UNDEFINED, &JsValue::from_str(&error));
-        }
-    })
-}
-
-fn call(receiver: &JsValue, name: &str, arguments: &[JsValue]) -> Result<JsValue, String> {
-    use wasm_bindgen::JsCast as _;
-
-    let function = js_sys::Reflect::get(receiver, &JsValue::from_str(name))
-        .map_err(js_error)?
-        .dyn_into::<js_sys::Function>()
-        .map_err(|_| format!("browser object has no callable {name} method"))?;
-    let args = js_sys::Array::new();
-    for argument in arguments {
-        args.push(argument);
-    }
-    function.apply(receiver, &args).map_err(js_error)
-}
-
-fn js_error(value: JsValue) -> String {
-    js_sys::Reflect::get(&value, &JsValue::from_str("message"))
-        .ok()
-        .and_then(|message| message.as_string())
-        .or_else(|| value.as_string())
-        .unwrap_or_else(|| "the browser reported an error without a message".to_owned())
+    let database = browser_store::open(&MODEL_HUB).await?;
+    let transaction = database.write()?;
+    transaction.delete(key).await?;
+    transaction.commit().await
 }
