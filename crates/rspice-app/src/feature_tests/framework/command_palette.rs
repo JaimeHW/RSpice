@@ -8,6 +8,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app::command_palette::*;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 
 #[test]
@@ -32,6 +33,13 @@ use crate::workbench::commands::vocabulary::{
 
 /// What the registry declares about `command`.
 fn spec(command: Command) -> &'static CommandSpec {
+    command_registry()
+        .spec(command.key())
+        .expect("the registry declares the command")
+}
+
+/// What the registry declares about the project feature's `command`.
+fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
     command_registry()
         .spec(command.key())
         .expect("the registry declares the command")
@@ -101,7 +109,10 @@ fn palette_is_a_typed_registry_projection() {
     let commands = palette_commands_listed();
     assert!(!commands.contains(&Command::CommandPalette));
     assert!(!commands.contains(&Command::Cancel));
-    assert!(commands.contains(&Command::OpenProject));
+    assert!(
+        palette_commands(&RSpiceApp::test_instance())
+            .any(|listed| listed.key() == ProjectCommand::OpenProject.key())
+    );
     assert!(commands.contains(&Command::GenerateNetlist));
     assert!(
         commands
@@ -148,16 +159,27 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
 fn opening_a_workspace_or_a_project_page_is_navigating() {
     let (mut workspaces, mut pages) = (0, 0);
     for &command in COMMAND_REGISTRY {
-        match command {
-            Command::OpenWorkspace(_) => workspaces += 1,
-            Command::ProjectPage(_) => pages += 1,
-            _ => continue,
-        }
+        let Command::OpenWorkspace(_) = command else {
+            continue;
+        };
+        workspaces += 1;
         assert_eq!(
             PaletteScope::for_command(spec(command)),
             PaletteScope::Navigate,
             "{command:?} is filed under {}",
             spec(command).group
+        );
+    }
+    for command in ProjectCommand::ALL {
+        let ProjectCommand::Page(_) = command else {
+            continue;
+        };
+        pages += 1;
+        assert_eq!(
+            PaletteScope::for_command(project_spec(command)),
+            PaletteScope::Navigate,
+            "{command:?} is filed under {}",
+            project_spec(command).group
         );
     }
     assert_eq!(workspaces, crate::workbench::state::Workspace::ALL.len());
@@ -255,8 +277,14 @@ fn fuzzy_matching_marks_display_characters_and_searches_registry_metadata() {
 
 #[test]
 fn palette_names_are_canonical_labels_without_ellipsis() {
-    assert_eq!(command_name(spec(Command::OpenProject)), "Open project");
-    assert_eq!(command_name(spec(Command::SaveAll)), "Save all");
+    assert_eq!(
+        command_name(project_spec(ProjectCommand::OpenProject)),
+        "Open project"
+    );
+    assert_eq!(
+        command_name(project_spec(ProjectCommand::SaveAll)),
+        "Save all"
+    );
     assert_eq!(
         command_name(spec(Command::GenerateNetlist)),
         "Open generated netlist"
@@ -687,8 +715,8 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         .select_cell("behavioral", "gain");
 
     for (query, command) in [
-        ("Verilog-A device", Command::NewVerilogADevice),
-        ("New view", Command::NewView),
+        ("Verilog-A device", Command::NewVerilogADevice.key()),
+        ("New view", ProjectCommand::NewView.key()),
     ] {
         let rows = palette_rows(
             &app,
@@ -699,7 +727,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         );
         let row = rows
             .into_iter()
-            .find(|row| row.entry.command() == Some(command.key()))
+            .find(|row| row.entry.command() == Some(command))
             .unwrap_or_else(|| panic!("{query:?} finds {command:?}"));
         assert!(row.blocked.is_none(), "{command:?}: {:?}", row.blocked);
         row.entry.execute(&mut app).expect("the command runs");
@@ -730,8 +758,11 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
             .expect("the library")
             .read_only = true;
     }
-    for command in [Command::NewVerilogADevice, Command::NewView] {
-        assert!(!command.is_enabled(&read_only), "{command:?}");
+    for command in [
+        Command::NewVerilogADevice.key(),
+        ProjectCommand::NewView.key(),
+    ] {
+        assert!(!read_only.command_key_enabled(command), "{command:?}");
     }
 }
 

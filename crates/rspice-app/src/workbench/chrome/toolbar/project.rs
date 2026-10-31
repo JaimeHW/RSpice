@@ -2,9 +2,9 @@
 //! open, and the Project workspace's tools.
 
 use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::project::commands::ProjectCommand;
 
 use super::toolbar_text_command;
 
@@ -16,7 +16,7 @@ pub(in crate::workbench) fn no_project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::ProjectLauncher.key(),
+        ProjectCommand::ProjectLauncher.key(),
         WorkbenchIcon::Folder,
         "Open project launcher",
         layout,
@@ -24,7 +24,7 @@ pub(in crate::workbench) fn no_project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::NewProject.key(),
+        ProjectCommand::NewProject.key(),
         WorkbenchIcon::Add,
         "New project",
         layout,
@@ -39,7 +39,7 @@ pub(in crate::workbench) fn project_tools(
     toolbar_text_command(
         ui,
         app,
-        Command::NewCell.key(),
+        ProjectCommand::NewCell.key(),
         WorkbenchIcon::Add,
         "New cell",
         layout,

@@ -21,16 +21,6 @@ impl Command {
             Self::OpenWorkspace(workspace) => {
                 workspace_available(state.platform.project_lifecycle.is_open(), workspace)
             }
-            Self::Save => {
-                state.platform.project_lifecycle.is_open()
-                    || state.model.schematic.session.current_file.is_some()
-                    || state.platform.browser_schematic_save_name.is_some()
-            }
-            Self::SaveAs => state.platform.project_lifecycle.is_open(),
-            Self::SaveAll => {
-                state.platform.project_lifecycle.is_open()
-                    && crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-            }
             Self::RevertActiveDocument => {
                 state.platform.project_lifecycle.accepted().is_some()
                     && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
@@ -39,9 +29,7 @@ impl Command {
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
-            Self::CloseProject => state.platform.project_lifecycle.is_open(),
             // Each is enabled exactly where its dialog could create something.
-            Self::NewView => state.new_view_target().is_some(),
             Self::NewVerilogADevice => crate::workbench::app::new_veriloga_device_available(state),
             Self::OpenNetlist => {
                 !state.model.simulation.execution.has_active_execution()
@@ -222,11 +210,6 @@ impl Command {
             Self::ConnectivityManager => {
                 active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
-            Self::DesignManagement => {
-                active_schematic_editor(app)
-                    && state.platform.project_lifecycle.is_open()
-                    && !state.schematic_edit_read_only()
-            }
             Self::SelectionBulkEdit => {
                 active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
@@ -241,7 +224,6 @@ impl Command {
             Self::ReviewComments => {
                 active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
             }
-            Self::RevisionHistory => state.platform.project_lifecycle.is_open(),
             Self::ObjectProperties => {
                 if active_symbol_editor(app) {
                     let selection = state.design.symbol.editor.effective_selection();
@@ -397,9 +379,6 @@ impl Command {
             Self::CheckCellview => active_schematic_editor(app) || active_symbol_editor(app),
             // The design is the configured one, whichever view is open.
             Self::CheckDesign => true,
-            Self::CheckAndSave => {
-                active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
             Self::ClearChecks if active_symbol_editor(app) => {
                 state.active_symbol_pin_finding_count().is_some()
             }

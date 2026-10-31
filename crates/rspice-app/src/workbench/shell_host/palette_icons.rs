@@ -6,6 +6,7 @@ use crate::ui::icons::Icon;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 
 /// The glyph the palette gives `command`; `None` for a command that wears its
@@ -30,21 +31,8 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::RuleSetup => Icon::Check,
         Command::RunSimulation => Icon::Run,
         Command::StopSimulation => Icon::Stop,
-        Command::CheckCellview
-        | Command::CheckDesign
-        | Command::CheckAndSave
-        | Command::PreflightChecks => Icon::Check,
-        Command::OpenProject
-        | Command::ProjectLauncher
-        | Command::RecentProjects
-        | Command::OpenDocument => Icon::Folder,
-        Command::NewProject
-        | Command::Save
-        | Command::SaveAs
-        | Command::SaveAll
-        | Command::ImportNetlist
-        | Command::ImportVerilogA
-        | Command::ExportNetlist(_) => Icon::File,
+        Command::CheckCellview | Command::CheckDesign | Command::PreflightChecks => Icon::Check,
+        Command::ImportNetlist | Command::ImportVerilogA | Command::ExportNetlist(_) => Icon::File,
         _ => return None,
     };
     Some(icon)
@@ -61,6 +49,20 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
     }
     if ModelsCommand::from_key(key) == Some(ModelsCommand::ModelBrowser) {
         return Some(Icon::Folder);
+    }
+    if let Some(command) = ProjectCommand::from_key(key) {
+        return match command {
+            ProjectCommand::CheckAndSave => Some(Icon::Check),
+            ProjectCommand::OpenProject
+            | ProjectCommand::ProjectLauncher
+            | ProjectCommand::RecentProjects
+            | ProjectCommand::OpenSchematic => Some(Icon::Folder),
+            ProjectCommand::NewProject
+            | ProjectCommand::Save
+            | ProjectCommand::SaveAs
+            | ProjectCommand::SaveAll => Some(Icon::File),
+            _ => None,
+        };
     }
     match ResultsCommand::from_key(key)? {
         ResultsCommand::ExportWaveformsCsv => Some(Icon::File),

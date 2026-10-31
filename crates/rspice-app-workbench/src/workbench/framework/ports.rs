@@ -5,6 +5,7 @@
 //! feature's, so the code that answers from a feature's reads, wherever it
 //! sits above the session, takes the port and not the feature.
 
+use rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ResultViewer, SourceWaveformPresentationKey,
@@ -98,4 +99,9 @@ pub trait ResultsPort {
     /// `analysis` takes it: the abscissa, and the ordinate where the sheet
     /// hands one over. `None` when neither is pinned.
     fn captured_viewport(&self, analysis: AnalysisPresentationKey) -> Option<CapturedViewport>;
+
+    /// What a project file saves of the workspace's presentation, as the
+    /// project lifecycle reads it beside the model when it captures the
+    /// project: whether the project holds unsaved work asks it.
+    fn saved_presentation(&self) -> &dyn ResultPresentationSource;
 }

@@ -971,11 +971,6 @@ mod tests {
             ),
             (ids::OPEN_CONSOLE, Command::OpenConsole),
             (ids::OPEN_NOTIFICATIONS, Command::OpenNotifications),
-            (ids::PROJECT_LAUNCHER, Command::ProjectLauncher),
-            (
-                ids::PROJECT_RECOVERY,
-                Command::ProjectPage(ProjectPage::Recovery),
-            ),
             (
                 ids::PROJECT_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Project),
@@ -986,7 +981,6 @@ mod tests {
                 ids::RESULTS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Results),
             ),
-            (ids::SAVE, Command::Save),
             (
                 ids::SIMULATION_ANALYSES,
                 Command::SimulationPage(crate::workbench::state::SimulationPage::Analyses),
@@ -1053,6 +1047,27 @@ mod tests {
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(ResultsCommand::from_key(id), Some(command), "{command:?}");
+            assert_eq!(legacy_command(id), None, "{command:?}");
+        }
+    }
+
+    /// Each key framework code names by an id for a project command is the
+    /// key that command declares.
+    #[test]
+    fn each_project_id_names_its_command() {
+        use crate::workbench::project::commands::ProjectCommand;
+        for (id, command) in [
+            (ids::NEW_CELL, ProjectCommand::NewCell),
+            (ids::NEW_PROJECT, ProjectCommand::NewProject),
+            (ids::PROJECT_LAUNCHER, ProjectCommand::ProjectLauncher),
+            (
+                ids::PROJECT_RECOVERY,
+                ProjectCommand::Page(ProjectPage::Recovery),
+            ),
+            (ids::SAVE, ProjectCommand::Save),
+        ] {
+            assert_eq!(id, command.key(), "{command:?}");
+            assert_eq!(ProjectCommand::from_key(id), Some(command), "{command:?}");
             assert_eq!(legacy_command(id), None, "{command:?}");
         }
     }

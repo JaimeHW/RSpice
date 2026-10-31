@@ -8,10 +8,13 @@
 
 use super::*;
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 
 #[test]
 fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
@@ -28,15 +31,20 @@ fn every_project_tab_has_one_discoverable_command_with_a_stable_identity() {
     assert_eq!(ProjectPage::ALL.len(), expected.len());
 
     for (page, stable_id) in expected {
-        let command = Command::ProjectPage(page);
+        let command = ProjectCommand::Page(page);
+        let key = command.key();
         assert!(
-            vocabulary::COMMAND_REGISTRY.contains(&command),
+            command_registry().order().contains(&key),
             "project tab is absent from the command registry: {page:?}"
         );
-        assert_eq!(command.stable_id(), stable_id);
-        assert_eq!(Command::from_stable_id(stable_id), Some(command));
+        assert_eq!(key.as_str(), stable_id);
+        assert_eq!(command_registry().resolve(stable_id), Some(key));
+        assert_eq!(ProjectCommand::from_key(key), Some(command));
         assert!(
-            command.requires_open_project(),
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "project tab bypasses the open-project boundary: {page:?}"
         );
     }
@@ -50,7 +58,7 @@ fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
         app.state.workbench.workspace = Workspace::Results;
         app.state.project.project_page = ProjectPage::Overview;
 
-        Command::ProjectPage(page).execute(&mut app);
+        app.execute_command_key(ProjectCommand::Page(page).key());
 
         assert_eq!(app.state.workbench.workspace, Workspace::Project);
         assert_eq!(app.state.project.project_page, page);
@@ -60,24 +68,34 @@ fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
 #[test]
 fn project_operation_gate_covers_every_mutating_project_command() {
     for command in [
-        Command::ProjectLauncher,
-        Command::RecentProjects,
-        Command::NewProject,
-        Command::OpenProject,
-        Command::Save,
-        Command::SaveAs,
-        Command::SaveAll,
         Command::RevertActiveDocument,
         Command::CloseActiveDocument,
-        Command::CloseProject,
-        Command::NewCell,
-        Command::OpenDocument,
         Command::ImportNetlist,
         Command::ImportVerilogA,
-        Command::CheckAndSave,
     ] {
         assert!(
             command.blocked_by_project_operation(),
+            "ungated: {command:?}"
+        );
+    }
+    for command in [
+        ProjectCommand::ProjectLauncher,
+        ProjectCommand::RecentProjects,
+        ProjectCommand::NewProject,
+        ProjectCommand::OpenProject,
+        ProjectCommand::Save,
+        ProjectCommand::SaveAs,
+        ProjectCommand::SaveAll,
+        ProjectCommand::CloseProject,
+        ProjectCommand::NewCell,
+        ProjectCommand::OpenSchematic,
+        ProjectCommand::CheckAndSave,
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION),
             "ungated: {command:?}"
         );
     }
@@ -114,7 +132,7 @@ fn new_cell_command_captures_exact_library_catalog_revision() {
     let mut app = RSpiceApp::test_instance();
     let revision = app.state.model.library_manager.revision();
 
-    Command::NewCell.execute(&mut app);
+    app.execute_command_key(ProjectCommand::NewCell.key());
 
     assert!(app.state.project.new_cell_dialog);
     assert_eq!(app.state.project.new_cell_library_revision, revision);
@@ -125,19 +143,12 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
     for command in [
-        Command::NewCell,
         Command::ImportNetlist,
         Command::ImportVerilogA,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
         Command::FindInDesign,
-        Command::CheckAndSave,
         Command::SelectionBulkEdit,
         Command::ConnectivityManager,
-        Command::ProjectPage(ProjectPage::Overview),
-        Command::ProjectPage(ProjectPage::Library),
-        Command::ProjectPage(ProjectPage::Configuration),
-        Command::ProjectPage(ProjectPage::Dependencies),
-        Command::ProjectPage(ProjectPage::Recovery),
         Command::SimulationPage(SimulationPage::Variables),
         Command::PreflightChecks,
         Command::ManageSimulationPlans,
@@ -208,6 +219,66 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
 
         let before = app.state.model.log_buffer.revision();
         command.execute(&mut app);
+
+        assert_eq!(
+            app.state.workbench.workspace,
+            Workspace::Project,
+            "closed-project command changed workspace: {command:?}"
+        );
+        assert_eq!(
+            app.state.model.log_buffer.revision(),
+            before,
+            "a disabled command is silent: {command:?}"
+        );
+        assert_eq!(
+            app.state.prompt_text(),
+            None,
+            "a disabled command is silent: {command:?}"
+        );
+    }
+
+    // The project feature's commands that act on a project hold the same
+    // boundary, through the dispatcher by key.
+    for command in [
+        ProjectCommand::NewCell,
+        ProjectCommand::CheckAndSave,
+        ProjectCommand::Page(ProjectPage::Overview),
+        ProjectCommand::Page(ProjectPage::Library),
+        ProjectCommand::Page(ProjectPage::Configuration),
+        ProjectCommand::Page(ProjectPage::Dependencies),
+        ProjectCommand::Page(ProjectPage::Recovery),
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
+            "missing closed-project boundary: {command:?}"
+        );
+    }
+    for command in ProjectCommand::ALL.into_iter().filter(|command| {
+        command
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::REQUIRES_OPEN_PROJECT)
+    }) {
+        let key = command.key();
+        let mut app = RSpiceApp::test_instance();
+        app.state.close_project_session();
+        app.state.workbench.workspace = Workspace::Project;
+
+        assert!(
+            !app.command_key_enabled(key),
+            "enabled without project: {command:?}"
+        );
+        assert_eq!(
+            app.command_availability(key),
+            CommandAvailability::Disabled("no project is open"),
+            "wrong closed-project reason for {command:?}"
+        );
+
+        let before = app.state.model.log_buffer.revision();
+        app.execute_command_key(key);
 
         assert_eq!(
             app.state.workbench.workspace,
@@ -358,30 +429,41 @@ fn standalone_schematic_save_remains_available_without_a_project() {
     app.state.close_project_session();
     app.state.model.schematic.session.current_file = Some("standalone.rsch".into());
 
-    assert!(!Command::Save.requires_open_project());
-    assert!(Command::Save.is_enabled(&app));
+    let save = ProjectCommand::Save;
+    assert!(
+        !save
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::REQUIRES_OPEN_PROJECT)
+    );
+    assert!(app.command_key_enabled(save.key()));
     assert_eq!(
-        Command::Save.availability(&app),
+        app.command_availability(save.key()),
         CommandAvailability::Available
     );
 
     app.state.model.schematic.session.current_file = None;
     app.state.platform.browser_schematic_save_name = Some("browser-import.rsch".to_owned());
-    assert!(Command::Save.is_enabled(&app));
+    assert!(app.command_key_enabled(save.key()));
     assert_eq!(
-        Command::Save.availability(&app),
+        app.command_availability(save.key()),
         CommandAvailability::Available
     );
 }
 
 #[test]
 fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
-    let mut state = AppState::default();
-    state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
-    state.project.project_launcher_open = false;
-    let _ = state.workbench.outbox.take::<FocusProjectLauncherSearch>();
+    let mut app = RSpiceApp::test_instance();
+    app.state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
+    app.state.project.project_launcher_open = false;
+    let _ = app
+        .state
+        .workbench
+        .outbox
+        .take::<FocusProjectLauncherSearch>();
 
-    open_recent_projects(&mut state);
+    app.execute_command_key(ProjectCommand::RecentProjects.key());
+    let state = &app.state;
 
     assert!(state.project.project_launcher_open);
     assert!(

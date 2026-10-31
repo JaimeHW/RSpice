@@ -5,6 +5,7 @@
 //! only the mutating ones explain the refusal and decline.
 
 use super::*;
+use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
 fn design_specialist_command_routes_to_the_existing_real_browser() {
@@ -63,7 +64,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         CommandAvailability::Disabled("open a schematic or testbench")
     );
     assert_eq!(
-        Command::CheckAndSave.availability(&app),
+        app.command_availability(ProjectCommand::CheckAndSave.key()),
         CommandAvailability::Disabled("open an editable schematic or testbench")
     );
 
@@ -77,7 +78,7 @@ fn design_menu_commands_explain_wrong_context_and_read_only_states() {
         );
     }
     assert_eq!(
-        Command::CheckAndSave.availability(&app),
+        app.command_availability(ProjectCommand::CheckAndSave.key()),
         CommandAvailability::Disabled("the active schematic is read-only")
     );
 
@@ -116,7 +117,9 @@ fn the_check_commands_name_their_reach_and_keep_the_check_family_keys() {
         "Ctrl+E"
     );
     assert_eq!(
-        Command::CheckAndSave.shortcut_bindings()[0].chord.label,
+        ProjectCommand::CheckAndSave.declared_spec().bindings[0]
+            .chord
+            .label,
         "Ctrl+Shift+E"
     );
     assert!(Command::CheckDesign.shortcut_bindings().is_empty());
@@ -143,15 +146,15 @@ fn check_design_is_offered_wherever_a_project_is_open() {
 fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    assert!(Command::CheckAndSave.is_enabled(&app));
+    assert!(app.command_key_enabled(ProjectCommand::CheckAndSave.key()));
 
-    Command::CheckAndSave.execute(&mut app);
+    app.execute_command_key(ProjectCommand::CheckAndSave.key());
     assert!(app.state.project.check_and_save.open);
     assert!(app.state.project.check_and_save.report.is_some());
 
     app.state.project.check_and_save.close();
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::CheckAndSave.is_enabled(&app));
+    assert!(!app.command_key_enabled(ProjectCommand::CheckAndSave.key()));
 
     app.state.model.schematic.session.read_only = false;
     app.state.model.safe_mode.activate(
@@ -161,7 +164,7 @@ fn check_and_save_obeys_write_authority_and_opens_its_real_workflow() {
         },
         "test session".to_owned(),
     );
-    assert!(!Command::CheckAndSave.is_enabled(&app));
+    assert!(!app.command_key_enabled(ProjectCommand::CheckAndSave.key()));
 }
 
 #[test]
@@ -187,8 +190,8 @@ fn configurations_opens_the_project_configuration_page() {
 fn design_management_has_authority_and_an_owned_workflow() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Design;
-    assert!(Command::DesignManagement.is_enabled(&app));
-    Command::DesignManagement.execute(&mut app);
+    assert!(app.command_key_enabled(ProjectCommand::DesignManagement.key()));
+    app.execute_command_key(ProjectCommand::DesignManagement.key());
     assert_eq!(
         app.state.workbench.current_route().surface_id(),
         crate::workbench::SurfaceId::DesignManagement
@@ -199,11 +202,11 @@ fn design_management_has_authority_and_an_owned_workflow() {
 
     app.state.project.design_management.open = false;
     app.state.model.schematic.session.read_only = true;
-    assert!(!Command::DesignManagement.is_enabled(&app));
+    assert!(!app.command_key_enabled(ProjectCommand::DesignManagement.key()));
 
     app.state.model.schematic.session.read_only = false;
     app.state.close_project_session();
-    assert!(!Command::DesignManagement.is_enabled(&app));
+    assert!(!app.command_key_enabled(ProjectCommand::DesignManagement.key()));
 }
 
 #[test]

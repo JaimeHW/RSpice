@@ -9,6 +9,7 @@
 use super::*;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
 fn command_catalog_has_unique_stable_ids() {
@@ -118,10 +119,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::ToggleFocusMode.spec().id, "toggle-focus-mode");
     assert_eq!(Command::RunSimulation.spec().id, "start-run");
     assert_eq!(Command::StopSimulation.spec().id, "stop-run");
-    assert_eq!(Command::OpenProject.spec().id, "open-project");
+    assert_eq!(ProjectCommand::OpenProject.key().as_str(), "open-project");
     assert_eq!(Command::OpenNetlist.spec().id, "open-netlist");
-    assert_eq!(Command::NewProject.spec().id, "new-project");
-    assert_eq!(Command::Save.spec().id, "save-project");
+    assert_eq!(ProjectCommand::NewProject.key().as_str(), "new-project");
+    assert_eq!(ProjectCommand::Save.key().as_str(), "save-project");
     assert_eq!(Command::CloseActiveDocument.spec().id, "close-document");
     assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
     assert_eq!(Command::GenerateNetlist.spec().id, "generated-netlist");
@@ -167,7 +168,10 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
         "specialist-tools-design"
     );
     assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");
-    assert_eq!(Command::DesignManagement.spec().id, "design-management");
+    assert_eq!(
+        ProjectCommand::DesignManagement.key().as_str(),
+        "design-management"
+    );
     assert_eq!(
         Command::ConnectivityManager.spec().id,
         "design-connectivity-tools"

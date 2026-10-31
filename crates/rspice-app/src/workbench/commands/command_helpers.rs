@@ -1,6 +1,8 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
+use crate::workbench::app::dialogs::library::new_view_target;
+use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
@@ -225,11 +227,6 @@ pub(super) fn set_tool(app: &mut RSpiceApp, tool: Tool) {
     app.state.model.schematic.arm_tool(tool);
 }
 
-pub(super) fn open_recent_projects(state: &mut AppState) {
-    state.open_project_launcher();
-    state.project.project_launcher_filter = ProjectLauncherFilter::Recent;
-}
-
 pub(super) const fn reset_active_view_available(_workspace: Workspace) -> bool {
     true
 }
@@ -305,45 +302,59 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
     }
 }
 
-pub(super) fn open_new_cell_dialog(app: &mut RSpiceApp) {
-    let selected = app
-        .state
-        .model
-        .library_manager
-        .selected_library
-        .as_ref()
-        .and_then(|name| {
-            app.state
-                .model
-                .library_manager
-                .get_library(name)
-                .filter(|library| !library.read_only)
-                .map(|library| library.name.clone())
-        });
-    let target_library = selected.or_else(|| {
-        app.state
-            .model
-            .library_manager
-            .libraries_sorted()
-            .into_iter()
-            .find(|library| !library.read_only)
-            .map(|library| library.name.clone())
-    });
-    let library_revision = app.state.model.library_manager.revision();
-
-    let dialogs = &mut app.state.project;
-    dialogs.new_cell_library = target_library.unwrap_or_default();
-    dialogs.new_cell_name.clear();
-    dialogs.new_cell_description.clear();
-    dialogs.new_cell_create_schematic = true;
-    dialogs.new_cell_create_symbol = false;
-    dialogs.new_cell_create_testbench = false;
-    dialogs.new_cell_create_veriloga = false;
-    dialogs.new_cell_error = None;
-    dialogs.new_cell_library_revision = library_revision;
-    dialogs.new_cell_dialog = true;
-}
-
 pub(in crate::workbench) fn file_action(app: &mut RSpiceApp, action: FileMenuAction) {
     dispatch_file_menu_action(&mut app.state, action, app.file_workflow_io.as_ref());
+}
+
+/// Carry out the project feature's file command `action` through the shell's
+/// file workflow, as its File menu row does.
+pub(in crate::workbench) fn run_project_file_action(
+    app: &mut RSpiceApp,
+    action: ProjectFileAction,
+) {
+    file_action(
+        app,
+        match action {
+            ProjectFileAction::NewProject => FileMenuAction::NewProject,
+            ProjectFileAction::OpenProject => FileMenuAction::OpenProject,
+            ProjectFileAction::OpenSchematic => FileMenuAction::Open,
+            ProjectFileAction::Save => FileMenuAction::Save,
+            ProjectFileAction::SaveAs => FileMenuAction::SaveProjectAs,
+            ProjectFileAction::SaveAll => FileMenuAction::SaveAll,
+            ProjectFileAction::CloseProject => FileMenuAction::CloseProject,
+        },
+    );
+}
+
+/// Open the project dialog `dialog` over the whole application, for the
+/// project feature's command that asked for it. Design management opens on
+/// its own route.
+pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: OpenProjectDialog) {
+    match dialog {
+        OpenProjectDialog::NewView => {
+            if let Some((library, cell)) = new_view_target(&app.state.model)
+                && let Err(error) = app.state.open_new_view_dialog(&library, &cell)
+            {
+                app.state.prompt(error);
+            }
+        }
+        OpenProjectDialog::DesignManagement => {
+            let route =
+                super::super::SurfaceRoute::surface(super::super::SurfaceId::DesignManagement);
+            match app
+                .state
+                .workbench
+                .navigate(route, super::super::RouteTransitionSource::User)
+            {
+                Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
+                Err(error) => app.state.prompt(error.to_string()),
+            }
+        }
+        OpenProjectDialog::RevisionHistory => {
+            crate::workbench::app::open_project_revision_history(&mut app.state);
+        }
+        OpenProjectDialog::CheckAndSave => {
+            crate::workbench::app::open_check_and_save_dialog(&mut app.state);
+        }
+    }
 }

@@ -22,6 +22,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_problem};
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::{ModelsCatalogScope, Workspace};
 use rspice_design::drc::DrcSeverity;
@@ -97,7 +98,7 @@ struct StatusSnapshot {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum OverviewIntent {
-    Command(Command),
+    Command(CommandKey),
     ProjectRootCommand(Command),
     OpenProjectRoot,
     OpenProjectModels,
@@ -107,7 +108,7 @@ enum OverviewIntent {
 impl OverviewIntent {
     fn execute(self, app: &mut RSpiceApp) {
         match self {
-            Self::Command(command) => command.execute(app),
+            Self::Command(key) => app.execute_command_key(key),
             Self::ProjectRootCommand(command) => {
                 open_project_root(app);
                 if command.is_enabled(app) {
@@ -456,7 +457,7 @@ impl OverviewSnapshot {
                         "Open analyses"
                     },
                     tone: Tone::Neutral,
-                    intent: OverviewIntent::Command(command),
+                    intent: OverviewIntent::Command(command.key()),
                     enabled,
                     disabled_reason,
                 }
@@ -514,7 +515,9 @@ impl OverviewSnapshot {
                     detail: "The project has no saved source document".to_owned(),
                     action: "Open deck",
                     tone: Tone::Error,
-                    intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist)),
+                    intent: OverviewIntent::Command(
+                        Command::OpenWorkspace(Workspace::Netlist).key(),
+                    ),
                     enabled,
                     disabled_reason,
                 },
@@ -524,7 +527,9 @@ impl OverviewSnapshot {
                     detail: deck.validation_detail.clone(),
                     action: "Open deck",
                     tone: deck.validation_tone,
-                    intent: OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist)),
+                    intent: OverviewIntent::Command(
+                        Command::OpenWorkspace(Workspace::Netlist).key(),
+                    ),
                     enabled,
                     disabled_reason,
                 },
@@ -550,7 +555,7 @@ impl OverviewSnapshot {
                 detail: configuration.detail.clone(),
                 action: "Manage",
                 tone: configuration.tone,
-                intent: OverviewIntent::Command(Command::ConfigurationSets),
+                intent: OverviewIntent::Command(Command::ConfigurationSets.key()),
                 enabled: configuration_enabled,
                 disabled_reason: configuration_disabled_reason,
             },
@@ -677,7 +682,9 @@ impl OverviewSnapshot {
                             revision.author()
                         ),
                         tone,
-                        intent: Some(OverviewIntent::Command(Command::RevisionHistory)),
+                        intent: Some(OverviewIntent::Command(
+                            ProjectCommand::RevisionHistory.key(),
+                        )),
                     },
                 ));
             }
@@ -713,9 +720,9 @@ impl OverviewSnapshot {
                         publication.actor_id()
                     ),
                     tone: Tone::Neutral,
-                    intent: Some(OverviewIntent::Command(Command::ProjectPage(
-                        ProjectPage::Library,
-                    ))),
+                    intent: Some(OverviewIntent::Command(
+                        ProjectCommand::Page(ProjectPage::Library).key(),
+                    )),
                 },
             ));
         }
@@ -1045,7 +1052,9 @@ fn overview_header(
                     };
                     if primary.accent().show(ui).clicked() {
                         intent = Some(if snapshot.netlist_first {
-                            OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
+                            OverviewIntent::Command(
+                                Command::OpenWorkspace(Workspace::Netlist).key(),
+                            )
                         } else {
                             OverviewIntent::OpenProjectRoot
                         });
@@ -1067,7 +1076,7 @@ fn overview_header(
                         }
                     }
                     let (new_cell_command_enabled, new_cell_command_reason) =
-                        command_gate(app, Command::NewCell.key());
+                        command_gate(app, ProjectCommand::NewCell.key());
                     let has_writable_library = app
                         .state
                         .model
@@ -1091,7 +1100,7 @@ fn overview_header(
                             "New cell creation is unavailable."
                         });
                     if new_cell.clicked() {
-                        intent = Some(OverviewIntent::Command(Command::NewCell));
+                        intent = Some(OverviewIntent::Command(ProjectCommand::NewCell.key()));
                     }
                     let (open_deck_enabled, open_deck_disabled_reason) =
                         command_gate(app, Command::OpenNetlist.key());
@@ -1106,13 +1115,15 @@ fn overview_header(
                         intent = Some(import_deck_intent());
                     }
                     let (history_enabled, history_disabled_reason) =
-                        command_gate(app, Command::RevisionHistory.key());
+                        command_gate(app, ProjectCommand::RevisionHistory.key());
                     let history = Button::new("History…").enabled(history_enabled).show(ui);
                     let history = history_disabled_reason.map_or(history.clone(), |reason| {
                         history.on_disabled_hover_text(reason)
                     });
                     if history.clicked() {
-                        intent = Some(OverviewIntent::Command(Command::RevisionHistory));
+                        intent = Some(OverviewIntent::Command(
+                            ProjectCommand::RevisionHistory.key(),
+                        ));
                     }
                 });
             },
@@ -1123,11 +1134,11 @@ fn overview_header(
 }
 
 fn run_plan_intent() -> OverviewIntent {
-    OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate))
+    OverviewIntent::Command(Command::OpenWorkspace(Workspace::Simulate).key())
 }
 
 fn import_deck_intent() -> OverviewIntent {
-    OverviewIntent::Command(Command::OpenNetlist)
+    OverviewIntent::Command(Command::OpenNetlist.key())
 }
 
 /// The bindings the next run executes against, stated as a property ledger.
@@ -1495,7 +1506,7 @@ fn design_register(
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
-                let library_command = Command::ProjectPage(ProjectPage::Library);
+                let library_command = ProjectCommand::Page(ProjectPage::Library);
                 let (library_enabled, library_disabled_reason) =
                     command_gate(app, library_command.key());
                 let library = Button::new("Browse library…")
@@ -1505,7 +1516,7 @@ fn design_register(
                     library.on_disabled_hover_text(reason)
                 });
                 if library.clicked() {
-                    requested = Some(OverviewIntent::Command(library_command));
+                    requested = Some(OverviewIntent::Command(library_command.key()));
                 }
                 let configuration_command = Command::ConfigurationSets;
                 let (configuration_enabled, configuration_disabled_reason) =
@@ -1518,7 +1529,7 @@ fn design_register(
                         configuration.on_disabled_hover_text(reason)
                     });
                 if configuration.clicked() {
-                    requested = Some(OverviewIntent::Command(configuration_command));
+                    requested = Some(OverviewIntent::Command(configuration_command.key()));
                 }
             });
         });

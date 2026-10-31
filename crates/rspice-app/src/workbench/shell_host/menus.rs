@@ -12,6 +12,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
@@ -57,6 +58,11 @@ const fn models(command: ModelsCommand) -> MenuEntry {
     MenuEntry::command(command.key())
 }
 
+/// The project feature's command's row under the label it declares.
+const fn project(command: ProjectCommand) -> MenuEntry {
+    MenuEntry::command(command.key())
+}
+
 /// What the application menu `menu` holds.
 pub(in crate::workbench) const fn application_menu_entries(
     menu: ApplicationMenu,
@@ -77,19 +83,19 @@ pub(in crate::workbench) const fn application_menu_entries(
 }
 
 const FILE_MENU: &[MenuEntry] = &[
-    command(Command::ProjectLauncher),
+    project(ProjectCommand::ProjectLauncher),
     Separator,
-    command(Command::OpenProject),
+    project(ProjectCommand::OpenProject),
     command(Command::OpenNetlist),
-    command(Command::NewProject),
-    command(Command::RecentProjects),
+    project(ProjectCommand::NewProject),
+    project(ProjectCommand::RecentProjects),
     Separator,
-    command(Command::NewCell),
-    command(Command::OpenDocument),
+    project(ProjectCommand::NewCell),
+    project(ProjectCommand::OpenSchematic),
     Separator,
-    command(Command::Save),
-    command(Command::SaveAs),
-    command(Command::SaveAll),
+    project(ProjectCommand::Save),
+    project(ProjectCommand::SaveAs),
+    project(ProjectCommand::SaveAll),
     command(Command::RevertActiveDocument),
     Separator,
     command(Command::ImportNetlist),
@@ -104,7 +110,7 @@ const FILE_MENU: &[MenuEntry] = &[
     cloud(CloudCommand::PublishToWeb),
     Separator,
     command(Command::CloseActiveDocument),
-    command(Command::CloseProject),
+    project(ProjectCommand::CloseProject),
     Separator,
     // The drawing sheet's workflows, in the order the sheet is set up.
     sheets(SheetsCommand::SheetProperties),
@@ -225,13 +231,13 @@ const DESIGN_MENU: &[MenuEntry] = &[
     sheets(SheetsCommand::DeleteSheet),
     Separator,
     command(Command::CreateHierarchy),
-    command(Command::DesignManagement),
+    project(ProjectCommand::DesignManagement),
     command(Command::SelectionBulkEdit),
     command(Command::ConnectivityManager),
     command(Command::ConfigurationSets),
     command(Command::RuleSetup),
     command(Command::ReviewComments),
-    command(Command::RevisionHistory),
+    project(ProjectCommand::RevisionHistory),
     Separator,
     command_as(
         Command::DesignSpecialistWorkspaces,
@@ -242,7 +248,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
     // reader, the whole design, and the check that gates a save.
     command(Command::CheckCellview),
     command(Command::CheckDesign),
-    command(Command::CheckAndSave),
+    project(ProjectCommand::CheckAndSave),
     Separator,
     palette_scope("Browse all design commands\u{2026}", "Design"),
 ];
@@ -459,9 +465,8 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::PlacePin => WorkbenchIcon::Pin,
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::PlaceText => WorkbenchIcon::Text,
-        Command::ProjectLauncher | Command::ManageSourceDocument => WorkbenchIcon::Folder,
-        Command::NewProject | Command::NewCell => WorkbenchIcon::Add,
-        Command::Save | Command::SymbolSave => WorkbenchIcon::Save,
+        Command::ManageSourceDocument => WorkbenchIcon::Folder,
+        Command::SymbolSave => WorkbenchIcon::Save,
         // The Models toolbar's button; the Verilog-A view's wears Run.
         Command::CompileVerilogA => WorkbenchIcon::Netlist,
         Command::RotateSelection => WorkbenchIcon::Rotate,
@@ -504,6 +509,14 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             HardcopyCommand::SaveReportDocument => Some(WorkbenchIcon::Save),
             HardcopyCommand::ReportPageProperties => Some(WorkbenchIcon::Sliders),
             HardcopyCommand::PrintHardcopy => Some(WorkbenchIcon::File),
+            _ => None,
+        };
+    }
+    if let Some(command) = ProjectCommand::from_key(key) {
+        return match command {
+            ProjectCommand::ProjectLauncher => Some(WorkbenchIcon::Folder),
+            ProjectCommand::NewProject | ProjectCommand::NewCell => Some(WorkbenchIcon::Add),
+            ProjectCommand::Save => Some(WorkbenchIcon::Save),
             _ => None,
         };
     }

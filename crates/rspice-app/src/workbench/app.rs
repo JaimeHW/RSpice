@@ -1967,7 +1967,7 @@ mod tests {
         assert!(state.application_modal_open());
         state.code.netlist.export_dialog.open = false;
 
-        state.open_project_launcher();
+        state.project.project_launcher_open = true;
         assert!(state.application_modal_open());
     }
 

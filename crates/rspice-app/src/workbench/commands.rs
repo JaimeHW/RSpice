@@ -20,7 +20,6 @@ use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
 use super::state::{ConsoleChannel, ConsolePage, SpecificationEvidenceFilter, Workspace};
-use crate::workbench::project::workspace_state::ProjectLauncherFilter;
 
 pub(crate) mod code_context;
 mod enablement;
@@ -112,8 +111,6 @@ pub(crate) const fn command_edits_schematic(command: Command) -> bool {
             | Command::ReplaceInstance
             | Command::UpdateInstanceInterface
             | Command::CreateHierarchy
-            | Command::DesignManagement
-            | Command::CheckAndSave
             | Command::Place(_)
             | Command::RotateSelection
             | Command::RotateSelectionCounterClockwise
@@ -220,8 +217,6 @@ impl Command {
                 self,
                 Self::Copy
                     | Self::OpenWorkspace(_)
-                    | Self::ProjectLauncher
-                    | Self::RecentProjects
                     | Self::PreviousDocument
                     | Self::NextDocument
                     | Self::CloseOtherDocuments
@@ -237,7 +232,6 @@ impl Command {
                     | Self::ShowInNetlist
                     | Self::SimulationPage(_)
                     | Self::VerificationPage(_)
-                    | Self::ProjectPage(_)
                     | Self::ToggleInspector
                     | Self::ToggleFocusMode
                     | Self::ResetLayout
@@ -303,22 +297,7 @@ impl Command {
             | Self::CommandPalette
             | Self::SpecialistToolBrowser
             | Self::DesignSpecialistWorkspaces => CommandOwner::Framework,
-            Self::ProjectLauncher
-            | Self::RecentProjects
-            | Self::NewProject
-            | Self::OpenProject
-            | Self::Save
-            | Self::SaveAs
-            | Self::SaveAll
-            | Self::CloseProject
-            | Self::NewCell
-            | Self::NewView
-            | Self::OpenDocument
-            | Self::DesignManagement
-            | Self::RevisionHistory
-            | Self::CheckAndSave
-            | Self::ProjectPage(_)
-            | Self::ConfigurationSets => CommandOwner::Project,
+            Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
             | Self::PlaceInstance
             | Self::PlaceWire
@@ -453,32 +432,11 @@ impl Command {
                     activate_workspace(app, workspace);
                 }
             }
-            Self::ProjectLauncher => app.state.open_project_launcher(),
-            Self::RecentProjects => open_recent_projects(&mut app.state),
-            Self::NewProject => file_action(app, FileMenuAction::NewProject),
-            Self::OpenProject => file_action(app, FileMenuAction::OpenProject),
-            // File Save always persists the project, including incomplete or
-            // unvalidated owned netlist work. Publishing a standalone source
-            // file is an explicit Netlist-toolbar operation and must never
-            // replace project persistence just because that editor is active.
-            Self::Save => file_action(app, FileMenuAction::Save),
-            Self::SaveAs => file_action(app, FileMenuAction::SaveProjectAs),
-            Self::SaveAll => file_action(app, FileMenuAction::SaveAll),
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
-            Self::CloseProject => file_action(app, FileMenuAction::CloseProject),
-            Self::NewCell => open_new_cell_dialog(app),
-            Self::NewView => {
-                if let Some((library, cell)) = app.state.new_view_target()
-                    && let Err(error) = app.state.open_new_view_dialog(&library, &cell)
-                {
-                    app.state.prompt(error);
-                }
-            }
             Self::NewVerilogADevice => {
                 crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
             }
-            Self::OpenDocument => file_action(app, FileMenuAction::Open),
             Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
             Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
@@ -878,17 +836,6 @@ impl Command {
             Self::ConnectivityManager => {
                 crate::workbench::app::open_connectivity_manager(&mut app.state);
             }
-            Self::DesignManagement => {
-                let route = super::SurfaceRoute::surface(super::SurfaceId::DesignManagement);
-                match app
-                    .state
-                    .workbench
-                    .navigate(route, super::RouteTransitionSource::User)
-                {
-                    Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
-                    Err(error) => app.state.prompt(error.to_string()),
-                }
-            }
             Self::SelectionBulkEdit => {
                 crate::workbench::app::open_selection_bulk_edit_dialog(&mut app.state);
             }
@@ -915,9 +862,6 @@ impl Command {
             }
             Self::ReviewComments => {
                 crate::workbench::app::open_design_review_comments(&mut app.state);
-            }
-            Self::RevisionHistory => {
-                crate::workbench::app::open_project_revision_history(&mut app.state);
             }
             Self::SymbolPinTool => app.activate_symbol_tool(super::SymbolTool::PlacePin),
             Self::SymbolPolylineTool => app.activate_symbol_tool(super::SymbolTool::Line),
@@ -1077,9 +1021,6 @@ impl Command {
             }
             Self::CheckCellview => check_cellview(&mut app.state),
             Self::CheckDesign => check_design(&mut app.state),
-            Self::CheckAndSave => {
-                crate::workbench::app::open_check_and_save_dialog(&mut app.state);
-            }
             Self::ClearChecks => {
                 if active_symbol_editor(app) {
                     app.state.clear_active_symbol_pin_checks();
@@ -1220,10 +1161,6 @@ impl Command {
                 activate_workspace(app, Workspace::Verify);
                 app.state.simulate.verification_page = page;
             }
-            Self::ProjectPage(page) => {
-                activate_workspace(app, Workspace::Project);
-                app.state.project.project_page = page;
-            }
             Self::SimulationPage(page) => {
                 activate_workspace(app, Workspace::Simulate);
                 app.state.simulate.simulation_page = page;
@@ -1315,7 +1252,9 @@ mod command_helpers;
 
 pub(crate) use command_helpers::reset_active_view;
 use command_helpers::*;
-pub(in crate::workbench) use command_helpers::{active_schematic_editor, file_action};
+pub(in crate::workbench) use command_helpers::{
+    active_schematic_editor, file_action, open_project_dialog, run_project_file_action,
+};
 
 #[cfg(test)]
 pub(crate) mod tests;

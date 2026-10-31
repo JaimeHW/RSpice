@@ -50,34 +50,10 @@ const fn chord(
 }
 
 const NONE: &[ShortcutBinding] = &[];
-const PROJECT_LAUNCHER: &[ShortcutBinding] = &[primary(
-    chord(Key::O, true, false, true, "Ctrl+Shift+O"),
-    ALL,
-)];
-const OPEN_PROJECT: &[ShortcutBinding] = &[
-    primary(chord(Key::O, true, false, false, "Ctrl+O"), DESKTOP),
-    alternate(chord(Key::O, true, true, false, "Ctrl+Alt+O"), HOST),
-];
 const OPEN_NETLIST: &[ShortcutBinding] = &[
     primary(chord(Key::L, true, false, true, "Ctrl+Shift+L"), DESKTOP),
     alternate(chord(Key::L, true, true, true, "Ctrl+Alt+Shift+L"), HOST),
 ];
-const NEW_PROJECT: &[ShortcutBinding] = &[
-    primary(chord(Key::N, true, false, true, "Ctrl+Shift+N"), DESKTOP),
-    alternate(chord(Key::N, true, true, true, "Ctrl+Alt+Shift+N"), HOST),
-];
-const SAVE_PROJECT: &[ShortcutBinding] = &[
-    primary(chord(Key::S, true, false, false, "Ctrl+S"), DESKTOP),
-    alternate(chord(Key::S, true, true, false, "Ctrl+Alt+S"), HOST),
-];
-const SAVE_PROJECT_AS: &[ShortcutBinding] = &[primary(
-    chord(Key::S, true, true, true, "Ctrl+Shift+Alt+S"),
-    ALL,
-)];
-const SAVE_ALL: &[ShortcutBinding] = &[primary(
-    chord(Key::S, true, false, true, "Ctrl+Shift+S"),
-    ALL,
-)];
 const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
     primary(chord(Key::W, true, false, false, "Ctrl+W"), DESKTOP),
     alternate(
@@ -85,10 +61,6 @@ const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
         HOST,
     ),
 ];
-const CLOSE_PROJECT: &[ShortcutBinding] = &[primary(
-    chord(Key::W, true, false, true, "Ctrl+Shift+W"),
-    DESKTOP,
-)];
 const EXIT: &[ShortcutBinding] = &[primary(
     chord(Key::F4, false, true, false, "Alt+F4"),
     DESKTOP,
@@ -327,10 +299,6 @@ const DESCEND_HIERARCHY_DIRECT: &[ShortcutBinding] =
     &[primary(chord(Key::E, false, false, true, "Shift+E"), ALL)];
 const CHECK_CELLVIEW: &[ShortcutBinding] =
     &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
-const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
-    chord(Key::E, true, false, true, "Ctrl+Shift+E"),
-    ALL,
-)];
 const NEXT_VIOLATION: &[ShortcutBinding] = &[
     primary(chord(Key::CloseBracket, false, false, false, "]"), ALL),
     alternate(chord(Key::F8, false, false, false, "F8"), ALL),
@@ -376,32 +344,23 @@ impl Command {
     pub(crate) const fn requires_open_project(self) -> bool {
         matches!(
             self,
-            Self::SaveAs
-                | Self::SaveAll
-                | Self::RevertActiveDocument
+            Self::RevertActiveDocument
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::CloseProject
-                | Self::NewCell
-                | Self::NewView
                 | Self::NewVerilogADevice
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
                 | Self::ExportNetlist(_)
                 | Self::FindInDesign
                 | Self::CheckDesign
-                | Self::CheckAndSave
                 | Self::ConnectivityManager
-                | Self::DesignManagement
                 | Self::SelectionBulkEdit
                 | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
-                | Self::RevisionHistory
                 | Self::CreateHierarchy
-                | Self::ProjectPage(_)
                 | Self::SimulationPage(_)
                 | Self::PreflightChecks
                 | Self::ManageSimulationPlans
@@ -428,34 +387,20 @@ impl Command {
     pub(crate) const fn blocked_by_project_operation(self) -> bool {
         matches!(
             self,
-            Self::ProjectLauncher
-                | Self::RecentProjects
-                | Self::NewProject
-                | Self::OpenProject
-                | Self::Save
-                | Self::SaveAs
-                | Self::SaveAll
-                | Self::RevertActiveDocument
+            Self::RevertActiveDocument
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::CloseProject
-                | Self::NewCell
-                | Self::NewView
                 | Self::NewVerilogADevice
-                | Self::OpenDocument
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
-                | Self::CheckAndSave
                 | Self::ConnectivityManager
-                | Self::DesignManagement
                 | Self::SelectionBulkEdit
                 | Self::FindReplace
                 | Self::ConfigurationSets
                 | Self::RuleSetup
                 | Self::ReviewComments
-                | Self::RevisionHistory
                 | Self::CreateHierarchy
         )
     }
@@ -540,14 +485,11 @@ impl Command {
             | Self::VisibilityOptions
             | Self::CheckCellview
             | Self::CheckDesign
-            | Self::CheckAndSave
             | Self::ConnectivityManager
-            | Self::DesignManagement
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
             | Self::RuleSetup
             | Self::ReviewComments
-            | Self::RevisionHistory
             | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
             Self::PreflightChecks => ShortcutContext::SimulationWorkspace,
             // Deliberately global, unlike the Simulation-workspace commands
@@ -624,15 +566,8 @@ impl Command {
             Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
             Self::StimulusApplyDraft => STIMULUS_APPLY_DRAFT,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
-            Self::ProjectLauncher => PROJECT_LAUNCHER,
-            Self::NewProject => NEW_PROJECT,
-            Self::OpenProject => OPEN_PROJECT,
             Self::OpenNetlist => OPEN_NETLIST,
-            Self::Save => SAVE_PROJECT,
-            Self::SaveAs => SAVE_PROJECT_AS,
-            Self::SaveAll => SAVE_ALL,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
-            Self::CloseProject => CLOSE_PROJECT,
             Self::Exit => EXIT,
             Self::Undo => UNDO,
             Self::Redo => REDO,
@@ -690,12 +625,10 @@ impl Command {
             Self::UpdateInstanceInterface => NONE,
             Self::CreateHierarchy => NONE,
             Self::ConnectivityManager => NONE,
-            Self::DesignManagement => NONE,
             Self::SelectionBulkEdit => NONE,
             Self::ConfigurationSets => NONE,
             Self::RuleSetup => NONE,
             Self::ReviewComments => NONE,
-            Self::RevisionHistory => NONE,
             Self::SymbolPinTool => SYMBOL_PIN,
             Self::SymbolPolylineTool => SYMBOL_POLYLINE,
             Self::SymbolRectangleTool => SYMBOL_RECTANGLE,
@@ -724,7 +657,6 @@ impl Command {
             // layouts, and every other chord of the check family is taken;
             // the Design menu, the toolbar and the palette are its routes.
             Self::CheckDesign => NONE,
-            Self::CheckAndSave => CHECK_AND_SAVE,
             Self::NextViolation => NEXT_VIOLATION,
             Self::PreviousViolation => PREVIOUS_VIOLATION,
             Self::RunSimulation => RUN_SIMULATION,
@@ -792,8 +724,6 @@ impl Command {
             Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
                 "no project is open"
             }
-            Self::SaveAll => "no unsaved project changes",
-            Self::Save | Self::SaveAs | Self::CloseProject => "no project is open",
             Self::RevertActiveDocument => "active document has no changes to revert",
             Self::CloseActiveDocument => "no closable document is active",
             Self::DetachDocument => "no active document is available to detach",
@@ -899,11 +829,9 @@ impl Command {
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
-            Self::DesignManagement => "open an editable schematic",
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets | Self::RuleSetup => "open a project",
             Self::ReviewComments => "open a schematic project",
-            Self::RevisionHistory => "open a project",
             Self::Paste => "clipboard has no compatible content",
             Self::RenameSelection => "select one editable component, net label, or declared bus",
             Self::ObjectProperties => "select one inspectable object",
@@ -933,12 +861,6 @@ impl Command {
                 .state
                 .selected_instance_netlist_block()
                 .unwrap_or("command is unavailable in this context"),
-            Self::CheckAndSave if !super::active_schematic_editor(app) => {
-                "open an editable schematic or testbench"
-            }
-            Self::CheckAndSave if app.state.schematic_edit_read_only() => {
-                "the active schematic is read-only"
-            }
             // An unrunnable plan stays enabled on purpose, so the run says
             // why it cannot start; this row is grey only while one runs, or,
             // on the netlist page, while the deck there cannot run.
@@ -964,7 +886,6 @@ impl Command {
                 "the project is open read-only"
             }
             Self::NewVerilogADevice => "no library can be written",
-            Self::NewView => "select a cell in a writable library",
             Self::StopSimulation if app.state.model.simulation.cancellation_is_pending() => {
                 "simulation cancellation is already in progress"
             }
@@ -1015,9 +936,6 @@ impl Command {
                 self,
                 Self::RunSimulation
                     | Self::StopSimulation
-                    | Self::OpenProject
-                    | Self::NewProject
-                    | Self::Save
                     | Self::CloseActiveDocument
                     | Self::ToggleFullScreen
                     | Self::GenerateNetlist

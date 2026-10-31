@@ -9,6 +9,7 @@ use crate::state::workspace::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::AppState;
+use crate::workbench::app_state::Model;
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, store_generated_symbol};
 
 /// Cell-view kinds backed by a complete, editable production surface.
@@ -35,30 +36,29 @@ const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
     )
 }
 
-impl AppState {
-    /// The cell New View adds a view to when it is invoked as a command: the
-    /// cell selected in the library, else the cell of the active document,
-    /// while its library can be written.
-    pub(crate) fn new_view_target(&self) -> Option<(String, String)> {
-        let selected = self
-            .model
-            .library_manager
-            .selected_library
-            .as_deref()
-            .zip(self.model.library_manager.selected_cell.as_deref());
-        let active = &self.model.workspace.content.active_view;
-        selected
-            .into_iter()
-            .chain([(active.library.as_str(), active.cell.as_str())])
-            .find(|(library, cell)| {
-                self.model
-                    .library_manager
-                    .get_library(library)
-                    .is_some_and(|library| !library.read_only && library.get_cell(cell).is_some())
-            })
-            .map(|(library, cell)| (library.to_owned(), cell.to_owned()))
-    }
+/// The cell New View adds a view to when it is invoked as a command: the cell
+/// selected in the library, else the cell of the active document, while its
+/// library can be written.
+pub(crate) fn new_view_target(model: &Model) -> Option<(String, String)> {
+    let selected = model
+        .library_manager
+        .selected_library
+        .as_deref()
+        .zip(model.library_manager.selected_cell.as_deref());
+    let active = &model.workspace.content.active_view;
+    selected
+        .into_iter()
+        .chain([(active.library.as_str(), active.cell.as_str())])
+        .find(|(library, cell)| {
+            model
+                .library_manager
+                .get_library(library)
+                .is_some_and(|library| !library.read_only && library.get_cell(cell).is_some())
+        })
+        .map(|(library, cell)| (library.to_owned(), cell.to_owned()))
+}
 
+impl AppState {
     /// Open New View against an exact, currently writable cell identity.
     ///
     /// The target is resolved before any dialog state changes. This keeps a

@@ -50,7 +50,6 @@ use crate::workbench::slots::{
     CloudState, CodeState, DesignState, HardcopyState, ModelsState, ProjectState, ResultsState,
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
-use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
@@ -488,25 +487,6 @@ impl AppState {
     /// pointer intent for this frame: anything modal the shell lists is open.
     pub(crate) fn application_modal_open(&self) -> bool {
         crate::workbench::framework::dialogs::application_modal_open(self)
-    }
-
-    pub fn open_project_launcher(&mut self) {
-        let route = SurfaceRoute::surface(SurfaceId::ProjectLauncher);
-        if self.workbench.current_route() != route
-            && let Err(error) = self.workbench.navigate(route, RouteTransitionSource::User)
-        {
-            self.workbench.record_route_diagnostic(format!(
-                "The Project Launcher could not be opened: {error}"
-            ));
-            return;
-        }
-        self.project.project_launcher_open = true;
-        self.project.project_launcher_page =
-            crate::workbench::project::workspace_state::ProjectLauncherPage::Projects;
-        self.platform.recovery_catalog.request_refresh();
-        self.workbench
-            .outbox
-            .push(crate::workbench::framework::requests::FocusProjectLauncherSearch);
     }
 
     /// Arm the analysis catalogue, from wherever the reader asked for it.

@@ -2,8 +2,9 @@
 
 use crate::state::command_catalog::CommandPlatform;
 use crate::workbench::app_state::session::shortcuts::category::*;
-use crate::workbench::commands::vocabulary::{Command, command_registry};
+use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
+use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
 fn command_reference_is_a_lossless_projection_of_discoverable_commands() {
@@ -27,7 +28,12 @@ fn command_reference_is_a_lossless_projection_of_discoverable_commands() {
     }
 
     assert_eq!(
-        Command::OpenProject.default_shortcut_label(CommandPlatform::Browser),
-        "Ctrl+Alt+O"
+        ProjectCommand::OpenProject
+            .declared_spec()
+            .bindings
+            .iter()
+            .find(|binding| binding.supports(CommandPlatform::Browser))
+            .map(|binding| binding.chord.label),
+        Some("Ctrl+Alt+O")
     );
 }

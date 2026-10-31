@@ -25,6 +25,7 @@ use crate::workbench::framework::feature::{
 };
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::models::ModelsFeature;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::settings::SettingsFeature;
 use crate::workbench::sheets::SheetsFeature;
@@ -281,6 +282,7 @@ features! {
     results: ResultsFeature,
     cloud: CloudFeature => cloud,
     models: ModelsFeature,
+    project: ProjectFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers
@@ -344,6 +346,7 @@ mod tests {
         let results = <ResultsFeature as Registered>::registry();
         let cloud = <CloudFeature as Registered>::registry();
         let models = <ModelsFeature as Registered>::registry();
+        let project = <ProjectFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
@@ -357,6 +360,7 @@ mod tests {
                 results.command(*key).is_some(),
                 cloud.command(*key).is_some(),
                 models.command(*key).is_some(),
+                project.command(*key).is_some(),
             ];
             assert_eq!(
                 declaring.iter().filter(|declares| **declares).count(),
@@ -376,6 +380,7 @@ mod tests {
                 + crate::workbench::results::commands::ResultsCommand::ALL.len()
                 + crate::workbench::cloud::commands::CloudCommand::ALL.len()
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
+                + crate::workbench::project::commands::ProjectCommand::ALL.len()
         );
     }
 

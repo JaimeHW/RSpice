@@ -121,9 +121,9 @@ fn published_library_snapshots_are_retained_project_operations() {
     assert_ne!(published.when, "time n/a");
     assert_eq!(
         published.intent,
-        Some(OverviewIntent::Command(Command::ProjectPage(
-            ProjectPage::Library
-        )))
+        Some(OverviewIntent::Command(
+            ProjectCommand::Page(ProjectPage::Library).key()
+        ))
     );
     assert!(
         snapshot.operation_total >= snapshot.operations.len(),
@@ -167,7 +167,7 @@ fn recent_operation_timestamps_fail_closed_and_format_relative_age() {
 #[test]
 fn overview_new_cell_action_opens_the_real_creation_workflow() {
     let mut app = RSpiceApp::test_instance();
-    OverviewIntent::Command(Command::NewCell).execute(&mut app);
+    OverviewIntent::Command(ProjectCommand::NewCell.key()).execute(&mut app);
     assert!(app.state.project.new_cell_dialog);
 }
 
@@ -176,7 +176,7 @@ fn overview_history_action_preserves_project_context() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
     let active = app.state.model.workspace.content.active_view.clone();
-    OverviewIntent::Command(Command::RevisionHistory).execute(&mut app);
+    OverviewIntent::Command(ProjectCommand::RevisionHistory.key()).execute(&mut app);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(app.state.model.workspace.content.active_view, active);
@@ -188,7 +188,7 @@ fn revision_history_is_available_from_project_overview() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
 
-    assert!(Command::RevisionHistory.is_enabled(&app));
+    assert!(app.command_key_enabled(ProjectCommand::RevisionHistory.key()));
 }
 
 #[test]
@@ -213,7 +213,7 @@ fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
     assert_eq!(latest_run.action, "Open deck");
     assert_eq!(
         latest_run.intent,
-        OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist))
+        OverviewIntent::Command(Command::OpenWorkspace(Workspace::Netlist).key())
     );
 
     // Simulate's run preflight reads the schematic a netlist-first project
@@ -260,7 +260,7 @@ fn overview_run_action_opens_the_plan_without_starting_execution() {
 fn overview_import_deck_uses_the_independent_netlist_project_workflow() {
     assert_eq!(
         import_deck_intent(),
-        OverviewIntent::Command(Command::OpenNetlist)
+        OverviewIntent::Command(Command::OpenNetlist.key())
     );
 }
 

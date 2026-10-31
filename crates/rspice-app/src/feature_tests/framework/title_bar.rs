@@ -24,6 +24,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::host::Host;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::state::{VerificationPage, Workspace};
@@ -621,9 +622,25 @@ fn application_menu_height_is_viewport_bounded() {
 fn menu_shortcuts_are_projected_from_the_typed_registry() {
     let platform = crate::state::command_catalog::CommandPlatform::Desktop;
     let app = RSpiceApp::test_instance();
+    for command in [ProjectCommand::OpenProject, ProjectCommand::Save] {
+        let declared = command
+            .declared_spec()
+            .bindings
+            .iter()
+            .find(|binding| binding.supports(platform))
+            .map_or("", |binding| binding.chord.label);
+        assert_eq!(
+            shortcut_for_occurrence(
+                &app,
+                platform,
+                egui::os::OperatingSystem::Windows,
+                command.key(),
+                None
+            ),
+            declared
+        );
+    }
     for command in [
-        Command::OpenProject,
-        Command::Save,
         Command::RunSimulation,
         Command::ToggleFullScreen,
         Command::GenerateNetlist,
@@ -655,8 +672,6 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
 #[test]
 fn core_menu_commands_are_all_real_dispatch_commands() {
     let commands = [
-        Command::OpenProject,
-        Command::Save,
         Command::Undo,
         Command::PlaceWire,
         Command::PlaceBus,
@@ -676,6 +691,12 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
             .spec(ModelsCommand::PdkSettings.key())
             .is_some()
     );
+    for command in [ProjectCommand::OpenProject, ProjectCommand::Save] {
+        assert!(
+            command_registry().spec(command.key()).is_some(),
+            "{command:?}"
+        );
+    }
 }
 
 /// No View-menu row is drawn twice.
@@ -715,15 +736,15 @@ const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::ArraySelection,
     Command::ReplaceInstance,
 ];
-const DESIGN_MANAGEMENT_COMMANDS: [Command; 8] = [
-    Command::CreateHierarchy,
-    Command::DesignManagement,
-    Command::SelectionBulkEdit,
-    Command::ConnectivityManager,
-    Command::ConfigurationSets,
-    Command::RuleSetup,
-    Command::ReviewComments,
-    Command::RevisionHistory,
+const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 8] = [
+    Command::CreateHierarchy.key(),
+    ProjectCommand::DesignManagement.key(),
+    Command::SelectionBulkEdit.key(),
+    Command::ConnectivityManager.key(),
+    Command::ConfigurationSets.key(),
+    Command::RuleSetup.key(),
+    Command::ReviewComments.key(),
+    ProjectCommand::RevisionHistory.key(),
 ];
 const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::PreviousSheet,
@@ -899,7 +920,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
 
 #[test]
 fn design_management_menu_matches_the_upgraded_governed_group() {
-    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_MANAGEMENT_COMMANDS));
+    assert_menu_lists(ApplicationMenu::Design, &DESIGN_MANAGEMENT_COMMANDS);
 }
 
 #[test]
@@ -915,9 +936,16 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for command in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
         .chain(DESIGN_EDIT_COMMANDS)
-        .chain(DESIGN_MANAGEMENT_COMMANDS)
     {
         assert!(command.palette_visible());
+    }
+    for key in DESIGN_MANAGEMENT_COMMANDS {
+        assert!(
+            command_registry()
+                .spec(key)
+                .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE)),
+            "{key:?}"
+        );
     }
     for command in DESIGN_SHEET_COMMANDS {
         assert!(
@@ -930,10 +958,15 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for command in [
         Command::CreateHierarchy,
         Command::DesignSpecialistWorkspaces,
-        Command::CheckAndSave,
     ] {
         assert!(command.palette_visible());
     }
+    assert!(
+        ProjectCommand::CheckAndSave
+            .declared_spec()
+            .flags
+            .contains(CommandFlags::PALETTE_VISIBLE)
+    );
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1045,8 +1078,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::PlaceJunction, WorkbenchIcon::Junction),
         (Command::PlacePin, WorkbenchIcon::Pin),
         (Command::PlaceText, WorkbenchIcon::Text),
-        (Command::NewProject, WorkbenchIcon::Add),
-        (Command::Save, WorkbenchIcon::Save),
         (Command::Delete, WorkbenchIcon::Trash),
         (Command::AscendHierarchy, WorkbenchIcon::ArrowUp),
         (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
@@ -1066,6 +1097,13 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         app.command_icon(ModelsCommand::ModelCompareRelease.key()),
         Some(WorkbenchIcon::Compare)
     );
+    for (command, icon) in [
+        (ProjectCommand::NewProject, WorkbenchIcon::Add),
+        (ProjectCommand::Save, WorkbenchIcon::Save),
+    ] {
+        assert_eq!(app.command_icon(command.key()), Some(icon), "{command:?}");
+    }
+    assert_eq!(app.command_icon(ProjectCommand::CloseProject.key()), None);
     assert_eq!(
         app.command_icon(ids::PRINT_HARDCOPY),
         Some(WorkbenchIcon::File)
@@ -1074,7 +1112,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::LegalPrivacy,
         Command::About,
         Command::HelpCenter,
-        Command::CloseProject,
         Command::Exit,
         Command::SelectAll,
         Command::RenameSelection,
@@ -1259,7 +1296,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
     for key in switches {
         assert!(Host::checked(&app, key).is_some(), "{key:?} reads no state");
     }
-    assert_eq!(Command::Save.checked(&app), None);
+    assert_eq!(Host::checked(&app, ProjectCommand::Save.key()), None);
     assert_eq!(Command::ResetLayout.checked(&app), None);
 
     for command in [

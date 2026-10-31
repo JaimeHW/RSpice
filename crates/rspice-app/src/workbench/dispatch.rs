@@ -25,7 +25,10 @@ use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
-use crate::workbench::commands::{active_schematic_editor, command_edits_schematic, file_action};
+use crate::workbench::commands::{
+    active_schematic_editor, command_edits_schematic, file_action, open_project_dialog,
+    run_project_file_action,
+};
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -34,8 +37,9 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, CloseForLiveMirror, ExportDataset, FollowSchematicGrid,
-    MarkFailureSites, PrintActiveView, PromptAfterCommands, RevealExecutedDeck,
-    SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
+    MarkFailureSites, OpenProjectDialog, PrintActiveView, ProjectFileAction, PromptAfterCommands,
+    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations,
+    ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -145,8 +149,9 @@ impl RSpiceApp {
     /// asked for, the waveforms and the family member a hand-off into Results
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
-    /// results failure banner marks there, and the close that makes room for
-    /// a live session's mirror.
+    /// results failure banner marks there, the close that makes room for a
+    /// live session's mirror, and last the project's file commands and the
+    /// project dialogs the shell opens for them.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -247,6 +252,16 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, CloseForLiveMirror| app.close_for_live_mirror(),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, action: ProjectFileAction| run_project_file_action(app, action),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, dialog: OpenProjectDialog| open_project_dialog(app, dialog),
         );
     }
 }

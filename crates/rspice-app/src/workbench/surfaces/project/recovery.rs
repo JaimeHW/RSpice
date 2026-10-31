@@ -12,6 +12,7 @@ use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
     MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
 };
+use crate::workbench::project::commands::ProjectCommand;
 use rspice_simulation_contract::run_set::format_bytes;
 
 /// The one sentence the page opens with: what a checkpoint is, and the
@@ -130,7 +131,7 @@ impl RecoveryIntent {
     fn execute(self, ctx: &Context, app: &mut RSpiceApp) {
         match self {
             Self::Create => create_manual_checkpoint(ctx, &mut app.state),
-            Self::RevisionHistory => Command::RevisionHistory.execute(app),
+            Self::RevisionHistory => app.execute_command_key(ProjectCommand::RevisionHistory.key()),
             Self::Reload => app.state.project.project_checkpoint_recovery.invalidate(),
             Self::Select(id) => app.state.project.project_checkpoint_selection = Some(id),
             Self::Compare(checkpoint) => {

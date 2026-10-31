@@ -36,6 +36,7 @@ use crate::workbench::lifecycle::recovery::{
     discard_checkpoint, open_diagnostics_folder, recovery_replacement_block_reason,
     refresh_catalog_if_requested, software_rendering_supported,
 };
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::{
     ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
 };
@@ -465,11 +466,11 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
             LauncherAction::Close => dismiss_launcher(app),
             LauncherAction::Browse => {
                 dismiss_launcher(app);
-                Command::OpenProject.execute(app);
+                app.execute_command_key(ProjectCommand::OpenProject.key());
             }
             LauncherAction::NewProject => {
                 dismiss_launcher(app);
-                Command::NewProject.execute(app);
+                app.execute_command_key(ProjectCommand::NewProject.key());
             }
             LauncherAction::OpenNetlist => {
                 dismiss_launcher(app);
@@ -1962,7 +1963,11 @@ mod tests {
     fn launcher_dismissal_returns_through_canonical_history() {
         let mut app = RSpiceApp::test_instance();
         app.state.workbench.activate(Workspace::Results);
-        app.state.open_project_launcher();
+        crate::workbench::project::open_project_launcher(
+            &mut app.state.project,
+            &mut app.state.workbench,
+            &mut app.state.platform,
+        );
 
         assert_eq!(
             app.state.workbench.current_route().surface_id(),
@@ -2011,7 +2016,11 @@ mod tests {
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
         ));
-        app.state.open_project_launcher();
+        crate::workbench::project::open_project_launcher(
+            &mut app.state.project,
+            &mut app.state.workbench,
+            &mut app.state.platform,
+        );
         assert!(matches!(
             app.state.workbench.take_browser_history_effect(),
             Some(crate::workbench::BrowserHistoryEffect::Push(_))
@@ -2169,7 +2178,11 @@ mod tests {
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
-        app.state.open_project_launcher();
+        crate::workbench::project::open_project_launcher(
+            &mut app.state.project,
+            &mut app.state.workbench,
+            &mut app.state.platform,
+        );
         app.state.project.project_launcher_page = page;
         app.state.model.safe_mode.active = safe_mode;
         let mut output = None;

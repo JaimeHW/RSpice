@@ -379,6 +379,42 @@ impl Request for CloseForLiveMirror {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// A project file command, carried out by the shell's file workflow as the
+/// File menu carries it out: the edit typed into the inspector lands, the
+/// project's unsaved work is reviewed where the command would lose it, and
+/// then the dialog, the save or the close runs. Raised by the project
+/// feature's file commands, and taken straight after the command returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ProjectFileAction {
+    NewProject,
+    OpenProject,
+    OpenSchematic,
+    Save,
+    SaveAs,
+    SaveAll,
+    CloseProject,
+}
+
+impl Request for ProjectFileAction {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// A project dialog the shell opens over the whole application, for the
+/// project feature's command that opens it: each reads the drawing, its
+/// checks or the library catalog beyond what the feature's context holds.
+/// Taken straight after the command returns.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OpenProjectDialog {
+    NewView,
+    DesignManagement,
+    RevisionHistory,
+    CheckAndSave,
+}
+
+impl Request for OpenProjectDialog {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

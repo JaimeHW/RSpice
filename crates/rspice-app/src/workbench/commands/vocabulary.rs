@@ -21,6 +21,7 @@ use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::settings::commands::SettingsCommand;
@@ -34,23 +35,11 @@ use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
 #[allow(clippy::enum_variant_names)]
 pub enum Command {
     OpenWorkspace(Workspace),
-    ProjectLauncher,
-    RecentProjects,
-    NewProject,
-    OpenProject,
-    Save,
-    SaveAs,
-    SaveAll,
     RevertActiveDocument,
     CloseActiveDocument,
-    CloseProject,
-    NewCell,
-    /// A cell view of another kind beside the views the selected cell has.
-    NewView,
     /// A cell whose Verilog-A module the reader writes next, with the symbol
     /// its ports generate.
     NewVerilogADevice,
-    OpenDocument,
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
@@ -129,14 +118,12 @@ pub enum Command {
     UpdateInstanceInterface,
     CreateHierarchy,
     ConnectivityManager,
-    DesignManagement,
     SelectionBulkEdit,
     ConfigurationSets,
     /// The project's design-rule deck: the severity each rule is reported
     /// at in this project.
     RuleSetup,
     ReviewComments,
-    RevisionHistory,
     DesignSpecialistWorkspaces,
     SymbolPinTool,
     SymbolPolylineTool,
@@ -189,7 +176,6 @@ pub enum Command {
     /// configuration, with every cellview of the project's own libraries the
     /// walk never reaches.
     CheckDesign,
-    CheckAndSave,
     ClearChecks,
     NextViolation,
     PreviousViolation,
@@ -238,7 +224,6 @@ pub enum Command {
     RenameSymbol,
     CompareGeneratedRevisions,
     VerificationPage(VerificationPage),
-    ProjectPage(ProjectPage),
     SimulationPage(SimulationPage),
     StimulusNewDefinition,
     StimulusDuplicateDefinition,
@@ -316,22 +301,11 @@ impl Command {
             Self::OpenWorkspace(Workspace::Netlist) => {
                 spec("netlist", "Open Netlist & Script Editor", "Navigate")
             }
-            Self::ProjectLauncher => spec("project-launcher", "Project launcher…", "File"),
-            Self::RecentProjects => spec("recent-projects", "Recent projects…", "File"),
-            Self::NewProject => spec("new-project", "New project…", "File"),
-            Self::OpenProject => spec("open-project", "Open project…", "File"),
-            Self::Save => spec("save-project", "Save", "File"),
-            Self::SaveAs => spec("save-project-as", "Save as…", "File"),
-            Self::SaveAll => spec("save-all", "Save all", "File"),
             Self::RevertActiveDocument => {
                 spec("revert-document", "Revert active document…", "File")
             }
             Self::CloseActiveDocument => spec("close-document", "Close active document", "File"),
-            Self::CloseProject => spec("close-project", "Close project…", "File"),
-            Self::NewCell => spec("new-cell", "New cell…", "File"),
-            Self::NewView => spec("new-view", "New view…", "File"),
             Self::NewVerilogADevice => spec("new-veriloga-device", "New Verilog-A device…", "File"),
-            Self::OpenDocument => spec("open-schematic", "Open schematic…", "File"),
             Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
@@ -474,11 +448,6 @@ impl Command {
                 "Connectivity and bus manager\u{2026}",
                 "Design",
             ),
-            Self::DesignManagement => spec(
-                "design-management",
-                "Sheets, variants and annotation\u{2026}",
-                "Design",
-            ),
             Self::SelectionBulkEdit => spec(
                 "design-bulk-tools",
                 "Selection and bulk editing\u{2026}",
@@ -487,7 +456,6 @@ impl Command {
             Self::ConfigurationSets => spec("configuration-sets", "Configurations", "Design"),
             Self::RuleSetup => spec("design-rule-setup", "Design rule setup\u{2026}", "Design"),
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
-            Self::RevisionHistory => spec("revision-history", "Revision history\u{2026}", "Design"),
             Self::DesignSpecialistWorkspaces => spec(
                 "specialist-tools-design",
                 "Specialist workspaces\u{2026}",
@@ -606,7 +574,6 @@ impl Command {
             Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
             Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
             Self::CheckDesign => spec("check-design", "Check design", "Design"),
-            Self::CheckAndSave => spec("check-and-save", "Check and save", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
             Self::NextViolation => spec("next-violation", "Next violation", "Verify"),
             Self::PreviousViolation => spec("previous-violation", "Previous violation", "Verify"),
@@ -683,25 +650,6 @@ impl Command {
             }
             Self::VerificationPage(VerificationPage::Regression) => {
                 spec("regression", "Regression plan", "Verify")
-            }
-            Self::ProjectPage(ProjectPage::Overview) => {
-                spec("project-overview", "Open project overview", "Project")
-            }
-            Self::ProjectPage(ProjectPage::Library) => {
-                spec("project-library", "Open project library", "Project")
-            }
-            Self::ProjectPage(ProjectPage::Configuration) => spec(
-                "project-testbench-configuration",
-                "Open testbench configuration",
-                "Project",
-            ),
-            Self::ProjectPage(ProjectPage::Dependencies) => spec(
-                "project-dependencies",
-                "Open dependency manifest",
-                "Project",
-            ),
-            Self::ProjectPage(ProjectPage::Recovery) => {
-                spec("project-recovery", "Open recovery center", "Project")
             }
             // Every setup route is addressable, the way the Project, Verify and
             // Models pages are. The Solver route keeps its own dedicated
@@ -830,20 +778,9 @@ pub(in crate::workbench) const fn spec(
 /// accessibility help, and keyboard resolution all project from this list.
 /// Context-only commands are retained here but can opt out of search.
 pub const COMMAND_REGISTRY: &[Command] = &[
-    Command::ProjectLauncher,
-    Command::RecentProjects,
-    Command::OpenProject,
-    Command::NewProject,
-    Command::Save,
-    Command::SaveAs,
-    Command::SaveAll,
     Command::RevertActiveDocument,
     Command::CloseActiveDocument,
-    Command::CloseProject,
-    Command::NewCell,
-    Command::NewView,
     Command::NewVerilogADevice,
-    Command::OpenDocument,
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
@@ -873,11 +810,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenWorkspace(Workspace::Verify),
     Command::OpenWorkspace(Workspace::Models),
     Command::OpenWorkspace(Workspace::Netlist),
-    Command::ProjectPage(ProjectPage::Overview),
-    Command::ProjectPage(ProjectPage::Library),
-    Command::ProjectPage(ProjectPage::Configuration),
-    Command::ProjectPage(ProjectPage::Dependencies),
-    Command::ProjectPage(ProjectPage::Recovery),
     Command::SimulationPage(SimulationPage::Analyses),
     Command::SimulationPage(SimulationPage::Excitations),
     Command::SimulationPage(SimulationPage::Variables),
@@ -940,13 +872,11 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ReplaceInstance,
     Command::UpdateInstanceInterface,
     Command::CreateHierarchy,
-    Command::DesignManagement,
     Command::SelectionBulkEdit,
     Command::ConnectivityManager,
     Command::ConfigurationSets,
     Command::RuleSetup,
     Command::ReviewComments,
-    Command::RevisionHistory,
     Command::DesignSpecialistWorkspaces,
     Command::SymbolPinTool,
     Command::SymbolPolylineTool,
@@ -988,7 +918,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ShowInNetlist,
     Command::CheckCellview,
     Command::CheckDesign,
-    Command::CheckAndSave,
     Command::ClearChecks,
     Command::NextViolation,
     Command::PreviousViolation,
@@ -1054,20 +983,20 @@ pub const COMMAND_REGISTRY: &[Command] = &[
 /// and the shortcut resolver breaks ties by: the shell's own commands and the
 /// ones a feature declares alike.
 static COMMAND_ORDER: &[CommandKey] = &[
-    Command::ProjectLauncher.key(),
-    Command::RecentProjects.key(),
-    Command::OpenProject.key(),
-    Command::NewProject.key(),
-    Command::Save.key(),
-    Command::SaveAs.key(),
-    Command::SaveAll.key(),
+    ProjectCommand::ProjectLauncher.key(),
+    ProjectCommand::RecentProjects.key(),
+    ProjectCommand::OpenProject.key(),
+    ProjectCommand::NewProject.key(),
+    ProjectCommand::Save.key(),
+    ProjectCommand::SaveAs.key(),
+    ProjectCommand::SaveAll.key(),
     Command::RevertActiveDocument.key(),
     Command::CloseActiveDocument.key(),
-    Command::CloseProject.key(),
-    Command::NewCell.key(),
-    Command::NewView.key(),
+    ProjectCommand::CloseProject.key(),
+    ProjectCommand::NewCell.key(),
+    ProjectCommand::NewView.key(),
     Command::NewVerilogADevice.key(),
-    Command::OpenDocument.key(),
+    ProjectCommand::OpenSchematic.key(),
     Command::OpenNetlist.key(),
     Command::ImportNetlist.key(),
     Command::ImportVerilogA.key(),
@@ -1109,11 +1038,11 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::OpenWorkspace(Workspace::Verify).key(),
     Command::OpenWorkspace(Workspace::Models).key(),
     Command::OpenWorkspace(Workspace::Netlist).key(),
-    Command::ProjectPage(ProjectPage::Overview).key(),
-    Command::ProjectPage(ProjectPage::Library).key(),
-    Command::ProjectPage(ProjectPage::Configuration).key(),
-    Command::ProjectPage(ProjectPage::Dependencies).key(),
-    Command::ProjectPage(ProjectPage::Recovery).key(),
+    ProjectCommand::Page(ProjectPage::Overview).key(),
+    ProjectCommand::Page(ProjectPage::Library).key(),
+    ProjectCommand::Page(ProjectPage::Configuration).key(),
+    ProjectCommand::Page(ProjectPage::Dependencies).key(),
+    ProjectCommand::Page(ProjectPage::Recovery).key(),
     Command::SimulationPage(SimulationPage::Analyses).key(),
     Command::SimulationPage(SimulationPage::Excitations).key(),
     Command::SimulationPage(SimulationPage::Variables).key(),
@@ -1188,13 +1117,13 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ReplaceInstance.key(),
     Command::UpdateInstanceInterface.key(),
     Command::CreateHierarchy.key(),
-    Command::DesignManagement.key(),
+    ProjectCommand::DesignManagement.key(),
     Command::SelectionBulkEdit.key(),
     Command::ConnectivityManager.key(),
     Command::ConfigurationSets.key(),
     Command::RuleSetup.key(),
     Command::ReviewComments.key(),
-    Command::RevisionHistory.key(),
+    ProjectCommand::RevisionHistory.key(),
     Command::DesignSpecialistWorkspaces.key(),
     SheetsCommand::NextSheet.key(),
     SheetsCommand::PreviousSheet.key(),
@@ -1240,7 +1169,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ShowInNetlist.key(),
     Command::CheckCellview.key(),
     Command::CheckDesign.key(),
-    Command::CheckAndSave.key(),
+    ProjectCommand::CheckAndSave.key(),
     Command::ClearChecks.key(),
     Command::NextViolation.key(),
     Command::PreviousViolation.key(),
@@ -1399,6 +1328,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(ResultsCommand::ALL.map(ResultsCommand::declared_spec))
                 .chain(CloudCommand::ALL.map(CloudCommand::declared_spec))
                 .chain(ModelsCommand::ALL.map(ModelsCommand::declared_spec))
+                .chain(ProjectCommand::ALL.map(ProjectCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

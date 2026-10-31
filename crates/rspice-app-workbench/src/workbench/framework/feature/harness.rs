@@ -12,8 +12,9 @@
 
 use std::sync::LazyLock;
 
+use rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
 use rspice_results::result_presentation::{
-    AnalysisPresentationKey, ResultViewer, SourceWaveformPresentationKey,
+    AnalysisPresentationKey, ResultPresentation, ResultViewer, SourceWaveformPresentationKey,
 };
 use rspice_results::visualization_document::{PageId, PaneId};
 use rspice_results_ui::fft::FftState;
@@ -24,6 +25,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
+use crate::state::SimulationState;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::{CommandAvailability, Registry};
@@ -208,6 +210,21 @@ impl ResultsPort for NullPorts {
     /// A fresh session pins no window on any sheet.
     fn captured_viewport(&self, _analysis: AnalysisPresentationKey) -> Option<CapturedViewport> {
         None
+    }
+
+    fn saved_presentation(&self) -> &dyn ResultPresentationSource {
+        self
+    }
+}
+
+/// What a fresh session saves of the results workspace: no markers, panes or
+/// expression groups, and a marker high-water mark of zero.
+impl ResultPresentationSource for NullPorts {
+    fn project_presentation(&self, _simulation: &SimulationState) -> ResultPresentation {
+        ResultPresentation {
+            marker_id_high_water: Some(0),
+            ..ResultPresentation::default()
+        }
     }
 }
 

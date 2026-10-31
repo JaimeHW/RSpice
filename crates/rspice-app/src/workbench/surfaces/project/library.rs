@@ -7,6 +7,7 @@
 use super::*;
 use crate::state::{CellViewRef, ViewType};
 use crate::workbench::app_state::AppState;
+use crate::workbench::project::commands::ProjectCommand;
 
 const CONTEXT_HEIGHT: f32 = 36.0;
 const DETAIL_HEIGHT: f32 = 40.0;
@@ -830,7 +831,7 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
                 app.state.prompt(error);
             }
         }
-        LibraryIntent::NewCell => Command::NewCell.execute(app),
+        LibraryIntent::NewCell => app.execute_command_key(ProjectCommand::NewCell.key()),
         LibraryIntent::NewView { library, cell } => {
             if let Err(error) = app.state.open_new_view_dialog(&library, &cell) {
                 app.state.prompt(error);

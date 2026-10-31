@@ -280,4 +280,11 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
     ) -> Option<crate::workbench::framework::ports::CapturedViewport> {
         crate::workbench::documents::result_document::captured_viewport(self, analysis)
     }
+
+    fn saved_presentation(
+        &self,
+    ) -> &dyn rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
+    {
+        &self.results
+    }
 }

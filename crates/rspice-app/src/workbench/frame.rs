@@ -159,7 +159,11 @@ pub fn show(root: &mut egui::Ui, app: &mut RSpiceApp) {
     let launcher_route_active =
         app.state.workbench.current_route().surface_id() == SurfaceId::ProjectLauncher;
     if launcher_route_active && !app.state.project.project_launcher_open {
-        app.state.open_project_launcher();
+        crate::workbench::project::open_project_launcher(
+            &mut app.state.project,
+            &mut app.state.workbench,
+            &mut app.state.platform,
+        );
     } else if !launcher_route_active && app.state.project.project_launcher_open {
         app.state.project.project_launcher_open = false;
     }

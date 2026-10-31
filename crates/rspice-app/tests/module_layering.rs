@@ -745,6 +745,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // What the Project > Configuration page keeps between frames. The project
     // slot holds it, so it ranks below it; it names only lower crates.
     "project/configuration_state",
+    // What the project feature's commands declare, the same way as the
+    // other features' declarations. They name the Project workspace's
+    // pages, so they rank above them.
+    "project/commands",
     "logging",
     "layout",
     // The interface text catalog and its locales. It names nothing of the

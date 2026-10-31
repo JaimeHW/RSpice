@@ -17,6 +17,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 const HEADER_HEIGHT: f32 = 116.0;
@@ -964,21 +965,27 @@ fn response_activated(ui: &mut Ui, response: &Response) -> bool {
 
 fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
     match action {
-        LandingAction::NewProject => Command::NewProject.execute(app),
-        LandingAction::OpenProject => Command::OpenProject.execute(app),
+        LandingAction::NewProject => app.execute_command_key(ProjectCommand::NewProject.key()),
+        LandingAction::OpenProject => app.execute_command_key(ProjectCommand::OpenProject.key()),
         LandingAction::OpenNetlist => Command::OpenNetlist.execute(app),
-        LandingAction::OpenSchematic => Command::OpenDocument.execute(app),
+        LandingAction::OpenSchematic => {
+            app.execute_command_key(ProjectCommand::OpenSchematic.key())
+        }
         LandingAction::OpenRecent(recent) => {
             #[cfg(not(target_arch = "wasm32"))]
             app.open_recent_file(recent);
             #[cfg(target_arch = "wasm32")]
             {
                 let _ = recent;
-                Command::OpenProject.execute(app);
+                app.execute_command_key(ProjectCommand::OpenProject.key());
             }
         }
         LandingAction::ReviewRecovery => {
-            app.state.open_project_launcher();
+            crate::workbench::project::open_project_launcher(
+                &mut app.state.project,
+                &mut app.state.workbench,
+                &mut app.state.platform,
+            );
             app.state.project.project_launcher_page = ProjectLauncherPage::Recovery;
             app.state.platform.recovery_catalog.request_refresh();
         }

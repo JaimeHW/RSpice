@@ -15,6 +15,7 @@ use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
 use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{property_row, property_row_problem};
 use super::super::super::state::Workspace;
+use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::ProjectPage;
 
 pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
@@ -109,13 +110,13 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
 
     section_header(ui, "Project actions", None);
     if inspector_action(ui, "Revision history\u{2026}") {
-        Command::RevisionHistory.execute(app);
+        app.execute_command_key(ProjectCommand::RevisionHistory.key());
     }
     if inspector_action(ui, "Configurations") {
         Command::ConfigurationSets.execute(app);
     }
     if inspector_action(ui, "Switch project\u{2026}") {
-        Command::ProjectLauncher.execute(app);
+        app.execute_command_key(ProjectCommand::ProjectLauncher.key());
     }
 }
 

@@ -253,7 +253,7 @@ const SHOW: &[Step] = &[
     (
         "11.24",
         &[
-            "app.state.open_project_launcher()",
+            "crate::workbench::project::open_project_launcher(",
             "tools::project_launcher::show(ctx, app)",
         ],
     ),
@@ -505,6 +505,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     (
         "13",
         &["|app, CloseForLiveMirror| app.close_for_live_mirror()"],
+    ),
+    (
+        "14",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "15",
+        &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
 
@@ -1139,8 +1147,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        13,
-        "`after_contribution` answers exactly the thirteen requests it lists"
+        15,
+        "`after_contribution` answers exactly the fifteen requests it lists"
     );
 }
 
