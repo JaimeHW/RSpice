@@ -82,6 +82,20 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     );
 }
 
+#[cfg(target_arch = "wasm32")]
+impl ProjectFeature {
+    /// Take the next project the browser finished reading or promoting, if
+    /// any, for the shell to open.
+    pub(in crate::workbench) fn poll_browser_project_import(
+        cx: &mut Cx<'_, Self>,
+    ) -> Option<crate::workbench::workflows::project_workflow::BrowserProjectOpen> {
+        crate::workbench::workflows::project_workflow::poll_browser_project_import(
+            cx.model,
+            cx.platform,
+        )
+    }
+}
+
 /// Open the project launcher on its Projects page, on the launcher's route,
 /// with the recovery catalog asked to refresh and the search field asked to
 /// take focus. A route the session refuses is recorded, and the launcher

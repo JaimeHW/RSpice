@@ -812,7 +812,9 @@ impl ConfirmationHost for RSpiceApp {
 
     #[cfg(target_arch = "wasm32")]
     fn pending_browser_file_operation(&self) -> Option<String> {
-        crate::workbench::workflows::project_workflow::browser_file_operation_label(&self.state)
+        crate::workbench::workflows::project_workflow::browser_file_operation_label(
+            &self.state.platform,
+        )
     }
 
     #[cfg(target_arch = "wasm32")]

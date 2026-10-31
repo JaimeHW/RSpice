@@ -996,14 +996,14 @@ pub(crate) fn save_project_as_to_path(state: &mut AppState, path: &Path) -> bool
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(crate) fn browser_file_operation_label(state: &AppState) -> Option<String> {
+pub(crate) fn browser_file_operation_label(platform: &PlatformState) -> Option<String> {
     if let Some(kind) = crate::workbench::browser::file_import::active_text_import_kind() {
         return Some(format!(
             "Waiting for the browser {} picker or permission request to finish.",
             kind.label()
         ));
     }
-    crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform)
+    crate::workbench::lifecycle::project_lifecycle::operation_in_progress(platform)
         .then(|| "Waiting for the browser project file or permission request to finish.".to_owned())
 }
 

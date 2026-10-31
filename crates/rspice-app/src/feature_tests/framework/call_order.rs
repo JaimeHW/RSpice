@@ -19,6 +19,7 @@ const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_imag
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
 const MODELS: &str = include_str!("../../workbench/models.rs");
+const PROJECT: &str = include_str!("../../workbench/project.rs");
 const RESULTS: &str = include_str!("../../../../rspice-app-results/src/workbench/results.rs");
 const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/serialization.rs");
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
@@ -138,7 +139,7 @@ const PREPARE_FRAME: &[Step] = &[
     (
         "5.24",
         &[
-            "project_workflow::poll_browser_project_import(",
+            "self.poll_browser_project_import()",
             "self.state.open_browser_project(open)",
             "self.restore_workspace_after_project_load()",
         ],
@@ -1349,6 +1350,27 @@ fn a_project_contribution_answers_nothing_where_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         PROJECT_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn the_project_feature_takes_the_browser_project_import_where_the_frame_did() {
+    assert_eq!(
+        without_whitespace(&body(FRAME, "fn poll_browser_project_import(")),
+        without_whitespace(
+            "use crate::workbench::project::ProjectFeature;\
+             ProjectFeature::poll_browser_project_import(&mut features::cx(self))"
+        ),
+        "the frame's browser project import step runs in the project feature's context, \
+         and only that"
+    );
+    assert_runs_in_order(
+        "ProjectFeature::poll_browser_project_import",
+        &body(PROJECT, "fn poll_browser_project_import("),
+        &[(
+            "5.24",
+            &["project_workflow::poll_browser_project_import(cx.model, cx.platform,)"],
+        )],
     );
 }
 

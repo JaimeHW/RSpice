@@ -253,6 +253,17 @@ impl RSpiceApp {
     pub(in crate::workbench) fn poll_browser_pack_restore(&mut self, ctx: &Context) {
         ModelsFeature::poll_browser_pack_restore(&mut features::cx(self), ctx);
     }
+
+    /// Have the project feature take the next project the browser finished
+    /// reading or promoting, in its context, for the shell to open.
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::workbench) fn poll_browser_project_import(
+        &mut self,
+    ) -> Option<crate::workbench::workflows::project_workflow::BrowserProjectOpen> {
+        use crate::workbench::project::ProjectFeature;
+
+        ProjectFeature::poll_browser_project_import(&mut features::cx(self))
+    }
 }
 
 /// The requests the result documents and the data browser raise while they
