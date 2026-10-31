@@ -36,10 +36,10 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, CloseForLiveMirror, ExportDataset, FollowSchematicGrid,
-    MarkFailureSites, OpenProjectDialog, PrintActiveView, ProjectFileAction, PromptAfterCommands,
-    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations,
-    ShowWaveforms,
+    self, ApplyWaveformDefaults, ArmPartPlacement, CloseForLiveMirror, ExportDataset,
+    FollowSchematicGrid, MarkFailureSites, OpenProjectDialog, PrintActiveView, ProjectFileAction,
+    PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter,
+    ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -252,6 +252,13 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, CloseForLiveMirror| app.close_for_live_mirror(),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, ArmPartPlacement(placement)| {
+                crate::workbench::app::arm_pack_part(&mut app.state.model, placement);
+            },
         );
         requests::drain(
             self,

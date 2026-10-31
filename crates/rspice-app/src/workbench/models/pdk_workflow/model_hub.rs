@@ -23,7 +23,8 @@ use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app_state::design_history::publish_model_library_candidate;
-use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::feature::{Cx, Session};
+use crate::workbench::framework::requests::ArmPartPlacement;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
 
@@ -674,7 +675,8 @@ pub(super) fn publish_model_hub_output(
         apply_model_hub_receipt(cx, receipt);
         return;
     };
-    let armed = crate::workbench::app::arm_pack_part(cx.model, placement);
+    let armed = placement.armed_label();
+    cx.wb.outbox().push(ArmPartPlacement(placement));
     rspice_schematic_editor::view::canvas::request_focus(ctx);
     apply_model_hub_receipt(cx, format!("{receipt} {armed} is armed for placement."));
 }

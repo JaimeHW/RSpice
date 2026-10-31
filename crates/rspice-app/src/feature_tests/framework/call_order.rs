@@ -508,10 +508,17 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "14",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app, ArmPartPlacement(placement)|",
+            "crate::workbench::app::arm_pack_part(&mut app.state.model, placement);",
+        ],
     ),
     (
         "15",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "16",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -1147,8 +1154,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        15,
-        "`after_contribution` answers exactly the fifteen requests it lists"
+        16,
+        "`after_contribution` answers exactly the sixteen requests it lists"
     );
 }
 

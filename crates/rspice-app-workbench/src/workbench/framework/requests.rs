@@ -415,6 +415,16 @@ impl Request for OpenProjectDialog {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Arm the schematic's placement tool with a part a model pack placed.
+/// Raised by the models feature, which names the armed part in its own
+/// receipt, and taken straight after the call that raised it.
+#[derive(Clone, Debug)]
+pub struct ArmPartPlacement(pub rspice_app_state::state::model_hub::PartPlacement);
+
+impl Request for ArmPartPlacement {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

@@ -21,6 +21,7 @@ use crate::state::{ComponentType, Tool};
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
+use crate::workbench::framework::requests::ArmPartPlacement;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
 
@@ -115,7 +116,8 @@ fn open_project() -> AppState {
     state
 }
 
-/// Publishes a completed operation into a session, as the frame loop does.
+/// Publishes a completed operation into a session, as the frame loop does:
+/// the part it placed is armed once the publishing step returns.
 fn publish(
     state: &mut AppState,
     handle: crate::services::model_hub::ModelHubStoreHandle,
@@ -128,6 +130,9 @@ fn publish(
     with_cx(state, &mut service, |cx| {
         publish_model_hub_output(&ctx, cx, request, output)
     });
+    if let Some(ArmPartPlacement(placement)) = state.workbench.outbox.take() {
+        crate::workbench::app::arm_pack_part(&mut state.model, placement);
+    }
 }
 
 #[test]

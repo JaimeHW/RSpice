@@ -29,8 +29,11 @@ fn arm_cell_instance(model: &mut Model, binding: LibraryCellInstance) -> String 
 
 /// Coordinate either placement shape published by a distributed model pack.
 pub(crate) fn arm_pack_part(model: &mut Model, placement: PartPlacement) -> String {
+    let label = placement.armed_label();
     match placement {
-        PartPlacement::CellInstance(binding) => arm_cell_instance(model, *binding),
+        PartPlacement::CellInstance(binding) => {
+            arm_cell_instance(model, *binding);
+        }
         PartPlacement::NativeDevice {
             component_type,
             variant,
@@ -40,10 +43,10 @@ pub(crate) fn arm_pack_part(model: &mut Model, placement: PartPlacement) -> Stri
             model.schematic.arm_tool(Tool::Place(component_type));
             model.schematic.session.editor.pending_part_model = Some(PendingPartModel {
                 tool: Tool::Place(component_type),
-                model: part_model.clone(),
+                model: part_model,
                 variant,
             });
-            part_model
         }
     }
+    label
 }

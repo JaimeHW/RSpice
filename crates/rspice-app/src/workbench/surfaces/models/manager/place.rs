@@ -119,7 +119,13 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
 /// focus and the workspace receipt. It is the same completion the Model Hub
 /// performs when a retention lands, one operation later.
 pub(super) fn arm(state: &mut AppState, ctx: &egui::Context, placement: PartPlacement) {
-    let armed = crate::workbench::app::arm_pack_part(&mut state.model, placement);
+    let armed = placement.armed_label();
+    state
+        .workbench
+        .outbox
+        .push(crate::workbench::framework::requests::ArmPartPlacement(
+            placement,
+        ));
     rspice_schematic_editor::view::canvas::request_focus(ctx);
     apply_receipt(state, Ok(format!("{armed} is armed for placement.")));
 }

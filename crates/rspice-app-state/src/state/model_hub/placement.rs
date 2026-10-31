@@ -66,6 +66,17 @@ pub enum PartPlacement {
     CellInstance(Box<LibraryCellInstance>),
 }
 
+impl PartPlacement {
+    /// What a placement receipt calls the part once it is armed: the cell
+    /// instance's library and cell, or the native device's model card.
+    pub fn armed_label(&self) -> String {
+        match self {
+            Self::NativeDevice { model, .. } => model.clone(),
+            Self::CellInstance(binding) => format!("{}/{}", binding.library, binding.cell),
+        }
+    }
+}
+
 /// Resolves a manifest part into the placement the schematic commits.
 ///
 /// `library` is the project model library the part's bytes were retained into,
