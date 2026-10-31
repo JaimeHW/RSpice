@@ -448,7 +448,7 @@ def command_gates(
             "hardcopy-service",
             "Frozen hardcopy source and renderer tests",
             ("cargo", "test", "--locked", "-p", "rspice-hardcopy", "-j", cargo_jobs, "--lib"),
-            125,
+            127,
         ),
         Gate(
             "publisher-tests",

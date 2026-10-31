@@ -306,3 +306,76 @@ fn a_bracket_in_hebrew_is_drawn_facing_its_text() {
         "an opening bracket bows left: middle {middle}, tip {tip}"
     );
 }
+
+/// The canvas sets each inked glyph of a line where print does, so a sheet
+/// exported as PDF or SVG, or rasterised from the SVG, reads as the canvas
+/// shows it: the same faces, the same shaping and the same order. Print
+/// and the SVG agree glyph for glyph in the hardcopy tests; this holds the
+/// canvas to print.
+#[test]
+fn the_canvas_sets_every_glyph_where_print_does() {
+    const SIZE: f32 = 100.0;
+    let mut lines = vec![
+        (egui::FontFamily::Proportional, "AVATAR To Wa"),
+        (crate::fonts::mono(), "R1 10 kΩ α ⌀6 ⏚"),
+        (crate::fonts::sans_semibold(), "DWG Δ 4.7 µF"),
+    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    lines.extend([
+        (egui::FontFamily::Proportional, "מגבר R1 = 10 kΩ (V+)"),
+        (egui::FontFamily::Proportional, "לא (גד) 12 שלום"),
+        (egui::FontFamily::Proportional, "لا إله قيمة 123"),
+        (crate::fonts::sans_semibold(), "مَرْحَبًا R2"),
+        (egui::FontFamily::Proportional, "שָׁלוֹם R3"),
+        (egui::FontFamily::Proportional, "ภาษาไทย น้ำ"),
+    ]);
+    for (family, text) in lines {
+        let galley = with_fonts(|fonts| {
+            layout_no_wrap(
+                fonts,
+                text,
+                FontId::new(SIZE, family.clone()),
+                Color32::WHITE,
+            )
+        });
+        let mut canvas: Vec<f32> = galley
+            .rows
+            .iter()
+            .flat_map(|row| {
+                row.row
+                    .glyphs
+                    .iter()
+                    .filter(|glyph| !glyph.chr.is_whitespace() && !glyph.uv_rect.is_nothing())
+                    .map(move |glyph| row.pos.x + glyph.pos.x)
+            })
+            .collect();
+        let mut printed = Vec::new();
+        let mut left = 0.0;
+        for piece in rspice_fonts::print::line(role_of(&family), text) {
+            let scale = SIZE / f32::from(piece.units_per_em);
+            for glyph in &piece.glyphs {
+                if !text[glyph.text.clone()].trim().is_empty() {
+                    printed.push(left + glyph.x_offset as f32 * scale);
+                }
+                left += glyph.advance as f32 * scale;
+            }
+        }
+        assert_eq!(
+            canvas.len(),
+            printed.len(),
+            "{text:?}: {canvas:?} {printed:?}"
+        );
+        for glyphs in [&mut canvas, &mut printed] {
+            glyphs.sort_by(f32::total_cmp);
+        }
+        let (from_canvas, from_print) = (canvas[0], printed[0]);
+        for (on_canvas, in_print) in canvas.iter().zip(&printed) {
+            assert!(
+                ((on_canvas - from_canvas) - (in_print - from_print)).abs() < SIZE * 0.01,
+                "{text:?}: a glyph at {} on the canvas, where print sets one at {}",
+                on_canvas - from_canvas,
+                in_print - from_print
+            );
+        }
+    }
+}

@@ -241,6 +241,11 @@ pub(super) fn write_svg_primitive(
             let (x, y) = transform.point(*origin);
             let size = transform.length(*size);
             let (family, weight) = svg_font(*font);
+            let line = SvgLine {
+                x,
+                anchor: *anchor,
+                size,
+            };
             let anchor = match anchor {
                 TextAnchor::Start => "start",
                 TextAnchor::Middle => "middle",
@@ -261,7 +266,7 @@ pub(super) fn write_svg_primitive(
                 svg_color(resolve_color(plan, *color)),
             )
             .expect("write to string");
-            write_svg_text_runs(output, faces, *font, text);
+            write_svg_text_runs(output, faces, *font, text, line);
             output.push_str("</text>");
         }
         ScenePrimitive::ClippedGroup {
@@ -415,32 +420,92 @@ pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
     publication_face(font.role().print_primary())
 }
 
-/// Write `text` as `font` letters it. A run in the element's own face is
-/// character data; a run another face carries is a `tspan` naming that face,
-/// so every renderer letters each glyph from the face the chain chose rather
-/// than from whichever face its own fallback finds first. Each face a run is
-/// lettered in joins `faces`, the set the page embeds.
+/// Where a line of text stands, in the page's units: the x its
+/// `text-anchor` point is at, that anchor, and the size it is lettered at.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct SvgLine {
+    pub(super) x: f64,
+    pub(super) anchor: TextAnchor,
+    pub(super) size: f64,
+}
+
+/// What a right-to-left piece is written between: U+202E RIGHT-TO-LEFT
+/// OVERRIDE before it, and after it U+200F RIGHT-TO-LEFT MARK and U+202C POP
+/// DIRECTIONAL FORMATTING. The mark keeps a space at the piece's end from
+/// counting as the end of the line, where the bidirectional algorithm would
+/// set it left to right.
+const RIGHT_TO_LEFT: (char, &str) = ('\u{202E}', "\u{200F}\u{202C}");
+
+/// Write `text` as print sets it in `font`, standing where `line` says.
+///
+/// A line that is one left-to-right piece in the element's own face is the
+/// element's character data, and the viewer places it by the element's own
+/// x and anchor. Any other line is a `tspan` per piece, from left to right,
+/// each at the x the shaped advances give its anchor point, so every viewer
+/// sets each piece where the PDF does, whatever its own fallback or
+/// bidirectional layout would make of the whole line:
+/// - a piece in another face names that face, so no viewer letters it
+///   from whichever face it finds first;
+/// - a right-to-left piece is written in the order it is read, inside a
+///   right-to-left override (see [`RIGHT_TO_LEFT`]), so a viewer sets it
+///   from its right end, joins its Arabic and mirrors its brackets, whatever
+///   it makes of a space or bracket at either end of it;
+/// - a replacement piece is its squares.
+///
+/// Each face a piece is lettered in joins `faces`, the set the page embeds.
 pub(super) fn write_svg_text_runs(
     output: &mut String,
     faces: &mut BTreeSet<PrintFace>,
     font: SceneFont,
     text: &str,
+    line: SvgLine,
 ) {
     let own = font.role().print_primary();
-    for run in font.role().runs(text) {
-        faces.insert(run.face);
-        if run.face == own {
-            escape_xml_into(&run.text, output);
-        } else {
-            let (family, weight) = publication_face(run.face);
-            write!(
-                output,
-                "<tspan font-family=\"{family}\" font-weight=\"{weight}\">"
-            )
-            .expect("write to string");
-            escape_xml_into(&run.text, output);
-            output.push_str("</tspan>");
+    let pieces = rspice_fonts::print::line(font.role(), text);
+    faces.extend(pieces.iter().map(|piece| piece.face));
+    if let [piece] = pieces.as_slice()
+        && piece.face == own
+        && !piece.right_to_left
+        && !piece.replacement
+    {
+        escape_xml_into(text, output);
+        return;
+    }
+    let widths: Vec<f64> = pieces.iter().map(|piece| piece.width(line.size)).collect();
+    let mut left = match line.anchor {
+        TextAnchor::Start => line.x,
+        TextAnchor::Middle => line.x - widths.iter().sum::<f64>() / 2.0,
+        TextAnchor::End => line.x - widths.iter().sum::<f64>(),
+    };
+    for (piece, width) in pieces.iter().zip(widths) {
+        let x = match line.anchor {
+            TextAnchor::Start => left,
+            TextAnchor::Middle => left + width / 2.0,
+            TextAnchor::End => left + width,
+        };
+        left += width;
+        write!(output, "<tspan x=\"{x:.3}\"").expect("write to string");
+        if piece.face != own {
+            let (family, weight) = publication_face(piece.face);
+            write!(output, " font-family=\"{family}\" font-weight=\"{weight}\"")
+                .expect("write to string");
         }
+        output.push('>');
+        if piece.replacement {
+            output.extend(piece.glyphs.iter().map(|_| rspice_fonts::REPLACEMENT));
+        } else {
+            let start = piece.glyphs.iter().map(|glyph| glyph.text.start).min();
+            let end = piece.glyphs.iter().map(|glyph| glyph.text.end).max();
+            let lettered = start.zip(end).map_or("", |(start, end)| &text[start..end]);
+            if piece.right_to_left {
+                output.push(RIGHT_TO_LEFT.0);
+            }
+            escape_xml_into(lettered, output);
+            if piece.right_to_left {
+                output.push_str(RIGHT_TO_LEFT.1);
+            }
+        }
+        output.push_str("</tspan>");
     }
 }
 
@@ -482,6 +547,11 @@ pub(super) fn write_svg_decorations(
             faces,
             SceneFont::SansSemibold,
             scene.metadata.title(),
+            SvgLine {
+                x: printable.x.micrometres() as f64,
+                anchor: TextAnchor::Start,
+                size: DECORATION_TEXT_UM as f64,
+            },
         );
         output.push_str("</text>");
         write!(
@@ -500,6 +570,11 @@ pub(super) fn write_svg_decorations(
                 plan.pagination().pages().len(),
                 page.coordinate()
             ),
+            SvgLine {
+                x: page_right as f64,
+                anchor: TextAnchor::End,
+                size: DECORATION_TEXT_UM as f64,
+            },
         );
         output.push_str("</text>");
         if let Some(line) = scene.metadata.header_lines.first() {
@@ -509,7 +584,17 @@ pub(super) fn write_svg_decorations(
                 "<text x=\"{center}\" y=\"{baseline}\" fill=\"{secondary}\" font-family=\"{PUBLICATION_SANS}\" font-size=\"{DECORATION_TEXT_UM}\" text-anchor=\"middle\">"
             )
             .expect("write to string");
-            write_svg_text_runs(output, faces, SceneFont::Sans, line);
+            write_svg_text_runs(
+                output,
+                faces,
+                SceneFont::Sans,
+                line,
+                SvgLine {
+                    x: center as f64,
+                    anchor: TextAnchor::Middle,
+                    size: DECORATION_TEXT_UM as f64,
+                },
+            );
             output.push_str("</text>");
         }
     }
@@ -520,7 +605,17 @@ pub(super) fn write_svg_decorations(
             row.x_um, row.baseline_um
         )
         .expect("write to string");
-        write_svg_text_runs(output, faces, SceneFont::Monospace, &row.text);
+        write_svg_text_runs(
+            output,
+            faces,
+            SceneFont::Monospace,
+            &row.text,
+            SvgLine {
+                x: row.x_um as f64,
+                anchor: TextAnchor::Start,
+                size: PROVENANCE_TEXT_UM as f64,
+            },
+        );
         output.push_str("</text>");
     }
     if let Some(legend) = legend_layout(plan, scene, page)? {
@@ -563,7 +658,17 @@ pub(super) fn write_svg_decorations(
                 slot.origin.0, slot.origin.1
             )
             .expect("write to string");
-            write_svg_text_runs(output, faces, SceneFont::Sans, &slot.label);
+            write_svg_text_runs(
+                output,
+                faces,
+                SceneFont::Sans,
+                &slot.label,
+                SvgLine {
+                    x: slot.origin.0 as f64,
+                    anchor: TextAnchor::Start,
+                    size: LEGEND_TEXT_UM as f64,
+                },
+            );
             output.push_str("</text>");
         }
         output.push_str("</g>");
@@ -632,7 +737,17 @@ pub(super) fn write_svg_watermark(
         "<text x=\"{cx}\" y=\"{cy}\" fill=\"{ink}\" fill-opacity=\"0.16\" font-family=\"{PUBLICATION_SANS}\" font-weight=\"600\" font-size=\"{size}\" text-anchor=\"middle\" transform=\"rotate(-35 {cx} {cy})\">"
     )
     .expect("write to string");
-    write_svg_text_runs(output, faces, SceneFont::SansSemibold, text);
+    write_svg_text_runs(
+        output,
+        faces,
+        SceneFont::SansSemibold,
+        text,
+        SvgLine {
+            x: cx as f64,
+            anchor: TextAnchor::Middle,
+            size: size as f64,
+        },
+    );
     output.push_str("</text>");
     let _ = scene;
 }
@@ -670,6 +785,16 @@ pub(super) fn write_svg_registration_marks(
         top + 3_000,
     )
     .expect("write to string");
-    write_svg_text_runs(output, faces, SceneFont::Monospace, page.coordinate());
+    write_svg_text_runs(
+        output,
+        faces,
+        SceneFont::Monospace,
+        page.coordinate(),
+        SvgLine {
+            x: (left + 2_500) as f64,
+            anchor: TextAnchor::Start,
+            size: 2_200.0,
+        },
+    );
     output.push_str("</text>");
 }

@@ -4,6 +4,7 @@
 //! PDF/A-2b, and gives its text back in logical order when it is copied.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 use lopdf::content::Content;
 use lopdf::{Encoding, Object};
@@ -307,4 +308,186 @@ fn the_render_budget_allows_for_the_faces_a_page_letters_in() {
         allowance("قيمة R1"),
         every_build + 2 * PrintFace::SansArabicRegular.bytes().len() as u64
     );
+}
+
+/// Each glyph a viewer lays `svg`'s text out in, as usvg's own layout
+/// places it: its id and x, with the controls that steer the layout left
+/// out, and the size the text is lettered at. The viewer letters from the
+/// faces the SVG embeds, under the families the SVG names them, as a
+/// browser does.
+fn laid_out_glyphs(svg: &str) -> (Vec<(u32, f32)>, f32) {
+    use base64::Engine as _;
+
+    let mut database = usvg::fontdb::Database::new();
+    for rule in svg.split("@font-face{").skip(1) {
+        let family = rule
+            .split("font-family:'")
+            .nth(1)
+            .and_then(|rest| rest.split('\'').next())
+            .expect("a face names its family");
+        let data = rule
+            .split("base64,")
+            .nth(1)
+            .and_then(|rest| rest.split(')').next())
+            .expect("a face carries its data");
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(data)
+            .unwrap();
+        for id in database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(bytes))) {
+            let mut face = database.face(id).cloned().unwrap();
+            face.families = vec![(
+                family.to_owned(),
+                usvg::fontdb::Language::English_UnitedStates,
+            )];
+            database.push_face_info(face);
+            database.remove_face(id);
+        }
+    }
+    let options = usvg::Options {
+        fontdb: Arc::new(database),
+        ..usvg::Options::default()
+    };
+    let tree = usvg::Tree::from_str(svg, &options).unwrap();
+    let mut glyphs = Vec::new();
+    let mut size = 0.0;
+    let mut groups = vec![tree.root()];
+    while let Some(group) = groups.pop() {
+        for node in group.children() {
+            match node {
+                usvg::Node::Group(nested) => groups.push(nested),
+                usvg::Node::Text(text) => {
+                    for span in text.layouted() {
+                        for glyph in &span.positioned_glyphs {
+                            // usvg gives a cluster's text to one of its
+                            // glyphs and none to the rest, so a glyph with no
+                            // text of its own is still a letter or a mark.
+                            if !glyph.text.is_empty()
+                                && glyph.text.chars().all(|character| {
+                                    matches!(
+                                        character,
+                                        '\u{200E}' | '\u{200F}' | '\u{202A}'..='\u{202E}'
+                                    )
+                                })
+                            {
+                                continue;
+                            }
+                            size = glyph.font_size();
+                            glyphs.push((glyph.id.0, glyph.transform().tx));
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    (glyphs, size)
+}
+
+/// Each glyph of `value` where print sets it, `size` units to the em, from
+/// the line's left end.
+fn printed_glyphs(font: SceneFont, value: &str, size: f32) -> Vec<(u32, f32)> {
+    let mut left = 0.0;
+    let mut glyphs = Vec::new();
+    for piece in rspice_fonts::print::line(font.role(), value) {
+        let scale = size / f32::from(piece.units_per_em);
+        for glyph in &piece.glyphs {
+            glyphs.push((glyph.id, left + glyph.x_offset as f32 * scale));
+            left += glyph.advance as f32 * scale;
+        }
+    }
+    glyphs
+}
+
+/// A viewer sets an SVG's text glyph for glyph where print does: each piece
+/// at the x the shaped advances give it, in its face, right-to-left pieces
+/// from their right end. usvg, which knows only a left-to-right paragraph,
+/// lays the mixed line out as the PDF does.
+#[test]
+fn an_svg_viewer_sets_every_glyph_where_print_does() {
+    let mut lines = vec![
+        (SceneFont::Sans, "AVATAR To Wa"),
+        (SceneFont::Monospace, "R1 10 kΩ α ⌀6 ⏚"),
+        (SceneFont::Sans, "Plain 中 \u{E000}"),
+    ];
+    #[cfg(not(target_arch = "wasm32"))]
+    lines.extend([
+        (SceneFont::Sans, "מגבר R1 = 10 kΩ (V+)"),
+        (SceneFont::Sans, "לא (גד) 12 שלום"),
+        (SceneFont::Sans, "لا إله قيمة 123"),
+        (SceneFont::SansSemibold, "مَرْحَبًا R2"),
+        (SceneFont::Sans, "שָׁלוֹם R3"),
+        (SceneFont::Sans, "ภาษาไทย น้ำ"),
+    ]);
+    for anchor in [TextAnchor::Start, TextAnchor::Middle, TextAnchor::End] {
+        for (font, value) in &lines {
+            let content = extent(150_000, 40_000);
+            let mut line = text(*font, value, 20_000);
+            if let ScenePrimitive::Text {
+                origin,
+                anchor: placed,
+                ..
+            } = &mut line
+            {
+                *origin = ScenePoint::new(
+                    Length::from_micrometres(75_000),
+                    Length::from_micrometres(20_000),
+                );
+                *placed = anchor;
+            }
+            let scene = HardcopyScene::try_new(
+                content,
+                HardcopySceneMetadata::try_new("Lettering", "RSpice hardcopy tests").unwrap(),
+                vec![line],
+                Vec::new(),
+            )
+            .unwrap();
+            let plan = undecorated_plan(OutputFormat::SvgVector, content);
+            let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+            let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+            let (mut laid_out, size) = laid_out_glyphs(svg);
+            let mut printed = printed_glyphs(*font, value, size);
+            assert_eq!(
+                laid_out.len(),
+                printed.len(),
+                "{value:?}: {laid_out:?} {printed:?}"
+            );
+            let origin = |glyphs: &[(u32, f32)]| {
+                glyphs.iter().map(|(_, x)| *x).fold(f32::INFINITY, f32::min)
+            };
+            let (from_viewer, from_print) = (origin(&laid_out), origin(&printed));
+            for glyphs in [&mut laid_out, &mut printed] {
+                glyphs.sort_by(|a, b| a.1.total_cmp(&b.1).then(a.0.cmp(&b.0)));
+            }
+            let tolerance = size * 0.01;
+            for ((viewer_id, viewer_x), (print_id, print_x)) in laid_out.iter().zip(&printed) {
+                assert_eq!(
+                    viewer_id, print_id,
+                    "{value:?} {anchor:?}: {laid_out:?} {printed:?}"
+                );
+                assert!(
+                    ((viewer_x - from_viewer) - (print_x - from_print)).abs() < tolerance,
+                    "{value:?} {anchor:?}: glyph {viewer_id} at {} where print sets it at {}",
+                    viewer_x - from_viewer,
+                    print_x - from_print
+                );
+            }
+        }
+    }
+}
+
+/// A right-to-left piece is written in logical order inside a right-to-left
+/// override, and names its face.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_svg_writes_a_right_to_left_piece_as_typed_inside_an_override() {
+    let publication = printed(OutputFormat::SvgVector, SceneFont::Sans, "שלום R1");
+    let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    let named = super::glyph_fallback::without_positions(svg);
+    assert!(
+        named.contains(
+            "<tspan font-family=\"RSpice Plex Sans Hebrew\" font-weight=\"400\">\u{202E}שלום\u{200F}\u{202C}</tspan>"
+        ),
+        "{named}"
+    );
+    assert!(named.contains("<tspan>R1</tspan>"), "{named}");
 }

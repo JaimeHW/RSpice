@@ -107,6 +107,20 @@ fn each_font_letters_engineering_symbols_through_its_chain() {
     }
 }
 
+/// `svg` with the x each piece of a line is placed at left out.
+pub(super) fn without_positions(svg: &str) -> String {
+    let mut kept = String::with_capacity(svg.len());
+    let mut rest = svg;
+    while let Some(at) = rest.find("<tspan x=\"") {
+        kept.push_str(&rest[..at]);
+        kept.push_str("<tspan");
+        let after = &rest[at + "<tspan x=\"".len()..];
+        rest = &after[after.find('"').expect("a closed x") + 1..];
+    }
+    kept.push_str(rest);
+    kept
+}
+
 /// Every renderer is told which face letters each run, so none of them falls
 /// back on its own, to whichever face it happens to find first.
 #[test]
@@ -124,24 +138,34 @@ fn svg_names_the_face_of_every_borrowed_run() {
     let plan = plan(OutputFormat::SvgVector, content, false);
     let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
     let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    // Each piece is placed at its own x; what matters here is the face each
+    // names, so the positions are left out.
+    let named = without_positions(svg);
+    let own = "<tspan>";
     let sans = "<tspan font-family=\"RSpice Plex Sans\" font-weight=\"400\">";
     let sans_medium = "<tspan font-family=\"RSpice Plex Sans\" font-weight=\"500\">";
     let symbols = "<tspan font-family=\"RSpice Symbols\" font-weight=\"400\">";
     assert!(
-        svg.contains(&format!(">R1 10 k{sans}Ω</tspan> {sans}α</tspan></text>")),
-        "{svg}"
+        named.contains(&format!(
+            ">{own}R1 10 k</tspan>{sans}Ω</tspan>{own} </tspan>{sans}α</tspan></text>"
+        )),
+        "{named}"
     );
     assert!(
-        svg.contains(&format!(">DWG {sans_medium}Δ</tspan></text>")),
-        "{svg}"
+        named.contains(&format!(">{own}DWG </tspan>{sans_medium}Δ</tspan></text>")),
+        "{named}"
     );
     assert!(
-        svg.contains(&format!(">Plain {symbols}\u{25fb}</tspan></text>")),
-        "{svg}"
+        named.contains(&format!(
+            ">{own}Plain </tspan>{symbols}\u{25fb}</tspan></text>"
+        )),
+        "{named}"
     );
     assert!(
-        svg.contains(&format!(">{symbols}⌀</tspan>6 {symbols}⏚</tspan></text>")),
-        "{svg}"
+        named.contains(&format!(
+            ">{symbols}⌀</tspan>{own}6 </tspan>{symbols}⏚</tspan></text>"
+        )),
+        "{named}"
     );
     // The face the symbols are named in travels with the drawing.
     assert!(

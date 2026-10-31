@@ -24,6 +24,8 @@ use std::ops::Range;
 use std::sync::OnceLock;
 
 use harfrust::{BufferClusterLevel, BufferFlags, Direction, FontRef, ShaperData, UnicodeBuffer};
+use skrifa::MetadataProvider;
+use skrifa::instance::{LocationRef, Size};
 use unicode_bidi::{BidiClass, BidiInfo, bidi_class};
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -47,6 +49,11 @@ pub struct Glyph {
 pub struct Piece {
     pub face: PrintFace,
     pub right_to_left: bool,
+    /// Whether the piece is replacement squares, each standing for a
+    /// grapheme cluster no face letters.
+    pub replacement: bool,
+    /// The font units to the em of the piece's face.
+    pub units_per_em: u16,
     /// The glyphs from left to right.
     pub glyphs: Vec<Glyph>,
 }
@@ -59,6 +66,12 @@ impl Piece {
             .iter()
             .map(|glyph| i64::from(glyph.advance))
             .sum()
+    }
+
+    /// How far the piece advances lettered `size` units to the em.
+    #[must_use]
+    pub fn width(&self, size: f64) -> f64 {
+        self.advance() as f64 * size / f64::from(self.units_per_em.max(1))
     }
 }
 
@@ -188,6 +201,8 @@ fn flush(face: PrintFace, right_to_left: bool, glyphs: &mut Vec<Glyph>, pieces: 
     pieces.push(Piece {
         face,
         right_to_left,
+        replacement: false,
+        units_per_em: units_per_em(face),
         glyphs: std::mem::take(glyphs),
     });
 }
@@ -212,16 +227,14 @@ fn push_replacements(
         glyphs.reverse();
     }
     match pieces.last_mut() {
-        Some(piece)
-            if piece.face == PrintFace::Symbols
-                && piece.right_to_left == right_to_left
-                && piece.glyphs.iter().all(|glyph| glyph.id == square.id) =>
-        {
+        Some(piece) if piece.replacement && piece.right_to_left == right_to_left => {
             piece.glyphs.extend(glyphs);
         }
         _ => pieces.push(Piece {
             face: PrintFace::Symbols,
             right_to_left,
+            replacement: true,
+            units_per_em: units_per_em(PrintFace::Symbols),
             glyphs,
         }),
     }
@@ -253,6 +266,12 @@ fn replacement_glyph() -> &'static Glyph {
 struct Shaping {
     font: FontRef<'static>,
     data: ShaperData,
+    units_per_em: u16,
+}
+
+/// The font units to the em of `face`.
+fn units_per_em(face: PrintFace) -> u16 {
+    shaping(face).map_or(1_000, |shaping| shaping.units_per_em)
 }
 
 fn shaping(face: PrintFace) -> Option<&'static Shaping> {
@@ -262,7 +281,14 @@ fn shaping(face: PrintFace) -> Option<&'static Shaping> {
         .get_or_init(|| {
             let font = FontRef::new(face.bytes()).ok()?;
             let data = ShaperData::new(&font);
-            Some(Shaping { font, data })
+            let units_per_em = font
+                .metrics(Size::unscaled(), LocationRef::default())
+                .units_per_em;
+            Some(Shaping {
+                font,
+                data,
+                units_per_em,
+            })
         })
         .as_ref()
 }
