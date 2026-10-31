@@ -2126,7 +2126,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
     "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
     "rspice-app/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
-    "rspice-app/src/workbench/project/library_dialogs/new_cell.rs::process_new_cell_dialog",
     "rspice-app/src/workbench/surfaces/design/layout_editor.rs::show_canvas",
     "rspice-app/src/workbench/surfaces/project/landing.rs::compact_recent_header",
     "rspice-app/src/workbench/surfaces/project/landing.rs::compact_section_header",
@@ -2154,7 +2153,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-ui-kit/src/widgets/canvas_entry.rs::derived",
     "rspice-ui-kit/src/widgets/canvas_entry.rs::paint_status",
     "rspice-ui-kit/src/widgets/command_form.rs::list_entry",
-    "rspice-ui-kit/src/widgets/command_form.rs::value_row",
     "rspice-ui-kit/src/widgets/dialog.rs::mark",
     "rspice-ui-kit/src/widgets/form.rs::kv_row",
 ];
