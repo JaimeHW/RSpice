@@ -82,6 +82,17 @@ macro_rules! hardcopy_peer {
     };
 }
 
+/// The models peer a context over `state` holds for the feature whose slot
+/// is `slot`: none for the models feature itself, whose slot it is.
+macro_rules! models_peer {
+    (models, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&*$state.models)
+    };
+}
+
 /// What a context over `app` lends the feature as what it runs: the
 /// application's field `own`, or nothing for a feature that runs nothing.
 macro_rules! own {
@@ -146,6 +157,8 @@ macro_rules! features {
                             hardcopy_peer!($slot, state),
                             results_peer!($slot, state),
                             &*state.simulate,
+                            &*state.code,
+                            models_peer!($slot, state),
                         ),
                         command_registry(),
                     )

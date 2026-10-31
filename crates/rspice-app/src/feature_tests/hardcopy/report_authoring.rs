@@ -59,6 +59,8 @@ fn cx<'a>(
             None,
             Some(&*state.results),
             &*state.simulate,
+            &*state.code,
+            Some(&*state.models),
         ),
         command_registry(),
     )

@@ -229,6 +229,10 @@ pub struct Peers<'a> {
     /// state, never itself as a peer.
     results: Option<&'a dyn ResultsPort>,
     simulate: &'a dyn SimulatePort,
+    code: &'a dyn CodePort,
+    /// `None` in the models feature's own context, as `results` is in the
+    /// results feature's.
+    models: Option<&'a dyn ModelsPort>,
 }
 
 impl<'a> Peers<'a> {
@@ -238,6 +242,8 @@ impl<'a> Peers<'a> {
         hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a dyn ResultsPort>,
         simulate: &'a dyn SimulatePort,
+        code: &'a dyn CodePort,
+        models: Option<&'a dyn ModelsPort>,
     ) -> Self {
         Self {
             design,
@@ -245,6 +251,8 @@ impl<'a> Peers<'a> {
             hardcopy,
             results,
             simulate,
+            code,
+            models,
         }
     }
 
@@ -279,6 +287,19 @@ impl<'a> Peers<'a> {
     /// What simulate shows.
     pub fn simulate(&self) -> &'a dyn SimulatePort {
         self.simulate
+    }
+
+    /// What code shows.
+    pub fn code(&self) -> &'a dyn CodePort {
+        self.code
+    }
+
+    /// What the models feature shows. The models feature's own context holds
+    /// no such peer, because the feature reads its own state; its code asking
+    /// for one is a fault in that code.
+    pub fn models(&self) -> &'a dyn ModelsPort {
+        self.models
+            .expect("the models feature reads its own state, never itself as a peer")
     }
 }
 

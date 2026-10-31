@@ -29,6 +29,8 @@ fn with_cx<R>(app: &mut RSpiceApp, call: impl FnOnce(&mut Cx<'_, ProjectFeature>
             Some(&*state.hardcopy),
             Some(&*state.results),
             &*state.simulate,
+            &*state.code,
+            Some(&*state.models),
         ),
         command_registry(),
     ))

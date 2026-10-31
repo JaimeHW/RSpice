@@ -98,6 +98,8 @@ fn with_cx<R>(
             Some(&*state.hardcopy),
             Some(&*state.results),
             &*state.simulate,
+            &*state.code,
+            None,
         ),
         command_registry(),
     ))

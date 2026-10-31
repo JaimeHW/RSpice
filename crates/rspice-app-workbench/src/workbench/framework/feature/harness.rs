@@ -42,10 +42,13 @@ use rspice_app_services::workbench::workflows::export_workflow::{
 };
 
 use super::{
-    CanvasGesturePort, CloudPort, Cx, DesignPort, Feature, FeatureCommand, FeatureRegistry,
-    HardcopyPort, LowerHandles, Peers, PublicationDraft, Reads, SimulatePort,
+    CanvasGesturePort, CloudPort, CodePort, Cx, DesignPort, Feature, FeatureCommand,
+    FeatureRegistry, HardcopyPort, LowerHandles, ModelsPort, Peers, PublicationDraft, Reads,
+    SimulatePort,
 };
-use crate::workbench::framework::ports::{CapturedViewport, DisplayedDatasetView, ResultsPort};
+use crate::workbench::framework::ports::{
+    CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPort,
+};
 
 /// Peers as a fresh session shows them.
 struct NullPorts;
@@ -129,6 +132,38 @@ impl HardcopyPort for NullPorts {
 impl SimulatePort for NullPorts {
     fn selected_specification(&self) -> Option<&str> {
         None
+    }
+}
+
+/// A fresh session's netlist editor shows no source, its caret on the first
+/// line.
+impl CodePort for NullPorts {
+    fn owned_source_active(&self) -> bool {
+        false
+    }
+
+    fn shows_owned_root(&self) -> bool {
+        false
+    }
+
+    fn netlist_cursor_line(&self) -> usize {
+        0
+    }
+}
+
+/// A fresh session's models authoring holds nothing unsaved, and it has
+/// gated no model.
+impl ModelsPort for NullPorts {
+    fn has_unsaved_authoring_changes(&self) -> bool {
+        false
+    }
+
+    fn model_editor_has_unsaved_changes(&self) -> bool {
+        false
+    }
+
+    fn model_gate_facts(&self, _model: &Model) -> Vec<ModelGateFact> {
+        Vec::new()
     }
 }
 
@@ -297,6 +332,8 @@ where
                 Some(&NullPorts),
                 Some(&NullPorts),
                 &NullPorts,
+                &NullPorts,
+                Some(&NullPorts),
             ),
             self.commands,
         )
