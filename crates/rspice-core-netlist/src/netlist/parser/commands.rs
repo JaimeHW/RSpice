@@ -8760,6 +8760,18 @@ mod tests {
         assert_eq!(netlist.options.timeint_reltol, Some(1e-4));
     }
 
+    /// Xyce reads `agauss` at its mean outside a sampling analysis (the
+    /// ISSUE_239 `*_test2` decks); ngspice draws it.
+    #[test]
+    fn xyce_reads_a_statistical_function_at_its_nominal_value() {
+        let deck = "statistics\n.param p={agauss(10k,1k,1)}\nV1 1 0 1\nR1 1 0 {p}\n.op\n.end\n";
+        let xyce = parse_in(deck, crate::config::SpiceDialect::Xyce).expect("Xyce deck parses");
+        assert_eq!(xyce.params.get("p"), Some(1e4));
+        let ngspice =
+            parse_in(deck, crate::config::SpiceDialect::Ngspice).expect("ngspice deck parses");
+        assert_ne!(ngspice.params.get("p"), Some(1e4));
+    }
+
     /// `numfreq=11,7` lists one count per tone, as `numfreq=11 numfreq2=7`.
     #[test]
     fn hbint_numfreq_takes_one_count_per_tone() {

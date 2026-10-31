@@ -904,6 +904,17 @@ fn parse_netlist_impl(
         )?
         .unwrap_or_default(),
     };
+    // Xyce draws `agauss`, `gauss`, `aunif` and `unif` only inside a sampling
+    // analysis and reads their nominal value everywhere else (`agaussOp::val`
+    // in ast_random.h). RSpice samples by reparsing with a seed.
+    if state.spice_dialect == crate::config::SpiceDialect::Xyce
+        && options.statistical_mode == StatisticalParamMode::Sample
+        && options.statistical_seed.is_none()
+    {
+        state
+            .params
+            .set_statistical_mode(StatisticalParamMode::Nominal);
+    }
     let _suffixes = crate::spice_number::read_suffixes_as_ngspice(
         state.spice_dialect == crate::config::SpiceDialect::Ngspice,
     );
