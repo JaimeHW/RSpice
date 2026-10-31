@@ -281,10 +281,39 @@ impl Model {
         }
     }
 
+    /// The open cellview and every cellview its walk reaches, as
+    /// [`Self::run_synced_design_check`] checks them.
+    pub fn run_active_design_checks(
+        &mut self,
+        facts: SlotFacts,
+    ) -> (Result<DrcResult, String>, Option<String>) {
+        let subject = self.workspace.content.active_schematic_reference();
+        self.run_synced_design_check(subject, CheckScope::Hierarchy, facts)
+    }
+
+    /// [`Self::run_design_check`], once the open drawing is synced into the
+    /// workspace where restoring its annotation failed, so the check reads
+    /// what the reader sees. Returns what the sync had to say on the status
+    /// bar beside the check's outcome.
+    pub fn run_synced_design_check(
+        &mut self,
+        subject: CellViewRef,
+        scope: CheckScope,
+        facts: SlotFacts,
+    ) -> (Result<DrcResult, String>, Option<String>) {
+        let prompt = if self.workspace.annotation_restoration_error().is_some() {
+            self.sync_active_schematic_to_workspace()
+        } else {
+            None
+        };
+        (self.run_design_check(subject, scope, facts), prompt)
+    }
+
     /// Check `subject` as far as `scope` reaches, and publish what it found.
     ///
     /// The model's part of a check: the drawing's annotation is brought into
-    /// the workspace first, by the editor, where restoring it failed.
+    /// the workspace first, by [`Self::run_synced_design_check`], where
+    /// restoring it failed.
     pub fn run_design_check(
         &mut self,
         subject: CellViewRef,

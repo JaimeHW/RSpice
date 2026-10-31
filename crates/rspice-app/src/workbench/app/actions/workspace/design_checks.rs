@@ -1,8 +1,9 @@
 //! Checking the design from the workbench.
 //!
 //! The model checks the design as it is configured. Where the drawing's
-//! annotation could not be restored, the editor brings it into the workspace
-//! first, so the check reads what the reader sees.
+//! annotation could not be restored, the model syncs the open drawing into
+//! the workspace first, so the check reads what the reader sees, and the
+//! sync's prompt is stated here.
 
 use rspice_design::drc::DrcResult;
 
@@ -52,10 +53,17 @@ impl AppState {
         self.run_design_check(subject, scope).map(|_| ())
     }
 
-    /// The open cellview and every cellview its walk reaches.
+    /// [`Model::run_active_design_checks`] with the slots' facts, stating
+    /// what its drawing sync had to say.
+    ///
+    /// [`Model::run_active_design_checks`]: crate::workbench::app_state::Model::run_active_design_checks
     pub(crate) fn run_active_design_checks(&mut self) -> Result<DrcResult, String> {
-        let subject = self.model.workspace.content.active_schematic_reference();
-        self.run_design_check(subject, CheckScope::Hierarchy)
+        let facts = self.slot_facts();
+        let (outcome, prompt) = self.model.run_active_design_checks(facts);
+        if let Some(prompt) = prompt {
+            self.prompt(prompt);
+        }
+        outcome
     }
 
     // Application half of a model operation; it becomes a request.
@@ -64,15 +72,11 @@ impl AppState {
         subject: CellViewRef,
         scope: CheckScope,
     ) -> Result<DrcResult, String> {
-        if self
-            .model
-            .workspace
-            .annotation_restoration_error()
-            .is_some()
-        {
-            self.sync_active_schematic_to_workspace();
-        }
         let facts = self.slot_facts();
-        self.model.run_design_check(subject, scope, facts)
+        let (outcome, prompt) = self.model.run_synced_design_check(subject, scope, facts);
+        if let Some(prompt) = prompt {
+            self.prompt(prompt);
+        }
+        outcome
     }
 }
