@@ -1,48 +1,37 @@
-//! Mockup-owned Replace selected instance operation.
+//! Replace instance: swap the selected instance's master for another one,
+//! reading first which pins and authored values the new master carries.
 
 use std::collections::HashSet;
 
-use egui::{Align, Context, Frame, Layout, Margin, Popup, ScrollArea, Ui, vec2};
+use egui::Context;
 
 use crate::state::{
     Component, ComponentType, Point, Rotation, SchematicReplacementAuthority,
     SchematicReplacementPreview, SchematicReplacementSourceSpec, SchematicReplacementTargetSpec,
     SchematicReplacementTerminal, SymbolResolver,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
-use crate::workbench::app::dialogs::operation_primitives::{
-    BODY_HEIGHT, CONTEXT_WIDTH, SURFACE_HEIGHT, TRANSACTION_HEIGHT, impact_preview,
-    operation_steps, paint_body_dividers,
-};
-use crate::workbench::app::dialogs::review_primitives::{
-    input_field, purpose_line, read_only_field,
-};
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::schematic::instance_catalog::{
     InstanceCatalogEntry, instance_catalog, resolve_instance_catalog_entry,
 };
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
 
-/// Isolated authority and authored draft for the mockup-owned Replace
-/// instance transaction. The visible Current and Mapping values are resolved
-/// facts; Replacement is the only editable field. The selected component's
-/// stable identifier is retained so the commit cannot drift to a later
-/// selection.
+/// Isolated authority and draft for the Replace instance form. Current is a
+/// resolved fact; the replacement master is the only choice, picked from
+/// `candidates`. The selected component's stable identifier is retained so
+/// the commit cannot drift to a later selection.
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ReplaceInstanceDialogState {
     pub(crate) open: bool,
     pub(crate) source_component_id: u64,
     pub(crate) current: String,
     pub(crate) replacement: String,
-    pub(crate) mapping: String,
+    /// The masters the instance can be replaced with, the likeliest first.
+    pub(crate) candidates: Vec<String>,
     pub(crate) authority: Option<SchematicEditAuthority>,
     pub(crate) replacement_authority: Option<crate::state::SchematicReplacementAuthority>,
     pub(crate) initial_target_identity: String,
@@ -50,7 +39,6 @@ pub(crate) struct ReplaceInstanceDialogState {
     pub(crate) initial_replacement: String,
     pub(crate) preview_error: Option<String>,
     pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 pub(crate) struct ReplaceInstanceOpen {
@@ -61,7 +49,7 @@ pub(crate) struct ReplaceInstanceOpen {
     pub(crate) replacement: String,
     pub(crate) initial_target_identity: String,
     pub(crate) initial_target_spec: crate::state::SchematicReplacementTargetSpec,
-    pub(crate) mapping: String,
+    pub(crate) candidates: Vec<String>,
 }
 
 impl ReplaceInstanceDialogState {
@@ -72,7 +60,7 @@ impl ReplaceInstanceDialogState {
             source_component_id: request.source_component_id,
             current: request.current,
             replacement: request.replacement,
-            mapping: request.mapping,
+            candidates: request.candidates,
             authority: Some(request.authority),
             replacement_authority: Some(request.replacement_authority),
             initial_target_identity: request.initial_target_identity,
@@ -80,7 +68,6 @@ impl ReplaceInstanceDialogState {
             initial_replacement,
             preview_error: None,
             dirty: false,
-            discard_confirm: false,
         };
     }
 
@@ -93,31 +80,30 @@ impl ReplaceInstanceDialogState {
             .replacement
             .trim()
             .eq_ignore_ascii_case(self.initial_replacement.trim());
-        self.discard_confirm = false;
         self.preview_error = None;
-    }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
     }
 }
 
-const TITLE: &str = "Replace selected instance";
-const PRIMARY: &str = "Replace instance";
-const DESCRIPTION: &str = "Replace with pin, parameter, model, and netlist compatibility review; preserve mapping where valid.";
-/// Body height this dialog takes over the shared operation geometry.
-///
-/// A count of preserved pins is not evidence of which pins were preserved, and
-/// the values a replacement silently discards are exactly what a reader needs
-/// before confirming. That band is the difference between the two, so it is
-/// part of the surface rather than something the shared geometry has to grow.
-const EVIDENCE_HEIGHT: f32 = 138.0;
+const TITLE: &str = "Replace instance";
+const PRIMARY: &str = "Replace";
+/// The sentence assistive technology reads for the whole form.
+const DESCRIPTION: &str = "Replace the selected instance's master, keeping the pins and authored values the new master can carry.";
+/// The mapping table's columns: what the current master has, which of the
+/// two it is, and what the replacement makes of it.
+const MAPPING_COLUMNS: [TableColumn<'static>; 3] = [
+    TableColumn {
+        header: "Name",
+        mono: true,
+    },
+    TableColumn {
+        header: "Kind",
+        mono: false,
+    },
+    TableColumn {
+        header: "Replacement",
+        mono: false,
+    },
+];
 
 #[derive(Debug, Clone)]
 struct ResolvedReplacement {
@@ -154,74 +140,101 @@ enum ReplacementValidation {
     Valid(Box<ResolvedReplacement>),
 }
 
-/// One name the replacement maps, or fails to.
+/// One line of the mapping table: a pin, or a parameter the instance sets,
+/// and what the replacement makes of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-struct EvidenceRow {
-    source: String,
+struct MappingLine {
+    name: String,
+    kind: &'static str,
     outcome: String,
-    preserved: bool,
 }
 
-/// What the reader confirms against: every terminal and parameter the
-/// replacement maps, and how many authored values it would discard.
+/// What the reader confirms against: every pin and every authored value of
+/// the current master with what becomes of it, and how many authored values
+/// the replacement discards.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ReplacementEvidence {
-    terminals: Vec<EvidenceRow>,
-    parameters: Vec<EvidenceRow>,
+    lines: Vec<MappingLine>,
     dropped_parameters: usize,
 }
 
-/// Project the reviewed preview into what the surface shows.
+impl ReplacementEvidence {
+    fn table(&self) -> Vec<Vec<String>> {
+        self.lines
+            .iter()
+            .map(|line| {
+                vec![
+                    line.name.clone(),
+                    line.kind.to_owned(),
+                    line.outcome.clone(),
+                ]
+            })
+            .collect()
+    }
+}
+
+/// Project the reviewed preview into what the form shows.
 ///
 /// The preview is the authority — the same value commit applies — so the
 /// mapping on screen is the mapping that will be made rather than a second
 /// reading of the two contracts. A replacement that does not resolve has no
-/// mapping to show; the transaction strip already says why.
+/// mapping to show; the footer says why. A parameter the instance never set
+/// loses nothing whichever master it lands on, so only authored ones are
+/// listed.
 fn replacement_evidence(validation: &ReplacementValidation) -> Option<ReplacementEvidence> {
     let ReplacementValidation::Valid(resolved) = validation else {
         return None;
     };
     let compatibility = &resolved.preview.compatibility;
-    Some(ReplacementEvidence {
-        terminals: compatibility
-            .terminal_mappings
-            .iter()
-            .map(|mapping| EvidenceRow {
-                source: mapping.source.clone(),
-                outcome: mapping.target.clone().unwrap_or_else(|| {
+    let pins = compatibility
+        .terminal_mappings
+        .iter()
+        .map(|mapping| MappingLine {
+            name: mapping.source.clone(),
+            kind: "Pin",
+            outcome: carried_outcome(&mapping.source, mapping.target.as_deref()).unwrap_or_else(
+                || {
                     if mapping.connected {
-                        "unmapped \u{00b7} wired".to_owned()
+                        "Not carried, wired".to_owned()
                     } else {
-                        "unmapped".to_owned()
+                        "Not carried".to_owned()
                     }
-                }),
-                preserved: mapping.target.is_some(),
-            })
-            .collect(),
-        parameters: compatibility
-            .parameter_mappings
-            .iter()
-            .map(|mapping| EvidenceRow {
-                source: mapping.source.clone(),
-                outcome: mapping.target.clone().unwrap_or_else(|| {
-                    if mapping.has_authored_value {
-                        "value dropped".to_owned()
-                    } else {
-                        "not carried".to_owned()
-                    }
-                }),
-                preserved: mapping.target.is_some(),
-            })
-            .collect(),
+                },
+            ),
+        });
+    let parameters = compatibility
+        .parameter_mappings
+        .iter()
+        .filter(|mapping| mapping.has_authored_value)
+        .map(|mapping| MappingLine {
+            name: mapping.source.clone(),
+            kind: "Parameter",
+            outcome: carried_outcome(&mapping.source, mapping.target.as_deref())
+                .unwrap_or_else(|| "Value dropped".to_owned()),
+        });
+    Some(ReplacementEvidence {
+        lines: pins.chain(parameters).collect(),
         dropped_parameters: resolved.preview.impact.dropped_parameters,
     })
 }
 
-fn dropped_parameter_summary(dropped: usize) -> String {
+/// "Carried", or "Carried as <name>" when the new master names it otherwise.
+fn carried_outcome(source: &str, target: Option<&str>) -> Option<String> {
+    let target = target?;
+    Some(if target.eq_ignore_ascii_case(source) {
+        "Carried".to_owned()
+    } else {
+        format!("Carried as {target}")
+    })
+}
+
+/// What the replacement costs, stated in the footer before Replace is
+/// pressed: nothing, or the authored values it discards.
+fn dropped_parameter_consequence(dropped: usize) -> Option<String> {
     match dropped {
-        0 => "No authored parameter value is discarded by this replacement.".to_owned(),
-        1 => "1 authored parameter value is discarded by this replacement.".to_owned(),
-        count => format!("{count} authored parameter values are discarded by this replacement."),
+        0 => None,
+        1 => Some("1 authored parameter value is discarded.".to_owned()),
+        count => Some(format!("{count} authored parameter values are discarded.")),
     }
 }
 
@@ -235,20 +248,6 @@ impl ReplacementValidation {
             Self::Invalid(message) => Some(message),
             Self::Valid(_) => None,
         }
-    }
-
-    fn mapping(&self) -> Option<String> {
-        let Self::Valid(resolved) = self else {
-            return None;
-        };
-        let compatibility = &resolved.preview.compatibility;
-        Some(format!(
-            "{} / {} pins \u{00b7} {} / {} parameters",
-            compatibility.mapped_terminal_count,
-            compatibility.target_terminal_count,
-            compatibility.mapped_parameter_count,
-            compatibility.target_parameter_count,
-        ))
     }
 }
 
@@ -294,12 +293,21 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
             return;
         }
     };
-    let Some(resolved) = best_replacement(state, &replacement_authority) else {
+    let ranked = ranked_replacements(state, &replacement_authority);
+    let Some(resolved) = best_replacement(state, &replacement_authority, &ranked) else {
         state.prompt("No other ready master keeps every connection of the selected instance.");
         return;
     };
     let current = current_display(replacement_authority.source_component());
-    let mapping = mapping_summary(&resolved.preview);
+    // The proposed master leads the picks; the rest follow in rank order.
+    let candidates = std::iter::once(resolved.display.clone())
+        .chain(
+            ranked
+                .into_iter()
+                .map(|candidate| candidate.entry.display)
+                .filter(|display| *display != resolved.display),
+        )
+        .collect();
     state.design.replace_instance.open(ReplaceInstanceOpen {
         authority: SchematicEditAuthority::capture(state),
         replacement_authority: replacement_authority.clone(),
@@ -308,7 +316,7 @@ pub(crate) fn open_replace_instance_dialog(state: &mut AppState) {
         replacement: resolved.display,
         initial_target_identity: resolved.identity,
         initial_target_spec: resolved.target,
-        mapping,
+        candidates,
     });
 }
 
@@ -318,91 +326,44 @@ impl RSpiceApp {
             return;
         }
         let validation = validation_for_repaint(ctx, &self.state);
-        self.state.design.replace_instance.mapping = validation
-            .mapping()
-            .unwrap_or_else(|| "Unavailable".to_owned());
-        let project = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .display_name()
-            .to_owned();
-        let revision = self
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .revision()
-            .get()
-            .to_string();
-        let discard_confirm = self.state.design.replace_instance.discard_confirm;
-        let validation_error = validation.error().map(str::to_owned);
-        let has_transaction = discard_confirm || validation_error.is_some();
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::SimulationWorkflow)
-            .initial_height(
-                SURFACE_HEIGHT
-                    + EVIDENCE_HEIGHT
-                    + if has_transaction {
-                        TRANSACTION_HEIGHT
-                    } else {
-                        0.0
-                    },
-            )
-            .flush_body()
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
-            })
-            .primary_enabled(validation.can_commit())
-            .initial_focus(DialogInitialFocus::BodyControl);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Some(error) = validation_error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Replacement requires attention",
-                error,
-            );
-        }
-
-        let catalog = instance_catalog(&self.state);
         let evidence = replacement_evidence(&validation);
-        let mut replacement_changed = false;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let focus = replacement_body(
-                ui,
-                &self.state.design.replace_instance.current,
-                &mut self.state.design.replace_instance.replacement,
-                &self.state.design.replace_instance.mapping,
-                validation.error(),
-                evidence.as_ref(),
-                &catalog,
-                &project,
-                &revision,
-            );
-            replacement_changed = focus.changed;
-            Some(focus.id)
-        });
-        if replacement_changed {
-            self.state.design.replace_instance.mark_edited();
+        let consequence = evidence
+            .as_ref()
+            .and_then(|evidence| dropped_parameter_consequence(evidence.dropped_parameters));
+        let table = evidence.as_ref().map(ReplacementEvidence::table);
+        let dialog = &self.state.design.replace_instance;
+        let mut picked = None;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .wide()
+            .describe(DESCRIPTION)
+            .primary_enabled(validation.can_commit())
+            .status(validation.error().map_or(Ok(None), Err))
+            .consequence(consequence.as_deref())
+            .show(ctx, |rows| {
+                rows.value("Current", &dialog.current);
+                let replace_with = rows.select_with_response(
+                    "Replace with",
+                    "replace-instance-master",
+                    &dialog.replacement,
+                    &dialog.candidates,
+                );
+                picked = replace_with.picked;
+                if let Some(table) = table.as_ref() {
+                    rows.table(&MAPPING_COLUMNS, table);
+                }
+                Some(replace_with.response.id)
+            });
+        if let Some(index) = picked {
+            let dialog = &mut self.state.design.replace_instance;
+            if let Some(display) = dialog.candidates.get(index).cloned() {
+                dialog.replacement = display;
+                dialog.mark_edited();
+            }
         }
-        match response.choice {
+        match choice {
             DialogChoice::Primary => self.commit_instance_replacement(),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.replace_instance.attempt_close();
-                if self.state.design.replace_instance.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.design.replace_instance.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -453,263 +414,6 @@ impl RSpiceApp {
             }
         }
     }
-}
-
-#[derive(Debug, Clone, Copy)]
-struct ReplacementBodyResponse {
-    id: egui::Id,
-    changed: bool,
-}
-
-fn replacement_body(
-    ui: &mut Ui,
-    current: &str,
-    replacement: &mut String,
-    mapping: &str,
-    replacement_error: Option<&str>,
-    evidence: Option<&ReplacementEvidence>,
-    catalog: &[InstanceCatalogEntry],
-    project: &str,
-    revision: &str,
-) -> ReplacementBodyResponse {
-    purpose_line(ui, DESCRIPTION);
-    operation_steps(ui);
-    let width = ui.available_width();
-    // The restored design's 760 px breakpoint is a viewport media query.  The
-    // desktop dialog itself is 760 px wide, so keying this off the body width
-    // would incorrectly stack every desktop dialog.
-    let stacked = replacement_uses_stacked_layout(ui.ctx().content_rect().width());
-    let context_width = CONTEXT_WIDTH.min((width * 0.42).max(220.0));
-    let form_width = if stacked {
-        width
-    } else {
-        (width - context_width).max(1.0)
-    };
-    let mut field_id = ui.id().with("replace-instance-replacement");
-    let mut changed = false;
-    if stacked {
-        let form_rect = replacement_form(
-            ui,
-            current,
-            replacement,
-            mapping,
-            replacement_error,
-            catalog,
-            &mut field_id,
-            &mut changed,
-            form_width,
-        );
-        ui.painter().hline(
-            form_rect.x_range(),
-            form_rect.bottom(),
-            egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border_strong),
-        );
-        impact_preview(ui, project, revision);
-        compatibility_evidence(ui, evidence);
-    } else {
-        let body = ui.allocate_ui_with_layout(
-            vec2(width, BODY_HEIGHT),
-            Layout::left_to_right(Align::Min),
-            |ui| {
-                ui.spacing_mut().item_spacing.x = 0.0;
-                replacement_form(
-                    ui,
-                    current,
-                    replacement,
-                    mapping,
-                    replacement_error,
-                    catalog,
-                    &mut field_id,
-                    &mut changed,
-                    form_width,
-                );
-                ui.allocate_ui_with_layout(
-                    vec2(context_width, BODY_HEIGHT),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.set_min_size(vec2(context_width, BODY_HEIGHT));
-                        impact_preview(ui, project, revision);
-                    },
-                );
-            },
-        );
-        paint_body_dividers(ui, body.response.rect, form_width);
-        compatibility_evidence(ui, evidence);
-    }
-    ReplacementBodyResponse {
-        id: field_id,
-        changed,
-    }
-}
-
-/// The mapping band under the review body: every terminal and every parameter
-/// the replacement carries across, and what it discards.
-fn compatibility_evidence(ui: &mut Ui, evidence: Option<&ReplacementEvidence>) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    Frame::NONE
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(12, 8))
-        .show(ui, |ui| {
-            let inner = (width - 24.0).max(1.0);
-            ui.set_width(inner);
-            ui.set_min_height(EVIDENCE_HEIGHT - 16.0);
-            ui.spacing_mut().item_spacing.y = 4.0;
-            let Some(evidence) = evidence else {
-                ui.label(
-                    egui::RichText::new(
-                        "Resolve a replacement master to review its pin and parameter mapping.",
-                    )
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-                );
-                return;
-            };
-            let list_height = EVIDENCE_HEIGHT - 68.0;
-            let column = (inner - 12.0) * 0.5;
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                evidence_column(ui, "Terminals", &evidence.terminals, column, list_height);
-                evidence_column(ui, "Parameters", &evidence.parameters, column, list_height);
-            });
-            ui.label(
-                egui::RichText::new(dropped_parameter_summary(evidence.dropped_parameters))
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(if evidence.dropped_parameters == 0 {
-                        t.color.text_faint
-                    } else {
-                        t.color.warn
-                    }),
-            );
-        });
-}
-
-/// One side of the mapping band. The list scrolls rather than the dialog: a
-/// contract with forty pins must not push the commit button off the surface.
-fn evidence_column(ui: &mut Ui, title: &str, rows: &[EvidenceRow], width: f32, height: f32) {
-    let t = Tokens::get(ui.ctx());
-    ui.allocate_ui_with_layout(
-        vec2(width, height + 20.0),
-        Layout::top_down(Align::Min),
-        |ui| {
-            ui.set_min_size(vec2(width, height + 20.0));
-            ui.label(
-                egui::RichText::new(title)
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text_dim),
-            );
-            ScrollArea::vertical()
-                .id_salt(("replace-instance-evidence", title))
-                .max_height(height)
-                .auto_shrink([false, false])
-                .show(ui, |ui| {
-                    ui.set_width(width);
-                    if rows.is_empty() {
-                        ui.label(
-                            egui::RichText::new("none declared")
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                    }
-                    for row in rows {
-                        ui.label(
-                            egui::RichText::new(format!("{} \u{2192} {}", row.source, row.outcome))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(if row.preserved {
-                                    t.color.text
-                                } else {
-                                    t.color.warn
-                                }),
-                        );
-                    }
-                });
-        },
-    );
-}
-
-const fn replacement_uses_stacked_layout(viewport_width: f32) -> bool {
-    viewport_width <= 760.0
-}
-
-fn replacement_form(
-    ui: &mut Ui,
-    current: &str,
-    replacement: &mut String,
-    mapping: &str,
-    replacement_error: Option<&str>,
-    catalog: &[InstanceCatalogEntry],
-    field_id: &mut egui::Id,
-    changed: &mut bool,
-    form_width: f32,
-) -> egui::Rect {
-    ui.allocate_ui_with_layout(
-        vec2(form_width, BODY_HEIGHT),
-        Layout::top_down(Align::Min),
-        |ui| {
-            ui.set_min_size(vec2(form_width, BODY_HEIGHT));
-            Frame::NONE
-                .fill(Tokens::get(ui.ctx()).color.bg_app)
-                .inner_margin(Margin::symmetric(12, 10))
-                .show(ui, |ui| {
-                    ui.set_width((form_width - 24.0).max(1.0));
-                    read_only_field(ui, "Current", current, "Selected stable instance identity");
-                    ui.add_space(9.0);
-                    let response = input_field(
-                        ui,
-                        "Replacement",
-                        replacement,
-                        "library/cell/view or primitive name",
-                        replacement_error,
-                        "Ready replacement master with stable catalog identity",
-                    );
-                    *field_id = response.id;
-                    *changed |= response.changed();
-                    let popup_id = Popup::default_response_id(&response);
-                    let query = replacement.trim().to_ascii_lowercase();
-                    let mut picked = None;
-                    let popup = Popup::menu(&response).gap(2.0).show(|ui| {
-                        ui.set_min_width(response.rect.width());
-                        ScrollArea::vertical()
-                            .id_salt("replace-instance-candidates")
-                            .max_height(180.0)
-                            .show(ui, |ui| {
-                                for entry in catalog.iter().filter(|entry| {
-                                    query.is_empty()
-                                        || entry.display.to_ascii_lowercase().contains(&query)
-                                        || entry.identity.to_ascii_lowercase().contains(&query)
-                                }) {
-                                    if ui
-                                        .selectable_label(false, &entry.display)
-                                        .on_hover_text(&entry.identity)
-                                        .clicked()
-                                    {
-                                        picked = Some(entry.display.clone());
-                                    }
-                                }
-                            });
-                    });
-                    if popup.is_some() {
-                        ui.ctx().accesskit_node_builder(popup_id, |node| {
-                            node.set_label("Ready replacement masters");
-                        });
-                    }
-                    if let Some(value) = picked {
-                        *replacement = value;
-                        *changed = true;
-                        Popup::close_id(ui.ctx(), popup_id);
-                    }
-                    ui.add_space(9.0);
-                    read_only_field(
-                        ui,
-                        "Mapping",
-                        mapping,
-                        "Preserved replacement pin and parameter mapping",
-                    );
-                });
-        },
-    )
-    .response
-    .rect
 }
 
 fn validate_draft(state: &AppState) -> ReplacementValidation {
@@ -919,10 +623,39 @@ fn authored_source_spec(
         .with_parameter_keys(parameter_keys))
 }
 
+/// One master that can stand in for the selected instance, with the
+/// replacement it would make.
+struct RankedReplacement {
+    entry: InstanceCatalogEntry,
+    target: SchematicReplacementTargetSpec,
+    preview: SchematicReplacementPreview,
+}
+
+/// The first of `ranked` whose replacement also passes the downstream
+/// checks: the form's opening choice.
 fn best_replacement(
     state: &AppState,
     authority: &SchematicReplacementAuthority,
+    ranked: &[RankedReplacement],
 ) -> Option<ResolvedReplacement> {
+    ranked.iter().find_map(|candidate| {
+        validate_downstream(state, authority, &candidate.target).ok()?;
+        Some(ResolvedReplacement {
+            identity: candidate.entry.identity.clone(),
+            display: candidate.entry.display.clone(),
+            target: candidate.target.clone(),
+            preview: candidate.preview.clone(),
+        })
+    })
+}
+
+/// Every other master the selected instance can be replaced with, the
+/// likeliest first: same device prefix, same pin count, most pins and then
+/// parameters carried, same library. These are the form's choices.
+fn ranked_replacements(
+    state: &AppState,
+    authority: &SchematicReplacementAuthority,
+) -> Vec<RankedReplacement> {
     let source = authority.source_component();
     let source_library = source
         .library_cell
@@ -966,15 +699,12 @@ fn best_replacement(
     });
     candidates
         .into_iter()
-        .find_map(|(_, entry, target, preview)| {
-            validate_downstream(state, authority, &target).ok()?;
-            Some(ResolvedReplacement {
-                identity: entry.identity,
-                display: entry.display,
-                target,
-                preview,
-            })
+        .map(|(_, entry, target, preview)| RankedReplacement {
+            entry,
+            target,
+            preview,
         })
+        .collect()
 }
 
 fn validate_downstream(
@@ -1091,21 +821,104 @@ fn current_display(component: &Component) -> String {
     format!("{} \u{00b7} {master}", component.name)
 }
 
-fn mapping_summary(preview: &SchematicReplacementPreview) -> String {
-    let compatibility = &preview.compatibility;
-    format!(
-        "{} / {} pins \u{00b7} {} / {} parameters",
-        compatibility.mapped_terminal_count,
-        compatibility.target_terminal_count,
-        compatibility.mapped_parameter_count,
-        compatibility.target_parameter_count,
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{Component, ComponentType};
+
+    fn placed_source(params: &str) -> AppState {
+        let mut state = AppState::default();
+        let id = state
+            .model
+            .schematic
+            .add_component(ComponentType::VoltageSource, Point::origin());
+        if !params.is_empty() {
+            state
+                .model
+                .schematic
+                .document_mut_for_test()
+                .components
+                .iter_mut()
+                .find(|component| component.id == id)
+                .expect("the placed source is retained")
+                .params = params.to_owned();
+        }
+        state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(id);
+        state
+    }
+
+    /// Replace instance is a wide command form: Current, a pick list of the
+    /// masters that can stand in (not a free-text field), and the mapping
+    /// table. None of the wizard it was drawn as survives: no step tabs,
+    /// purpose line or "Context" side table.
+    #[test]
+    fn replace_instance_is_a_command_form_with_a_pick_list_and_a_mapping_table() {
+        let mut app = RSpiceApp::test_instance();
+        app.state = placed_source("");
+        open_replace_instance_dialog(&mut app.state);
+        assert!(app.state.design.replace_instance.open);
+        let candidates = &app.state.design.replace_instance.candidates;
+        assert!(
+            candidates.contains(&app.state.design.replace_instance.replacement),
+            "the opening choice is one of the picks"
+        );
+        assert_eq!(
+            candidates.first(),
+            Some(&app.state.design.replace_instance.replacement),
+            "the proposed master leads the picks"
+        );
+
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut nodes = Vec::new();
+        for _ in 0..2 {
+            nodes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.render_replace_instance_dialog(ui.ctx()),
+                )
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes;
+        }
+        let texts = nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            nodes.iter().any(|(_, node)| {
+                node.role() == egui::accesskit::Role::ComboBox
+                    && node.label() == Some("Replace with")
+            }),
+            "Replace with is a pick list"
+        );
+        assert!(
+            texts.iter().any(|text| text.starts_with("Name: ")),
+            "the mapping table is published"
+        );
+        let wizard = texts
+            .iter()
+            .filter(|text| {
+                text.contains("Scope") || text.contains("Context") || text.contains("Mapping")
+            })
+            .collect::<Vec<_>>();
+        assert!(wizard.is_empty(), "the wizard is back: {wizard:?}");
+    }
 
     #[test]
     fn replacement_is_unavailable_without_exactly_one_instance() {
@@ -1164,7 +977,7 @@ mod tests {
         state.design.replace_instance.mark_edited();
 
         let validation = validate_draft(&state);
-        assert!(validation.mapping().is_none());
+        assert!(replacement_evidence(&validation).is_none());
         assert!(matches!(
             validation,
             ReplacementValidation::Invalid(message) if message.contains("ambiguous")
@@ -1193,39 +1006,13 @@ mod tests {
         assert!(validate_draft(&state).can_commit());
     }
 
-    #[test]
-    fn restored_mockup_stacks_only_at_its_viewport_media_breakpoint() {
-        assert!(replacement_uses_stacked_layout(760.0));
-        assert!(!replacement_uses_stacked_layout(761.0));
-        assert!(!replacement_uses_stacked_layout(1_440.0));
-    }
-
-    /// The band names what is carried across and what is not. A summary count
-    /// cannot say which parameter loses its authored value, and that is exactly
-    /// the fact a reader needs before confirming.
+    /// The table names what is carried across and what is not. A summary
+    /// count cannot say which parameter loses its authored value, and that is
+    /// exactly the fact a reader needs before confirming; the footer states
+    /// the cost.
     #[test]
     fn the_evidence_names_a_parameter_the_new_master_cannot_carry() {
-        let mut state = AppState::default();
-        let id = state
-            .model
-            .schematic
-            .add_component(ComponentType::VoltageSource, Point::origin());
-        state
-            .model
-            .schematic
-            .document_mut_for_test()
-            .components
-            .iter_mut()
-            .find(|component| component.id == id)
-            .expect("the placed source is retained")
-            .params = "legacy_tail=3n".to_owned();
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .select_only_component(id);
+        let mut state = placed_source("legacy_tail=3n");
         open_replace_instance_dialog(&mut state);
         assert!(state.design.replace_instance.open);
 
@@ -1237,20 +1024,24 @@ mod tests {
         let evidence = replacement_evidence(&validation).expect("a valid replacement has evidence");
 
         let dropped = evidence
-            .parameters
+            .lines
             .iter()
-            .find(|row| row.source == "legacy_tail")
+            .find(|line| line.name == "legacy_tail")
             .expect("the authored parameter is listed by name");
-        assert!(!dropped.preserved);
-        assert_eq!(dropped.outcome, "value dropped");
+        assert_eq!(dropped.kind, "Parameter");
+        assert_eq!(dropped.outcome, "Value dropped");
         assert!(evidence.dropped_parameters >= 1);
         assert!(
-            dropped_parameter_summary(evidence.dropped_parameters)
-                .contains("discarded by this replacement")
+            dropped_parameter_consequence(evidence.dropped_parameters)
+                .is_some_and(|consequence| consequence.contains("discarded"))
         );
+        assert_eq!(dropped_parameter_consequence(0), None);
         assert!(
-            evidence.terminals.iter().any(|row| row.preserved),
-            "a compatible replacement carries at least one terminal across"
+            evidence
+                .lines
+                .iter()
+                .any(|line| line.kind == "Pin" && line.outcome.starts_with("Carried")),
+            "a compatible replacement carries at least one pin across"
         );
 
         assert!(

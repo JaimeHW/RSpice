@@ -33,7 +33,6 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "navigation"),
     ("lib.rs", "navigator_tree"),
     ("lib.rs", "notification_center"),
-    ("lib.rs", "operation_primitives"),
     ("lib.rs", "problems_view"),
     ("lib.rs", "retired_documents"),
     ("lib.rs", "review_primitives"),

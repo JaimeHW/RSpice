@@ -1300,7 +1300,6 @@ mod tests {
             &[
                 "app/dialogs/check_and_save.rs",
                 "app/dialogs/check_and_save_validation.rs",
-                "app/dialogs/operation_primitives.rs",
                 "app/dialogs/review_primitives.rs",
                 "app/dialogs/live_session.rs",
                 "app/dialogs/publish_web.rs",

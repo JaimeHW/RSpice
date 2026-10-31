@@ -140,7 +140,7 @@ fn every_retained_dialog_owner_blocks_background_shortcuts() {
             initial_target_spec: crate::state::SchematicReplacementTargetSpec::primitive(
                 crate::state::ComponentType::Resistor,
             ),
-            mapping: "5 / 5 pins \u{00b7} 6 / 8 parameters".to_owned(),
+            candidates: vec!["OPA188 \u{00b7} 5 pin".to_owned()],
         });
     });
     assert_blocks_shortcuts(|dialogs| {
@@ -403,7 +403,7 @@ const DIALOG_GATE: &[DialogRow] = &[
             initial_target_spec: crate::state::SchematicReplacementTargetSpec::primitive(
                 crate::state::ComponentType::Resistor,
             ),
-            mapping: "5 / 5 pins".to_owned(),
+            candidates: vec!["OPA188".to_owned()],
         });
     }),
     ("stimulus_link", |dialogs| {

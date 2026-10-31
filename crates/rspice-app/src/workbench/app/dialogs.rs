@@ -37,7 +37,6 @@ pub(in crate::workbench) mod library;
 #[cfg(test)]
 pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
 pub(in crate::workbench) mod object_properties;
-pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::operation_primitives;
 pub(in crate::workbench) mod placement;
 pub(in crate::workbench) mod plan_removal;
 #[cfg(test)]
