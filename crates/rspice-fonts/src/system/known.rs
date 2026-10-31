@@ -13,6 +13,7 @@ use super::{FaceClass, KnownFace};
 use crate::HanVariant::{HongKong, Japanese, Korean, Simplified, Traditional};
 
 const SCRIPT: FaceClass = FaceClass::Script;
+#[cfg(any(windows, target_os = "macos"))]
 const EXTRA: FaceClass = FaceClass::Extra;
 const SC: FaceClass = FaceClass::Han(Simplified);
 const TC: FaceClass = FaceClass::Han(Traditional);
