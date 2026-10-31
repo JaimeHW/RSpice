@@ -2777,6 +2777,25 @@ impl Diode {
 }
 
 impl NonlinearDevice for Diode {
+    fn reopen_operating_point(&mut self) {
+        // The next stamp is dioload.c's MODEINITJCT arm again: the junction
+        // opens at tVcrit, or at zero bias for an `OFF` instance.
+        self.restore_nonlinear_state(DiodeNonlinearState {
+            prev_vd: 0.0,
+            prev_vd_old: 0.0,
+            prev_id: 0.0,
+            prev_gd: 0.0,
+            candidate_eval_valid: false,
+            junction_gmin: self.junction_gmin,
+            junction_history_valid: false,
+            last_limited_vd: 0.0,
+            limited: false,
+            last_stamp_vd: 0.0,
+            last_stamp_id: 0.0,
+            last_stamp_gd: 0.0,
+        });
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         let va = if self.node_anode == 0 {
             0.0

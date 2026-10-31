@@ -1492,7 +1492,8 @@ mod operating_point_rule_tests {
     /// Norton supplies drive them: with ideal voltage sources in their place,
     /// pseudo-transient continuation does not solve the first stage of the
     /// bipolar deck even from its operating point.
-    const REOPENED_FAMILIES: &[&str] = &["\
+    const REOPENED_FAMILIES: &[&str] = &[
+        "\
 * bipolar and SOI
 icc 0 vcc 5m
 rcc vcc 0 1k
@@ -1511,7 +1512,18 @@ m3 d3 g3 0 0 nsoi w=4u l=1u
 .model nsoi nmos level=57
 .op
 .end
-"];
+",
+        "\
+* diode
+icc 0 vcc 50m
+rcc vcc 0 100
+rd1 vcc a 10k
+d1 a 0 dmod
+.model dmod d is=1e-14
+.op
+.end
+",
+    ];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load
     /// (cktop.c), so an aid that follows a failed direct Newton walks as it
