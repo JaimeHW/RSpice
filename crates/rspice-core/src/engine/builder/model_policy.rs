@@ -436,10 +436,10 @@ pub(super) fn missing_b4soi_builtin_error(
     );
     SimulationError::Circuit(format!(
         "MOSFET '{element_name}': model '{model_name}' requests LEVEL={level} B4SOI \
-         (BSIM-SOI 4.x, {version}), which only the generated BSIM-SOI 4.6.1 builtin \
-         'bsimsoi_va' implements, and that builtin is not compiled into this build. Enable \
-         the 'veriloga-model-bsimsoi-va' feature to run this card; the native BSIM3-SOI \
-         equations are a different model and must not stand in for it."
+         (BSIM-SOI 4.x, {version}), which only the BSIM-SOI 4.6.1 builtin 'bsimsoi_va' \
+         from the Verilog-A-to-Rust codegen implements, and that builtin is not compiled \
+         into this build. Enable the 'veriloga-model-bsimsoi-va' feature to run this card; \
+         the native BSIM3-SOI equations are a different model and must not stand in for it."
     ))
 }
 

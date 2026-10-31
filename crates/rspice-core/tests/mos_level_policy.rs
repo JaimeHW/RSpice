@@ -1208,6 +1208,7 @@ fn hisim_levels_fail_closed_as_named_advanced_models() {
 #[test]
 fn cmc_mos_levels_fail_closed_as_veriloga_codegen_targets() {
     let generated = [
+        (58, cfg!(feature = "veriloga-model-bsimsoi-va")),
         (70, cfg!(feature = "veriloga-model-bsimsoi-va")),
         (107, cfg!(feature = "veriloga-model-bsimcmg-va")),
         (111, cfg!(feature = "veriloga-model-bsimcmg-va")),
