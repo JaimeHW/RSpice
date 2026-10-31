@@ -24,7 +24,7 @@ use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibilit
 
 use super::command_registry::{CommandAvailability, CommandFlags, CommandSpec, Registry};
 use super::dialogs::DialogKey;
-use super::ports::{ModelGateFact, ResultsPort};
+use super::ports::{ModelGateFact, ResultsPeer, ResultsPort, RunEventPort};
 use super::requests::{Drain, Outbox, Request};
 
 #[cfg(any(test, feature = "test-support"))]
@@ -233,8 +233,9 @@ pub struct Peers<'a> {
     /// results feature's.
     hardcopy: Option<&'a dyn HardcopyPort>,
     /// `None` in the results feature's own context: a feature reads its own
-    /// state, never itself as a peer.
-    results: Option<&'a dyn ResultsPort>,
+    /// state, never itself as a peer. Lent mutably, as design is, for the
+    /// run tier's reports alone.
+    results: Option<&'a mut dyn ResultsPeer>,
     /// `None` in simulate's own context, as `results` is in the results
     /// feature's.
     simulate: Option<&'a dyn SimulatePort>,
@@ -249,7 +250,7 @@ impl<'a> Peers<'a> {
         design: &'a mut dyn DesignPeer,
         cloud: Option<&'a dyn CloudPort>,
         hardcopy: Option<&'a dyn HardcopyPort>,
-        results: Option<&'a dyn ResultsPort>,
+        results: Option<&'a mut dyn ResultsPeer>,
         simulate: Option<&'a dyn SimulatePort>,
         code: &'a dyn CodePort,
         models: Option<&'a dyn ModelsPort>,
@@ -288,8 +289,17 @@ impl<'a> Peers<'a> {
     /// What the results workspace shows. The results feature's own context
     /// holds no such peer, because the feature reads its own state; its code
     /// asking for one is a fault in that code.
-    pub fn results(&self) -> &'a dyn ResultsPort {
+    pub fn results(&self) -> &dyn ResultsPort {
         self.results
+            .as_deref()
+            .expect("the results feature reads its own state, never itself as a peer")
+    }
+
+    /// Where the run tier's reports reach the results workspace. The results
+    /// feature's own context holds no such peer, as for [`Self::results`].
+    pub fn run_events(&mut self) -> &mut dyn RunEventPort {
+        self.results
+            .as_deref_mut()
             .expect("the results feature reads its own state, never itself as a peer")
     }
 

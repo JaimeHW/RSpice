@@ -6,6 +6,7 @@
 //! sits above the session, takes the port and not the feature.
 
 use rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
+use rspice_app_services::workbench::slots::platform::PlatformState;
 use rspice_app_state::workbench::app_state::model::Model;
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ResultViewer, SourceWaveformPresentationKey,
@@ -18,7 +19,10 @@ use rspice_results_ui::session::MarkerView;
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
+use crate::state::RunEvent;
+use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState;
 
 /// A model's release verdict.
 ///
@@ -105,6 +109,28 @@ pub struct DisplayedDatasetView {
 /// window. Either may be absent — the reader can pin one axis and leave the
 /// other to the page — which is why the pair is not one `Option`.
 pub type CapturedViewport = (Option<(f64, f64)>, Option<(f64, f64)>);
+
+/// The results workspace as another feature's context lends it: what it
+/// shows, and where the run tier's reports reach it.
+pub trait ResultsPeer: ResultsPort + RunEventPort {}
+
+impl<T: ResultsPort + RunEventPort> ResultsPeer for T {}
+
+/// Where the run tier's reports reach the results workspace: the one write
+/// another feature's context makes into it.
+pub trait RunEventPort {
+    /// Apply `event` to the results workspace before returning, over the
+    /// parts of the session it writes, as the application's own sink does.
+    fn apply_run_event(
+        &mut self,
+        event: RunEvent,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        platform: &PlatformState,
+        preflight: &mut PreflightDialogState,
+        commands: &'static Registry,
+    );
+}
 
 /// What the results workspace shows that another feature reads.
 pub trait ResultsPort {

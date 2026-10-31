@@ -47,7 +47,7 @@ use super::{
     SimulatePort,
 };
 use crate::workbench::framework::ports::{
-    CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPort,
+    CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPort, RunEventPort,
 };
 
 /// Peers as a fresh session shows them.
@@ -268,6 +268,21 @@ impl ResultsPort for NullPorts {
     }
 }
 
+/// A fresh session's results workspace holds nothing a run's report changes
+/// that a harness reads back, so a report reaches nothing.
+impl RunEventPort for NullPorts {
+    fn apply_run_event(
+        &mut self,
+        _event: crate::state::RunEvent,
+        _model: &mut Model,
+        _workbench: &mut WorkbenchSession,
+        _platform: &PlatformState,
+        _preflight: &mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
+        _commands: &'static Registry,
+    ) {
+    }
+}
+
 /// What a fresh session saves of the results workspace: no markers, panes or
 /// expression groups, and a marker high-water mark of zero.
 impl ResultPresentationSource for NullPorts {
@@ -294,8 +309,11 @@ pub struct FeatureHarness<F: Feature> {
     pub(crate) model_hub: rspice_app_services::services::model_hub::ModelHubService,
     /// Every command the feature reads as registered.
     pub commands: &'static Registry,
-    /// The design peer, the one a context lends mutably.
+    /// The design peer, which a context lends mutably.
     ports: NullPorts,
+    /// The results peer, which a context lends mutably for the run tier's
+    /// reports.
+    results_peer: NullPorts,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -318,6 +336,7 @@ where
             ),
             commands: &NO_COMMANDS,
             ports: NullPorts,
+            results_peer: NullPorts,
         }
     }
 
@@ -342,7 +361,7 @@ where
                 &mut self.ports,
                 Some(&NullPorts),
                 Some(&NullPorts),
-                Some(&NullPorts),
+                Some(&mut self.results_peer),
                 Some(&NullPorts),
                 &NullPorts,
                 Some(&NullPorts),

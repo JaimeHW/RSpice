@@ -163,6 +163,24 @@ impl ResultsState {
     }
 }
 
+/// Each report applies over the results workspace's parts, as the
+/// application state's own sink applies it.
+impl crate::workbench::framework::ports::RunEventPort for ResultsState {
+    fn apply_run_event(
+        &mut self,
+        event: crate::state::RunEvent,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        platform: &PlatformState,
+        preflight: &mut rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState,
+        commands: &'static Registry,
+    ) {
+        use crate::state::RunEventSink;
+        self.parts(model, workbench, platform, preflight, commands)
+            .apply_run_event(event);
+    }
+}
+
 impl crate::workbench::framework::ports::ResultsPort for ResultsState {
     fn result_viewer(&self) -> rspice_results::result_presentation::ResultViewer {
         self.results.session.viewer

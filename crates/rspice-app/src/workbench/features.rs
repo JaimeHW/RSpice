@@ -56,7 +56,7 @@ macro_rules! results_peer {
         None
     };
     ($slot:ident, $state:ident) => {
-        Some(&*$state.results)
+        Some(&mut *$state.results)
     };
 }
 

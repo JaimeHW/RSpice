@@ -96,7 +96,7 @@ fn with_cx<R>(
             &mut *state.design,
             Some(&*state.cloud),
             Some(&*state.hardcopy),
-            Some(&*state.results),
+            Some(&mut *state.results),
             Some(&*state.simulate),
             &*state.code,
             None,
