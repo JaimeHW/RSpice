@@ -838,12 +838,20 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             }
         }
         LibraryIntent::CopyCell { library, cell } => {
-            if let Err(error) = app.state.open_copy_cell_dialog(&library, &cell) {
+            let state = &mut app.state;
+            if let Err(error) = state
+                .project
+                .open_copy_cell_dialog(&state.model, &library, &cell)
+            {
                 app.state.prompt(error);
             }
         }
         LibraryIntent::RenameCell { library, cell } => {
-            if let Err(error) = app.state.open_rename_cell_dialog(&library, &cell) {
+            let state = &mut app.state;
+            if let Err(error) = state
+                .project
+                .open_rename_cell_dialog(&state.model, &library, &cell)
+            {
                 app.state.prompt(error);
             }
         }

@@ -436,13 +436,16 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.copy_cell"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.copy_cell_dialog),
-        render: |app, ctx| app.process_copy_cell_dialog(ctx),
+        render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("project.rename_cell"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.rename_cell_dialog),
-        render: |app, ctx| app.process_rename_cell_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::process_rename_cell_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("project.library_deletion_review"),

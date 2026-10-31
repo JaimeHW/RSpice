@@ -381,8 +381,8 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_veriloga_import_dialog", "code"),
     ("render_veriloga_replace_dialog", "code"),
     ("render_veriloga_build_settings", "code"),
-    ("process_copy_cell_dialog", "project"),
-    ("process_rename_cell_dialog", "project"),
+    ("ProjectFeature::process_copy_cell_dialog", "project"),
+    ("ProjectFeature::process_rename_cell_dialog", "project"),
     ("process_library_deletion_review_dialog", "project"),
     ("process_plan_removal_review_dialog", "simulate"),
     ("process_plan_removal_refusal_dialog", "simulate"),
@@ -574,7 +574,7 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "21",
-        &["|app, request: ProjectInspectorRequest| answer_project_inspector(app, request)"],
+        &["|app, request: ProjectRequest| answer_project_request(app, request)"],
     ),
     (
         "22",
@@ -1144,7 +1144,12 @@ fn dialog_specs(source: &str) -> Vec<WrittenSpec> {
             WrittenSpec {
                 key: field(spec, "DialogKey(\"", '"'),
                 modality: field(spec, "modality: Modality::", ','),
-                renders: top_level_calls(render),
+                // Answering what a step raised, straight after it, draws
+                // nothing: it is the step's own drain, not a step.
+                renders: top_level_calls(render)
+                    .into_iter()
+                    .filter(|call| call != "after_contribution")
+                    .collect(),
             }
         })
         .collect()
@@ -1400,14 +1405,14 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
         "RSpiceApp::after_contribution",
         DISPATCH,
         "pub(crate) fn after_contribution(",
-        &["|app, request: ProjectInspectorRequest| answer_project_inspector(app, request)"],
+        &["|app, request: ProjectRequest| answer_project_request(app, request)"],
     ),
     (
-        "answer_project_inspector",
+        "answer_project_request",
         COMMAND_HELPERS,
-        "fn answer_project_inspector(",
+        "fn answer_project_request(",
         &[
-            "ProjectInspectorRequest::UseForRuns(target) => {",
+            "ProjectRequest::UseForRuns(target) => {",
             "commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))",
             "app.state.project.configuration.refusal = refusal;",
         ],
@@ -1435,6 +1440,37 @@ fn the_docked_project_inspector_has_a_configuration_refused_for_runs_stated_in_t
         let shipped = crate::source_guard::without_test_items(source);
         assert_runs_in_order(function, &body(&shipped, signature), &steps);
     }
+}
+
+/// The project's cell dialogs draw in the feature's context. Rename Cell has
+/// what it raised answered straight after it draws, in the step that drew it;
+/// Copy Cell raises nothing.
+#[test]
+fn the_cell_dialogs_draw_in_the_project_context_and_a_rename_is_answered_as_it_returns() {
+    let order = without_whitespace(DIALOG_ORDER);
+    let spec = |key: &str| {
+        order
+            .split("DialogSpec{")
+            .find(|spec| spec.contains(&format!("DialogKey(\"{key}\")")))
+            .unwrap_or_else(|| panic!("the shell's dialog order draws `{key}`"))
+            .to_owned()
+    };
+    assert!(
+        spec("project.rename_cell").contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::process_rename_cell_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "Rename Cell draws in the project feature's context, and what it raised is answered \
+         straight after"
+    );
+    assert!(
+        spec("project.copy_cell").contains(&without_whitespace(
+            "render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),"
+        )),
+        "Copy Cell draws in the project feature's context and answers nothing"
+    );
 }
 
 #[test]

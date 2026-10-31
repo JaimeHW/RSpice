@@ -7,6 +7,7 @@
 
 pub(crate) mod commands;
 pub(crate) mod configuration_state;
+mod library_dialogs;
 pub(crate) mod workspace_state;
 
 use crate::state::ViewType;

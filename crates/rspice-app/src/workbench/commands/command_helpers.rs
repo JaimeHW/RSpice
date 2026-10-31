@@ -1,13 +1,15 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration_transaction,
 };
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
-use crate::workbench::project::commands::ProjectInspectorRequest;
+use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::session::project_transactions::apply_workspace_pruned;
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
@@ -341,17 +343,15 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
     }
 }
 
-/// Carry out what the Project workspace's inspector handed over, as the
-/// inspector did in place: the Configurations command, opening the selected
-/// view where it is edited, and using a configuration for runs, whose
-/// refusal the Configuration page states.
-pub(in crate::workbench) fn answer_project_inspector(
-    app: &mut RSpiceApp,
-    request: ProjectInspectorRequest,
-) {
+/// Carry out what the project feature handed over, as the feature did in
+/// place: the Configurations command, opening the selected view where it is
+/// edited, using a configuration for runs, whose refusal the Configuration
+/// page states, and what a library catalog change left outside the model,
+/// before the change's own line in the log.
+pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
-        ProjectInspectorRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
-        ProjectInspectorRequest::OpenView(reference, view_type) => {
+        ProjectRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
+        ProjectRequest::OpenView(reference, view_type) => {
             app.state.open_workspace_view(reference);
             // Source views are cell views too: Design shows a Verilog-A module's
             // editor and states what a SPICE or Verilog view is bound to.
@@ -364,11 +364,16 @@ pub(in crate::workbench) fn answer_project_inspector(
             };
             Command::OpenWorkspace(workspace).execute(app);
         }
-        ProjectInspectorRequest::UseForRuns(target) => {
+        ProjectRequest::UseForRuns(target) => {
             let refusal =
                 commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
                     .err();
             app.state.project.configuration.refusal = refusal;
+        }
+        ProjectRequest::CatalogChanged { pruned, notice } => {
+            apply_workspace_pruned(&mut app.state, pruned);
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, notice);
         }
     }
 }

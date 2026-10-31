@@ -6,10 +6,11 @@
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
 //!
-//! Beside them is what the Project workspace's inspector hands the shell to
-//! carry out, which the feature's own context cannot.
+//! Beside them is what the project feature hands the shell to carry out,
+//! which the feature's own context cannot.
 
 use egui::Key;
+use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -249,18 +250,26 @@ impl ProjectCommand {
     }
 }
 
-/// What the Project workspace's inspector hands the shell, which carries it
-/// out over the whole application as the inspector once did in place: the
-/// Configurations command of the shell's own table, opening the selected
-/// view in the workspace that edits it, and using a configuration for runs.
-/// Taken straight after the inspector has drawn.
+/// What the project feature hands the shell, which carries it out over the
+/// whole application as the feature once did in place: the Configurations
+/// command of the shell's own table, opening the selected view in the
+/// workspace that edits it, using a configuration for runs, and what a
+/// library catalog change left outside the model. Each place that raises one
+/// raises one, carrying everything it once did after that point, in order.
+/// Taken straight after the call that raised it.
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub(crate) enum ProjectInspectorRequest {
+pub(crate) enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
     UseForRuns(ConfigurationSelection),
+    /// What a catalog change left outside the model, then the change's own
+    /// line in the log, in the order the change once wrote both.
+    CatalogChanged {
+        pruned: WorkspacePruned,
+        notice: String,
+    },
 }
 
-impl Request for ProjectInspectorRequest {
+impl Request for ProjectRequest {
     const DRAIN: Drain = Drain::AfterContribution;
 }

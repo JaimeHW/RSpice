@@ -14,7 +14,7 @@ use crate::workbench::framework::command_registry::ids;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, dirty_document_count};
 
 use super::super::super::design_system::{property_row, property_row_problem};
-use crate::workbench::project::commands::{ProjectCommand, ProjectInspectorRequest};
+use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::configuration_state::ConfigurationPageState;
 use crate::workbench::project::workspace_state::ProjectPage;
 
@@ -41,7 +41,7 @@ pub(in crate::workbench) enum ProjectInspectorAction {
     /// Run the command this key names.
     Execute(CommandKey),
     /// Hand the shell what only it carries out.
-    Shell(ProjectInspectorRequest),
+    Shell(ProjectRequest),
 }
 
 pub(in crate::workbench) fn project(
@@ -52,9 +52,8 @@ pub(in crate::workbench) fn project(
         ProjectPage::Overview => project_overview(ui, inspector),
         ProjectPage::Library => project_library(ui, inspector),
         ProjectPage::Configuration => {
-            configuration::project_configuration(ui, inspector.configuration, inspector.model).map(
-                |target| ProjectInspectorAction::Shell(ProjectInspectorRequest::UseForRuns(target)),
-            )
+            configuration::project_configuration(ui, inspector.configuration, inspector.model)
+                .map(|target| ProjectInspectorAction::Shell(ProjectRequest::UseForRuns(target)))
         }
         ProjectPage::Dependencies => project_dependency(ui, inspector),
         ProjectPage::Recovery => {
@@ -158,7 +157,7 @@ fn project_overview(
     }
     if inspector_action(ui, "Configurations") {
         action = Some(ProjectInspectorAction::Shell(
-            ProjectInspectorRequest::ConfigurationSets,
+            ProjectRequest::ConfigurationSets,
         ));
     }
     if inspector_action(ui, "Switch project\u{2026}") {
@@ -266,7 +265,7 @@ fn project_library(
     // either — it is a project-level dialog, and the Project overview
     // inspector is where the project's own actions live.
     open_target.filter(|_| open).map(|(reference, view_type)| {
-        ProjectInspectorAction::Shell(ProjectInspectorRequest::OpenView(reference, view_type))
+        ProjectInspectorAction::Shell(ProjectRequest::OpenView(reference, view_type))
     })
 }
 

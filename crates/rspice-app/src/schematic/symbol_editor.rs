@@ -242,7 +242,11 @@ fn apply_surface_request(state: &mut AppState, request: SymbolSurfaceRequest) ->
                 return false;
             }
             let reference = &request.source.document;
-            if let Err(error) = state.open_copy_cell_dialog(&reference.library, &reference.cell) {
+            if let Err(error) = state.project.open_copy_cell_dialog(
+                &state.model,
+                &reference.library,
+                &reference.cell,
+            ) {
                 state.prompt(error);
             }
         }

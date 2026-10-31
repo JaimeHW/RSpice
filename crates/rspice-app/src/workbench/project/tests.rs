@@ -8,7 +8,10 @@ use super::ProjectFeature;
 
 /// Runs `call` in the project feature's context over `app`, lending it the
 /// application's parts as the frame does.
-fn with_cx<R>(app: &mut RSpiceApp, call: impl FnOnce(&mut Cx<'_, ProjectFeature>) -> R) -> R {
+pub(super) fn with_cx<R>(
+    app: &mut RSpiceApp,
+    call: impl FnOnce(&mut Cx<'_, ProjectFeature>) -> R,
+) -> R {
     let handles = LowerHandles {
         export_io: app.export_workflow_io.as_ref(),
         run_controller: &mut app.simulation_controller,

@@ -523,6 +523,7 @@ impl AppState {
     }
 
     /// [`Model::copy_cell`], stating what its drawing sync had to say.
+    #[cfg(test)]
     pub(crate) fn copy_cell(
         &mut self,
         src_library: &str,
@@ -540,6 +541,7 @@ impl AppState {
     }
 
     /// [`Model::rename_cell`], then what it left.
+    #[cfg(test)]
     pub(crate) fn rename_cell(
         &mut self,
         library: &str,
@@ -589,7 +591,7 @@ impl AppState {
 /// editor's reload of the schematic now in front, the retirement of
 /// everything run against the previous design, and the Verilog-A compile
 /// evidence that names a source whose owner moved.
-fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePruned) {
+pub(in crate::workbench) fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePruned) {
     let WorkspacePruned {
         prompt,
         restore_active_schematic,
