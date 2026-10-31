@@ -15,11 +15,13 @@ use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use egui::{Context, FontData, FontDefinitions, FontFamily, FullOutput, Shape, text::LayoutJob};
+use egui::{Context, FontData, FontDefinitions, FullOutput, Shape, text::LayoutJob};
 pub use rspice_fonts::HanVariant;
 use rspice_fonts::system::SystemFace;
 pub use rspice_fonts::system::{FaceClass, KnownFace, Source, SystemFonts};
 use rspice_fonts::{HanPreference, Role, Sink, han_order};
+
+use super::role_of;
 
 /// How often a frame looks for the worker's answer while a request is out.
 const POLL: Duration = Duration::from_millis(50);
@@ -243,14 +245,6 @@ fn definitions(joined: &[SystemFace]) -> FontDefinitions {
         }
     }
     fonts
-}
-
-/// The role a family letters, taking an unknown family as the sans.
-fn role_of(family: &FontFamily) -> Role {
-    Role::ALL
-        .into_iter()
-        .find(|role| role.egui_family() == *family)
-        .unwrap_or(Role::Sans)
 }
 
 /// Whether a character is drawn: controls, spaces, format characters and

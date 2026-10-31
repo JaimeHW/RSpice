@@ -46,6 +46,14 @@ pub fn mono_medium() -> FontFamily {
     Role::MonoMedium.egui_family()
 }
 
+/// The role a family letters, taking an unknown family as the sans.
+pub(crate) fn role_of(family: &FontFamily) -> Role {
+    Role::ALL
+        .into_iter()
+        .find(|role| role.egui_family() == *family)
+        .unwrap_or(Role::Sans)
+}
+
 /// The application font definitions: every face `rspice-fonts` embeds, and
 /// one family per role holding that role's chain.
 ///

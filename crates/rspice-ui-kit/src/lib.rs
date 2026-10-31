@@ -13,6 +13,7 @@ pub mod panels;
 pub mod plot;
 #[cfg(any(test, feature = "test-support"))]
 pub mod raster;
+pub mod text;
 pub mod theme;
 pub mod tokens;
 pub mod viewport;
