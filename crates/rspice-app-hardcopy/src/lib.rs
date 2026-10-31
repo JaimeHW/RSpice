@@ -55,7 +55,6 @@ pub mod workbench {
             HardcopyDialogState, HardcopyParts, HardcopyWorkflow, open_hardcopy_workflow,
             render_hardcopy_dialog,
         };
-        pub(crate) use rspice_app_state::workbench::app::schematic::edit_authority::SchematicEditAuthority;
 
         pub mod dialogs {
             pub mod hardcopy;
