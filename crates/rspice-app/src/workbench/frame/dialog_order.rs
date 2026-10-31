@@ -10,7 +10,6 @@ use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
-use crate::workbench::models::ModelsFeature;
 use crate::workbench::{RSpiceApp, SurfaceId};
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
@@ -46,8 +45,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("models.pdk_settings"),
         modality: Modality::Application,
-        is_open: Some(|state| state.models.pdk_settings_dialog.open),
-        render: |app, ctx| ModelsFeature::process_pdk_settings_dialog(&mut features::cx(app), ctx),
+        is_open: Some(|state| features::dialog_open(state, DialogKey("models.pdk_settings"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("models.pdk_settings")),
     },
     DialogSpec {
         key: DialogKey("settings.preferences"),
@@ -391,14 +390,8 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
     DialogSpec {
         key: DialogKey("models.model_browser"),
         modality: Modality::Application,
-        is_open: Some(|state| state.models.model_browser_state.open),
-        render: |app, ctx| {
-            crate::workbench::models::render_model_browser_dialog(
-                ctx,
-                &mut app.state.models,
-                &app.state.model,
-            )
-        },
+        is_open: Some(|state| features::dialog_open(state, DialogKey("models.model_browser"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("models.model_browser")),
     },
     DialogSpec {
         key: DialogKey("project.new_cell"),
@@ -629,12 +622,12 @@ const MODAL_ONLY: &[ModalSpec<AppState>] = &[
     ModalSpec {
         key: DialogKey("models.model_correlation"),
         modality: Modality::Application,
-        is_open: |state| state.models.model_correlation.dialog_open(),
+        is_open: |state| features::dialog_open(state, DialogKey("models.model_correlation")),
     },
     ModalSpec {
         key: DialogKey("models.models_view"),
         modality: Modality::Application,
-        is_open: |state| state.models.models_view.dialog.is_some(),
+        is_open: |state| features::dialog_open(state, DialogKey("models.models_view")),
     },
     ModalSpec {
         key: DialogKey("results.create_result_document"),

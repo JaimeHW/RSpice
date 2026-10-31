@@ -20,9 +20,10 @@ use crate::workbench::documents::model_editor::{
     ModelEditorParts, ModelEditorReads, create_editable_project_copy_and_open, open_project_model,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
-    held_back,
+    CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
+    NoHandles, Reads, held_back,
 };
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -44,6 +45,7 @@ impl Feature for ModelsFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ModelsCommand>();
+        registry.dialogs(DIALOGS);
         registry.navigator(FeatureNavigator {
             show: show_navigator,
         });
@@ -54,6 +56,39 @@ impl Feature for ModelsFeature {
         });
     }
 }
+
+/// The dialogs the feature draws, each under the key the shell lists it by.
+/// The dialog order draws the PDK settings and the model browser at their
+/// steps, the PDK settings step taking the model operations that finished
+/// since the last frame whether or not the dialog is open. The other two
+/// hold a modal gate the shell asks of them, and each is drawn where its
+/// work is: the correlation dialog by the measurement correlation route,
+/// and the Models workspace's own dialogs by that workspace, which carries
+/// out what they ask.
+const DIALOGS: &[FeatureDialog<ModelsFeature>] = &[
+    FeatureDialog {
+        key: DialogKey("models.pdk_settings"),
+        is_open: |models| models.pdk_settings_dialog.open,
+        render: ModelsFeature::process_pdk_settings_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("models.model_browser"),
+        is_open: |models| models.model_browser_state.open,
+        render: render_model_browser_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("models.model_correlation"),
+        is_open: |models| models.model_correlation.dialog_open(),
+        render: ModelsFeature::render_correlation_dialog,
+    },
+    FeatureDialog {
+        key: DialogKey("models.models_view"),
+        is_open: |models| models.models_view.dialog.is_some(),
+        // The Models workspace draws them inside its stage, where it
+        // carries out what they ask.
+        render: |_, _| {},
+    },
+];
 
 #[cfg(target_arch = "wasm32")]
 impl ModelsFeature {
@@ -428,14 +463,10 @@ impl CommandSet for ModelsCommand {
 
 /// The standalone model browser the Models menu opens, over every loaded
 /// model.
-pub(crate) fn render_model_browser_dialog(
-    ctx: &egui::Context,
-    models: &mut ModelsState,
-    model: &Model,
-) {
+fn render_model_browser_dialog(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Context) {
     let _ = render_model_browser(
         ctx,
-        &mut models.model_browser_state,
-        &model.model_library_manager,
+        &mut cx.state.model_browser_state,
+        &cx.model.model_library_manager,
     );
 }

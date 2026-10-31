@@ -576,6 +576,14 @@ impl ModelsFeature {
     ) {
         show(ui, cx);
     }
+
+    /// Draw the correlation dialog the route opened, if one is open.
+    pub(in crate::workbench) fn render_correlation_dialog(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &egui::Context,
+    ) {
+        show_correlation_dialog(ctx, cx);
+    }
 }
 
 fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
@@ -611,7 +619,7 @@ fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     evidence_ledger(&mut surface, &projection);
     correlation_notice(&mut surface, cx);
     workspace_body(&mut surface, cx, &projection);
-    show_correlation_dialog(ui.ctx(), cx);
+    ModelsFeature::render_correlation_dialog(cx, ui.ctx());
 }
 
 fn outer_header(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, projection: &CorrelationProjection) {
