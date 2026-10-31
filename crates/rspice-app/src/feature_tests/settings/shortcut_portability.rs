@@ -9,8 +9,8 @@ use crate::state::shortcuts::ShortcutBindingSlot;
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::state::shortcuts::ShortcutProfileLibrary;
 use crate::workbench::app::dialogs::preferences::shortcut_portability_dialogs::*;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::ShortcutConflictPolicy;
 
 #[test]
@@ -22,7 +22,7 @@ fn protected_binding_requires_fresh_explicit_confirmation() {
     imported
         .set_binding(
             &crate::workbench::commands::vocabulary::CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             vec![
                 CommandPlatform::Browser,
@@ -32,7 +32,7 @@ fn protected_binding_requires_fresh_explicit_confirmation() {
             None,
         )
         .unwrap();
-    imported.acknowledge_protected_override(Command::Save.key());
+    imported.acknowledge_protected_override(ids::SAVE);
     let artifact = exported_artifact(&imported);
     let base = ShortcutProfileLibrary::default();
     let mut state = ShortcutImportDialogState::default();
@@ -40,7 +40,7 @@ fn protected_binding_requires_fresh_explicit_confirmation() {
     state.options.conflict_policy = ShortcutConflictPolicy::UseImportedBinding;
     state.plan_dirty = true;
     state.synchronize_plan(&base, command_registry());
-    let command_id = Command::Save.stable_id().to_owned();
+    let command_id = ids::SAVE.as_str().to_owned();
     assert!(
         state
             .plan
@@ -65,7 +65,7 @@ fn replacing_source_clears_digest_specific_protected_consent() {
     state
         .options
         .protected_confirmations
-        .insert(Command::Save.stable_id().to_owned());
+        .insert(ids::SAVE.as_str().to_owned());
 
     state.accept_detected(
         &base,

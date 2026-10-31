@@ -4,6 +4,7 @@
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, icon_button, labeled_icon_button_sized};
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::layout::LayoutSpec;
 
 use super::{
@@ -255,14 +256,7 @@ fn netlist_page_tools(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpec
         );
         return;
     }
-    toolbar_text_command(
-        ui,
-        app,
-        Command::Save.key(),
-        WorkbenchIcon::Save,
-        "Save deck",
-        layout,
-    );
+    toolbar_text_command(ui, app, ids::SAVE, WorkbenchIcon::Save, "Save deck", layout);
     toolbar_text_command(
         ui,
         app,

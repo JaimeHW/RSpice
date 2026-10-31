@@ -14,6 +14,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::state::shortcuts::SingleKeyCanvasPolicy;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::state::Workspace;
 use egui::Key;
@@ -131,7 +132,7 @@ fn default_profile_keeps_place_text_on_the_mockup_binding() {
 #[test]
 fn editing_one_slot_preserves_the_other_then_resets_to_defaults() {
     let mut preferences = ShortcutPreferences::default();
-    let command = Command::Save.key();
+    let command = ids::SAVE;
     let default_alternate = preferences
         .resolved_bindings(&CommandRegistry, command)
         .into_iter()
@@ -178,7 +179,7 @@ fn malformed_keys_are_isolated_and_audited_without_hiding_defaults() {
     .unwrap();
     assert!(
         !preferences
-            .resolved_bindings(&CommandRegistry, Command::Save.key())
+            .resolved_bindings(&CommandRegistry, ids::SAVE)
             .is_empty()
     );
     assert!(
@@ -203,7 +204,7 @@ fn audit_finds_context_collisions_and_missing_browser_alternates() {
     preferences
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(sequence(Key::W, false)),
@@ -212,7 +213,7 @@ fn audit_finds_context_collisions_and_missing_browser_alternates() {
     preferences
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             CommandPlatform::ALL.to_vec(),
             None,
@@ -275,7 +276,7 @@ fn context_precedence_warns_across_tiers_but_blocks_same_tier_collisions() {
     across_tiers
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(sequence(Key::W, false)),
@@ -318,7 +319,7 @@ fn protected_override_acknowledgement_is_persisted_and_invalidated_by_edits() {
     preferences
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             vec![
                 CommandPlatform::Browser,
@@ -330,22 +331,22 @@ fn protected_override_acknowledgement_is_persisted_and_invalidated_by_edits() {
         .unwrap();
     assert!(!preferences.audit(&CommandRegistry).is_valid());
 
-    preferences.acknowledge_protected_override(Command::Save.key());
+    preferences.acknowledge_protected_override(ids::SAVE);
     assert!(preferences.audit(&CommandRegistry).is_valid());
     let mut round_trip: ShortcutPreferences =
         serde_json::from_value(serde_json::to_value(&preferences).unwrap()).unwrap();
-    assert!(round_trip.protected_override_acknowledged(Command::Save.key()));
+    assert!(round_trip.protected_override_acknowledged(ids::SAVE));
 
     round_trip
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(sequence(Key::F6, false)),
         )
         .unwrap();
-    assert!(!round_trip.protected_override_acknowledged(Command::Save.key()));
+    assert!(!round_trip.protected_override_acknowledged(ids::SAVE));
     assert!(!round_trip.audit(&CommandRegistry).is_valid());
 }
 

@@ -154,7 +154,7 @@ fn two_stroke_sequence_waits_and_dispatches_at_most_one_command() {
         Duration::from_millis(101),
         |_| true,
     );
-    assert_eq!(deferred.command, Some(Command::Save.key()));
+    assert_eq!(deferred.command, Some(ids::SAVE));
 }
 
 #[test]
@@ -267,7 +267,7 @@ fn no_timeout_waits_until_a_mismatch_then_dispatches_exact_prefix() {
         Duration::from_secs(62),
         |_| true,
     );
-    assert_eq!(deferred.command, Some(Command::Save.key()));
+    assert_eq!(deferred.command, Some(ids::SAVE));
     assert!(deferred.consume.is_empty());
 }
 
@@ -387,7 +387,7 @@ fn invalid_whole_profile_executes_immutable_defaults_only() {
             "context-precedence": "editor-modal-workspace-global"
         },
         "commands": {
-            Command::Save.stable_id(): {"bindings": [{
+            ids::SAVE.as_str(): {"bindings": [{
                 "slot": "primary",
                 "platforms": ["desktop"],
                 "sequence": [{"key": "DefinitelyNotAKey"}]

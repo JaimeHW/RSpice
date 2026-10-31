@@ -22,7 +22,9 @@ fn protected_override_acknowledgements_round_trip_in_device_local_store() {
     else {
         panic!("protected acknowledgement store did not restore");
     };
-    assert!(restored.library().active().protected_override_acknowledged(
-        crate::workbench::commands::vocabulary::Command::Save.key()
-    ));
+    assert!(
+        restored.library().active().protected_override_acknowledged(
+            crate::workbench::framework::command_registry::ids::SAVE
+        )
+    );
 }

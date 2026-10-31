@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::Workspace;
 use rspice_design::library::metadata::{cell_parameter_contract, decode_source_view_ports};
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
@@ -220,7 +221,7 @@ fn wired_device() -> (User, Device) {
     let mut user = User::new(RSpiceApp::test_instance());
 
     // 1. File → New project, not keeping the session's unsaved scratch work.
-    Command::NewProject.execute(&mut user.app);
+    user.app.execute_command_key(ids::NEW_PROJECT);
     user.settle();
     if user.app.state.workbench.confirmation_dialog.visible {
         user.click("Don't save");

@@ -16,9 +16,11 @@ fn legacy_import_never_trusts_transferred_protected_acknowledgements() {
     )
     .unwrap();
 
-    assert!(!staged.candidate().protected_override_acknowledged(
-        crate::workbench::commands::vocabulary::Command::Save.key()
-    ));
+    assert!(
+        !staged.candidate().protected_override_acknowledged(
+            crate::workbench::framework::command_registry::ids::SAVE
+        )
+    );
     // The scrub happens before decoding, so the transferred entry cannot
     // reappear through the candidate's own serialization either.
     let reencoded = serde_json::to_value(staged.candidate()).unwrap();

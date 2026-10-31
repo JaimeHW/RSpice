@@ -335,6 +335,8 @@ pub mod ids {
         MODELS_WORKSPACE = "models";
         MODEL_QUALIFICATION = "model-qualification";
         NETLIST_WORKSPACE = "netlist";
+        NEW_CELL = "new-cell";
+        NEW_PROJECT = "new-project";
         OPEN_CONSOLE = "open-console";
         OPEN_NOTIFICATIONS = "open-notifications";
         OPEN_RUN_IN_RESULTS = "open-run-in-results";

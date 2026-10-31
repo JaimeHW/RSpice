@@ -17,6 +17,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use egui::Context;
 use egui::Key;
 use egui::Modifiers;
@@ -27,7 +28,7 @@ fn capture_platforms_preserve_defaults_and_protected_alternates() {
     assert_eq!(
         binding_platforms(
             &profile,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             command_registry(),
         ),
@@ -48,7 +49,7 @@ fn protected_override_requires_explicit_persisted_draft_acknowledgement() {
     profile
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             vec![
                 CommandPlatform::Browser,
@@ -59,12 +60,12 @@ fn protected_override_requires_explicit_persisted_draft_acknowledgement() {
         )
         .unwrap();
     assert!(!profile.audit(&CommandRegistry).is_valid());
-    assert!(!profile.protected_override_acknowledged(Command::Save.key()));
+    assert!(!profile.protected_override_acknowledged(ids::SAVE));
 
-    profile.acknowledge_protected_override(Command::Save.key());
+    profile.acknowledge_protected_override(ids::SAVE);
 
     assert!(profile.audit(&CommandRegistry).is_valid());
-    assert!(profile.protected_override_acknowledged(Command::Save.key()));
+    assert!(profile.protected_override_acknowledged(ids::SAVE));
     assert!(
         profile
             .audit(&CommandRegistry)
@@ -110,7 +111,7 @@ fn ordered_same_frame_keydowns_produce_one_multi_stroke_sequence() {
     let mut editor = ShortcutEditorState::default();
     editor.open(&ShortcutPreferences::default());
     editor.recording = Some(ShortcutCaptureTarget {
-        command: Command::Save.key(),
+        command: ids::SAVE,
         slot: ShortcutBindingSlot::Primary,
     });
     let ctrl = Modifiers {
@@ -141,7 +142,7 @@ fn ordered_same_frame_keydowns_produce_one_multi_stroke_sequence() {
     assert_eq!(
         binding_for_slot(
             editor.draft.as_ref().unwrap(),
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             egui::os::OperatingSystem::Windows,
             command_registry(),
@@ -162,7 +163,7 @@ fn editor_draft_cancel_never_mutates_live_profile() {
         .unwrap()
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -195,7 +196,7 @@ fn valid_save_atomically_replaces_the_live_profile() {
         .unwrap()
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -214,7 +215,7 @@ fn valid_save_atomically_replaces_the_live_profile() {
     assert_eq!(
         binding_for_slot(
             state.model.preferences.shortcuts(),
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             egui::os::OperatingSystem::Windows,
             command_registry(),
@@ -237,7 +238,7 @@ fn invalid_save_keeps_the_draft_open_and_focuses_the_first_issue() {
         .unwrap()
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -274,9 +275,9 @@ fn pending_editor_is_immutable_and_exposes_a_disabled_progress_state() {
     let profile = state.model.preferences.shortcuts().clone();
     state.settings.shortcut_editor.open(&profile);
     state.settings.shortcut_editor.query = "save".to_owned();
-    state.settings.shortcut_editor.selected_command = Some(Command::Save.key());
+    state.settings.shortcut_editor.selected_command = Some(ids::SAVE);
     state.settings.shortcut_editor.recording = Some(ShortcutCaptureTarget {
-        command: Command::Save.key(),
+        command: ids::SAVE,
         slot: ShortcutBindingSlot::Primary,
     });
     state

@@ -5,6 +5,7 @@ use crate::feature_tests::settings::shortcut_vscode_import::{
 };
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::sha256;
 use crate::workbench::shortcuts::artifacts::vscode::*;
 use egui::Key;
@@ -68,7 +69,7 @@ fn platform_override_and_platform_primary_semantics_are_exact() {
     let windows_binding = windows
         .artifact()
         .profile()
-        .command_override(Command::Save.key())
+        .command_override(ids::SAVE)
         .unwrap();
     let windows_stroke = windows_binding.bindings()[0].sequence().strokes()[0];
     assert!(windows_stroke.primary());
@@ -83,7 +84,7 @@ fn platform_override_and_platform_primary_semantics_are_exact() {
     let mac_binding = mac
         .artifact()
         .profile()
-        .command_override(Command::Save.key())
+        .command_override(ids::SAVE)
         .unwrap();
     let mac_stroke = mac_binding.bindings()[0].sequence().strokes()[0];
     assert!(mac_stroke.primary());
@@ -127,7 +128,7 @@ fn duplicate_is_deduplicated_but_conflict_fails_closed() {
         conflict
             .artifact()
             .profile()
-            .command_override(Command::Save.key())
+            .command_override(ids::SAVE)
             .is_none()
     );
 }
@@ -149,7 +150,7 @@ fn unmatched_removal_fails_closed_without_creating_an_unbind() {
         adaptation
             .artifact()
             .profile()
-            .command_override(Command::Save.key())
+            .command_override(ids::SAVE)
             .is_none()
     );
     assert_every_entry_accounted_for(adaptation.report());
@@ -171,7 +172,7 @@ fn remove_then_replace_is_reviewable_but_cannot_be_partially_applied() {
     let command_override = adaptation
         .artifact()
         .profile()
-        .command_override(Command::Save.key())
+        .command_override(ids::SAVE)
         .unwrap();
     assert!(command_override.bindings()[0].sequence().strokes()[0].shift());
     assert_every_entry_accounted_for(adaptation.report());

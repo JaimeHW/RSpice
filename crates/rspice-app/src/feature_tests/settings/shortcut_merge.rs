@@ -15,6 +15,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 use crate::workbench::shortcuts::artifacts::merge::*;
 use egui::Key;
@@ -285,7 +286,7 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
     imported
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Alternate,
             vec![
                 CommandPlatform::Browser,
@@ -295,12 +296,12 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
             None,
         )
         .unwrap();
-    imported.acknowledge_protected_override(Command::Save.key());
+    imported.acknowledge_protected_override(ids::SAVE);
     let artifact = artifact_with_coverage(&imported, &["all"], &CommandPlatform::ALL, true);
     assert!(
         !artifact
             .profile()
-            .protected_override_acknowledged(Command::Save.key())
+            .protected_override_acknowledged(ids::SAVE)
     );
     let options = ShortcutImportOptions {
         conflict_policy: ShortcutConflictPolicy::UseImportedBinding,
@@ -317,13 +318,13 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
     assert!(!review.can_apply());
     assert_eq!(
         review.required_protected_confirmations(),
-        &BTreeSet::from([Command::Save.stable_id().to_owned()])
+        &BTreeSet::from([ids::SAVE.as_str().to_owned()])
     );
     let confirmed = plan_shortcut_import(
         &ShortcutProfileLibrary::default(),
         &artifact,
         &ShortcutImportOptions {
-            protected_confirmations: BTreeSet::from([Command::Save.stable_id().to_owned()]),
+            protected_confirmations: BTreeSet::from([ids::SAVE.as_str().to_owned()]),
             ..options
         },
         command_registry(),
@@ -334,7 +335,7 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
         confirmed
             .candidate_library()
             .active()
-            .protected_override_acknowledged(Command::Save.key())
+            .protected_override_acknowledged(ids::SAVE)
     );
 }
 
@@ -342,9 +343,9 @@ fn protected_acknowledgements_are_reconfirmed_for_each_import() {
 fn apply_persists_before_live_mutation() {
     let mut library = ShortcutProfileLibrary::default();
     let mut imported = ShortcutPreferences::default();
-    set(
+    set_key(
         &mut imported,
-        Command::Save,
+        ids::SAVE,
         ShortcutBindingSlot::Primary,
         CommandPlatform::Desktop,
         Key::F6,

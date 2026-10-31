@@ -21,7 +21,8 @@ fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
         ChordTimeoutPolicy, ShortcutBindingSlot, ShortcutPreferences, ShortcutSequence,
         ShortcutStroke,
     };
-    use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+    use crate::workbench::commands::vocabulary::CommandRegistry;
+    use crate::workbench::framework::command_registry::ids;
 
     let ctx = egui::Context::default();
     let mut app = RSpiceApp::test_instance();
@@ -35,7 +36,7 @@ fn restoring_shortcuts_saves_the_shipped_profile_before_it_goes_live() {
     edited
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             vec![CommandPlatform::Desktop],
             Some(ShortcutSequence::single(ShortcutStroke::new(

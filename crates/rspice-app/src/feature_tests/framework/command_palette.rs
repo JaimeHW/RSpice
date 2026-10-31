@@ -7,6 +7,7 @@ use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::command_palette::*;
 use crate::workbench::framework::command_registry::CommandSpec;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
 
 #[test]
@@ -586,8 +587,7 @@ fn opening_input_is_owned_before_background_text_edits() {
 #[test]
 fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete() {
     let mut app = test_app();
-    app.state.workbench.command_palette.recent =
-        vec![Command::PlaceProbe.key(), Command::Save.key()];
+    app.state.workbench.command_palette.recent = vec![Command::PlaceProbe.key(), ids::SAVE];
     let all = palette_rows(
         &app,
         "",
@@ -596,11 +596,11 @@ fn empty_all_scope_uses_mockup_suggestions_and_explicit_scopes_remain_complete()
         egui::os::OperatingSystem::Windows,
     );
     assert_eq!(all[0].entry.command(), Some(Command::PlaceProbe.key()));
-    assert_eq!(all[1].entry.command(), Some(Command::Save.key()));
+    assert_eq!(all[1].entry.command(), Some(ids::SAVE));
     assert_eq!(all.len(), SUGGESTION_LIMIT);
     assert_eq!(
         all.iter()
-            .filter(|row| row.entry.command() == Some(Command::Save.key()))
+            .filter(|row| row.entry.command() == Some(ids::SAVE))
             .count(),
         1
     );

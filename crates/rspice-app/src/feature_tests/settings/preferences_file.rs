@@ -2,12 +2,13 @@
 //! to the product's own commands.
 
 use crate::workbench::UserPreferences;
+use crate::workbench::framework::command_registry::ids;
 
 #[test]
 fn shortcut_profile_round_trips_inside_user_preferences() {
     use crate::state::command_catalog::CommandPlatform;
     use crate::state::shortcuts::{ShortcutBindingSlot, ShortcutSequence, ShortcutStroke};
-    use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
+    use crate::workbench::commands::vocabulary::CommandRegistry;
     use egui::Key;
 
     let mut preferences = UserPreferences::default();
@@ -16,7 +17,7 @@ fn shortcut_profile_round_trips_inside_user_preferences() {
         .unwrap()
         .set_binding(
             &CommandRegistry,
-            Command::Save.key(),
+            ids::SAVE,
             ShortcutBindingSlot::Primary,
             CommandPlatform::ALL.to_vec(),
             Some(ShortcutSequence::single(ShortcutStroke::new(
@@ -32,7 +33,7 @@ fn shortcut_profile_round_trips_inside_user_preferences() {
     assert_eq!(
         restored
             .shortcuts()
-            .resolved_bindings(&CommandRegistry, Command::Save.key())
+            .resolved_bindings(&CommandRegistry, ids::SAVE)
             .into_iter()
             .find(|binding| { binding.slot() == ShortcutBindingSlot::Primary })
             .unwrap()

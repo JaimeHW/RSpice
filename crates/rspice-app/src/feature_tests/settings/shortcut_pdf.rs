@@ -3,8 +3,8 @@
 
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::shortcuts::ShortcutPreferences;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::pdf::*;
 use crate::workbench::shortcuts::artifacts::projection::ShortcutExportRequest;
 use crate::workbench::shortcuts::artifacts::projection::ShortcutExportScope;
@@ -15,7 +15,7 @@ use lopdf::Document as ParsedPdf;
 #[test]
 fn pdf_excludes_private_profile_state_and_filesystem_paths() {
     let mut profile = ShortcutPreferences::default();
-    profile.acknowledge_protected_override(Command::Save.key());
+    profile.acknowledge_protected_override(ids::SAVE);
     let model = build_shortcut_reference_model(
         &profile,
         &ShortcutExportRequest {

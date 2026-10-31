@@ -25,6 +25,7 @@ use crate::workbench::design_system::{
 use crate::workbench::documents::netlist_document::{
     OwnedNetlistPublicationState, owned_netlist_publication_state, root_deck_source_index,
 };
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::Workspace;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -69,7 +70,7 @@ fn execute_netlist_first_action(app: &mut RSpiceApp, action: NetlistFirstAction)
         NetlistFirstAction::OpenNetlistWorkspace => {
             Command::OpenWorkspace(Workspace::Netlist).execute(app);
         }
-        NetlistFirstAction::CreateSchematic => Command::NewCell.execute(app),
+        NetlistFirstAction::CreateSchematic => app.execute_command_key(ids::NEW_CELL),
     }
 }
 

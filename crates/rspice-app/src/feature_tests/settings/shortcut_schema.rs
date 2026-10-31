@@ -1,7 +1,7 @@
 //! Decoding a portable shortcut artifact, in the case that binds the
 //! product's own commands.
 
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::schema::*;
 
 #[test]
@@ -26,11 +26,7 @@ fn imported_acknowledgements_and_source_paths_are_stripped() {
     .unwrap();
 
     assert_eq!(decoded.source_name(), "portable.json");
-    assert!(
-        !decoded
-            .profile()
-            .protected_override_acknowledged(Command::Save.key())
-    );
+    assert!(!decoded.profile().protected_override_acknowledged(ids::SAVE));
     assert!(
         decoded
             .portable_profile()

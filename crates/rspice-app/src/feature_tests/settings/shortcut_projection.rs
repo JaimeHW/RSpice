@@ -9,6 +9,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::command_registry::ids;
 use crate::workbench::shortcuts::artifacts::projection::*;
 use crate::workbench::shortcuts::artifacts::schema::ShortcutArtifactScope as ShortcutExportScope;
 use egui::os::OperatingSystem;
@@ -31,7 +32,7 @@ fn user_override_json_is_deterministic_private_and_platform_sliced() {
             ))),
         )
         .unwrap();
-    profile.acknowledge_protected_override(Command::Save.key());
+    profile.acknowledge_protected_override(ids::SAVE);
     let request = ShortcutExportRequest {
         scope: ShortcutExportScope::UserOverrides,
         include_platform_mappings: false,
