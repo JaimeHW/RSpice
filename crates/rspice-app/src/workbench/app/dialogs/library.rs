@@ -5,16 +5,10 @@
 //! each is bound to the exact catalog revision it opened against and refuses
 //! to commit against a catalog that moved underneath it.
 
-use egui::Context;
-
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::workbench::app::RSpiceApp;
 
 pub(in crate::workbench) mod new_veriloga_device;
-mod new_view_dialog;
-pub(in crate::workbench) use new_view_dialog::{
-    new_view_opening, new_view_target, seeded_symbol_view,
-};
 pub(in crate::workbench) mod pending_deletions;
 mod shared;
 pub(in crate::workbench) use shared::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};

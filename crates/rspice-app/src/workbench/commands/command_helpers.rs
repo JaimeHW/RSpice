@@ -347,9 +347,9 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
 /// Carry out what the project feature handed over, as the feature did in
 /// place: the Configurations command, opening the selected view where it is
 /// edited, using a configuration for runs, whose refusal the Configuration
-/// page states, and what a library catalog change left outside the model,
-/// then the revision a deletion reserved, before the change's own line in
-/// the log.
+/// page states, and what a library catalog change or a created cell or view
+/// left outside the model, each with the revision it reserved, in the order
+/// the change once did it.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
         ProjectRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
@@ -384,7 +384,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);
         }
-        ProjectRequest::CellCreated {
+        ProjectRequest::CellViewsCreated {
             schematics,
             mutation,
             notice,
@@ -411,6 +411,25 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 app.state.workbench.activate(Workspace::Design);
                 app.state.code.code_workspace.veriloga.receipt = Some(receipt);
             }
+            if persist_global_veriloga {
+                persist_global_veriloga_library(&mut app.state.model);
+            }
+        }
+        ProjectRequest::ViewOpened {
+            mutation,
+            view,
+            veriloga,
+            notice,
+            persist_global_veriloga,
+        } => {
+            publish_reserved_revision(app, mutation);
+            app.state.open_workspace_view(view);
+            if let Some(receipt) = veriloga {
+                app.state.workbench.activate(Workspace::Design);
+                app.state.code.code_workspace.veriloga.receipt = Some(*receipt);
+            }
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, notice);
             if persist_global_veriloga {
                 persist_global_veriloga_library(&mut app.state.model);
             }

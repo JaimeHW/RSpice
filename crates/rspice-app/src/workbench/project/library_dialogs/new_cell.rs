@@ -7,12 +7,12 @@ use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row};
-use crate::workbench::app::dialogs::library::{
-    LIBRARY_CATALOG_STALE_MESSAGE, seeded_symbol_view, validate_lcv_name,
-};
+use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
+
+use super::new_view::seeded_symbol_view;
 
 impl ProjectFeature {
     /// Draw New Cell. What a created cell leaves outside its catalog change
@@ -277,7 +277,7 @@ fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
         None
     };
     let open = view_to_open.map(|view| crate::state::CellViewRef::new(&library, &name, view));
-    cx.wb.outbox.push(ProjectRequest::CellCreated {
+    cx.wb.outbox.push(ProjectRequest::CellViewsCreated {
         schematics,
         mutation: ReservedLibraryRevision::new(project_mutation),
         notice: format!("Created cell '{name}' in library '{library}'."),
@@ -298,7 +298,7 @@ mod tests {
     };
     use crate::workbench::ChoicePreference;
     use crate::workbench::RSpiceApp;
-    use crate::workbench::project::library_dialogs::{published, shown};
+    use crate::workbench::project::library_dialogs::{in_front, published, shown};
     use crate::workbench::project::tests::with_cx;
 
     /// Create the cell the dialog names in the feature's context, with
@@ -647,7 +647,7 @@ mod tests {
     /// once did it in place, with the new document it read before it
     /// changed the catalog.
     fn carry_out_in_place(app: &mut RSpiceApp, seeded: crate::state::SchematicState) {
-        let Some(ProjectRequest::CellCreated {
+        let Some(ProjectRequest::CellViewsCreated {
             schematics,
             mutation,
             notice,
@@ -690,26 +690,6 @@ mod tests {
                 .activate(crate::workbench::state::Workspace::Design);
             state.code.code_workspace.veriloga.receipt = Some(receipt);
         }
-    }
-
-    /// Beside what [`shown`] holds, the workspace in front, whether the
-    /// Verilog-A receipt is kept, and the documents the creation seeded.
-    fn in_front(app: &RSpiceApp) -> (crate::workbench::state::Workspace, bool, Vec<String>) {
-        let mut buffers = app
-            .state
-            .model
-            .workspace
-            .content
-            .schematic_buffers
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        buffers.sort();
-        (
-            app.state.workbench.workspace,
-            app.state.code.code_workspace.veriloga.receipt.is_some(),
-            buffers,
-        )
     }
 
     /// A cell created in the feature's context, with what it left handed to

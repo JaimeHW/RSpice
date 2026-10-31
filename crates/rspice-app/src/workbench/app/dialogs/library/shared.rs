@@ -4,12 +4,6 @@
 use super::RSpiceApp;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
-pub(super) struct DialogActionOutcome {
-    pub(super) close: bool,
-    pub(super) persist_global_veriloga: bool,
-}
-
 pub(in crate::workbench) const LIBRARY_CATALOG_STALE_MESSAGE: &str =
     "The library catalog changed after this dialog opened. Cancel and reopen the operation.";
 

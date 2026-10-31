@@ -5,7 +5,10 @@
 mod cell_ops;
 mod library_ops;
 mod new_cell;
+mod new_view;
 mod rename_view;
+
+pub(super) use new_view::new_view_target;
 
 /// What the status bar, the Console and the drawing show: a catalog change
 /// handed to the shell ends showing what the change carried out in place
@@ -47,5 +50,28 @@ fn published(
             .collect(),
         model.library_manager.revision(),
         model.design_execution_epoch,
+    )
+}
+
+/// Beside what [`shown`] holds, the workspace in front, whether the
+/// Verilog-A receipt is kept, and the documents a creation seeded.
+#[cfg(test)]
+fn in_front(
+    app: &crate::workbench::RSpiceApp,
+) -> (crate::workbench::state::Workspace, bool, Vec<String>) {
+    let mut buffers = app
+        .state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    buffers.sort();
+    (
+        app.state.workbench.workspace,
+        app.state.code.code_workspace.veriloga.receipt.is_some(),
+        buffers,
     )
 }

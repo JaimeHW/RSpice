@@ -409,7 +409,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.new_view"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_view_dialog),
-        render: |app, ctx| app.process_new_view_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::process_new_view_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.new_veriloga_device"),

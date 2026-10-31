@@ -3,10 +3,7 @@
 //! recovery workflows; the Project Launcher, the Examples dialog, and the
 //! Project workspace's pages and filters.
 
-use crate::state::ViewType;
-use crate::workbench::app::dialogs::library::new_view_opening;
 use crate::workbench::app::{DesignManagementDialogState, ProjectRevisionHistoryDialogState};
-use crate::workbench::app_state::Model;
 
 /// What the project feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -174,31 +171,6 @@ pub(crate) struct ProjectState {
 }
 
 impl ProjectState {
-    /// Open New View on the exact cell `library`/`cell`, against the library
-    /// revision `model` holds now, preset to `view_type`, or for `None` to
-    /// the first type the cell does not have yet.
-    ///
-    /// The target is resolved before any dialog state changes. This keeps a
-    /// stale row click from opening an apparently valid transaction against a
-    /// different or read-only object.
-    pub(crate) fn open_new_view_dialog(
-        &mut self,
-        model: &Model,
-        library: &str,
-        cell: &str,
-        view_type: Option<ViewType>,
-    ) -> Result<(), String> {
-        let view_type = new_view_opening(model, library, cell, view_type)?;
-        self.new_view_library = library.to_owned();
-        self.new_view_cell = cell.to_owned();
-        self.new_view_name = view_type.display_name().to_owned();
-        self.new_view_type = view_type;
-        self.new_view_error = None;
-        self.new_view_library_revision = model.library_manager.revision();
-        self.new_view_dialog = true;
-        Ok(())
-    }
-
     /// Open the Examples dialog on its first circuit.
     pub(crate) fn open_examples(&mut self) {
         self.examples_selection = Some(0);

@@ -257,9 +257,10 @@ impl ProjectCommand {
 /// whole application as the feature once did in place: the Configurations
 /// command of the shell's own table, opening the selected view in the
 /// workspace that edits it, using a configuration for runs, and what a
-/// library catalog change left outside the model. Each place that raises one
-/// raises one, carrying everything it once did after that point, in order.
-/// Taken straight after the call that raised it.
+/// library catalog change, or a created cell or view, left outside the
+/// model. Each place that raises one raises one, carrying everything it
+/// once did after that point, in order. Taken straight after the call
+/// that raised it.
 #[derive(Clone, Debug)]
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
@@ -273,18 +274,31 @@ pub(crate) enum ProjectRequest {
         mutation: Option<ReservedLibraryRevision>,
         notice: String,
     },
-    /// What creating a cell left outside its catalog change, in the order
-    /// the creation once did it: a new document in each view that draws a
-    /// schematic, the revision it reserved, its own line in the log, the
-    /// view it opens first, the Verilog-A view's compile receipt, kept with
-    /// the Design workspace in front when that view is the one open, and
-    /// the user's Verilog-A library saved when the cell went into it.
-    CellCreated {
+    /// What creating a cell, or a view that a schematic or symbol editor
+    /// edits, left outside its catalog change, in the order the creation
+    /// once did it: a new document in each view that draws a schematic,
+    /// the revision it reserved, its own line in the log, the view it
+    /// opens first, the Verilog-A view's compile receipt, kept with the
+    /// Design workspace in front when that view is the one open, and the
+    /// user's Verilog-A library saved when the cell or view went into it.
+    CellViewsCreated {
         schematics: Vec<CellViewRef>,
         mutation: ReservedLibraryRevision,
         notice: String,
         open: Option<CellViewRef>,
         veriloga: Option<Box<(CellViewRef, VerilogACompileReceipt)>>,
+        persist_global_veriloga: bool,
+    },
+    /// What creating a Layout or a Verilog-A view left outside its catalog
+    /// change, in the order the creation once did it: the revision it
+    /// reserved, the view opened, the Verilog-A view's compile receipt,
+    /// kept with the Design workspace in front, its own line in the log,
+    /// and the user's Verilog-A library saved when the view went into it.
+    ViewOpened {
+        mutation: ReservedLibraryRevision,
+        view: CellViewRef,
+        veriloga: Option<Box<VerilogACompileReceipt>>,
+        notice: String,
         persist_global_veriloga: bool,
     },
 }

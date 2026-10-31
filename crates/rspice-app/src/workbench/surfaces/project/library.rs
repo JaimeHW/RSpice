@@ -851,7 +851,12 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
         }
         LibraryIntent::NewCell => app.execute_command_key(ProjectCommand::NewCell.key()),
         LibraryIntent::NewView { library, cell } => {
-            if let Err(error) = app.state.open_new_view_dialog(&library, &cell) {
+            let state = &mut app.state;
+            if let Err(error) =
+                state
+                    .project
+                    .open_new_view_dialog(&state.model, &library, &cell, None)
+            {
                 app.state.prompt(error);
             }
         }

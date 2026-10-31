@@ -11,7 +11,6 @@ mod library_dialogs;
 pub(crate) mod workspace_state;
 
 use crate::state::ViewType;
-use crate::workbench::app::dialogs::library::new_view_target;
 use crate::workbench::app::{open_design_management_dialog, open_project_revision_history};
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
@@ -28,6 +27,7 @@ use crate::workbench::slots::ProjectState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::ProjectCommand;
+use library_dialogs::new_view_target;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 /// The project feature.

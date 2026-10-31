@@ -377,7 +377,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_shortcuts_help_dialog", "shell"),
     ("features::render_dialog", "models"),
     ("ProjectFeature::process_new_cell_dialog", "project"),
-    ("process_new_view_dialog", "project"),
+    ("ProjectFeature::process_new_view_dialog", "project"),
     ("render_new_veriloga_device_form", "code"),
     ("render_veriloga_import_dialog", "code"),
     ("render_veriloga_replace_dialog", "code"),
@@ -1443,14 +1443,15 @@ fn the_docked_project_inspector_has_a_configuration_refused_for_runs_stated_in_t
     }
 }
 
-/// What creating a cell hands the shell is carried out in the order the
-/// creation once did it: the new documents, the reserved revision, the
-/// creation's line in the log, the view it opens, the Verilog-A receipt
-/// only once that view is the one open, and the Verilog-A library saved.
-const CELL_CREATED: &[Step] = &[(
-    "CellCreated",
+/// What creating a cell, or a view a schematic or symbol editor edits, hands
+/// the shell is carried out in the order the creation once did it: the new
+/// documents, the reserved revision, the creation's line in the log, the
+/// view it opens, the Verilog-A receipt only once that view is the one open,
+/// and the Verilog-A library saved.
+const CELL_VIEWS_CREATED: &[Step] = &[(
+    "CellViewsCreated",
     &[
-        "ProjectRequest::CellCreated {",
+        "ProjectRequest::CellViewsCreated {",
         "let seeded = app.state.new_schematic_document();",
         ".insert_schematic_editor(reference.key(), seeded.clone());",
         "publish_reserved_revision(app, mutation);",
@@ -1507,7 +1508,62 @@ fn the_cell_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_
     assert_runs_in_order(
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
-        CELL_CREATED,
+        CELL_VIEWS_CREATED,
+    );
+}
+
+/// What creating a Layout or a Verilog-A view hands the shell is carried out
+/// in the order the creation once did it: the reserved revision, the view
+/// opened, the Verilog-A receipt with the Design workspace in front, and the
+/// creation's line in the log, with the Verilog-A library saved last.
+const VIEW_OPENED: &[Step] = &[(
+    "ViewOpened",
+    &[
+        "ProjectRequest::ViewOpened {",
+        "publish_reserved_revision(app, mutation);",
+        "app.state.open_workspace_view(view);",
+        "app.state.workbench.activate(Workspace::Design);",
+        "app.state.code.code_workspace.veriloga.receipt = Some(*receipt);",
+        "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
+        "persist_global_veriloga_library(&mut app.state.model);",
+    ],
+)];
+
+/// New View draws in the project feature's context and has what it raised
+/// answered straight after it draws, in the step that drew it. A created
+/// view's Verilog-A library is saved inside that answer, after everything
+/// else it carries out, so nothing is saved ahead of the creation it saves.
+#[test]
+fn the_new_view_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns() {
+    let order = without_whitespace(DIALOG_ORDER);
+    let new_view = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"project.new_view\")"))
+        .expect("the shell's dialog order draws New View");
+    assert!(
+        new_view.contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::process_new_view_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "New View draws in the project feature's context, and what it raised is answered          straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    let answer = body(&shipped, "fn answer_project_request(");
+    assert_runs_in_order("answer_project_request", &answer, CELL_VIEWS_CREATED);
+    assert_runs_in_order("answer_project_request", &answer, VIEW_OPENED);
+    let answer = without_whitespace(&answer);
+    let view_opened = answer
+        .split("ProjectRequest::")
+        .find(|arm| arm.starts_with("ViewOpened{"))
+        .expect("the shell answers a view opened");
+    assert!(
+        view_opened
+            .trim_end_matches('}')
+            .ends_with("persist_global_veriloga_library(&mutapp.state.model);"),
+        "a created view's Verilog-A library is saved last"
     );
 }
 
