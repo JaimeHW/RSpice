@@ -13,6 +13,12 @@ use crate::circuit::{SourceTimeSide, XyceCoreCompanionMode};
 const PARALLEL_CLASSIC_MOS_THRESHOLD: usize = 2_048;
 #[cfg(feature = "parallel")]
 const CLASSIC_MOS_INSTANCES_PER_WORKER: usize = 512;
+// A BSIM4 update (limiting plus the full model with charges) costs
+// microseconds, so a few dozen instances already amortize a fork/join.
+#[cfg(feature = "parallel")]
+const PARALLEL_BSIM4_THRESHOLD: usize = 128;
+#[cfg(feature = "parallel")]
+const BSIM4_INSTANCES_PER_WORKER: usize = 64;
 // Unlike the update kernel, the residual proof also captures a compact static
 // term stream and dispatches a second row walk. Keep its independently measured
 // crossover above the general classic-MOS parallel threshold.
@@ -1106,7 +1112,17 @@ impl Engine {
             // topology; the decision is independent of deck identity or node
             // names and scales larger model populations upward.
             let instance_count = circuit.mosfets.len();
-            if let Some(worker_count) = self.classic_mos_parallel_worker_count(instance_count) {
+            let classic_mos_workers = self.classic_mos_parallel_worker_count(instance_count);
+            if let Some(bsim4_workers) = self.bsim4_parallel_worker_count(circuit.bsim4v8.len()) {
+                return self.install_classic_mos_parallel(|| {
+                    circuit.update_nonlinear_parallel_bsim4(
+                        solution,
+                        classic_mos_workers,
+                        bsim4_workers,
+                    );
+                });
+            }
+            if let Some(worker_count) = classic_mos_workers {
                 return self.install_classic_mos_parallel(|| {
                     circuit.update_nonlinear_parallel_classic_mos(solution, worker_count);
                 });
@@ -1114,6 +1130,19 @@ impl Engine {
         }
         circuit.update_nonlinear(solution);
         Ok(())
+    }
+
+    /// Workers for the BSIM4 update, or None to update serially.
+    #[cfg(feature = "parallel")]
+    fn bsim4_parallel_worker_count(&self, instance_count: usize) -> Option<usize> {
+        if instance_count < PARALLEL_BSIM4_THRESHOLD {
+            return None;
+        }
+        let useful_workers = instance_count.div_ceil(BSIM4_INSTANCES_PER_WORKER);
+        let worker_count = self
+            .parallel_worker_count(instance_count)
+            .min(useful_workers.max(1));
+        (worker_count > 1).then_some(worker_count)
     }
 
     /// Evaluate one contiguous candidate batch without sparse writes. Optional

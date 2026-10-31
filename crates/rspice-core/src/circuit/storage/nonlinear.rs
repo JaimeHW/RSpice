@@ -292,6 +292,23 @@ impl<D: crate::device::NonlinearDevice> NewtonFamily<D> {
         }
     }
 
+    /// [`Self::update_all`] in `worker_count` contiguous chunks on the
+    /// caller's Rayon pool. Every update reads only the solution and writes
+    /// only its own device, so the result is the serial one.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn update_all_parallel(&mut self, voltages: &[Value], worker_count: usize)
+    where
+        D: Send,
+    {
+        use rayon::prelude::*;
+        let chunk_size = self.devices.len().div_ceil(worker_count.max(1)).max(1);
+        self.devices.par_chunks_mut(chunk_size).for_each(|chunk| {
+            for device in chunk {
+                device.update(voltages);
+            }
+        });
+    }
+
     /// Stamp every device into the matrix for the Newton iteration.
     pub(crate) fn stamp_all(
         &self,

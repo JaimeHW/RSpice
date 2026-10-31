@@ -1312,10 +1312,44 @@ impl CircuitData {
         self.update_nonlinear_impl(voltages, Some(worker_count), false);
     }
 
+    /// [`Self::update_nonlinear`] with the BSIM4 instances evaluated in
+    /// `worker_count` contiguous chunks on the caller's Rayon pool. Each
+    /// update reads only the solution and writes only its own instance, so
+    /// the result is the serial one.
+    #[cfg(feature = "parallel")]
+    pub(crate) fn update_nonlinear_parallel_bsim4(
+        &mut self,
+        voltages: &[Value],
+        classic_mos_workers: Option<usize>,
+        worker_count: usize,
+    ) {
+        self.update_nonlinear_impl_with_bsim4(
+            voltages,
+            classic_mos_workers,
+            Some(worker_count),
+            false,
+        );
+    }
+
     fn update_nonlinear_impl(
         &mut self,
         voltages: &[Value],
         parallel_classic_mos_workers: Option<usize>,
+        preserve_initial_load: bool,
+    ) {
+        self.update_nonlinear_impl_with_bsim4(
+            voltages,
+            parallel_classic_mos_workers,
+            None,
+            preserve_initial_load,
+        );
+    }
+
+    fn update_nonlinear_impl_with_bsim4(
+        &mut self,
+        voltages: &[Value],
+        parallel_classic_mos_workers: Option<usize>,
+        parallel_bsim4_workers: Option<usize>,
         preserve_initial_load: bool,
     ) {
         use crate::device::NonlinearDevice;
@@ -1347,7 +1381,17 @@ impl CircuitData {
         self.b3soi_fd.update_all(voltages);
         self.b3soi_pd.update_all(voltages);
         self.bsim3v3.update_all(voltages);
-        self.bsim4v8.update_all(voltages);
+        #[cfg(feature = "parallel")]
+        if let Some(worker_count) = parallel_bsim4_workers {
+            self.bsim4v8.update_all_parallel(voltages, worker_count);
+        } else {
+            self.bsim4v8.update_all(voltages);
+        }
+        #[cfg(not(feature = "parallel"))]
+        {
+            let _ = parallel_bsim4_workers;
+            self.bsim4v8.update_all(voltages);
+        }
         self.ekv26s.update_all(voltages);
         self.ekv3s.update_all(voltages);
         self.vdmoses.update_all(voltages);
