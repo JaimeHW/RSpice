@@ -32,7 +32,7 @@ use crate::workbench::sheets::SheetsFeature;
 
 /// A feature the shell registers: its registry, and its contexts borrowed
 /// from the application.
-pub(super) trait Registered: Feature {
+pub(crate) trait Registered: Feature {
     /// Everything the feature registered, built on first use.
     fn registry() -> &'static FeatureRegistry<Self>;
 
@@ -45,7 +45,7 @@ pub(super) trait Registered: Feature {
 
 /// The context `F`'s call runs in, borrowed from `app`: its state, what it
 /// runs, and the application's handles on the services below the workbench.
-pub(super) fn cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
+pub(crate) fn cx<F: Registered>(app: &mut RSpiceApp) -> Cx<'_, F> {
     F::cx(app)
 }
 

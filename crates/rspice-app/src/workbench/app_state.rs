@@ -477,13 +477,6 @@ impl AppState {
             .provision_test_project_technology_with_models(models);
     }
 
-    /// [`Model::provision_test_project_symbol_technology_contract`].
-    #[cfg(test)]
-    pub(crate) fn provision_test_project_symbol_technology_contract(&mut self) {
-        self.model
-            .provision_test_project_symbol_technology_contract();
-    }
-
     /// Whether any retained application workflow owns exclusive keyboard and
     /// pointer intent for this frame: anything modal the shell lists is open.
     pub(crate) fn application_modal_open(&self) -> bool {

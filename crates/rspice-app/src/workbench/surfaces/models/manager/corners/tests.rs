@@ -156,7 +156,7 @@ fn a_corner_bound_to_nothing_at_all_reports_no_executable_bindings() {
 /// empty state is the truthful reading of a project that has attached nothing.
 #[test]
 fn a_fresh_project_reports_no_corner_bindings_at_all() {
-    let mut state = AppState::default();
+    let mut state = harness();
     let mut pending = Vec::new();
     let app = ManagerRenderContext::over(&mut state, &mut pending);
 
@@ -249,7 +249,7 @@ fn a_section_that_parses_but_defines_nothing_is_accepted_by_page_and_run_alike()
 
 #[test]
 fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.open_project_session();
     let library = state
         .model
@@ -316,7 +316,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
 
 #[test]
 fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.open_project_session();
     let library = state
         .model
@@ -497,7 +497,7 @@ fn a_matrix_cell_names_the_section_this_corner_binds_or_stays_blank() {
 /// to 150 °C against a corner qualified to 125 °C was told nothing anywhere.
 #[test]
 fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("pdk");
     library.root_path = Some(PathBuf::from("pdk.lib"));
@@ -519,7 +519,7 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
         .expect("the fixture library is loaded");
     state.model.sim_setup.reference_pvt.temperature_celsius = 150.0;
 
-    let rendered = |state: &mut AppState| {
+    let rendered = |state: &mut FeatureHarness<ModelsFeature>| {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
@@ -652,8 +652,8 @@ fn a_long_section_is_capped_and_says_how_much_it_left() {
 
 /// A library whose retained file carries both sections, one corner bound to
 /// `tt`, and one draft corner with a required domain left unbound.
-fn corner_page_state() -> AppState {
-    let mut state = AppState::default();
+fn corner_page_state() -> FeatureHarness<ModelsFeature> {
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = library_with_sections(&["tt", "mc_g"], RETAINED_CORNER_FILE);
     library.corners.clear();
@@ -681,7 +681,9 @@ fn corner_page_state() -> AppState {
 }
 
 /// Render the page and report every accessibility node it published.
-fn rendered_corner_page(state: &mut AppState) -> Vec<(egui::accesskit::Role, String)> {
+fn rendered_corner_page(
+    state: &mut FeatureHarness<ModelsFeature>,
+) -> Vec<(egui::accesskit::Role, String)> {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);
@@ -771,7 +773,7 @@ fn a_section_the_retained_file_does_not_carry_is_stated_rather_than_left_blank()
         .corners
         .insert("ff".to_owned(), corner_bound_to("ff", "ff"));
     library.selected_corner = Some("ff".to_owned());
-    state.models.models_view.selected_corner = Some("pdk\u{1f}ff".to_owned());
+    state.state.models_view.selected_corner = Some("pdk\u{1f}ff".to_owned());
 
     let labels = rendered_corner_page(&mut state)
         .into_iter()
@@ -869,7 +871,7 @@ fn a_corner_the_bind_dialog_cannot_help_is_offered_no_row_control() {
     // Two blockers the dialog cannot lift: a corner bound to no retained
     // source at all, and one whose own contract is malformed. Offering a
     // control that cannot change the verdict is worse than offering none.
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = library_with_sections(&["tt"], RETAINED_CORNER_FILE);
     library.corners.clear();

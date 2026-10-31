@@ -177,7 +177,7 @@ pub(crate) mod examples {
 
     mod netlist_integration_tests;
 }
-mod features;
+pub(crate) mod features;
 pub(crate) mod frame;
 pub(crate) use rspice_app_hardcopy::workbench::hardcopy;
 #[cfg(test)]

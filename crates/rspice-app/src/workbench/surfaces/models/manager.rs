@@ -59,19 +59,21 @@ use crate::workbench::app_state::design_history::{
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
 use crate::workbench::framework::feature::Cx;
+#[cfg(test)]
+use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::framework::requests::{
     BindComponentModel, OpenSymbolAuthoring, SubcircuitSymbolSource,
 };
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
+#[cfg(test)]
+use crate::workbench::models::tests::harness;
 use crate::workbench::models::workspace_state::{
     ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
     ProjectModelFacet, RSpicePartFacet,
 };
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog, WorkbenchSession};
-#[cfg(test)]
-use crate::workbench::{AppState, RSpiceApp, features};
 
 use bindings::{ConsumerIndex, effective_model_consumers};
 use catalog_scan::project_catalog_scan;
@@ -165,13 +167,17 @@ impl<'a> ManagerRenderContext<'a> {
         }
     }
 
-    /// A page's context over a whole application state, as a test holds one.
+    /// A page's context over the models feature on its own, as a test holds
+    /// one.
     #[cfg(test)]
-    fn over(state: &'a mut AppState, pending_actions: &'a mut Vec<ManagerAction>) -> Self {
+    fn over(
+        harness: &'a mut FeatureHarness<ModelsFeature>,
+        pending_actions: &'a mut Vec<ManagerAction>,
+    ) -> Self {
         Self {
-            state: &mut *state.models,
-            model: &mut state.model,
-            wb: &mut *state.workbench,
+            state: &mut harness.state,
+            model: &mut harness.model,
+            wb: &mut harness.wb,
             pending_actions,
         }
     }

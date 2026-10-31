@@ -3,3 +3,4 @@
 
 mod commands;
 mod pdk_workflow;
+mod studio;

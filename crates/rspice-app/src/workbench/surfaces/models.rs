@@ -21,7 +21,7 @@ use crate::workbench::models::commands::ModelsCommand;
 
 impl ModelsFeature {
     /// The Models & PDKs workspace on the stage.
-    pub(in crate::workbench) fn show_workspace(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
+    pub(crate) fn show_workspace(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
         manager::show(ui, cx);
     }
 }

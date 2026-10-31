@@ -8,11 +8,9 @@
 
 use super::*;
 
-use crate::workbench::app_state::AppState;
-
 /// Renders one models-workspace fragment and returns its access tree.
 fn accessibility_nodes(
-    state: &mut AppState,
+    state: &mut FeatureHarness<ModelsFeature>,
     size: egui::Vec2,
     render: impl FnOnce(&mut Ui, &mut ManagerRenderContext<'_>),
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
@@ -238,10 +236,10 @@ fn a_pre_release_never_supersedes_the_release_it_precedes() {
 /// longer see them: the dialog is what has to be rendered for "are both
 /// actions reachable" to mean anything.
 fn confirm_pack_nodes(
-    state: &mut AppState,
+    state: &mut FeatureHarness<ModelsFeature>,
     confirmation: &PackReleaseConfirmation,
 ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
-    state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+    state.state.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
         pack_id: "rspice-proving".to_owned(),
         attach: true,
         release: Some(Box::new(confirmation.clone())),
@@ -284,7 +282,7 @@ fn confirm_pack_nodes(
 
 #[test]
 fn the_release_confirmation_states_its_cost_and_exposes_both_actions() {
-    let mut state = AppState::default();
+    let mut state = harness();
     let confirmation = release(&[]);
     let nodes = confirm_pack_nodes(&mut state, &confirmation);
     assert!(button(&nodes, "Cancel").is_some(), "cancel is reachable");
@@ -328,7 +326,7 @@ fn a_confirmed_update_replaces_the_release_it_names() {
 
 #[test]
 fn an_incompatible_release_is_described_and_refused_rather_than_hidden() {
-    let mut state = AppState::default();
+    let mut state = harness();
     let confirmation = release(&["nonexistent-capability"]);
     let nodes = confirm_pack_nodes(&mut state, &confirmation);
     let install = button(&nodes, "Install pack").expect("the action is still present");
@@ -387,8 +385,8 @@ fn every_pack_state_is_reachable_and_offers_the_action_it_earns() {
         ),
         (unrunnable, vec![], vec!["Install"]),
     ] {
-        let mut app_state = AppState::default();
-        app_state.models.models_view.selected_pack = Some(ledger.pack_id.clone());
+        let mut app_state = harness();
+        app_state.state.models_view.selected_pack = Some(ledger.pack_id.clone());
         let listed = catalog(vec![ledger], Some(2), false);
         let nodes =
             accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), move |ui, app| {
@@ -447,7 +445,7 @@ fn the_facet_counts_partition_the_pack_total() {
         ),
     ];
     let hub = catalog(packs, Some(1), false);
-    let mut state = AppState::default();
+    let mut state = harness();
     let mut pending = Vec::new();
     let app = ManagerRenderContext::over(&mut state, &mut pending);
 
@@ -651,7 +649,7 @@ fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
          2026-09-13T09:30:00Z — refresh"
     );
 
-    let mut state = AppState::default();
+    let mut state = harness();
     let stale = catalog(
         vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Available)],
@@ -670,7 +668,7 @@ fn the_status_line_states_what_is_held_and_offers_the_two_things_to_do() {
     );
 
     // A hub that could not open says that instead of a fresh-looking age.
-    let mut state = AppState::default();
+    let mut state = harness();
     let unavailable = HubCatalog {
         unavailable: Some("RSpice could not open its model-pack storage.".to_owned()),
         ..HubCatalog::default()
@@ -699,7 +697,7 @@ fn the_expired_page_and_the_revoked_row_are_both_announced() {
 
     // An expired catalog with nothing installed: the page states the instant
     // and what is unaffected, and both sentences are on one node.
-    let mut state = AppState::default();
+    let mut state = harness();
     let mut expired = catalog(Vec::new(), Some(30), true);
     expired.expired = Some("2026-07-01T00:00:00Z".to_owned());
     let announced_expiry = expired.expired.clone().expect("the fixture is expired");
@@ -726,7 +724,7 @@ fn the_expired_page_and_the_revoked_row_are_both_announced() {
     // A recalled release that is installed: the row's own node carries the
     // publisher's reason, because the cell that paints "release revoked"
     // cannot.
-    let mut state = AppState::default();
+    let mut state = harness();
     let recalled = catalog(
         vec![recalled_pack(
             vec![row("Proving", "1.0.0", HubPackState::Installed)],
@@ -762,7 +760,7 @@ fn catalog_clock_failure_is_announced_without_hiding_installed_pack_actions() {
         };
         let mut catalog = catalog(packs, None, true);
         catalog.catalog_time_issue = Some(REASON.to_owned());
-        let mut state = AppState::default();
+        let mut state = harness();
         let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), move |ui, app| {
             packs_page(ui, app, &catalog);
         });
@@ -801,10 +799,10 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
         releases[0].pack_id = "rspice-bystander".to_owned();
         pinned_pack(releases, None, &[])
     };
-    let running = |state: &mut AppState, progress: Option<f32>| {
-        state.models.models_view.model_import_in_progress = true;
-        state.models.models_view.model_import_progress = progress;
-        state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+    let running = |state: &mut FeatureHarness<ModelsFeature>, progress: Option<f32>| {
+        state.state.models_view.model_import_in_progress = true;
+        state.state.models_view.model_import_progress = progress;
+        state.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: Some(landing.pack_id.clone()),
@@ -814,19 +812,19 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     // A length the signed catalog declared reaches the cell as a
     // percentage; a transfer with no declared length still says it is
     // running rather than inventing one.
-    let mut state = AppState::default();
+    let mut state = harness();
     running(&mut state, Some(0.42));
     assert_eq!(
-        pack_transfer(&state.models, &landing).map(|transfer| transfer.phrase),
+        pack_transfer(&state.state, &landing).map(|transfer| transfer.phrase),
         Some("installing 42%".to_owned())
     );
-    state.models.models_view.model_import_progress = None;
+    state.state.models_view.model_import_progress = None;
     assert_eq!(
-        pack_transfer(&state.models, &landing).map(|transfer| transfer.phrase),
+        pack_transfer(&state.state, &landing).map(|transfer| transfer.phrase),
         Some("installing".to_owned())
     );
     assert!(
-        pack_transfer(&state.models, &other).is_none(),
+        pack_transfer(&state.state, &other).is_none(),
         "one operation runs at a time, and it lights one row"
     );
 
@@ -843,14 +841,14 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
         "the exception is there when nothing is running"
     );
 
-    let mut state = AppState::default();
+    let mut state = harness();
     running(&mut state, Some(0.42));
-    state.models.models_view.selected_pack = Some(landing.pack_id.clone());
+    state.state.models_view.selected_pack = Some(landing.pack_id.clone());
     let listed = catalog(vec![landing.clone(), other.clone()], Some(1), false);
     let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), |ui, app| {
         packs_page(ui, app, &listed);
     });
-    let running_detail = pack_transfer(&state.models, &landing)
+    let running_detail = pack_transfer(&state.state, &landing)
         .expect("the landing pack is transferring")
         .detail;
     assert!(
@@ -861,11 +859,11 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     );
 
     // The receipt lands: the operation is over, and so is the cell.
-    state.models.models_view.model_import_in_progress = false;
-    state.models.models_view.model_import_progress = None;
-    state.models.models_view.action_receipt =
+    state.state.models_view.model_import_in_progress = false;
+    state.state.models_view.model_import_progress = None;
+    state.state.models_view.action_receipt =
         Some(Ok("RSpice proving pack 1.0.0 installed.".to_owned()));
-    assert!(pack_transfer(&state.models, &landing).is_none());
+    assert!(pack_transfer(&state.state, &landing).is_none());
     let listed = catalog(vec![landing, other], Some(1), false);
     let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), |ui, app| {
         packs_page(ui, app, &listed);
@@ -899,7 +897,7 @@ fn a_browser_session_states_the_lifetime_of_what_it_installs() {
         )
     };
 
-    let mut state = AppState::default();
+    let mut state = harness();
     let session = HubCatalog {
         host: browser::Host::Browser,
         ..listed()
@@ -912,7 +910,7 @@ fn a_browser_session_states_the_lifetime_of_what_it_installs() {
         "the browser projection states its pack lifetime on an announced node"
     );
 
-    let mut state = AppState::default();
+    let mut state = harness();
     let desktop = HubCatalog {
         host: browser::Host::Desktop,
         ..listed()
@@ -927,7 +925,7 @@ fn a_browser_session_states_the_lifetime_of_what_it_installs() {
 
     // A session with no pack store holds no packs, so it does not describe
     // how long the packs it cannot have would last.
-    let mut state = AppState::default();
+    let mut state = harness();
     let unavailable = HubCatalog {
         host: browser::Host::Browser,
         unavailable: Some("this browser denied RSpice storage".to_owned()),
@@ -953,11 +951,11 @@ fn every_operational_state_paints_its_word_and_its_consequence() {
     };
 
     for state in ModelsOperationalState::ALL {
-        let mut app_state = AppState::default();
-        app_state.models.models_view.operational_state = state;
-        app_state.models.models_view.action_receipt =
+        let mut app_state = harness();
+        app_state.state.models_view.operational_state = state;
+        app_state.state.models_view.action_receipt =
             Some(Err("the pack format refused: truncated archive".to_owned()));
-        app_state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+        app_state.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: None,
@@ -1003,11 +1001,11 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
         ModelsAttemptedOperation, ModelsOperationalState,
     };
 
-    let mut app_state = AppState::default();
-    app_state.models.models_view.operational_state = ModelsOperationalState::Offline;
-    app_state.models.models_view.action_receipt =
+    let mut app_state = harness();
+    app_state.state.models_view.operational_state = ModelsOperationalState::Offline;
+    app_state.state.models_view.action_receipt =
         Some(Err("the model hub could not be reached".to_owned()));
-    app_state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+    app_state.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
         label: "model-catalog refresh".to_owned(),
         reissuable: true,
         landing_pack: None,
@@ -1026,8 +1024,8 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
     assert!(button(&nodes, "Retry the catalog refresh").is_some());
 
     // And a page whose last operation succeeded says nothing at all.
-    let mut healthy = AppState::default();
-    healthy.models.models_view.action_receipt = Some(Ok("installed".to_owned()));
+    let mut healthy = harness();
+    healthy.state.models_view.action_receipt = Some(Ok("installed".to_owned()));
     let current = catalog(
         vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Available)],
@@ -1081,8 +1079,8 @@ fn an_installed_release_reports_only_what_is_wrong_with_it() {
 
     // And the action that produces the verdict is reachable on exactly the
     // packs that can be re-proved.
-    let mut state = AppState::default();
-    state.models.models_view.selected_pack = Some("rspice-proving".to_owned());
+    let mut state = harness();
+    state.state.models_view.selected_pack = Some("rspice-proving".to_owned());
     let field = catalog(
         vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Installed)],
@@ -1096,8 +1094,8 @@ fn an_installed_release_reports_only_what_is_wrong_with_it() {
     });
     assert!(button(&nodes, "Verify installed").is_some());
 
-    let mut state = AppState::default();
-    state.models.models_view.selected_pack = Some("rspice-proving".to_owned());
+    let mut state = harness();
+    state.state.models_view.selected_pack = Some("rspice-proving".to_owned());
     let offered = catalog(
         vec![pack(
             vec![row("Proving", "1.1.0", HubPackState::Available)],
@@ -1122,7 +1120,7 @@ fn a_discarded_catalog_cache_is_not_reported_as_never_having_asked() {
         "The cached catalog failed verification and was discarded — refresh"
     );
 
-    let mut state = AppState::default();
+    let mut state = harness();
     let discarded = HubCatalog {
         packs: vec![pack(
             vec![row("Proving", "1.0.0", HubPackState::Available)],

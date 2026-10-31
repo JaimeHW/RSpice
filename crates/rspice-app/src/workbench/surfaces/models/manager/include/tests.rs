@@ -96,7 +96,7 @@ fn a_definition_outside_any_section_says_so_rather_than_guessing() {
 
 #[test]
 fn the_index_carries_the_section_each_provider_declares_a_name_inside() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     let mut sectioned = DeviceModel::new("nch", crate::state::model_library::ModelType::Nmos);
@@ -129,7 +129,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
     // The callout's whole claim is "no file in the closure declares this".
     // It is answered out of the index the page already built, so this is also
     // the test that the two cannot drift: the same names decide both.
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     library.add_model(DeviceModel::new(
@@ -170,7 +170,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
 #[test]
 fn a_binned_family_is_indexed_under_the_name_it_binds() {
     use crate::state::model_library::ModelType;
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     for name in ["kit", "vendor"] {
         let mut library = ModelLibrary::new(name);

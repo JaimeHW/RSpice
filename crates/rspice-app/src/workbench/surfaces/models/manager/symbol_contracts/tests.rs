@@ -28,7 +28,7 @@ fn symbol_catalog(family: &str) -> LibraryManager {
 
 /// The families one frame's symbol registry reports, painted on `ctx` so that
 /// successive calls see the same cache the real page would.
-fn painted_families(ctx: &egui::Context, state: &mut AppState) -> Vec<String> {
+fn painted_families(ctx: &egui::Context, state: &mut FeatureHarness<ModelsFeature>) -> Vec<String> {
     let mut families = Vec::new();
     let mut pending_actions = Vec::new();
     let app = ManagerRenderContext::over(state, &mut pending_actions);
@@ -46,7 +46,7 @@ fn painted_families(ctx: &egui::Context, state: &mut AppState) -> Vec<String> {
 #[test]
 fn repainting_an_untouched_catalog_reads_no_symbol_twice() {
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.library_manager = symbol_catalog("nch");
 
     crate::state::SYMBOL_VIEW_PARSES.with(|count| count.set(0));
@@ -75,7 +75,7 @@ fn a_catalog_replaced_at_the_same_revision_is_still_re_read() {
     // mutations carry the same counter. A key made of the counter alone would
     // paint the first catalog's symbol contracts over the second's artwork.
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.library_manager = symbol_catalog("nch");
     assert_eq!(painted_families(&ctx, &mut state), vec!["nch".to_owned()]);
 
@@ -407,7 +407,7 @@ fn a_template_the_netlist_writer_refuses_produces_no_token_table() {
 /// A design catalog with the three registry states a reader has to tell apart:
 /// a symbol whose artwork agrees with its provider, one whose artwork does
 /// not, and a legacy symbol with no typed contract at all.
-fn seed_symbol_registry(state: &mut AppState) {
+fn seed_symbol_registry(state: &mut FeatureHarness<ModelsFeature>) {
     use crate::state::{PortSpec, SymbolDocument};
 
     state.model.library_manager = LibraryManager::new();
@@ -474,7 +474,7 @@ fn seed_symbol_registry(state: &mut AppState) {
 }
 
 /// The registry rows one frame reports, painted on `ctx`.
-fn painted_rows(ctx: &egui::Context, state: &mut AppState) -> Vec<SymbolRow> {
+fn painted_rows(ctx: &egui::Context, state: &mut FeatureHarness<ModelsFeature>) -> Vec<SymbolRow> {
     let mut rows = Vec::new();
     let mut pending_actions = Vec::new();
     let app = ManagerRenderContext::over(state, &mut pending_actions);
@@ -489,7 +489,7 @@ fn painted_rows(ctx: &egui::Context, state: &mut AppState) -> Vec<SymbolRow> {
 #[test]
 fn the_registry_states_a_verdict_per_symbol_rather_than_one_for_the_library() {
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     seed_symbol_registry(&mut state);
     let rows = painted_rows(&ctx, &mut state);
 
@@ -518,9 +518,11 @@ fn a_bound_signed_package_is_grouped_under_its_own_band() {
     // a publisher-signed technology archive installed into the registry and
     // pinned by the project, not a hand-assembled row.
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     seed_symbol_registry(&mut state);
-    state.provision_test_project_symbol_technology_contract();
+    state
+        .model
+        .provision_test_project_symbol_technology_contract();
     let rows = painted_rows(&ctx, &mut state);
 
     let project = project_row_count(&rows);
@@ -551,7 +553,7 @@ fn a_bound_signed_package_is_grouped_under_its_own_band() {
 #[test]
 fn a_project_only_registry_has_no_group_band_to_draw() {
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     seed_symbol_registry(&mut state);
     let rows = painted_rows(&ctx, &mut state);
     assert_eq!(project_row_count(&rows), rows.len());
@@ -624,7 +626,7 @@ fn the_two_corpora_are_grouped_and_the_band_names_the_technology() {
 }
 
 /// A schematic holding `components`, saved as the active sheet.
-fn place(state: &mut AppState, components: Vec<crate::state::Component>) {
+fn place(state: &mut FeatureHarness<ModelsFeature>, components: Vec<crate::state::Component>) {
     use crate::state::{ComponentType, Point};
 
     state.model.workspace.ensure_active_buffer();
@@ -650,7 +652,7 @@ fn the_instances_card_counts_this_symbol_by_both_routes_that_reach_it() {
     use crate::state::{Component, ComponentType, LibraryCellInstance, Point};
 
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     seed_symbol_registry(&mut state);
 
     let mut instance = Component::new(1, ComponentType::Nmos, Point::new(4, 6));
@@ -714,7 +716,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
     use crate::state::{Component, ComponentType, LibraryCellInstance, Point};
 
     let ctx = egui::Context::default();
-    let mut state = AppState::default();
+    let mut state = harness();
     seed_symbol_registry(&mut state);
     let mut instance = Component::new(1, ComponentType::Nmos, Point::new(4, 6));
     instance.name = "X1".to_owned();
@@ -732,7 +734,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
         .expect("the seeded symbol")
         .clone();
 
-    let count = |state: &mut AppState| {
+    let count = |state: &mut FeatureHarness<ModelsFeature>| {
         let mut pending_actions = Vec::new();
         let app = ManagerRenderContext::over(state, &mut pending_actions);
         let mut total = 0;

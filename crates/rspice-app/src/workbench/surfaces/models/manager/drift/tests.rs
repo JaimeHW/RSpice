@@ -4,7 +4,6 @@ use super::*;
 
 use crate::product::{ContentDigest, ModelSourceId};
 use crate::state::model_library::{ModelSourceContent, ModelSourcePin};
-use crate::workbench::app_state::AppState;
 
 fn digest(bytes: &[u8]) -> ContentDigest {
     use sha2::{Digest as _, Sha256};
@@ -12,7 +11,7 @@ fn digest(bytes: &[u8]) -> ContentDigest {
 }
 
 /// Every label the drift banner publishes for one library.
-fn banner_labels(state: &mut AppState, library: &str) -> Vec<String> {
+fn banner_labels(state: &mut FeatureHarness<ModelsFeature>, library: &str) -> Vec<String> {
     let ctx = egui::Context::default();
     ctx.enable_accesskit();
     crate::ui::Theme::default().apply(&ctx);
@@ -64,7 +63,7 @@ fn retained(name: &str, pinned: &[u8], held: &[u8]) -> ModelLibrary {
 
 #[test]
 fn source_verification_retains_findings_without_inventing_a_scan_date() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(retained(
         "moved",
@@ -93,7 +92,7 @@ fn source_verification_retains_findings_without_inventing_a_scan_date() {
 
 #[test]
 fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(retained(
         "clean",
@@ -157,7 +156,7 @@ fn a_retained_source_that_no_longer_hashes_to_its_pin_is_a_finding() {
 /// project B until something unrelated moved the number.
 #[test]
 fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drift_verdict() {
-    let mut open = AppState::default();
+    let mut open = harness();
     open.model.model_library_manager.clear();
     open.model.model_library_manager.add_library(retained(
         "alpha",
@@ -178,7 +177,7 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
     // A different project, whose file happens to have been saved at the same
     // revision. Asserted rather than assumed, so the collision this guards is
     // real and stays real if the default revision ever changes.
-    let mut opened = AppState::default();
+    let mut opened = harness();
     opened.model.model_library_manager.clear();
     opened.model.model_library_manager.add_library(retained(
         "beta",
@@ -217,7 +216,7 @@ fn a_project_opened_at_the_same_revision_cannot_wear_the_previous_project_s_drif
 
 #[test]
 fn a_built_in_catalog_has_no_pin_to_fail() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("builtin");
     library.source_authority = ModelSourceAuthority::BuiltIn;
@@ -258,7 +257,7 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
         bytes: accepted.to_vec(),
     }];
 
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(library);
     state.model.scan_source_drift();
@@ -290,7 +289,7 @@ fn an_external_source_edited_on_disk_reports_how_much_of_it_moved() {
 
 #[test]
 fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(retained(
         "moved",
@@ -385,7 +384,7 @@ fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
             bytes: b".lib ss\n".to_vec(),
         });
     }
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(library);
     state.model.scan_source_drift();
@@ -407,7 +406,7 @@ fn a_banner_over_several_findings_says_how_many_it_does_not_name() {
 /// A clean library is silent — the banner is the exception, not the header.
 #[test]
 fn a_library_whose_sources_all_match_paints_no_banner() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     state.model.model_library_manager.add_library(retained(
         "clean",

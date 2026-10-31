@@ -1005,7 +1005,10 @@ mod tests {
     }
 
     /// The shelf page a session would paint, and the count behind it.
-    fn page(state: &mut AppState, installed: &[InstalledPack]) -> (usize, Vec<ShelfRow>) {
+    fn page(
+        state: &mut FeatureHarness<ModelsFeature>,
+        installed: &[InstalledPack],
+    ) -> (usize, Vec<ShelfRow>) {
         let mut pending = Vec::new();
         let mut context = ManagerRenderContext::over(state, &mut pending);
         shelf_page(&mut context, installed, None, RSpicePartFacet::All, 0)
@@ -1029,7 +1032,7 @@ mod tests {
         let ctx = egui::Context::default();
         ctx.enable_accesskit();
         crate::ui::Theme::default().apply(&ctx);
-        let mut state = AppState::default();
+        let mut state = harness();
         let mut pending = Vec::new();
         let output = ctx.run_ui(
             egui::RawInput {
@@ -1116,7 +1119,7 @@ mod tests {
 
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        let mut state = AppState::default();
+        let mut state = harness();
         let mut pending = Vec::new();
         let size = egui::vec2(1180.0, 900.0);
         let output = ctx.run_ui(
@@ -1332,7 +1335,7 @@ mod tests {
     /// which is what every native emitter reads the model from.
     #[test]
     fn a_foundation_card_places_as_the_native_device_its_family_draws() {
-        let mut state = AppState::default();
+        let mut state = harness();
         let (_, rows) = page(&mut state, &[]);
         let row = rows
             .iter()
@@ -1370,7 +1373,7 @@ mod tests {
     /// symbol to different nodes.
     #[test]
     fn a_retained_macromodel_places_as_a_cell_instance_in_its_own_port_order() {
-        let mut state = AppState::default();
+        let mut state = harness();
         state
             .model
             .model_library_manager
@@ -1443,7 +1446,7 @@ mod tests {
         hub.refresh_catalog(&transport).expect("catalog");
         hub.install(&transport, PACK_ID, VERSION).expect("install");
 
-        let mut state = AppState::default();
+        let mut state = harness();
         let (_, rows) = page(&mut state, hub.installed());
         let row = row_named(
             &rows,
@@ -1527,7 +1530,7 @@ mod tests {
     /// places through the library that holds the bytes.
     #[test]
     fn a_part_the_project_already_holds_is_listed_and_placeable_again() {
-        let mut state = AppState::default();
+        let mut state = harness();
         let before = page(&mut state, &[]).0;
         state
             .model
@@ -1564,7 +1567,7 @@ mod tests {
     /// Placement that cannot happen is refused in a sentence, on the control.
     #[test]
     fn an_unplaceable_part_disables_the_control_and_says_why() {
-        let mut state = AppState::default();
+        let mut state = harness();
         state.model.workspace.ensure_active_buffer();
 
         // A card whose declared family no schematic device is drawn for.
@@ -1583,7 +1586,7 @@ mod tests {
                 library: "opaque".to_owned(),
             },
         );
-        let refusal = place::PlaceOffer::for_row(&state.model, &state.models, &[], opaque)
+        let refusal = place::PlaceOffer::for_row(&state.model, &state.state, &[], opaque)
             .blocked
             .expect("a part with no symbol is refused");
         assert!(
@@ -1598,7 +1601,7 @@ mod tests {
             .find(|row| row.hit.name == "RSPICE_DIODE")
             .expect("the foundation diode is on the shelf");
         assert!(
-            place::PlaceOffer::for_row(&state.model, &state.models, &[], placeable)
+            place::PlaceOffer::for_row(&state.model, &state.state, &[], placeable)
                 .blocked
                 .is_none(),
             "a placeable part on an open sheet offers Place"
@@ -1610,7 +1613,7 @@ mod tests {
             },
             "session".to_owned(),
         );
-        let blocked = place::PlaceOffer::for_row(&state.model, &state.models, &[], placeable)
+        let blocked = place::PlaceOffer::for_row(&state.model, &state.state, &[], placeable)
             .blocked
             .expect("a read-only project cannot receive an instance");
         assert!(
@@ -1630,7 +1633,7 @@ mod tests {
             let ctx = egui::Context::default();
             ctx.enable_accesskit();
             crate::ui::Theme::default().apply(&ctx);
-            let mut state = AppState::default();
+            let mut state = harness();
             if read_only {
                 state.model.safe_mode.activate(
                     crate::state::write_policy::LocalSafeModeOptions {
@@ -1689,7 +1692,7 @@ mod tests {
     /// table of nineteen rows the moment the shelf gained its second half.
     #[test]
     fn the_scope_chip_and_the_shelf_agree_about_how_many_parts_there_are() {
-        let mut state = AppState::default();
+        let mut state = harness();
         state
             .model
             .model_library_manager
@@ -1704,7 +1707,7 @@ mod tests {
     /// A symbol view in front is a sheet a device cannot land on.
     #[test]
     fn a_view_that_is_not_a_schematic_refuses_placement_and_says_so() {
-        let mut state = AppState::default();
+        let mut state = harness();
         state.model.workspace.activate_view(
             crate::state::CellViewRef::new("design", "top", "symbol"),
             crate::state::ViewType::Symbol,
@@ -1716,7 +1719,7 @@ mod tests {
             .iter()
             .find(|row| row.hit.name == "RSPICE_DIODE")
             .expect("the foundation diode is on the shelf");
-        let refusal = place::PlaceOffer::for_row(&state.model, &state.models, &[], row)
+        let refusal = place::PlaceOffer::for_row(&state.model, &state.state, &[], row)
             .blocked
             .expect("a symbol view cannot receive a device");
         assert!(

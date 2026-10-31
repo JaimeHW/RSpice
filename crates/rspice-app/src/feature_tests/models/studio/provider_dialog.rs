@@ -1,6 +1,8 @@
 //! Failed provider publication retains the rendered transaction for retry.
 
 use super::*;
+use crate::state::model_library::ModelConsumerScope;
+use crate::workbench::state::ModelsWorkbenchDialog;
 
 #[test]
 fn resolved_model_and_subcircuit_rows_reopen_and_clear_their_provider_decisions() {

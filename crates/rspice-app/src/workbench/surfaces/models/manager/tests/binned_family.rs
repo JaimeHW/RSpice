@@ -9,9 +9,9 @@ use super::*;
 
 /// A kit holding two bins of `nch` and the card `nch_25`, and one NMOS
 /// instance per entry of `models`, `M1` onward, each naming that model.
-fn kit_project(models: &[&str]) -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager.clear();
+fn kit_project(models: &[&str]) -> FeatureHarness<ModelsFeature> {
+    let mut app = harness();
+    app.model.model_library_manager.clear();
     let mut kit = ModelLibrary::new("kit");
     for (name, line, length) in [
         ("nch.1", 10, (0.1e-6, 1e-6)),
@@ -25,12 +25,11 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
         card.source_line = Some(line);
         kit.add_model(card);
     }
-    app.state.model.model_library_manager.add_library(kit);
-    app.state.models.models_page = ModelsPage::Models;
+    app.model.model_library_manager.add_library(kit);
+    app.state.models_page = ModelsPage::Models;
 
-    app.state.model.workspace.ensure_active_buffer();
+    app.model.workspace.ensure_active_buffer();
     let mut schematic = app
-        .state
         .model
         .workspace
         .active_schematic()
@@ -44,12 +43,12 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
         component.params = format!("model={model}");
         schematic.document_mut_for_test().components.push(component);
     }
-    app.state.model.workspace.save_active_schematic(&schematic);
-    app.state.model.schematic = schematic;
+    app.model.workspace.save_active_schematic(&schematic);
+    app.model.schematic = schematic;
     app
 }
 
-fn scan_rows(state: &mut AppState) -> (Vec<(String, usize, usize)>, usize) {
+fn scan_rows(state: &mut FeatureHarness<ModelsFeature>) -> (Vec<(String, usize, usize)>, usize) {
     let mut pending_actions = Vec::new();
     let render = ManagerRenderContext::over(state, &mut pending_actions);
     let consumers = ConsumerIndex::build(&render);
@@ -72,7 +71,7 @@ fn scan_rows(state: &mut AppState) -> (Vec<(String, usize, usize)>, usize) {
 #[test]
 fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
     let mut app = kit_project(&["nch", "nch.2", "nch_25"]);
-    let (rows, total) = scan_rows(&mut app.state);
+    let (rows, total) = scan_rows(&mut app);
     assert_eq!(
         rows,
         [("nch".to_owned(), 2, 2), ("nch_25".to_owned(), 0, 1)],
@@ -81,7 +80,7 @@ fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
     assert_eq!(total, 2, "the footer counts a family once");
 
     let mut pending_actions = Vec::new();
-    let render = ManagerRenderContext::over(&mut app.state, &mut pending_actions);
+    let render = ManagerRenderContext::over(&mut app, &mut pending_actions);
     let consumers = ConsumerIndex::build(&render);
     let kit = render
         .model
@@ -113,13 +112,12 @@ fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
 #[test]
 fn a_card_of_the_familys_own_name_keeps_its_bins_as_rows() {
     let mut app = kit_project(&["nch.1"]);
-    app.state
-        .model
+    app.model
         .model_library_manager
         .get_library_mut("kit")
         .expect("kit")
         .add_model(DeviceModel::new("nch", ModelType::Nmos));
-    let (rows, total) = scan_rows(&mut app.state);
+    let (rows, total) = scan_rows(&mut app);
     assert_eq!(
         rows,
         [
@@ -130,69 +128,4 @@ fn a_card_of_the_familys_own_name_keeps_its_bins_as_rows() {
         ]
     );
     assert_eq!(total, 4);
-}
-
-/// The catalog opens a family on its first bin, shows another bin from the
-/// family's own detail, and in either case binds the selected instance to
-/// `nch` with its library, unpinning the bin it named.
-#[test]
-fn binding_from_the_catalog_binds_the_family_with_its_library() {
-    let mut app = kit_project(&["nch.1"]);
-    app.state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .select_only_component(1);
-    let mut studio = ModelsStudio::open(app);
-    assert!(
-        studio.announces(|label| label == "nch · 2 bins in kit"),
-        "the family is one row; the page announces {:#?}",
-        studio.announcements()
-    );
-    assert!(
-        !studio.announces(|label| label.starts_with("nch.1 in") || label.starts_with("nch.2 in")),
-        "no bin is a row of its own; the page announces {:#?}",
-        studio.announcements()
-    );
-    assert_eq!(
-        studio.app.state.models.selected_model.as_deref(),
-        Some("nch.1"),
-        "a family's selection is a card, so every reader of it still reads one"
-    );
-    assert!(
-        studio
-            .painted
-            .iter()
-            .any(|(text, _)| text.ends_with("names bin nch.1")),
-        "where-used names the bin M1 is pinned to"
-    );
-
-    studio.click(|label| label.starts_with("nch.2 · L "));
-    assert_eq!(
-        studio.app.state.models.selected_model.as_deref(),
-        Some("nch.2")
-    );
-    assert!(
-        studio.announces(|label| label == "nch · 2 bins in kit"),
-        "showing another bin keeps the family's row selected"
-    );
-
-    studio.click(|label| label == "Bind to M1…");
-    let params = &studio
-        .app
-        .state
-        .model
-        .schematic
-        .document()
-        .components
-        .iter()
-        .find(|component| component.id == 1)
-        .expect("M1")
-        .params;
-    assert!(
-        params.ends_with("model=nch model_library=kit"),
-        "Bind gives the instance the family, not the bin on show: {params}"
-    );
 }

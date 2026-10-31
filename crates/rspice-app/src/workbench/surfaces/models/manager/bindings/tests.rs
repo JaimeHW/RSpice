@@ -4,11 +4,10 @@ use super::*;
 
 use crate::state::model_library::ModelType;
 use crate::state::{Component, ComponentType, Point};
-use crate::workbench::app_state::AppState;
 
 /// A design with `count` instances naming a model nothing provides.
-fn design_with_unresolved(count: u64) -> AppState {
-    let mut state = AppState::default();
+fn design_with_unresolved(count: u64) -> FeatureHarness<ModelsFeature> {
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("alpha");
     library.add_model(DeviceModel::new("nch", ModelType::Nmos));
@@ -33,7 +32,7 @@ fn design_with_unresolved(count: u64) -> AppState {
     state
 }
 
-fn diagnostics(state: &mut AppState) -> Vec<BindingDiagnostic> {
+fn diagnostics(state: &mut FeatureHarness<ModelsFeature>) -> Vec<BindingDiagnostic> {
     let mut pending = Vec::new();
     let render = ManagerRenderContext::over(state, &mut pending);
     ConsumerIndex::build(&render).diagnostics
@@ -73,7 +72,7 @@ fn every_unresolved_instance_is_a_row_of_its_own() {
 /// A declared provider that is not the executable one is its own finding.
 #[test]
 fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     for name in ["alpha", "beta"] {
         let mut library = ModelLibrary::new(name);
@@ -118,7 +117,7 @@ fn an_instance_bound_to_the_wrong_provider_says_which_one_wins() {
 #[test]
 fn the_card_offers_both_routes_out_and_vanishes_when_there_is_nothing_to_say() {
     fn nodes(
-        state: &mut AppState,
+        state: &mut FeatureHarness<ModelsFeature>,
         diagnostics: &[BindingDiagnostic],
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         let ctx = egui::Context::default();
@@ -174,7 +173,7 @@ fn the_card_offers_both_routes_out_and_vanishes_when_there_is_nothing_to_say() {
     );
 
     // Nothing to report renders nothing at all.
-    let mut clean = AppState::default();
+    let mut clean = harness();
     let tree = nodes(&mut clean, &[]);
     assert!(button(&tree, "Show instance").is_none());
     assert!(button(&tree, "Bind to selection…").is_none());

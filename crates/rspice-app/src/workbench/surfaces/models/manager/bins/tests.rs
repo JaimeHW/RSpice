@@ -67,7 +67,7 @@ fn placed(
 
 #[test]
 fn a_family_is_one_library_s_cards_sharing_a_base_name() {
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("foundry");
     for name in ["nch.1", "nch.2", "pch.1"] {

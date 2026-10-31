@@ -15,7 +15,6 @@ use crate::state::model_hub::tests::{
     hub_signing_key, signed_snapshot_projecting, two_part_archive,
 };
 use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
-use crate::workbench::app_state::AppState;
 
 const CAPABILITIES: [&str; 2] = ["subckt", "resistor"];
 
@@ -35,14 +34,14 @@ fn open(store: &Store) -> ModelHub {
 }
 
 /// A session holding 1.0.0 of the two-part pack, with a project pinned to it.
-fn session(catalog: Vec<u8>, archive: &[u8]) -> (ModelHub, Store, AppState) {
+fn session(catalog: Vec<u8>, archive: &[u8]) -> (ModelHub, Store, FeatureHarness<ModelsFeature>) {
     let store = Store::new(MemoryModelHubStore::new());
     let mut hub = open(&store);
     let transport = StubTransport::with_snapshot(catalog).serving(VERSION, archive.to_vec());
     hub.refresh_catalog(&transport).expect("catalog");
     hub.install(&transport, PACK_ID, VERSION).expect("install");
 
-    let mut state = AppState::default();
+    let mut state = harness();
     state.model.model_library_manager.clear();
     hub.add_part_to_project(
         &mut state.model.model_library_manager,
@@ -58,7 +57,7 @@ fn session(catalog: Vec<u8>, archive: &[u8]) -> (ModelHub, Store, AppState) {
         BIAS_PART_ID,
     )
     .expect("the project retains the bias network");
-    state.models.models_view.selected_pack = Some(PACK_ID.to_owned());
+    state.state.models_view.selected_pack = Some(PACK_ID.to_owned());
     (hub, store, state)
 }
 
@@ -108,9 +107,9 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
     let service = service_of(&store, hub);
 
     let catalog = hub::hub_catalog(&service, &state.model);
-    refresh_release_diff(&service, &mut state.models, &catalog);
+    refresh_release_diff(&service, &mut state.state, &catalog);
     let first = state
-        .models
+        .state
         .models_view
         .release_diff
         .clone()
@@ -120,7 +119,7 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
 
     // A value only a recomputation would destroy.
     state
-        .models
+        .state
         .models_view
         .release_diff
         .as_mut()
@@ -128,11 +127,11 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
         .added
         .push("SENTINEL".to_owned());
     for _ in 0..3 {
-        refresh_release_diff(&service, &mut state.models, &catalog);
+        refresh_release_diff(&service, &mut state.state, &catalog);
     }
     assert_eq!(
         state
-            .models
+            .state
             .models_view
             .release_diff
             .as_ref()
@@ -163,9 +162,9 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
     let service = service_of(&store, hub);
 
     let catalog = hub::hub_catalog(&service, &state.model);
-    refresh_release_diff(&service, &mut state.models, &catalog);
+    refresh_release_diff(&service, &mut state.state, &catalog);
     let before = state
-        .models
+        .state
         .models_view
         .release_diff
         .clone()
@@ -205,9 +204,9 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
          nothing about the content half of the key"
     );
 
-    refresh_release_diff(&service, &mut state.models, &replaced_catalog);
+    refresh_release_diff(&service, &mut state.state, &replaced_catalog);
     let after = state
-        .models
+        .state
         .models_view
         .release_diff
         .as_ref()
@@ -239,14 +238,14 @@ fn a_pack_this_project_pinned_nothing_from_offers_no_adoption() {
     state.model.model_library_manager.clear();
 
     let catalog = hub::hub_catalog(&service, &state.model);
-    let row = hub::selected_row(&catalog, &state.models).expect("the pack is listed");
+    let row = hub::selected_row(&catalog, &state.state).expect("the pack is listed");
     assert!(
         row.pins.is_empty(),
         "nothing is pinned, so nothing can be adopted"
     );
-    refresh_release_diff(&service, &mut state.models, &catalog);
+    refresh_release_diff(&service, &mut state.state, &catalog);
     assert!(
-        state.models.models_view.release_diff.is_some(),
+        state.state.models_view.release_diff.is_some(),
         "the diff is still worth stating: an update is on offer"
     );
 }
