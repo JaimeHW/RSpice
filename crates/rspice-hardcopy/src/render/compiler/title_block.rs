@@ -3,6 +3,8 @@
 //! Managed logos and field layout are resolved here so every publication
 //! backend consumes identical geometry. The block always stands upright.
 
+use rspice_design_model::design_management::{DrawingSheetTitleAlign, DrawingSheetTitleMeasure};
+
 use super::*;
 
 impl SemanticSceneCompiler<'_> {
@@ -116,24 +118,46 @@ impl SemanticSceneCompiler<'_> {
         // canvas sets it. A caption is the form's own wording and nothing
         // else: ISO 7200 marks no field as filled in by the system, and a
         // reader of the print has no use for knowing. An empty value plots
-        // nothing: the cell is a box to fill in.
-        for line in layout.lettering(&fields) {
-            self.add_text_rotated(
+        // nothing: the cell is a box to fill in. A value read right to left
+        // is set against the right of its run, as the canvas sets it.
+        for line in layout.lettering_measured(&fields, &PrintedTitleWidth) {
+            let (x_um, anchor) = match line.align {
+                DrawingSheetTitleAlign::Left => (line.x_um, TextAnchor::Start),
+                DrawingSheetTitleAlign::Right => (line.x_um + line.width_um, TextAnchor::End),
+            };
+            self.add_text_placed(
                 self.drawing_sheet_point(
-                    at_x(line.x_um)?,
+                    at_x(x_um)?,
                     at_y(line.seat_um + drawing_sheet_mono_baseline_offset_um(line.lettering_um))?,
                 )?,
                 &line.text,
-                if line.emphasised {
-                    SceneFont::MonospaceMedium
-                } else {
-                    SceneFont::Monospace
-                },
+                title_font(line.emphasised),
                 drawing_sheet_mono_em_um(line.lettering_um),
                 stroke.color,
-                SceneTextRotation::Upright,
+                (anchor, SceneTextRotation::Upright),
             )?;
         }
         Ok(())
+    }
+}
+
+/// The face print letters a title-block line in.
+const fn title_font(emphasised: bool) -> SceneFont {
+    if emphasised {
+        SceneFont::MonospaceMedium
+    } else {
+        SceneFont::Monospace
+    }
+}
+
+/// The width print sets a title-block line at: the shaped width of the faces
+/// it letters the line in. The canvas cuts by the same width, so a value is
+/// cut short at the same place on paper and on screen.
+pub(in crate::render) struct PrintedTitleWidth;
+
+impl DrawingSheetTitleMeasure for PrintedTitleWidth {
+    fn width_um(&self, text: &str, lettering_um: u64, emphasised: bool) -> u64 {
+        let ems = rspice_fonts::print::width_em(title_font(emphasised).role(), text);
+        (ems * drawing_sheet_mono_em_um(lettering_um) as f64).ceil() as u64
     }
 }

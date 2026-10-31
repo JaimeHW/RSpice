@@ -99,6 +99,14 @@ pub fn paint_text(
     rect
 }
 
+/// How wide print sets `text` in `family`'s faces, in ems
+/// ([`rspice_fonts::print::width_em`]). A field the canvas cuts by this
+/// width is cut where print cuts it.
+#[must_use]
+pub fn printed_width_em(family: &egui::FontFamily, text: &str) -> f64 {
+    rspice_fonts::print::width_em(role_of(family), text)
+}
+
 /// A label of text a person typed, in `font` and `color`, wrapped at the
 /// width left in the [`Ui`] and in the order it is read. Returns the label
 /// and the galley it shows.

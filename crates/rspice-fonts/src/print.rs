@@ -20,8 +20,9 @@
 //! when a face has a base but not the mark on it: print never draws a face's
 //! notdef box.
 
+use std::collections::HashMap;
 use std::ops::Range;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock, PoisonError};
 
 use harfrust::{BufferClusterLevel, BufferFlags, Direction, FontRef, ShaperData, UnicodeBuffer};
 use skrifa::MetadataProvider;
@@ -92,6 +93,73 @@ pub fn line(role: Role, text: &str) -> Vec<Piece> {
         }
     }
     pieces
+}
+
+/// How wide print sets `text` in `role`, in ems: what its pieces advance.
+///
+/// The canvas and print both cut a title-block value by this width, so the
+/// two cut it at the same place. A width is measured once and kept while the
+/// installed faces print looks in stand as they are, so a frame that letters
+/// the same text again shapes nothing.
+#[must_use]
+pub fn width_em(role: Role, text: &str) -> f64 {
+    let changes = installed_changes();
+    if let Some(widths) = WIDTHS
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .as_ref()
+        .filter(|widths| widths.changes == changes)
+        && let Some(&em) = widths.ems.get(&role).and_then(|ems| ems.get(text))
+    {
+        return em;
+    }
+    let em = line(role, text).iter().map(|piece| piece.width(1.0)).sum();
+    let mut widths = WIDTHS.lock().unwrap_or_else(PoisonError::into_inner);
+    let widths = widths.get_or_insert_with(Widths::default);
+    if widths.changes != changes || widths.count >= MAX_WIDTHS {
+        *widths = Widths {
+            changes,
+            ..Widths::default()
+        };
+    }
+    if widths
+        .ems
+        .entry(role)
+        .or_default()
+        .insert(text.into(), em)
+        .is_none()
+    {
+        widths.count += 1;
+    }
+    em
+}
+
+/// The most widths [`width_em`] keeps; past it, it starts again.
+const MAX_WIDTHS: usize = 4_096;
+
+/// The widths [`width_em`] has measured.
+static WIDTHS: Mutex<Option<Widths>> = Mutex::new(None);
+
+#[derive(Default)]
+struct Widths {
+    /// What [`installed_changes`] said when they were measured.
+    changes: u64,
+    ems: HashMap<Role, HashMap<Box<str>, f64>>,
+    count: usize,
+}
+
+/// A count that moves whenever print may letter a cluster in another
+/// installed face than before; a build without installed faces never moves
+/// it.
+fn installed_changes() -> u64 {
+    #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+    {
+        crate::system::print::changes()
+    }
+    #[cfg(not(all(feature = "system", not(target_arch = "wasm32"))))]
+    {
+        0
+    }
 }
 
 /// The runs of one level, from left to right, each with whether it reads

@@ -31,8 +31,9 @@ use rspice_design_model::design_management::{
     DRAWING_SHEET_TITLE_RULE_UM, DrawingSheetDisplayUnit, DrawingSheetFrameArtwork,
     DrawingSheetFrameLayer, DrawingSheetFrameMark,
     DrawingSheetGeometry as AuthoredDrawingSheetGeometry, DrawingSheetLettering, DrawingSheetRect,
-    DrawingSheetTitleLetteringRole, DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField,
-    SchematicSheetFormat, drawing_sheet_mono_em_um, drawing_sheet_title_layout,
+    DrawingSheetTitleAlign, DrawingSheetTitleLetteringRole, DrawingSheetTitleMeasure,
+    DrawingSheetZoneLayout, ResolvedDrawingSheetTitleField, SchematicSheetFormat,
+    drawing_sheet_mono_em_um, drawing_sheet_title_layout,
 };
 use rspice_ui_kit::theme;
 use rspice_ui_kit::tokens::{Mode, Tokens};
@@ -1355,7 +1356,7 @@ fn draw_title_block(
         return;
     }
     let padding = authored_title_cell_padding(layout.padding_um) * zoom;
-    for line in layout.lettering(&fields) {
+    for line in layout.lettering_measured(&fields, &DrawingSheetTitleWidth) {
         let cell = &layout.cells[line.cell];
         let clip = Rect::from_min_max(
             pos2(x_at(cell.x_um), y_at(cell.y_um)),
@@ -1383,10 +1384,16 @@ fn draw_title_block(
                 (palette.block_ink, theme::FontWeight::Regular)
             }
         };
+        // A value read right to left is set against the right of its run,
+        // as the plot sets it.
+        let (x_um, anchor) = match line.align {
+            DrawingSheetTitleAlign::Left => (line.x_um, Align2::LEFT_CENTER),
+            DrawingSheetTitleAlign::Right => (line.x_um + line.width_um, Align2::RIGHT_CENTER),
+        };
         rspice_ui_kit::text::paint_text(
             &painter.with_clip_rect(clip),
-            pos2(x_at(line.x_um), y_at(line.seat_um)),
-            Align2::LEFT_CENTER,
+            pos2(x_at(x_um), y_at(line.seat_um)),
+            anchor,
             line.text,
             theme::mono(
                 drawing_sheet_font_size(zoom, authored_lettering(line.lettering_um)),
@@ -1433,6 +1440,25 @@ fn draw_same_revision_note(
 fn title_line_width(width_um: u64, zoom: f32, pixels_per_point: f32) -> f32 {
     let points = width_um as f32 / 1_000.0 * DRAWING_SHEET_UNITS_PER_MM as f32 * zoom.max(0.0);
     points.max(1.0 / pixels_per_point.max(0.5))
+}
+
+/// The width a title-block line is set at on the sheet: the shaped width of
+/// the faces print letters it in, which the canvas letters it in too. The
+/// canvas, the plot and the sheet's own check of its title values all cut a
+/// value by it, so a value is cut short at the same place on each.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DrawingSheetTitleWidth;
+
+impl DrawingSheetTitleMeasure for DrawingSheetTitleWidth {
+    fn width_um(&self, text: &str, lettering_um: u64, emphasised: bool) -> u64 {
+        let weight = if emphasised {
+            theme::FontWeight::Medium
+        } else {
+            theme::FontWeight::Regular
+        };
+        let ems = rspice_ui_kit::text::printed_width_em(&theme::mono(1.0, weight).family, text);
+        (ems * drawing_sheet_mono_em_um(lettering_um) as f64).ceil() as u64
+    }
 }
 
 /// Horizontal padding between a title-grid rule and its lettering, in world

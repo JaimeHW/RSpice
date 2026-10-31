@@ -14,6 +14,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Mutex, PoisonError, RwLock};
 
 use skrifa::raw::TableProvider;
@@ -42,6 +43,18 @@ static FACES: RwLock<Vec<&'static SystemFace>> = RwLock::new(Vec::new());
 /// Where print looks, and what it has found there.
 static LOOKUP: Mutex<Option<Lookup>> = Mutex::new(None);
 
+/// How many times print has been told where to look, or in what order.
+static CHANGES: AtomicU64 = AtomicU64::new(0);
+
+/// A count that moves whenever a cluster may letter in another installed
+/// face than it did before: each time print is told where to look
+/// ([`print_from`], [`print_from_none`]) or in what order
+/// ([`set_print_order`]).
+#[must_use]
+pub fn changes() -> u64 {
+    CHANGES.load(Ordering::Acquire)
+}
+
 /// Makes print letter what no embedded face has from `source`'s faces, with
 /// the CJK faces in `order`. Replaces what print was told before.
 pub fn print_from(source: Source, order: [HanVariant; 5]) {
@@ -53,11 +66,13 @@ pub fn print_from(source: Source, order: [HanVariant; 5]) {
         chosen: HashMap::new(),
     };
     *LOOKUP.lock().unwrap_or_else(PoisonError::into_inner) = Some(lookup);
+    CHANGES.fetch_add(1, Ordering::AcqRel);
 }
 
 /// Makes print letter from no installed face.
 pub fn print_from_none() {
     *LOOKUP.lock().unwrap_or_else(PoisonError::into_inner) = None;
+    CHANGES.fetch_add(1, Ordering::AcqRel);
 }
 
 /// Orders print's CJK faces as `order` says, from the next cluster on.
@@ -70,6 +85,7 @@ pub fn set_print_order(order: [HanVariant; 5]) {
     {
         lookup.order = order;
         lookup.chosen.clear();
+        CHANGES.fetch_add(1, Ordering::AcqRel);
     }
 }
 

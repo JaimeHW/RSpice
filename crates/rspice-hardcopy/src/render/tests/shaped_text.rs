@@ -718,3 +718,141 @@ fn print_never_embeds_a_face_whose_licence_forbids_it() {
         Some(PdfConformance::PdfA2bValidated)
     );
 }
+
+/// A title value in each script, long enough that its cell cuts it: Arabic
+/// with its vowel marks, Hebrew with a number, a unit and brackets, Thai
+/// with its tone marks, and Japanese.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn script_title_values() -> [String; 4] {
+    [
+        "\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}\u{628}\u{64b}\u{627} \u{628}\u{650}\u{643}\u{64f}\u{645}\u{652} ",
+        "\u{5de}\u{5d2}\u{5d1}\u{5e8} R1 = 10 k\u{3a9} (V+) ",
+        "\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}\u{e04}\u{e23}\u{e31}\u{e1a} ",
+        "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{56de}\u{8def}\u{56f3} ",
+    ]
+    .map(|phrase| phrase.repeat(6).trim_end().to_owned())
+}
+
+/// `format` with its first authored title fields holding a value in each
+/// script, in the order [`script_title_values`] gives them.
+#[cfg(not(target_arch = "wasm32"))]
+pub(super) fn titled_in_every_script(format: &SchematicSheetFormat) -> SchematicSheetFormat {
+    use rspice_design_model::design_management::DrawingSheetTitleFieldValueAuthority;
+    let mut values = script_title_values().into_iter();
+    format
+        .try_update(|draft| {
+            for (field, state) in &mut draft.title_block.fields {
+                if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
+                    && !field.is_signature_date()
+                    && state.visible
+                    && let Some(value) = values.next()
+                {
+                    state.value = value;
+                }
+            }
+        })
+        .unwrap()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_title_value_in_any_script_is_cut_between_clusters_and_copies_back_as_plotted() {
+    use rspice_design_model::design_management::{
+        DrawingSheetTitleAlign, DrawingSheetTitleLetteringRole, drawing_sheet_mono_em_um,
+    };
+    use unicode_segmentation::UnicodeSegmentation;
+
+    let _japanese = Installed::japanese();
+    let format = titled_in_every_script(&SchematicSheetFormat::default());
+    let values = script_title_values();
+    let lettering = super::title_lettering::laid_out_lettering(&format)
+        .into_iter()
+        .filter(|line| line.role == DrawingSheetTitleLetteringRole::Value)
+        .filter(|line| {
+            values
+                .iter()
+                .any(|value| value.contains(line.text.trim_end_matches('…')))
+        })
+        .collect::<Vec<_>>();
+    for value in &values {
+        let lines = lettering
+            .iter()
+            .filter(|line| value.contains(line.text.trim_end_matches('…')))
+            .collect::<Vec<_>>();
+        assert!(
+            lines.iter().any(|line| line.text.ends_with('…')),
+            "{value:?} is cut: {lines:?}"
+        );
+        for line in lines {
+            // The line is a run of the value's whole clusters.
+            let kept = line.text.trim_end_matches('…');
+            let start = value.find(kept).unwrap();
+            let clusters = value
+                .grapheme_indices(true)
+                .map(|(at, _)| at)
+                .chain([value.len()])
+                .collect::<Vec<_>>();
+            assert!(
+                clusters.contains(&start) && clusters.contains(&(start + kept.len())),
+                "{:?} cuts a cluster of {value:?}",
+                line.text
+            );
+            // Its shaped width fits the run it is set in.
+            let font = if line.emphasised {
+                SceneFont::MonospaceMedium
+            } else {
+                SceneFont::Monospace
+            };
+            let shaped_um = rspice_fonts::print::width_em(font.role(), &line.text)
+                * drawing_sheet_mono_em_um(line.lettering_um) as f64;
+            assert!(
+                shaped_um <= line.width_um as f64,
+                "{:?} is {shaped_um} um in a {} um run",
+                line.text,
+                line.width_um
+            );
+        }
+    }
+    // The plot sets each line where the layout puts it: a value read right to
+    // left against the right of its run.
+    let source = resolved_blank_schematic(&format);
+    let scene = super::title_lettering::title_block_scene(&source);
+    for line in &lettering {
+        let anchor = scene
+            .primitives()
+            .iter()
+            .find_map(|primitive| match primitive {
+                ScenePrimitive::Text { text, anchor, .. } if *text == line.text => Some(*anchor),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("{:?} is plotted", line.text));
+        assert_eq!(
+            anchor,
+            match line.align {
+                DrawingSheetTitleAlign::Left => TextAnchor::Start,
+                DrawingSheetTitleAlign::Right => TextAnchor::End,
+            },
+            "{:?}",
+            line.text
+        );
+    }
+    assert!(
+        lettering
+            .iter()
+            .any(|line| line.align == DrawingSheetTitleAlign::Right)
+    );
+    // A PDF of the sheet copies back every line as it is plotted, in the
+    // order it was typed.
+    let plan = undecorated_plan(OutputFormat::PdfVector, scene.extent());
+    let publication = HardcopyRenderer::render(&plan, &scene).unwrap();
+    let page = page_text(publication.single_part().unwrap().bytes());
+    for line in &lettering {
+        assert!(
+            page.copied.contains(&line.text),
+            "{:?} is not copied back: {:?}",
+            line.text,
+            page.copied
+        );
+    }
+    assert!(page.glyphs.iter().all(|(_, code)| *code != 0));
+}

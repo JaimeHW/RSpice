@@ -117,10 +117,15 @@ pub fn sheet_panel(ui: &mut Ui, mut panel: SheetInspector<'_>) {
 /// The title fields the sheet's block cuts short, as the sheet prints them:
 /// lettering never shrinks to fit, so each prints with an ellipsis.
 fn cut_fields(model: &Model, sheet: &ActiveDrawingSheet) -> Vec<DrawingSheetTitleFieldId> {
-    drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical)
-        .map_or_else(Vec::new, |layout| {
-            layout.cut_fields(&model.title_block_fields(sheet))
-        })
+    drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).map_or_else(
+        Vec::new,
+        |layout| {
+            layout.cut_fields_measured(
+                &model.title_block_fields(sheet),
+                &rspice_schematic_editor::view::drawing_sheet::DrawingSheetTitleWidth,
+            )
+        },
+    )
 }
 
 /// Say under a field's row when its value prints cut short.

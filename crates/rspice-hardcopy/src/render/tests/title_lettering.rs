@@ -59,25 +59,7 @@ fn blank_schematic_titled(
 
 /// Every line the title block of `source` plots.
 fn plotted_lines_of(source: &ResolvedHardcopyDocument) -> Vec<(SceneFont, u64, String)> {
-    // The title block alone, so every monospace line is one of its captions.
-    let schematic = SchematicHardcopySetup::new(
-        SchematicHardcopyExtent::AuthoredDrawingSheet,
-        OutsideSheetContentPolicy::Ask,
-        false,
-        false,
-        false,
-        true,
-        false,
-        false,
-    );
-    let scene = scene_from_resolved(
-        source,
-        source.default_print_mapping(),
-        schematic,
-        resolved_metadata(),
-    )
-    .unwrap();
-    scene
+    title_block_scene(source)
         .primitives()
         .iter()
         .filter_map(|primitive| match primitive {
@@ -90,6 +72,28 @@ fn plotted_lines_of(source: &ResolvedHardcopyDocument) -> Vec<(SceneFont, u64, S
             _ => None,
         })
         .collect()
+}
+
+/// The scene of `source`'s title block alone, so every monospace line is
+/// one of its lines.
+pub(super) fn title_block_scene(source: &ResolvedHardcopyDocument) -> HardcopyScene {
+    let schematic = SchematicHardcopySetup::new(
+        SchematicHardcopyExtent::AuthoredDrawingSheet,
+        OutsideSheetContentPolicy::Ask,
+        false,
+        false,
+        false,
+        true,
+        false,
+        false,
+    );
+    scene_from_resolved(
+        source,
+        source.default_print_mapping(),
+        schematic,
+        resolved_metadata(),
+    )
+    .unwrap()
 }
 
 /// `format` with every authored field it shows filled in.
@@ -113,10 +117,10 @@ fn filled_in(format: &SchematicSheetFormat) -> SchematicSheetFormat {
         .unwrap()
 }
 
-/// Every line the title block of `format` letters by the layout, with the
-/// values a blank schematic supplies, as `resolved_blank_schematic`
-/// captures them.
-fn laid_out_lettering(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleLettering> {
+/// Every line the title block of `format` letters by the layout, measured
+/// as print measures it, with the values a blank schematic supplies, as
+/// `resolved_blank_schematic` captures them.
+pub(super) fn laid_out_lettering(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleLettering> {
     let layout = drawing_sheet_title_layout(format, &format.geometry().unwrap()).unwrap();
     let identity = HardcopySourceIdentity::try_new(
         "test-schematic",
@@ -129,7 +133,7 @@ fn laid_out_lettering(format: &SchematicSheetFormat) -> Vec<DrawingSheetTitleLet
         format,
         &drawing_sheet_title_values(&identity, format, None, None),
     );
-    layout.lettering(&fields)
+    layout.lettering_measured(&fields, &PrintedTitleWidth)
 }
 
 /// Every line the title block of `format` letters by the layout, with the

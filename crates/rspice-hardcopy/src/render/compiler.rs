@@ -1919,3 +1919,6 @@ mod schematic_text;
 mod sheet_frame;
 mod symbol_document;
 mod title_block;
+
+#[cfg(test)]
+pub(super) use title_block::PrintedTitleWidth;

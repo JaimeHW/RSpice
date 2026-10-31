@@ -1251,3 +1251,98 @@ fn a_large_sheet_fitted_to_the_window_keeps_its_block_rules_and_zone_letters() {
         }
     }
 }
+
+#[test]
+fn a_title_in_any_script_is_painted_cut_and_set_where_the_plot_sets_it() {
+    use rspice_design_model::design_management::{
+        DrawingSheetTitleFieldValueAuthority, resolve_drawing_sheet_title_fields,
+    };
+    // Arabic with its vowel marks, Hebrew with a number, a unit and
+    // brackets, and Thai with its tone marks, each long enough to be cut;
+    // and a Latin value, set on the left.
+    let mut values = [
+        "\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}\u{628}\u{64b}\u{627} \u{628}\u{650}\u{643}\u{64f}\u{645}\u{652} ",
+        "\u{5de}\u{5d2}\u{5d1}\u{5e8} R1 = 10 k\u{3a9} (V+) ",
+        "\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}\u{e04}\u{e23}\u{e31}\u{e1a} ",
+        "J. Whitfield ",
+    ]
+    .map(|phrase| phrase.repeat(6).trim_end().to_owned())
+    .into_iter();
+    let format = SchematicSheetFormat::default()
+        .try_update(|draft| {
+            for (field, state) in &mut draft.title_block.fields {
+                if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
+                    && !field.is_signature_date()
+                    && state.visible
+                    && let Some(value) = values.next()
+                {
+                    state.value = value;
+                }
+            }
+        })
+        .unwrap();
+    let sheet = active(format);
+    let fields = resolve_drawing_sheet_title_fields(&sheet.format, &Default::default());
+    let layout = drawing_sheet_title_layout(&sheet.format, &sheet.geometry.physical).unwrap();
+    let lettering = layout.lettering_measured(&fields, &DrawingSheetTitleWidth);
+    assert!(lettering.iter().any(|line| line.text.ends_with('…')));
+    assert!(
+        lettering
+            .iter()
+            .any(|line| line.align == DrawingSheetTitleAlign::Right)
+    );
+    let shapes = painted_title_block(&sheet, &fields);
+    // The canvas letters exactly the lines the layout cuts, by the width
+    // print sets them at: a line holding no right-to-left text as it is,
+    // and any other with the same characters in the order it is read, its
+    // brackets mirrored inside a right-to-left run.
+    let painted = lettered_text(&shapes);
+    assert_eq!(painted.len(), lettering.len(), "{painted:?}");
+    let characters = |text: &str| {
+        let mut characters = text
+            .chars()
+            .map(|character| if character == ')' { '(' } else { character })
+            .collect::<Vec<_>>();
+        characters.sort_unstable();
+        characters
+    };
+    for (painted, line) in painted.iter().zip(&lettering) {
+        if line.text.is_ascii() {
+            assert_eq!(*painted, line.text);
+        } else {
+            assert_eq!(characters(painted), characters(&line.text), "{painted:?}");
+        }
+    }
+    // A cut value read right to left ends at the left, where it is read to.
+    let title = painted
+        .iter()
+        .zip(&lettering)
+        .find(|(_, line)| line.align == DrawingSheetTitleAlign::Right && line.text.ends_with('…'))
+        .map(|(painted, _)| painted)
+        .expect("a right-to-left value is cut");
+    assert!(title.starts_with('…'), "{title:?}");
+    // Each stands against the edge of its run the plot sets it on.
+    let world = sheet.geometry.title_block.unwrap();
+    let x_at = |x_um: u64| {
+        world.min_x as f32
+            + (world.max_x - world.min_x) as f32 * x_um as f32 / layout.width_um as f32
+    };
+    let texts = shapes.iter().filter_map(|shape| match shape {
+        Shape::Text(text) => Some(text),
+        _ => None,
+    });
+    for (text, line) in texts.zip(&lettering) {
+        let (painted, laid_out) = match line.align {
+            DrawingSheetTitleAlign::Left => (text.pos.x, x_at(line.x_um)),
+            DrawingSheetTitleAlign::Right => (
+                text.pos.x + text.galley.size().x,
+                x_at(line.x_um + line.width_um),
+            ),
+        };
+        assert!(
+            (painted - laid_out).abs() < 0.5,
+            "{:?} stands at {painted}, not {laid_out}",
+            line.text
+        );
+    }
+}

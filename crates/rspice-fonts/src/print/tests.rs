@@ -291,3 +291,24 @@ fn thai_is_set_in_its_face_with_every_mark_drawn() {
             .all(|glyph| glyph.id != 0)
     );
 }
+
+#[test]
+fn a_line_is_as_wide_as_its_pieces_advance() {
+    // IBM Plex Mono sets every Latin character 0.6 em wide.
+    assert!((width_em(Role::Mono, "R1 = 10k") - 4.8).abs() < 1e-9);
+    #[cfg(not(target_arch = "wasm32"))]
+    for (role, text) in [
+        (Role::Mono, "\u{5de}\u{5d2}\u{5d1}\u{5e8} (R1)"),
+        (
+            Role::MonoMedium,
+            "\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}\u{628}\u{64b}\u{627} 12",
+        ),
+        (Role::Sans, "\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}"),
+    ] {
+        let pieces: f64 = line(role, text).iter().map(|piece| piece.width(1.0)).sum();
+        assert!(pieces > 0.0);
+        assert_eq!(width_em(role, text), pieces, "{text}");
+        // Measured again, the width is the one kept.
+        assert_eq!(width_em(role, text), pieces, "{text}");
+    }
+}
