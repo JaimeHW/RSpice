@@ -5,7 +5,7 @@
 //! happen entirely or not at all.
 
 use super::*;
-use crate::workbench::RSpiceApp;
+use crate::workbench::models::tests::{harness, model_editor_parts, save_open_model_candidate};
 
 fn definition() -> ProjectModelDefinition {
     ProjectModelDefinition {
@@ -288,34 +288,28 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
         )
         .expect("publish sectioned first model");
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state.model.model_library_manager = manager;
-    let project_revision = app.state.model.workspace.content.project.revision();
+    let mut app = harness();
+    app.open_project_session();
+    app.model.model_library_manager = manager;
+    let project_revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "multi-owned",
             "nch_owned",
             project_revision,
         )
         .expect("open sectioned sibling");
-    populate_operating_point_suite(&mut app.state.models.model_editor);
-    app.state
-        .models
-        .model_editor
-        .qualification_authoring
-        .model_section = "TT".to_owned();
-    assert!(app.state.models.model_editor.commit_qualification_suite());
-    start_qualification_execution(&mut app.state.model_editor_parts())
+    populate_operating_point_suite(&mut app.state.model_editor);
+    app.state.model_editor.qualification_authoring.model_section = "TT".to_owned();
+    assert!(app.state.model_editor.commit_qualification_suite());
+    start_qualification_execution(&mut model_editor_parts(&mut app))
         .expect("start desktop qualification");
-    advance_qualification_execution(&mut app.state.model_editor_parts());
+    advance_qualification_execution(&mut model_editor_parts(&mut app));
 
     let draft = app
         .state
-        .models
         .model_editor
         .draft
         .as_mut()
@@ -349,7 +343,6 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
     let sibling_digest = draft.base_source_digest;
     let sibling_source_id = draft.source_id;
     let library = app
-        .state
         .model
         .model_library_manager
         .get_library_mut("multi-owned")
@@ -361,7 +354,7 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
         .model_qualification
         .insert("nch_owned".to_owned(), sibling_qualification.clone());
 
-    let mut manager = app.state.model.model_library_manager.clone();
+    let mut manager = app.model.model_library_manager.clone();
     let second = resolve_project_model_for_editor(&manager, "multi-owned", "pch_owned")
         .expect("resolve editable sibling");
     let mut changed_second = second.definition.clone();
@@ -402,10 +395,9 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
 
 #[test]
 fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model("first-owned-model", &definition())
         .expect("create first model");
@@ -415,23 +407,20 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         description: "Second project model".to_owned(),
         ..definition()
     };
-    app.state
-        .model
+    app.model
         .model_library_manager
         .create_project_model("second-owned-model", &second)
         .expect("create second model");
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "first-owned-model",
             "nch_owned",
-            app.state.model.workspace.content.project.revision(),
+            app.model.workspace.content.project.revision(),
         )
         .expect("open first candidate");
     app.state
-        .models
         .model_editor
         .draft
         .as_mut()
@@ -439,7 +428,7 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
         .description = "Unsaved first-model description".to_owned();
 
     let error = open_project_model(
-        &mut app.state.model_editor_parts(),
+        &mut model_editor_parts(&mut app),
         "second-owned-model",
         "pch_owned",
     )
@@ -450,7 +439,6 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     );
     let retained = app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -460,14 +448,13 @@ fn opening_a_different_model_never_replaces_an_unsaved_candidate() {
     assert_eq!(retained.description, "Unsaved first-model description");
 
     open_project_model(
-        &mut app.state.model_editor_parts(),
+        &mut model_editor_parts(&mut app),
         "first-owned-model",
         "nch_owned",
     )
     .expect("reselecting the same dirty candidate retains it");
     assert_eq!(
         app.state
-            .models
             .model_editor
             .draft
             .as_ref()
@@ -903,27 +890,24 @@ fn new_section_transaction_is_validated_and_rolls_back_on_duplicate_identity() {
 
 #[test]
 fn save_controller_publishes_once_and_reopens_the_committed_revision() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create project model fixture");
-    let starting_project_revision = app.state.model.workspace.content.project.revision();
-    let starting_execution_epoch = app.state.model.design_execution_epoch;
+    let starting_project_revision = app.model.workspace.content.project.revision();
+    let starting_execution_epoch = app.model.design_execution_epoch;
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_owned",
             starting_project_revision,
         )
         .expect("open editor");
     app.state
-        .models
         .model_editor
         .draft
         .as_mut()
@@ -934,20 +918,18 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         .expect("parameter")
         .value = "0.51".to_owned();
 
-    let committed_project_revision = app
-        .save_open_model_candidate()
-        .expect("publish model revision");
+    let committed_project_revision =
+        save_open_model_candidate(&mut app).expect("publish model revision");
     assert_eq!(
         committed_project_revision,
         starting_project_revision.next().expect("project revision")
     );
-    assert!(app.state.model.workspace.content.project_metadata_dirty);
+    assert!(app.model.workspace.content.project_metadata_dirty);
     assert_eq!(
-        app.state.model.design_execution_epoch,
+        app.model.design_execution_epoch,
         starting_execution_epoch.wrapping_add(1)
     );
     let library = app
-        .state
         .model
         .model_library_manager
         .get_library("owned-models")
@@ -959,7 +941,6 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     assert_eq!(library.models["nch_owned"].parameters["vth0"], 0.51);
     let reopened = app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -970,20 +951,19 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         ObjectRevision::new(2).expect("source revision")
     );
     assert!(!reopened.is_dirty());
-    assert!(app.state.models.model_editor.validation.is_some());
+    assert!(app.state.model_editor.validation.is_some());
 
     assert!(
-        app.save_open_model_candidate()
+        save_open_model_candidate(&mut app)
             .expect_err("unchanged draft must not publish another revision")
             .contains("no semantic changes")
     );
     assert_eq!(
-        app.state.model.workspace.content.project.revision(),
+        app.model.workspace.content.project.revision(),
         committed_project_revision
     );
     assert_eq!(
-        app.state
-            .model
+        app.model
             .model_library_manager
             .get_library("owned-models")
             .unwrap()
@@ -991,7 +971,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         Some(ObjectRevision::new(2).expect("source revision"))
     );
     assert_eq!(
-        app.state.model.design_execution_epoch,
+        app.model.design_execution_epoch,
         starting_execution_epoch.wrapping_add(1)
     );
 }
@@ -1021,35 +1001,24 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
             qualification: crate::state::model_library::ModelSectionQualification::Unqualified,
         });
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model_revision("sectioned", &revision, &ModelQualificationState::default())
         .expect("create sectioned revision");
-    let project_revision = app.state.model.workspace.content.project.revision();
+    let project_revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "sectioned",
             "nch_owned",
             project_revision,
         )
         .expect("open sectioned editor");
-    assert!(
-        !app.state
-            .models
-            .model_editor
-            .draft
-            .as_ref()
-            .unwrap()
-            .is_dirty()
-    );
+    assert!(!app.state.model_editor.draft.as_ref().unwrap().is_dirty());
     app.state
-        .models
         .model_editor
         .draft
         .as_mut()
@@ -1060,10 +1029,8 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .unwrap()
         .unit = "V".to_owned();
 
-    app.save_open_model_candidate()
-        .expect("save metadata-only revision");
+    save_open_model_candidate(&mut app).expect("save metadata-only revision");
     let library = app
-        .state
         .model
         .model_library_manager
         .get_library("sectioned")
@@ -1079,7 +1046,6 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         Some("V")
     );
     let cards = app
-        .state
         .model
         .model_library_manager
         .reference_process_model_cards(crate::product::ProcessCorner::TT)
@@ -1240,34 +1206,31 @@ fn advanced_qualification_authoring_builds_executable_analysis_contracts() {
 
 #[test]
 fn cooperative_qualification_publishes_only_a_complete_platform_run() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.model.workspace.content.project.revision();
+    let revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
         )
         .expect("open editor");
-    populate_operating_point_suite(&mut app.state.models.model_editor);
+    populate_operating_point_suite(&mut app.state.model_editor);
     assert!(
-        app.state.models.model_editor.commit_qualification_suite(),
+        app.state.model_editor.commit_qualification_suite(),
         "{:?}",
-        app.state.models.model_editor.qualification_authoring.error
+        app.state.model_editor.qualification_authoring.error
     );
-    assert!(start_qualification_execution(&mut app.state.model_editor_parts()).is_ok());
+    assert!(start_qualification_execution(&mut model_editor_parts(&mut app)).is_ok());
     assert!(
         app.state
-            .models
             .model_editor
             .draft
             .as_ref()
@@ -1277,15 +1240,9 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
             .is_empty()
     );
 
-    advance_qualification_execution(&mut app.state.model_editor_parts());
-    assert!(
-        app.state
-            .models
-            .model_editor
-            .qualification_execution
-            .is_none()
-    );
-    let draft = app.state.models.model_editor.draft.as_ref().expect("draft");
+    advance_qualification_execution(&mut model_editor_parts(&mut app));
+    assert!(app.state.model_editor.qualification_execution.is_none());
+    let draft = app.state.model_editor.draft.as_ref().expect("draft");
     assert_eq!(draft.qualification.platform_runs.len(), 1);
     assert!(draft.qualification.evidence.is_empty());
     assert!(draft.qualification_is_dirty());
@@ -1293,45 +1250,42 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
 
 #[test]
 fn selected_vector_rerun_executes_only_its_complete_suite() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .unwrap();
-    let revision = app.state.model.workspace.content.project.revision();
+    let revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
         )
         .unwrap();
-    populate_operating_point_suite(&mut app.state.models.model_editor);
-    assert!(app.state.models.model_editor.commit_qualification_suite());
-    populate_operating_point_suite(&mut app.state.models.model_editor);
+    populate_operating_point_suite(&mut app.state.model_editor);
+    assert!(app.state.model_editor.commit_qualification_suite());
+    populate_operating_point_suite(&mut app.state.model_editor);
     {
-        let fields = &mut app.state.models.model_editor.qualification_authoring;
+        let fields = &mut app.state.model_editor.qualification_authoring;
         fields.suite_id = "dc-second".to_owned();
         fields.suite_name = "Second DC suite".to_owned();
         fields.vector_id = "second-vector".to_owned();
         fields.vector_name = "Second vector".to_owned();
     }
-    assert!(app.state.models.model_editor.commit_qualification_suite());
+    assert!(app.state.model_editor.commit_qualification_suite());
 
     start_qualification_vector_execution(
-        &mut app.state.model_editor_parts(),
+        &mut model_editor_parts(&mut app),
         "dc-second",
         "second-vector",
     )
     .unwrap();
     assert_eq!(
         app.state
-            .models
             .model_editor
             .qualification_execution
             .as_ref()
@@ -1339,12 +1293,12 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
             .suite_ids,
         vec!["dc-second".to_owned()]
     );
-    assert!(cancel_qualification_execution(
-        &mut app.state.model_editor_parts()
-    ));
+    assert!(cancel_qualification_execution(&mut model_editor_parts(
+        &mut app
+    )));
     assert!(
         start_qualification_vector_execution(
-            &mut app.state.model_editor_parts(),
+            &mut model_editor_parts(&mut app),
             "dc-second",
             "missing-vector"
         )
@@ -1385,30 +1339,28 @@ fn populate_complete_promotion_candidate(editor: &mut ModelEditorState) {
 
 #[test]
 fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.open_project_session();
-    app.state
-        .model
+    let mut app = harness();
+    app.open_project_session();
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition())
         .expect("create model");
-    let revision = app.state.model.workspace.content.project.revision();
+    let revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
         )
         .expect("open editor");
-    populate_operating_point_suite(&mut app.state.models.model_editor);
-    assert!(app.state.models.model_editor.commit_qualification_suite());
-    assert!(start_qualification_execution(&mut app.state.model_editor_parts()).is_ok());
-    advance_qualification_execution(&mut app.state.model_editor_parts());
+    populate_operating_point_suite(&mut app.state.model_editor);
+    assert!(app.state.model_editor.commit_qualification_suite());
+    assert!(start_qualification_execution(&mut model_editor_parts(&mut app)).is_ok());
+    advance_qualification_execution(&mut model_editor_parts(&mut app));
 
-    let draft = app.state.models.model_editor.draft.as_mut().expect("draft");
+    let draft = app.state.model_editor.draft.as_mut().expect("draft");
     let desktop = draft.qualification.platform_runs[0].clone();
     let mut webassembly = desktop.clone();
     webassembly.platform = QualificationPlatform::WebAssembly;
@@ -1434,18 +1386,12 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .evidence
         .insert(0, foreign_identity_evidence);
 
-    app.state.models.model_editor.begin_promotion_review();
+    app.state.model_editor.begin_promotion_review();
     assert_eq!(
-        app.state
-            .models
-            .model_editor
-            .promotion_candidate
-            .evidence_id,
-        exact_evidence_id,
+        app.state.model_editor.promotion_candidate.evidence_id, exact_evidence_id,
         "promotion prefill must include source_id in its exact-source projection"
     );
     app.state
-        .models
         .model_editor
         .draft
         .as_mut()
@@ -1453,11 +1399,10 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .qualification
         .evidence
         .retain(|evidence| evidence.id != "foreign-source-evidence");
-    populate_complete_promotion_candidate(&mut app.state.models.model_editor);
-    assert!(app.state.models.model_editor.commit_release_candidate());
+    populate_complete_promotion_candidate(&mut app.state.model_editor);
+    assert!(app.state.model_editor.commit_release_candidate());
     let candidate = app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
@@ -1473,22 +1418,16 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
 
     let before_duplicate = app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
         .expect("draft")
         .qualification
         .clone();
-    app.state
-        .models
-        .model_editor
-        .promotion_candidate
-        .candidate_id = "conflicting-candidate".to_owned();
-    assert!(!app.state.models.model_editor.commit_release_candidate());
+    app.state.model_editor.promotion_candidate.candidate_id = "conflicting-candidate".to_owned();
+    assert!(!app.state.model_editor.commit_release_candidate());
     assert_eq!(
         app.state
-            .models
             .model_editor
             .draft
             .as_ref()
@@ -1503,20 +1442,17 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
     };
     assert!(
         !app.state
-            .models
             .model_editor
             .commit_promotion(&candidate.identity.id, &invalid_correlation),
         "the authoritative promotion transaction must fail closed when retained correlation state is invalid"
     );
     assert!(
         app.state
-            .models
             .model_editor
             .commit_promotion(&candidate.identity.id, &ModelCorrelationState::default())
     );
     let qualification = &app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()

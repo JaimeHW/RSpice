@@ -6,10 +6,12 @@ use std::path::PathBuf;
 
 use egui::Color32;
 
+use crate::product::ObjectRevision;
 use crate::state::model_library::{DeviceModel, ModelLibrary, ModelType};
 use crate::state::pdk_config::PdkConfig;
 use crate::state::{Component, ComponentType, ModelsPage, Point};
 use crate::workbench::app_state::Model;
+use crate::workbench::documents::model_editor::{ModelEditorParts, save_open_candidate};
 use crate::workbench::framework::feature::harness::FeatureHarness;
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::WorkbenchSession;
@@ -24,6 +26,28 @@ pub(crate) fn harness() -> FeatureHarness<ModelsFeature> {
     FeatureHarness::with_model(
         Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
         WorkbenchSession::default(),
+    )
+}
+
+/// The parts opening a model in the editor writes, over the harness.
+pub(crate) fn model_editor_parts(
+    harness: &mut FeatureHarness<ModelsFeature>,
+) -> ModelEditorParts<'_> {
+    harness
+        .state
+        .model_editor_parts(&mut harness.model, &mut harness.wb, &harness.platform)
+}
+
+/// Save the model editor's open candidate as one guarded project revision,
+/// in the feature's context, as the Model Editor's own save does.
+pub(crate) fn save_open_model_candidate(
+    harness: &mut FeatureHarness<ModelsFeature>,
+) -> Result<ObjectRevision, String> {
+    let cx = &mut harness.cx();
+    save_open_candidate(
+        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
+        &mut cx.runs.preflight,
+        cx.handles.run_controller,
     )
 }
 

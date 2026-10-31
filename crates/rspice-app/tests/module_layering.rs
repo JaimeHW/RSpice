@@ -997,7 +997,10 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // These name `RSpiceApp` itself, so they retire with the `&mut RSpiceApp`
     // burndown, not with a module move.
     ("documents/code_workspace", "app", 5),
-    ("documents/model_editor", "app", 1),
+    // The model editor document's tests run over the models feature on its
+    // own, and the feature builds that harness, as the results feature's test
+    // host holds the slot its parts run against.
+    ("documents/model_editor", "models", 1),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
