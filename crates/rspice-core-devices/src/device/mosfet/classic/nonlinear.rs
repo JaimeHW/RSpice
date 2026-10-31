@@ -92,6 +92,10 @@ impl Mosfet {
     }
 
     pub(in crate::device::mosfet) fn retire_startup_state(&mut self) {
+        // A held `OFF` instance counted every load of its hold; the count
+        // means nothing once the state is spent, and a checkpoint accepts at
+        // most the two a seed serves.
+        self.initial_off_seed_evaluations = 0;
         self.initial_off_seed_pending = false;
         self.set_operating_point_startup(None);
     }
