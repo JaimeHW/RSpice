@@ -418,8 +418,17 @@ mod artifact_publication_tests {
             "an explicit valid TMAX overrides both defaults"
         );
         assert!(
-            rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0e-3, None, Some(0.0))
-                .is_err()
+            matches!(rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0e-3, None, Some(0.0)), Ok(value) if value == 1.0e-6),
+            "a zero TMAX is not given, as ngspice, LTspice and QSPICE read it"
+        );
+        assert!(
+            rspice_core::execution::resolve_transient_maximum_step(
+                1.0e-6,
+                1.0e-3,
+                None,
+                Some(-1.0e-6)
+            )
+            .is_err()
         );
         assert!(
             rspice_core::execution::resolve_transient_maximum_step(1.0e-6, 1.0, Some(1.0), None)

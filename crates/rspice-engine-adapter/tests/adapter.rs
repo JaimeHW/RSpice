@@ -1705,7 +1705,7 @@ fn alter_axes_are_explicitly_unsupported() {
 fn invalid_explicit_transient_tmax_is_a_bounded_configuration_failure() {
     let job = Job::new("invalid-transient-tmax");
     let response = job.execute(
-        "invalid TMAX\nV1 in 0 1\nR1 in 0 1k\n.tran 1u 1m 0 0\n.end\n",
+        "invalid TMAX\nV1 in 0 1\nR1 in 0 1k\n.tran 1u 1m 0 -1u\n.end\n",
         "transient",
     );
     assert_eq!(response["status"], "failed", "response: {response}");
