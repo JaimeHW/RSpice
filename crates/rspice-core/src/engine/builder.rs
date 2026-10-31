@@ -394,6 +394,7 @@ fn with_intended_master<'n>(
     refusal
 }
 
+mod geometry_scale;
 mod model_policy;
 pub(crate) use model_policy::without_repeated_topology_reports;
 use model_policy::*;
@@ -5568,7 +5569,7 @@ impl Engine {
         resistor_name: &str,
     ) -> Result<Option<ResolvedResistorParameters>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        let flattened = flatten_netlist_with_models(netlist)
+        let mut flattened = flatten_netlist_with_models(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
         let mut effective_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
@@ -5578,6 +5579,12 @@ impl Engine {
             effective_netlist.models.extend(flattened.scoped_models);
             &effective_netlist
         };
+
+        geometry_scale::scale_instance_geometry(
+            &mut flattened.elements,
+            netlist,
+            engine.config.spice_dialect,
+        );
 
         let Some(element) = flattened
             .elements
@@ -5694,7 +5701,7 @@ impl Engine {
         capacitor_name: &str,
     ) -> Result<Option<f64>, SimulationError> {
         let engine = self.resolved_for_netlist(netlist);
-        let flattened = flatten_netlist_with_models(netlist)
+        let mut flattened = flatten_netlist_with_models(netlist)
             .map_err(|e| SimulationError::Netlist(format!("Flattening error: {}", e)))?;
         let mut effective_netlist;
         let netlist = if flattened.scoped_models.is_empty() {
@@ -5704,6 +5711,12 @@ impl Engine {
             effective_netlist.models.extend(flattened.scoped_models);
             &effective_netlist
         };
+
+        geometry_scale::scale_instance_geometry(
+            &mut flattened.elements,
+            netlist,
+            engine.config.spice_dialect,
+        );
 
         let Some(element) = flattened
             .elements
@@ -5753,7 +5766,7 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         netlist.params.restart_statistical_stream();
-        let flattened = flatten_netlist_with_models_config_with_abort(
+        let mut flattened = flatten_netlist_with_models_config_with_abort(
             netlist,
             FlattenerConfig {
                 max_depth: engine.config.resource_limits.max_hierarchy_depth,
@@ -5776,6 +5789,11 @@ impl Engine {
 
         let resolution = ModelResolution::new(netlist, &NoAbort);
         let netlist = &resolution;
+        geometry_scale::scale_instance_geometry(
+            &mut flattened.elements,
+            netlist,
+            engine.config.spice_dialect,
+        );
         let mut inspection = ModelBinInspection::default();
         // Evaluate every declared bin card before resolving instances. This
         // makes the receipt a complete audit of the exact executable model
@@ -5862,7 +5880,7 @@ impl Engine {
         let engine = self.resolved_for_netlist(netlist);
         engine.ensure_valid_configuration()?;
         netlist.params.restart_statistical_stream();
-        let flattened = flatten_netlist_with_models_config_with_abort(
+        let mut flattened = flatten_netlist_with_models_config_with_abort(
             netlist,
             FlattenerConfig {
                 max_depth: engine.config.resource_limits.max_hierarchy_depth,
@@ -5883,6 +5901,11 @@ impl Engine {
             &effective_model_netlist
         };
         let resolution = ModelResolution::new(netlist, abort);
+        geometry_scale::scale_instance_geometry(
+            &mut flattened.elements,
+            &resolution,
+            engine.config.spice_dialect,
+        );
         let mut gaps = Vec::new();
         for element in &flattened.elements {
             let ElementKind::Mosfet {
@@ -6191,6 +6214,11 @@ impl Engine {
         };
         let resolution = ModelResolution::new(netlist, abort);
         let netlist = &resolution;
+        geometry_scale::scale_instance_geometry(
+            &mut flat_elements,
+            netlist,
+            self.config.spice_dialect,
+        );
         if let Some(tstop) = transient_stop_time {
             super::transient::noise::expand_transient_noise(
                 &mut flat_elements,

@@ -1035,10 +1035,9 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     }
                 }
                 (_, "SCALE") => {
-                    // Element geometry scale factor. ngspice exposes it as the
-                    // `scale` shell variable and reads it in device setup; the
-                    // geometric LEVEL=3 diode is the first RSpice device to derive
-                    // dimensions from it.
+                    // Element geometry scale factor (`.options scale`, Xyce's
+                    // `.options parser scale`). The circuit builder multiplies
+                    // the drawn instance geometry by it once flattened.
                     let value = expect_value(stream, line_num, params)?;
                     options.scale = Some(parse_positive_real_option("SCALE", value, line_num)?);
                 }
