@@ -392,29 +392,16 @@ impl Bjt {
     /// conducting transistors and one dead one is already asymmetric.
     ///
     /// ngspice states the load as thirteen branch quantities over seven
-    /// junction nodes, so it is not a node vector and cannot be realized whole:
-    /// `Vrci ≡ Vbci - Vbcx` identically, so `Vbci = -tVcrit` with `Vbcx = 0`
-    /// already contradicts the `Vrci = 0` it also asks for, and an instance
-    /// whose epi resistance is a milliohm would open on a kiloamp. Pinning
-    /// `Vbci = Vbcx = 0` gives up the one target the model barely reads — the
-    /// intrinsic B-C junction carries no forward current at either 0 or
-    /// `-tVcrit`, and the transport term this load exists to create comes from
-    /// `Vbei` — and buys back every resistor drop vbicload.c declares: `Vrci`,
-    /// `Vrbi` and `Vrbp` all fall out at zero, so neither genuinely nonlinear
-    /// parasitic (the VO/GAMM/HRCF epi resistance, the base-width-modulated
-    /// RBI) carries current.
-    ///
-    /// The four external drops cannot follow: six constraints over seven nodes
-    /// leave one degree of freedom, a common shift no internal branch sees, and
-    /// the terminals are wherever the circuit put them. Their companions are
-    /// exact regardless — the branches are linear — so this is free except on a
-    /// self-heating instance, whose thermal row reads the power sum. That sum is
-    /// quadratic in the parasitic drops, so a drop this load invents is watts of
-    /// fictitious dissipation: on `RS = 1 Ω` with the substrate a volt away, it
-    /// is hundreds of kelvin, and the temperature walks away from an otherwise
-    /// converged operating point. A self-heating instance therefore keeps the
-    /// ordinary limited load, which is the one case where a node-space port
-    /// cannot reproduce vbicload.c.
+    /// junction nodes, so it is not a node vector: `Vrci ≡ Vbci - Vbcx`
+    /// identically, and `Vbci = -tVcrit` with `Vbcx = 0` contradicts the
+    /// `Vrci = 0` it also asks for. The six junction targets are what the node
+    /// vector realizes; the seven resistor drops are the ones vbicload.c
+    /// declares, zero, because the load evaluates every parasitic branch and the
+    /// power sum at the drops it is handed rather than at the nodes'
+    /// (`anchor_parasitics_at_drops`, `thermal_power_branch_about`). A
+    /// self-heating instance therefore opens like any other, with Vrth at zero.
+    /// VBIC 1.3 is the Xyce model, not vbicload.c, and keeps the ordinary
+    /// limited load.
     pub(in crate::device::semiconductor::bjt) fn vbic_startup_load_internal_state(
         &self,
         raw: [Value; INTERNAL_DIM],
@@ -424,14 +411,14 @@ impl Bjt {
         }
         let startup = if self.initial_off {
             VbicNonlinearBranchVoltages::default()
-        } else if self.thermal_model_enabled() {
+        } else if self.vbic_13 {
             return None;
         } else {
             let (_vt, vcrit) = self.vbic_limiting_parameters(0.0);
             VbicNonlinearBranchVoltages {
                 vbei: vcrit,
                 vbex: vcrit,
-                vbci: 0.0,
+                vbci: -vcrit,
                 vbcx: 0.0,
                 vbep: 0.0,
                 vbcp: -vcrit,

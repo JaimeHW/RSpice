@@ -2873,15 +2873,10 @@ mod tests {
         );
     }
 
-    /// A self-heating instance whose parasitic resistors carry no current in
-    /// the solution must not see them dissipate or couple temperature into
-    /// their rows, however far the junction limiter moved its internal nodes:
-    /// vbicload.c reads the resistor drops from the solution and limits only
-    /// the junctions. Here every internal node sits on its terminal, so each
-    /// drop is zero, and the limited junctions are realized by moving the
-    /// nodes by volts.
-    #[test]
-    fn a_limited_self_heating_load_reads_the_solution_resistor_drops() {
+    /// A promoted, self-heating LEVEL=4 instance on nodes 1-3, substrate 4,
+    /// thermal 5, with every parasitic resistance present; returns it and the
+    /// solution length.
+    fn self_heating_vbic() -> (Bjt, usize) {
         let mut params = std::collections::HashMap::new();
         for (key, value) in [
             ("LEVEL", 4.0),
@@ -2913,6 +2908,19 @@ mod tests {
         });
         let n = next - 1;
         assert!(bjt.thermal_model_enabled());
+        (bjt, n)
+    }
+
+    /// A self-heating instance whose parasitic resistors carry no current in
+    /// the solution must not see them dissipate or couple temperature into
+    /// their rows, however far the junction limiter moved its internal nodes:
+    /// vbicload.c reads the resistor drops from the solution and limits only
+    /// the junctions. Here every internal node sits on its terminal, so each
+    /// drop is zero, and the limited junctions are realized by moving the
+    /// nodes by volts.
+    #[test]
+    fn a_limited_self_heating_load_reads_the_solution_resistor_drops() {
+        let (mut bjt, n) = self_heating_vbic();
 
         let mut bias = vec![0.0; n];
         for (node, value) in [
@@ -2963,6 +2971,47 @@ mod tests {
                 thermal_row[terminal - 1].abs() < 1e-12,
                 "terminal {terminal} enters the heat row with {:e} W/V",
                 thermal_row[terminal - 1]
+            );
+        }
+    }
+
+    /// vbicload.c's MODEINITJCT load (lines 250-258) opens a non-OFF instance
+    /// at `Vbei = Vbex = tVcrit`, `Vbci = Vbcp = -tVcrit`, `Vbcx = Vbep = 0`
+    /// and `Vrth = 0` whatever the solution vector holds, self-heating or not.
+    #[test]
+    fn a_self_heating_vbic_opens_on_the_modeinitjct_load() {
+        let (mut bjt, n) = self_heating_vbic();
+        let mut bias = vec![0.0; n];
+        for (node, value) in [
+            (bjt.node_collector, 5.0),
+            (bjt.node_cx, 5.0),
+            (bjt.node_ci, 5.0),
+            (bjt.node_bp, 5.0),
+            (bjt.node_base, 2.5),
+            (bjt.node_bx, 2.5),
+            (bjt.node_bi, 2.5),
+            (bjt.node_rth, 40.0),
+        ] {
+            bias[node - 1] = value;
+        }
+        bjt.update(&bias);
+
+        let (_vt, vcrit) = bjt.vbic_limiting_parameters(0.0);
+        let mut state = [0.0; INTERNAL_DIM];
+        state.copy_from_slice(&bjt.mna_internal_state()[..INTERNAL_DIM]);
+        let opened = bjt.vbic_nonlinear_branch_voltages(state);
+        for (name, actual, expected) in [
+            ("Vbei", opened.vbei, vcrit),
+            ("Vbex", opened.vbex, vcrit),
+            ("Vbci", opened.vbci, -vcrit),
+            ("Vbcx", opened.vbcx, 0.0),
+            ("Vbep", opened.vbep, 0.0),
+            ("Vbcp", opened.vbcp, -vcrit),
+            ("Vrth", opened.vrth, 0.0),
+        ] {
+            assert!(
+                (actual - expected).abs() < 1e-9,
+                "{name} opened at {actual} instead of {expected}"
             );
         }
     }
