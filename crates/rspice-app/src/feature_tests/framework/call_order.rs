@@ -346,7 +346,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_check_and_save_dialog", "project"),
     ("render_connectivity_manager_dialog", "design"),
     ("features::render_dialog", "sheets"),
-    ("render_design_management_dialog", "project"),
+    ("ProjectFeature::render_design_management_dialog", "project"),
     ("render_selection_bulk_edit_dialog", "design"),
     (
         "ProjectFeature::render_project_revision_history_dialog",
@@ -1674,6 +1674,46 @@ fn the_new_project_dialog_draws_in_the_project_context_and_its_creation_is_answe
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
         PROJECT_CREATED,
+    );
+}
+
+/// What Design management hands the shell is design's Create hierarchy,
+/// opened as the dialog once opened it in place.
+const CREATE_HIERARCHY_OPENED: &[Step] = &[(
+    "OpenCreateHierarchy",
+    &[
+        "ProjectRequest::OpenCreateHierarchy => {",
+        "crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);",
+    ],
+)];
+
+/// Design management draws in the project feature's context, and the
+/// Create hierarchy it hands over is answered straight after it draws, in
+/// the step that drew it, so it opens in the frame it was asked for.
+#[test]
+fn the_design_management_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns()
+ {
+    let order = without_whitespace(DIALOG_ORDER);
+    let design_management = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"project.design_management\")"))
+        .expect("the shell's dialog order draws Design management");
+    assert!(
+        design_management.contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::render_design_management_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "Design management draws in the project feature's context, and what it raises is \
+         answered straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        CREATE_HIERARCHY_OPENED,
     );
 }
 

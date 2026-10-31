@@ -22,10 +22,11 @@ use crate::workbench::app::dialogs::project::configuration::{
 };
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
 use crate::workbench::app::{ConfirmationAction, RSpiceApp};
-use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::state::WorkbenchSession;
 
 /// Where a new configuration's view list and stop list come from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -223,13 +224,24 @@ fn name_id() -> Id {
 
 /// Bring the Project > Configuration page forward.
 pub(in crate::workbench) fn show_configuration_page(state: &mut AppState) {
-    if !state.platform.project_lifecycle.is_open() {
+    show_configuration_page_in(
+        &state.platform,
+        &mut state.workbench,
+        &mut state.project.project_page,
+    );
+}
+
+/// [`show_configuration_page`] over the parts it reads and writes.
+pub(in crate::workbench) fn show_configuration_page_in(
+    platform: &PlatformState,
+    wb: &mut WorkbenchSession,
+    project_page: &mut ProjectPage,
+) {
+    if !platform.project_lifecycle.is_open() {
         return;
     }
-    state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Project);
-    state.project.project_page = ProjectPage::Configuration;
+    wb.activate(crate::workbench::state::Workspace::Project);
+    *project_page = ProjectPage::Configuration;
 }
 
 /// The actions a configuration row offers, as menu buttons: the dialog the

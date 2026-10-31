@@ -26,10 +26,13 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::{property_row, property_row_problem, section_header};
 
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model, PlatformState};
+use crate::workbench::app_state::{DesignManagementHistoryEntry, Model, PlatformState};
+use crate::workbench::project::configuration_state::ConfigurationTab;
+use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::simulation::SimulationController;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
 const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
@@ -420,6 +423,21 @@ impl DesignManagementDialogState {
     }
 }
 
+/// What Design management draws and commits against, lent by the project
+/// feature's context for the one call: the dialog's own state, the Project
+/// page and Configuration tab it can bring forward, the model, the session,
+/// and the run tier a published change voids.
+pub(in crate::workbench) struct DesignManagementParts<'a> {
+    pub(in crate::workbench) dialog: &'a mut DesignManagementDialogState,
+    pub(in crate::workbench) project_page: &'a mut ProjectPage,
+    pub(in crate::workbench) configuration_tab: &'a mut ConfigurationTab,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) platform: &'a PlatformState,
+    pub(in crate::workbench) wb: &'a mut WorkbenchSession,
+    pub(in crate::workbench) runs: &'a mut RunsState,
+    pub(in crate::workbench) run_controller: &'a mut SimulationController,
+}
+
 /// Open Design management on its Sheets tab.
 pub(crate) fn open_design_management_dialog(
     dialog: &mut DesignManagementDialogState,
@@ -631,6 +649,7 @@ mod controller;
 mod manager;
 mod operations;
 mod subflows;
+pub(in crate::workbench) use controller::render_design_management_dialog;
 #[cfg(test)]
 mod tests;
 /// Reachable from the workbench so a surface that composes its own dialog body

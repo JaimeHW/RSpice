@@ -321,6 +321,9 @@ pub(crate) enum ProjectRequest {
     /// session, and write the outcome back into the dialog held open for it:
     /// closed once the project is created, the refusal stated when it is not.
     CreateProject,
+    /// Open Create hierarchy, which design owns, over the selection Design
+    /// management handed on when a move asked for a new child cell.
+    OpenCreateHierarchy,
 }
 
 impl Request for ProjectRequest {

@@ -3,7 +3,7 @@
     "design->code": 18,
     "design->results": 1,
     "project->code": 2,
-    "project->design": 15,
+    "project->design": 14,
     "simulate->design": 4
   },
   "lower->upper": {},
@@ -11,6 +11,6 @@
     "&RSpiceApp params outside shell": 210,
     "&mut RSpiceApp params outside shell": 395,
     "impl AppState methods outside session": 139,
-    "impl RSpiceApp methods outside shell": 85
+    "impl RSpiceApp methods outside shell": 81
   }
 }

@@ -469,6 +469,9 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
                 Err(error) => app.state.project.new_project.error = Some(error),
             }
         }
+        ProjectRequest::OpenCreateHierarchy => {
+            crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+        }
     }
 }
 

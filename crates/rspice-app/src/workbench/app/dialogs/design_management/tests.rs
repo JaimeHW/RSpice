@@ -2,6 +2,26 @@
 
 use super::operations::variant_connectivity_difference_count;
 use super::*;
+use crate::state::{ComponentType, Point};
+use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
+use crate::workbench::project::commands::ProjectRequest;
+
+/// Design management's parts over `app`, as the project feature's context
+/// lends them.
+fn parts(app: &mut RSpiceApp) -> DesignManagementParts<'_> {
+    let state = &mut app.state;
+    DesignManagementParts {
+        dialog: &mut state.project.design_management,
+        project_page: &mut state.project.project_page,
+        configuration_tab: &mut state.project.configuration.tab,
+        model: &mut state.model,
+        platform: &state.platform,
+        wb: &mut state.workbench,
+        runs: &mut state.runs,
+        run_controller: &mut app.simulation_controller,
+    }
+}
 
 #[test]
 fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation() {
@@ -31,7 +51,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
             ..Default::default()
         };
         let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-            app.render_design_management_dialog(ctx);
+            render_design_management_dialog(&mut parts(&mut app), ctx);
         });
         app.state.project.design_management.discard_confirmation = confirmed_before_edit;
         let key = |key, modifiers| egui::Event::Key {
@@ -51,7 +71,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
                 key(egui::Key::Escape, egui::Modifiers::NONE),
                 key(egui::Key::Enter, egui::Modifiers::NONE),
             ]),
-            |ctx| app.render_design_management_dialog(ctx),
+            |ctx| render_design_management_dialog(&mut parts(&mut app), ctx),
         );
         let draft = &app.state.project.design_management;
         assert_eq!(draft.page, DesignManagementPage::NewSheet);
@@ -60,7 +80,7 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
         assert!(draft.subflow_dirty());
 
         let _ = ctx.run_ui(raw_input(Vec::new()), |ctx| {
-            app.render_design_management_dialog(ctx);
+            render_design_management_dialog(&mut parts(&mut app), ctx);
         });
         assert_eq!(
             app.state.project.design_management.page,
@@ -143,7 +163,7 @@ fn connectivity_only_variant_comparison_detects_dnp_topology_change() {
         .expect("comparison variant");
 
     assert!(
-        variant_connectivity_difference_count(&state, reference, comparison)
+        variant_connectivity_difference_count(&state.model, reference, comparison)
             .expect("connectivity comparison")
             > 0
     );
@@ -178,4 +198,37 @@ fn design_management_opens_on_the_tab_a_row_asks_for() {
         app.state.project.design_management.active_tab,
         DesignManagementTab::Sheets
     );
+}
+
+/// Create hierarchy, which a move into a new child cell hands on, is opened
+/// by the shell where Design management once opened it in place: over the
+/// same complete instance-only selection, before the next frame draws.
+#[test]
+fn a_create_hierarchy_handed_to_the_shell_opens_where_it_opened_in_place() {
+    for handed in [false, true] {
+        let mut app = RSpiceApp::test_instance();
+        let schematic = &mut app.state.model.schematic;
+        let r1 = schematic.add_component(ComponentType::Resistor, Point::origin());
+        let r2 = schematic.add_component(ComponentType::Resistor, Point::new(80, 0));
+        schematic.add_component(ComponentType::Resistor, Point::new(160, 0));
+        schematic.add_wire(vec![Point::new(20, 0), Point::new(60, 0)]);
+        schematic.add_wire(vec![Point::new(100, 0), Point::new(140, 0)]);
+        schematic.session.editor.selection.select_component(r1);
+        schematic.session.editor.selection.select_component(r2);
+        assert!(app.state.model.create_hierarchy_available());
+
+        if handed {
+            app.state
+                .workbench
+                .outbox
+                .push(ProjectRequest::OpenCreateHierarchy);
+            app.after_contribution();
+        } else {
+            crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+        }
+
+        let dialog = &app.state.design.create_hierarchy;
+        assert!(dialog.open, "handed {handed}");
+        assert_eq!(app.state.prompt_text(), None, "handed {handed}");
+    }
 }

@@ -975,24 +975,19 @@ impl RSpiceApp {
 /// `?surface=design-management` URL. Ordinary opens traverse back to their
 /// exact Design source; direct deep links fail safely to the canonical Design
 /// workspace using a replacement history entry.
-pub(crate) fn close_design_management_dialog_route(state: &mut AppState) {
-    if state.workbench.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement
-    {
+pub(crate) fn close_design_management_dialog_route(wb: &mut crate::workbench::WorkbenchSession) {
+    if wb.current_route().surface_id() != crate::workbench::SurfaceId::DesignManagement {
         return;
     }
-    if state
-        .workbench
+    if wb
         .navigate_back(crate::workbench::RouteTransitionSource::User)
         .is_some()
     {
         return;
     }
     let fallback = crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design);
-    if let Err(error) = state
-        .workbench
-        .replace_route(fallback, crate::workbench::RouteTransitionSource::User)
-    {
-        state.prompt(format!("Could not close Design Management: {error}"));
+    if let Err(error) = wb.replace_route(fallback, crate::workbench::RouteTransitionSource::User) {
+        wb.prompt(format!("Could not close Design Management: {error}"));
     }
 }
 
@@ -2048,7 +2043,7 @@ mod tests {
             Some(BrowserHistoryEffect::Push(manager))
         );
 
-        close_design_management_dialog_route(&mut state);
+        close_design_management_dialog_route(&mut state.workbench);
         assert_eq!(state.workbench.current_route(), design);
         assert_eq!(
             state.workbench.take_browser_history_effect(),
@@ -2063,7 +2058,7 @@ mod tests {
             .replace_route(manager, RouteTransitionSource::Restore)
             .expect("direct manager deep link restores");
         let _ = state.workbench.take_browser_history_effect();
-        close_design_management_dialog_route(&mut state);
+        close_design_management_dialog_route(&mut state.workbench);
         assert_eq!(state.workbench.current_route(), design);
         assert_eq!(
             state.workbench.take_browser_history_effect(),

@@ -7,492 +7,452 @@
 use super::controller::validate_design_management_page;
 use super::widgets::parse_reserved_ranges;
 use super::*;
+use crate::workbench::project::commands::ProjectRequest;
 
-impl RSpiceApp {
-    pub(super) fn commit_design_management_subflow(
-        &mut self,
-        page: DesignManagementPage,
-    ) -> Result<(), String> {
-        validate_design_management_page(&self.state, page)?;
-        if page == DesignManagementPage::MoveSelection
-            && self
-                .state
-                .project
-                .design_management
-                .inputs
-                .move_hierarchy_effect
-                == MoveHierarchyEffect::CreateChildCell
-        {
-            if self.state.project.design_management.dirty() {
-                return Err(
-                    "Apply the pending Design Management draft before transferring this selection to Create hierarchy."
-                        .to_owned(),
-                );
-            }
-            if !self.state.model.create_hierarchy_available() {
-                return Err(
-                    "Create hierarchy requires the retained complete instance-only selection and a writable active schematic."
-                        .to_owned(),
-                );
-            }
-            self.state.project.design_management.close_and_discard();
-            crate::workbench::app::close_design_management_dialog_route(&mut self.state);
-            crate::workbench::app::dialogs::hierarchy::create::open_create_hierarchy_dialog(
-                &mut self.state,
+pub(super) fn commit_design_management_subflow(
+    parts: &mut DesignManagementParts<'_>,
+    page: DesignManagementPage,
+) -> Result<(), String> {
+    validate_design_management_page(parts.dialog, parts.model, page)?;
+    if page == DesignManagementPage::MoveSelection
+        && parts.dialog.inputs.move_hierarchy_effect == MoveHierarchyEffect::CreateChildCell
+    {
+        if parts.dialog.dirty() {
+            return Err(
+                "Apply the pending Design Management draft before transferring this selection to Create hierarchy."
+                    .to_owned(),
             );
-            return Ok(());
         }
-        let owner_key = self.state.project.design_management.owner_key.clone();
-        let inputs = self.state.project.design_management.inputs.clone();
-        let selection = self
-            .state
-            .project
-            .design_management
-            .selection_object_ids
-            .clone();
-        let all_objects = self.state.project.design_management.all_object_ids.clone();
+        if !parts.model.create_hierarchy_available() {
+            return Err(
+                "Create hierarchy requires the retained complete instance-only selection and a writable active schematic."
+                    .to_owned(),
+            );
+        }
+        parts.dialog.close_and_discard();
+        crate::workbench::app::close_design_management_dialog_route(parts.wb);
+        // Create hierarchy is design's: the shell opens it as this dialog returns.
+        parts.wb.outbox.push(ProjectRequest::OpenCreateHierarchy);
+        return Ok(());
+    }
+    let owner_key = parts.dialog.owner_key.clone();
+    let inputs = parts.dialog.inputs.clone();
+    let selection = parts.dialog.selection_object_ids.clone();
+    let all_objects = parts.dialog.all_object_ids.clone();
 
-        // An operation reports only what it produced that the manager's own
-        // tabs do not show — a created-object count, a difference count, a
-        // finding count. That it completed is reported by its page closing.
-        let (tab, outcome) = match page {
-            DesignManagementPage::Manager => {
-                return Err("The manager publishes through its reviewed primary action.".to_owned());
-            }
-            DesignManagementPage::NewSheet => {
-                let personal = self
-                    .state
-                    .model
-                    .preferences
-                    .drawing_sheet_personal_preferences();
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let mut page_format = inputs
-                    .sheet_page_format
+    // An operation reports only what it produced that the manager's own
+    // tabs do not show — a created-object count, a difference count, a
+    // finding count. That it completed is reported by its page closing.
+    let (tab, outcome) = match page {
+        DesignManagementPage::Manager => {
+            return Err("The manager publishes through its reviewed primary action.".to_owned());
+        }
+        DesignManagementPage::NewSheet => {
+            let personal = parts.model.preferences.drawing_sheet_personal_preferences();
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let mut page_format = inputs
+                .sheet_page_format
+                .without_project_owned_title_values();
+            let selected_personal_id = match &page_format.authored_size {
+                crate::state::AuthoredDrawingSheetSize::Custom { snapshot } => {
+                    snapshot.preset_id.clone()
+                }
+                crate::state::AuthoredDrawingSheetSize::Standard { .. } => None,
+            };
+            if let Some(personal_preset) = selected_personal_id
+                .as_deref()
+                .filter(|id| draft.drawing_sheet_settings().find_preset(id).is_none())
+                .and_then(|id| {
+                    personal
+                        .presets
+                        .iter()
+                        .find(|preset| preset.id.eq_ignore_ascii_case(id))
+                })
+            {
+                page_format =
+                    crate::workbench::app_state::Model::capture_personal_preset_into_project(
+                        draft,
+                        personal_preset,
+                    )?
+                    .format
                     .without_project_owned_title_values();
-                let selected_personal_id = match &page_format.authored_size {
-                    crate::state::AuthoredDrawingSheetSize::Custom { snapshot } => {
-                        snapshot.preset_id.clone()
-                    }
-                    crate::state::AuthoredDrawingSheetSize::Standard { .. } => None,
-                };
-                if let Some(personal_preset) = selected_personal_id
-                    .as_deref()
-                    .filter(|id| draft.drawing_sheet_settings().find_preset(id).is_none())
-                    .and_then(|id| {
-                        personal
-                            .presets
-                            .iter()
-                            .find(|preset| preset.id.eq_ignore_ascii_case(id))
-                    })
-                {
-                    page_format =
-                        crate::workbench::app_state::Model::capture_personal_preset_into_project(
-                            draft,
-                            personal_preset,
-                        )?
-                        .format
-                        .without_project_owned_title_values();
-                }
-                let settings = draft.drawing_sheet_settings().clone();
-                if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask
-                    && settings.remember_last_explicit_format
-                    && page_format.inheritance == DrawingSheetInheritance::Explicit
-                    && settings.last_explicit_format.as_ref() != Some(&page_format)
-                {
-                    let mut updated = settings;
-                    updated.last_explicit_format = Some(page_format.clone());
-                    draft
-                        .update_drawing_sheet_settings(draft.revision(), updated)
-                        .map_err(|error| error.to_string())?;
-                }
-                let catalog = draft
-                    .ensure_sheet_catalog(&owner_key)
-                    .map_err(|error| error.to_string())?;
-                let used_pages = catalog
-                    .sheets()
-                    .iter()
-                    .filter_map(|sheet| sheet.definition().explicit_page_number)
-                    .collect::<BTreeSet<_>>();
-                let explicit_page_number =
-                    (1..=u32::MAX)
-                        .find(|page| !used_pages.contains(page))
-                        .ok_or_else(|| "No free sheet page number remains.".to_owned())?;
-                let id = catalog
-                    .create_sheet_with_page_format(
-                        SheetDefinition {
-                            name: inputs.sheet_name.trim().to_owned(),
-                            template: inputs.sheet_template,
-                            port_policy: inputs.sheet_port_policy,
-                            explicit_page_number: Some(explicit_page_number),
-                        },
-                        inputs.sheet_insert_after,
-                        page_format,
-                    )
-                    .map_err(|error| error.to_string())?;
-                if catalog.object_assignments().is_empty() && !all_objects.is_empty() {
-                    catalog
-                        .assign_objects(catalog.revision(), id, all_objects)
-                        .map_err(|error| error.to_string())?;
-                }
-                (DesignManagementTab::Sheets, None)
             }
-            DesignManagementPage::MoveSelection => {
-                let destination = inputs
-                    .move_destination
-                    .ok_or_else(|| "Destination sheet is required.".to_owned())?;
-                let connectivity = self.state.model.selected_component_sheet_move_plan()?;
-                if connectivity.source_component_ids != selection {
-                    return Err(
-                        "The retained selection changed while the sheet move was being reviewed. Close and reopen Design Management."
-                            .to_owned(),
-                    );
-                }
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let catalog = draft
-                    .sheet_catalog_mut(&owner_key)
-                    .ok_or_else(|| "No governed sheet catalog is available.".to_owned())?;
-                let active = catalog.active_sheet_id();
+            let settings = draft.drawing_sheet_settings().clone();
+            if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask
+                && settings.remember_last_explicit_format
+                && page_format.inheritance == DrawingSheetInheritance::Explicit
+                && settings.last_explicit_format.as_ref() != Some(&page_format)
+            {
+                let mut updated = settings;
+                updated.last_explicit_format = Some(page_format.clone());
+                draft
+                    .update_drawing_sheet_settings(draft.revision(), updated)
+                    .map_err(|error| error.to_string())?;
+            }
+            let catalog = draft
+                .ensure_sheet_catalog(&owner_key)
+                .map_err(|error| error.to_string())?;
+            let used_pages = catalog
+                .sheets()
+                .iter()
+                .filter_map(|sheet| sheet.definition().explicit_page_number)
+                .collect::<BTreeSet<_>>();
+            let explicit_page_number = (1..=u32::MAX)
+                .find(|page| !used_pages.contains(page))
+                .ok_or_else(|| "No free sheet page number remains.".to_owned())?;
+            let id = catalog
+                .create_sheet_with_page_format(
+                    SheetDefinition {
+                        name: inputs.sheet_name.trim().to_owned(),
+                        template: inputs.sheet_template,
+                        port_policy: inputs.sheet_port_policy,
+                        explicit_page_number: Some(explicit_page_number),
+                    },
+                    inputs.sheet_insert_after,
+                    page_format,
+                )
+                .map_err(|error| error.to_string())?;
+            if catalog.object_assignments().is_empty() && !all_objects.is_empty() {
                 catalog
-                    .reconcile_object_assignments(catalog.revision(), all_objects, active)
+                    .assign_objects(catalog.revision(), id, all_objects)
                     .map_err(|error| error.to_string())?;
-                let source = connectivity
-                    .source_component_ids
-                    .first()
-                    .and_then(|object_id| catalog.sheet_for_object(*object_id))
-                    .ok_or_else(|| {
-                        "The selected instances have no governed source-sheet identity.".to_owned()
-                    })?;
-                if inputs.move_boundary_policy == MoveBoundaryPolicy::ReviewedGlobalAliases {
-                    let mut settings = catalog.settings().clone();
-                    settings.connector_policy =
-                        crate::state::OffSheetConnectorPolicy::NamedConnectorsCompatibility;
-                    if settings != *catalog.settings() {
-                        catalog
-                            .set_settings(catalog.revision(), settings)
-                            .map_err(|error| error.to_string())?;
-                    }
-                }
-                // One owner builds the typed boundary contract, so the strip's
-                // "Move selection here" and this reviewed page cannot disagree
-                // about what a boundary net becomes.
-                let boundary_resolution =
-                    crate::workbench::app_state::Model::sheet_move_boundary_resolution(
-                        &connectivity,
-                        source,
-                        destination,
-                    );
-                let moved = catalog
-                    .move_selection(MoveSelectionRequest {
-                        expected_catalog_revision: catalog.revision(),
-                        object_ids: connectivity.moved_object_ids,
-                        destination_sheet_id: destination,
-                        boundary_resolution,
-                    })
-                    .map_err(|error| error.to_string())?;
-                // The boundary ports are the part the author did not ask for.
-                (
-                    DesignManagementTab::Sheets,
-                    (!moved.created_port_ids.is_empty()).then(|| {
-                        format!(
-                            "{} boundary port{} created for the move",
-                            moved.created_port_ids.len(),
-                            if moved.created_port_ids.len() == 1 {
-                                ""
-                            } else {
-                                "s"
-                            }
-                        )
-                    }),
-                )
             }
-            DesignManagementPage::NewVariant => {
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                draft
-                    .variants_mut()
-                    .create(AssemblyVariantDraft {
-                        name: inputs.variant_name.trim().to_owned(),
-                        parent_id: inputs.variant_parent,
-                        inheritance: inputs.variant_inheritance,
-                        qualification_plan: inputs.variant_qualification,
-                        overrides: BTreeMap::new(),
-                    })
-                    .map_err(|error| error.to_string())?;
-                (DesignManagementTab::Variants, None)
+            (DesignManagementTab::Sheets, None)
+        }
+        DesignManagementPage::MoveSelection => {
+            let destination = inputs
+                .move_destination
+                .ok_or_else(|| "Destination sheet is required.".to_owned())?;
+            let connectivity = parts.model.selected_component_sheet_move_plan()?;
+            if connectivity.source_component_ids != selection {
+                return Err(
+                    "The retained selection changed while the sheet move was being reviewed. Close and reopen Design Management."
+                        .to_owned(),
+                );
             }
-            DesignManagementPage::CompareVariants => {
-                let reference = inputs
-                    .compare_reference
-                    .ok_or_else(|| "Reference variant is required.".to_owned())?;
-                let comparison = inputs
-                    .compare_target
-                    .ok_or_else(|| "Comparison variant is required.".to_owned())?;
-                let result = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_ref()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?
-                    .variants()
-                    .compare(reference, comparison)
-                    .map_err(|error| error.to_string())?;
-                let (difference_count, class_label) = match inputs.difference_classes {
-                    VariantDifferenceClasses::DevicesValuesDnpModels => {
-                        (result.differences.len(), "device/value/DNP/model")
-                    }
-                    VariantDifferenceClasses::ConnectivityOnly => (
-                        variant_connectivity_difference_count(&self.state, reference, comparison)?,
-                        "connectivity",
-                    ),
-                };
-                // The comparison has nowhere else to land: no tab lists it.
-                (
-                    DesignManagementTab::Variants,
-                    Some(format!(
-                        "{difference_count} {class_label} difference{}",
-                        if difference_count == 1 { "" } else { "s" }
-                    )),
-                )
-            }
-            DesignManagementPage::VariantMatrix => {
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let mut variants = draft.variants().clone();
-                let mut settings = variants.settings().clone();
-                settings.missing_replacement = inputs.missing_replacement;
-                settings.model_equivalence = inputs.model_equivalence;
-                let settings_changed = settings != *variants.settings();
-                if settings_changed {
-                    variants
-                        .set_settings(settings)
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let catalog = draft
+                .sheet_catalog_mut(&owner_key)
+                .ok_or_else(|| "No governed sheet catalog is available.".to_owned())?;
+            let active = catalog.active_sheet_id();
+            catalog
+                .reconcile_object_assignments(catalog.revision(), all_objects, active)
+                .map_err(|error| error.to_string())?;
+            let source = connectivity
+                .source_component_ids
+                .first()
+                .and_then(|object_id| catalog.sheet_for_object(*object_id))
+                .ok_or_else(|| {
+                    "The selected instances have no governed source-sheet identity.".to_owned()
+                })?;
+            if inputs.move_boundary_policy == MoveBoundaryPolicy::ReviewedGlobalAliases {
+                let mut settings = catalog.settings().clone();
+                settings.connector_policy =
+                    crate::state::OffSheetConnectorPolicy::NamedConnectorsCompatibility;
+                if settings != *catalog.settings() {
+                    catalog
+                        .set_settings(catalog.revision(), settings)
                         .map_err(|error| error.to_string())?;
                 }
-                let edits = variants
-                    .variants()
-                    .iter()
-                    .flat_map(|variant| {
-                        variant
-                            .definition()
-                            .overrides
-                            .iter()
-                            .filter_map(|(object, value)| {
-                                let in_scope = inputs.matrix_scope
-                                    == VariantMatrixScope::AllControlledInstances
-                                    || object.cell_view_key() == owner_key;
-                                in_scope.then(|| VariantMatrixEdit {
-                                    variant_id: variant.id(),
-                                    expected_revision: variant.revision(),
-                                    object: object.clone(),
-                                    replacement: match value {
-                                        crate::state::VariantObjectOverride::Substitute {
-                                            replacement,
-                                        } => Some(replacement.clone()),
-                                        crate::state::VariantObjectOverride::DoNotPopulate {
-                                            ..
-                                        } => None,
-                                    },
-                                })
-                            })
-                    })
-                    .collect::<Vec<_>>();
-                if !edits.is_empty() {
-                    match variants.apply_substitution_matrix(
-                        edits,
-                        inputs.missing_replacement,
-                        inputs.model_equivalence,
-                    ) {
-                        Ok(_) | Err(crate::state::DesignManagementError::NoChanges(_)) => {}
-                        Err(error) => return Err(error.to_string()),
-                    }
-                }
-                if !settings_changed {
-                    return Err(
-                        "The governed substitution policies and existing overrides are unchanged."
-                            .to_owned(),
-                    );
-                }
-                *draft.variants_mut() = variants;
-                (DesignManagementTab::Variants, None)
             }
-            DesignManagementPage::RenumberPreview => {
-                let design_management = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_ref()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let request = renumber_request(
-                    &self.state.model.workspace,
-                    &self.state.model.schematic,
-                    design_management,
-                    &owner_key,
-                    &inputs,
-                )?;
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let preview = draft
-                    .annotation()
-                    .preview_renumbering(&request)
-                    .map_err(|error| error.to_string())?;
-                let mapping_count = preview.mappings.len();
-                draft
-                    .annotation_mut()
-                    .commit_renumbering(&preview, &request)
-                    .map_err(|error| error.to_string())?;
-                (
-                    DesignManagementTab::Annotation,
-                    Some(format!(
-                        "{mapping_count} reference change{}",
-                        if mapping_count == 1 { "" } else { "s" }
-                    )),
-                )
-            }
-            DesignManagementPage::AnnotationPolicy => {
-                let ranges = parse_reserved_ranges(
-                    &inputs.reserved_ranges,
-                    &self.state.project.design_management,
-                )?;
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                let policy = draft.annotation().policy().clone();
-                let mut definition = policy.definition().clone();
-                definition.prefix_allocation = inputs.prefix_allocation;
-                definition.reserved_ranges = ranges;
-                definition.imported_ids = inputs.imported_ids;
-                draft
-                    .annotation_mut()
-                    .update_policy(policy.revision(), definition)
-                    .map_err(|error| error.to_string())?;
-                (DesignManagementTab::Annotation, None)
-            }
-            DesignManagementPage::HierarchyAudit => {
-                let resolution = self.state.model.workspace.resolve_hierarchy_with_active(
-                    &self.state.model.library_manager,
-                    &self.state.model.workspace.content.active_view,
-                    &self.state.model.schematic,
+            // One owner builds the typed boundary contract, so the strip's
+            // "Move selection here" and this reviewed page cannot disagree
+            // about what a boundary net becomes.
+            let boundary_resolution =
+                crate::workbench::app_state::Model::sheet_move_boundary_resolution(
+                    &connectivity,
+                    source,
+                    destination,
                 );
-                let configuration = match inputs.audit_configuration {
-                    Some(id) => {
-                        let configuration = self
-                            .state
-                            .model
-                            .workspace
-                            .content
-                            .configuration_sets
-                            .find(id)
-                            .ok_or_else(|| {
-                                "The selected configuration no longer exists.".to_owned()
-                            })?;
-                        HierarchyAuditConfiguration::ConfigurationSet {
-                            id,
-                            revision: configuration.revision(),
-                            semantic_digest: configuration.semantic_digest(),
-                        }
-                    }
-                    None => HierarchyAuditConfiguration::ActiveProject,
-                };
-                let subjects = hierarchy_audit_subjects(
-                    &resolution,
-                    inputs.audit_view_checks,
-                    &self.state.model.workspace.content.occurrence_path(),
-                );
-                let request = HierarchyAuditRequest {
-                    configuration,
-                    view_checks: match inputs.audit_view_checks {
-                        HierarchyViewChecks::AllDeclaredFallbacks => {
-                            crate::state::HierarchyViewChecks::AllDeclaredFallbacks
-                        }
-                        HierarchyViewChecks::SelectedHierarchy => {
-                            crate::state::HierarchyViewChecks::SelectedHierarchy
-                        }
-                    },
-                    protected_boundaries: match inputs.audit_protected_boundaries {
-                        ProtectedBoundaryChecks::SignaturesAndPins => {
-                            crate::state::ProtectedBoundaryChecks::ValidateSignaturesAndPins
-                        }
-                        ProtectedBoundaryChecks::PinsOnly => {
-                            crate::state::ProtectedBoundaryChecks::PinsOnly
-                        }
-                    },
-                    subjects,
-                    boundary_evidence: Vec::new(),
-                };
-                let draft = self
-                    .state
-                    .project
-                    .design_management
-                    .draft
-                    .as_mut()
-                    .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
-                draft
-                    .run_and_record_hierarchy_audit(&request)
-                    .map_err(|error| error.to_string())?;
-                let audit = draft
-                    .hierarchy_audits()
-                    .last()
-                    .ok_or_else(|| "The hierarchy audit was not recorded.".to_owned())?;
-                // The tab says "qualified" or "findings"; the counts are here.
-                (
-                    DesignManagementTab::Hierarchy,
-                    Some(format!(
-                        "{} subject{} audited · {} finding{}",
-                        audit.resolved_subjects(),
-                        if audit.resolved_subjects() == 1 {
+            let moved = catalog
+                .move_selection(MoveSelectionRequest {
+                    expected_catalog_revision: catalog.revision(),
+                    object_ids: connectivity.moved_object_ids,
+                    destination_sheet_id: destination,
+                    boundary_resolution,
+                })
+                .map_err(|error| error.to_string())?;
+            // The boundary ports are the part the author did not ask for.
+            (
+                DesignManagementTab::Sheets,
+                (!moved.created_port_ids.is_empty()).then(|| {
+                    format!(
+                        "{} boundary port{} created for the move",
+                        moved.created_port_ids.len(),
+                        if moved.created_port_ids.len() == 1 {
                             ""
                         } else {
                             "s"
-                        },
-                        audit.findings().len(),
-                        if audit.findings().len() == 1 { "" } else { "s" }
-                    )),
-                )
+                        }
+                    )
+                }),
+            )
+        }
+        DesignManagementPage::NewVariant => {
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            draft
+                .variants_mut()
+                .create(AssemblyVariantDraft {
+                    name: inputs.variant_name.trim().to_owned(),
+                    parent_id: inputs.variant_parent,
+                    inheritance: inputs.variant_inheritance,
+                    qualification_plan: inputs.variant_qualification,
+                    overrides: BTreeMap::new(),
+                })
+                .map_err(|error| error.to_string())?;
+            (DesignManagementTab::Variants, None)
+        }
+        DesignManagementPage::CompareVariants => {
+            let reference = inputs
+                .compare_reference
+                .ok_or_else(|| "Reference variant is required.".to_owned())?;
+            let comparison = inputs
+                .compare_target
+                .ok_or_else(|| "Comparison variant is required.".to_owned())?;
+            let result = parts
+                .dialog
+                .draft
+                .as_ref()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?
+                .variants()
+                .compare(reference, comparison)
+                .map_err(|error| error.to_string())?;
+            let (difference_count, class_label) = match inputs.difference_classes {
+                VariantDifferenceClasses::DevicesValuesDnpModels => {
+                    (result.differences.len(), "device/value/DNP/model")
+                }
+                VariantDifferenceClasses::ConnectivityOnly => (
+                    variant_connectivity_difference_count(parts.model, reference, comparison)?,
+                    "connectivity",
+                ),
+            };
+            // The comparison has nowhere else to land: no tab lists it.
+            (
+                DesignManagementTab::Variants,
+                Some(format!(
+                    "{difference_count} {class_label} difference{}",
+                    if difference_count == 1 { "" } else { "s" }
+                )),
+            )
+        }
+        DesignManagementPage::VariantMatrix => {
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let mut variants = draft.variants().clone();
+            let mut settings = variants.settings().clone();
+            settings.missing_replacement = inputs.missing_replacement;
+            settings.model_equivalence = inputs.model_equivalence;
+            let settings_changed = settings != *variants.settings();
+            if settings_changed {
+                variants
+                    .set_settings(settings)
+                    .map_err(|error| error.to_string())?;
             }
-        };
+            let edits = variants
+                .variants()
+                .iter()
+                .flat_map(|variant| {
+                    variant
+                        .definition()
+                        .overrides
+                        .iter()
+                        .filter_map(|(object, value)| {
+                            let in_scope = inputs.matrix_scope
+                                == VariantMatrixScope::AllControlledInstances
+                                || object.cell_view_key() == owner_key;
+                            in_scope.then(|| VariantMatrixEdit {
+                                variant_id: variant.id(),
+                                expected_revision: variant.revision(),
+                                object: object.clone(),
+                                replacement: match value {
+                                    crate::state::VariantObjectOverride::Substitute {
+                                        replacement,
+                                    } => Some(replacement.clone()),
+                                    crate::state::VariantObjectOverride::DoNotPopulate {
+                                        ..
+                                    } => None,
+                                },
+                            })
+                        })
+                })
+                .collect::<Vec<_>>();
+            if !edits.is_empty() {
+                match variants.apply_substitution_matrix(
+                    edits,
+                    inputs.missing_replacement,
+                    inputs.model_equivalence,
+                ) {
+                    Ok(_) | Err(crate::state::DesignManagementError::NoChanges(_)) => {}
+                    Err(error) => return Err(error.to_string()),
+                }
+            }
+            if !settings_changed {
+                return Err(
+                    "The governed substitution policies and existing overrides are unchanged."
+                        .to_owned(),
+                );
+            }
+            *draft.variants_mut() = variants;
+            (DesignManagementTab::Variants, None)
+        }
+        DesignManagementPage::RenumberPreview => {
+            let design_management = parts
+                .dialog
+                .draft
+                .as_ref()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let request = renumber_request(
+                &parts.model.workspace,
+                &parts.model.schematic,
+                design_management,
+                &owner_key,
+                &inputs,
+            )?;
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let preview = draft
+                .annotation()
+                .preview_renumbering(&request)
+                .map_err(|error| error.to_string())?;
+            let mapping_count = preview.mappings.len();
+            draft
+                .annotation_mut()
+                .commit_renumbering(&preview, &request)
+                .map_err(|error| error.to_string())?;
+            (
+                DesignManagementTab::Annotation,
+                Some(format!(
+                    "{mapping_count} reference change{}",
+                    if mapping_count == 1 { "" } else { "s" }
+                )),
+            )
+        }
+        DesignManagementPage::AnnotationPolicy => {
+            let ranges = parse_reserved_ranges(&inputs.reserved_ranges, &*parts.dialog)?;
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            let policy = draft.annotation().policy().clone();
+            let mut definition = policy.definition().clone();
+            definition.prefix_allocation = inputs.prefix_allocation;
+            definition.reserved_ranges = ranges;
+            definition.imported_ids = inputs.imported_ids;
+            draft
+                .annotation_mut()
+                .update_policy(policy.revision(), definition)
+                .map_err(|error| error.to_string())?;
+            (DesignManagementTab::Annotation, None)
+        }
+        DesignManagementPage::HierarchyAudit => {
+            let resolution = parts.model.workspace.resolve_hierarchy_with_active(
+                &parts.model.library_manager,
+                &parts.model.workspace.content.active_view,
+                &parts.model.schematic,
+            );
+            let configuration = match inputs.audit_configuration {
+                Some(id) => {
+                    let configuration = parts
+                        .model
+                        .workspace
+                        .content
+                        .configuration_sets
+                        .find(id)
+                        .ok_or_else(|| {
+                        "The selected configuration no longer exists.".to_owned()
+                    })?;
+                    HierarchyAuditConfiguration::ConfigurationSet {
+                        id,
+                        revision: configuration.revision(),
+                        semantic_digest: configuration.semantic_digest(),
+                    }
+                }
+                None => HierarchyAuditConfiguration::ActiveProject,
+            };
+            let subjects = hierarchy_audit_subjects(
+                &resolution,
+                inputs.audit_view_checks,
+                &parts.model.workspace.content.occurrence_path(),
+            );
+            let request = HierarchyAuditRequest {
+                configuration,
+                view_checks: match inputs.audit_view_checks {
+                    HierarchyViewChecks::AllDeclaredFallbacks => {
+                        crate::state::HierarchyViewChecks::AllDeclaredFallbacks
+                    }
+                    HierarchyViewChecks::SelectedHierarchy => {
+                        crate::state::HierarchyViewChecks::SelectedHierarchy
+                    }
+                },
+                protected_boundaries: match inputs.audit_protected_boundaries {
+                    ProtectedBoundaryChecks::SignaturesAndPins => {
+                        crate::state::ProtectedBoundaryChecks::ValidateSignaturesAndPins
+                    }
+                    ProtectedBoundaryChecks::PinsOnly => {
+                        crate::state::ProtectedBoundaryChecks::PinsOnly
+                    }
+                },
+                subjects,
+                boundary_evidence: Vec::new(),
+            };
+            let draft = parts
+                .dialog
+                .draft
+                .as_mut()
+                .ok_or_else(|| "The Design Management draft is unavailable.".to_owned())?;
+            draft
+                .run_and_record_hierarchy_audit(&request)
+                .map_err(|error| error.to_string())?;
+            let audit = draft
+                .hierarchy_audits()
+                .last()
+                .ok_or_else(|| "The hierarchy audit was not recorded.".to_owned())?;
+            // The tab says "qualified" or "findings"; the counts are here.
+            (
+                DesignManagementTab::Hierarchy,
+                Some(format!(
+                    "{} subject{} audited · {} finding{}",
+                    audit.resolved_subjects(),
+                    if audit.resolved_subjects() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    audit.findings().len(),
+                    if audit.findings().len() == 1 { "" } else { "s" }
+                )),
+            )
+        }
+    };
 
-        let dialog = &mut self.state.project.design_management;
-        dialog.page = DesignManagementPage::Manager;
-        dialog.active_tab = tab;
-        dialog.input_baseline = None;
-        dialog.error = None;
-        dialog.outcome = outcome;
-        dialog.discard_confirmation = false;
-        dialog.body_scroll_offset = 0.0;
-        Ok(())
-    }
+    let dialog = &mut *parts.dialog;
+    dialog.page = DesignManagementPage::Manager;
+    dialog.active_tab = tab;
+    dialog.input_baseline = None;
+    dialog.error = None;
+    dialog.outcome = outcome;
+    dialog.discard_confirmation = false;
+    dialog.body_scroll_offset = 0.0;
+    Ok(())
 }
 
 /// Collect every annotatable object with the hierarchy path the renumbering
@@ -573,12 +533,12 @@ pub(super) fn renumber_request(
 }
 
 pub(super) fn variant_connectivity_difference_count(
-    state: &AppState,
+    model: &Model,
     reference: AssemblyVariantId,
     comparison: AssemblyVariantId,
 ) -> Result<usize, String> {
-    let reference = variant_connectivity_signature(state, reference)?;
-    let comparison = variant_connectivity_signature(state, comparison)?;
+    let reference = variant_connectivity_signature(model, reference)?;
+    let comparison = variant_connectivity_signature(model, comparison)?;
     Ok(reference.symmetric_difference(&comparison).count())
 }
 
@@ -588,10 +548,10 @@ pub(super) fn variant_connectivity_difference_count(
 /// Comparing these partitions detects DNP and substitution topology effects
 /// without treating value/model-only changes as connectivity differences.
 pub(super) fn variant_connectivity_signature(
-    state: &AppState,
+    model: &Model,
     variant_id: AssemblyVariantId,
 ) -> Result<BTreeSet<Vec<String>>, String> {
-    let mut workspace = state.model.workspace.clone();
+    let mut workspace = model.workspace.clone();
     workspace
         .content
         .design_management
@@ -600,13 +560,13 @@ pub(super) fn variant_connectivity_signature(
         .map_err(|error| error.to_string())?;
     let projection = workspace
         .configuration_execution_projection(
-            &state.model.library_manager,
-            &state.model.workspace.content.active_view,
-            &state.model.schematic,
+            &model.library_manager,
+            &model.workspace.content.active_view,
+            &model.schematic,
         )
         .map_err(|error| error.to_string())?;
     let hierarchy = rspice_design::hierarchy::HierarchySource::from_design_projection(
-        state.model.library_manager.catalog(),
+        model.library_manager.catalog(),
         &projection,
     );
     let mut groups = BTreeMap::<(String, String), Vec<String>>::new();

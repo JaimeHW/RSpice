@@ -13,6 +13,9 @@ mod revision_history;
 pub(crate) mod workspace_state;
 
 use crate::state::ViewType;
+use crate::workbench::app::dialogs::design_management::{
+    DesignManagementParts, render_design_management_dialog,
+};
 use crate::workbench::app::open_design_management_dialog;
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
@@ -72,6 +75,29 @@ impl ProjectFeature {
         } else if !route_active && cx.state.design_management.open {
             cx.state.design_management.close_and_discard();
         }
+    }
+
+    /// Draw Design management over what the feature's context lends it.
+    /// Create hierarchy, which design owns, is asked of the shell, which
+    /// opens it as the dialog returns.
+    pub(in crate::workbench) fn render_design_management_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        let project = &mut *cx.state;
+        render_design_management_dialog(
+            &mut DesignManagementParts {
+                dialog: &mut project.design_management,
+                project_page: &mut project.project_page,
+                configuration_tab: &mut project.configuration.tab,
+                model: &mut *cx.model,
+                platform: &*cx.platform,
+                wb: &mut *cx.wb,
+                runs: &mut *cx.runs,
+                run_controller: &mut *cx.handles.run_controller,
+            },
+            ctx,
+        );
     }
 }
 

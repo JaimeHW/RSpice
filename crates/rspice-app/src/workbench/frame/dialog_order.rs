@@ -219,7 +219,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.design_management"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.design_management.open),
-        render: |app, ctx| app.render_design_management_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::render_design_management_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("design.selection_bulk_edit"),
