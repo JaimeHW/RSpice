@@ -7,6 +7,8 @@
 
 pub(crate) mod commands;
 pub(crate) mod model_editor_workflow;
+#[cfg(target_arch = "wasm32")]
+pub(in crate::workbench) mod pdk_persistence;
 pub(in crate::workbench) mod pdk_workflow;
 pub(crate) mod workspace_state;
 
@@ -60,7 +62,7 @@ impl ModelsFeature {
         cx: &mut Cx<'_, ModelsFeature>,
         ctx: &egui::Context,
     ) {
-        use crate::workbench::app::pdk_persistence::{
+        use crate::workbench::models::pdk_persistence::{
             BrowserPdkParts, poll_browser_pdk_persistence,
         };
         poll_browser_pdk_persistence(

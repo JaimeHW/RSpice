@@ -24,10 +24,10 @@ use crate::state::pdk_config::{
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Button, Problem, problem_line};
-#[cfg(target_arch = "wasm32")]
-use crate::workbench::app::pdk_persistence;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::models::ModelsFeature;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::models::pdk_persistence;
 use rspice_simulation::pdk::import as pdk_import;
 
 const VIEW_STATE_ID: &str = "pdk-technology-admin-view-state";

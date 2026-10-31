@@ -817,6 +817,11 @@ const WORKBENCH_LAYERS: &[&str] = &[
     // The one name the user is known by. It reads the cloud session and the
     // license, never the application.
     "user_identity",
+    // The models feature's browser PDK store: the application starts its
+    // first read at launch, and the feature takes what it settled each
+    // frame. It names the session's parts and lower crates, never the
+    // application, so the root starts it from above.
+    "models/pdk_persistence",
     // The application root. Everything above operates on it; everything below
     // is operated on by it.
     "app",

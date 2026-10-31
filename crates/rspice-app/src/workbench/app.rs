@@ -86,10 +86,10 @@ pub(crate) mod dialogs;
 pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
-#[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) mod pdk_persistence;
 mod schematic;
 
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::models::pdk_persistence;
 #[cfg(target_arch = "wasm32")]
 use browser_history::{
     initialize_browser_surface_navigation, synchronize_browser_surface_navigation,

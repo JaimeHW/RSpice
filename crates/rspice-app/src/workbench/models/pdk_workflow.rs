@@ -882,7 +882,7 @@ impl RSpiceApp {
                 match prepare_pdk_configuration(&self.state, config) {
                     Ok((config, candidate, loaded)) => {
                         if let Err(error) =
-                            crate::workbench::app::pdk_persistence::start_browser_pdk_settings_publication(
+                            crate::workbench::models::pdk_persistence::start_browser_pdk_settings_publication(
                                 ctx,
                                 &self.state.model.pdk_config,
                                 config,
