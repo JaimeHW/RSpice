@@ -10,6 +10,7 @@ use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::{RSpiceApp, SurfaceId};
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
@@ -23,7 +24,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("shell.synchronize_design_management_route"),
         modality: Modality::None,
         is_open: None,
-        render: |app, _| app.synchronize_design_management_route(),
+        render: |app, _| {
+            ProjectFeature::synchronize_design_management_route(&mut features::cx(app))
+        },
     },
     DialogSpec {
         key: DialogKey("framework.confirmation"),

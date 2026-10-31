@@ -11,6 +11,7 @@ pub(crate) mod workspace_state;
 
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::library::new_view_target;
+use crate::workbench::app::{open_design_management_dialog, open_project_revision_history};
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
@@ -36,6 +37,25 @@ impl Feature for ProjectFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ProjectCommand>();
+    }
+}
+
+impl ProjectFeature {
+    /// Keep browser-restored manager routes and the transient egui dialog
+    /// owner synchronized. Commands open both in one transaction; this hook
+    /// covers deep links, Back/Forward, and restored application sessions.
+    pub(in crate::workbench) fn synchronize_design_management_route(cx: &mut Cx<'_, Self>) {
+        let route_active = cx.wb.current_route().surface_id() == SurfaceId::DesignManagement;
+        if route_active && !cx.state.design_management.open {
+            open_design_management_dialog(
+                &mut cx.state.design_management,
+                cx.model,
+                cx.platform,
+                cx.wb,
+            );
+        } else if !route_active && cx.state.design_management.open {
+            cx.state.design_management.close_and_discard();
+        }
     }
 }
 
@@ -105,6 +125,31 @@ fn open_new_cell_dialog(project: &mut ProjectState, model: &Model) {
     project.new_cell_error = None;
     project.new_cell_library_revision = library_revision;
     project.new_cell_dialog = true;
+}
+
+/// Open New View on the cell the command targets; why it cannot open there
+/// is stated on the status bar.
+fn open_new_view_dialog(project: &mut ProjectState, model: &Model, wb: &mut WorkbenchSession) {
+    if let Some((library, cell)) = new_view_target(model)
+        && let Err(error) = project.open_new_view_dialog(model, &library, &cell, None)
+    {
+        wb.prompt(error);
+    }
+}
+
+/// Open Design management on its own route; a route the session refuses
+/// is stated on the status bar.
+fn open_design_management(
+    project: &mut ProjectState,
+    model: &mut Model,
+    platform: &PlatformState,
+    wb: &mut WorkbenchSession,
+) {
+    let route = SurfaceRoute::surface(SurfaceId::DesignManagement);
+    match wb.navigate(route, RouteTransitionSource::User) {
+        Ok(_) => open_design_management_dialog(&mut project.design_management, model, platform, wb),
+        Err(error) => wb.prompt(error.to_string()),
+    }
 }
 
 /// Whether a schematic or testbench is the document in front of the Design
@@ -185,9 +230,10 @@ impl CommandSet for ProjectCommand {
         }
     }
 
-    /// The file commands are the shell's file workflow's, and the dialogs
-    /// that read beyond the feature's context are opened by the shell; each
-    /// is raised for the shell to take as soon as the command returns.
+    /// The file commands are the shell's file workflow's, and Check and save,
+    /// which runs the design checks beyond the feature's context, is opened
+    /// by the shell; each is raised for the shell to take as soon as the
+    /// command returns.
     fn execute(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::ProjectLauncher => open_project_launcher(cx.state, cx.wb, cx.platform),
@@ -203,15 +249,24 @@ impl CommandSet for ProjectCommand {
             Self::SaveAll => cx.wb.outbox.push(ProjectFileAction::SaveAll),
             Self::CloseProject => cx.wb.outbox.push(ProjectFileAction::CloseProject),
             Self::NewCell => open_new_cell_dialog(cx.state, cx.model),
-            Self::NewView => cx.wb.outbox.push(OpenProjectDialog::NewView),
+            Self::NewView => open_new_view_dialog(cx.state, cx.model, cx.wb),
             Self::OpenSchematic => cx.wb.outbox.push(ProjectFileAction::OpenSchematic),
             Self::Page(page) => {
                 cx.wb.activate(Workspace::Project);
                 cx.state.project_page = page;
             }
-            Self::DesignManagement => cx.wb.outbox.push(OpenProjectDialog::DesignManagement),
-            Self::RevisionHistory => cx.wb.outbox.push(OpenProjectDialog::RevisionHistory),
+            Self::DesignManagement => {
+                open_design_management(cx.state, cx.model, cx.platform, cx.wb);
+            }
+            Self::RevisionHistory => open_project_revision_history(
+                &mut cx.state.project_revision_history,
+                cx.model,
+                cx.platform,
+            ),
             Self::CheckAndSave => cx.wb.outbox.push(OpenProjectDialog::CheckAndSave),
         }
     }
 }
+
+#[cfg(test)]
+mod tests;

@@ -10,7 +10,12 @@ fn subflow_edit_and_escape_preserve_fresh_changes_and_reset_discard_confirmation
         crate::ui::Theme::default().apply(&ctx);
         let mut app = RSpiceApp::test_instance();
         let catalog = app.state.model.workspace.content.design_management.clone();
-        open_design_management_dialog(&mut app.state);
+        open_design_management_dialog(
+            &mut app.state.project.design_management,
+            &mut app.state.model,
+            &app.state.platform,
+            &mut app.state.workbench,
+        );
         assert!(app.state.project.design_management.open);
         app.state.project.design_management.reset_inputs_for_page(
             DesignManagementPage::NewSheet,
@@ -152,12 +157,23 @@ fn design_management_opens_on_the_tab_a_row_asks_for() {
         DesignManagementTab::Annotation,
     ] {
         let mut app = RSpiceApp::test_instance();
-        open_design_management_on(&mut app.state, tab);
+        open_design_management_on(
+            &mut app.state.project.design_management,
+            &mut app.state.model,
+            &app.state.platform,
+            &mut app.state.workbench,
+            tab,
+        );
         assert!(app.state.project.design_management.open);
         assert_eq!(app.state.project.design_management.active_tab, tab);
     }
     let mut app = RSpiceApp::test_instance();
-    open_design_management_dialog(&mut app.state);
+    open_design_management_dialog(
+        &mut app.state.project.design_management,
+        &mut app.state.model,
+        &app.state.platform,
+        &mut app.state.workbench,
+    );
     assert_eq!(
         app.state.project.design_management.active_tab,
         DesignManagementTab::Sheets

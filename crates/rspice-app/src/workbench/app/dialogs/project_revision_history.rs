@@ -20,7 +20,7 @@ use crate::ui::widgets::{
 use crate::workbench::design_system::section_header;
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
 
 const TITLE: &str = "Project revision and audit history";
 const NOT_RETAINED: &str = "not retained";
@@ -198,22 +198,20 @@ enum HistoryAction {
     Restore,
 }
 
-pub(crate) fn open_project_revision_history(state: &mut AppState) {
+pub(crate) fn open_project_revision_history(
+    dialog: &mut ProjectRevisionHistoryDialogState,
+    model: &Model,
+    platform: &PlatformState,
+) {
     // The command is greyed with no project open.
-    if !state.platform.project_lifecycle.is_open() {
+    if !platform.project_lifecycle.is_open() {
         return;
     }
-    if let Err(error) = state
-        .model
-        .schematic
-        .document()
-        .validated_revisions
-        .validate()
-    {
-        state.project.project_revision_history = ProjectRevisionHistoryDialogState {
+    if let Err(error) = model.schematic.document().validated_revisions.validate() {
+        *dialog = ProjectRevisionHistoryDialogState {
             open: true,
-            expected_journal: state.model.schematic.document().validated_revisions.clone(),
-            authority: Some(SchematicEditAuthority::capture(state)),
+            expected_journal: model.schematic.document().validated_revisions.clone(),
+            authority: Some(SchematicEditAuthority::capture(model)),
             error: Some(format!(
                 "The validated schematic revision journal failed integrity validation: {error}"
             )),
@@ -221,8 +219,7 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         };
         return;
     }
-    let selected = state
-        .model
+    let selected = model
         .schematic
         .document()
         .validated_revisions
@@ -230,11 +227,11 @@ pub(crate) fn open_project_revision_history(state: &mut AppState) {
         .last()
         .map(|record| vec![schematic_row_key(record.id())])
         .unwrap_or_default();
-    state.project.project_revision_history = ProjectRevisionHistoryDialogState {
+    *dialog = ProjectRevisionHistoryDialogState {
         open: true,
         selected,
-        authority: Some(SchematicEditAuthority::capture(state)),
-        expected_journal: state.model.schematic.document().validated_revisions.clone(),
+        authority: Some(SchematicEditAuthority::capture(model)),
+        expected_journal: model.schematic.document().validated_revisions.clone(),
         ..ProjectRevisionHistoryDialogState::default()
     };
 }

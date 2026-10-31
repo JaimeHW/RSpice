@@ -15,7 +15,7 @@ mod library_ops_dialogs;
 mod new_cell_dialog;
 pub(in crate::workbench) mod new_veriloga_device;
 mod new_view_dialog;
-pub(in crate::workbench) use new_view_dialog::new_view_target;
+pub(in crate::workbench) use new_view_dialog::{new_view_opening, new_view_target};
 pub(in crate::workbench) mod pending_deletions;
 mod rename_view_dialog;
 mod shared;

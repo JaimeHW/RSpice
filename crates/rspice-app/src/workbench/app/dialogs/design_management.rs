@@ -28,7 +28,8 @@ use crate::workbench::design_system::{property_row, property_row_problem, sectio
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::review_primitives::{input_field, read_only_field};
-use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry};
+use crate::workbench::app_state::{AppState, DesignManagementHistoryEntry, Model, PlatformState};
+use crate::workbench::state::WorkbenchSession;
 
 const MANAGER_TITLE: &str = "Sheets, variants, annotation and hierarchy";
 const MANAGER_PRIMARY: &str = "Apply reviewed design changes";
@@ -420,8 +421,13 @@ impl DesignManagementDialogState {
 }
 
 /// Open Design management on its Sheets tab.
-pub(crate) fn open_design_management_dialog(state: &mut AppState) {
-    open_design_management_on(state, DesignManagementTab::Sheets);
+pub(crate) fn open_design_management_dialog(
+    dialog: &mut DesignManagementDialogState,
+    model: &mut Model,
+    platform: &PlatformState,
+    wb: &mut WorkbenchSession,
+) {
+    open_design_management_on(dialog, model, platform, wb, DesignManagementTab::Sheets);
 }
 
 /// Open Design management on `tab`, so a menu row can land on Variants or
@@ -429,38 +435,44 @@ pub(crate) fn open_design_management_dialog(state: &mut AppState) {
 ///
 /// Like [`open_design_management_dialog`], it expects the caller to have
 /// navigated to the Design management route first.
-pub(crate) fn open_design_management_on(state: &mut AppState, tab: DesignManagementTab) {
-    open_design_management_dialog_state(state);
-    if state.project.design_management.open {
-        state.project.design_management.active_tab = tab;
+pub(crate) fn open_design_management_on(
+    dialog: &mut DesignManagementDialogState,
+    model: &mut Model,
+    platform: &PlatformState,
+    wb: &mut WorkbenchSession,
+    tab: DesignManagementTab,
+) {
+    open_design_management_dialog_state(dialog, model, platform, wb);
+    if dialog.open {
+        dialog.active_tab = tab;
     }
 }
 
-fn open_design_management_dialog_state(state: &mut AppState) {
+fn open_design_management_dialog_state(
+    dialog: &mut DesignManagementDialogState,
+    model: &mut Model,
+    platform: &PlatformState,
+    wb: &mut WorkbenchSession,
+) {
     // The command is greyed with no project open.
-    if !state.platform.project_lifecycle.is_open() {
+    if !platform.project_lifecycle.is_open() {
         return;
     }
     if !matches!(
-        state.model.workspace.content.active_view_type(),
+        model.workspace.content.active_view_type(),
         crate::state::ViewType::Schematic | crate::state::ViewType::Testbench
     ) {
-        state.prompt("Design Management needs a schematic or testbench view.");
+        wb.prompt("Design Management needs a schematic or testbench view.");
         return;
     }
-    crate::schematic::view::retain_selection_on_active_sheet(state);
-    let owner_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    let selection_object_ids = selected_stable_object_ids(&state.model.schematic);
-    let all_object_ids = all_stable_object_ids(&state.model.schematic);
-    let selection_summary = selected_object_summary(&state.model.schematic, &selection_object_ids);
-    let default_sheet_name = state.model.workspace.content.active_view.cell.clone();
-    let catalog = (*state.model.workspace.content.design_management).clone();
-    if let Err(error) = state.project.design_management.open(
+    crate::schematic::view::retain_selection_on_active_sheet_in(model);
+    let owner_key = model.workspace.content.active_schematic_reference().key();
+    let selection_object_ids = selected_stable_object_ids(&model.schematic);
+    let all_object_ids = all_stable_object_ids(&model.schematic);
+    let selection_summary = selected_object_summary(&model.schematic, &selection_object_ids);
+    let default_sheet_name = model.workspace.content.active_view.cell.clone();
+    let catalog = (*model.workspace.content.design_management).clone();
+    if let Err(error) = dialog.open(
         &catalog,
         owner_key.clone(),
         selection_object_ids.clone(),
@@ -468,7 +480,7 @@ fn open_design_management_dialog_state(state: &mut AppState) {
         selection_summary.clone(),
         default_sheet_name.clone(),
     ) {
-        state.project.design_management = DesignManagementDialogState {
+        *dialog = DesignManagementDialogState {
             open: true,
             owner_key,
             original: Some(catalog),

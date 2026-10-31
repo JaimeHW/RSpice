@@ -400,14 +400,11 @@ impl Request for ProjectFileAction {
 }
 
 /// A project dialog the shell opens over the whole application, for the
-/// project feature's command that opens it: each reads the drawing, its
-/// checks or the library catalog beyond what the feature's context holds.
-/// Taken straight after the command returns.
+/// project feature's command that opens it: Check and save runs the
+/// design checks and reads the code workspace beyond what the feature's
+/// context holds. Taken straight after the command returns.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OpenProjectDialog {
-    NewView,
-    DesignManagement,
-    RevisionHistory,
     CheckAndSave,
 }
 

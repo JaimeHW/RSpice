@@ -303,7 +303,10 @@ const SHOW: &[Step] = &[
 /// its spec names.
 const DIALOG_STEPS: &[(&str, &str)] = &[
     ("synchronize_route_owned_dialogs", "shell"),
-    ("synchronize_design_management_route", "shell"),
+    (
+        "ProjectFeature::synchronize_design_management_route",
+        "shell",
+    ),
     (
         "dialogs::confirmation::render_confirmation_dialog",
         "framework",
@@ -394,7 +397,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
 /// the run, finish what a dialog decided, or draw the route overlays.
 const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
     "synchronize_route_owned_dialogs",
-    "synchronize_design_management_route",
+    "ProjectFeature::synchronize_design_management_route",
     "invalidate_simulation_preflight",
     "process_pending_library_deletions",
     "process_exit_request",

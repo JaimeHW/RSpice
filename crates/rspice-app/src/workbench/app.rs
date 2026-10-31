@@ -952,19 +952,6 @@ impl RSpiceApp {
         );
     }
 
-    /// Keep browser-restored manager routes and the transient egui dialog
-    /// owner synchronized. Commands open both in one transaction; this hook
-    /// covers deep links, Back/Forward, and restored application sessions.
-    pub(in crate::workbench) fn synchronize_design_management_route(&mut self) {
-        let route_active = self.state.workbench.current_route().surface_id()
-            == crate::workbench::SurfaceId::DesignManagement;
-        if route_active && !self.state.project.design_management.open {
-            open_design_management_dialog(&mut self.state);
-        } else if !route_active && self.state.project.design_management.open {
-            self.state.project.design_management.close_and_discard();
-        }
-    }
-
     /// Keep canonical overlay/manager routes synchronized with their
     /// transient egui owners. Commands open the route and dialog together;
     /// this also covers direct deep links, Back/Forward, and restored
@@ -1985,34 +1972,6 @@ mod tests {
 
         state.project.project_launcher_open = true;
         assert!(state.application_modal_open());
-    }
-
-    #[test]
-    fn design_management_route_hook_opens_and_dismisses_the_transient_dialog_owner() {
-        let mut app = RSpiceApp::test_instance();
-        app.state
-            .workbench
-            .replace_route(
-                crate::workbench::SurfaceRoute::surface(
-                    crate::workbench::SurfaceId::DesignManagement,
-                ),
-                crate::workbench::RouteTransitionSource::Restore,
-            )
-            .expect("Design Management route is executable");
-        assert!(!app.state.project.design_management.open);
-
-        app.synchronize_design_management_route();
-        assert!(app.state.project.design_management.open);
-
-        app.state
-            .workbench
-            .replace_route(
-                crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::Design),
-                crate::workbench::RouteTransitionSource::BrowserPop,
-            )
-            .expect("Design workspace route is executable");
-        app.synchronize_design_management_route();
-        assert!(!app.state.project.design_management.open);
     }
 
     #[test]

@@ -1,7 +1,6 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
-use crate::workbench::app::dialogs::library::new_view_target;
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
 
 pub(super) fn open_command_palette(state: &mut AppState) {
@@ -327,32 +326,9 @@ pub(in crate::workbench) fn run_project_file_action(
 }
 
 /// Open the project dialog `dialog` over the whole application, for the
-/// project feature's command that asked for it. Design management opens on
-/// its own route.
+/// project feature's command that asked for it.
 pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: OpenProjectDialog) {
     match dialog {
-        OpenProjectDialog::NewView => {
-            if let Some((library, cell)) = new_view_target(&app.state.model)
-                && let Err(error) = app.state.open_new_view_dialog(&library, &cell)
-            {
-                app.state.prompt(error);
-            }
-        }
-        OpenProjectDialog::DesignManagement => {
-            let route =
-                super::super::SurfaceRoute::surface(super::super::SurfaceId::DesignManagement);
-            match app
-                .state
-                .workbench
-                .navigate(route, super::super::RouteTransitionSource::User)
-            {
-                Ok(_) => crate::workbench::app::open_design_management_dialog(&mut app.state),
-                Err(error) => app.state.prompt(error.to_string()),
-            }
-        }
-        OpenProjectDialog::RevisionHistory => {
-            crate::workbench::app::open_project_revision_history(&mut app.state);
-        }
         OpenProjectDialog::CheckAndSave => {
             crate::workbench::app::open_check_and_save_dialog(&mut app.state);
         }

@@ -77,40 +77,44 @@ impl AppState {
         cell: &str,
         view_type: Option<crate::state::ViewType>,
     ) -> Result<(), String> {
-        let target = self
-            .model
-            .library_manager
-            .get_library(library)
-            .ok_or_else(|| format!("Library '{library}' no longer exists."))?;
-        if target.read_only {
-            return Err(format!(
-                "Library '{library}' is read-only; a new view cannot be created."
-            ));
-        }
-        let cell_target = target
-            .get_cell(cell)
-            .ok_or_else(|| format!("Cell '{library}/{cell}' no longer exists."))?;
-        let view_type = view_type
-            .filter(|view_type| is_creatable_view_type(*view_type))
-            .or_else(|| {
-                CREATABLE_VIEW_TYPES.into_iter().find(|view_type| {
-                    !cell_target
-                        .views
-                        .values()
-                        .any(|view| view.view_type == *view_type)
-                })
-            })
-            .unwrap_or(crate::state::ViewType::Schematic);
-
-        self.project.new_view_library = library.to_owned();
-        self.project.new_view_cell = cell.to_owned();
-        self.project.new_view_name = view_type.display_name().to_owned();
-        self.project.new_view_type = view_type;
-        self.project.new_view_error = None;
-        self.project.new_view_library_revision = self.model.library_manager.revision();
-        self.project.new_view_dialog = true;
-        Ok(())
+        self.project
+            .open_new_view_dialog(&self.model, library, cell, view_type)
     }
+}
+
+/// The view type New View opens on for the exact cell `library`/`cell`:
+/// `view_type` when New View creates that type, else the first type it
+/// creates that the cell does not have yet. A cell that no longer exists,
+/// or whose library is read-only, is refused.
+pub(crate) fn new_view_opening(
+    model: &Model,
+    library: &str,
+    cell: &str,
+    view_type: Option<crate::state::ViewType>,
+) -> Result<crate::state::ViewType, String> {
+    let target = model
+        .library_manager
+        .get_library(library)
+        .ok_or_else(|| format!("Library '{library}' no longer exists."))?;
+    if target.read_only {
+        return Err(format!(
+            "Library '{library}' is read-only; a new view cannot be created."
+        ));
+    }
+    let cell_target = target
+        .get_cell(cell)
+        .ok_or_else(|| format!("Cell '{library}/{cell}' no longer exists."))?;
+    Ok(view_type
+        .filter(|view_type| is_creatable_view_type(*view_type))
+        .or_else(|| {
+            CREATABLE_VIEW_TYPES.into_iter().find(|view_type| {
+                !cell_target
+                    .views
+                    .values()
+                    .any(|view| view.view_type == *view_type)
+            })
+        })
+        .unwrap_or(crate::state::ViewType::Schematic))
 }
 
 /// Why Create is waiting while the view has no name.

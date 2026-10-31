@@ -15,7 +15,7 @@ use std::borrow::Cow;
 use egui::{Context, Id};
 
 use crate::state::{ActiveSheetTopology, SchematicState, Selection, SheetCatalog};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 use super::{SchematicSymbolContext, SelectionWindow};
 
@@ -139,24 +139,32 @@ pub(crate) fn selection_filtered_to_active_sheet(
     state: &AppState,
     source: &Selection,
 ) -> Selection {
+    selection_filtered_to_active_sheet_in(&state.model, source)
+}
+
+/// [`selection_filtered_to_active_sheet`] over the model alone.
+pub(crate) fn selection_filtered_to_active_sheet_in(
+    model: &Model,
+    source: &Selection,
+) -> Selection {
     let mut selection = Selection::default();
     // This runs twice a frame. Nothing selected keeps nothing, and the sheet
     // catalog is looked up once rather than once per object.
     if source.is_empty() {
         return selection;
     }
-    let catalog = active_sheet_catalog(state);
+    let catalog = model.active_sheet_catalog();
     let on_sheet = |id: u64| {
         rspice_schematic_editor::view::design_view::object_is_on_active_sheet(catalog, id)
     };
 
-    for object in &state.model.schematic.document().components {
+    for object in &model.schematic.document().components {
         if source.has_component(object.id) && on_sheet(object.id) {
             selection.select_component(object.id);
         }
     }
     let wire_parts = !source.wire_segments.is_empty() || !source.wire_vertices.is_empty();
-    for object in &state.model.schematic.document().wires {
+    for object in &model.schematic.document().wires {
         let whole = source.has_wire(object.id);
         if !(whole || wire_parts) || !on_sheet(object.id) {
             continue;
@@ -181,37 +189,37 @@ pub(crate) fn selection_filtered_to_active_sheet(
             );
         }
     }
-    for object in &state.model.schematic.document().junctions {
+    for object in &model.schematic.document().junctions {
         if source.has_junction(object.pos) && on_sheet(object.id) {
             selection.select_junction(object.pos);
         }
     }
-    for object in &state.model.schematic.document().buses {
+    for object in &model.schematic.document().buses {
         if source.has_bus(object.id) && on_sheet(object.id) {
             selection.select_bus(object.id);
         }
     }
-    for object in &state.model.schematic.document().bus_taps {
+    for object in &model.schematic.document().bus_taps {
         if source.has_bus_tap(object.id) && on_sheet(object.id) {
             selection.select_bus_tap(object.id);
         }
     }
-    for object in &state.model.schematic.document().net_labels {
+    for object in &model.schematic.document().net_labels {
         if source.has_net_label(object.id) && on_sheet(object.id) {
             selection.select_net_label(object.id);
         }
     }
-    for object in &state.model.schematic.document().design_notes {
+    for object in &model.schematic.document().design_notes {
         if source.has_design_note(object.id) && on_sheet(object.id) {
             selection.select_design_note(object.id);
         }
     }
-    for object in &state.model.schematic.document().documentation_shapes {
+    for object in &model.schematic.document().documentation_shapes {
         if source.has_documentation_shape(object.id) && on_sheet(object.id) {
             selection.select_documentation_shape(object.id);
         }
     }
-    for object in &state.model.schematic.document().probes {
+    for object in &model.schematic.document().probes {
         if source.has_probe(object.id) && on_sheet(object.id) {
             selection.select_probe(object.id);
         }
@@ -222,6 +230,13 @@ pub(crate) fn selection_filtered_to_active_sheet(
 pub(crate) fn retain_selection_on_active_sheet(state: &mut AppState) {
     let selection = selection_on_active_sheet(state);
     state.model.schematic.session.editor.selection = selection;
+}
+
+/// [`retain_selection_on_active_sheet`] over the model alone.
+pub(crate) fn retain_selection_on_active_sheet_in(model: &mut Model) {
+    let selection =
+        selection_filtered_to_active_sheet_in(model, &model.schematic.session.editor.selection);
+    model.schematic.session.editor.selection = selection;
 }
 
 /// Every complete object on the active sheet the session's selection filter
