@@ -736,6 +736,10 @@ pub struct MeasureEngine {
     /// The `D()`/`E()` operands of a transient run's cards, read as step
     /// functions on the run's exact event instants.
     events: Option<std::sync::Arc<events::EventOperands>>,
+    /// Whether a MIN, MAX or PP window end that falls between samples adds
+    /// the waveform's interpolated value there, as LTspice and QSPICE read
+    /// the window. ngspice and Xyce weigh only the samples inside it.
+    interpolate_extrema_window_ends: bool,
 }
 
 impl MeasureEngine {
@@ -744,11 +748,16 @@ impl MeasureEngine {
             measurements: Vec::new(),
             use_legacy_tran_trig_targ: false,
             events: None,
+            interpolate_extrema_window_ends: false,
         }
     }
 
     pub(crate) fn set_use_legacy_tran_trig_targ(&mut self, enabled: bool) {
         self.use_legacy_tran_trig_targ = enabled;
+    }
+
+    pub(crate) fn set_interpolate_extrema_window_ends(&mut self, enabled: bool) {
+        self.interpolate_extrema_window_ends = enabled;
     }
 
     pub(crate) fn set_event_operands(
@@ -1492,11 +1501,14 @@ impl MeasureEngine {
         };
 
         let (lower, upper) = Self::measurement_window_bounds(time, from, to);
-        let mut selected: Option<(usize, Value)> = None;
-        for (index, (&axis, &value)) in time.iter().zip(signal).enumerate() {
-            if !Self::axis_in_measurement_window(axis, lower, upper) {
-                continue;
-            }
+        let samples = time
+            .iter()
+            .copied()
+            .zip(signal.iter().copied())
+            .filter(|&(axis, _)| Self::axis_in_measurement_window(axis, lower, upper));
+        let ends = self.extrema_window_ends(time, signal, lower, upper);
+        let mut selected: Option<(Value, Value)> = None;
+        for (axis, value) in samples.chain(ends) {
             let replaces = selected.is_none_or(|(_, selected_value)| {
                 if is_max {
                     value > selected_value
@@ -1505,17 +1517,54 @@ impl MeasureEngine {
                 }
             });
             if replaces {
-                selected = Some((index, value));
+                selected = Some((axis, value));
             }
         }
-        let Some((selected_index, selected_value)) = selected else {
+        let Some((selected_axis, selected_value)) = selected else {
             return MeasureResult::failed(name, "Empty range");
         };
         let mut result = MeasureResult::success(name, selected_value);
         if output == ExtremaOutput::IndependentAxis {
-            result = result.with_output_projection(time[selected_index]);
+            result = result.with_output_projection(selected_axis);
         }
-        result.with_event_axis(time[selected_index])
+        result.with_event_axis(selected_axis)
+    }
+
+    /// The interpolated `(axis, value)` at each finite window end that falls
+    /// strictly between two samples of a monotonic axis, when this engine
+    /// reads extrema windows as LTspice and QSPICE do. A nested DC sweep's
+    /// repeating axis has no single place for an end, so it adds none.
+    fn extrema_window_ends(
+        &self,
+        axis: &[Value],
+        signal: &[Value],
+        lower: Value,
+        upper: Value,
+    ) -> Vec<(Value, Value)> {
+        // A reversed window selects nothing, interpolated or not.
+        if !self.interpolate_extrema_window_ends || lower > upper {
+            return Vec::new();
+        }
+        let ascending = axis.windows(2).all(|pair| pair[0] <= pair[1]);
+        if !ascending && !axis.windows(2).all(|pair| pair[0] >= pair[1]) {
+            return Vec::new();
+        }
+        let mut ends = Vec::new();
+        for bound in [lower, upper] {
+            if !bound.is_finite() || ends.iter().any(|&(end, _)| end == bound) {
+                continue;
+            }
+            let end = axis.windows(2).zip(signal.windows(2)).find_map(|(x, y)| {
+                let inside = if ascending {
+                    x[0] < bound && bound < x[1]
+                } else {
+                    x[1] < bound && bound < x[0]
+                };
+                inside.then(|| (bound, y[0] + (y[1] - y[0]) * (bound - x[0]) / (x[1] - x[0])))
+            });
+            ends.extend(end);
+        }
+        ends
     }
 
     fn eval_pp(
@@ -1539,18 +1588,22 @@ impl MeasureEngine {
         };
 
         let (lower, upper) = Self::measurement_window_bounds(time, from, to);
+        let samples = time
+            .iter()
+            .copied()
+            .zip(signal.iter().copied())
+            .filter(|&(axis, _)| Self::axis_in_measurement_window(axis, lower, upper));
+        let ends = self.extrema_window_ends(time, signal, lower, upper);
         let mut selected: Option<(Value, Value)> = None;
-        for (&axis, &value) in time.iter().zip(signal) {
-            if Self::axis_in_measurement_window(axis, lower, upper) {
-                match &mut selected {
-                    None => selected = Some((value, value)),
-                    Some((minimum, maximum)) => {
-                        if value < *minimum {
-                            *minimum = value;
-                        }
-                        if value > *maximum {
-                            *maximum = value;
-                        }
+        for (_, value) in samples.chain(ends) {
+            match &mut selected {
+                None => selected = Some((value, value)),
+                Some((minimum, maximum)) => {
+                    if value < *minimum {
+                        *minimum = value;
+                    }
+                    if value > *maximum {
+                        *maximum = value;
                     }
                 }
             }
@@ -4037,6 +4090,79 @@ mod tests {
 
         assert!(results.iter().all(|result| result.value.is_none()));
         assert!(results.iter().all(|result| !result.passed));
+    }
+
+    #[test]
+    fn extrema_window_ends_between_samples_add_their_interpolated_values() {
+        // LTspice 26.1.1 and QSPICE over a two-point sweep of v(1) = 1, 2:
+        // MAX FROM=1 TO=1.5 is 1.5 at 1.5, MIN FROM=1.2 TO=2 is 1.2, and PP
+        // FROM=1.2 TO=1.6 is 0.4 with no sample inside. ngspice-46 and Xyce
+        // 7.10 read the samples only: 1, 2, and an empty window.
+        let statement = |name: &str, measure_type| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type,
+            analysis: "DC".to_string(),
+        };
+        let statements = [
+            statement(
+                "largest",
+                MeasureType::Max {
+                    signal: "V(1)".to_string(),
+                    from: Some(1.0),
+                    to: Some(1.5),
+                    output: ExtremaOutput::IndependentAxis,
+                },
+            ),
+            statement(
+                "smallest",
+                MeasureType::Min {
+                    signal: "V(1)".to_string(),
+                    from: Some(1.2),
+                    to: Some(2.0),
+                    output: ExtremaOutput::Value,
+                },
+            ),
+            statement(
+                "swing",
+                MeasureType::PeakToPeak {
+                    signal: "V(1)".to_string(),
+                    from: Some(1.2),
+                    to: Some(1.6),
+                },
+            ),
+            statement(
+                "reversed",
+                MeasureType::Max {
+                    signal: "V(1)".to_string(),
+                    from: Some(1.6),
+                    to: Some(1.2),
+                    output: ExtremaOutput::Value,
+                },
+            ),
+        ];
+        let axis = [1.0, 2.0];
+        let values = [1.0, 2.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(1)".to_string(), &values);
+        let evaluate = |interpolate: bool| {
+            let mut engine = MeasureEngine::new();
+            engine.set_interpolate_extrema_window_ends(interpolate);
+            for statement in &statements {
+                engine.add(statement.clone());
+            }
+            engine
+                .evaluate(&axis, &signals)
+                .into_iter()
+                .map(|result| result.value.map(|value| (value * 1e12).round() / 1e12))
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(evaluate(true), [Some(1.5), Some(1.2), Some(0.4), None]);
+        assert_eq!(evaluate(false), [Some(1.0), Some(2.0), None, None]);
     }
 
     #[test]

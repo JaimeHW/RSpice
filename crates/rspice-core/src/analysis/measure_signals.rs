@@ -5791,6 +5791,13 @@ fn evaluate_noise_measurements_with_parameters(
         }
         Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
     };
+    let policy = MeasureEvaluationPolicy {
+        global_default: netlist.options.measure_default_value,
+        equation_default: -1.0,
+        use_legacy_tran_trig_targ: false,
+        events: None,
+        interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+    };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -5802,12 +5809,7 @@ fn evaluate_noise_measurements_with_parameters(
             },
             &[],
             traces,
-            MeasureEvaluationPolicy {
-                global_default: netlist.options.measure_default_value,
-                equation_default: -1.0,
-                use_legacy_tran_trig_targ: false,
-                events: None,
-            },
+            policy,
             abort,
         ),
         Err(_) => evaluate_statements(
@@ -5818,8 +5820,7 @@ fn evaluate_noise_measurements_with_parameters(
                 base: &netlist.params,
                 rows: parameters,
             },
-            false,
-            None,
+            policy,
             abort,
         ),
     }?;
@@ -5878,31 +5879,19 @@ fn evaluate_statements(
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     params: MeasureParameters<'_>,
-    use_legacy_tran_trig_targ: bool,
-    events: Option<&Arc<EventOperands>>,
+    policy: MeasureEvaluationPolicy<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
-    evaluate_statements_with_segment_starts(
-        statements,
-        axis,
-        signals,
-        params,
-        &[],
-        use_legacy_tran_trig_targ,
-        events,
-        abort,
-    )
+    evaluate_statements_with_segment_starts(statements, axis, signals, params, &[], policy, abort)
 }
 
-#[allow(clippy::too_many_arguments)]
 fn evaluate_statements_with_segment_starts(
     statements: &[&MeasureStatement],
     axis: &[Value],
     signals: &HashMap<String, &[Value]>,
     params: MeasureParameters<'_>,
     segment_starts: &[usize],
-    use_legacy_tran_trig_targ: bool,
-    events: Option<&Arc<EventOperands>>,
+    policy: MeasureEvaluationPolicy<'_>,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<MeasureResult>, SimulationError> {
     let derived = materialize_measure_expression_signals_with_limits_and_abort(
@@ -5918,8 +5907,9 @@ fn evaluate_statements_with_segment_starts(
         augmented_signals.insert(name.clone(), waveform.as_slice());
     }
     let mut engine = MeasureEngine::new();
-    engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
-    engine.set_event_operands(events.cloned());
+    engine.set_use_legacy_tran_trig_targ(policy.use_legacy_tran_trig_targ);
+    engine.set_event_operands(policy.events.cloned());
+    engine.set_interpolate_extrema_window_ends(policy.interpolate_extrema_window_ends);
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -5944,6 +5934,21 @@ struct MeasureEvaluationPolicy<'a> {
     use_legacy_tran_trig_targ: bool,
     /// A transient run's `D()`/`E()` operands; `None` for every other run.
     events: Option<&'a Arc<EventOperands>>,
+    /// See [`measures_interpolate_extrema_window_ends`].
+    interpolate_extrema_window_ends: bool,
+}
+
+/// Whether a MIN, MAX or PP window end between samples adds the interpolated
+/// value there. LTspice 26.1.1 and QSPICE read `MAX v(1) FROM=1 TO=1.5` over
+/// a two-point sweep as 1.5; ngspice-46 and Xyce 7.10 read only the samples
+/// inside (1). The ngspice and Xyce dialects keep their simulators' reading,
+/// and the default dialect follows LTspice and QSPICE.
+fn measures_interpolate_extrema_window_ends(netlist: &Netlist) -> bool {
+    netlist
+        .options
+        .spice_dialect
+        .unwrap_or_else(|| netlist.parse_dialect())
+        == crate::config::SpiceDialect::BestAvailable
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5962,6 +5967,7 @@ fn evaluate_statements_with_equation_traces(
         equation_default,
         use_legacy_tran_trig_targ,
         events,
+        interpolate_extrema_window_ends,
     } = policy;
     let statement_dependencies = statements
         .iter()
@@ -6057,6 +6063,7 @@ fn evaluate_statements_with_equation_traces(
     let mut engine = MeasureEngine::new();
     engine.set_use_legacy_tran_trig_targ(use_legacy_tran_trig_targ);
     engine.set_event_operands(events.cloned());
+    engine.set_interpolate_extrema_window_ends(interpolate_extrema_window_ends);
     for statement in statements {
         engine.add((*statement).clone());
     }
@@ -6751,6 +6758,13 @@ fn evaluate_tran_measurements_with_signals_and_abort(
     // A card's `D()`/`E()` operands read the run's event traces as step
     // functions; the sampled table above holds no event column.
     let events = current_result.and_then(|result| EventOperands::new(&statements, result));
+    let policy = MeasureEvaluationPolicy {
+        global_default: netlist.options.measure_default_value,
+        equation_default: -1.0,
+        use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
+        events: events.as_ref(),
+        interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+    };
     let mut results = match &live_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -6759,12 +6773,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             (&netlist.params).into(),
             &[],
             traces,
-            MeasureEvaluationPolicy {
-                global_default: netlist.options.measure_default_value,
-                equation_default: -1.0,
-                use_legacy_tran_trig_targ: netlist.options.measure_use_lttm(),
-                events: events.as_ref(),
-            },
+            policy,
             abort,
         ),
         Err(_) => evaluate_statements(
@@ -6772,8 +6781,7 @@ fn evaluate_tran_measurements_with_signals_and_abort(
             time,
             &signals,
             (&netlist.params).into(),
-            netlist.options.measure_use_lttm(),
-            events.as_ref(),
+            policy,
             abort,
         ),
     }?;
@@ -6949,6 +6957,13 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
         Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
     };
     let segment_starts = dc_primary_segment_starts(netlist, series.axis().len());
+    let policy = MeasureEvaluationPolicy {
+        global_default: netlist.options.measure_default_value,
+        equation_default: 0.0,
+        use_legacy_tran_trig_targ: false,
+        events: None,
+        interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+    };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -6957,12 +6972,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             (&netlist.params).into(),
             &segment_starts,
             traces,
-            MeasureEvaluationPolicy {
-                global_default: netlist.options.measure_default_value,
-                equation_default: 0.0,
-                use_legacy_tran_trig_targ: false,
-                events: None,
-            },
+            policy,
             abort,
         ),
         Err(_) => evaluate_statements_with_segment_starts(
@@ -6971,8 +6981,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             &signals,
             (&netlist.params).into(),
             &segment_starts,
-            false,
-            None,
+            policy,
             abort,
         ),
     }?;
@@ -7181,6 +7190,13 @@ fn evaluate_ac_measurements_with_parameters(
         }
         Err(EquationMeasurementEvaluationError::Detail(error)) => Err(error),
     };
+    let policy = MeasureEvaluationPolicy {
+        global_default: netlist.options.measure_default_value,
+        equation_default: -1.0,
+        use_legacy_tran_trig_targ: false,
+        events: None,
+        interpolate_extrema_window_ends: measures_interpolate_extrema_window_ends(netlist),
+    };
     let mut results = match &equation_traces {
         Ok(traces) => evaluate_statements_with_equation_traces(
             &statements,
@@ -7192,12 +7208,7 @@ fn evaluate_ac_measurements_with_parameters(
             },
             &[],
             traces,
-            MeasureEvaluationPolicy {
-                global_default: netlist.options.measure_default_value,
-                equation_default: -1.0,
-                use_legacy_tran_trig_targ: false,
-                events: None,
-            },
+            policy,
             abort,
         ),
         Err(_) => evaluate_statements(
@@ -7208,8 +7219,7 @@ fn evaluate_ac_measurements_with_parameters(
                 base: &netlist.params,
                 rows: parameters,
             },
-            false,
-            None,
+            policy,
             abort,
         ),
     }?;
@@ -7862,6 +7872,41 @@ mod tests {
                 ("LAST", Some(4.0))
             ]
         );
+    }
+
+    #[test]
+    fn extremum_window_ends_follow_the_dialect() {
+        // LTspice and QSPICE give 1.5, ngspice-46 and Xyce 7.10 give 1.
+        let deck = "window end\n\
+                    V1 1 0 1\n\
+                    R1 1 0 1\n\
+                    .DC V1 1 2 1\n\
+                    .MEAS DC LARGEST MAX V(1) FROM=1 TO=1.5\n\
+                    .END\n";
+        let point = |volts: Value| {
+            let mut result = SimulationResult::new(1, 0);
+            result.node_names = ["0", "1"].map(str::to_string).to_vec();
+            result.node_voltages = vec![0.0, volts];
+            result
+        };
+        let sweep = [(1.0, point(1.0)), (2.0, point(2.0))];
+        let largest = |dialect: crate::config::SpiceDialect| {
+            let netlist = Netlist::parse_with_options(
+                deck,
+                crate::netlist::NetlistParseOptions {
+                    spice_dialect: Some(dialect),
+                    ..Default::default()
+                },
+            )
+            .expect("window deck parses");
+            evaluate_dc_measurements(&netlist, &sweep)[0].value
+        };
+        assert_eq!(
+            largest(crate::config::SpiceDialect::BestAvailable),
+            Some(1.5)
+        );
+        assert_eq!(largest(crate::config::SpiceDialect::Ngspice), Some(1.0));
+        assert_eq!(largest(crate::config::SpiceDialect::Xyce), Some(1.0));
     }
 
     #[test]
