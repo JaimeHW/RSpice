@@ -10,6 +10,8 @@
 
 use std::sync::OnceLock;
 
+#[cfg(not(target_arch = "wasm32"))]
+use rspice_fonts::system::print::SystemFaceId;
 use rspice_fonts::{PrintFace, Role};
 
 use super::*;
@@ -28,7 +30,7 @@ impl SceneFont {
     }
 }
 
-/// The embedded faces, parsed for their metrics.
+/// The faces print letters in, parsed for their metrics.
 pub(crate) struct PrintFaces {
     faces: Vec<ttf_parser::Face<'static>>,
 }
@@ -41,7 +43,7 @@ impl PrintFaces {
         static FACES: OnceLock<Result<PrintFaces, &'static str>> = OnceLock::new();
         FACES
             .get_or_init(|| {
-                PrintFace::ALL
+                PrintFace::BUNDLED
                     .into_iter()
                     .map(|face| ttf_parser::Face::parse(face.bytes(), 0).map_err(|_| face.name()))
                     .collect::<Result<Vec<_>, _>>()
@@ -51,8 +53,31 @@ impl PrintFaces {
             .map_err(|name| HardcopyRenderError::InvalidEmbeddedFont(name))
     }
 
+    /// `face`, parsed. An installed face is parsed the first time it is
+    /// asked for; one this parser cannot read is measured as RSpice Symbols.
     pub(crate) fn face(&self, face: PrintFace) -> &ttf_parser::Face<'static> {
-        &self.faces[face as usize]
+        match face {
+            PrintFace::Bundled(face) => &self.faces[face as usize],
+            #[cfg(not(target_arch = "wasm32"))]
+            PrintFace::System(id) => {
+                use std::collections::HashMap;
+                use std::sync::{Mutex, PoisonError};
+                type Parsed = HashMap<SystemFaceId, Option<&'static ttf_parser::Face<'static>>>;
+                static PARSED: Mutex<Option<Parsed>> = Mutex::new(None);
+                let parsed = *PARSED
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .get_or_insert_with(HashMap::new)
+                    .entry(id)
+                    .or_insert_with(|| {
+                        let face = id.face();
+                        ttf_parser::Face::parse(face.bytes(), face.index())
+                            .ok()
+                            .map(|parsed| &*Box::leak(Box::new(parsed)))
+                    });
+                parsed.unwrap_or(&self.faces[Face::Symbols as usize])
+            }
+        }
     }
 
     /// Inked width of one grapheme lettered in `font`, from the leftmost ink
@@ -90,7 +115,8 @@ impl PrintFaces {
 
 /// The receipt's entries for `faces`, in the receipt's own order: each face's
 /// family, weight and version, and the SHA-256 of the bytes the binary
-/// embeds, worked out once per process.
+/// embeds, worked out once per process. An installed face is recorded with
+/// the file it was read from and the SHA-256 of that file as it was read.
 pub(crate) fn receipt_faces(
     faces: &std::collections::BTreeSet<PrintFace>,
 ) -> Result<Vec<HardcopyFace>, HardcopyRenderError> {
@@ -99,7 +125,7 @@ pub(crate) fn receipt_faces(
     static ENTRIES: OnceLock<Result<Vec<HardcopyFace>, &'static str>> = OnceLock::new();
     let entries = ENTRIES
         .get_or_init(|| {
-            PrintFace::ALL
+            PrintFace::BUNDLED
                 .into_iter()
                 .map(|face| {
                     let parsed =
@@ -110,9 +136,10 @@ pub(crate) fn receipt_faces(
                         .filter(|name| name.name_id == ttf_parser::name_id::VERSION)
                         .find_map(|name| name.to_string())
                         .ok_or(face.name())?;
+                    let embedded = face.bundled().ok_or(face.name())?;
                     HardcopyFace::try_new(
-                        face.face().family(),
-                        face.face().weight(),
+                        embedded.family(),
+                        embedded.weight(),
                         version.trim(),
                         ContentDigest::from_bytes(Sha256::digest(face.bytes()).into()),
                         HardcopyFaceSource::Bundled,
@@ -125,8 +152,74 @@ pub(crate) fn receipt_faces(
         .map_err(|name| HardcopyRenderError::InvalidEmbeddedFont(name))?;
     let mut recorded = faces
         .iter()
-        .map(|&face| entries[face as usize].clone())
-        .collect::<Vec<_>>();
+        .map(|&face| match face {
+            PrintFace::Bundled(face) => Ok(entries[face as usize].clone()),
+            #[cfg(not(target_arch = "wasm32"))]
+            PrintFace::System(id) => system_receipt_face(id),
+        })
+        .collect::<Result<Vec<_>, _>>()?;
     recorded.sort();
     Ok(recorded)
+}
+
+/// The receipt's entry for the installed face `id`, worked out once per
+/// process.
+#[cfg(not(target_arch = "wasm32"))]
+fn system_receipt_face(id: SystemFaceId) -> Result<HardcopyFace, HardcopyRenderError> {
+    use std::collections::HashMap;
+    use std::sync::{Mutex, PoisonError};
+
+    use rspice_hardcopy_contract::HardcopyFaceSource;
+
+    static ENTRIES: Mutex<Option<HashMap<SystemFaceId, Result<HardcopyFace, &'static str>>>> =
+        Mutex::new(None);
+    ENTRIES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get_or_insert_with(HashMap::new)
+        .entry(id)
+        .or_insert_with(|| {
+            let face = id.face();
+            let parsed =
+                ttf_parser::Face::parse(face.bytes(), face.index()).map_err(|_| face.family())?;
+            let version = parsed
+                .names()
+                .into_iter()
+                .filter(|name| name.name_id == ttf_parser::name_id::VERSION)
+                .find_map(|name| name.to_string())
+                .unwrap_or_default();
+            HardcopyFace::try_new(
+                face.family(),
+                parsed.weight().to_number(),
+                version.trim(),
+                ContentDigest::from_bytes(Sha256::digest(face.bytes()).into()),
+                HardcopyFaceSource::System {
+                    path: receipt_path(face.path(), home_directory().as_deref()),
+                },
+            )
+            .map_err(|_| face.family())
+        })
+        .clone()
+        .map_err(HardcopyRenderError::InvalidEmbeddedFont)
+}
+
+/// The user's home directory, which a receipt never names.
+#[cfg(not(target_arch = "wasm32"))]
+fn home_directory() -> Option<std::path::PathBuf> {
+    let variable = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    std::env::var_os(variable)
+        .filter(|home| !home.is_empty())
+        .map(std::path::PathBuf::from)
+}
+
+/// `path` as a receipt records it: a file under `home`, such as a face one
+/// user installed, starts `~` in place of the home directory, so a receipt
+/// shared with others does not carry the user's name; any other file, such
+/// as a face of the operating system's, is recorded as it is.
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn receipt_path(path: &std::path::Path, home: Option<&std::path::Path>) -> String {
+    match home.and_then(|home| path.strip_prefix(home).ok()) {
+        Some(within) => format!("~{}{}", std::path::MAIN_SEPARATOR, within.display()),
+        None => path.display().to_string(),
+    }
 }

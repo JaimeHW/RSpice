@@ -32,8 +32,12 @@ static STARTED: Mutex<Option<(SystemFonts, Vec<String>)>> = Mutex::new(None);
 /// Starts reading the operating system's font files now, on a worker thread,
 /// so the read overlaps the window's creation. `system_languages` are the
 /// operating system's display languages, most preferred first.
+///
+/// Print letters from the same faces, in the same order, so a sheet prints
+/// what the canvas shows.
 pub fn start(system_languages: Vec<String>) {
     let order = han_order(None, HanPreference::Auto, &system_languages);
+    rspice_fonts::system::print::print_from(Source::system(), order);
     let fonts = SystemFonts::spawn(Source::system(), order);
     if let Ok(mut started) = STARTED.lock() {
         *started = Some((fonts, system_languages));
@@ -133,6 +137,7 @@ impl SystemFontsPlugin {
         }
         self.order = order;
         self.reordered = true;
+        rspice_fonts::system::print::set_print_order(order);
         self.fonts.reorder(order, self.asked.clone());
         self.outstanding += 1;
     }

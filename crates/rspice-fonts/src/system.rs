@@ -17,6 +17,7 @@
 //! its weight.
 
 mod known;
+pub mod print;
 
 use std::collections::{BTreeMap, HashSet};
 use std::fmt;
@@ -117,8 +118,8 @@ impl SystemFace {
     /// Reads the candidate's file and holds the copy to what was scanned: the
     /// file may have changed since.
     fn load(candidate: &Candidate, covered: &[char]) -> Option<Self> {
-        let bytes = std::fs::read(&candidate.path).ok()?;
-        let font = FontRef::from_index(&bytes, candidate.index).ok()?;
+        let bytes = read_once(&candidate.path)?;
+        let font = FontRef::from_index(bytes, candidate.index).ok()?;
         let charmap = font.charmap();
         if font.outline_glyphs().format().is_none()
             || !covered
@@ -127,8 +128,6 @@ impl SystemFace {
         {
             return None;
         }
-        let bytes: &'static [u8] = bytes.leak();
-        let charmap = FontRef::from_index(bytes, candidate.index).ok()?.charmap();
         Some(Self {
             family: candidate.family.clone(),
             path: candidate.path.clone(),
@@ -198,6 +197,20 @@ impl fmt::Debug for SystemFace {
             .field("class", &self.class)
             .finish_non_exhaustive()
     }
+}
+
+/// The bytes of the font file at `path`, read the first time a face in it
+/// joins the screen or print and kept for the life of the process, so the
+/// two never read one file twice. `None` when it cannot be read.
+fn read_once(path: &Path) -> Option<&'static [u8]> {
+    static READ: Mutex<BTreeMap<PathBuf, &'static [u8]>> = Mutex::new(BTreeMap::new());
+    let mut read = READ.lock().ok()?;
+    if let Some(bytes) = read.get(path) {
+        return Some(bytes);
+    }
+    let bytes: &'static [u8] = std::fs::read(path).ok()?.leak();
+    read.insert(path.to_path_buf(), bytes);
+    Some(bytes)
 }
 
 fn precedence(class: FaceClass, position: usize, order: &[HanVariant; 5]) -> (u8, usize) {

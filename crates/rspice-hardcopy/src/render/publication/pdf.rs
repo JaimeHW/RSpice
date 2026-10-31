@@ -8,33 +8,51 @@
 
 use super::*;
 
-/// One PDF font per bundled face, and the runs a scene font letters in.
+/// One PDF font per bundled face, one per installed face a page letters
+/// in, and the runs a scene font letters in.
 pub(super) struct PdfFonts {
     faces: &'static PrintFaces,
     fonts: Vec<Font>,
+    /// The installed faces, each loaded the first time a page letters in it.
+    #[cfg(not(target_arch = "wasm32"))]
+    installed: std::cell::RefCell<BTreeMap<PrintFace, Font>>,
 }
 
 impl PdfFonts {
     fn load() -> Result<Self, HardcopyRenderError> {
         Ok(Self {
             faces: PrintFaces::get()?,
-            fonts: PrintFace::ALL
+            fonts: PrintFace::BUNDLED
                 .into_iter()
-                .map(|face| load_pdf_font(face.bytes(), face.name()))
+                .map(|face| load_pdf_font(face.bytes(), 0, face.name()))
                 .collect::<Result<_, _>>()?,
+            #[cfg(not(target_arch = "wasm32"))]
+            installed: std::cell::RefCell::default(),
         })
     }
 
-    fn font(&self, face: PrintFace) -> &Font {
-        &self.fonts[face as usize]
+    fn font(&self, face: PrintFace) -> Result<Font, HardcopyRenderError> {
+        match face {
+            PrintFace::Bundled(embedded) => Ok(self.fonts[embedded as usize].clone()),
+            #[cfg(not(target_arch = "wasm32"))]
+            PrintFace::System(_) => {
+                if let Some(font) = self.installed.borrow().get(&face) {
+                    return Ok(font.clone());
+                }
+                let font = load_pdf_font(face.bytes(), face.index(), face.name())?;
+                self.installed.borrow_mut().insert(face, font.clone());
+                Ok(font)
+            }
+        }
     }
 }
 
 pub(super) fn load_pdf_font(
     bytes: &'static [u8],
+    index: u32,
     name: &'static str,
 ) -> Result<Font, HardcopyRenderError> {
-    Font::new(bytes.into(), 0).ok_or(HardcopyRenderError::InvalidEmbeddedFont(name))
+    Font::new(bytes.into(), index).ok_or(HardcopyRenderError::InvalidEmbeddedFont(name))
 }
 
 pub(super) fn render_pdf(
@@ -636,14 +654,10 @@ fn draw_pdf_text(
     set_pdf_fill(surface, color, opacity);
     surface.set_stroke(None);
     for (left, face, glyphs) in stretches {
-        surface.draw_glyphs(
-            Point::from_xy(left, y),
-            &glyphs,
-            fonts.font(face).clone(),
-            text,
-            size,
-            outlined,
-        );
+        let Ok(font) = fonts.font(face) else {
+            continue;
+        };
+        surface.draw_glyphs(Point::from_xy(left, y), &glyphs, font, text, size, outlined);
     }
 }
 

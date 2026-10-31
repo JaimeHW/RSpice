@@ -227,7 +227,7 @@ fn svg_legend_labels_stay_inside_their_columns_on_a4_and_a3() {
         let mut options = usvg::Options::default();
         options
             .fontdb_mut()
-            .load_font_data(PrintFace::SansRegular.bytes().to_vec());
+            .load_font_data(PrintFace::Bundled(Face::SansRegular).bytes().to_vec());
         let number = |node: usvg::roxmltree::Node<'_, '_>, name: &str| {
             node.attribute(name).unwrap().parse::<f64>().unwrap()
         };

@@ -1,13 +1,15 @@
 //! Emitting a page as SVG.
 //!
 //! The faces a page's text is lettered in, and only those, are embedded
-//! rather than referenced, and hatch patterns are emitted as definitions
+//! rather than referenced; text in a face installed on the machine that
+//! printed it is drawn as the outlines of its glyphs, each defined once per
+//! page. Hatch patterns are emitted as definitions
 //! keyed by fill, so an exported page renders identically
 //! wherever it is opened — nothing depends on the viewing machine having a
 //! font or a pattern library. Colours pass through the plan's print-safe
 //! mapping first, so what is emitted is what a printer will reproduce.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use super::*;
 
@@ -58,7 +60,10 @@ pub(super) fn render_page_svg(
     // The faces are embedded here once the page is written, so that only
     // the faces its text was lettered in travel with it.
     let fonts_at = output.len();
-    let mut faces = BTreeSet::new();
+    let mut faces = PageFaces {
+        page: page.number(),
+        ..PageFaces::default()
+    };
     write!(
         output,
         "<defs><clipPath id=\"content-clip\"><rect x=\"{}\" y=\"{}\" width=\"{}\" height=\"{}\"/></clipPath></defs>",
@@ -86,12 +91,85 @@ pub(super) fn render_page_svg(
     output.push_str("</g>");
     write_svg_decorations(&mut output, &mut faces, plan, scene, page)?;
     output.push_str("</svg>");
-    if plan.setup().render().fonts().embed_fonts() && !faces.is_empty() {
-        let mut fonts = String::new();
-        write_embedded_svg_fonts(&mut fonts, &faces);
-        output.insert_str(fonts_at, &fonts);
+    let mut fonts = String::new();
+    if plan.setup().render().fonts().embed_fonts() {
+        write_embedded_svg_fonts(&mut fonts, &faces.lettered);
     }
+    faces.write_outlines(&mut fonts);
+    output.insert_str(fonts_at, &fonts);
     Ok(output)
+}
+
+/// The faces a page's text is lettered in, and the outlines it draws.
+#[derive(Default)]
+pub(super) struct PageFaces {
+    pub(super) lettered: BTreeSet<PrintFace>,
+    /// The page's number, which every outline's id starts with, so the
+    /// pages of a browser print, one document, never share an id.
+    page: u32,
+    /// The id each glyph drawn as an outline is defined under, numbered in
+    /// the order the page first draws it, and its path data.
+    outlines: BTreeMap<(PrintFace, u32), (usize, String)>,
+}
+
+impl PageFaces {
+    /// The id `glyph` of `face` is defined under, defining it the first
+    /// time. A glyph with no outline, such as a space, has none.
+    fn outline(&mut self, face: PrintFace, glyph: u32) -> Option<usize> {
+        let next = self.outlines.len();
+        let (id, path) = self.outlines.entry((face, glyph)).or_insert_with(|| {
+            let mut path = SvgPath(String::new());
+            if let (Ok(faces), Ok(glyph)) = (PrintFaces::get(), u16::try_from(glyph)) {
+                faces
+                    .face(face)
+                    .outline_glyph(ttf_parser::GlyphId(glyph), &mut path);
+            }
+            (next, path.0)
+        });
+        (!path.is_empty()).then_some(*id)
+    }
+
+    /// One `<defs>` holding the path of every outline the page draws.
+    fn write_outlines(&self, output: &mut String) {
+        if self.outlines.values().all(|(_, path)| path.is_empty()) {
+            return;
+        }
+        let mut defined: Vec<&(usize, String)> = self.outlines.values().collect();
+        defined.sort_by_key(|(id, _)| *id);
+        output.push_str("<defs>");
+        for (id, path) in defined {
+            if !path.is_empty() {
+                write!(output, "<path id=\"o{}-{id}\" d=\"{path}\"/>", self.page)
+                    .expect("write to string");
+            }
+        }
+        output.push_str("</defs>");
+    }
+}
+
+/// A glyph's outline as SVG path data, in its face's units, y up.
+struct SvgPath(String);
+
+impl ttf_parser::OutlineBuilder for SvgPath {
+    fn move_to(&mut self, x: f32, y: f32) {
+        write!(self.0, "M{x} {y}").expect("write to string");
+    }
+
+    fn line_to(&mut self, x: f32, y: f32) {
+        write!(self.0, "L{x} {y}").expect("write to string");
+    }
+
+    fn quad_to(&mut self, x1: f32, y1: f32, x: f32, y: f32) {
+        write!(self.0, "Q{x1} {y1} {x} {y}").expect("write to string");
+    }
+
+    fn curve_to(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, x: f32, y: f32) {
+        write!(self.0, "C{x1} {y1} {x2} {y2} {x} {y}").expect("write to string");
+    }
+
+    fn close(&mut self) {
+        self.0.push('Z');
+    }
 }
 
 /// Adds to `faces` every face `page`'s text is lettered in. It is the walk the
@@ -104,20 +182,27 @@ pub(super) fn add_page_faces(
     page: &PreviewPage,
 ) -> Result<(), HardcopyRenderError> {
     let mut discarded = String::new();
+    let mut page_faces = PageFaces::default();
     let transform = page_transform(page);
     for primitive in page_primitives(scene, page)? {
-        write_svg_primitive(&mut discarded, faces, plan, transform, primitive);
+        write_svg_primitive(&mut discarded, &mut page_faces, plan, transform, primitive);
         discarded.clear();
     }
-    write_svg_decorations(&mut discarded, faces, plan, scene, page)
+    write_svg_decorations(&mut discarded, &mut page_faces, plan, scene, page)?;
+    faces.extend(page_faces.lettered);
+    Ok(())
 }
 
-/// An `@font-face` rule, with the face's data inline, for each face in
-/// `faces`.
+/// An `@font-face` rule, with the face's data inline, for each embedded
+/// face in `faces`. An installed face is drawn as outlines instead.
 pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<PrintFace>) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
+    let embedded: Vec<Face> = faces.iter().filter_map(|face| face.bundled()).collect();
+    if embedded.is_empty() {
+        return;
+    }
     output.push_str("<style>");
-    for &face in faces {
+    for face in embedded {
         let (family, weight) = publication_face(face);
         write!(
             output,
@@ -131,7 +216,7 @@ pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<Pri
 
 pub(super) fn write_svg_primitive(
     output: &mut String,
-    faces: &mut BTreeSet<PrintFace>,
+    faces: &mut PageFaces,
     plan: &HardcopyPlan,
     transform: PageTransform,
     primitive: &ScenePrimitive,
@@ -417,7 +502,7 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
 }
 
 pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
-    publication_face(font.role().print_primary())
+    publication_face(font.role().primary())
 }
 
 /// Where a line of text stands, in the page's units: the x its
@@ -450,19 +535,22 @@ const RIGHT_TO_LEFT: (char, &str) = ('\u{202E}', "\u{200F}\u{202C}");
 ///   right-to-left override (see [`RIGHT_TO_LEFT`]), so a viewer sets it
 ///   from its right end, joins its Arabic and mirrors its brackets, whatever
 ///   it makes of a space or bracket at either end of it;
-/// - a replacement piece is its squares.
+/// - a replacement piece is its squares;
+/// - a piece in a face installed on the machine is drawn as the outlines of
+///   its glyphs, ahead of the `<text>` element, filled and turned as it is,
+///   with the piece's text as its title.
 ///
 /// Each face a piece is lettered in joins `faces`, the set the page embeds.
 pub(super) fn write_svg_text_runs(
     output: &mut String,
-    faces: &mut BTreeSet<PrintFace>,
+    faces: &mut PageFaces,
     font: SceneFont,
     text: &str,
     line: SvgLine,
 ) {
     let own = font.role().print_primary();
     let pieces = rspice_fonts::print::line(font.role(), text);
-    faces.extend(pieces.iter().map(|piece| piece.face));
+    faces.lettered.extend(pieces.iter().map(|piece| piece.face));
     if let [piece] = pieces.as_slice()
         && piece.face == own
         && !piece.right_to_left
@@ -477,16 +565,31 @@ pub(super) fn write_svg_text_runs(
         TextAnchor::Middle => line.x - widths.iter().sum::<f64>() / 2.0,
         TextAnchor::End => line.x - widths.iter().sum::<f64>(),
     };
+    let open = output.rfind("<text").unwrap_or(output.len());
+    let mut outlined = String::new();
     for (piece, width) in pieces.iter().zip(widths) {
         let x = match line.anchor {
             TextAnchor::Start => left,
             TextAnchor::Middle => left + width / 2.0,
             TextAnchor::End => left + width,
         };
+        let piece_left = left;
         left += width;
+        let Some(embedded) = piece.face.bundled() else {
+            write_outlined_piece(
+                &mut outlined,
+                faces,
+                &output[open..],
+                text,
+                piece,
+                piece_left,
+                line.size,
+            );
+            continue;
+        };
         write!(output, "<tspan x=\"{x:.3}\"").expect("write to string");
         if piece.face != own {
-            let (family, weight) = publication_face(piece.face);
+            let (family, weight) = publication_face(embedded);
             write!(output, " font-family=\"{family}\" font-weight=\"{weight}\"")
                 .expect("write to string");
         }
@@ -507,6 +610,68 @@ pub(super) fn write_svg_text_runs(
         }
         output.push_str("</tspan>");
     }
+    output.insert_str(open, &outlined);
+}
+
+/// Draws `piece` as the outlines of its glyphs, from `left` at `size`, on
+/// the baseline of the `<text>` element `element` opens and filled and
+/// turned as it is. The group's title is the piece's text, as it was typed.
+fn write_outlined_piece(
+    output: &mut String,
+    faces: &mut PageFaces,
+    element: &str,
+    text: &str,
+    piece: &rspice_fonts::print::Piece,
+    left: f64,
+    size: f64,
+) {
+    let attribute = |name: &str| {
+        let marker = format!(" {name}=\"");
+        let at = element.find(&marker)? + marker.len();
+        element[at..].split('"').next()
+    };
+    let baseline = attribute("y")
+        .and_then(|y| y.parse::<f64>().ok())
+        .unwrap_or(0.0);
+    let scale = size / f64::from(piece.units_per_em.max(1));
+    output.push_str("<g");
+    for name in ["fill", "fill-opacity"] {
+        if let Some(value) = attribute(name) {
+            write!(output, " {name}=\"{value}\"").expect("write to string");
+        }
+    }
+    let turned = attribute("transform").map_or(String::new(), |turn| format!("{turn} "));
+    write!(
+        output,
+        " transform=\"{turned}translate({left:.3} {baseline:.3}) scale({scale:.6} {:.6})\"><title>",
+        -scale
+    )
+    .expect("write to string");
+    let start = piece.glyphs.iter().map(|glyph| glyph.text.start).min();
+    let end = piece.glyphs.iter().map(|glyph| glyph.text.end).max();
+    escape_xml_into(
+        start.zip(end).map_or("", |(start, end)| &text[start..end]),
+        output,
+    );
+    output.push_str("</title>");
+    let mut advance = 0_i64;
+    for glyph in &piece.glyphs {
+        if let Some(id) = faces.outline(piece.face, glyph.id) {
+            write!(
+                output,
+                "<use href=\"#o{}-{id}\" x=\"{}\"",
+                faces.page,
+                advance + i64::from(glyph.x_offset)
+            )
+            .expect("write to string");
+            if glyph.y_offset != 0 {
+                write!(output, " y=\"{}\"", glyph.y_offset).expect("write to string");
+            }
+            output.push_str("/>");
+        }
+        advance += i64::from(glyph.advance);
+    }
+    output.push_str("</g>");
 }
 
 pub(super) fn escape_xml_into(value: &str, output: &mut String) {
@@ -524,7 +689,7 @@ pub(super) fn escape_xml_into(value: &str, output: &mut String) {
 
 pub(super) fn write_svg_decorations(
     output: &mut String,
-    faces: &mut BTreeSet<PrintFace>,
+    faces: &mut PageFaces,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -716,7 +881,7 @@ pub(super) fn write_svg_trim_marks(output: &mut String, plan: &HardcopyPlan, pag
 
 pub(super) fn write_svg_watermark(
     output: &mut String,
-    faces: &mut BTreeSet<PrintFace>,
+    faces: &mut PageFaces,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -754,7 +919,7 @@ pub(super) fn write_svg_watermark(
 
 pub(super) fn write_svg_registration_marks(
     output: &mut String,
-    faces: &mut BTreeSet<PrintFace>,
+    faces: &mut PageFaces,
     plan: &HardcopyPlan,
     page: &PreviewPage,
 ) {

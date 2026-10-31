@@ -31,26 +31,26 @@ pub(super) const PUBLICATION_SANS_HEBREW: &str = "RSpice Plex Sans Hebrew";
 pub(super) const PUBLICATION_SANS_THAI: &str = "RSpice Plex Sans Thai";
 
 /// The family and CSS weight each embedded face is published under.
-pub(super) const fn publication_face(face: PrintFace) -> (&'static str, &'static str) {
+pub(super) const fn publication_face(face: Face) -> (&'static str, &'static str) {
     match face {
-        PrintFace::SansRegular => (PUBLICATION_SANS, "400"),
-        PrintFace::SansMedium => (PUBLICATION_SANS, "500"),
-        PrintFace::SansSemibold => (PUBLICATION_SANS, "600"),
-        PrintFace::MonoRegular => (PUBLICATION_MONO, "400"),
-        PrintFace::MonoMedium => (PUBLICATION_MONO, "500"),
-        PrintFace::Symbols => (PUBLICATION_SYMBOLS, "400"),
+        Face::SansRegular => (PUBLICATION_SANS, "400"),
+        Face::SansMedium => (PUBLICATION_SANS, "500"),
+        Face::SansSemibold => (PUBLICATION_SANS, "600"),
+        Face::MonoRegular => (PUBLICATION_MONO, "400"),
+        Face::MonoMedium => (PUBLICATION_MONO, "500"),
+        Face::Symbols => (PUBLICATION_SYMBOLS, "400"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansArabicRegular => (PUBLICATION_SANS_ARABIC, "400"),
+        Face::SansArabicRegular => (PUBLICATION_SANS_ARABIC, "400"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansArabicSemibold => (PUBLICATION_SANS_ARABIC, "600"),
+        Face::SansArabicSemibold => (PUBLICATION_SANS_ARABIC, "600"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansHebrewRegular => (PUBLICATION_SANS_HEBREW, "400"),
+        Face::SansHebrewRegular => (PUBLICATION_SANS_HEBREW, "400"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansHebrewSemibold => (PUBLICATION_SANS_HEBREW, "600"),
+        Face::SansHebrewSemibold => (PUBLICATION_SANS_HEBREW, "600"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansThaiRegular => (PUBLICATION_SANS_THAI, "400"),
+        Face::SansThaiRegular => (PUBLICATION_SANS_THAI, "400"),
         #[cfg(not(target_arch = "wasm32"))]
-        PrintFace::SansThaiSemibold => (PUBLICATION_SANS_THAI, "600"),
+        Face::SansThaiSemibold => (PUBLICATION_SANS_THAI, "600"),
     }
 }
 

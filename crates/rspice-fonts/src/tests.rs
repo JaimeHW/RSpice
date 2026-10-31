@@ -143,9 +143,9 @@ fn runs_split_where_the_face_changes() {
     assert_eq!(
         Role::Mono.runs("⌀10 mm Δ"),
         expected(&[
-            (PrintFace::Symbols, "⌀"),
-            (PrintFace::MonoRegular, "10 mm "),
-            (PrintFace::SansRegular, "Δ"),
+            (PrintFace::Bundled(Face::Symbols), "⌀"),
+            (PrintFace::Bundled(Face::MonoRegular), "10 mm "),
+            (PrintFace::Bundled(Face::SansRegular), "Δ"),
         ])
     );
     assert!(Role::Sans.runs("").is_empty());
@@ -157,15 +157,15 @@ fn a_grapheme_cluster_is_lettered_by_one_face() {
     // letters the whole cluster.
     assert_eq!(
         Role::Sans.runs("⚠\u{FE0F}"),
-        expected(&[(PrintFace::Symbols, "⚠\u{FE0F}")])
+        expected(&[(PrintFace::Bundled(Face::Symbols), "⚠\u{FE0F}")])
     );
     // An unknown base takes its marks with it into one replacement.
     assert_eq!(
         Role::Sans.runs("a\u{10FFFD}\u{301}b"),
         expected(&[
-            (PrintFace::SansRegular, "a"),
-            (PrintFace::Symbols, "\u{25FB}"),
-            (PrintFace::SansRegular, "b"),
+            (PrintFace::Bundled(Face::SansRegular), "a"),
+            (PrintFace::Bundled(Face::Symbols), "\u{25FB}"),
+            (PrintFace::Bundled(Face::SansRegular), "b"),
         ])
     );
 }
@@ -189,12 +189,19 @@ fn every_egui_family_holds_its_roles_chain() {
 
 #[test]
 fn print_names_every_embedded_face() {
-    assert_eq!(PrintFace::ALL.map(PrintFace::face), Face::ALL);
-    for face in PrintFace::ALL {
-        assert_eq!(face.face().printed(), face, "{face:?}");
+    assert_eq!(
+        PrintFace::BUNDLED.map(PrintFace::bundled),
+        Face::ALL.map(Some)
+    );
+    for face in PrintFace::BUNDLED {
+        assert_eq!(face.bundled().map(Face::printed), Some(face), "{face:?}");
     }
     for role in Role::ALL {
-        assert_eq!(role.print_primary().face(), role.primary(), "{role:?}");
+        assert_eq!(
+            role.print_primary().bundled(),
+            Some(role.primary()),
+            "{role:?}"
+        );
     }
 }
 
@@ -218,8 +225,8 @@ fn arabic_hebrew_and_thai_letter_from_their_plex_face_at_the_roles_weight() {
     assert_eq!(
         Role::Sans.runs("قيمة R1"),
         expected(&[
-            (PrintFace::SansArabicRegular, "قيمة"),
-            (PrintFace::SansRegular, " R1"),
+            (PrintFace::Bundled(Face::SansArabicRegular), "قيمة"),
+            (PrintFace::Bundled(Face::SansRegular), " R1"),
         ])
     );
 }

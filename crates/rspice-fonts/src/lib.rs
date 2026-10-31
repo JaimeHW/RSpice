@@ -404,20 +404,16 @@ impl Role {
     /// The face print letters the role's own text in: [`Self::primary`].
     #[must_use]
     pub const fn print_primary(self) -> PrintFace {
-        match self {
-            Self::Sans => PrintFace::SansRegular,
-            Self::SansMedium => PrintFace::SansMedium,
-            Self::SansSemibold => PrintFace::SansSemibold,
-            Self::Mono => PrintFace::MonoRegular,
-            Self::MonoMedium => PrintFace::MonoMedium,
-        }
+        PrintFace::Bundled(self.primary())
     }
 
     /// `text` as print letters it in the role, split where the face changes.
     ///
     /// A grapheme cluster is never split between faces: it is lettered by the
     /// first face that has every character of it that draws, or else by the
-    /// face of its first character, so a base and its marks stay together. A
+    /// face of its first character, so a base and its marks stay together.
+    /// The role's chain is looked in first, then, on a desktop, the installed
+    /// faces print has been told of (`system::print::print_from`). A
     /// cluster whose first character no face has letters as one
     /// [`REPLACEMENT`].
     #[must_use]
@@ -444,98 +440,111 @@ impl Role {
     fn letter_cluster(self, cluster: &str) -> (PrintFace, &str) {
         match self.cluster_face(cluster) {
             Some(face) => (face, cluster),
-            None => (PrintFace::Symbols, REPLACEMENT_TEXT),
+            None => (PrintFace::Bundled(Face::Symbols), REPLACEMENT_TEXT),
         }
     }
 
     /// The face print letters a grapheme cluster in, or `None` when it is
     /// lettered as [`REPLACEMENT`]; see [`Self::runs`].
     fn cluster_face(self, cluster: &str) -> Option<PrintFace> {
-        let whole = self.print_faces().find(|face| {
-            cluster
-                .chars()
-                .filter(|character| draws(*character))
-                .all(|character| face.face().covers(character))
-        });
-        whole.or_else(|| {
-            cluster
-                .chars()
-                .next()
-                .and_then(|first| self.print_faces().find(|face| face.face().covers(first)))
-        })
+        let drawn: Vec<char> = cluster
+            .chars()
+            .filter(|character| draws(*character))
+            .collect();
+        let whole = self
+            .print_faces()
+            .find(|face| drawn.iter().all(|&character| face.covers(character)));
+        if whole.is_some() {
+            return whole;
+        }
+        #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+        let installed = system::print::face_for(cluster, &drawn);
+        #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+        if let Some((face, true)) = installed {
+            return Some(PrintFace::System(face));
+        }
+        let first = cluster.chars().next()?;
+        #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+        let installed = installed.map(|(face, _)| PrintFace::System(face));
+        #[cfg(not(all(feature = "system", not(target_arch = "wasm32"))))]
+        let installed = None;
+        self.print_faces()
+            .find(|face| face.covers(first))
+            .or(installed)
     }
 }
 
-/// A face print letters from: every embedded face. A print table indexed by
-/// it holds every face print can ask for.
+/// A face print letters from: an embedded face, or on a desktop a face
+/// installed there that print has been told of.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum PrintFace {
-    SansRegular,
-    SansMedium,
-    SansSemibold,
-    MonoRegular,
-    MonoMedium,
-    Symbols,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansArabicRegular,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansArabicSemibold,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansHebrewRegular,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansHebrewSemibold,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansThaiRegular,
-    #[cfg(not(target_arch = "wasm32"))]
-    SansThaiSemibold,
+    Bundled(Face),
+    #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+    System(system::print::SystemFaceId),
 }
 
 impl PrintFace {
-    pub const ALL: [Self; Face::ALL.len()] = {
-        let mut all = [Self::SansRegular; Face::ALL.len()];
+    /// Every embedded face, as print names it.
+    pub const BUNDLED: [Self; Face::ALL.len()] = {
+        let mut all = [Self::Bundled(Face::SansRegular); Face::ALL.len()];
         let mut at = 0;
         while at < all.len() {
-            all[at] = Face::ALL[at].printed();
+            all[at] = Self::Bundled(Face::ALL[at]);
             at += 1;
         }
         all
     };
 
-    /// The embedded face.
+    /// The embedded face, or `None` for an installed one.
     #[must_use]
-    pub const fn face(self) -> Face {
+    pub const fn bundled(self) -> Option<Face> {
         match self {
-            Self::SansRegular => Face::SansRegular,
-            Self::SansMedium => Face::SansMedium,
-            Self::SansSemibold => Face::SansSemibold,
-            Self::MonoRegular => Face::MonoRegular,
-            Self::MonoMedium => Face::MonoMedium,
-            Self::Symbols => Face::Symbols,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansArabicRegular => Face::SansArabicRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansArabicSemibold => Face::SansArabicSemibold,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansHebrewRegular => Face::SansHebrewRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansHebrewSemibold => Face::SansHebrewSemibold,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansThaiRegular => Face::SansThaiRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansThaiSemibold => Face::SansThaiSemibold,
+            Self::Bundled(face) => Some(face),
+            #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+            Self::System(_) => None,
         }
     }
 
-    /// The face's TrueType bytes; see [`Face::bytes`].
+    /// The bytes of the face's file: the TrueType face embedded, or the
+    /// installed file as it was read when the face joined print.
     #[must_use]
-    pub const fn bytes(self) -> &'static [u8] {
-        self.face().bytes()
+    pub fn bytes(self) -> &'static [u8] {
+        match self {
+            Self::Bundled(face) => face.bytes(),
+            #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+            Self::System(face) => face.face().bytes(),
+        }
     }
 
-    /// The face's family and weight; see [`Face::name`].
+    /// The face's index in [`Self::bytes`], which a collection holds
+    /// several of.
     #[must_use]
-    pub const fn name(self) -> &'static str {
-        self.face().name()
+    pub fn index(self) -> u32 {
+        match self {
+            Self::Bundled(_) => 0,
+            #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+            Self::System(face) => face.face().index(),
+        }
+    }
+
+    /// The face's family and weight, or an installed face's family.
+    #[must_use]
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Bundled(face) => face.name(),
+            #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+            Self::System(face) => face.face().family(),
+        }
+    }
+
+    /// Whether the face has a glyph for `character`.
+    #[must_use]
+    pub fn covers(self, character: char) -> bool {
+        match self {
+            Self::Bundled(face) => face.covers(character),
+            #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+            Self::System(face) => face.face().covers(character),
+        }
     }
 }
 
@@ -543,26 +552,7 @@ impl Face {
     /// The face as print names it.
     #[must_use]
     pub const fn printed(self) -> PrintFace {
-        match self {
-            Self::SansRegular => PrintFace::SansRegular,
-            Self::SansMedium => PrintFace::SansMedium,
-            Self::SansSemibold => PrintFace::SansSemibold,
-            Self::MonoRegular => PrintFace::MonoRegular,
-            Self::MonoMedium => PrintFace::MonoMedium,
-            Self::Symbols => PrintFace::Symbols,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansArabicRegular => PrintFace::SansArabicRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansArabicSemibold => PrintFace::SansArabicSemibold,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansHebrewRegular => PrintFace::SansHebrewRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansHebrewSemibold => PrintFace::SansHebrewSemibold,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansThaiRegular => PrintFace::SansThaiRegular,
-            #[cfg(not(target_arch = "wasm32"))]
-            Self::SansThaiSemibold => PrintFace::SansThaiSemibold,
-        }
+        PrintFace::Bundled(self)
     }
 }
 

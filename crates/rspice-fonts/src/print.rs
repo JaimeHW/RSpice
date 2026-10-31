@@ -30,7 +30,7 @@ use unicode_bidi::{BidiClass, BidiInfo, bidi_class};
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::bidi::is_logical_order;
-use crate::{PrintFace, REPLACEMENT_TEXT, Role};
+use crate::{Face, PrintFace, REPLACEMENT_TEXT, Role};
 
 /// A glyph as the shaper set it, in its face's font units.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -231,10 +231,10 @@ fn push_replacements(
             piece.glyphs.extend(glyphs);
         }
         _ => pieces.push(Piece {
-            face: PrintFace::Symbols,
+            face: PrintFace::Bundled(Face::Symbols),
             right_to_left,
             replacement: true,
-            units_per_em: units_per_em(PrintFace::Symbols),
+            units_per_em: units_per_em(PrintFace::Bundled(Face::Symbols)),
             glyphs,
         }),
     }
@@ -245,7 +245,7 @@ fn replacement_glyph() -> &'static Glyph {
     static SQUARE: OnceLock<Glyph> = OnceLock::new();
     SQUARE.get_or_init(|| {
         shape(
-            PrintFace::Symbols,
+            PrintFace::Bundled(Face::Symbols),
             REPLACEMENT_TEXT,
             0..REPLACEMENT_TEXT.len(),
             false,
@@ -275,22 +275,50 @@ fn units_per_em(face: PrintFace) -> u16 {
 }
 
 fn shaping(face: PrintFace) -> Option<&'static Shaping> {
-    static SHAPING: [OnceLock<Option<Shaping>>; PrintFace::ALL.len()] =
-        [const { OnceLock::new() }; PrintFace::ALL.len()];
-    SHAPING[face as usize]
-        .get_or_init(|| {
-            let font = FontRef::new(face.bytes()).ok()?;
-            let data = ShaperData::new(&font);
-            let units_per_em = font
-                .metrics(Size::unscaled(), LocationRef::default())
-                .units_per_em;
-            Some(Shaping {
-                font,
-                data,
-                units_per_em,
-            })
+    match face {
+        PrintFace::Bundled(face) => {
+            static SHAPING: [OnceLock<Option<Shaping>>; Face::ALL.len()] =
+                [const { OnceLock::new() }; Face::ALL.len()];
+            SHAPING[face as usize]
+                .get_or_init(|| Shaping::new(face.bytes(), 0))
+                .as_ref()
+        }
+        #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
+        PrintFace::System(id) => {
+            use std::collections::HashMap;
+            use std::sync::{Mutex, PoisonError};
+            // An installed face is parsed once, the first time print sets
+            // text in it, and kept as long as the face itself.
+            static SHAPING: Mutex<
+                Option<HashMap<crate::system::print::SystemFaceId, Option<&'static Shaping>>>,
+            > = Mutex::new(None);
+            *SHAPING
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .get_or_insert_with(HashMap::new)
+                .entry(id)
+                .or_insert_with(|| {
+                    let face = id.face();
+                    Shaping::new(face.bytes(), face.index())
+                        .map(|shaping| &*Box::leak(Box::new(shaping)))
+                })
+        }
+    }
+}
+
+impl Shaping {
+    fn new(bytes: &'static [u8], index: u32) -> Option<Self> {
+        let font = FontRef::from_index(bytes, index).ok()?;
+        let data = ShaperData::new(&font);
+        let units_per_em = font
+            .metrics(Size::unscaled(), LocationRef::default())
+            .units_per_em;
+        Some(Self {
+            font,
+            data,
+            units_per_em,
         })
-        .as_ref()
+    }
 }
 
 /// `text[range]` shaped in `face`, from left to right. Each character is a

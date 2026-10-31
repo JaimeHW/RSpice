@@ -31,7 +31,8 @@ pub(super) fn text(font: SceneFont, value: &str, y_um: u64) -> ScenePrimitive {
 
 pub(super) fn text_scene(content: ContentExtent, primitives: Vec<ScenePrimitive>) -> HardcopyScene {
     // The title is uncovered on purpose: it once refused the whole document.
-    let metadata = HardcopySceneMetadata::try_new("10 kΩ 中", "RSpice hardcopy tests").unwrap();
+    let metadata =
+        HardcopySceneMetadata::try_new("10 kΩ \u{0378}", "RSpice hardcopy tests").unwrap();
     HardcopyScene::try_new(content, metadata, primitives, Vec::new()).unwrap()
 }
 
@@ -131,7 +132,7 @@ fn svg_names_the_face_of_every_borrowed_run() {
         vec![
             text(SceneFont::Monospace, "R1 10 kΩ α", 20_000),
             text(SceneFont::MonospaceMedium, "DWG Δ", 40_000),
-            text(SceneFont::Sans, "Plain 中", 60_000),
+            text(SceneFont::Sans, "Plain \u{0378}", 60_000),
             text(SceneFont::Monospace, "⌀6 ⏚", 70_000),
         ],
     );
@@ -230,7 +231,7 @@ fn a_borrowed_glyph_prints_as_its_lending_face_letters_it() {
     assert_ne!(diameter, blank, "the ⌀ inked nothing");
     // What no face carries prints as the replacement square, never refused,
     // and never as a question mark.
-    let uncovered = page(SceneFont::Sans, "中");
+    let uncovered = page(SceneFont::Sans, "\u{0378}");
     assert_eq!(uncovered, page(SceneFont::Sans, "\u{25fb}"));
     assert_ne!(uncovered, page(SceneFont::Sans, "?"));
 }

@@ -227,7 +227,9 @@ fn a_line_is_placed_by_its_shaped_width() {
         .iter()
         .map(rspice_fonts::print::Piece::advance)
         .sum();
-    let face = PrintFaces::get().unwrap().face(PrintFace::SansRegular);
+    let face = PrintFaces::get()
+        .unwrap()
+        .face(PrintFace::Bundled(Face::SansRegular));
     let unshaped: i64 = value
         .chars()
         .filter_map(|character| face.glyph_index(character))
@@ -306,7 +308,7 @@ fn the_render_budget_allows_for_the_faces_a_page_letters_in() {
     #[cfg(not(target_arch = "wasm32"))]
     assert_eq!(
         allowance("قيمة R1"),
-        every_build + 2 * PrintFace::SansArabicRegular.bytes().len() as u64
+        every_build + 2 * PrintFace::Bundled(Face::SansArabicRegular).bytes().len() as u64
     );
 }
 
@@ -407,7 +409,7 @@ fn an_svg_viewer_sets_every_glyph_where_print_does() {
     let mut lines = vec![
         (SceneFont::Sans, "AVATAR To Wa"),
         (SceneFont::Monospace, "R1 10 kΩ α ⌀6 ⏚"),
-        (SceneFont::Sans, "Plain 中 \u{E000}"),
+        (SceneFont::Sans, "Plain \u{0378} \u{E000}"),
     ];
     #[cfg(not(target_arch = "wasm32"))]
     lines.extend([
@@ -490,4 +492,229 @@ fn an_svg_writes_a_right_to_left_piece_as_typed_inside_an_override() {
         "{named}"
     );
     assert!(named.contains("<tspan>R1</tspan>"), "{named}");
+}
+
+/// Print letters from an installed face for as long as this holds it, and
+/// from none afterwards. Print looks in one place per process, so the tests
+/// that move it take turns.
+#[cfg(not(target_arch = "wasm32"))]
+struct Installed {
+    _turn: std::sync::MutexGuard<'static, ()>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Installed {
+    fn faces(known: Vec<rspice_fonts::system::KnownFace>) -> Self {
+        static TURN: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        let turn = TURN
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        rspice_fonts::system::print::print_from(
+            rspice_fonts::system::Source::files(known),
+            rspice_fonts::HanVariant::Japanese.order(),
+        );
+        Self { _turn: turn }
+    }
+
+    /// IBM Plex Sans JP, read as an installed face so every machine has it.
+    fn japanese() -> Self {
+        Self::faces(vec![installed_face(fixture_font(
+            "IBMPlexSansJP-Regular.ttf",
+        ))])
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+impl Drop for Installed {
+    fn drop(&mut self) {
+        rspice_fonts::system::print::print_from_none();
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fixture_font(file: &str) -> std::path::PathBuf {
+    std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../assets/fonts")
+        .join(file)
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn installed_face(path: std::path::PathBuf) -> rspice_fonts::system::KnownFace {
+    rspice_fonts::system::KnownFace::new(
+        path,
+        "IBM Plex Sans JP",
+        rspice_fonts::system::FaceClass::Han(rspice_fonts::HanVariant::Japanese),
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_pdf_letters_what_no_embedded_face_has_from_an_installed_face() {
+    let _installed = Installed::japanese();
+    let value = "出力 R1 中文";
+    for format in [OutputFormat::PdfVector, OutputFormat::PdfA] {
+        let publication = printed(format, SceneFont::Sans, value);
+        let page = page_text(publication.single_part().unwrap().bytes());
+        assert_eq!(page.copied, value);
+        assert!(
+            page.glyphs
+                .iter()
+                .any(|(base, _)| base.contains("IBMPlexSansJP")),
+            "{:?}",
+            page.glyphs
+        );
+        assert!(
+            !page
+                .glyphs
+                .iter()
+                .any(|(base, _)| base.contains("RSpiceSymbols")),
+            "nothing prints as the square: {:?}",
+            page.glyphs
+        );
+        if format == OutputFormat::PdfA {
+            assert_eq!(
+                publication.pdf_conformance(),
+                Some(PdfConformance::PdfA2bValidated)
+            );
+        }
+    }
+}
+
+/// An SVG draws an installed face's glyphs as outlines, each defined once
+/// and used where it stands, titled with the text as typed; it carries no
+/// copy of the face itself.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_svg_draws_an_installed_face_as_outlines_defined_once() {
+    let _installed = Installed::japanese();
+    let publication = printed(OutputFormat::SvgVector, SceneFont::Sans, "R1 中文中");
+    let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    assert_eq!(svg.matches("<path id=\"o").count(), 2, "{svg}");
+    // Each id names its page: a browser print puts every page in one
+    // document.
+    assert!(svg.contains("<path id=\"o1-1\""), "{svg}");
+    assert_eq!(svg.matches("<use href=\"#o").count(), 3, "{svg}");
+    assert!(svg.contains("<title>中文中</title>"), "{svg}");
+    assert!(!svg.contains("IBM Plex Sans JP"), "{svg}");
+    let text = &svg[svg.find("<text").unwrap()..];
+    assert!(
+        !text.contains('中'),
+        "the outlined text is not also text: {text}"
+    );
+    // The rasteriser draws the outlines, not the square.
+    let raster = |value: &str| {
+        printed(OutputFormat::Png { dpi: 150 }, SceneFont::Sans, value)
+            .single_part()
+            .unwrap()
+            .bytes()
+            .to_vec()
+    };
+    assert_ne!(raster("中"), raster("\u{0378}"));
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_receipt_names_an_installed_face_by_its_file_never_the_home_directory() {
+    let _installed = Installed::japanese();
+    let publication = printed(OutputFormat::PdfVector, SceneFont::Sans, "R1 中文");
+    let installed: Vec<_> = publication
+        .faces_used()
+        .iter()
+        .filter(|face| face.source() != &HardcopyFaceSource::Bundled)
+        .collect();
+    let [face] = installed.as_slice() else {
+        panic!("one installed face: {:?}", publication.faces_used());
+    };
+    assert_eq!(face.family(), "IBM Plex Sans JP");
+    assert_eq!(face.weight(), 400);
+    let HardcopyFaceSource::System { path } = face.source() else {
+        panic!("{face:?}");
+    };
+    assert!(path.ends_with("IBMPlexSansJP-Regular.ttf"), "{path}");
+    let home = if cfg!(windows) { "USERPROFILE" } else { "HOME" };
+    if let Some(home) = std::env::var_os(home).filter(|home| !home.is_empty()) {
+        assert!(!path.contains(home.to_str().unwrap()), "{path}");
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_receipt_writes_a_face_one_user_installed_from_the_home_directory() {
+    use std::path::{MAIN_SEPARATOR as SEPARATOR, Path};
+
+    use crate::render::glyph_runs::receipt_path;
+
+    let home = if cfg!(windows) {
+        Path::new(r"C:\Users\Ada")
+    } else {
+        Path::new("/home/ada")
+    };
+    let per_user = if cfg!(windows) {
+        home.join(r"AppData\Local\Microsoft\Windows\Fonts\NotoSansJP-Regular.ttf")
+    } else {
+        home.join(".local/share/fonts/NotoSansJP-Regular.ttf")
+    };
+    let within = per_user.strip_prefix(home).unwrap().display().to_string();
+    assert_eq!(
+        receipt_path(&per_user, Some(home)),
+        format!("~{SEPARATOR}{within}")
+    );
+    let system = if cfg!(windows) {
+        Path::new(r"C:\Windows\Fonts\YuGothM.ttc")
+    } else {
+        Path::new("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc")
+    };
+    assert_eq!(
+        receipt_path(system, Some(home)),
+        system.display().to_string()
+    );
+    assert_eq!(
+        receipt_path(&per_user, None),
+        per_user.display().to_string()
+    );
+}
+
+/// A face whose licence keeps it out of documents is passed over: its
+/// characters print as the square, and the PDF carries no part of it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn print_never_embeds_a_face_whose_licence_forbids_it() {
+    let mut bytes = std::fs::read(fixture_font("IBMPlexSansJP-Regular.ttf")).unwrap();
+    let tables = usize::from(u16::from_be_bytes([bytes[4], bytes[5]]));
+    let os2 = (0..tables)
+        .map(|table| 12 + 16 * table)
+        .find(|&record| &bytes[record..record + 4] == b"OS/2")
+        .map(|record| u32::from_be_bytes(bytes[record + 8..record + 12].try_into().unwrap()))
+        .expect("the face has an OS/2 table") as usize;
+    // fsType 2: Restricted License embedding.
+    bytes[os2 + 8..os2 + 10].copy_from_slice(&2_u16.to_be_bytes());
+    let path = std::env::temp_dir().join(format!(
+        "rspice-hardcopy-restricted-{}.ttf",
+        std::process::id()
+    ));
+    std::fs::write(&path, bytes).unwrap();
+    let installed = Installed::faces(vec![installed_face(path.clone())]);
+    let value = "R1 中文";
+    let publication = printed(OutputFormat::PdfA, SceneFont::Sans, value);
+    drop(installed);
+    let _ = std::fs::remove_file(path);
+    let page = page_text(publication.single_part().unwrap().bytes());
+    assert_eq!(page.copied, value);
+    assert!(
+        !page
+            .glyphs
+            .iter()
+            .any(|(base, _)| base.contains("IBMPlexSansJP")),
+        "{:?}",
+        page.glyphs
+    );
+    assert!(
+        page.glyphs
+            .iter()
+            .any(|(base, _)| base.contains("RSpiceSymbols"))
+    );
+    assert_eq!(
+        publication.pdf_conformance(),
+        Some(PdfConformance::PdfA2bValidated)
+    );
 }

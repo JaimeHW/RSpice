@@ -2131,12 +2131,12 @@ pub(super) fn scene_contains_text(scene: &HardcopyScene) -> bool {
 /// The faces every build embeds. They letter Latin, Greek and the
 /// engineering symbols, so the render budget allows for them on any page.
 const EVERY_BUILD_FACES: [PrintFace; 6] = [
-    PrintFace::SansRegular,
-    PrintFace::SansMedium,
-    PrintFace::SansSemibold,
-    PrintFace::MonoRegular,
-    PrintFace::MonoMedium,
-    PrintFace::Symbols,
+    PrintFace::Bundled(Face::SansRegular),
+    PrintFace::Bundled(Face::SansMedium),
+    PrintFace::Bundled(Face::SansSemibold),
+    PrintFace::Bundled(Face::MonoRegular),
+    PrintFace::Bundled(Face::MonoMedium),
+    PrintFace::Bundled(Face::Symbols),
 ];
 
 /// The bytes the render budget allows a page for the faces it embeds: the

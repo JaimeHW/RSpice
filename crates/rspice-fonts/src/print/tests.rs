@@ -76,7 +76,7 @@ fn latin_is_set_as_its_face_spaces_it_and_reads_left_to_right() {
     let pieces = line(Role::Sans, text);
     assert_eq!(pieces.len(), 1);
     let piece = &pieces[0];
-    assert_eq!(piece.face, PrintFace::SansRegular);
+    assert_eq!(piece.face, PrintFace::Bundled(Face::SansRegular));
     assert!(!piece.right_to_left);
     assert_eq!(
         texts(text, &pieces),
@@ -86,7 +86,7 @@ fn latin_is_set_as_its_face_spaces_it_and_reads_left_to_right() {
     // placed by summing those advances runs long.
     let unshaped: i64 = text
         .chars()
-        .map(|character| unshaped_advance(PrintFace::SansRegular, character))
+        .map(|character| unshaped_advance(PrintFace::Bundled(Face::SansRegular), character))
         .sum();
     assert!(
         piece.advance() < unshaped,
@@ -115,10 +115,10 @@ fn a_borrowed_character_is_set_in_the_face_that_has_it() {
     assert_eq!(
         faces,
         [
-            (PrintFace::SansRegular, vec!["Δ"]),
-            (PrintFace::MonoRegular, vec!["V", " "]),
-            (PrintFace::Symbols, vec!["⌀"]),
-            (PrintFace::MonoRegular, vec!["1", "0"]),
+            (PrintFace::Bundled(Face::SansRegular), vec!["Δ"]),
+            (PrintFace::Bundled(Face::MonoRegular), vec!["V", " "]),
+            (PrintFace::Bundled(Face::Symbols), vec!["⌀"]),
+            (PrintFace::Bundled(Face::MonoRegular), vec!["1", "0"]),
         ]
     );
 }
@@ -127,9 +127,9 @@ fn a_borrowed_character_is_set_in_the_face_that_has_it() {
 fn a_character_no_face_has_is_set_as_the_square_and_keeps_its_text() {
     let text = "x\u{E000}\u{E001}y";
     let pieces = line(Role::Sans, text);
-    let square = glyph_of(PrintFace::Symbols, REPLACEMENT);
+    let square = glyph_of(PrintFace::Bundled(Face::Symbols), REPLACEMENT);
     assert_eq!(pieces.len(), 3, "{pieces:?}");
-    assert_eq!(pieces[1].face, PrintFace::Symbols);
+    assert_eq!(pieces[1].face, PrintFace::Bundled(Face::Symbols));
     assert_eq!(
         pieces[1]
             .glyphs
@@ -146,15 +146,15 @@ fn a_mark_its_face_lacks_sets_its_cluster_as_the_square() {
     // base, which shapes the mark to its missing glyph.
     let text = "a\u{0363}b";
     let pieces = line(Role::Sans, text);
-    let square = glyph_of(PrintFace::Symbols, REPLACEMENT);
+    let square = glyph_of(PrintFace::Bundled(Face::Symbols), REPLACEMENT);
     assert_eq!(
         pieces
             .iter()
             .map(|piece| (piece.face, texts(text, std::slice::from_ref(piece))))
             .collect::<Vec<_>>(),
         [
-            (PrintFace::Symbols, vec!["a\u{0363}"]),
-            (PrintFace::SansRegular, vec!["b"]),
+            (PrintFace::Bundled(Face::Symbols), vec!["a\u{0363}"]),
+            (PrintFace::Bundled(Face::SansRegular), vec!["b"]),
         ]
     );
     assert_eq!(pieces[0].glyphs[0].id, square);
@@ -221,12 +221,12 @@ fn arabic_is_joined_and_lam_alef_is_one_glyph_for_both_letters() {
     let pieces = line(Role::Sans, text);
     let arabic: Vec<&Piece> = pieces
         .iter()
-        .filter(|piece| piece.face == PrintFace::SansArabicRegular)
+        .filter(|piece| piece.face == PrintFace::Bundled(Face::SansArabicRegular))
         .collect();
     assert_eq!(arabic.len(), 2, "{pieces:?}");
     assert!(arabic.iter().all(|piece| piece.right_to_left));
     // A joined beh is not the isolated form the character map names.
-    let isolated = glyph_of(PrintFace::SansArabicRegular, 'ب');
+    let isolated = glyph_of(PrintFace::Bundled(Face::SansArabicRegular), 'ب');
     let beh = arabic
         .iter()
         .find(|piece| piece.glyphs.len() == 3)
@@ -280,8 +280,8 @@ fn thai_is_set_in_its_face_with_every_mark_drawn() {
     assert!(
         pieces
             .iter()
-            .filter(|piece| piece.face != PrintFace::SansRegular)
-            .all(|piece| piece.face == PrintFace::SansThaiRegular),
+            .filter(|piece| piece.face != PrintFace::Bundled(Face::SansRegular))
+            .all(|piece| piece.face == PrintFace::Bundled(Face::SansThaiRegular)),
         "{pieces:?}"
     );
     assert!(
