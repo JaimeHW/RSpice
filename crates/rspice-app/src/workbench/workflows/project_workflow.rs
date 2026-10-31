@@ -13,12 +13,13 @@ use crate::io::ProjectSnapshot;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::lifecycle::project_lifecycle::PersistenceBinding;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
-use crate::workbench::lifecycle::project_lifecycle::{
-    PersistenceBinding, ProjectLifecycleError, SaveScope,
-};
+use crate::workbench::lifecycle::project_lifecycle::{ProjectLifecycleError, SaveScope};
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::workflows::file_workflow::file_name_string;
+use rspice_app_services::workbench::slots::platform::remember_recent_file;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
 
@@ -1165,8 +1166,7 @@ pub(crate) fn load_project_from_path(state: &mut AppState, path: &Path) -> bool 
     match crate::workbench::lifecycle::project_lifecycle::read_native_binding(path) {
         Ok((project, binding)) => {
             let canonical_path = binding.canonical_path.clone();
-            apply_loaded_project_authorized(
-                state,
+            state.apply_loaded_project_authorized(
                 project,
                 ProjectLoadOrigin::PersistentPath(&canonical_path),
                 Some(binding),
@@ -1195,30 +1195,64 @@ pub(crate) fn apply_loaded_project(
                 return false;
             }
         };
-    apply_loaded_project_authorized(state, project, origin, None, transaction)
+    state.apply_loaded_project_authorized(project, origin, None, transaction)
 }
 
-fn apply_loaded_project_authorized(
-    state: &mut AppState,
+/// A project read for opening, validated and taken apart before it replaces
+/// the open one.
+pub(crate) struct LoadedProject {
+    /// Retires the replaced project's execution context.
+    pub(crate) announcement: String,
+    pub(crate) install: LoadedProjectInstall,
+    pub(crate) restore: LoadedProjectRestore,
+}
+
+/// What a loaded project installs as the open one.
+pub(crate) struct LoadedProjectInstall {
+    library_manager: crate::state::LibraryManager,
+    workspace: crate::state::ProjectWorkspace,
+    sim_setup: crate::workbench::app_state::SimSetupState,
+    model_library_manager: crate::state::model_library::ModelLibraryManager,
+}
+
+/// What a loaded project brings back once it is installed.
+pub(crate) struct LoadedProjectRestore {
+    simulation_results: crate::io::ProjectSimulationResults,
+    result_presentation: crate::state::result_presentation::ResultPresentation,
+    accepted_baseline: ProjectSnapshot,
+    simulation_results_warning: Option<String>,
+    workspace_migration_warning: Option<String>,
+    execution_warnings: Vec<String>,
+}
+
+/// Validate a project read for opening against the replacement
+/// `transaction` reserved for it, restore the execution context it was
+/// saved with, and settle where it saves next. A refusal ends the
+/// transaction and answers the open, and nothing is installed.
+pub(crate) fn prepare_loaded_project(
+    lifecycle: crate::workbench::lifecycle::project_lifecycle::LifecycleParts<'_>,
+    workbench: &mut WorkbenchSession,
     mut project: ProjectSnapshot,
     origin: ProjectLoadOrigin<'_>,
-    binding: Option<PersistenceBinding>,
     transaction: crate::product::TransactionId,
-) -> bool {
+) -> Option<LoadedProject> {
     if let Err(error) = crate::workbench::lifecycle::project_lifecycle::validate_project_replacement(
-        state,
+        &lifecycle,
         transaction,
     ) {
         #[cfg(target_arch = "wasm32")]
         crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-            &mut state.platform,
+            lifecycle.platform,
             transaction,
         );
         #[cfg(not(target_arch = "wasm32"))]
-        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(&mut state.platform);
-        lifecycle_error(state, error, "Project open blocked");
-        return false;
+        crate::workbench::lifecycle::project_lifecycle::cancel_transaction(lifecycle.platform);
+        report_lifecycle_error(lifecycle.model, workbench, error, "Project open blocked");
+        return None;
     }
+    let crate::workbench::lifecycle::project_lifecycle::LifecycleParts {
+        model, platform, ..
+    } = lifecycle;
     let accepted_execution_context = project.file.execution_context.clone();
     let project_id = project.file.workspace.project.id();
     let (simulation_plan, model_library_manager, execution_warnings) = match project
@@ -1229,26 +1263,24 @@ fn apply_loaded_project_authorized(
         Some(context) => match crate::io::restore_execution_context(context, project_id) {
             Ok(restored) => restored,
             Err(error) => {
-                state.report_failure(
+                model.report_failure(
                     "Project open failed",
                     format!("its saved simulation setup is invalid: {error}"),
                 );
                 #[cfg(target_arch = "wasm32")]
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     transaction,
                 );
                 #[cfg(not(target_arch = "wasm32"))]
-                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(
-                    &mut state.platform,
-                );
-                return false;
+                crate::workbench::lifecycle::project_lifecycle::cancel_transaction(platform);
+                return None;
             }
         },
         None => {
             let (manager, mut warnings) =
                 match crate::workbench::app_state::restore_session_model_library_manager(
-                    &mut state.model.pdk_config,
+                    &mut model.pdk_config,
                 ) {
                     Ok((manager, loaded)) => (
                         manager,
@@ -1281,7 +1313,7 @@ fn apply_loaded_project_authorized(
             }
             (
                 crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-                    &state.model.preferences,
+                    &model.preferences,
                 ),
                 manager,
                 warnings,
@@ -1292,65 +1324,138 @@ fn apply_loaded_project_authorized(
     match origin {
         #[cfg(not(target_arch = "wasm32"))]
         ProjectLoadOrigin::PersistentPath(_) => {
-            state.platform.browser_project_save_name = None;
+            platform.browser_project_save_name = None;
         }
         ProjectLoadOrigin::LiveSession(_) => {
             // The host's on-disk location is meaningless on this machine and
             // must never become a save target here.
             project.file.workspace.project.path = None;
-            state.platform.browser_project_save_name = None;
+            platform.browser_project_save_name = None;
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         ProjectLoadOrigin::BrowserImport(name) | ProjectLoadOrigin::BrowserCanonical(name) => {
             project.file.workspace.project.path = None;
-            state.platform.browser_project_save_name = Some(name.to_string());
+            platform.browser_project_save_name = Some(name.to_string());
         }
     }
     let mut accepted_baseline = project.clone();
     accepted_baseline.file.execution_context = accepted_execution_context;
-    let simulation_results = project.file.simulation_results;
-    let result_presentation = project.file.result_presentation;
-    let mut simulation_results_warning = project.file.simulation_results_warning;
-    let workspace_migration_warning = project.file.workspace_migration_warning;
-    let opened = format!(
+    let announcement = format!(
         "{} {} ({}).",
         origin.success_prefix(),
         project.file.workspace.project.display_name(),
         origin.display_label()
     );
-    state.replace_project_execution_context(opened);
-    state.model.library_manager = project.file.libraries;
-    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.model.workspace = crate::state::ProjectWorkspace::from_parts(
-        project.file.workspace,
-        project.workspace_session,
-    );
-    state.model.sim_setup = simulation_plan;
-    state.model.model_library_manager = model_library_manager;
-    state.restore_active_schematic_from_workspace();
-    state.model.simulation = crate::state::SimulationState::default();
+    Some(LoadedProject {
+        announcement,
+        install: LoadedProjectInstall {
+            library_manager: project.file.libraries,
+            workspace: crate::state::ProjectWorkspace::from_parts(
+                project.file.workspace,
+                project.workspace_session,
+            ),
+            sim_setup: simulation_plan,
+            model_library_manager,
+        },
+        restore: LoadedProjectRestore {
+            simulation_results: project.file.simulation_results,
+            result_presentation: project.file.result_presentation,
+            accepted_baseline,
+            simulation_results_warning: project.file.simulation_results_warning,
+            workspace_migration_warning: project.file.workspace_migration_warning,
+            execution_warnings,
+        },
+    })
+}
+
+/// Make a loaded project's libraries, workspace, plan and model catalog the
+/// open ones, under fresh library edit locks.
+pub(crate) fn install_loaded_project(model: &mut Model, install: LoadedProjectInstall) {
+    model.library_manager = install.library_manager;
+    model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    model.workspace = install.workspace;
+    model.sim_setup = install.sim_setup;
+    model.model_library_manager = install.model_library_manager;
+}
+
+/// What an installed project's restore leaves for the shell and the report.
+pub(crate) struct OpenedProject {
+    pub(crate) result_presentation: crate::state::result_presentation::ResultPresentation,
+    pub(crate) accepted_baseline: ProjectSnapshot,
+    pub(crate) report: OpenedProjectReport,
+}
+
+/// What an opened project has to say once it is open.
+pub(crate) struct OpenedProjectReport {
+    technology_block: Option<String>,
+    workspace_migration_warning: Option<String>,
+    simulation_results_warning: Option<String>,
+    execution_warnings: Vec<String>,
+}
+
+/// Restore an installed project's simulation: a fresh simulation state, the
+/// technology gate asked of the installed project, then the results it was
+/// saved with.
+pub(crate) fn restore_loaded_simulation(
+    model: &mut Model,
+    restore: LoadedProjectRestore,
+) -> OpenedProject {
+    let LoadedProjectRestore {
+        simulation_results,
+        result_presentation,
+        accepted_baseline,
+        mut simulation_results_warning,
+        workspace_migration_warning,
+        execution_warnings,
+    } = restore;
+    model.simulation = crate::state::SimulationState::default();
     // Asked of the one gate a run asks: a project with no technology runs
     // whatever its plan does not need one for. Asking whether it had a
     // binding at all told every such project its runs were blocked, and they
     // were not.
-    let technology_block = state.technology_gate_block_reason().err();
+    let technology_block = model
+        .technology_inputs()
+        .technology_gate_block_reason()
+        .err();
     if let Err(error) =
-        crate::io::restore_simulation_results(simulation_results, &mut state.model.simulation)
+        crate::io::restore_simulation_results(simulation_results, &mut model.simulation)
         && simulation_results_warning.is_none()
     {
         simulation_results_warning = Some(format!(
             "Simulation results were not restored because their persisted data is invalid: {error}"
         ));
     }
-    // Markers are restored after the datasets they annotate, and only those
-    // that still find their analysis: a marker pointing at a dataset this
-    // project no longer retains would draw on nothing.
-    state.restore_result_presentation(result_presentation);
-    if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::services::recent_files::RecentKind::Project, path);
+    OpenedProject {
+        result_presentation,
+        accepted_baseline,
+        report: OpenedProjectReport {
+            technology_block,
+            workspace_migration_warning,
+            simulation_results_warning,
+            execution_warnings,
+        },
     }
-    if let Some(error) = technology_block {
-        state.record(
+}
+
+/// Report an opened project: remember the file it came from, then say why
+/// its runs are blocked, what its load lost, and what its plan's migration
+/// dropped.
+pub(crate) fn report_opened_project(
+    model: &mut Model,
+    platform: &mut PlatformState,
+    origin: ProjectLoadOrigin<'_>,
+    report: OpenedProjectReport,
+) {
+    if let Some(path) = origin.recent_path() {
+        remember_recent_file(
+            model,
+            platform,
+            crate::services::recent_files::RecentKind::Project,
+            path,
+        );
+    }
+    if let Some(error) = report.technology_block {
+        model.record(
             LogSeverity::Warning,
             LogSource::Studio,
             format!(
@@ -1359,23 +1464,15 @@ fn apply_loaded_project_authorized(
             ),
         );
     }
-    for warning in workspace_migration_warning
+    for warning in report
+        .workspace_migration_warning
         .into_iter()
-        .chain(simulation_results_warning)
-        .chain(execution_warnings)
+        .chain(report.simulation_results_warning)
+        .chain(report.execution_warnings)
     {
-        state.record(LogSeverity::Warning, LogSource::Studio, warning);
+        model.record(LogSeverity::Warning, LogSource::Studio, warning);
     }
-    report_legacy_run_set_notes(state);
-    crate::workbench::app_state::services_access::accept_loaded_project(
-        state,
-        accepted_baseline,
-        binding,
-    );
-    // What the stored rule deck holds that this build does not apply, on the
-    // page before anything is checked under it.
-    state.publish_rule_deck_issues();
-    true
+    report_legacy_run_set_notes(model);
 }
 
 /// Report what folding a pre-unification Corner run space into the plan-global
@@ -1390,9 +1487,9 @@ fn apply_loaded_project_authorized(
 ///
 /// Drained rather than read, so a second load of the same session cannot repeat
 /// a loss that was already announced.
-fn report_legacy_run_set_notes(state: &mut AppState) {
-    for note in std::mem::take(&mut state.model.sim_setup.legacy_run_set_notes) {
-        state.record(LogSeverity::Warning, LogSource::Studio, note);
+fn report_legacy_run_set_notes(model: &mut Model) {
+    for note in std::mem::take(&mut model.sim_setup.legacy_run_set_notes) {
+        model.record(LogSeverity::Warning, LogSource::Studio, note);
     }
 }
 
@@ -1436,8 +1533,7 @@ pub(crate) fn apply_live_project_snapshot(
                 return LiveProjectApply::Rejected;
             }
         };
-    if apply_loaded_project_authorized(
-        state,
+    if state.apply_loaded_project_authorized(
         project,
         ProjectLoadOrigin::LiveSession(host_label),
         None,
@@ -1672,8 +1768,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                 BrowserProjectImportPayload::Loaded(file) => {
                     finish_browser_project_import(completion.import_token);
                     match crate::io::project_io::load_project_text(&file.contents, None) {
-                        Ok(project) => apply_loaded_project_authorized(
-                            state,
+                        Ok(project) => state.apply_loaded_project_authorized(
                             project,
                             ProjectLoadOrigin::BrowserImport(&file.name),
                             None,
@@ -1753,8 +1848,7 @@ fn finish_browser_canonical_open(
     };
     let binding = PersistenceBinding::Browser { handle_id, binding };
     let binding_for_persist = binding.clone();
-    let opened = apply_loaded_project_authorized(
-        state,
+    let opened = state.apply_loaded_project_authorized(
         project,
         ProjectLoadOrigin::BrowserCanonical(&display_name),
         Some(binding),

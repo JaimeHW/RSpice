@@ -9,6 +9,8 @@
 
 #[cfg(test)]
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::io::ProjectSnapshot;
+use crate::product::TransactionId;
 use crate::state::{SchematicState, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
@@ -19,14 +21,14 @@ use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::{
-    ProjectCloseDestination, has_unsaved_changes,
+    LifecycleParts, PersistenceBinding, ProjectCloseDestination, has_unsaved_changes,
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::state::Workspace;
 use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 use crate::workbench::workflows::project_workflow::{
-    self, ClosedProject, LiveProjectApply, NewProject, NewProjectParams,
-    apply_live_project_snapshot,
+    self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
+    OpenedProject, ProjectLoadOrigin, apply_live_project_snapshot,
 };
 
 /// Replacing the open project with a new one: the project's phases over its
@@ -256,6 +258,67 @@ fn close_project_discard(state: &mut AppState, destination: ProjectCloseDestinat
         state.workbench.outbox.push(requests::LiveMirrorEntry);
     }
     true
+}
+
+/// Opening a project read from a file, a browser import or binding, or a
+/// live session's host, in place of the open one: the project's phases over
+/// its own parts, with the shell's steps between them, in the order the open
+/// has always run.
+impl AppState {
+    /// Replace the open project with `project`, read from `origin` under the
+    /// replacement `transaction` reserved for it, and accept it under
+    /// `binding`. Returns whether it opened.
+    pub(crate) fn apply_loaded_project_authorized(
+        &mut self,
+        project: ProjectSnapshot,
+        origin: ProjectLoadOrigin<'_>,
+        binding: Option<PersistenceBinding>,
+        transaction: TransactionId,
+    ) -> bool {
+        let lifecycle = LifecycleParts {
+            model: &mut self.model,
+            platform: &mut self.platform,
+            workspace: self.workbench.workspace,
+            presentation: &self.results.results,
+        };
+        let Some(LoadedProject {
+            announcement,
+            install,
+            restore,
+        }) = project_workflow::prepare_loaded_project(
+            lifecycle,
+            &mut self.workbench,
+            project,
+            origin,
+            transaction,
+        )
+        else {
+            return false;
+        };
+        self.replace_project_execution_context(announcement);
+        project_workflow::install_loaded_project(&mut self.model, install);
+        self.restore_active_schematic_from_workspace();
+        let OpenedProject {
+            result_presentation,
+            accepted_baseline,
+            report,
+        } = project_workflow::restore_loaded_simulation(&mut self.model, restore);
+        // Markers are restored after the datasets they annotate, and only those
+        // that still find their analysis: a marker pointing at a dataset this
+        // project no longer retains would draw on nothing.
+        self.restore_result_presentation(result_presentation);
+        project_workflow::report_opened_project(
+            &mut self.model,
+            &mut self.platform,
+            origin,
+            report,
+        );
+        services_access::accept_loaded_project(self, accepted_baseline, binding);
+        // What the stored rule deck holds that this build does not apply, on the
+        // page before anything is checked under it.
+        self.publish_rule_deck_issues();
+        true
+    }
 }
 
 impl RSpiceApp {
@@ -699,6 +762,30 @@ mod tests {
                 "project_workflow::closing_loses_nothing(self)",
                 "close_project_discard(self, ProjectCloseDestination::EmptyWorkbench)",
                 "project_workflow::report_startup_project_kept(",
+            ],
+        );
+    }
+
+    /// A project opens in place of the open one in the order it always has:
+    /// the refusals and the execution context it was saved with before
+    /// anything changes, the replaced project's execution context retired,
+    /// the project installed and its drawing reloaded, its simulation and
+    /// then its markers restored, the open reported, the project accepted,
+    /// and then the rule deck's issues published.
+    #[test]
+    fn a_loaded_project_opens_in_the_order_it_always_has() {
+        assert_runs_in_order(
+            "apply_loaded_project_authorized",
+            &[
+                "project_workflow::prepare_loaded_project(",
+                "self.replace_project_execution_context(announcement)",
+                "project_workflow::install_loaded_project(&mut self.model, install)",
+                "self.restore_active_schematic_from_workspace()",
+                "project_workflow::restore_loaded_simulation(&mut self.model, restore)",
+                "self.restore_result_presentation(result_presentation)",
+                "project_workflow::report_opened_project(",
+                "services_access::accept_loaded_project(self, accepted_baseline, binding)",
+                "self.publish_rule_deck_issues()",
             ],
         );
     }
