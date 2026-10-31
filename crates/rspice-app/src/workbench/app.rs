@@ -159,7 +159,7 @@ pub(crate) use dialogs::hardcopy::HardcopyWorkflow;
 pub(crate) use dialogs::plan_removal::{
     PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone,
 };
-pub(crate) use dialogs::state::{GridSnapSpacingChoice, HelpCenterPage};
+pub(crate) use dialogs::state::HelpCenterPage;
 
 /// Test-only: the studio pins this against its own hop label, and the dialog
 /// module it lives in is private to the shell.

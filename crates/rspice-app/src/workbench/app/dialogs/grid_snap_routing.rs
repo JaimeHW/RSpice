@@ -9,8 +9,48 @@ use egui::Context;
 
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
-use crate::workbench::app::{GridSnapSpacingChoice, RSpiceApp, SchematicEditAuthority};
+use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
+
+/// Governed snap-spacing choices shown by the upgraded schematic toolbar
+/// transaction. `Free` disables snapping without replacing the document's
+/// retained pitch.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(crate) enum GridSnapSpacingChoice {
+    #[default]
+    Free,
+    Mil25,
+    Mil50,
+    Metric,
+}
+
+impl GridSnapSpacingChoice {
+    pub(crate) const ALL: [Self; 4] = [Self::Free, Self::Mil25, Self::Mil50, Self::Metric];
+
+    pub(crate) fn label(self) -> String {
+        self.pitch().map_or_else(
+            || "Free".to_owned(),
+            crate::state::policy_labels::grid_pitch_label,
+        )
+    }
+
+    pub(crate) const fn pitch(self) -> Option<crate::state::SchematicGridPitch> {
+        match self {
+            Self::Free => None,
+            Self::Mil25 => Some(crate::state::SchematicGridPitch::Mil25),
+            Self::Mil50 => Some(crate::state::SchematicGridPitch::Mil50),
+            Self::Metric => Some(crate::state::SchematicGridPitch::Metric),
+        }
+    }
+
+    pub(crate) const fn from_pitch(pitch: crate::state::SchematicGridPitch) -> Self {
+        match pitch {
+            crate::state::SchematicGridPitch::Mil25 => Self::Mil25,
+            crate::state::SchematicGridPitch::Mil50 => Self::Mil50,
+            crate::state::SchematicGridPitch::Metric => Self::Metric,
+        }
+    }
+}
 
 /// Complete isolated candidate published by Grid, snap and wire routing.
 #[derive(Debug, Clone, PartialEq)]
