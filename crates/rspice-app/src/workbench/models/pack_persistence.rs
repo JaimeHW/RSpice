@@ -27,9 +27,12 @@ use crate::state::model_hub::durable::{PersistedHubState, start_browser_pack_res
 use crate::workbench::app_state::Model;
 use crate::workbench::models::workspace_state::{ModelsOperationalState, ModelsWorkbenchViewState};
 
+/// What storage answers: the kept hub state and its warnings, or why not.
+type PackRestore = Result<(PersistedHubState, Vec<String>), String>;
+
 thread_local! {
     /// The restore, once storage has answered. At most one ever arrives.
-    static COMPLETION: std::cell::RefCell<Option<Result<(PersistedHubState, Vec<String>), String>>> =
+    static COMPLETION: std::cell::RefCell<Option<PackRestore>> =
         const { std::cell::RefCell::new(None) };
 }
 
