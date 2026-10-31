@@ -510,8 +510,12 @@ const MAX_PUBLIC_ITEMS: usize = 5235;
 // 1,603.
 // `Mosfet::enter_operating_point` adds one: the operating-point prime and a
 // warm-started solve (`rspice-core` circuit/nonlinear.rs) enter or skip every
-// classic MOSFET's MODEINITJCT load with it. The census is 1,604, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1604;
+// classic MOSFET's MODEINITJCT load with it. The census is 1,604.
+// `Mosfet::set_native_xyce_transient_convergence` adds one: the circuit store
+// (`rspice-core` circuit/storage/nonlinear.rs) selects Xyce's transient
+// device-convergence status for classic MOS instances, as it does through
+// the diode's. The census is 1,605, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1605;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
