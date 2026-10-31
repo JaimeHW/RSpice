@@ -47,6 +47,8 @@ impl Bsim4v8EvalInputs {
 
 #[derive(Debug)]
 struct Bsim4v8EvalRecord {
+    /// A cleared record keeps its allocation for the next evaluation.
+    valid: bool,
     inputs: Bsim4v8EvalInputs,
     /// The module's result; `charge` is present when the charge model ran.
     op: Bsim4v8Op,
@@ -68,7 +70,11 @@ impl Clone for Bsim4v8EvalMemo {
 impl Bsim4v8EvalMemo {
     fn find<T>(&self, mut hit: impl FnMut(&Bsim4v8EvalRecord) -> Option<T>) -> Option<T> {
         let records = self.0.borrow();
-        records.iter().flatten().find_map(|record| hit(record))
+        records
+            .iter()
+            .flatten()
+            .filter(|record| record.valid)
+            .find_map(|record| hit(record))
     }
 
     /// The DC-only result of a recorded evaluation at `inputs`: exactly what
@@ -103,17 +109,26 @@ impl Bsim4v8EvalMemo {
         records.swap(0, 1);
         match &mut records[0] {
             Some(record) => {
+                record.valid = true;
                 record.inputs = inputs;
                 record.op.clone_from(op);
                 record.dc_output_vdsat = dc_output_vdsat;
             }
             slot @ None => {
                 *slot = Some(Box::new(Bsim4v8EvalRecord {
+                    valid: true,
                     inputs,
                     op: op.clone(),
                     dc_output_vdsat,
                 }));
             }
+        }
+    }
+
+    /// Forget every record: the instance now holds other model data.
+    pub(super) fn clear(&self) {
+        for record in self.0.borrow_mut().iter_mut().flatten() {
+            record.valid = false;
         }
     }
 }

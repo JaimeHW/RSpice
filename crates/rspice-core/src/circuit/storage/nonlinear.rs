@@ -241,9 +241,23 @@ impl Bjts {
 /// Newton-solve storage for one device family that stamps through the generic
 /// [`MatrixStamper`] path rather than the O(1) `stamp_direct` linkage of
 /// [`Mosfets`].
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(crate) struct NewtonFamily<D> {
     pub devices: Vec<D>,
+}
+
+impl<D: Clone> Clone for NewtonFamily<D> {
+    fn clone(&self) -> Self {
+        Self {
+            devices: self.devices.clone(),
+        }
+    }
+
+    /// Transient snapshots refresh every family in place each step attempt:
+    /// keep the device buffer and let each device refresh itself.
+    fn clone_from(&mut self, source: &Self) {
+        self.devices.clone_from(&source.devices);
+    }
 }
 
 impl<D> Default for NewtonFamily<D> {

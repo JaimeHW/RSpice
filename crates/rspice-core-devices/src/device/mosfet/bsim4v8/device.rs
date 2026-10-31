@@ -39,6 +39,7 @@ const TRNQS_SCALING: Value = 1.0e-9;
 mod ac_response;
 #[doc(hidden)]
 pub mod checkpoint;
+mod clone;
 mod continuation;
 mod eval_memo;
 mod periodic;
@@ -102,7 +103,7 @@ struct Bsim4v8LimitAnchor {
 }
 
 /// One BSIM4 v4.8 instance wired into the engine.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Bsim4v8Device {
     pub name: String,
     /// External drain terminal.

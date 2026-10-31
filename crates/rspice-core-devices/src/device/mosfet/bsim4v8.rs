@@ -95,7 +95,7 @@ use crate::Value;
 use std::sync::Arc;
 
 /// One BSIM4 v4.8 instance: shared model card + size knot + instance tail.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct Bsim4v8 {
     pub name: String,
     /// +1 NMOS / -1 PMOS (model `mtype`).
@@ -105,6 +105,47 @@ pub struct Bsim4v8 {
     pub size: Arc<Bsim4v8SizeDep>,
     pub inst: Bsim4v8InstTemp,
     pub geom: Bsim4v8Geometry,
+}
+
+impl Clone for Bsim4v8 {
+    fn clone(&self) -> Self {
+        Self {
+            name: self.name.clone(),
+            mtype: self.mtype,
+            model: Arc::clone(&self.model),
+            model_temp: Arc::clone(&self.model_temp),
+            size: Arc::clone(&self.size),
+            inst: self.inst.clone(),
+            geom: self.geom,
+        }
+    }
+
+    /// Transient snapshots refresh every instance in place each step attempt:
+    /// keep the name buffer and the shared handles that already match.
+    fn clone_from(&mut self, source: &Self) {
+        let Self {
+            name,
+            mtype,
+            model,
+            model_temp,
+            size,
+            inst,
+            geom,
+        } = source;
+        self.name.clone_from(name);
+        self.mtype = *mtype;
+        if !Arc::ptr_eq(&self.model, model) {
+            self.model = Arc::clone(model);
+        }
+        if !Arc::ptr_eq(&self.model_temp, model_temp) {
+            self.model_temp = Arc::clone(model_temp);
+        }
+        if !Arc::ptr_eq(&self.size, size) {
+            self.size = Arc::clone(size);
+        }
+        self.inst.clone_from(inst);
+        self.geom = *geom;
+    }
 }
 
 impl Bsim4v8 {
