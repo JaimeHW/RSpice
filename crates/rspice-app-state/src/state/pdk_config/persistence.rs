@@ -16,20 +16,12 @@ pub use browser::{start_browser_pdk_config_load, start_browser_pdk_config_save};
 
 #[cfg(any(test, target_arch = "wasm32"))]
 const BROWSER_PDK_SCHEMA_VERSION: u32 = 1;
-#[cfg(target_arch = "wasm32")]
-const BROWSER_PDK_DATABASE: &str = "rspice-pdk-config";
-#[cfg(target_arch = "wasm32")]
-const BROWSER_PDK_STORE: &str = "content-addressed-pdk-config";
 #[cfg(any(test, target_arch = "wasm32"))]
 const MAX_BROWSER_PDK_GENERATION: u64 = (1_u64 << 53) - 1;
 #[cfg(any(test, target_arch = "wasm32"))]
 const MAX_BROWSER_PDK_METADATA_BYTES: usize = 32 * 1024 * 1024;
 #[cfg(target_arch = "wasm32")]
-const BROWSER_PDK_ASYNC_TIMEOUT_MS: u32 = 30_000;
-#[cfg(target_arch = "wasm32")]
 const BROWSER_PDK_STORAGE_MANAGER_TIMEOUT_MS: u32 = 5_000;
-#[cfg(target_arch = "wasm32")]
-const MAX_RETAINED_BROWSER_PDK_EVENT_OPERATIONS: usize = 32;
 #[cfg(any(test, target_arch = "wasm32"))]
 const BROWSER_PDK_RECORD_OVERHEAD_BYTES: u64 = 4 * 1024;
 #[cfg(any(test, target_arch = "wasm32"))]

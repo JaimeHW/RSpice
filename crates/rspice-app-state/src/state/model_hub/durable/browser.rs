@@ -226,7 +226,7 @@ async fn read_persisted_state() -> Result<(PersistedHubState, Vec<String>), Stri
 
 /// What the browser will promise about the bytes just written.
 async fn observe_durability() -> PackStorageStanding {
-    let Some(storage) = storage_manager() else {
+    let Some(storage) = browser_store::storage_manager() else {
         return PackStorageStanding::BestEffort;
     };
     let mut persisted = storage_boolean(&storage, "persisted").await;
@@ -242,27 +242,12 @@ async fn observe_durability() -> PackStorageStanding {
     }
 }
 
-fn storage_manager() -> Option<JsValue> {
-    let window = web_sys::window()?;
-    let navigator = js_sys::Reflect::get(&window, &JsValue::from_str("navigator")).ok()?;
-    let storage = js_sys::Reflect::get(&navigator, &JsValue::from_str("storage")).ok()?;
-    (!storage.is_null() && !storage.is_undefined()).then_some(storage)
-}
-
 async fn storage_boolean(storage: &JsValue, method: &str) -> Option<bool> {
-    let callable = js_sys::Reflect::get(storage, &JsValue::from_str(method)).ok()?;
-    if callable.is_null() || callable.is_undefined() {
-        return None;
-    }
-    let returned = browser_store::call(storage, method, &[]).ok()?;
-    browser_store::await_promise(
-        js_sys::Promise::resolve(&returned),
-        method,
-        MODEL_HUB.timeout_ms,
-    )
-    .await
-    .ok()?
-    .as_bool()
+    browser_store::storage_call(storage, method, MODEL_HUB.timeout_ms)
+        .await
+        .ok()
+        .flatten()?
+        .as_bool()
 }
 
 // ---------------------------------------------------------------------------

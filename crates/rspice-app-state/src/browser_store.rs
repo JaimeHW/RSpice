@@ -52,6 +52,18 @@ pub const MODEL_HUB: Schema = Schema {
     refusal: "too many model-pack storage operations are still pending",
 };
 
+/// The PDK configuration: a generation head per configuration path, its
+/// metadata, and each signed archive under its own digest.
+pub const PDK_CONFIG: Schema = Schema {
+    database: "rspice-pdk-config",
+    version: 1,
+    store: "content-addressed-pdk-config",
+    timeout_ms: 30_000,
+    blocked: "IndexedDB schema upgrade is blocked by another RSpice tab",
+    pending: 32,
+    refusal: "too many browser PDK storage operations are still pending",
+};
+
 #[cfg(target_arch = "wasm32")]
 pub use browser::*;
 
@@ -523,6 +535,40 @@ mod browser {
         })
     }
 
+    /// The origin's `navigator.storage`, where the browser offers one.
+    pub fn storage_manager() -> Option<JsValue> {
+        let window = web_sys::window()?;
+        let navigator = js_sys::Reflect::get(&window, &JsValue::from_str("navigator")).ok()?;
+        let storage = js_sys::Reflect::get(&navigator, &JsValue::from_str("storage")).ok()?;
+        (!storage.is_null() && !storage.is_undefined()).then_some(storage)
+    }
+
+    /// Settles one of the storage manager's methods, or `Ok(None)` when the
+    /// browser does not offer it. A failure says whether the call could not
+    /// be made or did not succeed.
+    pub async fn storage_call(
+        storage: &JsValue,
+        method: &str,
+        timeout_ms: u32,
+    ) -> Result<Option<JsValue>, String> {
+        let Ok(callable) = js_sys::Reflect::get(storage, &JsValue::from_str(method)) else {
+            return Ok(None);
+        };
+        if callable.is_null() || callable.is_undefined() {
+            return Ok(None);
+        }
+        let returned =
+            call(storage, method, &[]).map_err(|error| format!("could not be called: {error}"))?;
+        await_promise(
+            js_sys::Promise::resolve(&returned),
+            &format!("browser StorageManager.{method}()"),
+            timeout_ms,
+        )
+        .await
+        .map(Some)
+        .map_err(|error| format!("failed: {error}"))
+    }
+
     /// Awaits a promise, or gives up on it after `timeout_ms`.
     pub async fn await_promise(
         promise: js_sys::Promise,
@@ -599,6 +645,10 @@ mod tests {
         assert_eq!(
             identity(MODEL_HUB),
             ("rspice-model-hub", 1, "verified-packs")
+        );
+        assert_eq!(
+            identity(PDK_CONFIG),
+            ("rspice-pdk-config", 1, "content-addressed-pdk-config")
         );
     }
 }
