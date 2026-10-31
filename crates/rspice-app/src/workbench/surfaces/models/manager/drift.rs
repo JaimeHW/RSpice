@@ -81,7 +81,7 @@ pub(super) fn paint_source_chip(ui: &Ui, rect: egui::Rect, column_end: f32) {
 /// about one model and the list belongs to the library. Opening it is what the
 /// resolve flow is for.
 pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, library: &str) {
-    let findings = app.state.model.source_drift_findings(library);
+    let findings = app.model.source_drift_findings(library);
     let Some(first) = findings.first() else {
         return;
     };
@@ -109,7 +109,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
         first.pinned,
         first.on_disk.as_deref().unwrap_or("unreadable")
     );
-    let detected = app.state.model.source_drift.scanned_at.clone().map_or_else(
+    let detected = app.model.source_drift.scanned_at.clone().map_or_else(
         || "detected by the last source scan".to_owned(),
         |at| format!("detected {at}"),
     );
@@ -141,7 +141,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
                 DRIFT_EFFECT,
             );
             if Button::new("Resolve drift…").show(ui).clicked() {
-                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ResolveDrift {
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::ResolveDrift {
                     library: library.to_owned(),
                 });
             }
@@ -155,7 +155,7 @@ pub(super) fn detail_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, lib
 /// repair is a re-pin — the same refresh the source pane offers — which reads
 /// the bytes as they are now and publishes a revision recording the change.
 pub(super) fn resolve_dialog(ui: &mut Ui, app: &ManagerRenderContext<'_>, library: &str) {
-    let findings = app.state.model.source_drift_findings(library).to_vec();
+    let findings = app.model.source_drift_findings(library).to_vec();
     let t = Tokens::get(ui.ctx());
     // The dialog's own title names the library and the banner behind it
     // stated the count; what this surface owes a reader is the list below
@@ -205,11 +205,10 @@ pub(super) fn repin_block_reason(
     app: &ManagerRenderContext<'_>,
     library: &str,
 ) -> Option<&'static str> {
-    if app.state.model.source_drift_findings(library).is_empty() {
+    if app.model.source_drift_findings(library).is_empty() {
         return Some("There is nothing here to re-pin.");
     }
     app.state
-        .models
         .models_view
         .model_import_in_progress
         .then_some("Another model-source operation is still running.")

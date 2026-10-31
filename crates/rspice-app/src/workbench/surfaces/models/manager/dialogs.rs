@@ -14,7 +14,7 @@ pub(super) fn render_dialog(
     app: &mut ManagerRenderContext<'_>,
     hub: &hub::HubCatalog,
 ) {
-    let Some(dialog) = app.state.models.models_view.dialog.clone() else {
+    let Some(dialog) = app.state.models_view.dialog.clone() else {
         return;
     };
     match dialog {
@@ -61,7 +61,7 @@ pub(super) fn render_dialog(
                 }
                 DialogChoice::None => {
                     if selection != selected {
-                        app.state.models.models_view.dialog =
+                        app.state.models_view.dialog =
                             Some(ModelsWorkbenchDialog::SelectBrowserImportRoot {
                                 candidates,
                                 selected: selection,
@@ -123,10 +123,10 @@ pub(super) fn render_dialog(
             match choice {
                 DialogChoice::Primary => {
                     app.queue_command(ModelsCommand::ModelEditor.key());
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::None => {}
             }
@@ -174,9 +174,9 @@ pub(super) fn render_dialog(
                     }
                 });
             if choice == DialogChoice::Cancelled {
-                app.state.models.models_view.dialog = None;
+                app.state.models_view.dialog = None;
             } else if chosen != right {
-                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
                     left_library,
                     left_model,
                     right: chosen,
@@ -197,7 +197,6 @@ pub(super) fn render_dialog(
                 Some(release) => hub::release_install_block_reason(app, release),
                 None => app
                     .state
-                    .models
                     .models_view
                     .model_import_in_progress
                     .then(|| "Another model-source operation is still running.".to_owned()),
@@ -232,18 +231,17 @@ pub(super) fn render_dialog(
                         None if attach => attach_pack(app, &pack_id),
                         None => detach_pack(app, &pack_id),
                     }
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }
         }
         ModelsWorkbenchDialog::ConfirmPart { pack_id, part_name } => {
-            let busy = app.state.models.models_view.model_import_in_progress;
+            let busy = app.state.models_view.model_import_in_progress;
             let mut dialog = Dialog::new("Add shipped part to project", "Add to project")
                 .description(format!(
                     "Retain {part_name} from {pack_id} into this project as one revision."
@@ -267,12 +265,11 @@ pub(super) fn render_dialog(
             match choice {
                 DialogChoice::Primary => {
                     add_part(app, &pack_id, &part_name);
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }
@@ -284,7 +281,6 @@ pub(super) fn render_dialog(
             mut target_cell,
         } => {
             let writable = app
-                .state
                 .model
                 .library_manager
                 .libraries_sorted()
@@ -341,15 +337,14 @@ pub(super) fn render_dialog(
                         &target_cell,
                     );
                     receipt(app, result);
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {
-                    app.state.models.models_view.dialog =
+                    app.state.models_view.dialog =
                         Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
                             package_id,
                             source_cell,
@@ -368,7 +363,6 @@ pub(super) fn render_dialog(
             mut error,
         } => {
             let has_record = app
-                .state
                 .model
                 .model_library_manager
                 .model_resolution_record(scope, &definition)
@@ -444,22 +438,21 @@ pub(super) fn render_dialog(
                 error = result.as_ref().err().cloned();
                 receipt(app, result);
                 if error.is_none() {
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                     return;
                 }
             }
             match choice {
                 DialogChoice::Secondary => {
                     app.queue_command(ModelsCommand::ModelEditor.key());
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None | DialogChoice::Primary => {
-                    app.state.models.models_view.dialog =
+                    app.state.models_view.dialog =
                         Some(ModelsWorkbenchDialog::DefinitionConflict {
                             definition,
                             scope,
@@ -500,7 +493,7 @@ pub(super) fn render_dialog(
                     }
                 });
             if choice == DialogChoice::Cancelled {
-                app.state.models.models_view.dialog = None;
+                app.state.models_view.dialog = None;
             }
         }
         ModelsWorkbenchDialog::AddCorner {
@@ -544,12 +537,12 @@ pub(super) fn render_dialog(
             };
             if decision == Some(true) {
                 add_corner(app, &library, &name, &temperature_c, &supply_factor);
-                app.state.models.models_view.dialog = None;
+                app.state.models_view.dialog = None;
             } else if decision == Some(false) {
-                app.state.models.models_view.dialog = None;
-                app.state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
+                app.state.models_view.dialog = None;
+                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
-                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::AddCorner {
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::AddCorner {
                     library,
                     name,
                     temperature_c,
@@ -673,12 +666,12 @@ pub(super) fn render_dialog(
                     &required_domains,
                     make_default,
                 );
-                app.state.models.models_view.dialog = None;
+                app.state.models_view.dialog = None;
             } else if decision == Some(false) {
-                app.state.models.models_view.dialog = None;
-                app.state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
+                app.state.models_view.dialog = None;
+                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
-                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::EditCorner {
                     library,
                     original_name,
                     duplicate,
@@ -716,12 +709,11 @@ pub(super) fn render_dialog(
             match choice {
                 DialogChoice::Primary => {
                     delete_corner(app, &library, &corner);
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }
@@ -733,7 +725,6 @@ pub(super) fn render_dialog(
             mut section,
         } => {
             let sections = app
-                .state
                 .model
                 .model_library_manager
                 .get_library(&library)
@@ -810,18 +801,17 @@ pub(super) fn render_dialog(
             };
             if decision == Some(true) {
                 bind_corner_section(app, &library, &corner, domain, &section);
-                app.state.models.models_view.dialog = None;
+                app.state.models_view.dialog = None;
             } else if decision == Some(false) {
-                app.state.models.models_view.dialog = None;
-                app.state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
+                app.state.models_view.dialog = None;
+                app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
             } else {
-                app.state.models.models_view.dialog =
-                    Some(ModelsWorkbenchDialog::BindCornerSection {
-                        library,
-                        corner,
-                        domain,
-                        section,
-                    });
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::BindCornerSection {
+                    library,
+                    corner,
+                    domain,
+                    section,
+                });
             }
         }
         ModelsWorkbenchDialog::ResolveDrift { library } => {
@@ -845,13 +835,12 @@ pub(super) fn render_dialog(
             });
             match choice {
                 DialogChoice::Primary => {
-                    app.state.models.models_view.dialog = None;
+                    app.state.models_view.dialog = None;
                     refresh_library(app, &library);
                 }
                 DialogChoice::Ghost | DialogChoice::Secondary | DialogChoice::Cancelled => {
-                    app.state.models.models_view.dialog = None;
-                    app.state.models.models_view.operational_state =
-                        ModelsOperationalState::Cancelled;
+                    app.state.models_view.dialog = None;
+                    app.state.models_view.operational_state = ModelsOperationalState::Cancelled;
                 }
                 DialogChoice::None => {}
             }

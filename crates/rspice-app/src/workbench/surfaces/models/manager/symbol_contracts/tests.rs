@@ -31,10 +31,7 @@ fn symbol_catalog(family: &str) -> LibraryManager {
 fn painted_families(ctx: &egui::Context, state: &mut AppState) -> Vec<String> {
     let mut families = Vec::new();
     let mut pending_actions = Vec::new();
-    let app = ManagerRenderContext {
-        state,
-        pending_actions: &mut pending_actions,
-    };
+    let app = ManagerRenderContext::over(state, &mut pending_actions);
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             families = symbol_rows(ui, &app)
@@ -480,10 +477,7 @@ fn seed_symbol_registry(state: &mut AppState) {
 fn painted_rows(ctx: &egui::Context, state: &mut AppState) -> Vec<SymbolRow> {
     let mut rows = Vec::new();
     let mut pending_actions = Vec::new();
-    let app = ManagerRenderContext {
-        state,
-        pending_actions: &mut pending_actions,
-    };
+    let app = ManagerRenderContext::over(state, &mut pending_actions);
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
             rows = symbol_rows(ui, &app);
@@ -681,10 +675,7 @@ fn the_instances_card_counts_this_symbol_by_both_routes_that_reach_it() {
         .expect("the seeded symbol");
 
     let mut pending_actions = Vec::new();
-    let app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending_actions,
-    };
+    let app = ManagerRenderContext::over(&mut state, &mut pending_actions);
     let mut instances = None;
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
@@ -743,10 +734,7 @@ fn a_repainted_instances_card_walks_the_sheet_once() {
 
     let count = |state: &mut AppState| {
         let mut pending_actions = Vec::new();
-        let app = ManagerRenderContext {
-            state,
-            pending_actions: &mut pending_actions,
-        };
+        let app = ManagerRenderContext::over(state, &mut pending_actions);
         let mut total = 0;
         let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {

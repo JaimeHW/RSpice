@@ -35,10 +35,7 @@ fn design_with_unresolved(count: u64) -> AppState {
 
 fn diagnostics(state: &mut AppState) -> Vec<BindingDiagnostic> {
     let mut pending = Vec::new();
-    let render = ManagerRenderContext {
-        state,
-        pending_actions: &mut pending,
-    };
+    let render = ManagerRenderContext::over(state, &mut pending);
     ConsumerIndex::build(&render).diagnostics
 }
 
@@ -138,10 +135,7 @@ fn the_card_offers_both_routes_out_and_vanishes_when_there_is_nothing_to_say() {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let mut app = ManagerRenderContext {
-                        state,
-                        pending_actions: &mut pending,
-                    };
+                    let mut app = ManagerRenderContext::over(state, &mut pending);
                     unresolved_card(ui, &mut app, diagnostics);
                 });
             },

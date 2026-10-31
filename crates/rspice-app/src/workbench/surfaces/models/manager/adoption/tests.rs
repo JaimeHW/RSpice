@@ -107,8 +107,8 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
     );
     let service = service_of(&store, hub);
 
-    let catalog = hub::hub_catalog(&service, &state);
-    refresh_release_diff(&service, &mut state, &catalog);
+    let catalog = hub::hub_catalog(&service, &state.model);
+    refresh_release_diff(&service, &mut state.models, &catalog);
     let first = state
         .models
         .models_view
@@ -128,7 +128,7 @@ fn an_unchanged_question_is_answered_from_the_latch_rather_than_recomputed() {
         .added
         .push("SENTINEL".to_owned());
     for _ in 0..3 {
-        refresh_release_diff(&service, &mut state, &catalog);
+        refresh_release_diff(&service, &mut state.models, &catalog);
     }
     assert_eq!(
         state
@@ -162,8 +162,8 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
     );
     let service = service_of(&store, hub);
 
-    let catalog = hub::hub_catalog(&service, &state);
-    refresh_release_diff(&service, &mut state, &catalog);
+    let catalog = hub::hub_catalog(&service, &state.model);
+    refresh_release_diff(&service, &mut state.models, &catalog);
     let before = state
         .models
         .models_view
@@ -192,7 +192,7 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
         &[(VERSION, &archive), (NEXT_VERSION, &extra)],
     );
     let service = service_of(&store, reopened);
-    let replaced_catalog = hub::hub_catalog(&service, &state);
+    let replaced_catalog = hub::hub_catalog(&service, &state.model);
     let after_key = replaced_catalog
         .identity
         .as_ref()
@@ -205,7 +205,7 @@ fn a_catalog_replaced_wholesale_cannot_reuse_a_diff_it_did_not_earn() {
          nothing about the content half of the key"
     );
 
-    refresh_release_diff(&service, &mut state, &replaced_catalog);
+    refresh_release_diff(&service, &mut state.models, &replaced_catalog);
     let after = state
         .models
         .models_view
@@ -238,13 +238,13 @@ fn a_pack_this_project_pinned_nothing_from_offers_no_adoption() {
     let service = service_of(&store, hub);
     state.model.model_library_manager.clear();
 
-    let catalog = hub::hub_catalog(&service, &state);
-    let row = hub::selected_row(&catalog, &state).expect("the pack is listed");
+    let catalog = hub::hub_catalog(&service, &state.model);
+    let row = hub::selected_row(&catalog, &state.models).expect("the pack is listed");
     assert!(
         row.pins.is_empty(),
         "nothing is pinned, so nothing can be adopted"
     );
-    refresh_release_diff(&service, &mut state, &catalog);
+    refresh_release_diff(&service, &mut state.models, &catalog);
     assert!(
         state.models.models_view.release_diff.is_some(),
         "the diff is still worth stating: an update is on offer"

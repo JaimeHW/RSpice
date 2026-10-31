@@ -51,10 +51,7 @@ fn kit_project(models: &[&str]) -> RSpiceApp {
 
 fn scan_rows(state: &mut AppState) -> (Vec<(String, usize, usize)>, usize) {
     let mut pending_actions = Vec::new();
-    let render = ManagerRenderContext {
-        state,
-        pending_actions: &mut pending_actions,
-    };
+    let render = ManagerRenderContext::over(state, &mut pending_actions);
     let consumers = ConsumerIndex::build(&render);
     let scan = project_catalog_scan(&render, &consumers);
     assert!(
@@ -84,13 +81,9 @@ fn a_family_is_one_row_that_counts_every_instance_its_bins_run_for() {
     assert_eq!(total, 2, "the footer counts a family once");
 
     let mut pending_actions = Vec::new();
-    let render = ManagerRenderContext {
-        state: &mut app.state,
-        pending_actions: &mut pending_actions,
-    };
+    let render = ManagerRenderContext::over(&mut app.state, &mut pending_actions);
     let consumers = ConsumerIndex::build(&render);
     let kit = render
-        .state
         .model
         .model_library_manager
         .get_library("kit")

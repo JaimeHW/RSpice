@@ -95,10 +95,7 @@ fn a_family_is_one_library_s_cards_sharing_a_base_name() {
         instances: Vec::new(),
     };
     let mut pending = Vec::new();
-    let render = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let render = ManagerRenderContext::over(&mut state, &mut pending);
     let families = bin_families(&render, &inspection).expect("providers resolve");
     assert_eq!(families.len(), 2);
     assert_eq!(families[0].library, "foundry");

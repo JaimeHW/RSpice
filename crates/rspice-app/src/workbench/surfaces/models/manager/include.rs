@@ -13,7 +13,7 @@ pub(super) fn include_page(
     // subtitle states what it found. Everything below reads this vector; the
     // unresolved-instance card in particular answers its question by lookup
     // into it rather than by a second scan.
-    let definitions = app.state.model.definition_index();
+    let definitions = app.model.definition_index();
     let contested = definitions.iter().filter(|row| row.contested()).count();
     section_title(
         ui,
@@ -39,12 +39,12 @@ pub(super) fn include_page(
             // which accepted whatever the file had become without ever showing
             // the reader what that was.
             if Button::new("Resolve drift…")
-                .enabled(!app.state.models.models_view.model_import_in_progress)
+                .enabled(!app.state.models_view.model_import_in_progress)
                 .show(ui)
                 .clicked()
             {
                 if let Some(library) = current_library_name(app) {
-                    app.state.models.models_view.dialog =
+                    app.state.models_view.dialog =
                         Some(ModelsWorkbenchDialog::ResolveDrift { library });
                 } else {
                     receipt(
@@ -58,11 +58,11 @@ pub(super) fn include_page(
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         ui.checkbox(
-            &mut app.state.models.models_view.include_direct_only,
+            &mut app.state.models_view.include_direct_only,
             "Direct dependencies only",
         );
         ui.add(
-            egui::TextEdit::singleline(&mut app.state.models.models_view.include_definition_query)
+            egui::TextEdit::singleline(&mut app.state.models_view.include_definition_query)
                 .hint_text("Filter definitions or providers…")
                 .desired_width(260.0),
         );
@@ -72,7 +72,7 @@ pub(super) fn include_page(
     // handful of nodes and a name index. Cloning the libraries themselves to
     // dodge the borrow, which is what this did, copied the whole model corpus
     // and its retained source bytes on every frame.
-    if app.state.model.model_library_manager.library_count() == 0 {
+    if app.model.model_library_manager.library_count() == 0 {
         page_empty_state(
             ui,
             "No model-source closure is loaded",
@@ -81,7 +81,7 @@ pub(super) fn include_page(
         return;
     }
     let nodes = closure_nodes(app);
-    let unbound = unbound_instances(app.state, &definitions);
+    let unbound = unbound_instances(app.model, &definitions);
     include_closure_graph(ui, app, &nodes, diagnostics);
     include_definition_table(ui, app, &definitions);
     // The rules beside the instances they govern: the table above answers
@@ -134,8 +134,8 @@ fn closure_nodes(app: &ManagerRenderContext<'_>) -> ClosureGraph {
     // "Direct dependencies only" means the root of each library plus whatever
     // the root itself includes; anything reached through another file is a
     // transitive member and folds away.
-    let direct_only = app.state.models.models_view.include_direct_only;
-    let libraries = app.state.model.model_library_manager.libraries_sorted();
+    let direct_only = app.state.models_view.include_direct_only;
+    let libraries = app.model.model_library_manager.libraries_sorted();
     let mut nodes = Vec::new();
     let mut matching = 0usize;
     for library in &libraries {
@@ -176,7 +176,7 @@ fn include_closure_graph(
     graph: &ClosureGraph,
     diagnostics: &ClosureFacts,
 ) {
-    let direct_only = app.state.models.models_view.include_direct_only;
+    let direct_only = app.state.models_view.include_direct_only;
     detail_pane(
         ui,
         "Resolved closure",
@@ -242,12 +242,7 @@ fn include_closure_graph(
                         egui::vec2(node_width, node_height),
                     );
                     node_rects.insert(source.path.clone(), node);
-                    let selected = app
-                        .state
-                        .models
-                        .models_view
-                        .include_selected_source
-                        .as_deref()
+                    let selected = app.state.models_view.include_selected_source.as_deref()
                         == Some(source.path.to_string_lossy().as_ref());
                     ui.painter().rect(
                         node,
@@ -308,7 +303,7 @@ fn include_closure_graph(
                     });
                     crate::ui::theme::paint_focus_ring(ui, &response, node);
                     if response.clicked() {
-                        app.state.models.models_view.include_selected_source =
+                        app.state.models_view.include_selected_source =
                             Some(source.path.to_string_lossy().into_owned());
                     }
                 }
@@ -404,7 +399,6 @@ fn include_definition_table(
 ) {
     let query = app
         .state
-        .models
         .models_view
         .include_definition_query
         .trim()
@@ -494,7 +488,6 @@ fn include_definition_table(
                                 Some((row.definition.clone(), row.scope, row.providers.clone()));
                         } else if row.scope == ModelConsumerScope::Subcircuit
                             && let Ok(Some(provider)) = app
-                                .state
                                 .model
                                 .model_library_manager
                                 .effective_definition_provider(row.scope, &row.definition)
@@ -508,14 +501,13 @@ fn include_definition_table(
     });
     if let Some((definition, scope, providers)) = conflict {
         let selected_provider = app
-            .state
             .model
             .model_library_manager
             .model_resolution_record(scope, &definition)
             .map(|record| record.provider_library.clone())
             .or_else(|| providers.first().cloned())
             .unwrap_or_default();
-        app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
+        app.state.models_view.dialog = Some(ModelsWorkbenchDialog::DefinitionConflict {
             definition,
             scope,
             providers,
@@ -642,15 +634,15 @@ const UNBOUND_ROWS: usize = 4;
 /// holding answers that by lookup.
 ///
 /// [index]: super::bindings::ConsumerIndex
-fn unbound_instances(state: &AppState, definitions: &[DefinitionRow]) -> Vec<UnboundInstance> {
-    let Some(schematic) = state.model.workspace.active_schematic() else {
+fn unbound_instances(model: &Model, definitions: &[DefinitionRow]) -> Vec<UnboundInstance> {
+    let Some(schematic) = model.workspace.active_schematic() else {
         return Vec::new();
     };
     let defined = definitions
         .iter()
         .map(|row| row.definition.as_str())
         .collect::<BTreeSet<_>>();
-    let sheet = state.model.workspace.content.active_view.display_path();
+    let sheet = model.workspace.content.active_view.display_path();
     let mut unbound = schematic
         .document()
         .components
@@ -780,8 +772,7 @@ fn instance_binding_card(
         }
     });
     if let Some(component_id) = bind {
-        app.state
-            .model
+        app.model
             .schematic
             .session
             .editor
@@ -790,8 +781,7 @@ fn instance_binding_card(
         app.queue_command(ModelsCommand::Page(ModelsPage::Models).key());
     }
     if let Some(component_id) = locate {
-        app.state
-            .model
+        app.model
             .schematic
             .session
             .editor

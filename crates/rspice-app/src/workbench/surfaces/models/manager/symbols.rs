@@ -47,19 +47,13 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
             if Button::new("Create symbol").accent().show(ui).clicked() {
-                app.state
-                    .workbench
-                    .outbox
-                    .push(OpenSymbolAuthoring::ModelBound);
+                app.wb.outbox.push(OpenSymbolAuthoring::ModelBound);
             }
             if Button::new("Form designer").show(ui).clicked() {
-                app.state
-                    .workbench
-                    .outbox
-                    .push(OpenSymbolAuthoring::ParameterForm);
+                app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm);
             }
             if Button::new("Import symbol").show(ui).clicked() {
-                app.state.workbench.outbox.push(OpenSymbolAuthoring::Import);
+                app.wb.outbox.push(OpenSymbolAuthoring::Import);
             }
             if Button::new("Library manager").show(ui).clicked() {
                 navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
@@ -107,7 +101,6 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 };
                 let selected = app
                     .state
-                    .models
                     .models_view
                     .selected_symbol
                     .as_deref()
@@ -117,9 +110,9 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     symbol_registry(ui, height, &rows, &layout, selected.as_deref())
                 {
                     let row = &rows[index];
-                    app.state.models.models_view.selected_symbol = Some(symbol_key(&row.reference));
+                    app.state.models_view.selected_symbol = Some(symbol_key(&row.reference));
                     if !row.read_only() {
-                        app.state.model.library_manager.select_view(
+                        app.model.library_manager.select_view(
                             &row.reference.library,
                             &row.reference.cell,
                             &row.reference.view,
@@ -485,7 +478,6 @@ fn symbol_detail(
 ) {
     let selected = app
         .state
-        .models
         .models_view
         .selected_symbol
         .as_deref()
@@ -495,7 +487,7 @@ fn symbol_detail(
     let Some(row) = selected else {
         return;
     };
-    app.state.models.models_view.selected_symbol = Some(symbol_key(&row.reference));
+    app.state.models_view.selected_symbol = Some(symbol_key(&row.reference));
     ScrollArea::vertical()
         .id_salt("models-symbol-detail")
         .auto_shrink([false, true])
@@ -552,8 +544,7 @@ fn symbol_detail(
                                     Err("This read-only design library is not a signed technology overlay and cannot be varied here.".to_owned()),
                                 );
                             } else {
-                                app.state
-                                    .workbench
+                                app.wb
                                     .outbox
                                     .push(OpenInDesign(row.reference.clone()));
                             }
@@ -564,12 +555,12 @@ fn symbol_detail(
                             )
                             .clicked()
                         {
-                            app.state.model.library_manager.select_view(
+                            app.model.library_manager.select_view(
                                 &row.reference.library,
                                 &row.reference.cell,
                                 &row.reference.view,
                             );
-                            app.state.workbench.outbox.push(OpenSymbolAuthoring::ParameterForm);
+                            app.wb.outbox.push(OpenSymbolAuthoring::ParameterForm);
                         }
                     });
                 });
@@ -1075,22 +1066,19 @@ fn detail_table_row(ui: &mut Ui, columns: &[(&str, f32, bool)], announced: Strin
 
 fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &SymbolRow) {
     let Some(target_library) = app
-        .state
         .model
         .library_manager
         .selected_library
         .as_deref()
         .and_then(|name| {
-            app.state
-                .model
+            app.model
                 .library_manager
                 .get_library(name)
                 .filter(|library| !library.read_only)
                 .map(|library| library.name.clone())
         })
         .or_else(|| {
-            app.state
-                .model
+            app.model
                 .library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -1107,13 +1095,12 @@ fn open_author_symbol_variant_dialog(app: &mut ManagerRenderContext<'_>, row: &S
         );
         return;
     };
-    app.state.models.models_view.dialog =
-        Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
-            package_id: row.reference.library.clone(),
-            source_cell: row.reference.cell.clone(),
-            target_library,
-            target_cell: row.reference.cell.clone(),
-        });
+    app.state.models_view.dialog = Some(ModelsWorkbenchDialog::AuthorTechnologySymbolVariant {
+        package_id: row.reference.library.clone(),
+        source_cell: row.reference.cell.clone(),
+        target_library,
+        target_cell: row.reference.cell.clone(),
+    });
 }
 
 fn symbol_key(reference: &CellViewRef) -> String {

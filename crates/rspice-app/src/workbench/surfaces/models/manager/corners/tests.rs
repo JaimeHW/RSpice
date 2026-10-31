@@ -158,10 +158,7 @@ fn a_corner_bound_to_nothing_at_all_reports_no_executable_bindings() {
 fn a_fresh_project_reports_no_corner_bindings_at_all() {
     let mut state = AppState::default();
     let mut pending = Vec::new();
-    let app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let app = ManagerRenderContext::over(&mut state, &mut pending);
 
     assert!(
         corner_rows(&app).is_empty(),
@@ -265,14 +262,10 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
         .expect("sectioned source imports");
     let initial_revision = state.model.workspace.content.project.revision();
     let mut pending = Vec::new();
-    let mut app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let mut app = ManagerRenderContext::over(&mut state, &mut pending);
 
     add_corner(&mut app, &library, "hot", "125", "0.9");
     let draft = app
-        .state
         .model
         .model_library_manager
         .get_library(&library)
@@ -290,8 +283,7 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
         CornerSectionDomain::Composite,
         "TT",
     );
-    app.state
-        .model
+    app.model
         .model_library_manager
         .get_library(&library)
         .and_then(|library| library.corners.get("hot"))
@@ -301,7 +293,6 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
 
     unbind_corner_section(&mut app, &library, "hot", CornerSectionDomain::Composite);
     let unbound = app
-        .state
         .model
         .model_library_manager
         .get_library(&library)
@@ -313,15 +304,14 @@ fn corner_lifecycle_publishes_drafts_bindings_defaults_and_deletion() {
     set_default_corner(&mut app, &library, "hot");
     delete_corner(&mut app, &library, "hot");
     let retained = app
-        .state
         .model
         .model_library_manager
         .get_library(&library)
         .expect("library remains attached");
     assert!(!retained.corners.contains_key("hot"));
     assert!(retained.corners.values().any(|corner| corner.is_default));
-    assert!(app.state.model.workspace.content.project.revision() > initial_revision);
-    assert!(app.state.model.workspace.content.project_metadata_dirty);
+    assert!(app.model.workspace.content.project.revision() > initial_revision);
+    assert!(app.model.workspace.content.project_metadata_dirty);
 }
 
 #[test]
@@ -370,10 +360,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         .get_library(&library)
         .and_then(|library| library.selected_corner.clone());
     let mut pending = Vec::new();
-    let mut app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let mut app = ManagerRenderContext::over(&mut state, &mut pending);
     let rows = corner_rows(&app);
     let inspected = rows
         .iter()
@@ -389,12 +376,11 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
     inspect_corner(&mut app, &inspected);
 
     assert_eq!(
-        app.state.models.models_view.selected_corner.as_deref(),
+        app.state.models_view.selected_corner.as_deref(),
         Some(inspected.key.as_str())
     );
     assert_eq!(
-        app.state
-            .model
+        app.model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
@@ -402,24 +388,23 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         "inspection must not change the executable section"
     );
     assert_eq!(
-        app.state.model.workspace.content.project.revision(),
+        app.model.workspace.content.project.revision(),
         initial_revision
     );
-    assert_eq!(app.state.model.design_execution_epoch, initial_epoch);
+    assert_eq!(app.model.design_execution_epoch, initial_epoch);
 
     activate_corner(&mut app, &library, &inspected.corner.name);
 
     assert_eq!(
-        app.state
-            .model
+        app.model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
         Some(inspected.corner.name.as_str())
     );
-    assert!(app.state.model.workspace.content.project.revision() > initial_revision);
+    assert!(app.model.workspace.content.project.revision() > initial_revision);
     assert_eq!(
-        app.state.model.design_execution_epoch,
+        app.model.design_execution_epoch,
         initial_epoch.wrapping_add(1)
     );
 
@@ -437,8 +422,7 @@ fn inspecting_a_corner_is_ui_only_and_activation_is_an_explicit_transaction() {
         .clone();
     set_default_corner(&mut app, &library, &default_target);
     assert_eq!(
-        app.state
-            .model
+        app.model
             .model_library_manager
             .get_library(&library)
             .and_then(|library| library.selected_corner.as_deref()),
@@ -550,10 +534,7 @@ fn a_corner_qualified_narrower_than_the_run_set_says_so_on_its_own_page() {
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let mut app = ManagerRenderContext {
-                        state,
-                        pending_actions: &mut pending,
-                    };
+                    let mut app = ManagerRenderContext::over(state, &mut pending);
                     let rows = corner_rows(&app);
                     temperature_validity_findings(
                         ui,
@@ -715,10 +696,7 @@ fn rendered_corner_page(state: &mut AppState) -> Vec<(egui::accesskit::Role, Str
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let mut app = ManagerRenderContext {
-                    state,
-                    pending_actions: &mut pending,
-                };
+                let mut app = ManagerRenderContext::over(state, &mut pending);
                 corners_page(ui, &mut app);
             });
         },
@@ -819,10 +797,7 @@ fn the_source_excerpt_is_sliced_once_and_read_back_after_that() {
     let mut excerpts = Vec::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let app = ManagerRenderContext {
-                state: &mut state,
-                pending_actions: &mut pending,
-            };
+            let app = ManagerRenderContext::over(&mut state, &mut pending);
             let rows = corner_rows(&app);
             let row = rows
                 .iter()
@@ -845,10 +820,7 @@ fn the_source_excerpt_is_sliced_once_and_read_back_after_that() {
     let mut sections = Vec::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
         egui::CentralPanel::default().show(ctx, |ui| {
-            let app = ManagerRenderContext {
-                state: &mut state,
-                pending_actions: &mut pending,
-            };
+            let app = ManagerRenderContext::over(&mut state, &mut pending);
             let rows = corner_rows(&app);
             let row = rows
                 .iter()
@@ -918,10 +890,7 @@ fn a_corner_the_bind_dialog_cannot_help_is_offered_no_row_control() {
         .expect("the fixture library is loaded");
 
     let mut pending = Vec::new();
-    let app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let app = ManagerRenderContext::over(&mut state, &mut pending);
     for row in corner_rows(&app) {
         assert!(
             !row.binding_blocked,

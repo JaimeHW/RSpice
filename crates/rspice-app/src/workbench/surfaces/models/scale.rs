@@ -341,7 +341,9 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::show(ui, app));
+                .show(ctx, |ui| {
+                    super::manager::show(ui, &mut crate::workbench::features::cx(app))
+                });
         }));
         authentications =
             crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|c| c.get());

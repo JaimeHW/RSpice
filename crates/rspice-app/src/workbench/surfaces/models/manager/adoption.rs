@@ -53,7 +53,7 @@ use super::hub::{HubCatalog, HubLedgerRow, announced, announced_widget, plain_li
 /// offer to diff in the first place; the section simply has nothing to say.
 pub(super) fn refresh_release_diff(
     service: &ModelHubService,
-    state: &mut AppState,
+    state: &mut ModelsState,
     hub: &HubCatalog,
 ) {
     let question = selected_row(hub, state).and_then(|row| {
@@ -66,7 +66,7 @@ pub(super) fn refresh_release_diff(
         ))
     });
     let (Some((pack_id, from, to)), Some(identity)) = (question, hub.identity.as_ref()) else {
-        state.models.models_view.release_diff = None;
+        state.models_view.release_diff = None;
         return;
     };
     let key = crate::state::model_hub::ReleaseDiffKey {
@@ -76,7 +76,6 @@ pub(super) fn refresh_release_diff(
         to,
     };
     if state
-        .models
         .models_view
         .release_diff
         .as_ref()
@@ -84,7 +83,7 @@ pub(super) fn refresh_release_diff(
     {
         return;
     }
-    state.models.models_view.release_diff = service
+    state.models_view.release_diff = service
         .hub()
         .and_then(|hub| hub.release_diff(&key.pack_id, &key.from, &key.to).ok());
 }
@@ -239,7 +238,7 @@ fn adopt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedgerRow, di
             .color(t.color.text_dim),
         &headline,
     );
-    let idle = !app.state.models.models_view.model_import_in_progress;
+    let idle = !app.state.models_view.model_import_in_progress;
     for pin in &pinned {
         adopt_line(ui, app, row, diff, pin, idle, &t);
     }

@@ -79,7 +79,7 @@ fn models_canvas(page: ModelsPage, scope: ModelsCatalogScope) -> crate::ui::rast
     crate::ui::raster::render(MODELS_RASTER_SIZE, |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| show(ui, &mut app));
+            .show(ui, |ui| manager::show(ui, &mut features::cx(&mut app)));
     })
 }
 
@@ -198,7 +198,7 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
                 |ctx| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| show(ui, &mut app));
+                        .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
                 },
             );
 
@@ -702,7 +702,7 @@ fn no_models_page_ends_in_unpainted_canvas() {
                 |ctx| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| show(ui, &mut app));
+                        .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
                 },
             );
             let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
@@ -758,7 +758,7 @@ fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| show(ui, &mut app));
+                .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
         },
     );
 

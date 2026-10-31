@@ -61,13 +61,13 @@ impl ConsumerIndex {
 
         let mut by_provider = BTreeMap::<(String, String, String), Vec<String>>::new();
         let mut diagnostics = Vec::new();
-        let Some(schematic) = app.state.model.workspace.active_schematic() else {
+        let Some(schematic) = app.model.workspace.active_schematic() else {
             return Self {
                 by_provider,
                 diagnostics,
             };
         };
-        let sheet = app.state.model.workspace.content.active_view.display_path();
+        let sheet = app.model.workspace.content.active_view.display_path();
         for component in &schematic.document().components {
             let Some(model) = explicit_component_model(component) else {
                 continue;
@@ -93,7 +93,6 @@ impl ConsumerIndex {
                 .map(|provider| provider.trim().to_owned())
                 .filter(|provider| !provider.is_empty());
             match app
-                .state
                 .model
                 .model_library_manager
                 .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &model)
@@ -211,15 +210,13 @@ pub(super) fn unresolved_card(
     }
     // A bin's selection binds its family, as the detail's Bind does.
     let selected_model = app
-        .state
         .model
         .model_library_manager
         .selected_library
         .clone()
-        .zip(app.state.models.selected_model.clone())
+        .zip(app.state.selected_model.clone())
         .map(|(library, model)| {
             let binding = app
-                .state
                 .model
                 .model_library_manager
                 .get_library(&library)
@@ -296,8 +293,7 @@ fn unresolved_row(
                 .on_hover_text("Selects this instance and opens the schematic it sits on.")
                 .clicked()
             {
-                app.state
-                    .model
+                app.model
                     .schematic
                     .session
                     .editor
@@ -314,7 +310,7 @@ fn unresolved_row(
                 }
                 Some((library, model)) => {
                     crate::workbench::docks::validate_component_model_catalog_binding(
-                        &app.state.model,
+                        app.model,
                         diagnostic.component_id,
                         library,
                         model,
@@ -350,15 +346,13 @@ pub(super) fn effective_model_consumers(
     app: &ManagerRenderContext<'_>,
     model_name: &str,
 ) -> Vec<String> {
-    app.state
-        .model
+    app.model
         .model_library_manager
         .effective_definition_provider(ModelConsumerScope::PrimitiveModel, model_name)
         .ok()
         .flatten()
         .and_then(|provider| {
-            app.state
-                .model
+            app.model
                 .model_library_manager
                 .get_library(&provider.library)
                 .map(|library| model_consumers_for_provider(app, library, model_name))

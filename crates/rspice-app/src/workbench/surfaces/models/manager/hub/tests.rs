@@ -30,10 +30,7 @@ fn accessibility_nodes(
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let mut context = ManagerRenderContext {
-                    state,
-                    pending_actions: &mut pending,
-                };
+                let mut context = ManagerRenderContext::over(state, &mut pending);
                 if let Some(render) = render.take() {
                     render(ui, &mut context);
                 }
@@ -271,10 +268,7 @@ fn confirm_pack_nodes(
             },
             |ctx| {
                 egui::CentralPanel::default().show(ctx, |ui| {
-                    let mut context = ManagerRenderContext {
-                        state,
-                        pending_actions: &mut pending,
-                    };
+                    let mut context = ManagerRenderContext::over(state, &mut pending);
                     super::super::dialogs::render_dialog(ui, &mut context, &catalog);
                 });
             },
@@ -455,10 +449,7 @@ fn the_facet_counts_partition_the_pack_total() {
     let hub = catalog(packs, Some(1), false);
     let mut state = AppState::default();
     let mut pending = Vec::new();
-    let app = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending,
-    };
+    let app = ManagerRenderContext::over(&mut state, &mut pending);
 
     let counts = ledger_facet_counts(&hub, &app);
     let count = |facet: ModelHubFacet| {
@@ -826,16 +817,16 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     let mut state = AppState::default();
     running(&mut state, Some(0.42));
     assert_eq!(
-        pack_transfer(&state, &landing).map(|transfer| transfer.phrase),
+        pack_transfer(&state.models, &landing).map(|transfer| transfer.phrase),
         Some("installing 42%".to_owned())
     );
     state.models.models_view.model_import_progress = None;
     assert_eq!(
-        pack_transfer(&state, &landing).map(|transfer| transfer.phrase),
+        pack_transfer(&state.models, &landing).map(|transfer| transfer.phrase),
         Some("installing".to_owned())
     );
     assert!(
-        pack_transfer(&state, &other).is_none(),
+        pack_transfer(&state.models, &other).is_none(),
         "one operation runs at a time, and it lights one row"
     );
 
@@ -859,7 +850,7 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), |ui, app| {
         packs_page(ui, app, &listed);
     });
-    let running_detail = pack_transfer(&state, &landing)
+    let running_detail = pack_transfer(&state.models, &landing)
         .expect("the landing pack is transferring")
         .detail;
     assert!(
@@ -874,7 +865,7 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
     state.models.models_view.model_import_progress = None;
     state.models.models_view.action_receipt =
         Some(Ok("RSpice proving pack 1.0.0 installed.".to_owned()));
-    assert!(pack_transfer(&state, &landing).is_none());
+    assert!(pack_transfer(&state.models, &landing).is_none());
     let listed = catalog(vec![landing, other], Some(1), false);
     let nodes = accessibility_nodes(&mut state, egui::vec2(1100.0, 760.0), |ui, app| {
         packs_page(ui, app, &listed);

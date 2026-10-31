@@ -619,8 +619,10 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
 ];
 
 /// The shell's `contribute`, at the points the models feature draws in its
-/// context: none answers anything there, as none did when the shell drew
-/// them, so a request another point left waits for the answer it waited for.
+/// context. The workspace's surface has what it raised answered with every
+/// workspace's page, once it has drawn. Its routes, navigator and inspector
+/// answer nothing there, as none did when the shell drew them, so a request
+/// another point left waits for the answer it waited for.
 const MODELS_CONTRIBUTIONS: &[Step] = &[
     (
         "model editor route",
@@ -645,6 +647,14 @@ const MODELS_CONTRIBUTIONS: &[Step] = &[
            ModelsFeature::show_pdk_technology_admin(&mut features::cx(app), ui);\
            return;\
            }"],
+    ),
+    (
+        "workspace surface",
+        &[
+            "Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),",
+            "app.after_contribution();",
+            "Point::SplitResults =>",
+        ],
     ),
     (
         "navigator",

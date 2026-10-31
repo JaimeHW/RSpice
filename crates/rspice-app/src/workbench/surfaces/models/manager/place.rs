@@ -90,23 +90,25 @@ pub(super) fn place_route(
 /// Separate from [`place_route`] because these are facts about the session, not
 /// about the part: they change with which document is in front and whether the
 /// project may be written, and they apply to every row on the page at once.
-pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Option<&'static str> {
+pub(super) fn session_block_reason(
+    model: &Model,
+    state: &ModelsState,
+    route: &PlaceRoute,
+) -> Option<&'static str> {
     // A placement is armed on a sheet's cursor, so there has to be a sheet.
     // The active view having no schematic buffer is exactly that condition:
     // a symbol view is in front, and a device has nowhere to land on one.
-    if state.model.workspace.active_schematic().is_none() {
+    if model.workspace.active_schematic().is_none() {
         return Some(
             "The view in front is not a schematic, so a placed part would have nowhere to land. Open a schematic first.",
         );
     }
-    if state.model.safe_mode.project_read_only() {
+    if model.safe_mode.project_read_only() {
         return Some(
             "This project is open read-only in safe mode, so it cannot receive an instance.",
         );
     }
-    if matches!(route, PlaceRoute::Retain { .. })
-        && state.models.models_view.model_import_in_progress
-    {
+    if matches!(route, PlaceRoute::Retain { .. }) && state.models_view.model_import_in_progress {
         return Some("Another model-source operation is still running.");
     }
     None
@@ -118,11 +120,14 @@ pub(super) fn session_block_reason(state: &AppState, route: &PlaceRoute) -> Opti
 /// placement ends in two things a render borrow cannot reach: the canvas
 /// focus and the workspace receipt. It is the same completion the Model Hub
 /// performs when a retention lands, one operation later.
-pub(super) fn arm(state: &mut AppState, ctx: &egui::Context, placement: PartPlacement) {
+pub(super) fn arm(
+    wb: &mut WorkbenchSession,
+    state: &mut ModelsState,
+    ctx: &egui::Context,
+    placement: PartPlacement,
+) {
     let armed = placement.armed_label();
-    state
-        .workbench
-        .outbox
+    wb.outbox
         .push(crate::workbench::framework::requests::ArmPartPlacement(
             placement,
         ));
@@ -140,8 +145,13 @@ pub(super) struct PlaceOffer {
 }
 
 impl PlaceOffer {
-    pub(super) fn for_row(state: &AppState, installed: &[InstalledPack], row: &ShelfRow) -> Self {
-        let manager = &state.model.model_library_manager;
+    pub(super) fn for_row(
+        model: &Model,
+        state: &ModelsState,
+        installed: &[InstalledPack],
+        row: &ShelfRow,
+    ) -> Self {
+        let manager = &model.model_library_manager;
         // A retention names a release; if the store no longer holds it, the
         // route is a promise about something that is gone.
         if let PartOrigin::InstalledPack { pack_id, version } = &row.origin
@@ -162,7 +172,7 @@ impl PlaceOffer {
                 blocked: Some(reason),
             },
             Ok(route) => {
-                let blocked = session_block_reason(state, &route).map(str::to_owned);
+                let blocked = session_block_reason(model, state, &route).map(str::to_owned);
                 Self {
                     route: Some(route),
                     blocked,

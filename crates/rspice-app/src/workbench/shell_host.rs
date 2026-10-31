@@ -78,8 +78,8 @@ impl Host for RSpiceApp {
             // from the workspace's page.
             Point::Surface(workspace) => {
                 use crate::workbench::surfaces::{
-                    automation, design, library_cellview_manager, models, netlist, project,
-                    simulate, stimulus, verify,
+                    automation, design, library_cellview_manager, netlist, project, simulate,
+                    stimulus, verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -119,7 +119,7 @@ impl Host for RSpiceApp {
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
                     Workspace::Verify => verify::show(ui, app),
-                    Workspace::Models => models::show(ui, app),
+                    Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),
                     Workspace::Netlist => {
                         netlist::prepare_workspace(app);
                         match app.state.code.code_workspace.page {

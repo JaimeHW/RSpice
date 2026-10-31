@@ -73,9 +73,7 @@ fn bin_families(
 ) -> Result<Vec<BinFamily>, String> {
     let mut families = BTreeMap::<(String, String), Vec<BinCard>>::new();
     for card in &inspection.cards {
-        let provider = app
-            .state
-            .model.model_library_manager
+        let provider = app.model.model_library_manager
             .effective_definition_provider(ModelConsumerScope::PrimitiveModel, &card.model)?
             .ok_or_else(|| {
                 format!(
@@ -133,9 +131,8 @@ fn authoritative_bin_inspection(
     ui: &Ui,
     app: &ManagerRenderContext<'_>,
 ) -> Result<rspice_core::engine::ModelBinInspection, String> {
-    let input_digest = crate::simulation::controller::prepared_run::design_inspection_input_digest(
-        &app.state.model,
-    );
+    let input_digest =
+        crate::simulation::controller::prepared_run::design_inspection_input_digest(app.model);
     let cache_id = egui::Id::new("models-authoritative-bin-inspection");
     if let Some(cached) = ui
         .ctx()
@@ -147,7 +144,7 @@ fn authoritative_bin_inspection(
 
     let result = (|| {
         let source = crate::simulation::controller::SimulationController::
-            prepare_design_netlist_for_inspection(&app.state.model)
+            prepare_design_netlist_for_inspection(app.model)
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
         rspice_core::Engine::new(rspice_core::SimulationConfig::default())
@@ -197,7 +194,7 @@ fn bins_blocked(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, error: &str) {
                 app.queue_command(ModelsCommand::ModelEditor.key());
             }
             if Button::new("Import bin map")
-                .enabled(!app.state.models.models_view.model_import_in_progress)
+                .enabled(!app.state.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
                     "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
@@ -269,7 +266,7 @@ fn bins_body(
             }
             // Gated on the fact it traces — the selected model — rather than
             // on a schematic selection it never reads, and it says which.
-            let traced = app.state.models.selected_model.clone();
+            let traced = app.state.selected_model.clone();
             if Button::new("Trace schematic")
                 .enabled(traced.is_some())
                 .show(ui)
@@ -277,7 +274,7 @@ fn bins_body(
                 .clicked()
                 && let Some(model) = traced
             {
-                app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
+                app.state.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
                     consumers: effective_model_consumers(app, &model),
                     model,
                 });
@@ -286,7 +283,7 @@ fn bins_body(
                 app.queue_command(ModelsCommand::ModelEditor.key());
             }
             if Button::new("Import bin map")
-                .enabled(!app.state.models.models_view.model_import_in_progress)
+                .enabled(!app.state.models_view.model_import_in_progress)
                 .show(ui)
                 .on_hover_text(
                     "Import binned model cards; the simulator evaluates L, W, and NFIN bounds from the imported source.",
@@ -309,14 +306,13 @@ fn bins_body(
 
     let selected = app
         .state
-        .models
         .models_view
         .selected_bin_family
         .clone()
         .filter(|selected| families.iter().any(|family| family.key() == *selected))
         .or_else(|| families.first().map(BinFamily::key))
         .unwrap_or_default();
-    app.state.models.models_view.selected_bin_family = Some(selected.clone());
+    app.state.models_view.selected_bin_family = Some(selected.clone());
     let Some(family) = families.iter().find(|family| family.key() == selected) else {
         return;
     };
@@ -1104,7 +1100,7 @@ fn family_table(
             });
     });
     if let Some(picked) = picked {
-        app.state.models.models_view.selected_bin_family = Some(picked);
+        app.state.models_view.selected_bin_family = Some(picked);
     }
 }
 
@@ -1331,7 +1327,7 @@ fn geometry_instance_table(
             .find(|instance| instance.element == element)
     {
         let model = instance.requested_model.clone();
-        app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
+        app.state.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
             consumers: effective_model_consumers(app, &model),
             model,
         });

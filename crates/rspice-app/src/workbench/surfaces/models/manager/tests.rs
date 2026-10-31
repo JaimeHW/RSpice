@@ -46,10 +46,7 @@ fn bound_consumers_are_attributed_only_to_the_effective_provider() {
     state.model.workspace.save_active_schematic(&schematic);
 
     let mut pending_actions = Vec::new();
-    let render = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending_actions,
-    };
+    let render = ManagerRenderContext::over(&mut state, &mut pending_actions);
     let consumers = ConsumerIndex::build(&render);
     let scan = project_catalog_scan(&render, &consumers);
     let alpha = scan
@@ -84,16 +81,12 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
     let initial_revision = state.model.workspace.content.project.revision();
     let initial_epoch = state.model.design_execution_epoch;
     let mut pending_actions = Vec::new();
-    let mut render = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending_actions,
-    };
+    let mut render = ManagerRenderContext::over(&mut state, &mut pending_actions);
 
     detach_pack(&mut render, "shared-pack");
 
     assert!(
         render
-            .state
             .model
             .model_library_manager
             .get_library("pack-a")
@@ -101,25 +94,17 @@ fn detaching_a_pack_removes_every_attached_library_in_one_revision() {
     );
     assert!(
         render
-            .state
             .model
             .model_library_manager
             .get_library("pack-b")
             .is_none()
     );
     assert_eq!(
-        render
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .revision()
-            .get(),
+        render.model.workspace.content.project.revision().get(),
         initial_revision.get() + 1
     );
     assert_eq!(
-        render.state.model.design_execution_epoch,
+        render.model.design_execution_epoch,
         initial_epoch.wrapping_add(1)
     );
 }
@@ -140,10 +125,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .expect("project has package")
         .archive_digest();
     let mut pending_actions = Vec::new();
-    let mut render = ManagerRenderContext {
-        state: &mut state,
-        pending_actions: &mut pending_actions,
-    };
+    let mut render = ManagerRenderContext::over(&mut state, &mut pending_actions);
 
     let receipt = author_technology_symbol_variant(
         &mut render,
@@ -156,18 +138,10 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
 
     assert!(receipt.contains("signed technology symbol 'demo180/nmos_demo'"));
     assert_eq!(
-        render
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .revision()
-            .get(),
+        render.model.workspace.content.project.revision().get(),
         initial_revision.get() + 1
     );
     let view = render
-        .state
         .model
         .library_manager
         .get_library("signed_variant_test")
@@ -196,7 +170,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .validate()
         .expect("project variant stays executable");
 
-    let committed_revision = render.state.model.workspace.content.project.revision();
+    let committed_revision = render.model.workspace.content.project.revision();
     assert!(
         author_technology_symbol_variant(
             &mut render,
@@ -208,7 +182,7 @@ fn signed_technology_symbol_variant_is_authored_in_one_project_revision() {
         .is_err()
     );
     assert_eq!(
-        render.state.model.workspace.content.project.revision(),
+        render.model.workspace.content.project.revision(),
         committed_revision,
         "a rejected overwrite must not publish a partial transaction"
     );
@@ -450,10 +424,7 @@ fn catalog_row_paint(row: &ProjectModelRow) -> Vec<(String, Color32)> {
                 ..egui::RawInput::default()
             },
             |ctx| {
-                let mut render = ManagerRenderContext {
-                    state: &mut state,
-                    pending_actions: &mut pending_actions,
-                };
+                let mut render = ManagerRenderContext::over(&mut state, &mut pending_actions);
                 egui::CentralPanel::default().show(ctx, |ui| {
                     project_model_row(ui, &mut render, row);
                 });
@@ -562,7 +533,7 @@ impl ModelsStudio {
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ui, app));
+                    .show(ctx, |ui| show(ui, &mut features::cx(app)));
                 // The shell answers what the workspace raised once it has
                 // drawn.
                 app.after_contribution();
@@ -727,7 +698,7 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
         let mut app = RSpiceApp::test_instance();
         app.state.models.models_page = page;
         app.state.models.models_view.catalog_scope = scope;
-        apply_receipt(&mut app.state, Err(reason.to_owned()));
+        apply_receipt(&mut app.state.models, Err(reason.to_owned()));
         let consequence = app.state.models.models_view.operational_state.consequence();
         let studio = ModelsStudio::open(app);
         let stated = studio
@@ -752,7 +723,7 @@ fn a_refused_action_is_stated_on_the_page_it_was_taken_from() {
     // An action that worked says nothing.
     let mut app = RSpiceApp::test_instance();
     app.state.models.models_page = ModelsPage::Corners;
-    apply_receipt(&mut app.state, Ok("validated".to_owned()));
+    apply_receipt(&mut app.state.models, Ok("validated".to_owned()));
     let studio = ModelsStudio::open(app);
     assert!(!studio.announces(|label| label == ModelsOperationalState::Ready.consequence()));
 }

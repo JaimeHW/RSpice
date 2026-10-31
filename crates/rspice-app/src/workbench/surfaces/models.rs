@@ -29,8 +29,11 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    manager::show(ui, app);
+impl ModelsFeature {
+    /// The Models & PDKs workspace on the stage.
+    pub(in crate::workbench) fn show_workspace(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
+        manager::show(ui, cx);
+    }
 }
 
 fn symbol_parameter_form_label(definition: &ModelBoundSymbolDefinition) -> String {

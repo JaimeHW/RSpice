@@ -202,8 +202,8 @@ pub(super) enum AttentionTone {
 ///
 /// One model-catalog operation runs at a time, so the row that lights is the
 /// one the attempted operation named and no other.
-pub(super) fn pack_transfer(state: &AppState, row: &HubLedgerRow) -> Option<Attention> {
-    let view = &state.models.models_view;
+pub(super) fn pack_transfer(state: &ModelsState, row: &HubLedgerRow) -> Option<Attention> {
+    let view = &state.models_view;
     if !view.model_import_in_progress {
         return None;
     }
@@ -480,7 +480,7 @@ impl HubCatalog {
 }
 
 /// Projects the session hub and the project's pins into what the ledger lists.
-pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCatalog {
+pub(super) fn hub_catalog(service: &ModelHubService, model: &Model) -> HubCatalog {
     let mut catalog = HubCatalog {
         age_days: service.catalog_age_days(),
         unavailable: service.unavailable_reason().map(str::to_owned),
@@ -500,7 +500,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
         .as_ref()
         .map(|identity| identity.generated_at.chars().take(10).collect());
     catalog.signing_key = rspice_pack::encode_hex(hub.anchor().key().as_bytes());
-    let pins = project_pins(state);
+    let pins = project_pins(model);
     let installed = hub.installed();
     let recalls = hub.recalls();
     let mut releases: BTreeMap<String, Vec<HubPackRow>> = BTreeMap::new();
@@ -599,9 +599,9 @@ pub(super) fn hub_catalog(service: &ModelHubService, state: &AppState) -> HubCat
 ///
 /// One pass rather than one per pack: the ledger asks this question of every
 /// row, and a project at the top of its range binds dozens of libraries.
-fn project_pins(state: &AppState) -> BTreeMap<String, Vec<PackPartPin>> {
+fn project_pins(model: &Model) -> BTreeMap<String, Vec<PackPartPin>> {
     let mut pins: BTreeMap<String, Vec<PackPartPin>> = BTreeMap::new();
-    for library in state.model.model_library_manager.libraries_sorted() {
+    for library in model.model_library_manager.libraries_sorted() {
         if let Some(pin) = library.pack_pin.as_ref() {
             pins.entry(pin.pack_id.clone())
                 .or_default()
@@ -667,11 +667,11 @@ pub(super) fn ledger_row(
 /// catalog, the pack or either release actually moved.
 pub(super) fn prepare(
     service: &ModelHubService,
-    state: &mut AppState,
+    state: &mut ModelsState,
     hub: &HubCatalog,
 ) -> Option<ModelHubRequest> {
     super::adoption::refresh_release_diff(service, state, hub);
-    let view = &mut state.models.models_view;
+    let view = &mut state.models_view;
     if hub.unavailable.is_some()
         || !hub.stale
         || view.model_import_in_progress
@@ -689,9 +689,11 @@ pub(super) fn prepare(
 /// projection computed for it must be about the same pack, and two spellings
 /// of "which one is selected" would eventually let a reader read one pack's
 /// releases beside another pack's diff.
-pub(super) fn selected_row<'a>(hub: &'a HubCatalog, state: &AppState) -> Option<&'a HubLedgerRow> {
+pub(super) fn selected_row<'a>(
+    hub: &'a HubCatalog,
+    state: &ModelsState,
+) -> Option<&'a HubLedgerRow> {
     state
-        .models
         .models_view
         .selected_pack
         .as_deref()
@@ -809,7 +811,6 @@ pub(super) fn packs_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &
     catalog_status(ui, app, hub);
     exception_banner(ui, app);
     let packs = app
-        .state
         .model
         .model_library_manager
         .spice_packs()
@@ -953,7 +954,7 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                     );
                 }
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let idle = !app.state.models.models_view.model_import_in_progress;
+                    let idle = !app.state.models_view.model_import_in_progress;
                     if Button::new("Refresh catalog")
                         .enabled(idle)
                         .show(ui)
@@ -970,10 +971,9 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                         )
                         .clicked()
                     {
-                        app.state.models.models_view.dialog =
-                            Some(ModelsWorkbenchDialog::HeldCatalog);
+                        app.state.models_view.dialog = Some(ModelsWorkbenchDialog::HeldCatalog);
                     }
-                    if let Some(fraction) = app.state.models.models_view.model_import_progress {
+                    if let Some(fraction) = app.state.models_view.model_import_progress {
                         ui.add(
                             egui::ProgressBar::new(fraction)
                                 .desired_width(120.0)
@@ -1058,23 +1058,17 @@ pub(super) fn announced_widget(ui: &mut Ui, widget: egui::Label, label: &str) {
 /// that named the version, so a bare "retry" here would be a button that
 /// guesses which release the reader meant.
 fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
-    let Some(Err(reason)) = app.state.models.models_view.action_receipt.clone() else {
+    let Some(Err(reason)) = app.state.models_view.action_receipt.clone() else {
         return;
     };
-    let state = app.state.models.models_view.operational_state;
-    let attempted = app
-        .state
-        .models
-        .models_view
-        .attempted_operation
-        .clone()
-        .unwrap_or(
-            crate::workbench::models::workspace_state::ModelsAttemptedOperation {
-                label: "model-source operation".to_owned(),
-                reissuable: false,
-                landing_pack: None,
-            },
-        );
+    let state = app.state.models_view.operational_state;
+    let attempted = app.state.models_view.attempted_operation.clone().unwrap_or(
+        crate::workbench::models::workspace_state::ModelsAttemptedOperation {
+            label: "model-source operation".to_owned(),
+            reissuable: false,
+            landing_pack: None,
+        },
+    );
     let text_dim = Tokens::get(ui.ctx()).color.text_dim;
     refusal_frame(
         ui,
@@ -1093,7 +1087,7 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         |ui| {
             if attempted.reissuable
                 && Button::new("Retry the catalog refresh")
-                    .enabled(!app.state.models.models_view.model_import_in_progress)
+                    .enabled(!app.state.models_view.model_import_in_progress)
                     .show(ui)
                     .on_disabled_hover_text("Another model-source operation is still running.")
                     .clicked()
@@ -1107,13 +1101,13 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
 /// A refused action on any other manager page, stated on the page it was
 /// taken from: what refused it and what that left behind. Those pages name
 /// their actions in their own toolbars, and offer no retry here.
-pub(super) fn page_refusal(ui: &mut Ui, state: &AppState) {
-    let Some(Err(reason)) = &state.models.models_view.action_receipt else {
+pub(super) fn page_refusal(ui: &mut Ui, state: &ModelsState) {
+    let Some(Err(reason)) = &state.models_view.action_receipt else {
         return;
     };
     refusal_frame(
         ui,
-        state.models.models_view.operational_state,
+        state.models_view.operational_state,
         reason,
         |_| {},
         |_| {},
@@ -1285,10 +1279,9 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
         page_empty_state(ui, headline, &detail);
         return;
     }
-    let facet = app.state.models.models_view.hub_facet;
+    let facet = app.state.models_view.hub_facet;
     let query = app
         .state
-        .models
         .models_view
         .catalog_query
         .trim()
@@ -1325,8 +1318,8 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
                          what this project pinned.",
                     );
                     if Button::new("Clear release filter").show(ui).clicked() {
-                        app.state.models.models_view.hub_facet = ModelHubFacet::All;
-                        app.state.models.models_view.catalog_query.clear();
+                        app.state.models_view.hub_facet = ModelHubFacet::All;
+                        app.state.models_view.catalog_query.clear();
                     }
                 }
                 for (row, attention) in &visible {
@@ -1368,7 +1361,6 @@ fn verification_of<'a>(
 ) -> Option<&'a PackReProof> {
     let installed = row.installed.as_ref()?;
     app.state
-        .models
         .models_view
         .pack_verification
         .get(&release_key(&row.pack_id, &installed.version))
@@ -1388,8 +1380,7 @@ fn ledger_line(
 ) {
     let transfer = pack_transfer(app.state, row);
     let attention = transfer.as_ref().or(attention);
-    let selected =
-        app.state.models.models_view.selected_pack.as_deref() == Some(row.pack_id.as_str());
+    let selected = app.state.models_view.selected_pack.as_deref() == Some(row.pack_id.as_str());
     let project = project_cell(&row.adoption);
     let response = selectable_data_row(
         ui,
@@ -1441,7 +1432,7 @@ fn ledger_line(
         None => response,
     };
     if response.clicked() {
-        app.state.models.models_view.selected_pack = Some(row.pack_id.clone());
+        app.state.models_view.selected_pack = Some(row.pack_id.clone());
     }
 }
 
@@ -1470,7 +1461,6 @@ fn inspector(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, 
     // cannot outlive the row it was computed for by even one frame.
     let diff = app
         .state
-        .models
         .models_view
         .release_diff
         .clone()
@@ -1519,7 +1509,7 @@ fn inspector_identity(
     attention: Option<&Attention>,
 ) {
     let t = Tokens::get(ui.ctx());
-    let idle = !app.state.models.models_view.model_import_in_progress;
+    let idle = !app.state.models_view.model_import_in_progress;
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 10.0;
         ui.add_space(12.0);
@@ -1557,7 +1547,7 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
                 .on_disabled_hover_text("Another model-source operation is still running.")
                 .clicked()
         {
-            app.state.models.models_view.dialog =
+            app.state.models_view.dialog =
                 Some(confirmation(offered, Some(installed.version.clone())));
         }
         if Button::new("Remove")
@@ -1609,7 +1599,7 @@ fn pack_actions(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &HubLedger
         .on_disabled_hover_text("Another model-source operation is still running.")
         .clicked()
     {
-        app.state.models.models_view.dialog = Some(confirmation(offered, None));
+        app.state.models_view.dialog = Some(confirmation(offered, None));
     }
 }
 
@@ -1856,7 +1846,6 @@ pub(super) fn release_install_block_reason(
         ));
     }
     app.state
-        .models
         .models_view
         .model_import_in_progress
         .then(|| "Another model-source operation is still running.".to_owned())

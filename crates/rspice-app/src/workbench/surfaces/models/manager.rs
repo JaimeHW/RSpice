@@ -53,11 +53,12 @@ use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
     paint_problem_mark, problem_line,
 };
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
-use crate::workbench::features;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::requests::{
     BindComponentModel, OpenSymbolAuthoring, SubcircuitSymbolSource,
 };
@@ -67,8 +68,10 @@ use crate::workbench::models::workspace_state::{
     ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
     ProjectModelFacet, RSpicePartFacet,
 };
-use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog};
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::slots::ModelsState;
+use crate::workbench::state::{ModelsCatalogScope, ModelsWorkbenchDialog, WorkbenchSession};
+#[cfg(test)]
+use crate::workbench::{AppState, RSpiceApp, features};
 
 use bindings::{ConsumerIndex, effective_model_consumers};
 use catalog_scan::project_catalog_scan;
@@ -142,9 +145,36 @@ enum ManagerAction {
     PlacePart(Box<crate::state::model_hub::PartPlacement>),
 }
 
+/// What a page of the workspace draws with: the parts of the models
+/// feature's context it reads and writes, and the actions it queues for once
+/// the workspace has drawn.
 struct ManagerRenderContext<'a> {
-    state: &'a mut AppState,
+    state: &'a mut ModelsState,
+    model: &'a mut Model,
+    wb: &'a mut WorkbenchSession,
     pending_actions: &'a mut Vec<ManagerAction>,
+}
+
+impl<'a> ManagerRenderContext<'a> {
+    fn of(cx: &'a mut Cx<'_, ModelsFeature>, pending_actions: &'a mut Vec<ManagerAction>) -> Self {
+        Self {
+            state: &mut *cx.state,
+            model: &mut *cx.model,
+            wb: &mut *cx.wb,
+            pending_actions,
+        }
+    }
+
+    /// A page's context over a whole application state, as a test holds one.
+    #[cfg(test)]
+    fn over(state: &'a mut AppState, pending_actions: &'a mut Vec<ManagerAction>) -> Self {
+        Self {
+            state: &mut *state.models,
+            model: &mut state.model,
+            wb: &mut *state.workbench,
+            pending_actions,
+        }
+    }
 }
 
 impl ManagerRenderContext<'_> {
@@ -217,7 +247,7 @@ impl ManagerRenderContext<'_> {
     }
 }
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     let context = ui.ctx().clone();
     let t = Tokens::get(ui.ctx());
     // The approved manager is one continuous document surface. Individual
@@ -227,20 +257,13 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     paint_document_surface(ui);
 
     let mut pending_actions = Vec::new();
-    {
-        let mut render = ManagerRenderContext {
-            state: &mut app.state,
-            pending_actions: &mut pending_actions,
-        };
-        page_tabs(ui, &mut render);
-    }
+    page_tabs(ui, &mut ManagerRenderContext::of(cx, &mut pending_actions));
 
-    if app.state.models.models_view.model_import_in_progress {
+    if cx.state.models_view.model_import_in_progress {
         ui.horizontal(|ui| {
             crate::ui::widgets::busy_mark(ui, 14.0);
             ui.label(
-                app.state
-                    .models
+                cx.state
                     .models_view
                     .model_import_label
                     .as_deref()
@@ -249,43 +272,46 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     }
 
-    if app.state.model.source_drift_needs_scan() {
+    if cx.model.source_drift_needs_scan() {
         pending_actions.push(ManagerAction::ScanSourceDrift);
     }
 
-    let page = app.state.models.models_page;
+    let page = cx.state.models_page;
     // A refused action is stated on the page it was taken from. The packs view
     // raises its own banner, with the operation and its retry; Qualification
     // reports its own actions, not through this receipt.
     let packs_view = page == ModelsPage::Models
-        && app.state.models.models_view.catalog_scope == ModelsCatalogScope::InstalledPacks;
+        && cx.state.models_view.catalog_scope == ModelsCatalogScope::InstalledPacks;
     if page != ModelsPage::Qualification && !packs_view {
-        hub::page_refusal(ui, &app.state);
+        hub::page_refusal(ui, cx.state);
     }
     let include_diagnostics = (page == ModelsPage::Include)
-        .then(|| closure_facts(app.state.model.model_library_manager.libraries_sorted()));
+        .then(|| closure_facts(cx.model.model_library_manager.libraries_sorted()));
     // Projected before the render borrow, and settled there too: both the
     // stale-catalog refresh and the release diff need the session hub, which
     // the render borrow does not carry.
-    let hub_catalog = hub::hub_catalog(&app.model_hub, &app.state);
+    let hub_catalog = hub::hub_catalog(cx.handles.model_hub, cx.model);
     if page == ModelsPage::Models
-        && let Some(request) = hub::prepare(&app.model_hub, &mut app.state, &hub_catalog)
+        && let Some(request) = hub::prepare(cx.handles.model_hub, cx.state, &hub_catalog)
     {
         pending_actions.push(ManagerAction::ModelHub(request));
     }
     if page == ModelsPage::Qualification {
-        qualification_page::show(ui, &mut features::cx(app));
+        qualification_page::show(ui, cx);
     } else {
         // The releases this machine holds, read beside the session's own state
         // rather than cloned into it: the shelf offers parts of an installed
         // pack the project has not adopted, and copying a manifest per frame
         // would be most of what the page costs.
-        let installed = app
+        let installed = cx
+            .handles
             .model_hub
             .hub()
             .map_or::<&[crate::state::model_hub::InstalledPack], _>(&[], |hub| hub.installed());
         let mut render = ManagerRenderContext {
-            state: &mut app.state,
+            state: &mut *cx.state,
+            model: &mut *cx.model,
+            wb: &mut *cx.wb,
             pending_actions: &mut pending_actions,
         };
         match page {
@@ -305,77 +331,61 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     divide_document_remainder(ui);
 
-    {
-        let mut render = ManagerRenderContext {
-            state: &mut app.state,
-            pending_actions: &mut pending_actions,
-        };
-        dialogs::render_dialog(ui, &mut render, &hub_catalog);
-    }
+    dialogs::render_dialog(
+        ui,
+        &mut ManagerRenderContext::of(cx, &mut pending_actions),
+        &hub_catalog,
+    );
     for action in pending_actions {
         match action {
-            ManagerAction::Command(key) => app.execute_command_key(key),
+            ManagerAction::Command(key) => cx.execute(key),
             ManagerAction::ImportModelSource => {
-                ModelsFeature::start_model_source_import(&mut features::cx(app), &context)
+                ModelsFeature::start_model_source_import(cx, &context)
             }
             ManagerAction::RefreshLibrary { library } => {
-                ModelsFeature::start_model_library_refresh(
-                    &mut features::cx(app),
-                    &context,
-                    library,
-                );
+                ModelsFeature::start_model_library_refresh(cx, &context, library);
             }
             ManagerAction::AttachPack { pack_id } => {
-                ModelsFeature::start_model_pack_attach(&mut features::cx(app), &context, pack_id);
+                ModelsFeature::start_model_pack_attach(cx, &context, pack_id);
             }
             ManagerAction::AddPart { pack_id, part_name } => {
-                ModelsFeature::start_model_part_add(
-                    &mut features::cx(app),
-                    &context,
-                    pack_id,
-                    part_name,
-                );
+                ModelsFeature::start_model_part_add(cx, &context, pack_id, part_name);
             }
             #[cfg(target_arch = "wasm32")]
             ManagerAction::SelectBrowserImportRoot { root } => {
-                ModelsFeature::select_browser_model_import_root(
-                    &mut features::cx(app),
-                    &context,
-                    root,
-                );
+                ModelsFeature::select_browser_model_import_root(cx, &context, root);
             }
             #[cfg(target_arch = "wasm32")]
             ManagerAction::CancelBrowserImportRoot => {
-                ModelsFeature::cancel_browser_model_import_root(&mut features::cx(app));
+                ModelsFeature::cancel_browser_model_import_root(cx);
             }
             ManagerAction::BindComponentModel {
                 component_id,
                 library,
                 model,
             } => {
-                app.state.workbench.outbox.push(BindComponentModel {
+                cx.wb.outbox.push(BindComponentModel {
                     component_id,
                     library,
                     model,
                 });
             }
-            ManagerAction::ScanSourceDrift => app.state.model.scan_source_drift(),
+            ManagerAction::ScanSourceDrift => cx.model.scan_source_drift(),
             ManagerAction::ModelHub(request) => {
-                ModelsFeature::start_model_hub_operation(&mut features::cx(app), &context, request);
+                ModelsFeature::start_model_hub_operation(cx, &context, request);
             }
             ManagerAction::PlacePart(placement) => {
-                place::arm(&mut app.state, &context, *placement);
+                place::arm(cx.wb, cx.state, &context, *placement);
             }
             ManagerAction::CreateSubcircuitSymbol {
                 library,
                 subcircuit,
-            } => match subcircuit_symbol_source(&app.state, &library, &subcircuit) {
-                Ok(source) => app
-                    .state
-                    .workbench
+            } => match subcircuit_symbol_source(cx.model, &library, &subcircuit) {
+                Ok(source) => cx
+                    .wb
                     .outbox
                     .push(OpenSymbolAuthoring::SubcircuitBound(Box::new(source))),
-                Err(error) => apply_receipt(&mut app.state, Err(error)),
+                Err(error) => apply_receipt(cx.state, Err(error)),
             },
         }
     }
@@ -417,12 +427,11 @@ fn divide_document_remainder(ui: &Ui) {
 /// The interface a symbol for the subcircuit `subcircuit_name` of the
 /// library `library_name` is created from, as the catalog executes it.
 fn subcircuit_symbol_source(
-    state: &AppState,
+    model: &Model,
     library_name: &str,
     subcircuit_name: &str,
 ) -> Result<SubcircuitSymbolSource, String> {
-    let provider = state
-        .model
+    let provider = model
         .model_library_manager
         .effective_definition_provider(ModelConsumerScope::Subcircuit, subcircuit_name)?
         .ok_or_else(|| {
@@ -434,8 +443,7 @@ fn subcircuit_symbol_source(
             provider.library
         ));
     }
-    let library = state
-        .model
+    let library = model
         .model_library_manager
         .get_library(&provider.library)
         .ok_or_else(|| {
@@ -516,8 +524,8 @@ fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::ZERO;
                         for page in ModelsPage::ALL {
-                            if page_tab(ui, page.label(), app.state.models.models_page == page) {
-                                app.state.models.models_page = page;
+                            if page_tab(ui, page.label(), app.state.models_page == page) {
+                                app.state.models_page = page;
                             }
                         }
                     });
@@ -588,7 +596,7 @@ fn catalog_page(
     // the rows, once more for the selected model's consumers, each a pass over
     // every placed instance in the design.
     let pass = matches!(
-        app.state.models.models_view.catalog_scope,
+        app.state.models_view.catalog_scope,
         ModelsCatalogScope::Project
     )
     .then(|| {
@@ -603,7 +611,7 @@ fn catalog_page(
         hub,
         installed,
     );
-    match app.state.models.models_view.catalog_scope {
+    match app.state.models_view.catalog_scope {
         ModelsCatalogScope::Project => {
             project_catalog(ui, app, pass.as_ref().expect("the project scope scans"));
         }
@@ -620,7 +628,7 @@ fn catalog_bar(
     installed: &[crate::state::model_hub::InstalledPack],
 ) {
     let loaded = scan.map_or_else(
-        || catalog_model_count(&app.state.model.model_library_manager),
+        || catalog_model_count(&app.model.model_library_manager),
         |scan| scan.total,
     );
     let packs = hub.packs.len();
@@ -628,12 +636,8 @@ fn catalog_bar(
     // is both. Counting only the shipped index said "17" over a table of
     // nineteen rows, and said "0" on a browser build over a project full of
     // parts.
-    let parts = app
-        .state
-        .model
-        .model_library_manager
-        .pack_definition_count()
-        + held_parts::held_count(&app.state.model.model_library_manager, installed);
+    let parts = app.model.model_library_manager.pack_definition_count()
+        + held_parts::held_count(&app.model.model_library_manager, installed);
     let t = Tokens::get(ui.ctx());
     egui::Frame::NONE
         .fill(t.color.bg_panel)
@@ -658,7 +662,7 @@ fn catalog_bar(
                 let options = labels.each_ref().map(String::as_str);
                 let mut selected = SCOPES
                     .iter()
-                    .position(|scope| *scope == app.state.models.models_view.catalog_scope)
+                    .position(|scope| *scope == app.state.models_view.catalog_scope)
                     .unwrap_or(0);
                 if widgets::segmented(
                     ui,
@@ -667,10 +671,10 @@ fn catalog_bar(
                     &mut selected,
                     SegmentedWidth::Natural,
                 ) {
-                    app.state.models.models_view.catalog_scope = SCOPES[selected];
-                    app.state.models.models_view.catalog_query.clear();
-                    app.state.models.models_view.part_catalog_offset = 0;
-                    app.state.models.models_view.selected_part = None;
+                    app.state.models_view.catalog_scope = SCOPES[selected];
+                    app.state.models_view.catalog_query.clear();
+                    app.state.models_view.part_catalog_offset = 0;
+                    app.state.models_view.selected_part = None;
                 }
 
                 // The source mockup drops the facet rail before it can squeeze
@@ -680,7 +684,7 @@ fn catalog_bar(
                         .id_salt("models-catalog-facets")
                         .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
                         .show(ui, |ui| {
-                            match app.state.models.models_view.catalog_scope {
+                            match app.state.models_view.catalog_scope {
                                 ModelsCatalogScope::Project => {
                                     ui.horizontal(|ui| {
                                         ui.spacing_mut().item_spacing.x = 4.0;
@@ -691,13 +695,13 @@ fn catalog_bar(
                                                 scan.map(|scan| scan.facets[index]).unwrap_or(0);
                                             if facet_button(
                                                 ui,
-                                                app.state.models.models_view.project_facet == facet,
+                                                app.state.models_view.project_facet == facet,
                                                 facet.label(),
                                                 Some(count),
                                             )
                                             .clicked()
                                             {
-                                                app.state.models.models_view.project_facet = facet;
+                                                app.state.models_view.project_facet = facet;
                                             }
                                         }
                                     });
@@ -718,13 +722,13 @@ fn catalog_bar(
                                         {
                                             if facet_button(
                                                 ui,
-                                                app.state.models.models_view.hub_facet == facet,
+                                                app.state.models_view.hub_facet == facet,
                                                 facet.label(),
                                                 Some(counts[index]),
                                             )
                                             .clicked()
                                             {
-                                                app.state.models.models_view.hub_facet = facet;
+                                                app.state.models_view.hub_facet = facet;
                                             }
                                         }
                                     });
@@ -735,16 +739,15 @@ fn catalog_bar(
                                         for facet in RSpicePartFacet::ALL {
                                             if facet_button(
                                                 ui,
-                                                app.state.models.models_view.part_facet == facet,
+                                                app.state.models_view.part_facet == facet,
                                                 facet.label(),
                                                 None,
                                             )
                                             .clicked()
                                             {
-                                                app.state.models.models_view.part_facet = facet;
-                                                app.state.models.models_view.selected_part = None;
-                                                app.state.models.models_view.part_catalog_offset =
-                                                    0;
+                                                app.state.models_view.part_facet = facet;
+                                                app.state.models_view.selected_part = None;
+                                                app.state.models_view.part_catalog_offset = 0;
                                             }
                                         }
                                     });
@@ -754,7 +757,7 @@ fn catalog_bar(
                 }
 
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                    let hint = match app.state.models.models_view.catalog_scope {
+                    let hint = match app.state.models_view.catalog_scope {
                         ModelsCatalogScope::Project => {
                             "Search models, parameters or consumers…".to_owned()
                         }
@@ -765,12 +768,12 @@ fn catalog_bar(
                     };
                     let query = ui.add_sized(
                         [ui.available_width().clamp(170.0, 340.0), 24.0],
-                        egui::TextEdit::singleline(&mut app.state.models.models_view.catalog_query)
+                        egui::TextEdit::singleline(&mut app.state.models_view.catalog_query)
                             .hint_text(hint),
                     );
                     if query.changed() {
-                        app.state.models.models_view.part_catalog_offset = 0;
-                        app.state.models.models_view.selected_part = None;
+                        app.state.models_view.part_catalog_offset = 0;
+                        app.state.models_view.selected_part = None;
                     }
                 });
             });
@@ -935,12 +938,8 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
     let rows = &scan.rows;
     let selected_visible = rows.iter().any(|row| {
         row.holds(
-            app.state
-                .model
-                .model_library_manager
-                .selected_library
-                .as_deref(),
-            app.state.models.selected_model.as_deref(),
+            app.model.model_library_manager.selected_library.as_deref(),
+            app.state.selected_model.as_deref(),
         )
     });
     if !selected_visible && let Some(row) = rows.first() {
@@ -955,7 +954,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
     egui::Frame::NONE
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .show(ui, |ui| {
-        let sort = app.state.models.models_view.catalog_sort;
+        let sort = app.state.models_view.catalog_sort;
         if let Some(key) = sortable_table_header(
             ui,
             "models-project-catalog-sort",
@@ -972,7 +971,7 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         ) {
             // Next frame's scan reads the new order; this frame's rows were
             // derived under the old one and are painted as they were derived.
-            app.state.models.models_view.catalog_sort.toggle(key);
+            app.state.models_view.catalog_sort.toggle(key);
         }
         let table = ScrollArea::vertical()
             .id_salt("models-project-table")
@@ -986,8 +985,8 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
                     "Search covers names, families, sources, libraries, consumers and resolved parameters.",
                 );
                 if Button::new("Clear filter").show(ui).clicked() {
-                    app.state.models.models_view.catalog_query.clear();
-                    app.state.models.models_view.project_facet = ProjectModelFacet::All;
+                    app.state.models_view.catalog_query.clear();
+                    app.state.models_view.project_facet = ProjectModelFacet::All;
                 }
             });
         } else {
@@ -1030,8 +1029,7 @@ fn model_needs_review(library: &ModelLibrary, model: &DeviceModel) -> bool {
 fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
     let card = (row.bins > 0)
         .then(|| {
-            app.state
-                .model
+            app.model
                 .model_library_manager
                 .get_library(&row.library)
                 .and_then(|library| library.bin_family(&row.model))
@@ -1040,11 +1038,11 @@ fn select_catalog_row(app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow)
         .flatten()
         .unwrap_or_else(|| row.model.clone());
     crate::workbench::models::workspace_state::select_library_or_prompt(
-        &mut app.state.model,
-        &mut app.state.workbench,
+        app.model,
+        app.wb,
         &row.library,
     );
-    app.state.models.selected_model = Some(card);
+    app.state.selected_model = Some(card);
 }
 
 /// The family the catalog's selection belongs to: the family of the selected
@@ -1058,12 +1056,8 @@ fn selection_family<'a>(library: &'a ModelLibrary, model: &str) -> Option<BinFam
 
 fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &ProjectModelRow) {
     let selected = row.holds(
-        app.state
-            .model
-            .model_library_manager
-            .selected_library
-            .as_deref(),
-        app.state.models.selected_model.as_deref(),
+        app.model.model_library_manager.selected_library.as_deref(),
+        app.state.selected_model.as_deref(),
     );
     let t = Tokens::get(ui.ctx());
     let (rect, response) =
@@ -1259,13 +1253,11 @@ fn compare_models(
     right_model: &str,
 ) {
     let left = app
-        .state
         .model
         .model_library_manager
         .get_library(left_library)
         .and_then(|library| library.get_model(left_model));
     let right = app
-        .state
         .model
         .model_library_manager
         .get_library(right_library)
@@ -1389,7 +1381,6 @@ fn comparison_state(left: Option<&String>, right: Option<&String>) -> &'static s
 
 fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, left_model: &str) {
     let right = app
-        .state
         .model
         .model_library_manager
         .libraries_sorted()
@@ -1411,7 +1402,7 @@ fn open_model_compare(app: &mut ManagerRenderContext<'_>, left_library: &str, le
     // Opened on a chosen counterpart, never on whichever definition the
     // catalog happens to iterate first: comparing a MOS card against an
     // unrelated BJT because it sorted first is not a comparison.
-    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
+    app.state.models_view.dialog = Some(ModelsWorkbenchDialog::CompareModels {
         left_library: left_library.to_owned(),
         left_model: left_model.to_owned(),
         right: default_comparison_counterpart(app, left_library, left_model),
@@ -1428,8 +1419,7 @@ fn default_comparison_counterpart(
     left_library: &str,
     left_model: &str,
 ) -> Option<(String, String)> {
-    app.state
-        .model
+    app.model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1452,7 +1442,6 @@ fn comparison_counterpart_picker(
     selected: &mut Option<(String, String)>,
 ) {
     let candidates = app
-        .state
         .model
         .model_library_manager
         .libraries_sorted()
@@ -1494,8 +1483,7 @@ fn comparison_counterpart_picker(
 
 /// The name of the model library the catalog has selected, if it resolves.
 fn current_library_name(app: &ManagerRenderContext<'_>) -> Option<String> {
-    app.state
-        .model
+    app.model
         .model_library_manager
         .current_library()
         .map(|library| library.name.clone())
@@ -1508,7 +1496,6 @@ fn current_library_name(app: &ManagerRenderContext<'_>) -> Option<String> {
 /// could hand this function a record it reads two fields of.
 fn refresh_library(app: &mut ManagerRenderContext<'_>, library_name: &str) {
     if !app
-        .state
         .model
         .model_library_manager
         .get_library(library_name)
@@ -1551,7 +1538,6 @@ fn author_technology_symbol_variant(
         );
     }
     let package = app
-        .state
         .model
         .project_signed_technology_package()?
         .ok_or_else(|| "This project has no signed technology package.".to_owned())?;
@@ -1574,7 +1560,6 @@ fn author_technology_symbol_variant(
             format!("Signed technology symbol '{package_id}/{source_cell}' no longer resolves.")
         })?;
     let target = app
-        .state
         .model
         .library_manager
         .get_library(target_library)
@@ -1612,7 +1597,7 @@ fn author_technology_symbol_variant(
         format!("Signed technology symbol cannot seed a project variant: {error}")
     })?;
 
-    let mut candidate = app.state.model.library_manager.clone();
+    let mut candidate = app.model.library_manager.clone();
     let plan = crate::state::prepare_symbol_construction(
         &variant,
         candidate
@@ -1626,13 +1611,13 @@ fn author_technology_symbol_variant(
         .commit_symbol_construction(plan)
         .map_err(|error| error.to_string())?;
     let revision = publish_symbol_definition_candidate(
-        &mut app.state.model,
+        app.model,
         candidate,
         target_library,
         target_cell,
         format!("author project variant of signed symbol {package_id}/{source_cell}"),
     )?;
-    app.state.models.models_view.selected_symbol =
+    app.state.models_view.selected_symbol =
         Some(format!("{target_library}\u{1f}{target_cell}\u{1f}symbol"));
     Ok(format!(
         "Authored '{target_library}/{target_cell}' from signed technology symbol '{package_id}/{source_cell}' at project revision {}.",
@@ -1649,12 +1634,12 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
         );
         return;
     }
-    let mut candidate = app.state.model.model_library_manager.clone();
+    let mut candidate = app.model.model_library_manager.clone();
     for library in &libraries {
         candidate.remove_library(library);
     }
     let result = publish_model_library_set_candidate(
-        &mut app.state.model,
+        app.model,
         candidate,
         format!("detach model pack {pack_id}"),
     )
@@ -1669,7 +1654,7 @@ fn detach_pack(app: &mut ManagerRenderContext<'_>, pack_id: &str) {
         ))
     });
     if let Ok(message) = &result {
-        app.state
+        app.model
             .record(LogSeverity::Info, LogSource::Studio, message.clone());
     }
     receipt(app, result);
@@ -1686,12 +1671,12 @@ fn publish_definition_provider(
     provider_library: &str,
     reason: &str,
 ) -> Result<String, String> {
-    let mut candidate = app.state.model.model_library_manager.clone();
+    let mut candidate = app.model.model_library_manager.clone();
     candidate
         .resolve_definition_provider(scope, definition, provider_library, reason.trim())
         .and_then(|record| {
             publish_model_resolution_candidate(
-                &mut app.state.model,
+                app.model,
                 candidate,
                 format!(
                     "resolve {} {} to {}",
@@ -1718,7 +1703,7 @@ fn clear_definition_provider(
     scope: ModelConsumerScope,
     definition: &str,
 ) -> Result<String, String> {
-    let mut candidate = app.state.model.model_library_manager.clone();
+    let mut candidate = app.model.model_library_manager.clone();
     if !candidate.clear_definition_provider(scope, definition) {
         return Err(format!(
             "No provider decision exists for {} '{}'.",
@@ -1727,7 +1712,7 @@ fn clear_definition_provider(
         ));
     }
     publish_model_resolution_candidate(
-        &mut app.state.model,
+        app.model,
         candidate,
         format!("clear {} provider decision {definition}", scope.label()),
     )
@@ -1743,7 +1728,6 @@ fn clear_definition_provider(
 
 fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> Vec<String> {
     let mut libraries = app
-        .state
         .model
         .model_library_manager
         .libraries_sorted()
@@ -1756,8 +1740,7 @@ fn attached_libraries_for_pack(app: &ManagerRenderContext<'_>, pack_id: &str) ->
 }
 
 fn is_builtin_pack(app: &ManagerRenderContext<'_>, pack_id: &str) -> bool {
-    app.state
-        .model
+    app.model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -1791,13 +1774,12 @@ fn export_include_manifest(app: &mut ManagerRenderContext<'_>) {
         Ok(message) => (LogSeverity::Info, message.clone()),
         Err(error) => (LogSeverity::Error, error.clone()),
     };
-    app.state.record(severity, LogSource::Studio, text);
+    app.model.record(severity, LogSource::Studio, text);
     receipt(app, result);
 }
 
 fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
     let libraries = app
-        .state
         .model
         .model_library_manager
         .libraries_sorted()
@@ -1827,7 +1809,7 @@ fn build_include_manifest(app: &ManagerRenderContext<'_>) -> String {
         .collect::<Vec<_>>();
     serde_json::to_string_pretty(&serde_json::json!({
         "schema": 1,
-        "project_revision": app.state.model.workspace.content.project.revision(),
+        "project_revision": app.model.workspace.content.project.revision(),
         "libraries": libraries,
     }))
     .unwrap_or_else(|error| format!("{{\"error\":\"{error}\"}}"))
@@ -1851,14 +1833,7 @@ const fn pin_source_block_reason(external: bool, importing: bool) -> Option<&'st
 }
 
 fn exactly_one_selected_component(app: &ManagerRenderContext<'_>) -> Option<u64> {
-    let selection = &app
-        .state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .components;
+    let selection = &app.model.schematic.session.editor.selection.components;
     (selection.len() == 1).then(|| *selection.iter().next().expect("one selected component"))
 }
 
@@ -1879,12 +1854,12 @@ fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
 
 /// Show an action's outcome on the page. A caller whose action changed the
 /// project or wrote a file records it as well; a refusal stays on the page.
-fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
-    state.models.models_view.note_receipt(result);
+fn apply_receipt(state: &mut ModelsState, result: Result<String, String>) {
+    state.models_view.note_receipt(result);
 }
 
 fn navigate_specialist(app: &mut ManagerRenderContext<'_>, surface: crate::workbench::SurfaceId) {
-    if let Err(error) = app.state.workbench.navigate(
+    if let Err(error) = app.wb.navigate(
         crate::workbench::SurfaceRoute::surface(surface),
         crate::workbench::RouteTransitionSource::User,
     ) {

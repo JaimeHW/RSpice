@@ -206,7 +206,7 @@ fn run_page(app: &mut RSpiceApp, width: f32) -> egui::FullOutput {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, app));
+                .show(ctx, |ui| super::super::show(ui, &mut features::cx(app)));
         },
     )
 }
@@ -396,7 +396,9 @@ fn every_closure_segment_announces_its_ratio_and_the_fact_behind_it() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app));
+                .show(ctx, |ui| {
+                    super::super::show(ui, &mut features::cx(&mut app))
+                });
         },
     );
     let nodes = output
@@ -604,7 +606,9 @@ fn the_engine_owned_band_states_its_whole_exemption() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app));
+                .show(ctx, |ui| {
+                    super::super::show(ui, &mut features::cx(&mut app))
+                });
         },
     );
     assert!(
@@ -647,7 +651,9 @@ fn the_qualification_body_fills_the_document_in_two_tracks() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| super::super::show(ui, &mut app));
+                .show(ctx, |ui| {
+                    super::super::show(ui, &mut features::cx(&mut app))
+                });
         },
     );
 

@@ -24,7 +24,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureInspector, FeatureNavigator, FeatureRegistry,
-    NoHandles, Reads, held_back,
+    FeatureSurface, NoHandles, Reads, held_back,
 };
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{
@@ -49,6 +49,9 @@ impl Feature for ModelsFeature {
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ModelsCommand>();
         registry.dialogs(DIALOGS);
+        registry.surface(FeatureSurface {
+            show: ModelsFeature::show_workspace,
+        });
         registry.navigator(FeatureNavigator {
             show: show_navigator,
         });

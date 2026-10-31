@@ -121,19 +121,13 @@ fn project_selection<'a>(
     app: &ManagerRenderContext<'_>,
     consumers: &'a ConsumerIndex,
 ) -> Result<SelectedModelDetail<'a>, (&'static str, &'static str)> {
-    let Some(library_name) = app
-        .state
-        .model
-        .model_library_manager
-        .selected_library
-        .as_deref()
-    else {
+    let Some(library_name) = app.model.model_library_manager.selected_library.as_deref() else {
         return Err((
             "Select a model to inspect its source and resolved contract.",
             "The detail area never invents a model when the catalog selection is empty.",
         ));
     };
-    let Some(model_name) = app.state.models.selected_model.as_deref() else {
+    let Some(model_name) = app.state.selected_model.as_deref() else {
         return Err((
             "Select a model to inspect its source and resolved contract.",
             "Use the table above or choose a model source in the Navigator.",
@@ -143,12 +137,7 @@ fn project_selection<'a>(
         "The selected model no longer resolves.",
         "Rescan or clear the selection; stale identities are never retargeted automatically.",
     );
-    let Some(library) = app
-        .state
-        .model
-        .model_library_manager
-        .get_library(library_name)
-    else {
+    let Some(library) = app.model.model_library_manager.get_library(library_name) else {
         return Err(stale);
     };
     // A binned family's selection is one of its bins, and naming the family
@@ -186,7 +175,7 @@ fn project_selection<'a>(
         || Some("Select exactly one compatible schematic instance first.".to_owned()),
         |component_id| {
             crate::workbench::docks::validate_component_model_catalog_binding(
-                &app.state.model,
+                app.model,
                 component_id,
                 &library.name,
                 &binding,
@@ -200,8 +189,7 @@ fn project_selection<'a>(
     let bind_target = selected_component
         .filter(|_| binding_block_reason.is_none())
         .and_then(|component_id| {
-            app.state
-                .model
+            app.model
                 .schematic
                 .document()
                 .components
@@ -402,7 +390,7 @@ pub(super) fn selected_model_detail(
                         app.queue_model_binding(component_id, &detail.library, &detail.binding);
                     }
                     if Button::new("Qualification").show(ui).clicked() {
-                        app.state.models.models_page = ModelsPage::Qualification;
+                        app.state.models_page = ModelsPage::Qualification;
                     }
                     if Button::new(if detail.project_owned {
                         "Model editor…"
@@ -431,7 +419,7 @@ pub(super) fn selected_model_detail(
                     }
                     let blocked = pin_source_block_reason(
                         detail.has_root,
-                        app.state.models.models_view.model_import_in_progress,
+                        app.state.models_view.model_import_in_progress,
                     );
                     if Button::new(if detail.pinned {
                         "Refresh pin"
@@ -506,12 +494,7 @@ pub(super) fn selected_model_detail(
 /// a library: the retained source bytes are the largest thing in one, and this
 /// click is the only place that reads them.
 fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, model_name: &str) {
-    let Some(library) = app
-        .state
-        .model
-        .model_library_manager
-        .get_library(library_name)
-    else {
+    let Some(library) = app.model.model_library_manager.get_library(library_name) else {
         return;
     };
     let Some(model) = library.get_model(model_name) else {
@@ -560,7 +543,7 @@ fn open_model_source(app: &mut ManagerRenderContext<'_>, library_name: &str, mod
         return;
     };
     match opened {
-        Ok(dialog) => app.state.models.models_view.dialog = Some(dialog),
+        Ok(dialog) => app.state.models_view.dialog = Some(dialog),
         Err(error) => receipt(app, Err(error)),
     }
 }
@@ -805,7 +788,7 @@ fn bins_card(
         |ui| {
             for bin in &detail.bins {
                 if bin_row(ui, bin, bin.name == detail.model).clicked() {
-                    app.state.models.selected_model = Some(bin.name.clone());
+                    app.state.selected_model = Some(bin.name.clone());
                 }
             }
         },
@@ -1009,7 +992,7 @@ fn qualification_card(
                     routed |= routed_count(ui, name, &value.to_string(), note).clicked();
                 }
                 if routed {
-                    app.state.models.models_page = ModelsPage::Qualification;
+                    app.state.models_page = ModelsPage::Qualification;
                 }
             } else {
                 empty_state(
@@ -1063,7 +1046,7 @@ fn usage_card(
                                 .color(t.color.text_faint),
                         );
                         if opened {
-                            app.state.models.models_view.dialog =
+                            app.state.models_view.dialog =
                                 Some(ModelsWorkbenchDialog::BindingTrace {
                                     model: detail.binding.clone(),
                                     consumers: usages.to_vec(),
@@ -1077,11 +1060,10 @@ fn usage_card(
                         .link(format!("{} more…", usages.len() - USAGE_ROWS))
                         .clicked()
                     {
-                        app.state.models.models_view.dialog =
-                            Some(ModelsWorkbenchDialog::BindingTrace {
-                                model: detail.binding.clone(),
-                                consumers: usages.to_vec(),
-                            });
+                        app.state.models_view.dialog = Some(ModelsWorkbenchDialog::BindingTrace {
+                            model: detail.binding.clone(),
+                            consumers: usages.to_vec(),
+                        });
                     }
                 }
             }

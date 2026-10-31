@@ -157,7 +157,7 @@ fn an_instance_naming_something_the_closure_defines_is_not_unresolved() {
     state.model.workspace.save_active_schematic(&schematic);
 
     let definitions = state.model.definition_index();
-    let unbound = unbound_instances(&state, &definitions);
+    let unbound = unbound_instances(&state.model, &definitions);
     assert_eq!(unbound.len(), 1, "only the name nothing declares is listed");
     assert_eq!(unbound[0].instance, "M2");
     assert_eq!(unbound[0].reference, "comparator_fast");
@@ -206,7 +206,7 @@ fn a_binned_family_is_indexed_under_the_name_it_binds() {
     component.value = "nch".to_owned();
     schematic.document_mut_for_test().components.push(component);
     state.model.workspace.save_active_schematic(&schematic);
-    assert!(unbound_instances(&state, &state.model.definition_index()).is_empty());
+    assert!(unbound_instances(&state.model, &state.model.definition_index()).is_empty());
 }
 
 #[test]

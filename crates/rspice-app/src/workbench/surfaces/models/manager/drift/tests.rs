@@ -27,10 +27,7 @@ fn banner_labels(state: &mut AppState, library: &str) -> Vec<String> {
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let mut app = ManagerRenderContext {
-                    state,
-                    pending_actions: &mut pending,
-                };
+                let mut app = ManagerRenderContext::over(state, &mut pending);
                 detail_banner(ui, &mut app, library);
             });
         },
@@ -322,10 +319,7 @@ fn the_drifted_library_reaches_the_reader_as_a_banner_with_both_digests() {
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let mut app = ManagerRenderContext {
-                    state: &mut state,
-                    pending_actions: &mut pending,
-                };
+                let mut app = ManagerRenderContext::over(&mut state, &mut pending);
                 detail_banner(ui, &mut app, "moved");
             });
         },
@@ -436,10 +430,7 @@ fn a_library_whose_sources_all_match_paints_no_banner() {
         },
         |ctx| {
             egui::CentralPanel::default().show(ctx, |ui| {
-                let mut app = ManagerRenderContext {
-                    state: &mut state,
-                    pending_actions: &mut pending,
-                };
+                let mut app = ManagerRenderContext::over(&mut state, &mut pending);
                 detail_banner(ui, &mut app, "clean");
             });
         },

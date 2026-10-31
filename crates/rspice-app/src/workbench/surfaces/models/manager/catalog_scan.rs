@@ -14,24 +14,19 @@ pub(super) fn project_catalog_scan(
 ) -> ProjectCatalogScan {
     let query = app
         .state
-        .models
         .models_view
         .catalog_query
         .trim()
         .to_ascii_lowercase();
-    let facet = app.state.models.models_view.project_facet;
+    let facet = app.state.models_view.project_facet;
     let mut rows = Vec::new();
     let mut total = 0usize;
     let mut facets = [0usize; ProjectModelFacet::ALL.len()];
     let mut review_shown = 0usize;
-    for library in app.state.model.model_library_manager.libraries_sorted() {
+    for library in app.model.model_library_manager.libraries_sorted() {
         let pinned = model_is_pinned(library);
         let built_in = matches!(library.source_authority, ModelSourceAuthority::BuiltIn);
-        let drifted = !app
-            .state
-            .model
-            .source_drift_findings(&library.name)
-            .is_empty();
+        let drifted = !app.model.source_drift_findings(&library.name).is_empty();
         let library_source = library.root_path.as_deref().map(path_label);
         // A binned family is one row, named as an instance binds it; its bins
         // are its detail, not rows beside it.
@@ -107,7 +102,7 @@ pub(super) fn project_catalog_scan(
             });
         }
     }
-    sort_catalog_rows(&mut rows, app.state.models.models_view.catalog_sort);
+    sort_catalog_rows(&mut rows, app.state.models_view.catalog_sort);
     ProjectCatalogScan {
         rows,
         total,
