@@ -2,9 +2,9 @@
 //!
 //! The Problems grid's order, its filters and its groups are a reading
 //! position over the canonical store, not evidence about the design. They live
-//! beside the store rather than inside it because the store decides what is
-//! true and this decides what is shown — and they live in the session rather
-//! than in the page because a page that keeps its own state cannot be tested
+//! outside the store because the store decides what is true and this decides
+//! what is shown — and they live in the workbench session rather than in the
+//! page because a page that keeps its own state cannot be tested
 //! without being drawn.
 //!
 //! Nothing here is persisted. A filter is how a reader is reading the findings
@@ -108,9 +108,9 @@ impl SeverityFilter {
 
 /// The reading position itself.
 ///
-/// Visible to the crate because [`super::AppState`] holds one and the session
-/// aggregate is built by name outside the shell; its fields and vocabulary are
-/// the shell's own, and nothing below it reads them.
+/// Public because [`WorkbenchSession`](super::WorkbenchSession) holds one;
+/// its fields and vocabulary are the shell's own, and nothing below it reads
+/// them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProblemsView {
     /// The column the rows are ordered by. There is always one: the order

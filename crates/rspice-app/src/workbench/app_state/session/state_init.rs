@@ -177,7 +177,6 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
 
     let mut state = AppState {
         model,
-        problems_view: crate::workbench::app_state::problems_view::ProblemsView::default(),
         shell: Default::default(),
         platform: Box::default(),
         design: Box::default(),

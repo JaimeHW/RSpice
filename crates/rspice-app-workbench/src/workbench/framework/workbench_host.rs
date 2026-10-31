@@ -14,7 +14,6 @@ use crate::workbench::app_state::diagnostic_store::listing::ListingSource;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, PlatformState};
-use crate::workbench::state::problems_view::ProblemsView;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 
@@ -87,9 +86,9 @@ pub trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     fn show_signal(&mut self, run: usize, analysis: usize, waveform: usize);
 }
 
-/// The session the console's pages draw from: the model and the workbench
-/// session, the Problems page's own view, and the shell's answers for a log
-/// line's anchor and a finding's waiver.
+/// The session the console's pages draw from: the model, the workbench
+/// session with the Problems page's own view, and the shell's answers for a
+/// log line's anchor and a finding's waiver.
 pub trait ConsoleHost: ProblemsHost + ListingSource {
     /// The engineering model the log and the findings belong to.
     fn model(&self) -> &Model;
@@ -103,12 +102,6 @@ pub trait ConsoleHost: ProblemsHost + ListingSource {
 
     /// The workbench session, to change.
     fn workbench_mut(&mut self) -> &mut WorkbenchSession;
-
-    /// The Problems page's filters, columns and waiver draft.
-    fn problems_view(&self) -> &ProblemsView;
-
-    /// The Problems page's view, to change.
-    fn problems_view_mut(&mut self) -> &mut ProblemsView;
 
     /// Leave the console for whatever `anchor` names.
     fn jump_to_log_anchor(&mut self, anchor: LogAnchor);

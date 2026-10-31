@@ -25,7 +25,6 @@ use crate::ui::icons::Icon;
 use crate::ui::widgets::NotificationAction;
 use crate::workbench::app::ConfirmationResponse;
 use crate::workbench::app::dialogs::confirmation::ConfirmationHost;
-use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::chrome::title_bar::application_menus::{self, ApplicationMenu};
@@ -672,14 +671,6 @@ impl ConsoleHost for AppState {
 
     fn workbench_mut(&mut self) -> &mut WorkbenchSession {
         &mut self.workbench
-    }
-
-    fn problems_view(&self) -> &ProblemsView {
-        &self.problems_view
-    }
-
-    fn problems_view_mut(&mut self) -> &mut ProblemsView {
-        &mut self.problems_view
     }
 
     fn jump_to_log_anchor(&mut self, anchor: LogAnchor) {

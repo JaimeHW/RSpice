@@ -17,6 +17,7 @@ use super::console_views::{
     ConsoleView, InlineEdit, NotificationFilter, SpecialistToolBrowserState,
 };
 use super::navigator_tree::NavigatorTrees;
+use super::problems_view::ProblemsView;
 use super::retired_documents;
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::localization::{MessageCatalog, UiTextLocale};
@@ -386,6 +387,10 @@ pub struct WorkbenchSession {
     /// The reader's place on the Console page. Transient: a reading position
     /// over logs, not a layout preference.
     pub console_view: ConsoleView,
+    /// Where the reader is standing in the model's diagnostics: the Problems
+    /// grid's order, filters and groups. A reading position over the
+    /// evidence, never evidence itself, and never persisted.
+    pub problems_view: ProblemsView,
     /// Active and locally closed document presentations in each workspace.
     /// Stable object IDs ensure a reordered run history or analysis plan does
     /// not silently retarget a restored tab.
@@ -498,6 +503,7 @@ impl Default for WorkbenchSession {
             workspace_preset: WorkspacePreset::default(),
             console_page: ConsolePage::Console,
             console_view: ConsoleView::default(),
+            problems_view: ProblemsView::default(),
             documents: WorkspaceDocumentRegistry::default(),
             prompt: None,
             navigator_trees: NavigatorTrees::default(),

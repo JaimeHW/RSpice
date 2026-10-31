@@ -18,10 +18,12 @@ use crate::workbench::app_state::diagnostic_store::listing::{DiagnosticRow, RowS
 use crate::workbench::app_state::diagnostic_store::{
     DiagnosticInputs, DiagnosticLevel, DiagnosticRecord, DiagnosticRoute, DiagnosticSubject,
 };
-use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping, ProblemsView};
 use crate::workbench::docks::console::problems::arrange::{Arrangement, Line};
 use crate::workbench::docks::console::problems::*;
 use crate::workbench::docks::console::{CONSOLE_CELL_INSET, CONSOLE_ROW_MIN_HEIGHT};
+use rspice_app_workbench::workbench::state::problems_view::{
+    ProblemColumn, ProblemGrouping, ProblemsView,
+};
 use rspice_design::drc::{DrcLocation, DrcResult, DrcViolation, DrcViolationType};
 
 mod detail_region;
@@ -698,7 +700,7 @@ fn the_ordered_column_says_which_way_and_draws_its_mark() {
         "an unordered heading offers to order by itself",
     );
 
-    state.problems_view.sort = ProblemColumn::Code;
+    state.workbench.problems_view.sort = ProblemColumn::Code;
     let by_rule = render(&mut state, sized(egui::RawInput::default()));
     assert!(says(&by_rule, "Rule, sorted ascending"));
     assert!(says(&by_rule, "Sort by Severity"));
@@ -708,8 +710,8 @@ fn the_ordered_column_says_which_way_and_draws_its_mark() {
         "the mark moves with the order: one column carries it at a time",
     );
 
-    state.problems_view.sort = ProblemColumn::Severity;
-    state.problems_view.descending = true;
+    state.workbench.problems_view.sort = ProblemColumn::Severity;
+    state.workbench.problems_view.descending = true;
     let descending = render(&mut state, sized(egui::RawInput::default()));
     assert!(descending.nodes.iter().any(|node| node.role == Role::Button
         && node.says() == Some("Severity, sorted least severe first")),);
@@ -766,7 +768,7 @@ fn a_page_opens_with_the_worst_finding_first() {
         "the error at {error} must be listed above the warning at {warning}",
     );
 
-    state.problems_view.descending = true;
+    state.workbench.problems_view.descending = true;
     let (error, warning) = positions(&render(&mut state, sized(egui::RawInput::default())));
     assert!(warning < error, "reversing the order reverses the rows");
 }
@@ -842,7 +844,7 @@ fn findings_with_equal_keys_keep_their_reported_order_either_way() {
     publish(&mut state, records);
 
     let messages = |descending: bool| {
-        let mut view = state.problems_view.clone();
+        let mut view = state.workbench.problems_view.clone();
         view.sort = ProblemColumn::Code;
         view.descending = descending;
         let listed = listing(&state);
@@ -883,7 +885,7 @@ fn locations_order_by_line_number_not_by_spelling() {
         NetlistDiagnosticCollection::try_new(vec![tenth, ninth], "")
             .expect("the fixture collection is well formed"),
     );
-    state.problems_view.sort = ProblemColumn::Location;
+    state.workbench.problems_view.sort = ProblemColumn::Location;
 
     let render = render(&mut state, sized(egui::RawInput::default()));
     let ninth = render.text("on the ninth line").expect("listed").y;
@@ -901,7 +903,7 @@ fn a_severity_count_describes_what_its_toggle_would_list() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
 
-    let view = state.problems_view.clone();
+    let view = state.workbench.problems_view.clone();
     let listed = listing(&state);
     let arrangement = Arrangement::build(&listed, &view);
     assert_eq!(
@@ -915,8 +917,8 @@ fn a_severity_count_describes_what_its_toggle_would_list() {
 
     // Narrowed to one producer, the error count describes what the severity
     // toggle would list *there* — not the two errors the whole list holds.
-    state.problems_view.producer = Some("rspice.design.rules".to_owned());
-    let view = state.problems_view.clone();
+    state.workbench.problems_view.producer = Some("rspice.design.rules".to_owned());
+    let view = state.workbench.problems_view.clone();
     let listed = listing(&state);
     let arrangement = Arrangement::build(&listed, &view);
     assert_eq!(arrangement.tally.severity(DiagnosticLevel::Error), 1);
@@ -952,7 +954,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
     assert!(listed.exact("Waived 1").is_some(), "{:?}", listed.texts);
     assert!(listed.has("a waived finding"));
 
-    state.problems_view.waived = false;
+    state.workbench.problems_view.waived = false;
     let hidden = render(&mut state, sized(egui::RawInput::default()));
     assert!(
         hidden.exact("Waived 1").is_some(),
@@ -961,6 +963,7 @@ fn the_waiver_toggle_counts_what_it_would_list() {
     assert!(!hidden.has("a waived finding"));
 
     state
+        .workbench
         .problems_view
         .severities
         .toggle(DiagnosticLevel::Error);
@@ -1056,7 +1059,7 @@ fn a_note_and_a_hint_are_marked_like_every_other_severity() {
 #[test]
 fn the_text_filter_lists_only_what_it_matches() {
     let mut state = state_with_design_findings();
-    state.problems_view.text = "resistance".to_owned();
+    state.workbench.problems_view.text = "resistance".to_owned();
     let render = render(&mut state, sized(egui::RawInput::default()));
     assert!(render.has("R1 has no resistance"));
     assert!(
@@ -1076,7 +1079,7 @@ fn the_text_filter_lists_only_what_it_matches() {
 fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
-    state.problems_view.grouping = ProblemGrouping::Producer;
+    state.workbench.problems_view.grouping = ProblemGrouping::Producer;
     let header = "rspice.design.rules · 1 error · 1 advisory";
 
     let grouped = render(&mut state, sized(egui::RawInput::default()));
@@ -1092,7 +1095,10 @@ fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
     assert_eq!(node.toggled, None, "and not that it is a toggle pressed");
     assert!(grouped.has("R1 has no resistance"));
 
-    state.problems_view.collapse("rspice.design.rules", true);
+    state
+        .workbench
+        .problems_view
+        .collapse("rspice.design.rules", true);
     let collapsed = render(&mut state, sized(egui::RawInput::default()));
     let node = collapsed
         .node(header)
@@ -1110,11 +1116,14 @@ fn grouping_prints_a_header_that_carries_its_counts_and_collapses() {
 fn copying_what_is_listed_includes_collapsed_groups() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
-    state.problems_view.grouping = ProblemGrouping::Producer;
-    state.problems_view.collapse("rspice.design.rules", true);
+    state.workbench.problems_view.grouping = ProblemGrouping::Producer;
+    state
+        .workbench
+        .problems_view
+        .collapse("rspice.design.rules", true);
 
     let listed = listing(&state);
-    let arrangement = Arrangement::build(&listed, &state.problems_view);
+    let arrangement = Arrangement::build(&listed, &state.workbench.problems_view);
     assert_eq!(arrangement.listed, 3);
     let printed = (0..arrangement.lines())
         .filter(|line| matches!(arrangement.line(*line), Some(Line::Row(_))))
@@ -1572,7 +1581,7 @@ fn home_end_and_the_page_keys_move_through_the_list() {
 /// order they are printed.
 fn group_labels(state: &AppState) -> Vec<String> {
     let listed = listing(state);
-    let arrangement = Arrangement::build(&listed, &state.problems_view);
+    let arrangement = Arrangement::build(&listed, &state.workbench.problems_view);
     (0..arrangement.lines())
         .filter_map(|line| match arrangement.line(line) {
             Some(Line::Group(group)) => arrangement.group(group).map(|group| group.label.clone()),
@@ -1589,7 +1598,7 @@ fn group_labels(state: &AppState) -> Vec<String> {
 fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
-    state.problems_view.grouping = ProblemGrouping::Producer;
+    state.workbench.problems_view.grouping = ProblemGrouping::Producer;
     let label = "rspice.design.rules";
     let first_of_group = {
         let listed = listing(&state);
@@ -1613,7 +1622,7 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
 
     let _ = harness.frame(&mut state, clicked(header.center()));
     assert!(
-        state.problems_view.is_collapsed(label),
+        state.workbench.problems_view.is_collapsed(label),
         "the click closed it"
     );
     assert_eq!(
@@ -1621,12 +1630,18 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
         Some(grid::body_id()),
         "and left the keyboard in the table",
     );
-    assert_eq!(state.problems_view.current_group.as_deref(), Some(label));
+    assert_eq!(
+        state.workbench.problems_view.current_group.as_deref(),
+        Some(label)
+    );
     assert_eq!(state.model.diagnostics.current_finding(), None);
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
-    assert!(!state.problems_view.is_collapsed(label), "Right opens it");
+    assert!(
+        !state.workbench.problems_view.is_collapsed(label),
+        "Right opens it"
+    );
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowRight));
     assert_eq!(
@@ -1634,28 +1649,34 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
         Some(first_of_group),
         "Right on an open header goes to its first finding",
     );
-    assert_eq!(state.problems_view.current_group, None);
+    assert_eq!(state.workbench.problems_view.current_group, None);
 
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowLeft));
     assert_eq!(
-        state.problems_view.current_group.as_deref(),
+        state.workbench.problems_view.current_group.as_deref(),
         Some(label),
         "Left on a finding goes to its header",
     );
     assert_eq!(state.model.diagnostics.current_finding(), None);
-    assert!(!state.problems_view.is_collapsed(label));
+    assert!(!state.workbench.problems_view.is_collapsed(label));
     let _ = harness.frame(&mut state, keyed(egui::Key::ArrowLeft));
     assert!(
-        state.problems_view.is_collapsed(label),
+        state.workbench.problems_view.is_collapsed(label),
         "Left on an open header closes it",
     );
 
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Enter));
-    assert!(!state.problems_view.is_collapsed(label), "Enter opens it");
+    assert!(
+        !state.workbench.problems_view.is_collapsed(label),
+        "Enter opens it"
+    );
     harness.settle(&mut state);
     let _ = harness.frame(&mut state, keyed(egui::Key::Space));
-    assert!(state.problems_view.is_collapsed(label), "Space closes it");
+    assert!(
+        state.workbench.problems_view.is_collapsed(label),
+        "Space closes it"
+    );
     assert_eq!(harness.focused(), Some(grid::body_id()));
 }
 
@@ -1665,13 +1686,13 @@ fn a_group_closed_with_the_mouse_opens_again_from_the_keyboard() {
 fn with_every_group_closed_the_arrows_still_move() {
     let mut state = state_with_design_findings();
     netlist_finding_with_a_fix(&mut state);
-    state.problems_view.grouping = ProblemGrouping::Producer;
+    state.workbench.problems_view.grouping = ProblemGrouping::Producer;
     let labels = group_labels(&state);
     assert_eq!(labels.len(), 2, "precondition: two groups: {labels:?}");
     for label in &labels {
-        state.problems_view.collapse(label, true);
+        state.workbench.problems_view.collapse(label, true);
     }
-    let standing = |state: &AppState| state.problems_view.current_group.clone();
+    let standing = |state: &AppState| state.workbench.problems_view.current_group.clone();
 
     let harness = Harness::new();
     harness.settle(&mut state);
@@ -2157,11 +2178,11 @@ fn every_row_announces_as_an_option_of_the_list() {
 /// there chose to hide.
 #[test]
 fn closing_or_replacing_the_project_forgets_the_reading_position() {
-    use crate::workbench::app_state::problems_view::ProblemsView;
     use crate::workbench::workflows::project_workflow::create_new_project;
+    use rspice_app_workbench::workbench::state::problems_view::ProblemsView;
 
     fn read_narrowly(state: &mut AppState) {
-        let view = &mut state.problems_view;
+        let view = &mut state.workbench.problems_view;
         view.text = "ground".to_owned();
         view.producer = Some("rspice.design.rules".to_owned());
         view.waived = false;
@@ -2177,11 +2198,11 @@ fn closing_or_replacing_the_project_forgets_the_reading_position() {
     assert!(state.close_project_discard(
         crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination::EmptyWorkbench,
     ));
-    assert_eq!(state.problems_view, ProblemsView::default());
+    assert_eq!(state.workbench.problems_view, ProblemsView::default());
 
     read_narrowly(&mut state);
     create_new_project(&mut state);
-    assert_eq!(state.problems_view, ProblemsView::default());
+    assert_eq!(state.workbench.problems_view, ProblemsView::default());
 }
 
 /// The page is not a severity filter over the session log.
@@ -2282,13 +2303,13 @@ fn the_severity_column_is_measured_against_the_listed_cells() {
 
     let widest = |state: &AppState| {
         let listed = listing(state);
-        Arrangement::build(&listed, &state.problems_view)
+        Arrangement::build(&listed, &state.workbench.problems_view)
             .tally
             .widest[0]
     };
-    state.problems_view.waived = false;
+    state.workbench.problems_view.waived = false;
     assert_eq!(widest(&state), "Warning".chars().count());
-    state.problems_view.waived = true;
+    state.workbench.problems_view.waived = true;
     assert_eq!(widest(&state), "Waived Error".chars().count());
 }
 
@@ -2297,11 +2318,11 @@ fn the_severity_column_is_measured_against_the_listed_cells() {
 #[test]
 fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
     let mut state = state_with_findings(5);
-    state.problems_view.sort = ProblemColumn::Message;
+    state.workbench.problems_view.sort = ProblemColumn::Message;
     let ctx = egui::Context::default();
     let arranged = |state: &AppState| {
         let listed = listing(state);
-        arrange::arrange(&ctx, &listed, &state.problems_view, None).0
+        arrange::arrange(&ctx, &listed, &state.workbench.problems_view, None).0
     };
 
     let first = arranged(&state);
@@ -2310,13 +2331,13 @@ fn the_arrangement_is_rebuilt_only_when_what_it_was_built_from_changes() {
         "an unchanged frame reuses the arrangement",
     );
 
-    state.problems_view.explain = true;
+    state.workbench.problems_view.explain = true;
     assert!(
         Arc::ptr_eq(&first, &arranged(&state)),
         "the detail region's own state arranges nothing",
     );
 
-    state.problems_view.descending = true;
+    state.workbench.problems_view.descending = true;
     let reversed = arranged(&state);
     assert!(!Arc::ptr_eq(&first, &reversed), "a new order rebuilds it");
 
@@ -2347,7 +2368,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     let ctx = egui::Context::default();
     let arranged = |state: &AppState| {
         let listed = listing(state);
-        arrange::arrange(&ctx, &listed, &state.problems_view, None).0
+        arrange::arrange(&ctx, &listed, &state.workbench.problems_view, None).0
     };
     let republish = |state: &mut AppState, change: &dyn Fn(&mut DiagnosticRecord)| {
         let mut records: Vec<DiagnosticRecord> = state
@@ -2384,7 +2405,7 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
     let raised = arranged(&state);
     assert!(!Arc::ptr_eq(&waived, &raised), "a new severity rebuilds it");
 
-    state.problems_view.text = "finding".to_owned();
+    state.workbench.problems_view.text = "finding".to_owned();
     let filtered = arranged(&state);
     republish(&mut state, &|record| {
         record.message = "finding 00, restated".to_owned();
@@ -2394,8 +2415,8 @@ fn the_arrangement_is_rebuilt_when_a_row_changes_in_place() {
         "under a text filter, a new message rebuilds it",
     );
 
-    state.problems_view.text.clear();
-    state.problems_view.sort = ProblemColumn::Subject;
+    state.workbench.problems_view.text.clear();
+    state.workbench.problems_view.sort = ProblemColumn::Subject;
     let by_subject = arranged(&state);
     republish(&mut state, &|record| {
         record.subject.object = "Node 'n9'".to_owned();

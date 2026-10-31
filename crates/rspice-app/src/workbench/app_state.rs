@@ -24,7 +24,6 @@ pub(in crate::workbench) mod interaction_state;
 mod modal_gate_tests;
 pub(crate) use rspice_app_state::workbench::app_state::model;
 mod model_access;
-pub(crate) use rspice_app_workbench::workbench::state::problems_view;
 mod run_access;
 pub(crate) use rspice_app_runs::workbench::app_state::run_preflight;
 mod schematic_drag;
@@ -86,10 +85,6 @@ pub struct AppState {
     /// libraries, and the evidence two or more features read. Inline, so the
     /// state moves at the size it had before these fields were gathered.
     pub(crate) model: Model,
-    /// Where the reader is standing in the model's diagnostics: the Problems
-    /// grid's order, filters and groups. A reading position over the evidence, never
-    /// evidence itself, and never persisted.
-    pub(crate) problems_view: problems_view::ProblemsView,
     /// The shell's own dialogs. Inline: a few flags and a filter.
     pub(crate) shell: ShellState,
     /// The platform services' runtime state.
@@ -694,7 +689,7 @@ impl AppState {
     pub(crate) fn show_problem_findings(&mut self) {
         self.workbench.console_visible = true;
         self.workbench.console_page = crate::workbench::state::ConsolePage::Problems;
-        self.problems_view.clear_filters();
+        self.workbench.problems_view.clear_filters();
     }
 
     /// Raise every reported notice as a toast, in the order reported.

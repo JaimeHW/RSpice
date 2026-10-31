@@ -185,7 +185,7 @@ impl BodyMemory {
 /// that changes what refuses a run, so the caller drops whatever run was
 /// prepared or checked under the waivers as they stood.
 pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
-    let mut view = state.problems_view().clone();
+    let mut view = state.workbench().problems_view.clone();
     let mut selection = Selection {
         listed: None,
         finding: state.model().diagnostics.current_finding(),
@@ -388,7 +388,7 @@ pub fn problems(ui: &mut Ui, state: &mut impl ConsoleHost) -> bool {
     {
         view.waiving = None;
     }
-    *state.problems_view_mut() = view;
+    state.workbench_mut().problems_view = view;
     state
         .model_mut()
         .diagnostics
@@ -422,7 +422,7 @@ fn apply_waiver_edit(state: &mut impl ConsoleHost, edit: WaiverEdit) -> bool {
     let outcome = match edit {
         WaiverEdit::Record { target, reason } => state
             .waive_finding(&target, &reason)
-            .map(|()| state.problems_view_mut().waiving = None),
+            .map(|()| state.workbench_mut().problems_view.waiving = None),
         WaiverEdit::Remove(target) => state.remove_finding_waiver(&target),
     };
     outcome

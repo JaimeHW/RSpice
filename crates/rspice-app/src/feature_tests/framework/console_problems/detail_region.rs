@@ -20,7 +20,7 @@ fn explain_is_offered_only_where_the_rule_has_words() {
         "a rule finding offers its rule: {:?}",
         unopened.texts,
     );
-    state.problems_view.explain = true;
+    state.workbench.problems_view.explain = true;
     let explained = render(&mut state, sized(egui::RawInput::default()));
     assert!(
         explained.has(

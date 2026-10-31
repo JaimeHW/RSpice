@@ -71,8 +71,8 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     app.state.model.schematic = crate::state::SchematicState::default();
     // A filter left from earlier reading, narrowing the page to nothing the
     // pass will file.
-    app.state.problems_view.text = "no blocker says this".to_owned();
-    app.state.problems_view.producer = Some("rspice.netlist.parser".to_owned());
+    app.state.workbench.problems_view.text = "no blocker says this".to_owned();
+    app.state.workbench.problems_view.producer = Some("rspice.netlist.parser".to_owned());
 
     assert!(Command::RunSimulation.is_enabled(&app));
     Command::RunSimulation.execute(&mut app);
@@ -122,7 +122,7 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     );
     assert!(app.state.workbench.console_visible);
     assert!(
-        !app.state.problems_view.is_filtered(),
+        !app.state.workbench.problems_view.is_filtered(),
         "a filter from earlier reading must not hide the blockers"
     );
     let blockers: Vec<String> = report

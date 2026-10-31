@@ -70,7 +70,7 @@ impl AppState {
         // The reading position goes with the findings it was read over: a
         // filter carried into another design hides conditions nobody there
         // chose to hide.
-        self.problems_view = Default::default();
+        self.workbench.problems_view = Default::default();
         self.results.analysis.clear_specialized_viewer_data();
     }
 

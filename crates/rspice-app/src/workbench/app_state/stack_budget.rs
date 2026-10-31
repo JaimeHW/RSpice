@@ -70,7 +70,6 @@ fn field_sizes() -> Vec<(&'static str, usize)> {
     vec![
         ("model", size_of::<a::Model>()),
         ("shell", held(|state| &state.shell)),
-        ("problems_view", held(|state| &state.problems_view)),
         (
             "shortcut_resolver",
             size_of::<a::session::shortcuts::ShortcutResolverState>(),

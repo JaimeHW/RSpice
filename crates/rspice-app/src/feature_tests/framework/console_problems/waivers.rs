@@ -100,7 +100,10 @@ fn a_waiver_is_recorded_with_its_reason_and_removed_from_the_detail_region() {
         .expect("Enter records the waiver");
     assert_eq!(waiver.reason, REASON);
     assert_eq!(state.model.schematic.document().waivers.entries().len(), 1);
-    assert!(state.problems_view.waiving.is_none(), "the draft is closed");
+    assert!(
+        state.workbench.problems_view.waiving.is_none(),
+        "the draft is closed"
+    );
 
     let stated = harness.frame(&mut state, sized(egui::RawInput::default()));
     let line = format!("Waived \u{00b7} {}", detail::waiver_text(waiver));
@@ -127,17 +130,23 @@ fn a_reason_is_abandoned_by_escape_and_by_standing_elsewhere() {
     let _ = harness.frame(&mut state, typed(REASON));
     let _ = harness.frame(&mut state, keyed(egui::Key::Escape));
     harness.settle(&mut state);
-    assert!(state.problems_view.waiving.is_none(), "Escape abandons it");
+    assert!(
+        state.workbench.problems_view.waiving.is_none(),
+        "Escape abandons it"
+    );
     assert!(state.model.schematic.document().waivers.is_empty());
 
     let render = harness.frame(&mut state, sized(egui::RawInput::default()));
     let _ = harness.frame(&mut state, click_on(&render, "Waive\u{2026}"));
-    assert!(state.problems_view.waiving.is_some(), "precondition: asked");
+    assert!(
+        state.workbench.problems_view.waiving.is_some(),
+        "precondition: asked"
+    );
     let missing = reported(&state)[0];
     state.model.diagnostics.set_current_finding(Some(missing));
     harness.settle(&mut state);
     assert!(
-        state.problems_view.waiving.is_none(),
+        state.workbench.problems_view.waiving.is_none(),
         "the reason goes with the finding it was written for",
     );
     assert!(state.model.schematic.document().waivers.is_empty());
@@ -178,6 +187,7 @@ fn the_row_menu_waives_the_row_it_was_opened_on() {
     assert_eq!(state.model.diagnostics.current_finding(), Some(wire));
     assert_eq!(
         state
+            .workbench
             .problems_view
             .waiving
             .as_ref()
@@ -227,7 +237,7 @@ fn a_waiver_that_cannot_be_recorded_here_is_not_offered() {
     let _ = harness.frame(&mut state, click_on(&render, "Waive\u{2026}"));
     harness.settle(&mut state);
     assert!(
-        state.problems_view.waiving.is_none(),
+        state.workbench.problems_view.waiving.is_none(),
         "no reason is asked for a waiver that cannot be recorded"
     );
 }
@@ -252,7 +262,7 @@ fn a_copied_row_carries_its_waiver() {
         copy_of(&listed.row(1).expect("listed")).ends_with("\tan open error\t"),
         "an unwaived row leaves the column empty",
     );
-    let arrangement = Arrangement::build(&listed, &state.problems_view);
+    let arrangement = Arrangement::build(&listed, &state.workbench.problems_view);
     let copied = copy_of_listed(&listed, &arrangement);
     assert_eq!(
         copied.lines().next(),
