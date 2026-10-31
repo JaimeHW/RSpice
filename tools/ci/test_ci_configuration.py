@@ -462,6 +462,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-app-settings",
             "rspice-app-results",
             "rspice-app-hardcopy",
+            "rspice-app-cloud",
             "rspice-core",
             "rspice-core-base",
             "rspice-core-netlist",
@@ -626,7 +627,7 @@ class CiConfigurationTests(unittest.TestCase):
         # The engine's lane also runs the crates of its family below it.
         for packages, job in (
             ("-p rspice-core -p rspice-core-base -p rspice-core-netlist -p rspice-core-devices", "test-linux"),
-            ("-p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy", "test-ui"),
+            ("-p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy -p rspice-app-cloud", "test-ui"),
         ):
             body = re.split(r"\n  [a-z][a-z0-9-]*:", workflow.split(f"  {job}:\n", 1)[1], maxsplit=1)[0]
             # A complete package selection includes lib, bin, integration and doc
@@ -652,6 +653,7 @@ class CiConfigurationTests(unittest.TestCase):
             "rspice-app-settings",
             "rspice-app-results",
             "rspice-app-hardcopy",
+            "rspice-app-cloud",
             "rspice-conformance",
         }
         generated = {name for name in workspace_member_names()
@@ -1928,12 +1930,12 @@ class CiConfigurationTests(unittest.TestCase):
 
         self.assertIn("runs-on: macos-latest", workflow)
         self.assertIn(
-            "cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy",
+            "cargo check --locked -p rspice-cli -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy -p rspice-app-cloud",
             workflow,
         )
         self.assertIn("cargo test --locked -p rspice-cli --tests", workflow)
         self.assertIn(
-            "cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy --lib",
+            "cargo test --locked -p rspice-app -p rspice-app-state -p rspice-app-services -p rspice-app-runs -p rspice-app-workbench -p rspice-app-sheets -p rspice-app-settings -p rspice-app-results -p rspice-app-hardcopy -p rspice-app-cloud --lib",
             workflow,
         )
         # The desktop claim includes reclaiming a killed run's staging files,
@@ -2099,6 +2101,7 @@ class CiConfigurationTests(unittest.TestCase):
                 "rspice-app-settings",
                 "rspice-app-results",
                 "rspice-app-hardcopy",
+                "rspice-app-cloud",
             )
             for path in (ROOT / "crates" / crate / "src").rglob("*.rs")
         ):

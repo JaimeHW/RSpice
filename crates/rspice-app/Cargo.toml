@@ -40,6 +40,7 @@ rspice-app-services.workspace = true
 rspice-app-runs.workspace = true
 rspice-app-workbench.workspace = true
 rspice-app-hardcopy.workspace = true
+rspice-app-cloud.workspace = true
 rspice-app-results.workspace = true
 rspice-app-settings.workspace = true
 rspice-app-sheets.workspace = true
@@ -107,6 +108,7 @@ rspice-app-services = { workspace = true, features = ["test-support"] }
 rspice-app-runs = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-app-hardcopy = { workspace = true, features = ["test-support"] }
+rspice-app-cloud = { workspace = true, features = ["test-support"] }
 rspice-app-results = { workspace = true, features = ["test-support"] }
 rspice-app-settings = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
@@ -123,13 +125,12 @@ zip.workspace = true
 rustyhdf5 = { version = "1.93", default-features = false }
 parquet = { version = "60", default-features = false, features = ["arrow"] }
 wat = "1"
+# The notification centre's tests pin the local zone with `time`, and the
+# drawing-sheet preset tests sign a package with a fixed dalek key.
+time = { workspace = true }
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
-# Keypair generation for license issuance in the `services::license` tests.
-# The matching `rand_core` feature on ed25519-dalek is dev-only for the same
-# reason: `cargo test` unions it in, `cargo build` never sees it.
-ed25519-dalek = { version = "2", features = ["rand_core"] }
-rand = "0.8"
 lopdf = { version = "0.45", default-features = false }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
@@ -139,11 +140,6 @@ rspice-output = { workspace = true, features = ["durable-file"] }
 # not currently publish its AccessKit tree to the DOM.
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu", "persistence", "accesskit"] }
 rspice-automation-runtime = { path = "../rspice-automation-runtime", version = "0.1.0" }
-
-# License verification is pure Rust on every target. Native clients retain
-# dalek's precomputed tables for maximum throughput; key generation remains
-# test-only through the dev-dependency above.
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
 
 # No RSpice source names `winit`; this edge exists only to turn on winit's
 # default features, which `eframe` above cannot reach: it is taken with
@@ -157,23 +153,6 @@ ed25519-dalek = { version = "2", default-features = false, features = ["std", "f
 winit = "0.30"
 
 env_logger = "0.11"
-tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
-# Live-session relay socket (ADR 0082). rustls + webpki roots keep the
-# banned native-tls/openssl stacks out and share reqwest's TLS provider;
-# futures-util supplies the Stream/Sink adapters the socket pump drives.
-futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
-tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
-
-# Cloud account boundary: the typed RSpice Cloud client, the OIDC token
-# transport the client crate deliberately does not own, and RFC 3339 stamps
-# for session freshness. `reqwest` is the native identity transport only — the
-# browser fetches through web-sys, because reqwest's wasm backend cannot
-# express the `redirect: error` this flow depends on.
-getrandom = { workspace = true }
-reqwest = { workspace = true }
-rspice-cloud-client = { workspace = true }
-time = { workspace = true }
-url = { workspace = true }
 
 # The local zone's offset, for times written on the reader's own clock.
 # `time` answers that only in a single-threaded process on Unix, and this one
@@ -223,49 +202,23 @@ winresource = "0.1"
 eframe = { version = "0.35.0", default-features = false, features = ["wgpu_no_default_features", "persistence", "web_screen_reader"] }
 wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
 
-# Dalek's `fast` feature changes only verification throughput: it selects a
-# precomputed basepoint table, not a different Ed25519 algorithm or policy.
-# Browser license checks are rare, so retain exact verification semantics and
-# zeroization without carrying that table in either browser image.
-ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
-
 # No rayon on wasm; the "wasm" feature states the browser build. The
 # interactive image retains portable Verilog-A artifacts and validation, while
 # secondary-module emission and verification are owned exclusively by the
 # `rspice-worker` package. Keeping that ownership explicit prevents the
 # secondary-module emitter and verifier from being duplicated in both images.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
-tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
 wasm-bindgen = "0.2"
 serde-wasm-bindgen = "0.6"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
-# The Request/Response/AbortController/ReadableStream group backs the browser
-# identity Fetch in `services::cloud_account::oidc`, WebSocket/CloseEvent the
-# live-session relay, and Crypto the PKCE verifier's entropy. The
-# Notification group is the run alert a hidden tab raises.
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "Notification", "NotificationOptions", "NotificationPermission", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+# The Notification group is the run alert a hidden tab raises.
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "Notification", "NotificationOptions", "NotificationPermission"] }
 js-sys = "0.3"
 
-# Cloud account boundary, browser half. The typed client, `url` for callback
-# and relay routes, RFC 3339 stamps for session freshness, and the three
-# browser-only primitives the Fetch and socket pumps drive: timeouts, the
-# `select!`/`StreamExt` adapters, and the response-body stream.
-#
-# rspice-cloud-client brings reqwest with it, which the identity flow does
-# not use on this target (see `oidc::IdentityHttpClient`) but the client's
-# own transport does. On wasm32 reqwest compiles down to a wrapper over the
-# same Fetch API rather than the native hyper/TLS stack, so the browser image
-# carries the binding layer, not a second HTTP implementation.
-futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
-gloo-timers = { workspace = true, features = ["futures"] }
-rspice-cloud-client = { workspace = true }
 # The pack trust crate is portable and reaches the same verdict in the browser.
 rspice-pack = { workspace = true }
-time = { workspace = true }
-url = { workspace = true }
-wasm-streams = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.76"

@@ -236,6 +236,28 @@ class DependencyPolicyTests(unittest.TestCase):
             ],
         )
 
+    def test_only_the_cloud_feature_names_the_network_stack(self) -> None:
+        self.assertEqual(
+            violations({}, {}, named={
+                "rspice-app-cloud": {
+                    "reqwest", "tokio-tungstenite", "rspice-cloud-client", "futures-util",
+                },
+                "rspice-app": {"rspice-app-cloud", "egui"},
+            }),
+            [],
+        )
+        self.assertEqual(
+            violations({}, {}, named={
+                "rspice-app": {"rspice-app-cloud", "reqwest"},
+                "rspice-app-services": {"futures-util", "tokio-tungstenite"},
+            }),
+            [
+                "rspice-app names network package reqwest; only rspice-app-cloud may",
+                "rspice-app-services names network package futures-util; only rspice-app-cloud may",
+                "rspice-app-services names network package tokio-tungstenite; only rspice-app-cloud may",
+            ],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

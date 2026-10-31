@@ -34,8 +34,8 @@ pub(crate) use rspice_app_hardcopy::workbench::app::dialogs::hardcopy;
 pub(in crate::workbench) mod help;
 pub(in crate::workbench) mod hierarchy;
 pub(in crate::workbench) mod library;
-pub(crate) mod license;
-pub(in crate::workbench) mod live_session;
+#[cfg(test)]
+pub(crate) use rspice_app_cloud::workbench::app::dialogs::license;
 pub(in crate::workbench) mod object_properties;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::operation_primitives;
 pub(in crate::workbench) mod pdk_settings;
@@ -47,7 +47,8 @@ pub(crate) use rspice_app_settings::workbench::app::dialogs::preferences;
 pub(in crate::workbench) mod project;
 pub(in crate::workbench) mod project_revision_history;
 pub(in crate::workbench) mod property_dialog;
-pub(crate) mod publish_web;
+#[cfg(test)]
+pub(crate) use rspice_app_cloud::workbench::app::dialogs::publish_web;
 pub(in crate::workbench) mod replace_instance;
 pub(in crate::workbench) use rspice_app_workbench::workbench::app::dialogs::review_primitives;
 pub(in crate::workbench) mod rule_setup;
@@ -59,7 +60,6 @@ pub(in crate::workbench) mod source_language_tools;
 pub(in crate::workbench) mod state;
 pub(in crate::workbench) mod stimulus_link;
 pub(in crate::workbench) mod symbol_definition;
-pub(in crate::workbench) mod unpublish_web;
 pub(in crate::workbench) mod veriloga_build_settings;
 pub(in crate::workbench) mod visibility_options;
 pub(crate) use rspice_app_workbench::workbench::app::dialogs::window_session;

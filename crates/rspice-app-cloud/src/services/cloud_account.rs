@@ -25,7 +25,7 @@ mod contract_mapping;
 mod executor;
 #[cfg(not(target_arch = "wasm32"))]
 mod live_relay;
-pub(crate) mod model_hub_transport;
+pub mod model_hub_transport;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_login;
 mod oidc;
@@ -727,7 +727,7 @@ impl CloudAccountService {
 
     /// A service that never operates a session, so test instances start no
     /// thread and touch no network.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn unconfigured() -> Self {
         Self {
             availability: CloudAccountAvailability::UnconfiguredBuild,
@@ -746,7 +746,7 @@ impl CloudAccountService {
 
     /// An inert service that reports `snapshot`, so a surface can be drawn in
     /// a session state no test can reach without a server.
-    #[cfg(test)]
+    #[cfg(any(test, feature = "test-support"))]
     pub fn with_snapshot(
         availability: CloudAccountAvailability,
         snapshot: CloudSessionSnapshot,

@@ -76,7 +76,7 @@ const DENYLIST: &[u64] = &[];
 /// A well-formed sample key for tests, genuinely signed by the development
 /// key (id 0x01), so it exercises the full verification path. No build of
 /// the product carries it.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub const SAMPLE_KEY: &str = "RSPICE-K1.040MW2YJEZ0NGEMZ040011TG000F6M80003G0000047MMRB9DNJJ0NV8D5T6CTB5DHJ0.12FX61MG7FWYV6CJSBQFTGHG954N0K1FE2EQ93FG33HM6R9CPEF35VT55XFX6VYZ2SJ3WW2K34P97SRS8QPPCHM474C0M3DCNW6VW30";
 
 /// Feature bitfield labels, LSB first (spec §payload).

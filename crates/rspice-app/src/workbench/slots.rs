@@ -8,7 +8,7 @@
 //! field, by the session wire. Each is `Default + Clone`, because a project
 //! transaction builds its result in a clone of the whole state.
 
-mod cloud;
+use rspice_app_cloud::workbench::slots::cloud;
 mod code;
 mod design;
 use rspice_app_hardcopy::workbench::slots::hardcopy;

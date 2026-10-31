@@ -31,7 +31,8 @@
 //!
 //! Its interior layering is ordered and ratcheted by
 //! `tests/module_layering.rs`, not by this file.
-pub(crate) mod account_organization;
+#[cfg(test)]
+pub(crate) use rspice_app_cloud::workbench::account_organization;
 pub(crate) mod app;
 pub(crate) mod app_state;
 pub(crate) mod browser {
@@ -58,9 +59,8 @@ pub(crate) mod browser {
     pub(crate) use rspice_app_workbench::workbench::browser::navigation;
 }
 pub(crate) mod chrome {
-    pub use rspice_app_workbench::workbench::chrome::*;
-    pub(in crate::workbench) mod presence;
     pub(crate) use rspice_app_sheets::workbench::chrome::sheet_strip;
+    pub use rspice_app_workbench::workbench::chrome::*;
     pub(crate) mod activity_rail {
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::activity_rail::results;
         pub use rspice_app_workbench::workbench::chrome::activity_rail::*;
@@ -97,7 +97,7 @@ pub(crate) mod chrome {
         pub(crate) mod simulate;
     }
 }
-pub(crate) mod cloud;
+pub(crate) use rspice_app_cloud::workbench::cloud;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod diagnostic_routes;
@@ -202,7 +202,7 @@ pub(crate) mod lifecycle {
     pub(crate) mod session;
     pub(crate) use rspice_app_workbench::workbench::lifecycle::window_session;
 }
-pub(crate) mod live_session;
+pub(crate) use rspice_app_cloud::workbench::live_session;
 pub(crate) use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
@@ -246,7 +246,6 @@ pub(crate) mod surfaces {
     pub(in crate::workbench) use simulate::show_workflow_dialogs as show_simulation_workflow_dialogs;
 }
 pub(crate) mod tools;
-pub(crate) mod user_identity;
 pub(crate) mod workflows;
 
 pub(crate) use cross_probe::synchronize_schematic_cross_probe;

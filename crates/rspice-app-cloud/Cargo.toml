@@ -1,0 +1,122 @@
+[package]
+name = "rspice-app-cloud"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's cloud feature: the RSpice Cloud account and licence, web publication and the live session"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[lib]
+doctest = false
+
+[features]
+# Opens the feature's test-only seams to the application's own tests.
+test-support = []
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-runs.workspace = true
+rspice-app-workbench.workspace = true
+rspice-publication-contract.workspace = true
+rspice-simulation-contract.workspace = true
+egui = { version = "0.35.0", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+sha2 = "0.10"
+base64 = "0.23"
+log = "0.4"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+dirs = "7.0"
+
+[dev-dependencies]
+rspice-app-state = { workspace = true, features = ["test-support"] }
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
+rspice-schematic-editor.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# Keypair generation for license issuance in the `services::license` tests.
+# The matching `rand_core` feature on ed25519-dalek is dev-only for the same
+# reason: `cargo test` unions it in, `cargo build` never sees it.
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# License verification is pure Rust on every target. Native clients retain
+# dalek's precomputed tables for maximum throughput; key generation remains
+# test-only through the dev-dependency above.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "fast", "zeroize"] }
+
+tokio = { version = "1", features = ["sync", "macros", "time", "rt-multi-thread"] }
+# Live-session relay socket (ADR 0082). rustls + webpki roots keep the
+# banned native-tls/openssl stacks out and share reqwest's TLS provider;
+# futures-util supplies the Stream/Sink adapters the socket pump drives.
+futures-util = { version = "0.3", default-features = false, features = ["std", "sink"] }
+tokio-tungstenite = { version = "0.30.0", features = ["rustls-tls-webpki-roots"] }
+
+# Cloud account boundary: the typed RSpice Cloud client, the OIDC token
+# transport the client crate deliberately does not own, and RFC 3339 stamps
+# for session freshness. `reqwest` is the native identity transport only — the
+# browser fetches through web-sys, because reqwest's wasm backend cannot
+# express the `redirect: error` this flow depends on.
+getrandom = { workspace = true }
+reqwest = { workspace = true }
+rspice-cloud-client = { workspace = true }
+time = { workspace = true }
+url = { workspace = true }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(windows)'.dependencies]
+# The stored cloud session is sealed to the signed-in Windows user (DPAPI).
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_Security_Cryptography",
+] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+# Dalek's `fast` feature changes only verification throughput: it selects a
+# precomputed basepoint table, not a different Ed25519 algorithm or policy.
+# Browser license checks are rare, so retain exact verification semantics and
+# zeroization without carrying that table in either browser image.
+ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+tokio = { version = "1", features = ["sync", "macros", "rt", "time"] }
+wasm-bindgen = "0.2"
+# uuid needs an explicit browser entropy source on wasm32-unknown-unknown
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+wasm-bindgen-futures = "0.4"
+# The Request/Response/AbortController/ReadableStream group backs the browser
+# identity Fetch in `services::cloud_account::oidc`, WebSocket/CloseEvent the
+# live-session relay, Crypto the PKCE verifier's entropy, and Storage the
+# browser session's tab-scoped store.
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "Document", "Element", "Event", "EventTarget", "MessageEvent", "Storage", "Url", "console", "AbortController", "AbortSignal", "BinaryType", "CloseEvent", "Crypto", "Headers", "ReadableStream", "ReferrerPolicy", "Request", "RequestCache", "RequestCredentials", "RequestInit", "RequestMode", "RequestRedirect", "Response", "WebSocket"] }
+js-sys = "0.3"
+
+# Cloud account boundary, browser half. The typed client, `url` for callback
+# and relay routes, RFC 3339 stamps for session freshness, and the three
+# browser-only primitives the Fetch and socket pumps drive: timeouts, the
+# `select!`/`StreamExt` adapters, and the response-body stream.
+#
+# rspice-cloud-client brings reqwest with it, which the identity flow does
+# not use on this target (see `oidc::IdentityHttpClient`) but the client's
+# own transport does. On wasm32 reqwest compiles down to a wrapper over the
+# same Fetch API rather than the native hyper/TLS stack, so the browser image
+# carries the binding layer, not a second HTTP implementation.
+futures-util = { version = "0.3", default-features = false, features = ["std", "async-await"] }
+gloo-timers = { workspace = true, features = ["futures"] }
+rspice-cloud-client = { workspace = true }
+time = { workspace = true }
+url = { workspace = true }
+wasm-streams = { workspace = true }
+
+[lints]
+workspace = true

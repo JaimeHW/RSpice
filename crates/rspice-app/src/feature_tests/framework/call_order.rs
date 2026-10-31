@@ -11,7 +11,7 @@
 // Refactor scaffolding: deleted when the split completes.
 
 const APP: &str = include_str!("../../workbench/app.rs");
-const CLOUD: &str = include_str!("../../workbench/cloud.rs");
+const CLOUD: &str = include_str!("../../../../rspice-app-cloud/src/workbench/cloud.rs");
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");

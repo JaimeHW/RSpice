@@ -7,7 +7,7 @@
 //! application holds beside its state and lends with the context. Publish to
 //! web reviews what it would publish through the hardcopy feature's port.
 
-pub(crate) mod commands;
+pub mod commands;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::cloud_account::{

@@ -61,10 +61,10 @@ const LAYERS: &[(&str, u32)] = &[
     // `rspice-app-services`, and the run tier (the controller, its prepared
     // runs, the run preflight and the runs' slot) in `rspice-app-runs`, below
     // every module here; each may reference them. The workbench framework
-    // compiles as `rspice-app-workbench`, and the sheets, settings, results and
-    // hardcopy features as `rspice-app-sheets`, `rspice-app-settings`,
-    // `rspice-app-results` and `rspice-app-hardcopy`, inside `workbench`, where
-    // the interior order below ranks them.
+    // compiles as `rspice-app-workbench`, and the sheets, settings, results,
+    // hardcopy and cloud features as `rspice-app-sheets`, `rspice-app-settings`,
+    // `rspice-app-results`, `rspice-app-hardcopy` and `rspice-app-cloud`, inside
+    // `workbench`, where the interior order below ranks them.
     //
     // Locating the production half of a source file that inspects itself.
     // It references nothing, and `automation_workflow`, `simulation` and
@@ -349,9 +349,10 @@ fn rust_sources(root: &Path) -> Vec<PathBuf> {
 }
 
 /// The application crates every whole-file scan must find: this crate and the
-/// eight split out of it so far. Discovery may find more, never fewer.
-const KNOWN_APP_CRATES: [&str; 9] = [
+/// nine split out of it so far. Discovery may find more, never fewer.
+const KNOWN_APP_CRATES: [&str; 10] = [
     "rspice-app",
+    "rspice-app-cloud",
     "rspice-app-hardcopy",
     "rspice-app-results",
     "rspice-app-runs",
@@ -1017,11 +1018,12 @@ fn workbench_dir() -> PathBuf {
 }
 
 /// The workbench's framework modules compile as `rspice-app-workbench`, and the
-/// sheets, settings, results and hardcopy features as `rspice-app-sheets`,
-/// `rspice-app-settings`, `rspice-app-results` and `rspice-app-hardcopy`, at
-/// the paths they had here, and keep their rank in the same order: each crate's
-/// `src/workbench` is scanned beside this crate's.
-fn workbench_roots() -> [PathBuf; 6] {
+/// sheets, settings, results, hardcopy and cloud features as
+/// `rspice-app-sheets`, `rspice-app-settings`, `rspice-app-results`,
+/// `rspice-app-hardcopy` and `rspice-app-cloud`, at the paths they had here,
+/// and keep their rank in the same order: each crate's `src/workbench` is
+/// scanned beside this crate's.
+fn workbench_roots() -> [PathBuf; 7] {
     [
         workbench_dir(),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-workbench/src/workbench"),
@@ -1029,6 +1031,7 @@ fn workbench_roots() -> [PathBuf; 6] {
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-settings/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench"),
         Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-hardcopy/src/workbench"),
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench"),
     ]
 }
 
@@ -1595,7 +1598,10 @@ fn source_files_have_no_byte_order_mark() {
 ///
 /// 12 -> 11: the shortcut platform's allow moves with the workbench framework
 /// to `rspice-app-workbench`, whose own guard counts it.
-const MAX_LINT_SUPPRESSIONS: usize = 9;
+///
+/// 9 -> 6: the cloud feature's suppressions move with it to
+/// `rspice-app-cloud`, whose own guard counts them.
+const MAX_LINT_SUPPRESSIONS: usize = 6;
 
 /// The crate does not accumulate lint suppressions.
 #[test]
@@ -2035,6 +2041,7 @@ const PAINTED_UI_CRATES: &[&str] = &[
     "rspice-app-settings/src",
     "rspice-app-results/src",
     "rspice-app-hardcopy/src",
+    "rspice-app-cloud/src",
     "rspice-ui-kit/src",
     "rspice-results-ui/src",
     "rspice-schematic-editor/src",

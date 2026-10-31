@@ -123,13 +123,10 @@ pub(crate) mod services {
     //! Backend services for the RSpice UI application.
     //! Contains specialized processing and analysis utilities.
 
-    pub(crate) mod cloud_account;
-    #[cfg(windows)]
-    pub(crate) mod dpapi;
+    pub(crate) use rspice_app_cloud::services::cloud_account;
     #[cfg(test)]
     mod drc_tests;
-    pub(crate) mod license;
-    pub(crate) use rspice_app_services::services::live_protocol;
+    pub(crate) use rspice_app_cloud::services::license;
     pub(crate) use rspice_app_services::services::model_hub;
     pub(crate) mod model_qualification;
     pub(crate) use rspice_app_services::services::recent_files;

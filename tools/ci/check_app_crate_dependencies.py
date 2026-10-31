@@ -118,6 +118,13 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-results", "rspice-hardcopy-contract", "rspice-hardcopy",
         "rspice-publication-contract",
     },
+    # The cloud feature: the persisted model, the platform services, the run
+    # tier whose runs a live session reports, the workbench framework it
+    # registers with, and the run-set contract its publication sizes come from.
+    "rspice-app-cloud": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-simulation-contract",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -127,7 +134,7 @@ ALLOWED: dict[str, set[str]] = {
 HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
-    "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy",
+    "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
 }
 # The application's features, each a crate of its own once it is extracted. A
 # feature reaches no other feature, and nothing above the workbench framework.
@@ -143,6 +150,11 @@ ENGINE_PACKAGES = {
     "rspice-veriloga-runtime", "rspice-veriloga-models",
 }
 INCLUDE_DEV = {"rspice-worker", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui"}
+# The network stack: the HTTP and WebSocket clients, the typed RSpice Cloud
+# client and the stream adapters its pumps drive. Of the application's crates,
+# only the cloud feature names it; the rest reach the network through it.
+NETWORK_PACKAGES = {"reqwest", "tokio-tungstenite", "rspice-cloud-client", "futures-util"}
+NETWORK_OWNER = "rspice-app-cloud"
 PACKAGE_LINE = re.compile(r"^([A-Za-z0-9_-]+) v\d")
 
 
@@ -152,6 +164,7 @@ def violations(
     native_bundle_formats: set[str] | None = None,
     table_schema_formats: set[str] | None = None,
     normal_direct: dict[str, set[str]] | None = None,
+    named: dict[str, set[str]] | None = None,
 ) -> list[str]:
     """Validate the package graph; absent planned crates need no placeholder."""
     issues = []
@@ -227,6 +240,11 @@ def violations(
         for dep in sorted(dependencies or set()):
             if dep in ENGINE_PACKAGES or dep.startswith("rspice-veriloga-model-"):
                 issues.append(f"rspice-formats {label} reaches simulator package {dep}")
+    for name, deps in sorted((named or {}).items()):
+        if name == NETWORK_OWNER:
+            continue
+        for dep in sorted(deps & NETWORK_PACKAGES):
+            issues.append(f"{name} names network package {dep}; only {NETWORK_OWNER} may")
     return issues
 
 
@@ -239,6 +257,12 @@ def main() -> int:
     direct = {}
     normal_direct = {}
     closures = {}
+    # What every application crate names, of any kind, for the network rule.
+    application = set(ALLOWED) | {"rspice-app"}
+    named = {
+        package["name"]: {dep["name"] for dep in package["dependencies"]}
+        for package in metadata["packages"] if package["name"] in application
+    }
     for package in metadata["packages"]:
         name = package["name"]
         if name not in ALLOWED:
@@ -277,7 +301,7 @@ def main() -> int:
             }
     issues = violations(
         direct, closures, portable_formats.get(""), portable_formats.get("native-bundle"),
-        portable_formats.get("table-schema"), normal_direct,
+        portable_formats.get("table-schema"), normal_direct, named,
     )
     if issues:
         print("\n".join(issues))
