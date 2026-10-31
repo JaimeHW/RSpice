@@ -4,6 +4,7 @@
 use crate::io::FileWorkflowIo;
 use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::ModelsPort;
 
 /// Every action reachable from the File menu.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -137,8 +138,7 @@ fn request_exit(state: &mut AppState) {
     ) {
         return;
     }
-    // Read in the models feature's state until it answers through its port.
-    if state.models.has_unsaved_authoring_changes() {
+    if ModelsPort::has_unsaved_authoring_changes(&*state.models) {
         state
             .workbench
             .confirmation_dialog
@@ -170,8 +170,7 @@ fn require_project_save_confirmation_if_dirty(
         return true;
     }
     if !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-        // Read in the models feature's state until it answers through its port.
-        && !state.models.model_editor_has_unsaved_changes()
+        && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     {
         return false;
     }

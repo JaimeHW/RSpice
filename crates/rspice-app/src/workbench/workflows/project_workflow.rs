@@ -12,6 +12,7 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
 use crate::workbench::app_state::SlotFacts;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::framework::feature::ModelsPort;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 #[cfg(target_arch = "wasm32")]
@@ -1115,8 +1116,7 @@ pub(crate) fn request_close_project(state: &mut AppState) -> bool {
 /// something to lose.
 pub(crate) fn closing_loses_nothing(state: &AppState) -> bool {
     !state.model.simulation.execution.has_active_execution()
-        // Read in the models feature's state until it answers through its port.
-        && !state.models.model_editor_has_unsaved_changes()
+        && !ModelsPort::model_editor_has_unsaved_changes(&*state.models)
         && !state
             .project
             .configuration

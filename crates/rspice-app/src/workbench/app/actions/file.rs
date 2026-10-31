@@ -5,6 +5,7 @@
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::workbench::app::{ConfirmationAction, ConfirmationResponse, RSpiceApp};
+use crate::workbench::framework::feature::ModelsPort;
 
 impl RSpiceApp {
     /// Internal: Actually open a schematic (after confirmation)
@@ -86,8 +87,7 @@ impl RSpiceApp {
                     )
                 );
                 if project_action
-                    // Read in the models feature's state until it answers through its port.
-                    && self.state.models.model_editor_has_unsaved_changes()
+                    && ModelsPort::model_editor_has_unsaved_changes(&*self.state.models)
                     && let Err(error) = self.save_open_model_candidate()
                 {
                     self.state.record(
@@ -223,8 +223,7 @@ impl RSpiceApp {
         &mut self,
         destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
     ) {
-        // Read in the models feature's state until it answers through its port.
-        if self.state.models.model_editor_has_unsaved_changes()
+        if ModelsPort::model_editor_has_unsaved_changes(&*self.state.models)
             && let Err(error) = self.save_open_model_candidate()
         {
             self.state.record(
@@ -344,8 +343,7 @@ impl RSpiceApp {
         }
         if crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state)
             || (recent.kind == crate::services::recent_files::RecentKind::Project
-                // Read in the models feature's state until it answers through its port.
-                && self.state.models.model_editor_has_unsaved_changes())
+                && ModelsPort::model_editor_has_unsaved_changes(&*self.state.models))
         {
             self.state
                 .workbench

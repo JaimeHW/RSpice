@@ -23,6 +23,7 @@ use crate::workbench::app::dialogs::project::configuration::{
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
 use crate::workbench::app::{ConfirmationAction, RSpiceApp};
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
 
@@ -393,11 +394,10 @@ fn go_on_leaving(
             .show_close_project(destination);
         return None;
     }
-    // Read in the models feature's state until it answers through its port.
     let drafts = if action == ConfirmationAction::Exit {
-        state.models.has_unsaved_authoring_changes()
+        ModelsPort::has_unsaved_authoring_changes(&*state.models)
     } else {
-        state.models.model_editor_has_unsaved_changes()
+        ModelsPort::model_editor_has_unsaved_changes(&*state.models)
     };
     if !drafts && !crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state) {
         let (path, kind) = recent.unzip();
