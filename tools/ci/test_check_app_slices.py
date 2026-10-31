@@ -96,7 +96,7 @@ class SliceRuleTests(unittest.TestCase):
                         "workbench/docks/inspector/run_details.rs", "workbench/results.rs",
                         "workbench/results/commands.rs"],
             "models": ["workbench/surfaces/models.rs", "properties/model_browser.rs"],
-            "project": ["workbench/surfaces/project.rs", "workbench/app/actions/file.rs"],
+            "project": ["workbench/surfaces/project.rs", "workbench/workflows/project_workflow.rs"],
             "sheets": ["workbench/chrome/sheet_strip.rs", "workbench/app/drawing_sheet_edit.rs"],
             "hardcopy": ["workbench/hardcopy_adapters/sources.rs", "workbench/hardcopy/exports.rs",
                          "workbench/hardcopy.rs", "workbench/hardcopy/commands.rs"],
@@ -106,7 +106,7 @@ class SliceRuleTests(unittest.TestCase):
                          "workbench/settings.rs", "workbench/settings/commands.rs"],
             "shell": ["lib.rs", "workbench/app.rs", "workbench/app/dialogs/help.rs",
                       "workbench/app_state/session/preference_runtime.rs",
-                      "workbench/session/project_transactions.rs"],
+                      "workbench/session/project_transactions.rs", "workbench/app/actions/file.rs"],
         }
         self.assertEqual(set(expected), set(SLICES))
         for slice_name, paths in expected.items():
