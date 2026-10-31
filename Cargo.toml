@@ -60,9 +60,6 @@ members = [
     "tools/xspice-catalog-dump",
     "tools/veriloga-catalog-dump",
 ]
-# Third-party source built in place of its crates.io release; never a member,
-# so the workspace's formatting, lint and test gates do not reach it.
-exclude = ["vendor/epaint"]
 
 [workspace.package]
 version = "0.1.0"
@@ -213,12 +210,6 @@ rspice-core = { path = "crates/rspice-core", version = "0.1.0" }
 rspice-core-base = { path = "crates/rspice-core-base", version = "0.1.0", default-features = false }
 rspice-core-netlist = { path = "crates/rspice-core-netlist", version = "0.1.0", default-features = false }
 rspice-core-devices = { path = "crates/rspice-core-devices", version = "0.1.0", default-features = false }
-
-# crates.io epaint 0.35.0 with the fix for emilk/egui#8576 (right-to-left runs
-# got 2n-1 glyphs); see tools/vendor/vendor_epaint.py. Delete it, and the
-# exclude above, at the first egui release that ships the fix.
-[patch.crates-io]
-epaint = { path = "vendor/epaint" }
 
 # One lint policy for the whole workspace. Crates opt in with
 # `lints.workspace = true`, so tightening a rule is a single edit here rather

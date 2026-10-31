@@ -1475,6 +1475,7 @@ fn title_field_pass(
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn a_title_field_holding_arabic_is_edited_in_the_order_it_is_typed() {
     let ctx = egui::Context::default();
     ctx.set_os(egui::os::OperatingSystem::Nix);

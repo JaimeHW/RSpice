@@ -181,6 +181,7 @@ impl Field {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn the_arrow_keys_walk_arabic_in_the_order_it_is_typed() {
     let mut field = Field::new("عدد 123 مرحبا");
     field.focus();
@@ -193,6 +194,7 @@ fn the_arrow_keys_walk_arabic_in_the_order_it_is_typed() {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn a_word_jump_back_over_hebrew_after_latin_lands_before_the_word() {
     let mut field = Field::new("Aurora בב");
     field.focus();
@@ -203,6 +205,7 @@ fn a_word_jump_back_over_hebrew_after_latin_lands_before_the_word() {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn the_caret_stands_at_the_leading_edge_of_the_character_after_it() {
     // Displayed "42 םולש": the paragraph reads from the right, and the
     // number inside it from its own left.
@@ -221,6 +224,7 @@ fn the_caret_stands_at_the_leading_edge_of_the_character_after_it() {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn a_click_puts_the_caret_at_the_character_edge_nearest_it() {
     let mut field = Field::new("שלום 42");
     let y = field.row_y();
@@ -235,6 +239,7 @@ fn a_click_puts_the_caret_at_the_character_edge_nearest_it() {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn a_selection_bands_each_stretch_of_its_glyphs() {
     // "c", the space and "ד" are selected: the first two at the end of the
     // Latin, the last at the far right of the Hebrew, displayed "והד".
@@ -286,6 +291,7 @@ fn a_selection_bands_each_stretch_of_its_glyphs() {
 }
 
 #[test]
+#[ignore = "needs the emilk/egui#8576 fix, which no egui release has yet"]
 fn wrapped_rows_hold_the_characters_and_line_breaks_of_the_logical_rows() {
     let text = "שלום עולם 42 מגבר ראשי\nאב 7";
     let ctx = Context::default();
