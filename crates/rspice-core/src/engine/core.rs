@@ -502,6 +502,12 @@ impl Engine {
         })
     }
 
+    /// Whether this engine has started its bounded device-update pool.
+    #[cfg(all(test, feature = "parallel"))]
+    pub(crate) fn device_update_pool_started(&self) -> bool {
+        self.classic_mos_parallel_pool.get().is_some()
+    }
+
     /// Resolve the execution resource before any accepted history is mutated.
     /// None means the caller already runs inside its owning frontend pool.
     #[cfg(feature = "parallel")]

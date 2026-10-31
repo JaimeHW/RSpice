@@ -164,7 +164,7 @@ impl Engine {
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
-        circuit.update_nonlinear(solution);
+        self.update_operating_point_nonlinear(circuit, solution);
         if static_probe {
             circuit.update_bjt_static_linearizations(solution);
             circuit.update_b3soi_static_linearizations(solution);
@@ -196,6 +196,21 @@ impl Engine {
             circuit.stamp_mixed_operating_point(matrix, rhs, solution, time)?;
         }
         Ok(())
+    }
+
+    /// The device update of an operating-point Newton load. A large BSIM4 or
+    /// classic-MOS population evaluates on the bounded worker pool the
+    /// transient update uses, as ngspice-46 loads BSIM4 under OpenMP in every
+    /// analysis. Each instance reads only the solution and writes only its
+    /// own state, so the result is the serial one; a pool that cannot start
+    /// has touched nothing, and the serial update runs instead.
+    fn update_operating_point_nonlinear(&self, circuit: &mut CircuitData, solution: &[Value]) {
+        if self
+            .update_transient_nonlinear_devices(circuit, solution)
+            .is_err()
+        {
+            circuit.update_nonlinear(solution);
+        }
     }
 
     #[inline]
@@ -242,7 +257,7 @@ impl Engine {
         circuit.set_b3soi_operating_point_mode(true);
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
-        circuit.update_nonlinear(solution);
+        self.update_operating_point_nonlinear(circuit, solution);
         if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
         }
@@ -380,5 +395,55 @@ impl Engine {
             circuit.stamp_mixed_operating_point(matrix, rhs, &zero_solution, time)?;
         }
         Ok(())
+    }
+}
+
+#[cfg(all(test, feature = "parallel"))]
+mod tests {
+    use super::*;
+
+    /// A 64-stage BSIM4 inverter chain (128 instances) reaches its operating
+    /// point with the device updates on the worker pool, as the transient
+    /// update of the same population does.
+    #[test]
+    fn a_large_bsim4_population_updates_on_the_worker_pool_at_the_operating_point() {
+        let mut deck = String::from(concat!(
+            "bsim4 chain\n",
+            ".subckt inv in out vdd\n",
+            "MN out in 0 0 nm l=0.1u w=1u\n",
+            "MP out in vdd vdd pm l=0.1u w=2u\n",
+            ".ends\n",
+            "VDD vdd 0 1\n",
+            "VIN in 0 1\n",
+        ));
+        for stage in 1..=64 {
+            let input = if stage == 1 {
+                "in".to_string()
+            } else {
+                format!("o{}", stage - 1)
+            };
+            deck.push_str(&format!("X{stage} {input} o{stage} vdd inv\n"));
+        }
+        deck.push_str(".model nm nmos level=54\n.model pm pmos level=54\n.op\n.end\n");
+        let netlist = crate::netlist::Netlist::parse(&deck).unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point_with_abort(
+                &netlist,
+                &mut circuit,
+                &mut matrix,
+                &crate::abort_signal::NoAbort,
+            )
+            .unwrap();
+        let last = circuit.get_node_by_name("o64").unwrap();
+        assert!(
+            (solution[last - 1] - 1.0).abs() < 1e-3,
+            "o64 = {}",
+            solution[last - 1]
+        );
+        assert!(engine.device_update_pool_started());
     }
 }

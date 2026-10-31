@@ -1100,7 +1100,7 @@ impl Engine {
 
     /// Refresh nonlinear trial state, parallelizing the model-batched classic
     /// MOS family only when its population amortizes bounded-pool dispatch.
-    pub(super) fn update_transient_nonlinear_devices(
+    pub(in crate::engine) fn update_transient_nonlinear_devices(
         &self,
         circuit: &mut crate::circuit::CircuitData,
         solution: &[Value],
