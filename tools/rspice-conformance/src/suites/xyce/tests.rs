@@ -19100,7 +19100,9 @@ fn level9_default_output_accepts_plain_precisionless_print() {
 fn b4soi_461_inverter_is_scored_by_its_xyce_verify_contract() {
     // Xyce_Regression's Netlists/B4SOI_461/CMakeLists.txt checks this deck
     // with xyce_verify.pl and the deck's `*comp v(out) offset=.2`; its
-    // TEMP=25 keeps it out of the shape-based selector.
+    // TEMP=25 keeps it out of the shape-based selector. The offset shifts
+    // both columns (xyce_verify.pl:1110-1111, :1166) and leaves the default
+    // error bounds in force.
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(Path::parent)
@@ -19118,7 +19120,7 @@ fn b4soi_461_inverter_is_scored_by_its_xyce_verify_contract() {
         plan.comparison_mode,
         XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
             scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
-            error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+            error_bounds: XyceVerifyCompErrorBounds::Release710Default,
         }
     );
 }
