@@ -569,6 +569,13 @@ impl Host for RSpiceApp {
         )
     }
 
+    fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
+        legacy_command(key).map_or_else(
+            || self.label(key).into(),
+            |command| crate::workbench::commands::menu_label(command, self),
+        )
+    }
+
     fn shortcut_label(
         &self,
         key: CommandKey,

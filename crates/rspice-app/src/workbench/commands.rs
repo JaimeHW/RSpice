@@ -254,6 +254,7 @@ impl Command {
             | Self::Duplicate
             | Self::Delete
             | Self::SelectAll
+            | Self::DeselectAll
             | Self::FindInDesign
             | Self::ZoomIn
             | Self::ZoomOut
@@ -486,6 +487,7 @@ impl Command {
                     app.state.select_all_schematic_objects();
                 }
             }
+            Self::DeselectAll => deselect_all(app),
             Self::RenameSelection => {
                 crate::workbench::app::open_selected_object_rename(&mut app.state);
             }
@@ -1165,12 +1167,12 @@ impl Command {
 
 mod command_helpers;
 
-pub(crate) use command_helpers::reset_active_view;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
     active_schematic_editor, answer_project_request, file_action, open_project_dialog,
     run_project_file_action,
 };
+pub(crate) use command_helpers::{menu_label, reset_active_view};
 
 #[cfg(test)]
 pub(crate) mod tests;

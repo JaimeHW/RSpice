@@ -420,6 +420,7 @@ impl Command {
             | Self::Duplicate
             | Self::Delete
             | Self::SelectAll
+            | Self::DeselectAll
             | Self::RenameSelection
             | Self::ObjectProperties
             | Self::ZoomIn
@@ -871,6 +872,7 @@ impl Command {
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
+            Self::DeselectAll => "nothing is selected",
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

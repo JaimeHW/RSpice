@@ -41,6 +41,93 @@ pub(super) fn open_help_center(state: &mut AppState, page: crate::workbench::app
 
 /// Whether the netlist document — not merely the workspace that hosts it — is
 /// the thing on screen.
+/// Clear the drawing's selection: the symbol's in a symbol editor, the
+/// active sheet's otherwise, in the session and in the sheet's buffer, as
+/// Select all writes both.
+pub(super) fn deselect_all(app: &mut RSpiceApp) {
+    if active_symbol_editor(app) {
+        app.state.design.symbol.editor.clear_selection();
+        return;
+    }
+    let state = &mut app.state;
+    state.model.schematic.session.editor.selection.clear();
+    let active_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
+        buffer.editor.session.editor.selection.clear();
+    }
+}
+
+/// The label a menu row shows for `command` right now: Undo and Redo name
+/// the step they take where the drawing's history names it, Repeat names
+/// the command it repeats, and every other row reads the vocabulary's label.
+pub(crate) fn menu_label(command: Command, app: &RSpiceApp) -> std::borrow::Cow<'static, str> {
+    let label = command.spec().label;
+    let named = match command {
+        Command::Undo | Command::Redo if command.is_enabled(app) => {
+            schematic_step_name(app, command == Command::Undo)
+                .map(|step| format!("{label} {}", lower_first_word(step)))
+        }
+        Command::RepeatLastCommand => {
+            vocabulary::last_repeatable(app.state.workbench.last_repeatable_command.as_deref())
+                .map(|spec| format!("Repeat {}", lower_first_word(spec.label)))
+        }
+        _ => None,
+    };
+    named.map_or(label.into(), Into::into)
+}
+
+/// The name of the step Undo (`undo`) or Redo would take, where that step
+/// is the schematic editor's own: its history names each step. The netlist
+/// page's and the project's histories, and the symbol editor's, do not.
+fn schematic_step_name(app: &RSpiceApp, undo: bool) -> Option<&str> {
+    let state = &app.state;
+    let elsewhere = if undo {
+        (netlist_page_is_visible(state)
+            && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
+            || state.model.can_undo_project_design()
+    } else {
+        (netlist_page_is_visible(state)
+            && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
+            || state.model.can_redo_project_design()
+    };
+    if elsewhere
+        || state.workbench.active_source_editor.is_some()
+        || active_symbol_editor(app)
+        || !active_schematic_editor(app)
+    {
+        return None;
+    }
+    let history = state.model.schematic.history();
+    let step = if undo {
+        history.undo_description()
+    } else {
+        history.redo_description()
+    };
+    step.map(str::trim).filter(|step| !step.is_empty())
+}
+
+/// `text` to follow a verb mid-sentence: a capitalised first word reads in
+/// lower case ("Draw wire" becomes "draw wire"), a name or an acronym keeps
+/// its case ("R1", "AC").
+fn lower_first_word(text: &str) -> String {
+    let first_word = text.split_whitespace().next().unwrap_or_default();
+    let mut characters = first_word.chars();
+    let capitalised =
+        characters.next().is_some_and(char::is_uppercase) && characters.all(char::is_lowercase);
+    if !capitalised {
+        return text.to_owned();
+    }
+    let mut characters = text.chars();
+    characters.next().map_or_else(String::new, |first| {
+        first.to_lowercase().chain(characters).collect()
+    })
+}
+
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
     state.workbench.workspace == Workspace::Netlist
         && state.code.code_workspace.page

@@ -125,6 +125,14 @@ impl Command {
                 }
             }
             Self::SelectAll => active_symbol_editor(app) || active_schematic_editor(app),
+            Self::DeselectAll => {
+                if active_symbol_editor(app) {
+                    !state.design.symbol.editor.effective_selection().is_empty()
+                } else {
+                    active_schematic_editor(app)
+                        && !state.model.schematic.session.editor.selection.is_empty()
+                }
+            }
             Self::RenameSelection => {
                 active_schematic_editor(app)
                     && crate::workbench::app::rename_selection_available(state)

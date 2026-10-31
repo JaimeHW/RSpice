@@ -732,16 +732,16 @@ const DESIGN_PLACEMENT_COMMANDS: [Command; 10] = [
     Command::PlaceText,
     Command::PlaceShape,
 ];
-const DESIGN_EDIT_COMMANDS: [Command; 4] = [
+const SELECTION_EDIT_COMMANDS: [Command; 5] = [
     Command::MoveSelection,
     Command::StretchSelection,
     Command::ArraySelection,
     Command::ReplaceInstance,
+    Command::SelectionBulkEdit,
 ];
-const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 7] = [
+const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 6] = [
     Command::CreateHierarchy.key(),
     ProjectCommand::DesignManagement.key(),
-    Command::SelectionBulkEdit.key(),
     Command::ConnectivityManager.key(),
     Command::ConfigurationSets.key(),
     Command::RuleSetup.key(),
@@ -773,9 +773,93 @@ fn window_layout_menu_places_split_with_results_before_focus_workspace() {
     );
 }
 
+/// What is done to a selection is edited from Edit, where Cut, Copy and
+/// Delete already are; Design keeps what builds the design.
 #[test]
-fn design_edit_menu_matches_the_upgraded_authoring_group() {
-    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_EDIT_COMMANDS));
+fn the_selection_edits_are_in_edit_and_not_in_design() {
+    assert_menu_lists(ApplicationMenu::Edit, &keys(SELECTION_EDIT_COMMANDS));
+    let design = listed_commands(application_menu_entries(ApplicationMenu::Design));
+    for command in SELECTION_EDIT_COMMANDS {
+        assert!(
+            !design.contains(&command.key()),
+            "Design still lists {command:?}"
+        );
+    }
+}
+
+/// Undo and Redo name the step they take and Repeat the command it runs
+/// again, so a reader knows what the row does before choosing it; with
+/// nothing to name, each reads its plain label.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn undo_redo_and_repeat_name_what_they_act_on() {
+    let mut app = title_test_app();
+    let edit_rows = |app: &RSpiceApp| {
+        shown_rows(ApplicationMenu::Edit, app)
+            .into_iter()
+            .take(3)
+            .map(|(label, _)| label)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(edit_rows(&app), ["Undo", "Redo", "Repeat last command"]);
+
+    assert!(
+        app.state
+            .model
+            .schematic
+            .with_undo("Place resistor", |schematic| {
+                schematic.add_component(
+                    crate::state::ComponentType::Resistor,
+                    crate::state::Point::origin(),
+                );
+            })
+    );
+    assert_eq!(edit_rows(&app)[0], "Undo place resistor");
+
+    app.execute(Command::Undo.key());
+    assert_eq!(edit_rows(&app)[1], "Redo place resistor");
+
+    app.state.workbench.last_repeatable_command = Some("place-wire".to_owned());
+    assert_eq!(edit_rows(&app)[2], "Repeat draw wire");
+}
+
+/// Deselect all clears the selection Select all made, and is grey with
+/// nothing selected.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn deselect_all_clears_the_selection() {
+    let mut app = title_test_app();
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut app.state.model.schematic,
+    );
+    assert_eq!(
+        app.availability(Command::DeselectAll.key()),
+        CommandAvailability::Disabled("nothing is selected")
+    );
+    app.execute(Command::SelectAll.key());
+    assert!(
+        !app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty()
+    );
+    assert!(app.is_enabled(Command::DeselectAll.key()));
+
+    app.execute(Command::DeselectAll.key());
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .is_empty()
+    );
+    assert!(!app.is_enabled(Command::DeselectAll.key()));
 }
 
 /// One frame of what `draw` paints, returning the labels of the menu items
@@ -936,7 +1020,7 @@ fn design_sheet_menu_reads_navigation_before_authoring() {
 fn upgraded_design_menu_commands_remain_palette_discoverable() {
     for command in DESIGN_PLACEMENT_COMMANDS
         .into_iter()
-        .chain(DESIGN_EDIT_COMMANDS)
+        .chain(SELECTION_EDIT_COMMANDS)
     {
         assert!(command.palette_visible());
     }
@@ -2164,17 +2248,27 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
         &[
             "Undo | undo | Ctrl+Z | off: nothing to undo",
             "Redo | redo | Ctrl+Shift+Z | off: nothing to redo",
+            "Repeat last command | repeat-last-command | . | off: no placement or edit has run yet",
             "---",
-            "Cut selection | cut-selection | Ctrl+X | off: select an editable object",
-            "Copy selection | copy-selection | Ctrl+C | off: select an editable object",
+            "Cut | cut-selection | Ctrl+X | off: select an editable object",
+            "Copy | copy-selection | Ctrl+C | off: select an editable object",
             "Paste | paste-selection | Ctrl+V | off: clipboard has no compatible content",
-            "Duplicate selection | duplicate-selection | Ctrl+D | off: select an editable object",
-            "Delete selection | delete-selection | Delete | off: select an editable object",
-            "Select all | select-all | Ctrl+A | on",
+            "Duplicate | duplicate-selection | Ctrl+D | off: select an editable object",
+            "Delete | delete-selection | Delete | off: select an editable object",
             "---",
-            "Rename selected object… | rename-selection | F2 | off: select one editable component, net label, or declared bus",
-            "Object properties… | object-properties | Q | off: select one inspectable object",
-            "Find in design… | find-design | Ctrl+F | on",
+            "Select all | select-all | Ctrl+A | on",
+            "Deselect all | deselect-all |  | off: nothing is selected",
+            "---",
+            "Move | move-selection | M | off: select an editable object",
+            "Stretch | stretch-selection | S | off: select an editable object",
+            "Create array… | array-selection |  | off: select an editable object",
+            "Replace instance… | replace-instance |  | off: select an editable object",
+            "Bulk edit… | design-bulk-tools |  | on",
+            "---",
+            "Rename… | rename-selection | F2 | off: select one editable component, net label, or declared bus",
+            "Properties… | object-properties | Q | off: select one inspectable object",
+            "---",
+            "Find… | find-design | Ctrl+F | on",
             "Find and replace… | find-replace | Ctrl+H | on",
             "---",
             "Preferences… | preferences | Ctrl+, | on",
@@ -2219,10 +2313,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Place text or note… | place-text | Shift+T | on",
             "Draw documentation shape… | place-shape |  | on",
             "---",
-            "Move selection | move-selection | M | off: select an editable object",
-            "Stretch selection | stretch-selection | S | off: select an editable object",
-            "Create array… | array-selection |  | off: select an editable object",
-            "Replace instance… | replace-instance |  | off: select an editable object",
             "Arrange >",
             "  Rotate clockwise | rotate-selection | Ctrl+R | off: select an editable object",
             "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: select an editable object",
@@ -2252,7 +2342,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "---",
             "Create hierarchy from selection… | create-hierarchy |  | off: select an editable object",
             "Sheets, variants and annotation… | design-management |  | on",
-            "Selection and bulk editing… | design-bulk-tools |  | on",
             "Connectivity and bus manager… | design-connectivity-tools |  | on",
             "Configurations | configuration-sets |  | on",
             "Design rule setup… | design-rule-setup |  | on",
@@ -2373,16 +2462,18 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
             "Undo | undo | Ctrl+Z | on",
             "Redo | redo | Ctrl+Shift+Z | on",
             "---",
-            "Cut selection | cut-selection | Ctrl+X | on",
-            "Copy selection | copy-selection | Ctrl+C | on",
+            "Cut | cut-selection | Ctrl+X | on",
+            "Copy | copy-selection | Ctrl+C | on",
             "Paste | paste-selection | Ctrl+V | on",
             "Duplicate line | duplicate-line | Ctrl+D | on",
-            "Delete selection | delete-selection | Delete | on",
+            "Delete line | delete-line | Ctrl+Shift+K | on",
+            "---",
             "Select all | select-all | Ctrl+A | on",
             "---",
             "Toggle line comment | toggle-line-comment | Ctrl+/ | on",
             "Format document | format-document |  | on",
             "Go to line… | go-to-line | Ctrl+G | on",
+            "---",
             "Find in source… | find-code | Ctrl+F | off: command is unavailable in this context",
             "---",
             "Preferences… | preferences | Ctrl+, | on",
