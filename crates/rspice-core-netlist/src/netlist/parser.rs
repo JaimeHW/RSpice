@@ -1033,6 +1033,26 @@ fn parse_netlist_impl(
                 overrides,
             )
         })?;
+    // LTspice steps a parameter no `.param` declares. The deck still reads at
+    // one point outside the sweep, so the parameter starts at its first value.
+    if state.spice_dialect == crate::config::SpiceDialect::BestAvailable {
+        let undeclared = state
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Step(step)
+                    if step.target == crate::netlist::StepTarget::Param
+                        && !state.params.has_any_parameter_binding(&step.name) =>
+                {
+                    Some((step.name.clone(), step.sweep.values().first().copied()?))
+                }
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for (name, value) in undeclared {
+            state.params.set(&name, value);
+        }
+    }
     let pending_xyce_diode_model_warnings =
         std::mem::take(&mut state.pending_xyce_diode_model_warnings);
     validate_resistor_model_references_with_abort(&state, abort)?;
@@ -5443,5 +5463,17 @@ mod ltspice_source_syntax_tests {
             lowered("E1 3 0 2 0 Laplace=1/(1+s*1e-3) window=1m nfft=1024"),
             pspice
         );
+    }
+
+    /// LTspice steps a parameter no `.param` declares; it reads at its first
+    /// stepped value outside the sweep.
+    #[test]
+    fn a_stepped_undeclared_parameter_starts_at_its_first_value() {
+        let deck = "step\nV1 1 0 1\nR2 1 0 {RX}\n.op\n.step param RX list 1k 2k\n.end\n";
+        let netlist = Netlist::parse(deck).expect("an undeclared stepped parameter parses");
+        assert_eq!(netlist.params.get("RX"), Some(1e3));
+        let declared = Netlist::parse(&deck.replace(".op\n", ".op\n.param RX=5k\n"))
+            .expect("a declared stepped parameter parses");
+        assert_eq!(declared.params.get("RX"), Some(5e3));
     }
 }
