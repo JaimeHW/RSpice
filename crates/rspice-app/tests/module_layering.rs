@@ -2124,7 +2124,6 @@ const UNPUBLISHED_PAINTED_ROWS: &[&str] = &[
     "rspice-app/src/workbench/app/dialogs/design_management/widgets.rs::schematic_preview",
     "rspice-app/src/workbench/app/dialogs/design_review_comments.rs::review_message",
     "rspice-app/src/workbench/app/dialogs/help.rs::render_shortcuts_help_dialog",
-    "rspice-app/src/workbench/app/dialogs/hierarchy/create.rs::table_row",
     "rspice-app/src/workbench/docks/navigator/design.rs::tabs",
     "rspice-app/src/workbench/project/library_dialogs/cell_ops.rs::process_copy_cell_dialog",
     "rspice-app/src/workbench/project/library_dialogs/new_cell.rs::process_new_cell_dialog",

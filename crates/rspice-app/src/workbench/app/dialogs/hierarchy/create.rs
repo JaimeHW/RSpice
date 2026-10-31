@@ -1,28 +1,22 @@
-//! Mockup-owned Create hierarchy from selection workflow.
+//! Create hierarchy from selection.
 //!
-//! The modal retains an exact parent authority and inferred interface. Primary
+//! The form retains an exact parent authority and inferred interface. Primary
 //! builds and validates parent, child, library, generated-symbol, hierarchy,
 //! and netlist candidates before a single non-fallible project publication.
 
 use std::collections::HashSet;
 
-use egui::{Align, Context, Frame, Label, Layout, Margin, Sense, Stroke, Ui, UiBuilder, vec2};
+use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::schematic::view::schematic_symbol_context;
 use crate::state::{
     Cell, CellViewRef, HierarchyExtractionPlan, NetLabel, PortDirection, PortSpec, View, ViewType,
 };
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    select_mono_with_response,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use rspice_design::drc::{DrcConfig, DrcViolation, run_check_with_hierarchy};
 use rspice_design::hierarchy::HierarchySource;
 
-use crate::workbench::app::dialogs::schematic_command::{DISCARD_DETAIL, DISCARD_TITLE};
 use crate::workbench::app::schematic::hierarchy_reference_impact::validate_hierarchy_reference_impact;
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::design_history::{
@@ -50,12 +44,7 @@ pub(crate) struct CreateHierarchyDialogState {
     pub(crate) plan: Option<crate::state::HierarchyExtractionPlan>,
     pub(crate) ports: Vec<CreateHierarchyPortDraft>,
     pub(crate) library_revision: u64,
-    pub(crate) initial_cell_name: String,
-    pub(crate) initial_target_view: crate::state::ViewType,
-    pub(crate) initial_ports: Vec<CreateHierarchyPortDraft>,
     pub(crate) validation_error: Option<String>,
-    pub(crate) dirty: bool,
-    pub(crate) discard_confirm: bool,
 }
 
 impl CreateHierarchyDialogState {
@@ -64,6 +53,7 @@ impl CreateHierarchyDialogState {
         authority: SchematicEditAuthority,
         plan: crate::state::HierarchyExtractionPlan,
         library_revision: u64,
+        cell_name: String,
     ) {
         let ports = plan
             .ports
@@ -77,61 +67,45 @@ impl CreateHierarchyDialogState {
             .collect::<Vec<_>>();
         *self = Self {
             open: true,
-            cell_name: "sensor_frontend".to_owned(),
+            cell_name,
             target_view: crate::state::ViewType::Schematic,
             authority: Some(authority),
             plan: Some(plan),
-            ports: ports.clone(),
+            ports,
             library_revision,
-            initial_cell_name: "sensor_frontend".to_owned(),
-            initial_target_view: crate::state::ViewType::Schematic,
-            initial_ports: ports,
             validation_error: None,
-            dirty: false,
-            discard_confirm: false,
         };
-    }
-
-    pub(crate) fn mark_edited(&mut self) {
-        self.dirty = self.cell_name != self.initial_cell_name
-            || self.target_view != self.initial_target_view
-            || self.ports != self.initial_ports;
-        self.discard_confirm = false;
-        self.validation_error = None;
     }
 
     pub(crate) fn close(&mut self) {
         *self = Self::default();
     }
-
-    pub(crate) fn attempt_close(&mut self) -> bool {
-        if self.dirty && !self.discard_confirm {
-            self.discard_confirm = true;
-            false
-        } else {
-            self.close();
-            true
-        }
-    }
 }
 
 const TITLE: &str = "Create hierarchical cell";
 const PRIMARY: &str = "Create and descend";
-const DESCRIPTION: &str = "Create a stable cell/view from the selected schematic instances and infer an explicit electrical interface.";
-const CELL_ROW_TITLE: &str = "Cell and view";
-const CELL_ROW_DETAIL: &str = "Stable library identity used by hierarchy and netlisting.";
-const SOURCE_ROW_TITLE: &str = "Source selection";
-const SOURCE_ROW_DETAIL: &str =
-    "Selected instances move transactionally; nets become explicit ports.";
-const VIEW_OPTIONS: [&str; 2] = ["schematic", "symbol"];
-const TABLE_HEADERS: [&str; 4] = ["Port", "Direction", "Discipline", "Net"];
-#[cfg(test)]
-const DEFAULT_CELL: &str = "sensor_frontend";
-const SETTING_ROW_HORIZONTAL_PADDING: i8 = 12;
-const SETTING_ROW_VERTICAL_PADDING: i8 = 10;
-const SETTING_ROW_MIN_HEIGHT: f32 = 54.0;
-const SURFACE_WITHOUT_TABLE_ROWS: f32 = 267.0;
-const TABLE_ROW_HEIGHT: f32 = 28.0;
+/// The sentence assistive technology reads for the whole form.
+const DESCRIPTION: &str = "Move the selected instances into a new cell, with a port for every net that crosses the selection's edge.";
+const VIEW_OPTIONS: [&str; 2] = ["Schematic", "Symbol"];
+/// The ports table: each port, and the parent net it carries.
+const PORT_COLUMNS: [TableColumn<'static>; 4] = [
+    TableColumn {
+        header: "Port",
+        mono: true,
+    },
+    TableColumn {
+        header: "Direction",
+        mono: true,
+    },
+    TableColumn {
+        header: "Discipline",
+        mono: true,
+    },
+    TableColumn {
+        header: "Net",
+        mono: true,
+    },
+];
 
 pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
     // The command is greyed whenever this does not hold.
@@ -145,11 +119,45 @@ pub(crate) fn open_create_hierarchy_dialog(state: &mut AppState) {
             return;
         }
     };
+    let cell_name = default_cell_name(state);
     state.design.create_hierarchy.open(
         SchematicEditAuthority::capture(state),
         plan,
         state.model.library_manager.revision(),
+        cell_name,
     );
+}
+
+/// The new cell's first name: the parent cell's with "_sub", numbered from 2
+/// when that is taken in the parent's library or among the open documents.
+/// A fixed sample name was offered whatever the design was.
+fn default_cell_name(state: &AppState) -> String {
+    let parent = &state.model.workspace.content.active_view;
+    let taken = |name: &str| {
+        state
+            .model
+            .library_manager
+            .get_library(&parent.library)
+            .is_some_and(|library| {
+                library
+                    .cells_sorted()
+                    .iter()
+                    .any(|cell| cell.name.eq_ignore_ascii_case(name))
+            })
+            || ["schematic", "symbol"].into_iter().any(|view| {
+                state
+                    .model
+                    .workspace
+                    .content
+                    .schematic_buffers
+                    .contains_key(&CellViewRef::new(&parent.library, name, view).key())
+            })
+    };
+    let base = format!("{}_sub", parent.cell);
+    std::iter::once(base.clone())
+        .chain((2..).map(|index| format!("{base}{index}")))
+        .find(|name| !taken(name))
+        .expect("the numbered names are unbounded")
 }
 
 impl RSpiceApp {
@@ -158,268 +166,65 @@ impl RSpiceApp {
             return;
         }
         let validation = validate_draft(&self.state);
-        let discard_confirm = self.state.design.create_hierarchy.discard_confirm;
-        let table_rows = self.state.design.create_hierarchy.ports.len().max(1) as f32;
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .size(DialogSize::Transaction)
-            .flush_body()
-            .initial_height(
-                SURFACE_WITHOUT_TABLE_ROWS
-                    + table_rows * TABLE_ROW_HEIGHT
-                    + if discard_confirm || validation.is_err() {
-                        37.0
-                    } else {
-                        0.0
-                    },
-            )
-            .ghost(if discard_confirm {
-                "Discard changes"
-            } else {
-                "Cancel"
+        let draft = &mut self.state.design.create_hierarchy;
+        let instances = draft
+            .plan
+            .as_ref()
+            .map_or_else(String::new, |plan| plan.source_instance_names.join(", "));
+        let ports = draft
+            .ports
+            .iter()
+            .map(|port| {
+                vec![
+                    port.name.clone(),
+                    direction_label(port.direction).to_owned(),
+                    port.discipline.keyword().to_owned(),
+                    port.source_net.clone(),
+                ]
             })
+            .collect::<Vec<_>>();
+        let mut view = usize::from(draft.target_view == ViewType::Symbol);
+        let mut edited = false;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .wide()
+            .describe(DESCRIPTION)
             .primary_enabled(validation.is_ok())
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .description(DESCRIPTION);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Err(error) = &validation {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Create hierarchy cannot continue",
-                error,
-            );
+            .status(validation.as_ref().map(|_| None).map_err(String::as_str))
+            .show(ctx, |rows| {
+                let name = egui::Id::new("create-hierarchy-cell-name");
+                edited |= rows
+                    .text("Cell name", name, &mut draft.cell_name, "")
+                    .changed();
+                edited |= rows.segmented("View", "create-hierarchy-view", &VIEW_OPTIONS, &mut view);
+                rows.value_mono("Instances", &instances);
+                if ports.is_empty() {
+                    rows.value("Ports", "None: no net crosses the selection's edge");
+                } else {
+                    rows.table(&PORT_COLUMNS, &ports);
+                }
+                Some(name)
+            });
+        if edited {
+            draft.target_view = if view == 1 {
+                ViewType::Symbol
+            } else {
+                ViewType::Schematic
+            };
+            draft.validation_error = None;
         }
-
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            Some(hierarchy_body(ui, &mut self.state.design.create_hierarchy))
-        });
-        match response.choice {
+        match choice {
             DialogChoice::Primary => {
-                // The dialog states the refusal in place.
+                // The footer states the refusal.
                 if let Err(error) = commit_create_hierarchy(&mut self.state) {
                     self.state.design.create_hierarchy.validation_error = Some(error);
                 }
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.create_hierarchy.attempt_close();
-                if self.state.design.create_hierarchy.open {
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                }
+                self.state.design.create_hierarchy.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
-}
-
-fn hierarchy_body(ui: &mut Ui, draft: &mut CreateHierarchyDialogState) -> egui::Id {
-    let t = Tokens::get(ui.ctx());
-    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    let initial = setting_row(ui, CELL_ROW_TITLE, CELL_ROW_DETAIL, |ui| {
-        ui.spacing_mut().item_spacing.x = 6.0;
-        let width = (ui.available_width() - 116.0).max(1.0);
-        let response = ui.add_sized(
-            vec2(width, t.metrics.ctl_h),
-            egui::TextEdit::singleline(&mut draft.cell_name)
-                .font(egui::TextStyle::Monospace)
-                .margin(Margin::symmetric(8, 4)),
-        );
-        ui.ctx().accesskit_node_builder(response.id, |node| {
-            node.set_label("New cell name");
-        });
-        if response.changed() {
-            draft.mark_edited();
-        }
-        let labels = VIEW_OPTIONS.map(str::to_owned);
-        let selected = draft.target_view.display_name();
-        let view = select_mono_with_response(
-            ui,
-            "create-hierarchy-view",
-            "New cell view",
-            selected,
-            &labels,
-            110.0,
-        );
-        if let Some(index) = view.picked {
-            let next = if index == 0 {
-                ViewType::Schematic
-            } else {
-                ViewType::Symbol
-            };
-            if next != draft.target_view {
-                draft.target_view = next;
-                draft.mark_edited();
-            }
-        }
-        response.id
-    });
-    setting_row(ui, SOURCE_ROW_TITLE, SOURCE_ROW_DETAIL, |ui| {
-        let summary = draft.plan.as_ref().map_or_else(
-            || "Selection unavailable".to_owned(),
-            |plan| {
-                format!(
-                    "{} \u{00b7} {} nets",
-                    plan.source_instance_names.join(" \u{00b7} "),
-                    plan.source_net_count
-                )
-            },
-        );
-        status_text(ui, &summary);
-    });
-    hierarchy_port_table(ui, &draft.ports);
-    initial
-}
-
-fn setting_row<R>(ui: &mut Ui, title: &str, detail: &str, content: impl FnOnce(&mut Ui) -> R) -> R {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let response = Frame::NONE
-        .fill(t.color.bg_app)
-        .inner_margin(Margin::symmetric(
-            SETTING_ROW_HORIZONTAL_PADDING,
-            SETTING_ROW_VERTICAL_PADDING,
-        ))
-        .show(ui, |ui| {
-            let inner_width = (width - f32::from(SETTING_ROW_HORIZONTAL_PADDING) * 2.0).max(1.0);
-            let inner_height =
-                (SETTING_ROW_MIN_HEIGHT - f32::from(SETTING_ROW_VERTICAL_PADDING) * 2.0).max(1.0);
-            ui.set_min_size(vec2(inner_width, inner_height));
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 12.0;
-                let content_width = (inner_width - 12.0).max(1.0);
-                let label_width = (content_width * (0.38 / 1.38)).max(150.0);
-                ui.allocate_ui_with_layout(
-                    vec2(label_width.min(content_width), inner_height),
-                    Layout::top_down(Align::Min),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.y = 3.0;
-                        ui.label(
-                            egui::RichText::new(title)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                                .color(t.color.text),
-                        );
-                        ui.label(
-                            egui::RichText::new(detail)
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_faint),
-                        );
-                    },
-                );
-                ui.with_layout(Layout::left_to_right(Align::Center), |ui| content(ui))
-                    .inner
-            })
-            .inner
-        });
-    ui.painter().hline(
-        response.response.rect.x_range(),
-        response.response.rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    response.inner
-}
-
-fn hierarchy_port_table(ui: &mut Ui, ports: &[CreateHierarchyPortDraft]) {
-    table_row(ui, true, TABLE_HEADERS);
-    if ports.is_empty() {
-        let t = Tokens::get(ui.ctx());
-        Frame::NONE
-            .fill(t.color.bg_app)
-            .inner_margin(Margin::symmetric(12, 0))
-            .show(ui, |ui| {
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), TABLE_ROW_HEIGHT),
-                    Layout::left_to_right(Align::Center),
-                    |ui| {
-                        ui.label(
-                            egui::RichText::new("No boundary nets \u{00b7} zero-port child cell")
-                                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                    },
-                );
-            });
-        return;
-    }
-    for port in ports {
-        table_row(
-            ui,
-            false,
-            [
-                port.name.as_str(),
-                direction_label(port.direction),
-                port.discipline.keyword(),
-                port.source_net.as_str(),
-            ],
-        );
-    }
-}
-
-fn table_row(ui: &mut Ui, heading: bool, values: [&str; 4]) {
-    let t = Tokens::get(ui.ctx());
-    let height = if heading { 27.0 } else { TABLE_ROW_HEIGHT };
-    let fill = if heading {
-        t.color.bg_elevated
-    } else {
-        t.color.bg_app
-    };
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
-    ui.painter().rect_filled(rect, 0.0, fill);
-    let column_width = rect.width() / values.len() as f32;
-    let mut x = rect.left();
-    for (index, value) in values.iter().enumerate() {
-        let right = if index == values.len() - 1 {
-            rect.right()
-        } else {
-            x + column_width
-        };
-        let cell = egui::Rect::from_min_max(
-            egui::pos2(x + 8.0, rect.top()),
-            egui::pos2((right - 8.0).max(x + 8.0), rect.bottom()),
-        );
-        ui.scope_builder(
-            UiBuilder::new()
-                .max_rect(cell)
-                .layout(Layout::left_to_right(Align::Center)),
-            |ui| {
-                ui.set_clip_rect(cell);
-                ui.add_sized(
-                    cell.size(),
-                    Label::new(
-                        egui::RichText::new(if heading {
-                            value.to_uppercase()
-                        } else {
-                            (*value).to_owned()
-                        })
-                        .font(if heading {
-                            theme::sans(tokens::FS_0, FontWeight::Medium)
-                        } else {
-                            theme::sans(tokens::FS_0, FontWeight::Regular)
-                        })
-                        .color(if heading {
-                            t.color.text_faint
-                        } else {
-                            t.color.text_dim
-                        }),
-                    )
-                    .truncate(),
-                );
-            },
-        );
-        x = right;
-    }
-    ui.painter().hline(
-        rect.x_range(),
-        rect.bottom(),
-        Stroke::new(1.0, t.color.border),
-    );
-    ui.ctx().accesskit_node_builder(response.id, |node| {
-        node.set_label(values.join(", "));
-    });
 }
 
 const fn direction_label(direction: PortDirection) -> &'static str {
@@ -428,23 +233,6 @@ const fn direction_label(direction: PortDirection) -> &'static str {
         PortDirection::Out => "output",
         PortDirection::InOut | PortDirection::Supply => "inout",
     }
-}
-
-/// The dot that stood in front of this line was green whatever the line said.
-fn status_text(ui: &mut Ui, text: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 5.0;
-        ui.add_sized(
-            vec2(ui.available_width().max(1.0), t.metrics.ctl_h),
-            Label::new(
-                egui::RichText::new(text)
-                    .font(theme::mono(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.text_dim),
-            )
-            .truncate(),
-        );
-    });
 }
 
 fn validate_draft(state: &AppState) -> Result<HierarchyExtractionPlan, String> {
@@ -886,6 +674,120 @@ mod tests {
         SavedOutputPolicy, SavedOutputPrecision, SavedOutputStreaming, SymbolDocument,
     };
 
+    fn two_selected_resistors() -> AppState {
+        let mut state = AppState::default();
+        for x in [0, 40] {
+            let id = state
+                .model
+                .schematic
+                .add_component(ComponentType::Resistor, Point::new(x, 0));
+            state
+                .model
+                .schematic
+                .session
+                .editor
+                .selection
+                .select_component(id);
+        }
+        state
+    }
+
+    /// The new cell is named after its parent, not "sensor_frontend", and
+    /// the next free number follows when that name is taken.
+    #[test]
+    fn the_new_cell_is_named_after_its_parent() {
+        let mut state = two_selected_resistors();
+        let parent = state.model.workspace.content.active_view.clone();
+        open_create_hierarchy_dialog(&mut state);
+        assert_eq!(
+            state.design.create_hierarchy.cell_name,
+            format!("{}_sub", parent.cell)
+        );
+
+        state.design.create_hierarchy.close();
+        state
+            .model
+            .library_manager
+            .get_library_mut(&parent.library)
+            .expect("the parent's library")
+            .add_cell(Cell::new(&format!("{}_sub", parent.cell)));
+        open_create_hierarchy_dialog(&mut state);
+        assert_eq!(
+            state.design.create_hierarchy.cell_name,
+            format!("{}_sub2", parent.cell)
+        );
+    }
+
+    /// Create hierarchy is a command form: its ports table on the labels'
+    /// edge, and none of the explainer lines under its labels.
+    #[test]
+    fn create_hierarchy_is_a_command_form_without_explainers() {
+        let mut app = RSpiceApp::test_instance();
+        rspice_app_state::workbench::examples::load_example(
+            "RC Lowpass Filter",
+            &mut app.state.model.schematic,
+        );
+        let r1 = app
+            .state
+            .model
+            .schematic
+            .document()
+            .components
+            .iter()
+            .find(|component| component.name == "R1")
+            .expect("the example places R1")
+            .id;
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .select_only_component(r1);
+        open_create_hierarchy_dialog(&mut app.state);
+        assert!(app.state.design.create_hierarchy.open);
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut nodes = Vec::new();
+        for _ in 0..2 {
+            nodes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.render_create_hierarchy_dialog(ui.ctx()),
+                )
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes;
+        }
+        let texts = nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .collect::<Vec<_>>();
+        assert!(
+            texts.iter().any(|text| text.starts_with("Port: ")),
+            "the ports table is published: {texts:?}"
+        );
+        let explainers = texts
+            .iter()
+            .filter(|text| {
+                text.contains("Stable library identity") || text.contains("transactionally")
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            explainers.is_empty(),
+            "the explainers are back: {explainers:?}"
+        );
+    }
+
     #[test]
     fn open_is_unavailable_for_mixed_selection() {
         let mut state = AppState::default();
@@ -971,15 +873,16 @@ mod tests {
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.design.create_hierarchy.open);
+        let child = state.design.create_hierarchy.cell_name.clone();
         commit_create_hierarchy(&mut state).expect("transaction commits");
 
-        let target_ref = CellViewRef::new(&library_name, DEFAULT_CELL, "schematic");
+        let target_ref = CellViewRef::new(&library_name, &child, "schematic");
         assert_eq!(state.model.workspace.content.active_view, target_ref);
         let target_cell = state
             .model
             .library_manager
             .get_library(&library_name)
-            .and_then(|library| library.get_cell(DEFAULT_CELL))
+            .and_then(|library| library.get_cell(&child))
             .expect("target cell");
         let symbol_view = target_cell.get_view("symbol").expect("symbol view");
         assert_eq!(
@@ -1009,7 +912,7 @@ mod tests {
             .model
             .library_manager
             .get_library_mut(&library_name)
-            .and_then(|library| library.get_cell_mut(DEFAULT_CELL))
+            .and_then(|library| library.get_cell_mut(&child))
             .expect("target cell")
             .views
             .values_mut()
@@ -1029,7 +932,7 @@ mod tests {
                 .model
                 .library_manager
                 .get_library(&library_name)
-                .and_then(|library| library.get_cell(DEFAULT_CELL))
+                .and_then(|library| library.get_cell(&child))
                 .is_none()
         );
         assert!(state.model.can_redo_project_design());
@@ -1093,6 +996,7 @@ mod tests {
 
         open_create_hierarchy_dialog(&mut state);
         assert!(state.design.create_hierarchy.open);
+        let child = state.design.create_hierarchy.cell_name.clone();
         let error = commit_create_hierarchy(&mut state).expect_err("reference must block");
         assert!(error.contains("saved output 'branch_current'"), "{error}");
         assert!(before.is_equal_document(state.model.schematic.document()));
@@ -1101,7 +1005,7 @@ mod tests {
                 .model
                 .library_manager
                 .get_library(&state.model.workspace.content.active_view.library)
-                .and_then(|library| library.get_cell(DEFAULT_CELL))
+                .and_then(|library| library.get_cell(&child))
                 .is_none()
         );
     }
