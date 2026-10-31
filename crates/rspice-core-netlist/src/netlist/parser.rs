@@ -5420,4 +5420,28 @@ mod ltspice_source_syntax_tests {
         assert_eq!(parallel.nodes, ["A", "0"]);
         assert!(matches!(parallel.kind, ElementKind::Capacitor { value, .. } if value == 1e-9));
     }
+
+    /// `E n+ n- nc+ nc- Laplace=H(s)` is the PSpice `LAPLACE {V(nc+,nc-)}`
+    /// form; LTspice's FFT options do not change the exact realization.
+    #[test]
+    fn an_ltspice_laplace_source_realizes_the_pspice_transfer() {
+        let lowered = |card: &str| {
+            let netlist = Netlist::parse(&format!(
+                "laplace\nV1 2 0 1\n{card}\nR3 3 0 1k\n.op\n.end\n"
+            ))
+            .unwrap_or_else(|error| panic!("{card}: {error}"));
+            netlist
+                .elements
+                .iter()
+                .map(|element| format!("{} {:?} {:?}", element.name, element.nodes, element.kind))
+                .collect::<Vec<_>>()
+        };
+        let pspice = lowered("E1 3 0 LAPLACE {V(2,0)} = {1/(1+s*1e-3)}");
+        assert!(pspice.len() > 3, "{pspice:?}");
+        assert_eq!(lowered("E1 3 0 2 0 Laplace=1/(1+s*1e-3)"), pspice);
+        assert_eq!(
+            lowered("E1 3 0 2 0 Laplace=1/(1+s*1e-3) window=1m nfft=1024"),
+            pspice
+        );
+    }
 }

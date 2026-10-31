@@ -7373,6 +7373,52 @@ fn collect_chebyshev_input_expression(
 
 /// Reconstruct a controlled-source expression while leaving a trailing
 /// current-source `M=` assignment for the typed instance-parameter parser.
+/// LTspice's `E/G n+ n- nc+ nc- Laplace=<H(s)>`: the transfer of
+/// `V(nc+,nc-)`, read up to LTspice's own `window=`/`nfft=`/`mtol=` options.
+/// Those tune LTspice's FFT evaluation of `H(s)`; the transfer is realized
+/// exactly here, so they are read and dropped.
+fn take_ltspice_laplace(
+    stream: &mut TokenStream,
+    line_num: usize,
+) -> Result<Option<String>, ParseError> {
+    let is_option = |stream: &TokenStream| {
+        matches!(&stream.peek().kind, TokenKind::Ident(word) if ["WINDOW", "NFFT", "MTOL"]
+            .iter()
+            .any(|option| word.eq_ignore_ascii_case(option)))
+            && matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    };
+    if !matches!(&stream.peek().kind, TokenKind::Ident(word) if word.eq_ignore_ascii_case("LAPLACE"))
+        || !matches!(stream.peek_n(1).kind, TokenKind::Equals)
+    {
+        return Ok(None);
+    }
+    stream.advance();
+    stream.advance();
+    let mut expression = String::new();
+    while !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) && !is_option(stream) {
+        match &stream.peek().kind {
+            TokenKind::Expression(inner) => expression.push_str(&format!("({inner})")),
+            kind => append_behavioral_expr_token(&mut expression, kind),
+        }
+        stream.advance();
+    }
+    while is_option(stream) {
+        stream.advance();
+        stream.advance();
+        if !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+            stream.advance();
+        }
+    }
+    let expression = expression.trim().to_string();
+    if expression.is_empty() {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: "Laplace= requires a transfer function of s".to_string(),
+        });
+    }
+    Ok(Some(expression))
+}
+
 fn collect_source_expression_argument(
     stream: &mut TokenStream,
     line_num: usize,
@@ -8256,6 +8302,18 @@ fn parse_voltage_controlled_source(
 
             let ctrl_pos = expect_node(stream, line_num)?;
             let ctrl_neg = expect_node(stream, line_num)?;
+            if let Some(rational_text) = take_ltspice_laplace(stream, line_num)? {
+                elements.extend(synthesize_laplace(
+                    &name,
+                    &node_pos,
+                    &node_neg,
+                    &format!("V({ctrl_pos},{ctrl_neg})"),
+                    &rational_text,
+                    is_voltage_output,
+                    line_num,
+                )?);
+                return Ok(VoltageControlledSourceParseKind::Ordinary);
+            }
             let mut gain_direction = 0.0.into();
             let (gain, gain_expr) = expect_deferrable_controlled_source_value(
                 stream,
