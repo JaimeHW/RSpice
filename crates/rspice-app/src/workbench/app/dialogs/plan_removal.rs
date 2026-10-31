@@ -31,7 +31,6 @@ use egui::Context;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, kv_row};
-use crate::workbench::RSpiceApp;
 
 /// What one staged plan removal is about to take out of the plan.
 ///
@@ -310,15 +309,16 @@ impl PlanRemovalTarget {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn process_plan_removal_review_dialog(&mut self, ctx: &Context) {
-        let review = &self.state.simulate.plan_removal_review;
-        let Some(target) = review.target else {
+impl PlanRemovalReview {
+    /// Ask whether to perform the staged removal, while one is staged: a
+    /// confirmation is recorded for the page that owns the plan to apply.
+    pub(crate) fn process(&mut self, ctx: &Context) {
+        let Some(target) = self.target else {
             return;
         };
 
-        let label = review.label.clone();
-        let consequences = review.consequences.clone();
+        let label = self.label.clone();
+        let consequences = self.consequences.clone();
 
         let choice = Dialog::new(target.title(), "Remove")
             .description(target.description())
@@ -364,17 +364,17 @@ impl RSpiceApp {
 
         match choice {
             DialogChoice::Primary => {
-                self.state.simulate.plan_removal_review.confirmed = true;
+                self.confirmed = true;
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.simulate.plan_removal_review.close();
+                self.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
 }
 
-impl RSpiceApp {
+impl PlanRemovalRefusal {
     /// State a removal the plan will not perform, on the surface the review
     /// would have used.
     ///
@@ -386,22 +386,17 @@ impl RSpiceApp {
     /// the blocking analyses by instance id. There is no primary action that
     /// destroys anything here: the only thing to do about a blocked removal is
     /// to go and look at what is blocking it.
-    pub(in crate::workbench) fn process_plan_removal_refusal_dialog(&mut self, ctx: &Context) {
-        let refusal = &self.state.simulate.plan_removal_refusal;
-        if refusal.analysis.is_none() {
+    pub(crate) fn process(&mut self, ctx: &Context) {
+        if self.analysis.is_none() {
             return;
         }
-        let label = refusal.label.clone();
-        let blockers: Vec<String> = refusal
-            .blockers
-            .iter()
-            .map(|(_, name)| name.clone())
-            .collect();
+        let label = self.label.clone();
+        let blockers: Vec<String> = self.blockers.iter().map(|(_, name)| name.clone()).collect();
         if blockers.is_empty() {
             // A refusal with nothing to name is not a refusal anyone can act
             // on. Nothing opens one, and standing one open would be a modal
             // whose only statement is that something unnamed is in the way.
-            self.state.simulate.plan_removal_refusal.close();
+            self.close();
             return;
         }
 
@@ -437,10 +432,10 @@ impl RSpiceApp {
             // applied — this module renders and records, and navigates nothing
             // itself.
             DialogChoice::Primary => {
-                self.state.simulate.plan_removal_refusal.reveal = true;
+                self.reveal = true;
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.simulate.plan_removal_refusal.close();
+                self.close();
             }
             DialogChoice::Secondary | DialogChoice::None => {}
         }

@@ -11,6 +11,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
 use crate::workbench::project::ProjectFeature;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::{RSpiceApp, SurfaceId};
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
@@ -473,13 +474,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("simulate.plan_removal_review"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_review.target.is_some()),
-        render: |app, ctx| app.process_plan_removal_review_dialog(ctx),
+        render: |app, ctx| {
+            SimulateFeature::render_plan_removal_review(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("simulate.plan_removal_refusal"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.simulate.plan_removal_refusal.analysis.is_some()),
-        render: |app, ctx| app.process_plan_removal_refusal_dialog(ctx),
+        render: |app, ctx| {
+            SimulateFeature::render_plan_removal_refusal(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     #[cfg(not(target_arch = "wasm32"))]
     DialogSpec {

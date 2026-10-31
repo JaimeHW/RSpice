@@ -391,8 +391,8 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "ProjectFeature::process_library_deletion_review_dialog",
         "project",
     ),
-    ("process_plan_removal_review_dialog", "simulate"),
-    ("process_plan_removal_refusal_dialog", "simulate"),
+    ("SimulateFeature::render_plan_removal_review", "simulate"),
+    ("SimulateFeature::render_plan_removal_refusal", "simulate"),
     (
         "app_state::services_access::process_autosave_restore_dialog",
         "services",

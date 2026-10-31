@@ -32,6 +32,26 @@ impl Feature for SimulateFeature {
     }
 }
 
+impl SimulateFeature {
+    /// Draw the review of a staged plan removal that orphans something,
+    /// while one is staged.
+    pub(in crate::workbench) fn render_plan_removal_review(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        cx.state.plan_removal_review.process(ctx);
+    }
+
+    /// Draw the statement of a plan removal the plan refused, while one
+    /// stands.
+    pub(in crate::workbench) fn render_plan_removal_refusal(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        cx.state.plan_removal_refusal.process(ctx);
+    }
+}
+
 /// The shell's commands the feature takes a part in: Reset Active View is
 /// the Simulate and Verify workspaces' own wherever either is in front.
 const ROUTED: &[RoutedCommand<SimulateFeature>] = &[RoutedCommand {
