@@ -7,8 +7,7 @@
 //! registry rather than a dead end.
 
 use super::*;
-use crate::workbench::RSpiceApp;
-use crate::workbench::features;
+use crate::workbench::models::tests::harness;
 
 fn fixture_package() -> ValidatedPdkTechnologyPackage {
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
@@ -146,17 +145,16 @@ fn layer_and_via_helpers_preserve_stream_and_connectivity_completeness() {
 
 #[test]
 fn installed_revision_exposes_unsigned_authoring_entrypoint() {
-    let mut app = RSpiceApp::test_instance();
+    let mut app = harness();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.model.pdk_config.publisher_trust_store = trust;
-    app.state
-        .model
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.model.pdk_config.publisher_trust_store = trust;
+    app.model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.model.pdk_config.publisher_trust_store,
+            &app.model.pdk_config.publisher_trust_store,
             &authority,
             "install authoring surface fixture",
         )
@@ -173,7 +171,7 @@ fn installed_revision_exposes_unsigned_authoring_entrypoint() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output
@@ -191,8 +189,8 @@ fn installed_revision_exposes_unsigned_authoring_entrypoint() {
 
 #[test]
 fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    let mut app = harness();
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -205,7 +203,7 @@ fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let nodes = output
@@ -235,8 +233,8 @@ fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
 /// status stacks under the title rather than over it.
 #[test]
 fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    let mut app = harness();
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -249,7 +247,7 @@ fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let nodes = output
@@ -288,8 +286,8 @@ fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
 
 #[test]
 fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    let mut app = harness();
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -311,7 +309,7 @@ fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output
@@ -331,17 +329,16 @@ fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
 
 #[test]
 fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
-    let mut app = RSpiceApp::test_instance();
+    let mut app = harness();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.model.pdk_config.publisher_trust_store = trust;
-    app.state
-        .model
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.model.pdk_config.publisher_trust_store = trust;
+    app.model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.model.pdk_config.publisher_trust_store,
+            &app.model.pdk_config.publisher_trust_store,
             &authority,
             "install display editor fixture",
         )
@@ -371,7 +368,7 @@ fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output
@@ -404,17 +401,16 @@ fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
 
 #[test]
 fn revision_comparison_fails_closed_at_phone_width_without_a_second_trusted_revision() {
-    let mut app = RSpiceApp::test_instance();
+    let mut app = harness();
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.model.pdk_config.publisher_trust_store = trust;
-    app.state
-        .model
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.model.pdk_config.publisher_trust_store = trust;
+    app.model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &bytes,
-            &app.state.model.pdk_config.publisher_trust_store,
+            &app.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison fixture",
         )
@@ -441,7 +437,7 @@ fn revision_comparison_fails_closed_at_phone_width_without_a_second_trusted_revi
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output
@@ -462,29 +458,27 @@ fn revision_comparison_fails_closed_at_phone_width_without_a_second_trusted_revi
 
 #[test]
 fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
-    let mut app = RSpiceApp::test_instance();
+    let mut app = harness();
     let (baseline, candidate, trust, authority) =
         crate::state::pdk_config::signed_technology_diff_test_fixture();
-    app.state.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
-    app.state.model.pdk_config.publisher_trust_store = trust;
-    app.state
-        .model
+    app.model.pdk_config = crate::state::pdk_config::PdkConfig::default();
+    app.model.pdk_config.publisher_trust_store = trust;
+    app.model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &baseline,
-            &app.state.model.pdk_config.publisher_trust_store,
+            &app.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison baseline",
         )
         .expect("install baseline");
-    app.state
-        .model
+    app.model
         .pdk_config
         .technology_registry
         .install_archive_bytes(
             &candidate,
-            &app.state.model.pdk_config.publisher_trust_store,
+            &app.model.pdk_config.publisher_trust_store,
             &authority,
             "install comparison candidate",
         )
@@ -513,7 +507,7 @@ fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output
@@ -558,8 +552,8 @@ fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
 
 #[test]
 fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.provision_test_project_technology_contract();
+    let mut app = harness();
+    app.model.provision_test_project_technology_contract();
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
@@ -573,23 +567,14 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
 
     apply_action(
         &ctx,
-        &mut features::cx(&mut app),
+        &mut app.cx(),
         &mut view,
         AdminAction::RunProjectCallback {
             callback_id: "derive-device".to_owned(),
         },
     );
-    assert_eq!(
-        app.state
-            .model
-            .workspace
-            .content
-            .pdk_callback_receipts()
-            .len(),
-        1
-    );
-    app.state
-        .model
+    assert_eq!(app.model.workspace.content.pdk_callback_receipts().len(), 1);
+    app.model
         .workspace
         .content
         .validate_pdk_callback_receipts()
@@ -607,7 +592,7 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let accessibility = output

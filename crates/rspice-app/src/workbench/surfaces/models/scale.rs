@@ -21,7 +21,9 @@ use crate::state::model_library::{
     ProjectModelRevisionDefinition,
 };
 use crate::state::{Component, ComponentType, Point};
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::models::ModelsFeature;
+use crate::workbench::models::tests::harness;
 
 /// Libraries a project at the top of its range binds at once.
 pub(super) const LIBRARIES: usize = 40;
@@ -42,32 +44,28 @@ pub(super) const SYMBOLS: usize = 600;
 pub(super) const MODELS: usize = LIBRARIES * MODELS_PER_LIBRARY;
 
 /// An application holding a model corpus at production scale.
-pub(super) fn large_corpus_app() -> RSpiceApp {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.library_manager.clear();
-    app.state.model.model_library_manager.clear();
+pub(super) fn large_corpus_app() -> FeatureHarness<ModelsFeature> {
+    let mut app = harness();
+    app.model.library_manager.clear();
+    app.model.model_library_manager.clear();
 
     for index in 0..PROJECT_LIBRARIES {
-        app.state
-            .model
+        app.model
             .model_library_manager
             .add_library(project_owned_library(index));
     }
     for index in PROJECT_LIBRARIES..LIBRARIES {
-        app.state
-            .model
+        app.model
             .model_library_manager
             .add_library(bound_pdk_library(index));
     }
 
     // The Symbols page registers one row per symbol cellview, which is its own
     // corpus: a technology library ships a symbol for every device it offers.
-    app.state
-        .model
+    app.model
         .library_manager
         .add_library(crate::state::Library::new("tech_symbols"));
     let symbol_library = app
-        .state
         .model
         .library_manager
         .get_library_mut("tech_symbols")
@@ -78,9 +76,8 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         symbol_library.add_cell(cell);
     }
 
-    app.state.model.workspace.ensure_active_buffer();
+    app.model.workspace.ensure_active_buffer();
     let mut schematic = app
-        .state
         .model
         .workspace
         .active_schematic()
@@ -104,7 +101,7 @@ pub(super) fn large_corpus_app() -> RSpiceApp {
         };
         schematic.document_mut_for_test().components.push(component);
     }
-    app.state.model.workspace.save_active_schematic(&schematic);
+    app.model.workspace.save_active_schematic(&schematic);
     app
 }
 
@@ -313,11 +310,15 @@ fn bound_pdk_library(index: usize) -> ModelLibrary {
 }
 
 /// Render one page of the workspace and report what the frame produced.
-pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec2) -> FrameReport {
+pub(super) fn render_page(
+    app: &mut FeatureHarness<ModelsFeature>,
+    page: ModelsPage,
+    size: egui::Vec2,
+) -> FrameReport {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
-    app.state.models.models_page = page;
+    app.state.models_page = page;
     let input = || egui::RawInput {
         screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
         ..Default::default()
@@ -341,9 +342,7 @@ pub(super) fn render_page(app: &mut RSpiceApp, page: ModelsPage, size: egui::Vec
         output = Some(ctx.run_ui(input(), |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| {
-                    super::manager::show(ui, &mut crate::workbench::features::cx(app))
-                });
+                .show(ctx, |ui| super::manager::show(ui, &mut app.cx()));
         }));
         authentications =
             crate::workbench::documents::model_editor::CLOSURE_AUTHENTICATIONS.with(|c| c.get());
@@ -396,10 +395,7 @@ const WIDGET_CEILING: usize = 500;
 #[test]
 fn every_page_builds_a_screenful_not_a_corpus() {
     let mut app = large_corpus_app();
-    assert_eq!(
-        app.state.model.model_library_manager.total_model_count(),
-        MODELS
-    );
+    assert_eq!(app.model.model_library_manager.total_model_count(), MODELS);
     for page in ModelsPage::ALL {
         let report = render_page(&mut app, page, egui::vec2(1600.0, 1000.0));
         assert!(
@@ -537,8 +533,7 @@ fn report_page_cost_at_production_scale() {
     // Reported separately because it is the one derivation a page cannot
     // narrow to what is on screen: the metric strip totals every model.
     let summaries = std::time::Instant::now();
-    let count =
-        super::qualification_summaries(&app.state.model, &app.state.models.model_editor).len();
+    let count = super::qualification_summaries(&app.model, &app.state.model_editor).len();
     writeln!(
         report_output,
         "qualification_summaries: {count} summaries in {:?}",

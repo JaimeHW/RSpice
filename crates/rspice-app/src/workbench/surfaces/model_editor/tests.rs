@@ -6,18 +6,17 @@
 //! surface states is painted by the element that owns it.
 
 use super::*;
-use crate::workbench::RSpiceApp;
-use crate::workbench::features;
+use crate::workbench::framework::feature::harness::FeatureHarness;
+use crate::workbench::models::tests::harness;
 
 /// A project-owned candidate with enough declared parameters that the counts
 /// the rail and the section headers state are not all zero.
 #[cfg(not(target_arch = "wasm32"))]
-fn app_with_open_candidate() -> RSpiceApp {
+fn app_with_open_candidate() -> FeatureHarness<ModelsFeature> {
     use crate::state::model_library::ProjectModelDefinition;
 
-    let mut app = RSpiceApp::test_instance();
-    app.state
-        .model
+    let mut app = harness();
+    app.model
         .model_library_manager
         .create_project_model(
             "owned-models",
@@ -34,12 +33,11 @@ fn app_with_open_candidate() -> RSpiceApp {
             },
         )
         .expect("create project model");
-    let revision = app.state.model.workspace.content.project.revision();
+    let revision = app.model.workspace.content.project.revision();
     app.state
-        .models
         .model_editor
         .open(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_owned",
             revision,
@@ -51,7 +49,10 @@ fn app_with_open_candidate() -> RSpiceApp {
 /// Every string the surface paints, with the colour it was laid out in, at the
 /// workspace width the surface is designed against.
 #[cfg(not(target_arch = "wasm32"))]
-fn painted_surface(app: &mut RSpiceApp, section: ModelEditorSection) -> Vec<(String, Color32)> {
+fn painted_surface(
+    app: &mut FeatureHarness<ModelsFeature>,
+    section: ModelEditorSection,
+) -> Vec<(String, Color32)> {
     fn walk(shape: &egui::epaint::Shape, into: &mut Vec<(String, Color32)>) {
         match shape {
             egui::epaint::Shape::Text(painted) => into.push((
@@ -72,7 +73,7 @@ fn painted_surface(app: &mut RSpiceApp, section: ModelEditorSection) -> Vec<(Str
         }
     }
 
-    app.state.models.model_editor.active_section = section;
+    app.state.model_editor.active_section = section;
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let size = Vec2::new(1_180.0, 900.0);
@@ -84,7 +85,7 @@ fn painted_surface(app: &mut RSpiceApp, section: ModelEditorSection) -> Vec<(Str
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| show(ui, &mut features::cx(app)));
+                .show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let mut painted = Vec::new();
@@ -312,9 +313,9 @@ fn retained_platform_runs_project_before_cross_platform_evidence_exists() {
 
 #[test]
 fn cancelling_qualification_authoring_discards_every_partial_field() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.models.model_editor.begin_qualification_suite();
-    let fields = &mut app.state.models.model_editor.qualification_authoring;
+    let mut app = harness();
+    app.state.model_editor.begin_qualification_suite();
+    let fields = &mut app.state.model_editor.qualification_authoring;
     fields.suite_id = "partial-suite".to_owned();
     fields.vector_id = "partial-vector".to_owned();
     fields.executable_input = "V1 in 0 1".to_owned();
@@ -323,9 +324,9 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
     fields.sample = QualificationAuthoringSample::SweepPoint;
     fields.error = Some("partial error".to_owned());
 
-    cancel_qualification_authoring(&mut app.state.models.model_editor);
+    cancel_qualification_authoring(&mut app.state.model_editor);
 
-    let editor = &app.state.models.model_editor;
+    let editor = &app.state.model_editor;
     assert!(!editor.qualification_authoring_open);
     assert!(editor.qualification_authoring.suite_id.is_empty());
     assert!(editor.qualification_authoring.vector_id.is_empty());
@@ -351,30 +352,22 @@ fn cancelling_qualification_authoring_discards_every_partial_field() {
 #[test]
 fn the_navigation_rail_projects_only_section_owned_counts() {
     let mut app = app_with_open_candidate();
-    let records = persisted_records(&features::cx(&mut app));
+    let records = persisted_records(&app.cx());
     let metadata = records.metadata.as_ref().expect("persisted schema");
     let parameters = metadata.parameters.len();
     let sections = metadata.sections.len();
-    let qualification = qualification_totals(&features::cx(&mut app), &records);
+    let qualification = qualification_totals(&app.cx(), &records);
 
     assert_eq!(
-        navigation_meta(
-            &features::cx(&mut app),
-            &records,
-            ModelEditorSection::Parameters
-        ),
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Parameters),
         Some(parameters.to_string())
     );
     assert_eq!(
-        navigation_meta(
-            &features::cx(&mut app),
-            &records,
-            ModelEditorSection::Sections
-        ),
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Sections),
         Some(sections.to_string())
     );
     assert_eq!(
-        navigation_meta(&features::cx(&mut app), &records, ModelEditorSection::Tests),
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Tests),
         Some(format!(
             "{}/{}",
             qualification.desktop_passed, qualification.total
@@ -385,10 +378,7 @@ fn the_navigation_rail_projects_only_section_owned_counts() {
         ModelEditorSection::Temperature,
         ModelEditorSection::Release,
     ] {
-        assert_eq!(
-            navigation_meta(&features::cx(&mut app), &records, section),
-            None
-        );
+        assert_eq!(navigation_meta(&app.cx(), &records, section), None);
     }
 }
 
@@ -400,18 +390,18 @@ fn the_navigation_rail_projects_only_section_owned_counts() {
 #[test]
 fn a_rejected_schema_is_announced_once_by_the_header() {
     let mut app = app_with_open_candidate();
-    let mut records = persisted_records(&features::cx(&mut app));
+    let mut records = persisted_records(&app.cx());
     records.metadata_error = Some("parameters[0]: out of declared bounds".to_owned());
 
     assert_eq!(
-        candidate_status(&features::cx(&mut app), &records),
+        candidate_status(&app.cx(), &records),
         Some((
             "metadata invalid · parameters[0]: out of declared bounds".to_owned(),
             Some(Problem::Failure)
         ))
     );
     for section in [ModelEditorSection::Parameters, ModelEditorSection::Sections] {
-        let count = navigation_meta(&features::cx(&mut app), &records, section).expect("count");
+        let count = navigation_meta(&app.cx(), &records, section).expect("count");
         assert!(count.chars().all(|c| c.is_ascii_digit()), "{count}");
     }
 }
@@ -423,24 +413,23 @@ fn a_rejected_schema_is_announced_once_by_the_header() {
 #[test]
 fn the_header_announces_no_status_for_a_validated_candidate() {
     let mut app = app_with_open_candidate();
-    let records = persisted_records(&features::cx(&mut app));
+    let records = persisted_records(&app.cx());
     assert_eq!(
-        candidate_status(&features::cx(&mut app), &records),
+        candidate_status(&app.cx(), &records),
         Some(("Not validated".to_owned(), None))
     );
 
-    let revision = app.state.model.workspace.content.project.revision();
+    let revision = app.model.workspace.content.project.revision();
     let evidence = app
         .state
-        .models
         .model_editor
         .draft
         .as_ref()
         .expect("open candidate")
-        .validate(&app.state.model.model_library_manager, revision)
+        .validate(&app.model.model_library_manager, revision)
         .expect("the fixture candidate validates");
-    app.state.models.model_editor.validation = Some(evidence);
-    assert_eq!(candidate_status(&features::cx(&mut app), &records), None);
+    app.state.model_editor.validation = Some(evidence);
+    assert_eq!(candidate_status(&app.cx(), &records), None);
 }
 
 /// The parameter source split and runtime parity are section aggregates: no
@@ -449,17 +438,13 @@ fn the_header_announces_no_status_for_a_validated_candidate() {
 #[test]
 fn section_headers_own_the_aggregates_no_row_can_carry() {
     let mut app = app_with_open_candidate();
-    let records = persisted_records(&features::cx(&mut app));
+    let records = persisted_records(&app.cx());
     let metadata = records.metadata.as_ref().expect("persisted schema");
     let (declared, inherited, overridden) = parameter_source_split(metadata);
-    let qualification = qualification_totals(&features::cx(&mut app), &records);
+    let qualification = qualification_totals(&app.cx(), &records);
 
     assert_eq!(
-        section_header_fact(
-            &features::cx(&mut app),
-            &records,
-            ModelEditorSection::Parameters
-        ),
+        section_header_fact(&app.cx(), &records, ModelEditorSection::Parameters),
         Some(format!(
             "{declared} declared · {inherited} inherited · {overridden} override"
         ))
@@ -467,7 +452,7 @@ fn section_headers_own_the_aggregates_no_row_can_carry() {
     // The parity ratio, and not a word about what is unresolved: that is the
     // Tests table's own Status column, one row at a time.
     assert_eq!(
-        section_header_fact(&features::cx(&mut app), &records, ModelEditorSection::Tests),
+        section_header_fact(&app.cx(), &records, ModelEditorSection::Tests),
         Some(format!(
             "{} / {} WebAssembly",
             qualification.wasm_passed, qualification.total
@@ -481,10 +466,7 @@ fn section_headers_own_the_aggregates_no_row_can_carry() {
         ModelEditorSection::Temperature,
         ModelEditorSection::Release,
     ] {
-        assert_eq!(
-            section_header_fact(&features::cx(&mut app), &records, section),
-            None
-        );
+        assert_eq!(section_header_fact(&app.cx(), &records, section), None);
     }
 }
 
@@ -495,27 +477,18 @@ fn section_headers_own_the_aggregates_no_row_can_carry() {
 #[test]
 fn every_owned_fact_is_painted_by_its_owner() {
     let mut app = app_with_open_candidate();
-    let records = persisted_records(&features::cx(&mut app));
+    let records = persisted_records(&app.cx());
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let t = Tokens::get(&ctx);
 
-    let parameters = navigation_meta(
-        &features::cx(&mut app),
-        &records,
-        ModelEditorSection::Parameters,
-    )
-    .expect("count");
-    let tests = navigation_meta(&features::cx(&mut app), &records, ModelEditorSection::Tests)
-        .expect("ratio");
-    let split = section_header_fact(
-        &features::cx(&mut app),
-        &records,
-        ModelEditorSection::Parameters,
-    )
-    .expect("split");
-    let parity = section_header_fact(&features::cx(&mut app), &records, ModelEditorSection::Tests)
-        .expect("parity");
+    let parameters =
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Parameters).expect("count");
+    let tests = navigation_meta(&app.cx(), &records, ModelEditorSection::Tests).expect("ratio");
+    let split =
+        section_header_fact(&app.cx(), &records, ModelEditorSection::Parameters).expect("split");
+    let parity =
+        section_header_fact(&app.cx(), &records, ModelEditorSection::Tests).expect("parity");
 
     let parameters_page = painted_surface(&mut app, ModelEditorSection::Parameters);
     assert!(
@@ -574,7 +547,7 @@ fn the_workspace_body_tiles_the_surface_under_the_specialist_header() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
+                .show(ctx, |ui| show(ui, &mut app.cx()));
         },
     );
     let fill = Tokens::get(&ctx).color.bg_panel;

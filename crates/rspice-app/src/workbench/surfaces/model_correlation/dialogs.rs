@@ -735,8 +735,8 @@ pub(super) fn describe_region(ui: &Ui, response: &egui::Response, label: &str, d
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::workbench::RSpiceApp;
-    use crate::workbench::features;
+    use crate::workbench::framework::feature::harness::FeatureHarness;
+    use crate::workbench::models::tests::harness;
     use rspice_model_library::correlation::{
         CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
     };
@@ -916,7 +916,7 @@ mod tests {
     /// model that the surface can resolve, so the ledger is exercised against
     /// numbers rather than against the empty state.
     #[cfg(not(target_arch = "wasm32"))]
-    fn correlated_app() -> RSpiceApp {
+    fn correlated_app() -> FeatureHarness<ModelsFeature> {
         use crate::product::ContentDigest;
         use crate::state::model_library::{
             CorrelationDatasetRevision, CorrelationMetricDefinition,
@@ -932,8 +932,8 @@ s1,gain,0.05,dB,0.04,1,10,27\n\
 s2,gain,-0.95,dB,0.04,1,100,27\n\
 s3,gain,-1.9,dB,0.04,1,1000,27\n";
 
-        let mut app = RSpiceApp::test_instance();
-        app.state.model.model_library_manager = ModelLibraryManager::new();
+        let mut app = harness();
+        app.model.model_library_manager = ModelLibraryManager::new();
         let definition = ProjectModelDefinition {
             name: "nch_corr".to_owned(),
             spice_type: "NMOS".to_owned(),
@@ -941,13 +941,12 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0)]),
             string_parameters: BTreeMap::new(),
         };
-        app.state
-            .model
+        app.model
             .model_library_manager
             .create_project_model("owned-models", &definition)
             .expect("project model");
         let resolved = resolve_project_model_for_editor(
-            &app.state.model.model_library_manager,
+            &app.model.model_library_manager,
             "owned-models",
             "nch_corr",
         )
@@ -1051,8 +1050,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
         .expect("correlation suite");
         let correlation =
             ModelCorrelationState::try_new(vec![suite], Vec::new()).expect("correlation state");
-        app.state
-            .model
+        app.model
             .model_library_manager
             .replace_project_model_correlation(
                 "owned-models",
@@ -1064,14 +1062,14 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
                 &correlation,
             )
             .expect("retained correlation");
-        app.state.model.model_library_manager.selected_library = Some("owned-models".to_owned());
-        app.state.models.selected_model = Some("nch_corr".to_owned());
+        app.model.model_library_manager.selected_library = Some("owned-models".to_owned());
+        app.state.selected_model = Some("nch_corr".to_owned());
         app
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn correlation_nodes(
-        app: &mut RSpiceApp,
+        app: &mut FeatureHarness<ModelsFeature>,
         size: Vec2,
     ) -> Vec<(egui::accesskit::NodeId, egui::accesskit::Node)> {
         let ctx = egui::Context::default();
@@ -1085,7 +1083,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ui, &mut features::cx(app)));
+                    .show(ctx, |ui| show(ui, &mut app.cx()));
             },
         );
         output
@@ -1106,7 +1104,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     fn the_ledger_publishes_every_measure_with_its_value_and_caption() {
         let mut app = correlated_app();
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
-        let projection = CorrelationProjection::build(&features::cx(&mut app));
+        let projection = CorrelationProjection::build(&app.cx());
         for measure in projection.measures() {
             let expected = format!("{}: {}. {}", measure.label, measure.value, measure.detail);
             // egui gives `WidgetType::Label` AccessKit's Label role, whose
@@ -1132,7 +1130,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     fn the_state_verdict_is_stated_once_and_on_the_ledger() {
         let mut app = correlated_app();
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
-        let projection = CorrelationProjection::build(&features::cx(&mut app));
+        let projection = CorrelationProjection::build(&app.cx());
         let (state, _) = projection.state_label();
         let owners = nodes
             .iter()
@@ -1158,7 +1156,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     #[test]
     fn the_datasets_panel_owns_the_retained_dataset_count() {
         let mut app = correlated_app();
-        app.state.models.model_correlation.section = ModelCorrelationSection::Datasets;
+        app.state.model_correlation.section = ModelCorrelationSection::Datasets;
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
         assert!(
             nodes
@@ -1167,7 +1165,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             "the datasets panel head never stated its count"
         );
         assert!(
-            CorrelationProjection::build(&features::cx(&mut app))
+            CorrelationProjection::build(&app.cx())
                 .measures()
                 .iter()
                 .all(|measure| measure.label != "Datasets"),

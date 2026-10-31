@@ -14,9 +14,8 @@ use crate::state::ModelsPage;
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelSourceEvidenceBinding,
 };
-use crate::workbench::RSpiceApp;
-use crate::workbench::features;
 use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::models::tests::harness;
 use crate::workbench::state::ModelsCatalogScope;
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
@@ -80,13 +79,13 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
 ];
 
 fn models_canvas(page: ModelsPage, scope: ModelsCatalogScope) -> crate::ui::raster::Canvas {
-    let mut app = RSpiceApp::test_instance();
-    app.state.models.models_page = page;
-    app.state.models.models_view.catalog_scope = scope;
+    let mut app = harness();
+    app.state.models_page = page;
+    app.state.models_view.catalog_scope = scope;
     crate::ui::raster::render(MODELS_RASTER_SIZE, |ui, background| {
         egui::CentralPanel::default()
             .frame(egui::Frame::NONE.fill(background))
-            .show(ui, |ui| manager::show(ui, &mut features::cx(&mut app)));
+            .show(ui, |ui| manager::show(ui, &mut app.cx()));
     })
 }
 
@@ -189,10 +188,10 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
             ctx.enable_accesskit();
-            let mut app = RSpiceApp::test_instance();
-            app.state.models.models_page = page;
-            app.state.model.library_manager.clear();
-            app.state.model.model_library_manager.clear();
+            let mut app = harness();
+            app.state.models_page = page;
+            app.model.library_manager.clear();
+            app.model.model_library_manager.clear();
 
             let output = ctx.run_ui(
                 egui::RawInput {
@@ -205,7 +204,7 @@ fn complete_models_surface_keeps_action_pages_inside_the_title_band() {
                 |ctx| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
+                        .show(ctx, |ui| manager::show(ui, &mut app.cx()));
                 },
             );
 
@@ -340,8 +339,8 @@ fn qualification_domain_projection_preserves_distinct_tolerance_contracts() {
 
 #[test]
 fn project_model_without_suites_is_truthfully_unqualified() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    let mut app = harness();
+    app.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
     let definition = crate::state::model_library::ProjectModelDefinition {
         name: "nch_owned".to_owned(),
         spice_type: "NMOS".to_owned(),
@@ -352,13 +351,12 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         ]),
         string_parameters: std::collections::BTreeMap::new(),
     };
-    app.state
-        .model
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .expect("create project model");
 
-    let summary = qualification_summaries(&app.state.model, &app.state.models.model_editor)
+    let summary = qualification_summaries(&app.model, &app.state.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("qualification summary");
@@ -370,15 +368,14 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     assert_eq!(summary.passing_vectors, 0);
     assert!(summary.evidence_digest.is_none());
 
-    app.state
-        .model
+    app.model
         .model_library_manager
         .select_library(&summary.library)
         .expect("the fixture library is loaded");
-    app.state.models.selected_model = Some(summary.model.clone());
+    app.state.selected_model = Some(summary.model.clone());
     assert_eq!(
         qualification_action_block_reason(
-            &features::cx(&mut app),
+            &app.cx(),
             Some(&summary),
             QualificationPageAction::RunSuite
         )
@@ -387,27 +384,21 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     );
     assert_eq!(
         qualification_action_block_reason(
-            &features::cx(&mut app),
+            &app.cx(),
             Some(&summary),
             QualificationPageAction::ReviewVectors
         ),
         None
     );
-    execute_qualification_action(
-        &mut features::cx(&mut app),
-        QualificationPageAction::ReviewVectors,
-    );
+    execute_qualification_action(&mut app.cx(), QualificationPageAction::ReviewVectors);
     assert_eq!(
-        app.state.models.model_editor.active_section,
+        app.state.model_editor.active_section,
         ModelEditorSection::Tests
     );
-    assert!(app.state.models.model_editor.qualification_plan_open);
-    assert_eq!(
-        app.state.workbench.current_route().surface_id(),
-        SurfaceId::ModelEditor
-    );
+    assert!(app.state.model_editor.qualification_plan_open);
+    assert_eq!(app.wb.current_route().surface_id(), SurfaceId::ModelEditor);
 
-    let editor = &mut app.state.models.model_editor;
+    let editor = &mut app.state.model_editor;
     editor.begin_qualification_suite();
     let authoring = &mut editor.qualification_authoring;
     authoring.suite_id = "dc-op".to_owned();
@@ -427,7 +418,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
         editor.qualification_authoring.error
     );
 
-    let working_summary = qualification_summaries(&app.state.model, &app.state.models.model_editor)
+    let working_summary = qualification_summaries(&app.model, &app.state.model_editor)
         .into_iter()
         .find(|summary| summary.model == "nch_owned")
         .expect("working qualification summary");
@@ -440,7 +431,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
     );
     assert_eq!(
         qualification_action_block_reason(
-            &features::cx(&mut app),
+            &app.cx(),
             Some(&working_summary),
             QualificationPageAction::RunSuite
         ),
@@ -450,7 +441,7 @@ fn project_model_without_suites_is_truthfully_unqualified() {
 
 #[test]
 fn engine_owned_model_is_exempt_and_never_receives_synthetic_qualification_evidence() {
-    let app = RSpiceApp::test_instance();
+    let app = harness();
     let library = ModelLibrary::new("built-in");
     let model = DeviceModel::new(
         "builtin_resistor",
@@ -458,12 +449,8 @@ fn engine_owned_model_is_exempt_and_never_receives_synthetic_qualification_evide
     );
 
     let closure = model_editor::verify_project_library_closure(&library, &library.name);
-    let summary = qualification_model_summary(
-        &app.state.models.model_editor,
-        &library,
-        &model,
-        closure.as_ref(),
-    );
+    let summary =
+        qualification_model_summary(&app.state.model_editor, &library, &model, closure.as_ref());
 
     // No evidence is invented for it — and no failure is either: the source
     // resolution that cannot succeed for a compiled-in card is never run, so
@@ -481,18 +468,14 @@ fn engine_owned_model_is_exempt_and_never_receives_synthetic_qualification_evide
 /// defect, and softening it would be the release gate failing open.
 #[test]
 fn a_library_that_should_be_source_owned_and_is_not_stays_blocked() {
-    let app = RSpiceApp::test_instance();
+    let app = harness();
     let mut library = ModelLibrary::new("vendor-pdk");
     library.source_authority = crate::state::model_library::ModelSourceAuthority::External;
     let model = DeviceModel::new("nch", crate::state::model_library::ModelType::Nmos);
 
     let closure = model_editor::verify_project_library_closure(&library, &library.name);
-    let summary = qualification_model_summary(
-        &app.state.models.model_editor,
-        &library,
-        &model,
-        closure.as_ref(),
-    );
+    let summary =
+        qualification_model_summary(&app.state.model_editor, &library, &model, closure.as_ref());
 
     assert!(summary.source_error.is_some());
     assert_eq!(summary.gate, QualificationGate::Blocked);
@@ -507,8 +490,8 @@ fn a_library_that_should_be_source_owned_and_is_not_stays_blocked() {
 /// release-gate failures, which is RSpice shipping red against its own library.
 #[test]
 fn a_fresh_project_reports_no_blocked_release_gates() {
-    let mut app = RSpiceApp::test_instance();
-    let summaries = qualification_summaries(&app.state.model, &app.state.models.model_editor);
+    let mut app = harness();
+    let summaries = qualification_summaries(&app.model, &app.state.model_editor);
     assert!(
         !summaries.is_empty(),
         "a fresh project loads the compiled-in foundation library"
@@ -538,7 +521,7 @@ fn a_fresh_project_reports_no_blocked_release_gates() {
     // A reading surface sees the same rung, and never "the gate could not be
     // read" — which is the fact that would make the Simulation Studio refuse a
     // release on evidence nobody can open.
-    let facts = app.state.models.model_gate_facts(&app.state.model);
+    let facts = app.state.model_gate_facts(&app.model);
     assert_eq!(facts.len(), summaries.len());
     assert!(
         facts
@@ -564,9 +547,8 @@ fn a_fresh_project_reports_no_blocked_release_gates() {
         QualificationPageAction::ReviewReleaseBinding,
         QualificationPageAction::CompareRelease,
     ] {
-        let reason =
-            qualification_action_block_reason(&features::cx(&mut app), Some(selected), action)
-                .expect("an engine-owned selection blocks every qualification workflow");
+        let reason = qualification_action_block_reason(&app.cx(), Some(selected), action)
+            .expect("an engine-owned selection blocks every qualification workflow");
         assert!(
             reason.contains("exempt from the source-owned release gate"),
             "{action:?} blocked for the wrong reason: {reason}"
@@ -580,8 +562,8 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         CorrelationDatasetClass, CorrelationDatasetRevision, CorrelationSuite,
     };
 
-    let mut app = RSpiceApp::test_instance();
-    app.state.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
+    let mut app = harness();
+    app.model.model_library_manager = crate::state::model_library::ModelLibraryManager::new();
     let definition = crate::state::model_library::ProjectModelDefinition {
         name: "nch_correlated".to_owned(),
         spice_type: "NMOS".to_owned(),
@@ -589,13 +571,12 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
         numeric_parameters: BTreeMap::from([("level".to_owned(), 1.0), ("vth0".to_owned(), 0.48)]),
         string_parameters: BTreeMap::new(),
     };
-    app.state
-        .model
+    app.model
         .model_library_manager
         .create_project_model("owned-models", &definition)
         .unwrap();
     let resolved = model_editor::resolve_project_model_for_editor(
-        &app.state.model.model_library_manager,
+        &app.model.model_library_manager,
         "owned-models",
         "nch_correlated",
     )
@@ -635,19 +616,14 @@ fn configured_correlation_requires_current_approved_evidence_for_qualification()
     .unwrap();
     let correlation = ModelCorrelationState::try_new(vec![suite], Vec::new()).unwrap();
     let library = app
-        .state
         .model
         .model_library_manager
         .get_library("owned-models")
         .unwrap();
     let model = library.models.get("nch_correlated").unwrap();
     let closure = model_editor::verify_project_library_closure(library, &library.name);
-    let mut summary = qualification_model_summary(
-        &app.state.models.model_editor,
-        library,
-        model,
-        closure.as_ref(),
-    );
+    let mut summary =
+        qualification_model_summary(&app.state.model_editor, library, model, closure.as_ref());
     summary.gate = QualificationGate::Qualified;
 
     apply_correlation_qualification_contract(&mut summary, Some(&correlation), Some(&source));
@@ -697,9 +673,9 @@ fn no_models_page_ends_in_unpainted_canvas() {
         for scope in SCOPES {
             let ctx = egui::Context::default();
             crate::ui::Theme::default().apply(&ctx);
-            let mut app = RSpiceApp::test_instance();
-            app.state.models.models_page = page;
-            app.state.models.models_view.catalog_scope = scope;
+            let mut app = harness();
+            app.state.models_page = page;
+            app.state.models_view.catalog_scope = scope;
             let size = egui::vec2(1_180.0, 900.0);
             let output = ctx.run_ui(
                 egui::RawInput {
@@ -709,7 +685,7 @@ fn no_models_page_ends_in_unpainted_canvas() {
                 |ctx| {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
-                        .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
+                        .show(ctx, |ui| manager::show(ui, &mut app.cx()));
                 },
             );
             let panel = crate::ui::tokens::Tokens::get(&ctx).color.bg_panel;
@@ -754,8 +730,8 @@ fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
 
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
-    let mut app = RSpiceApp::test_instance();
-    app.state.models.models_page = ModelsPage::Models;
+    let mut app = harness();
+    app.state.models_page = ModelsPage::Models;
     let size = egui::vec2(1_180.0, 900.0);
     let output = ctx.run_ui(
         egui::RawInput {
@@ -765,7 +741,7 @@ fn the_model_detail_panes_are_one_row_of_equal_columns_filling_the_document() {
         |ctx| {
             egui::CentralPanel::default()
                 .frame(egui::Frame::NONE)
-                .show(ctx, |ui| manager::show(ui, &mut features::cx(&mut app)));
+                .show(ctx, |ui| manager::show(ui, &mut app.cx()));
         },
     );
 
