@@ -20,6 +20,72 @@ use rspice_vocabulary::product::ResultDocumentId;
 
 use crate::workbench::state::WorkbenchSession;
 
+/// A model's release verdict.
+///
+/// Readable across the surfaces because it is a fact about the project, not
+/// about the qualification page: a simulation plan cannot honestly sign off on a model the
+/// gate has not cleared, and the alternative — a second verdict enum on the
+/// reading side — is how two surfaces come to disagree about one model.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum QualificationGate {
+    Qualified,
+    Review,
+    Unqualified,
+    Blocked,
+    /// The model is one of the simulator's own compiled-in equation defaults,
+    /// and the source-owned gate is not its gate.
+    ///
+    /// Off the ramp above rather than a shade of [`Self::Blocked`]: a built-in
+    /// card has no project source to bind evidence to, so "not source-owned"
+    /// is its design and not a finding against it. Deriving it from a failed
+    /// source resolution is what once had a project nobody had touched yet
+    /// reporting every foundation family as a red release-gate failure.
+    EngineOwned,
+}
+
+impl QualificationGate {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Qualified => "qualified",
+            Self::Review => "review",
+            Self::Unqualified => "unqualified",
+            Self::Blocked => "blocked",
+            Self::EngineOwned => "engine-owned",
+        }
+    }
+
+    /// Whether the source-owned release gate governs this model at all.
+    ///
+    /// The counts that read as verdicts — qualified of how many, parity of how
+    /// many — are ratios over the governed population, and totalling the
+    /// exempt models into their denominators is the same false alarm the
+    /// per-model badge used to carry.
+    pub const fn is_gate_subject(self) -> bool {
+        !matches!(self, Self::EngineOwned)
+    }
+}
+
+/// One model's release gate, as another surface may read it.
+///
+/// The qualification page keeps its own working record of each model — the
+/// per-domain vector counts, the desktop/wasm parity split, the evidence
+/// digests — and it moves whenever that page does. This is the narrow
+/// projection of it, so a field added there does not silently become another
+/// surface's dependency.
+#[derive(Debug, Clone)]
+pub struct ModelGateFact {
+    pub library: String,
+    pub model: String,
+    pub vectors: usize,
+    pub evidenced_vectors: usize,
+    pub passing_vectors: usize,
+    pub open_dispositions: usize,
+    /// The gate could not be read for this model at all, so its counts say
+    /// nothing either way and a reader must not total them as passing.
+    pub unreadable: bool,
+    pub gate: QualificationGate,
+}
+
 /// The retained dataset the results workspace shows opened directly, as the
 /// reader sees it.
 #[derive(Clone, Debug, PartialEq, Eq)]

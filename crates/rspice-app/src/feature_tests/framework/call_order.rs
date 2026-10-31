@@ -831,7 +831,7 @@ const SYNC_WINDOW_TITLE: &[Step] = &[
     ),
     (
         "5.33.2",
-        &["self.state.models.has_unsaved_authoring_changes()"],
+        &["ModelsPort::has_unsaved_authoring_changes(&*self.state.models)"],
     ),
     (
         "5.33.3",

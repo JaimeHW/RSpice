@@ -15,8 +15,9 @@ use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
 use crate::workbench::RSpiceApp;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::framework::ports::{ModelGateFact, QualificationGate};
 
-use super::super::models::{ModelGateFact, QualificationGate, model_gate_facts};
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
     ledger_head, ledger_row, ledger_row_cells, paint_text, paint_toned_text, rule_row,
@@ -748,7 +749,10 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .map(|binding| binding.library_name.to_ascii_lowercase())
         .collect::<std::collections::HashSet<_>>();
-    let summaries = model_gate_facts(app)
+    let summaries = app
+        .state
+        .models
+        .model_gate_facts(&app.state.model)
         .into_iter()
         .filter(|fact| bound.contains(&fact.library.to_ascii_lowercase()))
         .collect::<Vec<_>>();
@@ -1296,7 +1300,7 @@ mod tests {
             editor.qualification_authoring.error
         );
 
-        let summaries = model_gate_facts(&app);
+        let summaries = app.state.models.model_gate_facts(&app.state.model);
         let reading = gate_reading(summaries.iter().map(ModelGate::from));
 
         assert!(

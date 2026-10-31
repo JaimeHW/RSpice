@@ -14,7 +14,9 @@ use crate::state::ModelsPage;
 use crate::state::model_library::{
     DeviceModel, ModelCorrelationState, ModelLibrary, ModelSourceEvidenceBinding,
 };
+use crate::workbench::RSpiceApp;
 use crate::workbench::features;
+use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::state::ModelsCatalogScope;
 
 const MODELS_RASTER_SIZE: egui::Vec2 = egui::Vec2::new(1_180.0, 900.0);
@@ -536,7 +538,7 @@ fn a_fresh_project_reports_no_blocked_release_gates() {
     // A reading surface sees the same rung, and never "the gate could not be
     // read" — which is the fact that would make the Simulation Studio refuse a
     // release on evidence nobody can open.
-    let facts = model_gate_facts(&app);
+    let facts = app.state.models.model_gate_facts(&app.state.model);
     assert_eq!(facts.len(), summaries.len());
     assert!(
         facts

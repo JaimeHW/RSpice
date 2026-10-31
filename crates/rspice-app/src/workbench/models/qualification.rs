@@ -15,51 +15,7 @@ use crate::state::model_library::{
     QualificationVectorDispositionCause, short_digest,
 };
 use crate::workbench::documents::model_editor::{self, ModelEditorState};
-
-/// A model's release verdict.
-///
-/// Readable across the surfaces because it is a fact about the project, not
-/// about this page: a simulation plan cannot honestly sign off on a model the
-/// gate has not cleared, and the alternative — a second verdict enum on the
-/// reading side — is how two surfaces come to disagree about one model.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workbench) enum QualificationGate {
-    Qualified,
-    Review,
-    Unqualified,
-    Blocked,
-    /// The model is one of the simulator's own compiled-in equation defaults,
-    /// and the source-owned gate is not its gate.
-    ///
-    /// Off the ramp above rather than a shade of [`Self::Blocked`]: a built-in
-    /// card has no project source to bind evidence to, so "not source-owned"
-    /// is its design and not a finding against it. Deriving it from a failed
-    /// source resolution is what once had a project nobody had touched yet
-    /// reporting every foundation family as a red release-gate failure.
-    EngineOwned,
-}
-
-impl QualificationGate {
-    pub(in crate::workbench) const fn label(self) -> &'static str {
-        match self {
-            Self::Qualified => "qualified",
-            Self::Review => "review",
-            Self::Unqualified => "unqualified",
-            Self::Blocked => "blocked",
-            Self::EngineOwned => "engine-owned",
-        }
-    }
-
-    /// Whether the source-owned release gate governs this model at all.
-    ///
-    /// The counts that read as verdicts — qualified of how many, parity of how
-    /// many — are ratios over the governed population, and totalling the
-    /// exempt models into their denominators is the same false alarm the
-    /// per-model badge used to carry.
-    pub(in crate::workbench) const fn is_gate_subject(self) -> bool {
-        !matches!(self, Self::EngineOwned)
-    }
-}
+use crate::workbench::framework::ports::{ModelGateFact, QualificationGate};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(in crate::workbench) enum QualificationDomain {
@@ -228,25 +184,24 @@ pub(crate) fn qualification_summaries(
     summaries
 }
 
-/// One model's release gate, as another surface may read it.
-///
-/// [`QualificationModelSummary`] is this page's own working record — the
-/// per-domain vector counts, the desktop/wasm parity split, the evidence
-/// digests — and it moves whenever the qualification page does. This is the
-/// narrow projection of it, so a field added there does not silently become
-/// another surface's dependency.
-#[derive(Debug, Clone)]
-pub(in crate::workbench) struct ModelGateFact {
-    pub(in crate::workbench) library: String,
-    pub(in crate::workbench) model: String,
-    pub(in crate::workbench) vectors: usize,
-    pub(in crate::workbench) evidenced_vectors: usize,
-    pub(in crate::workbench) passing_vectors: usize,
-    pub(in crate::workbench) open_dispositions: usize,
-    /// This page could not read the model's gate at all, so its counts say
-    /// nothing either way and a reader must not total them as passing.
-    pub(in crate::workbench) unreadable: bool,
-    pub(in crate::workbench) gate: QualificationGate,
+/// Every model in the closure, projected to what a reading surface may know.
+pub(in crate::workbench) fn model_gate_facts(
+    model: &Model,
+    editor: &ModelEditorState,
+) -> Vec<ModelGateFact> {
+    qualification_summaries(model, editor)
+        .into_iter()
+        .map(|summary| ModelGateFact {
+            library: summary.library,
+            model: summary.model,
+            vectors: summary.vectors,
+            evidenced_vectors: summary.evidenced_vectors,
+            passing_vectors: summary.passing_vectors,
+            open_dispositions: summary.open_dispositions,
+            unreadable: summary.source_error.is_some(),
+            gate: summary.gate,
+        })
+        .collect()
 }
 
 pub(in crate::workbench) fn qualification_model_summary(

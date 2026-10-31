@@ -15,23 +15,6 @@ pub(super) enum QualificationPageAction {
     OpenCorrelation,
 }
 
-/// Every model in the closure, projected to what a reading surface may know.
-pub(in crate::workbench::surfaces) fn model_gate_facts(app: &RSpiceApp) -> Vec<ModelGateFact> {
-    qualification_summaries(&app.state.model, &app.state.models.model_editor)
-        .into_iter()
-        .map(|summary| ModelGateFact {
-            library: summary.library,
-            model: summary.model,
-            vectors: summary.vectors,
-            evidenced_vectors: summary.evidenced_vectors,
-            passing_vectors: summary.passing_vectors,
-            open_dispositions: summary.open_dispositions,
-            unreadable: summary.source_error.is_some(),
-            gate: summary.gate,
-        })
-        .collect()
-}
-
 /// The band the engine-owned families are listed under.
 pub(super) const ENGINE_OWNED_BAND: &str =
     "Engine-owned · exempt from the source-owned release gate";

@@ -4,18 +4,13 @@
 mod manager;
 mod qualification_actions;
 
+use crate::workbench::framework::ports::QualificationGate;
 use crate::workbench::models::qualification::*;
 use qualification_actions::*;
-
-/// What the rest of the surfaces may read about model qualification. The globs
-/// above are this module's own working vocabulary and stay private to it.
-pub(super) use crate::workbench::models::qualification::{ModelGateFact, QualificationGate};
-pub(super) use qualification_actions::model_gate_facts;
 
 use egui::Ui;
 
 use crate::state::ModelBoundSymbolDefinition;
-use crate::workbench::RSpiceApp;
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use crate::workbench::documents::model_editor::{self, ModelEditorSection};

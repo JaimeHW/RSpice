@@ -37,7 +37,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{Registry, ids};
-use crate::workbench::framework::feature::CloudSessionPort;
+use crate::workbench::framework::feature::{CloudSessionPort, ModelsPort};
 use crate::workbench::framework::host::{
     DocumentHost, Host, InspectorScope, NavigatorSection, Point, ProblemsHost, RailEntry,
     StatusCell, ToolbarScope, ToolbarSlot,
@@ -732,7 +732,7 @@ impl WorkbenchHost for RSpiceApp {
     }
 
     fn model_draft_unsaved(&self) -> bool {
-        self.state.models.model_editor_has_unsaved_changes()
+        ModelsPort::model_editor_has_unsaved_changes(&*self.state.models)
     }
 
     fn unapplied_stimulus_drafts(&self) -> Vec<String> {

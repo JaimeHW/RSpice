@@ -130,3 +130,22 @@ impl ModelsState {
         self.clear_project_model_editor();
     }
 }
+
+/// What another part reads of the models feature: its unsaved authoring and
+/// each model's release gate.
+impl crate::workbench::framework::feature::ModelsPort for ModelsState {
+    fn has_unsaved_authoring_changes(&self) -> bool {
+        ModelsState::has_unsaved_authoring_changes(self)
+    }
+
+    fn model_editor_has_unsaved_changes(&self) -> bool {
+        ModelsState::model_editor_has_unsaved_changes(self)
+    }
+
+    fn model_gate_facts(
+        &self,
+        model: &rspice_app_state::workbench::app_state::model::Model,
+    ) -> Vec<crate::workbench::framework::ports::ModelGateFact> {
+        crate::workbench::models::qualification::model_gate_facts(model, &self.model_editor)
+    }
+}

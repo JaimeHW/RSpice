@@ -31,6 +31,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::veriloga_library::{
     restore_global_veriloga_library, save_global_veriloga_library,
 };
+use crate::workbench::framework::feature::ModelsPort;
 
 const CONTEXT_LONG_PRESS_DURATION_SECONDS: f64 = 0.56;
 const CONTEXT_LONG_PRESS_MOVE_TOLERANCE_POINTS: f32 = 9.0;
@@ -763,7 +764,8 @@ impl RSpiceApp {
     fn sync_window_title(&mut self, ctx: &Context) {
         let project_has_unsaved_changes =
             crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(&self.state);
-        let authoring_has_unsaved_changes = self.state.models.has_unsaved_authoring_changes();
+        let authoring_has_unsaved_changes =
+            ModelsPort::has_unsaved_authoring_changes(&*self.state.models);
         let should_warn_before_unload = should_warn_before_browser_unload(
             project_has_unsaved_changes,
             authoring_has_unsaved_changes,
