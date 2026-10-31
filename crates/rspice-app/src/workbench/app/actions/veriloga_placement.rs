@@ -98,7 +98,10 @@ impl AppState {
         self.open_workspace_view(target.clone());
         self.workbench
             .activate(crate::workbench::state::Workspace::Design);
-        let label = crate::workbench::app::arm_library_cell_placement(self, candidate.binding);
+        let label = rspice_app_state::workbench::app::schematic::placement::arm_cell_instance(
+            &mut self.model,
+            candidate.binding,
+        );
         Ok(format!(
             "{label} is armed for placement in {}.",
             target.display_path()
