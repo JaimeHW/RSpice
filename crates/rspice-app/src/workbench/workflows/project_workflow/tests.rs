@@ -497,10 +497,10 @@ fn save_copy_permission_never_turns_a_live_mirror_into_a_canonical_project() {
     state.model.live_write_locks.mirror_save_copy_allowed = true;
 
     assert_eq!(
-        live_mirror_save_block(&state, false),
+        live_mirror_save_block(&state.model, false),
         Some("A live mirror cannot be saved in place. Use Save As to create an independent copy.")
     );
-    assert_eq!(live_mirror_save_block(&state, true), None);
+    assert_eq!(live_mirror_save_block(&state.model, true), None);
 }
 
 fn project_named_with_results(path: &str) -> ProjectSnapshot {
@@ -709,7 +709,7 @@ fn browser_import_filename_is_used_for_next_project_save_as_dialog() {
     ));
 
     assert_eq!(
-        project_save_dialog_default_name(&state),
+        project_save_dialog_default_name(&state.model, &state.platform),
         "browser-import.rspiceproj"
     );
 }

@@ -10,13 +10,17 @@ use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
+use crate::workbench::app_state::SlotFacts;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 #[cfg(target_arch = "wasm32")]
 use crate::workbench::lifecycle::project_lifecycle::PersistenceBinding;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
-use crate::workbench::lifecycle::project_lifecycle::{ProjectLifecycleError, SaveScope};
+use crate::workbench::lifecycle::project_lifecycle::{
+    LifecycleHost, LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView,
+    ProjectLifecycleError, SaveScope,
+};
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::workflows::file_workflow::file_name_string;
 use rspice_app_services::workbench::slots::platform::remember_recent_file;
@@ -310,34 +314,37 @@ fn seed_new_project_drawing_sheet_default(
 
 #[cfg(all(not(target_arch = "wasm32"), test))]
 pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
-    save_native_scope(
-        state,
-        SaveScope::AllDocuments,
-        path,
-        DestinationAuthority::UserSelected,
-    )
-    .is_ok()
+    state
+        .save_project_scope_to(
+            SaveScope::AllDocuments,
+            path,
+            DestinationAuthority::UserSelected,
+        )
+        .is_ok()
 }
 
-fn project_save_dialog_default_name(state: &AppState) -> String {
-    state
-        .model
+fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
+    model
         .workspace
         .content
         .project
         .path
         .as_deref()
         .and_then(file_name_string)
-        .or_else(|| state.platform.browser_project_save_name.clone())
+        .or_else(|| platform.browser_project_save_name.clone())
         .unwrap_or_else(|| "untitled.rspiceproj".to_string())
 }
 
 pub(crate) fn save_project(state: &mut AppState) -> bool {
-    save_scope_outcome(state, SaveScope::ActiveDocument).request_started()
+    state
+        .save_project_scope(SaveScope::ActiveDocument)
+        .request_started()
 }
 
 pub(crate) fn save_all(state: &mut AppState) -> bool {
-    save_scope_outcome(state, SaveScope::AllDocuments).request_started()
+    state
+        .save_project_scope(SaveScope::AllDocuments)
+        .request_started()
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -362,18 +369,18 @@ impl SaveRequestOutcome {
 }
 
 pub(crate) fn save_all_for_continuation(state: &mut AppState) -> SaveRequestOutcome {
-    save_scope_outcome(state, SaveScope::AllDocuments)
+    state.save_project_scope(SaveScope::AllDocuments)
 }
 
 pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestOutcome {
-    save_scope_outcome(state, SaveScope::ActiveDocument)
+    state.save_project_scope(SaveScope::ActiveDocument)
 }
 
 /// A streamed mirror never acquires a canonical local binding implicitly.
 /// Policy may authorize an explicit independent copy through Save As; it
 /// never authorizes ordinary Save/Save All to retain or overwrite the mirror.
-fn live_mirror_save_block(state: &AppState, project_copy: bool) -> Option<&'static str> {
-    let locks = &state.model.live_write_locks;
+fn live_mirror_save_block(model: &Model, project_copy: bool) -> Option<&'static str> {
+    let locks = &model.live_write_locks;
     if !locks.mirror {
         None
     } else if !locks.mirror_save_copy_allowed {
@@ -385,64 +392,95 @@ fn live_mirror_save_block(state: &AppState, project_copy: bool) -> Option<&'stat
     }
 }
 
-fn save_scope_outcome(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Err(error) = state.commit_inline_component_edit() {
-        state.prompt(format!("Inspector edit was not applied: {error}"));
-        return SaveRequestOutcome::Failed(error);
-    }
-    save_scope_for_platform(state, scope)
+/// What a project save reads and writes: the lifecycle's parts, the status
+/// bar it answers on, and the features' facts the design checks a save runs
+/// read, taken when the save starts. A save changes none of those facts.
+pub(crate) struct SaveParts<'a> {
+    pub(crate) lifecycle: LifecycleParts<'a>,
+    pub(crate) workbench: &'a mut WorkbenchSession,
+    pub(crate) facts: SlotFacts,
 }
 
+impl LifecycleSource for SaveParts<'_> {
+    fn lifecycle_view(&self) -> LifecycleView<'_> {
+        self.lifecycle.lifecycle_view()
+    }
+}
+
+impl LifecycleSourceMut for SaveParts<'_> {
+    fn lifecycle_parts(&mut self) -> LifecycleParts<'_> {
+        self.lifecycle.lifecycle_parts()
+    }
+}
+
+/// A save the preference asks to be checked runs the model's design checks,
+/// stating their prompt on the status bar.
+impl LifecycleHost for SaveParts<'_> {
+    fn run_active_design_checks(&mut self) -> Result<rspice_design::drc::DrcResult, String> {
+        let (outcome, prompt) = self.lifecycle.model.run_active_design_checks(self.facts);
+        if let Some(prompt) = prompt {
+            self.workbench.prompt(prompt);
+        }
+        outcome
+    }
+}
+
+/// Where a save writes on the desktop: refused for a live mirror, the open
+/// project's own file, or the file the reader picks.
 #[cfg(not(target_arch = "wasm32"))]
-fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Some(message) = live_mirror_save_block(state, false) {
-        state.prompt(message);
-        return SaveRequestOutcome::Failed(message.to_owned());
+pub(crate) fn native_save_destination(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    platform: &PlatformState,
+) -> Result<(std::path::PathBuf, DestinationAuthority), SaveRequestOutcome> {
+    if let Some(message) = live_mirror_save_block(model, false) {
+        workbench.prompt(message);
+        return Err(SaveRequestOutcome::Failed(message.to_owned()));
     }
     if let Some(path) =
-        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(&state.platform)
+        crate::workbench::lifecycle::project_lifecycle::canonical_native_path(platform)
     {
-        return save_native_scope(state, scope, &path, DestinationAuthority::Canonical)
-            .map_or_else(SaveRequestOutcome::Failed, |()| {
-                SaveRequestOutcome::CanonicalComplete
-            });
+        return Ok((path, DestinationAuthority::Canonical));
     }
-    let default_name = project_save_dialog_default_name(state);
+    let default_name = project_save_dialog_default_name(model, platform);
     match crate::io::show_save_project_dialog(Some(&default_name)) {
-        Ok(path) => save_native_scope(state, scope, &path, DestinationAuthority::UserSelected)
-            .map_or_else(SaveRequestOutcome::Failed, |()| {
-                SaveRequestOutcome::CanonicalComplete
-            }),
-        Err(ProjectIoError::Cancelled) => SaveRequestOutcome::Cancelled,
+        Ok(path) => Ok((path, DestinationAuthority::UserSelected)),
+        Err(ProjectIoError::Cancelled) => Err(SaveRequestOutcome::Cancelled),
         Err(error) => {
             let message = error.to_string();
-            state.report_failure("Project save failed", message.clone());
-            SaveRequestOutcome::Failed(message)
+            model.report_failure("Project save failed", message.clone());
+            Err(SaveRequestOutcome::Failed(message))
         }
     }
 }
 
+/// Save `scope` to `path` under `authority`, then remember the file and
+/// record the save, or answer why it failed.
 #[cfg(not(target_arch = "wasm32"))]
-fn save_native_scope(
-    state: &mut AppState,
+pub(crate) fn save_native_scope(
+    mut parts: SaveParts<'_>,
     scope: SaveScope,
     path: &Path,
     authority: DestinationAuthority,
 ) -> Result<(), String> {
-    state.commit_inline_component_edit()?;
-    match crate::workbench::lifecycle::project_lifecycle::save_native(state, scope, path, authority)
-    {
+    match crate::workbench::lifecycle::project_lifecycle::save_native(
+        &mut parts, scope, path, authority,
+    ) {
         Ok(()) => {
-            let canonical = crate::workbench::lifecycle::project_lifecycle::canonical_native_path(
-                &state.platform,
-            )
-            .unwrap_or_else(|| path.to_path_buf());
-            state.platform.browser_project_save_name = None;
-            state.remember_recent_file(
+            let LifecycleParts {
+                model, platform, ..
+            } = parts.lifecycle;
+            let canonical =
+                crate::workbench::lifecycle::project_lifecycle::canonical_native_path(platform)
+                    .unwrap_or_else(|| path.to_path_buf());
+            platform.browser_project_save_name = None;
+            remember_recent_file(
+                model,
+                platform,
                 crate::services::recent_files::RecentKind::Project,
                 &canonical,
             );
-            state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("Saved project: {}", canonical.display()),
@@ -451,29 +489,32 @@ fn save_native_scope(
         }
         Err(error) => {
             let message = error.to_string();
-            lifecycle_error(state, error, "Project save failed");
+            report_lifecycle_error(
+                parts.lifecycle.model,
+                parts.workbench,
+                error,
+                "Project save failed",
+            );
             Err(message)
         }
     }
 }
 
+/// Save `scope` through the browser, refused for a live mirror.
 #[cfg(target_arch = "wasm32")]
-fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    if let Some(message) = live_mirror_save_block(state, false) {
-        state.prompt(message);
+pub(crate) fn save_scope_in_browser(parts: SaveParts<'_>, scope: SaveScope) -> SaveRequestOutcome {
+    if let Some(message) = live_mirror_save_block(parts.lifecycle.model, false) {
+        parts.workbench.prompt(message);
         return SaveRequestOutcome::Failed(message.to_owned());
     }
-    save_project_in_browser(state, scope)
+    start_browser_project_save(parts, scope, false)
 }
 
+/// Save a copy of the project through the browser. Returns whether the save
+/// started.
 #[cfg(target_arch = "wasm32")]
-fn save_project_in_browser(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
-    start_browser_project_save(state, scope, false)
-}
-
-#[cfg(target_arch = "wasm32")]
-fn save_project_copy_in_browser(state: &mut AppState) -> bool {
-    start_browser_project_save(state, SaveScope::AllDocuments, true).request_started()
+pub(crate) fn save_project_copy_in_browser(parts: SaveParts<'_>) -> bool {
+    start_browser_project_save(parts, SaveScope::AllDocuments, true).request_started()
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -503,13 +544,14 @@ fn accept_browser_canonical_display_name(
 
 #[cfg(target_arch = "wasm32")]
 fn start_browser_project_save(
-    state: &mut AppState,
+    mut parts: SaveParts<'_>,
     scope: SaveScope,
     project_copy: bool,
 ) -> SaveRequestOutcome {
-    let suggested_name = project_save_dialog_default_name(state);
+    let suggested_name =
+        project_save_dialog_default_name(parts.lifecycle.model, parts.lifecycle.platform);
     let mut prepared = match crate::workbench::lifecycle::project_lifecycle::prepare_browser_save(
-        state,
+        &mut parts,
         scope,
         project_copy,
         suggested_name,
@@ -517,10 +559,18 @@ fn start_browser_project_save(
         Ok(prepared) => prepared,
         Err(error) => {
             let message = error.to_string();
-            lifecycle_error(state, error, "Project save failed");
+            report_lifecycle_error(
+                parts.lifecycle.model,
+                parts.workbench,
+                error,
+                "Project save failed",
+            );
             return SaveRequestOutcome::Failed(message);
         }
     };
+    let LifecycleParts {
+        model, platform, ..
+    } = parts.lifecycle;
 
     let save_surface_supported = browser_save_picker_is_safe(
         project_copy,
@@ -540,10 +590,10 @@ fn start_browser_project_save(
             Ok(text) => text,
             Err(error) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     prepared.save.transaction(),
                 );
-                state.report_failure(
+                model.report_failure(
                     "Project copy failed",
                     format!("the saved project was not UTF-8: {error}"),
                 );
@@ -556,17 +606,17 @@ fn start_browser_project_save(
         match crate::workbench::browser::download::download_text_file(&path, &text) {
             Ok(()) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     prepared.save.transaction(),
                 );
                 if project_copy {
-                    state.record(
+                    model.record(
                         LogSeverity::Info,
                         LogSource::Studio,
                         "Downloaded a copy of the project; the open project is unchanged.",
                     );
                 } else {
-                    state.model.report_warning(
+                    model.report_warning(
                         "Saved as a download instead",
                         "The project was downloaded as a copy, not saved; it still has unsaved \
                          changes.",
@@ -576,10 +626,10 @@ fn start_browser_project_save(
             }
             Err(error) => {
                 crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                    &mut state.platform,
+                    platform,
                     prepared.save.transaction(),
                 );
-                state.report_failure("Project download failed", error.clone());
+                model.report_failure("Project download failed", error.clone());
                 return SaveRequestOutcome::Failed(error);
             }
         }
@@ -616,10 +666,10 @@ fn start_browser_project_save(
         Err(error) => {
             let message = error.clone();
             crate::workbench::lifecycle::project_lifecycle::cancel_transaction_if(
-                &mut state.platform,
+                platform,
                 transaction,
             );
-            state.report_failure("Project save failed", error);
+            model.report_failure("Project save failed", error);
             SaveRequestOutcome::Failed(message)
         }
     }
@@ -895,11 +945,11 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
     if !state.commit_pending_inspector_edit() {
         return false;
     }
-    if let Some(message) = live_mirror_save_block(state, true) {
+    if let Some(message) = live_mirror_save_block(&state.model, true) {
         state.prompt(message);
         return false;
     }
-    let default_name = project_save_dialog_default_name(state);
+    let default_name = project_save_dialog_default_name(&state.model, &state.platform);
 
     #[cfg(not(target_arch = "wasm32"))]
     match crate::io::show_save_project_dialog(Some(default_name.as_str())) {
@@ -914,7 +964,7 @@ pub(crate) fn save_project_as(state: &mut AppState) -> bool {
     #[cfg(target_arch = "wasm32")]
     {
         let _ = default_name;
-        save_project_copy_in_browser(state)
+        state.save_project_copy_in_browser()
     }
 }
 

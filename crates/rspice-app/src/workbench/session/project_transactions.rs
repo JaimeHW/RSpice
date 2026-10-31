@@ -20,6 +20,9 @@ use crate::workbench::app_state::model::{LibraryRemoval, WorkspacePruned};
 use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
+use crate::workbench::lifecycle::project_lifecycle::SaveScope;
 use crate::workbench::lifecycle::project_lifecycle::{
     LifecycleParts, PersistenceBinding, ProjectCloseDestination, RevertReviewToken,
     has_unsaved_changes,
@@ -33,7 +36,7 @@ use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 use crate::workbench::workflows::project_workflow::BrowserProjectOpen;
 use crate::workbench::workflows::project_workflow::{
     self, ClosedProject, LiveProjectApply, LoadedProject, NewProject, NewProjectParams,
-    OpenedProject, ProjectLoadOrigin, apply_live_project_snapshot,
+    OpenedProject, ProjectLoadOrigin, SaveParts, SaveRequestOutcome, apply_live_project_snapshot,
 };
 
 /// Replacing the open project with a new one: the project's phases over its
@@ -379,6 +382,91 @@ impl AppState {
     pub(crate) fn confirm_revert_active_document(&mut self, token: &RevertReviewToken) -> bool {
         let reverted = services_access::confirm_revert_active_document(self, token);
         project_workflow::report_revert(&mut self.model, &mut self.workbench, token, reverted)
+    }
+}
+
+/// Saving the open project: the inspector's pending inline edit committed
+/// before the save reads the drawing, and again after the desktop's save
+/// dialog, then the project's save over its parts.
+impl AppState {
+    /// Save `scope` of the open project where it saves: its own file, a file
+    /// the reader picks, or the browser's. Returns how the save went.
+    pub(crate) fn save_project_scope(&mut self, scope: SaveScope) -> SaveRequestOutcome {
+        if let Err(error) = self.commit_inline_component_edit() {
+            self.prompt(format!("Inspector edit was not applied: {error}"));
+            return SaveRequestOutcome::Failed(error);
+        }
+        save_scope_for_platform(self, scope)
+    }
+
+    /// Save `scope` of the open project to `path` under `authority`.
+    #[cfg(all(not(target_arch = "wasm32"), test))]
+    pub(crate) fn save_project_scope_to(
+        &mut self,
+        scope: SaveScope,
+        path: &std::path::Path,
+        authority: DestinationAuthority,
+    ) -> Result<(), String> {
+        save_native_scope(self, scope, path, authority)
+    }
+
+    /// Save a copy of the open project through the browser. Returns whether
+    /// the save started.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn save_project_copy_in_browser(&mut self) -> bool {
+        project_workflow::save_project_copy_in_browser(save_parts(self))
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+    let (path, authority) = match project_workflow::native_save_destination(
+        &mut state.model,
+        &mut state.workbench,
+        &state.platform,
+    ) {
+        Ok(destination) => destination,
+        Err(outcome) => return outcome,
+    };
+    save_native_scope(state, scope, &path, authority)
+        .map_or_else(SaveRequestOutcome::Failed, |()| {
+            SaveRequestOutcome::CanonicalComplete
+        })
+}
+
+#[cfg(target_arch = "wasm32")]
+fn save_scope_for_platform(state: &mut AppState, scope: SaveScope) -> SaveRequestOutcome {
+    project_workflow::save_scope_in_browser(save_parts(state), scope)
+}
+
+/// The desktop save once its file is settled: the inspector's pending inline
+/// edit committed again, since the save dialog may have let the reader make
+/// one, then the project's save over its parts.
+#[cfg(not(target_arch = "wasm32"))]
+fn save_native_scope(
+    state: &mut AppState,
+    scope: SaveScope,
+    path: &std::path::Path,
+    authority: DestinationAuthority,
+) -> Result<(), String> {
+    state.commit_inline_component_edit()?;
+    project_workflow::save_native_scope(save_parts(state), scope, path, authority)
+}
+
+/// What the project's save reads and writes, with the features' facts its
+/// design checks read, taken as the save starts.
+fn save_parts(state: &mut AppState) -> SaveParts<'_> {
+    let facts = state.slot_facts();
+    let workspace = state.workbench.workspace;
+    SaveParts {
+        lifecycle: LifecycleParts {
+            model: &mut state.model,
+            platform: &mut state.platform,
+            workspace,
+            presentation: &state.results.results,
+        },
+        workbench: &mut state.workbench,
+        facts,
     }
 }
 
@@ -847,6 +935,34 @@ mod tests {
                 "project_workflow::report_opened_project(",
                 "services_access::accept_loaded_project(self, accepted_baseline, binding)",
                 "self.publish_rule_deck_issues()",
+            ],
+        );
+    }
+
+    /// A save commits the inspector's pending inline edit before anything
+    /// else, and on the desktop commits it again once the save dialog has
+    /// settled the file, right before the project's save.
+    #[test]
+    fn a_save_commits_the_inline_edit_before_the_project_saves() {
+        assert_runs_in_order(
+            "save_project_scope",
+            &[
+                "self.commit_inline_component_edit()",
+                "save_scope_for_platform(self, scope)",
+            ],
+        );
+        assert_runs_in_order(
+            "save_scope_for_platform",
+            &[
+                "project_workflow::native_save_destination(",
+                "save_native_scope(state, scope, &path, authority)",
+            ],
+        );
+        assert_runs_in_order(
+            "save_native_scope",
+            &[
+                "state.commit_inline_component_edit()?",
+                "project_workflow::save_native_scope(save_parts(state), scope, path, authority)",
             ],
         );
     }
