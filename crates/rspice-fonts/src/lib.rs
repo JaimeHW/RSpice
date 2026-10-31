@@ -21,6 +21,8 @@ use std::sync::OnceLock;
 use skrifa::{FontRef, MetadataProvider, charmap::Charmap};
 use unicode_segmentation::UnicodeSegmentation;
 
+#[cfg(feature = "bidi")]
+pub mod bidi;
 #[cfg(feature = "egui")]
 mod egui_families;
 mod han;
