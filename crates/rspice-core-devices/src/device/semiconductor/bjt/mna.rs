@@ -469,6 +469,24 @@ impl Bjt {
         let limited_from = Self::checkpoint_take_array(values, &mut cursor);
         self.mna_limited_from
             .set((flags[1] != 0.0).then_some(limited_from));
+        // The image predates the dissipation anchor, so a restored limited
+        // load re-derives its drops from the candidate it was limited from.
+        // Only the MODEINITJCT load anchors elsewhere, and an accepted point
+        // is never that first evaluation.
+        self.mna_dissipation_drops =
+            (flags[1] != 0.0 && !self.uses_legacy_gummel_poon()).then(|| {
+                let [vc, vb, ve, vs] = [
+                    limited_from[0],
+                    limited_from[1],
+                    limited_from[2],
+                    limited_from[3],
+                ];
+                let mut solution_bias = [0.0; INTERNAL_DIM];
+                solution_bias
+                    .copy_from_slice(&limited_from[EXTERNAL_DIM..EXTERNAL_DIM + INTERNAL_DIM]);
+                self.impose_intrinsic_node_constraints(&mut solution_bias, vc, vb, ve, vs);
+                Self::vbic_parasitic_drops([vc, vb, ve, vs], solution_bias)
+            });
         self.vbic_startup_load_pending = flags[2] != 0.0;
         let linearized = Self::checkpoint_take_linearization(values, &mut cursor);
         let [
@@ -1098,6 +1116,7 @@ impl Bjt {
             self.vbic_startup_load_pending = false;
         }
         self.legacy_junction_limited = false;
+        self.mna_dissipation_drops = None;
         let mut state = if self.uses_legacy_gummel_poon() {
             let mut state = raw;
             if apply_limiting
@@ -1139,35 +1158,53 @@ impl Bjt {
                 }
             }
             state
+        } else if let Some(startup) = startup_load
+            .then(|| self.vbic_startup_load_internal_state(raw))
+            .flatten()
+        {
+            // vbicload.c's MODEINITJCT load zeroes every resistor drop
+            // (lines 255-256) along with the junctions it seeds.
+            self.mna_dissipation_drops = Some([0.0; VBIC_PARASITIC_DROP_DIM]);
+            startup
+        } else if apply_limiting {
+            let mut solution_bias = raw;
+            self.impose_intrinsic_node_constraints(&mut solution_bias, vc, vb, ve, vs);
+            self.mna_dissipation_drops =
+                Some(Self::vbic_parasitic_drops([vc, vb, ve, vs], solution_bias));
+            self.limit_vbic_internal_state_to_previous(raw, previous)
         } else {
-            match (startup_load, apply_limiting) {
-                (true, _) => self
-                    .vbic_startup_load_internal_state(raw)
-                    .unwrap_or_else(|| self.limit_vbic_internal_state_to_previous(raw, previous)),
-                (false, true) => self.limit_vbic_internal_state_to_previous(raw, previous),
-                (false, false) => raw,
-            }
+            raw
         };
         self.impose_intrinsic_node_constraints(&mut state, vc, vb, ve, vs);
         self.eval_anchor = [vc, vb, ve, vs];
 
-        let eval = self.evaluate_state_with_rbi_current(
-            BjtNodeVoltages {
-                vc,
-                vb,
-                ve,
-                vs,
-                vcx: state[IDX_VCX],
-                vci: state[IDX_VCI],
-                vbx: state[IDX_VBX],
-                vbi: state[IDX_VBI],
-                vei: state[IDX_VEI],
-                vbp: state[IDX_VBP],
-                vsi: state[IDX_VSI],
-            },
+        let voltages = BjtNodeVoltages {
+            vc,
+            vb,
+            ve,
+            vs,
+            vcx: state[IDX_VCX],
+            vci: state[IDX_VCI],
+            vbx: state[IDX_VBX],
+            vbi: state[IDX_VBI],
+            vei: state[IDX_VEI],
+            vbp: state[IDX_VBP],
+            vsi: state[IDX_VSI],
+        };
+        let mut eval = self.evaluate_state_with_rbi_current(
+            voltages,
             state[IDX_VRTH],
             self.mna_rbi_branch.map(|_| rbi_current),
         );
+        if let Some(drops) = self.mna_dissipation_drops {
+            self.anchor_parasitics_at_drops(
+                &mut eval,
+                voltages,
+                state[IDX_VRTH],
+                drops,
+                self.mna_rbi_branch.is_some(),
+            );
+        }
         let terminal_currents = self.external_terminal_branches(eval);
 
         self.vc_ext = vc;
@@ -1585,6 +1622,7 @@ impl Bjt {
             eval,
             self.mna_external_state(),
             external_rbi_port,
+            self.mna_dissipation_drops,
             |row, terms| {
                 let sign = Self::vbic_residual_row_sign(row);
                 for term in terms {
@@ -1763,6 +1801,7 @@ impl Bjt {
             state,
             eval,
             [vc, vb, ve, vs],
+            self.mna_dissipation_drops,
             |row| row.source(static_internal, &external),
         );
         for row in 0..INTERNAL_DIM {
@@ -2832,6 +2871,100 @@ mod tests {
             "substrate node moved {:.4} V behind a 1 mΩ RS",
             projected[IDX_VSI]
         );
+    }
+
+    /// A self-heating instance whose parasitic resistors carry no current in
+    /// the solution must not see them dissipate or couple temperature into
+    /// their rows, however far the junction limiter moved its internal nodes:
+    /// vbicload.c reads the resistor drops from the solution and limits only
+    /// the junctions. Here every internal node sits on its terminal, so each
+    /// drop is zero, and the limited junctions are realized by moving the
+    /// nodes by volts.
+    #[test]
+    fn a_limited_self_heating_load_reads_the_solution_resistor_drops() {
+        let mut params = std::collections::HashMap::new();
+        for (key, value) in [
+            ("LEVEL", 4.0),
+            ("IS", 1e-16),
+            ("IBEI", 1e-18),
+            ("RCX", 10.0),
+            ("RCI", 1.0),
+            ("RBX", 100.0),
+            ("RBI", 20.0),
+            ("RE", 15.0),
+            ("RS", 1.0),
+            ("RBP", 1.0),
+            ("XRCX", 2.0),
+            ("XRBX", 2.0),
+            ("XRE", 2.0),
+            ("XRS", 2.0),
+            ("RTH", 150.0),
+        ] {
+            params.insert(key.to_string(), value);
+        }
+        let mut bjt = Bjt::new_npn("QT".to_string(), 1, 2, 3).with_params(&params);
+        bjt.set_substrate_node(4);
+        bjt.set_vbic_external_thermal_node(5);
+        let mut next = 6;
+        bjt.assign_vbic_internal_nodes(|_| {
+            let node = next;
+            next += 1;
+            node
+        });
+        let n = next - 1;
+        assert!(bjt.thermal_model_enabled());
+
+        let mut bias = vec![0.0; n];
+        for (node, value) in [
+            (bjt.node_collector, 5.0),
+            (bjt.node_cx, 5.0),
+            (bjt.node_ci, 5.0),
+            (bjt.node_bp, 5.0),
+            (bjt.node_base, 2.5),
+            (bjt.node_bx, 2.5),
+            (bjt.node_bi, 2.5),
+        ] {
+            bias[node - 1] = value;
+        }
+        bjt.update(&vec![0.0; n]);
+        bjt.stamp_mna(&mut DenseStamper::new(n));
+        bjt.update(&bias);
+
+        let state = bjt.mna_internal_state();
+        assert!(
+            (state[IDX_VCX] - 5.0).abs() > 0.1 || state[IDX_VSI].abs() > 0.1,
+            "the limiter must move the internal nodes for this to test anything"
+        );
+        let eval = bjt.mna_eval.expect("a limited load caches its evaluation");
+        for (name, branch) in [
+            ("RCX", eval.ircx),
+            ("RBX", eval.irbx),
+            ("RE", eval.ire),
+            ("RS", eval.irs),
+        ] {
+            assert!(
+                branch.d_internal[IDX_VRTH].abs() < 1e-12,
+                "{name} couples {:e} A/K into its rows at zero solution drop",
+                branch.d_internal[IDX_VRTH]
+            );
+        }
+
+        // Only the resistors' dissipation reads the external terminals.
+        let mut stamper = DenseStamper::new(n);
+        bjt.stamp_mna(&mut stamper);
+        let thermal_row = &stamper.a[bjt.node_rth - 1];
+        for terminal in [
+            bjt.node_collector,
+            bjt.node_base,
+            bjt.node_emitter,
+            bjt.node_substrate,
+        ] {
+            assert!(
+                thermal_row[terminal - 1].abs() < 1e-12,
+                "terminal {terminal} enters the heat row with {:e} W/V",
+                thermal_row[terminal - 1]
+            );
+        }
     }
 
     /// vbicload.c evaluates an OFF instance at zero on every junction on its

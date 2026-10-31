@@ -407,6 +407,104 @@ impl Bjt {
         evaluated
     }
 
+    /// Re-anchor a limited evaluation's parasitic branches at the drops the
+    /// solution puts across them.
+    ///
+    /// vbicload.c reads the seven resistor drops from the solution unlimited
+    /// and limits only the junctions (lines 419-484), so each parasitic
+    /// current is evaluated at its own drop with only its controls (qb, qbp,
+    /// the Kull junctions, the temperature) at the limited bias. A promoted
+    /// instance realizes the limited junctions as node voltages, and the drops
+    /// of that node vector carry whatever the projection spent on them: on a
+    /// milliohm RCI, vbci and vbcx limited 2vt apart are tens of amps. The
+    /// current those drops give is linear in them, so the KCL companion is
+    /// exact at any anchor, but its sensitivity to the controls is not —
+    /// through a resistor's temperature exponent alone, tens of amps couple
+    /// tenths of an amp per kelvin into the rows it joins. Each branch is
+    /// evaluated at `drops` with its controls at `voltages`, then restated at
+    /// `voltages` along its own dI/dV, which is ngspice's companion.
+    pub(in crate::device::semiconductor::bjt) fn anchor_parasitics_at_drops(
+        &self,
+        eval: &mut EvaluatedBjtState,
+        voltages: BjtNodeVoltages,
+        vrth: Value,
+        drops: [Value; VBIC_PARASITIC_DROP_DIM],
+        rbi_port: bool,
+    ) {
+        let BjtNodeVoltages {
+            vc,
+            vb,
+            ve,
+            vs,
+            vcx,
+            vci,
+            vbx,
+            vbi,
+            vei,
+            vbp,
+            vsi,
+        } = voltages;
+        let own =
+            Self::vbic_parasitic_drops([vc, vb, ve, vs], [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth]);
+        if own == drops {
+            return;
+        }
+        let linearized = eval.linearized;
+        let at = |model: &Bjt, rise: Value| {
+            // qb at this temperature, to the order the evaluation's own
+            // dqb/dVrth was taken.
+            let mut base_charge = linearized;
+            base_charge.qb += (rise - vrth) * linearized.dqb_dvrth;
+            let ircx = model.ircx_branch(vcx + drops[0], vcx);
+            let irbx = model.irbx_branch(vbx + drops[2], vbx);
+            let irbi = model.irbi_branch(base_charge, vbi + drops[3], vbi);
+            let ire = model.ire_branch(vei + drops[4], vei);
+            let irbp = model.irbp_branch(vbx, vbi, vbp - drops[5], vci, vbp, vsi);
+            let irs = model.irs_branch(vsi + drops[6], vsi);
+            [
+                (ircx, ircx.d_external[EXT_C]),
+                model.vbic_irci_branch(drops[1], vbi - vci, vbi - vcx),
+                (irbx, irbx.d_external[EXT_B]),
+                (irbi, irbi.d_internal[IDX_VBX]),
+                (ire, ire.d_external[EXT_E]),
+                (irbp, -irbp.d_internal[IDX_VCX]),
+                (irs, irs.d_external[EXT_S]),
+            ]
+        };
+        let mut anchored = self.with_temperature_variant(vrth, |model| at(model, vrth));
+        if self.thermal_model_enabled() {
+            let h = self.thermal_derivative_step(vrth);
+            let plus = self
+                .with_temperature_derivative_variant(vrth + h, vrth, |model| at(model, vrth + h));
+            let minus = self
+                .with_temperature_derivative_variant(vrth - h, vrth, |model| at(model, vrth - h));
+            for ((branch, _), ((upper, _), (lower, _))) in
+                anchored.iter_mut().zip(plus.iter().zip(&minus))
+            {
+                Self::apply_thermal_derivative(branch, *upper, *lower, 2.0 * h);
+            }
+        }
+        let slots = [
+            &mut eval.ircx,
+            &mut eval.irci,
+            &mut eval.irbx,
+            &mut eval.irbi,
+            &mut eval.ire,
+            &mut eval.irbp,
+            &mut eval.irs,
+        ];
+        for (index, (slot, (branch, conductance))) in slots.into_iter().zip(anchored).enumerate() {
+            // An independent RBI port current has no drop to re-anchor.
+            if index == 3 && rbi_port {
+                continue;
+            }
+            *slot = BranchLinearization {
+                current: branch.current + conductance * (own[index] - drops[index]),
+                ..branch
+            };
+        }
+    }
+
     pub(in crate::device::semiconductor::bjt) fn intrinsic_state_for_biases(
         &self,
         vc: Value,
@@ -874,7 +972,7 @@ impl Bjt {
             state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi, state.vrth,
         ];
         let external = [vc, vb, ve, vs];
-        self.internal_kcl_linearization_from_eval_with_source(state, eval, external, |row| {
+        self.internal_kcl_linearization_from_eval_with_source(state, eval, external, None, |row| {
             row.source(&internal, &external)
         })
     }
@@ -884,6 +982,7 @@ impl Bjt {
         state: IntrinsicTerminalState,
         eval: EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
+        dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
         source_for_branch: impl Fn(BranchLinearization) -> Value,
     ) -> (
         [[Value; INTERNAL_DIM]; INTERNAL_DIM],
@@ -919,12 +1018,19 @@ impl Bjt {
                 }
             }
         }
-        self.visit_internal_kcl_terms(state, eval, external, false, |index, terms| {
-            let row = Self::sum_branch_terms(terms);
-            jacobian[index] = row.d_internal;
-            external_partials[index] = row.d_external;
-            source[index] = source_for_branch(row);
-        });
+        self.visit_internal_kcl_terms(
+            state,
+            eval,
+            external,
+            false,
+            dissipation_drops,
+            |index, terms| {
+                let row = Self::sum_branch_terms(terms);
+                jacobian[index] = row.d_internal;
+                external_partials[index] = row.d_external;
+                source[index] = source_for_branch(row);
+            },
+        );
         (jacobian, external_partials, source)
     }
 
@@ -938,6 +1044,7 @@ impl Bjt {
         eval: EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
         external_rbi_port: bool,
+        dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
         mut visit: impl FnMut(usize, &[BranchLinearization]),
     ) {
         let [collector, base, emitter] = self.intrinsic_terminal_branches(&eval);
@@ -995,13 +1102,14 @@ impl Bjt {
             visit(IDX_VSI, &[eval.irs, eval.iccp, negative(eval.ibcp)]);
         }
         if self.thermal_model_enabled() {
-            let power = self.thermal_power_branch(
+            let power = self.thermal_power_branch_about(
                 eval,
                 external,
                 [
                     state.vcx, state.vci, state.vbx, state.vbi, state.vei, state.vbp, state.vsi,
                     state.vrth,
                 ],
+                dissipation_drops,
             );
             visit(
                 IDX_VRTH,

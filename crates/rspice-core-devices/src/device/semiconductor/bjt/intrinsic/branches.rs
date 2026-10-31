@@ -608,14 +608,30 @@ impl Bjt {
         vci: Value,
         vbi: Value,
     ) -> (BranchLinearization, Value) {
-        let mut branch = BranchLinearization::default();
         if !Self::series_active(self.rci) {
-            return (branch, 0.0);
+            return (BranchLinearization::default(), 0.0);
         }
         if self.legacy_quasi_saturation().is_some() {
             return self.legacy_epi_branch(vcx, vci, vbi);
         }
+        self.vbic_irci_branch(vcx - vci, vbi - vci, vbi - vcx)
+    }
 
+    /// The VBIC epi branch at three independent controls, as vbicload.c
+    /// reads them: the drop `vrci` across the epi resistance and the two
+    /// junction voltages `vbci` and `vbcx` (each `node − node`, before
+    /// polarity). On a node vector `vrci = vbci − vbcx` identically; a
+    /// limited bias pairs the solution's drop with the limited junctions.
+    pub(in crate::device::semiconductor::bjt) fn vbic_irci_branch(
+        &self,
+        vrci: Value,
+        vbci: Value,
+        vbcx: Value,
+    ) -> (BranchLinearization, Value) {
+        let mut branch = BranchLinearization::default();
+        if !Self::series_active(self.rci) {
+            return (branch, 0.0);
+        }
         let p = self.polarity();
         let vt = self.vt.max(1e-12);
         let rci = self.guarded_series_resistance(self.rci);
@@ -631,9 +647,9 @@ impl Bjt {
             0.0
         };
 
-        let vrci_eff = p * (vcx - vci);
-        let vbci_eff = p * (vbi - vci);
-        let vbcx_eff = p * (vbi - vcx);
+        let vrci_eff = p * vrci;
+        let vbci_eff = p * vbci;
+        let vbcx_eff = p * vbcx;
 
         let (exp_bci, dexp_bci_darg) = self.vbic_general_exp(vbci_eff / vt);
         let (exp_bcx, dexp_bcx_darg) = self.vbic_general_exp(vbcx_eff / vt);

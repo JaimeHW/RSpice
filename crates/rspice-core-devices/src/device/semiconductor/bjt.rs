@@ -632,6 +632,8 @@ const VBIC_LIMITED_BRANCH_DIM: usize = 6;
 /// the thermal state.
 const VBIC_JUNCTION_NODE_DIM: usize = INTERNAL_DIM - 1;
 const LEGACY_LIMITED_BRANCH_DIM: usize = 3;
+/// The parasitic resistances whose drops enter the VBIC power sum.
+const VBIC_PARASITIC_DROP_DIM: usize = 7;
 const IDX_VXF1: usize = INTERNAL_DIM;
 const IDX_VXF2: usize = INTERNAL_DIM + 1;
 const IDX_QCTH: usize = BJT_DYNAMIC_CHARGE_COUNT - 3;
@@ -1272,6 +1274,10 @@ pub struct Bjt {
     /// Set until the first limited evaluation, which is the only one with no
     /// previous iterate to limit against.
     vbic_startup_load_pending: bool,
+    /// The parasitic drops the cached evaluation's power sum is expanded
+    /// about, when they are not the evaluated state's own: the solution's
+    /// drops for a limited load, zero for the MODEINITJCT one.
+    mna_dissipation_drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
     /// Excess-phase algebraic rows (delta-iciei, ixf1, ixf2) at the limited
     /// MNA bias (TD > 0 only).
     mna_delay_branches: [BjtCurrentBranch; VBIC_DELAY_BRANCH_COUNT],
@@ -2194,6 +2200,7 @@ impl Bjt {
             mna_rbi_current: 0.0,
             mna_limited_from: Cell::new(None),
             vbic_startup_load_pending: true,
+            mna_dissipation_drops: None,
             mna_delay_branches: [BjtCurrentBranch::default(); VBIC_DELAY_BRANCH_COUNT],
             mna_delay_thermal: BjtCurrentBranch::default(),
             mna_charge_cache: Cell::new([BjtChargeBranch::default(); BJT_DYNAMIC_CHARGE_COUNT]),

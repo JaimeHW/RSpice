@@ -525,16 +525,62 @@ impl Bjt {
 
     pub(super) fn thermal_power_branch(
         &self,
+        eval: EvaluatedBjtState,
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; INTERNAL_DIM],
+    ) -> BranchLinearization {
+        self.thermal_power_branch_about(eval, external, internal, None)
+    }
+
+    /// The parasitic-resistance drops the power sum reads, in the order
+    /// `[Vrcx, Vrci, Vrbx, Vrbi, Vre, Vrbp, Vrs]`.
+    pub(super) fn vbic_parasitic_drops(
+        external: [Value; EXTERNAL_DIM],
+        internal: [Value; INTERNAL_DIM],
+    ) -> [Value; VBIC_PARASITIC_DROP_DIM] {
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, _vrth] = internal;
+        let [vc, vb, ve, vs] = external;
+        [
+            vc - vcx,
+            vcx - vci,
+            vb - vbx,
+            vbx - vbi,
+            ve - vei,
+            vbp - vcx,
+            vs - vsi,
+        ]
+    }
+
+    /// The power sum at `internal`, with each parasitic resistance's
+    /// dissipation expanded about `drops` when given.
+    ///
+    /// vbicload.c limits only the six junction voltages and Vrth; the seven
+    /// resistor drops it multiplies into `Ith` are read from the solution
+    /// unlimited (lines 419-484). A promoted instance carries its junctions as
+    /// node voltages, so realizing a limited junction set moves the internal
+    /// nodes, and the drops of `internal` then carry whatever the projection
+    /// spent to make the junctions fit. Those drops are linear in each
+    /// branch's KCL, where the companion is exact at any anchor, but the
+    /// dissipation is quadratic in them: a volt moved across a 1 Ω `RS`
+    /// heats the instance by a watt it never dissipates, and Rth turns that
+    /// into hundreds of kelvin on the very first limited iterate. So each
+    /// resistance dissipates `c·V*²` at the drop `V*` the solution actually
+    /// puts across it, with its conductance `c` from the limited bias, and the
+    /// expansion is restated at `internal` to share the other rows' anchor.
+    pub(super) fn thermal_power_branch_about(
+        &self,
         mut eval: EvaluatedBjtState,
         external: [Value; EXTERNAL_DIM],
         internal: [Value; INTERNAL_DIM],
+        drops: Option<[Value; VBIC_PARASITIC_DROP_DIM]>,
     ) -> BranchLinearization {
         if !self.thermal_model_enabled() || !self.vbic_heat_generation {
             return BranchLinearization::default();
         }
 
-        let [vcx, vci, vbx, vbi, vei, vbp, vsi, _vrth] = internal;
-        let [vc, vb, ve, vs] = external;
+        let [vcx, vci, vbx, vbi, vei, vbp, vsi, vrth] = internal;
+        let own_drops = Self::vbic_parasitic_drops(external, internal);
+        let anchors = drops.unwrap_or(own_drops);
         if self.vbic_13 {
             // Xyce computes power before adding its numerical GMIN parallels.
             // Igcx is likewise absent from the model's defined power sum.
@@ -615,56 +661,104 @@ impl Bjt {
             [0.0, 0.0, 1.0, 0.0, 0.0, 0.0, -1.0, 0.0],
             zero_external,
         );
-        add_power(
-            &mut power,
-            eval.ircx,
-            vc - vcx,
-            [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [1.0, 0.0, 0.0, 0.0],
-        );
-        add_power(
-            &mut power,
-            eval.irci,
-            vcx - vci,
-            [1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            zero_external,
-        );
-        add_power(
-            &mut power,
-            eval.irbx,
-            vb - vbx,
-            [0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
-            [0.0, 1.0, 0.0, 0.0],
-        );
-        add_power(
-            &mut power,
-            eval.irbi,
-            vbx - vbi,
-            [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
-            zero_external,
-        );
-        add_power(
-            &mut power,
-            eval.ire,
-            ve - vei,
-            [0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0],
-            [0.0, 0.0, 1.0, 0.0],
-        );
-        add_power(
-            &mut power,
-            eval.irbp,
-            vbp - vcx,
-            [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
-            zero_external,
-        );
-        add_power(
-            &mut power,
-            eval.irs,
-            vs - vsi,
-            [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0],
-            [0.0, 0.0, 0.0, 1.0],
-        );
+        // Each branch's dI/dV at fixed junctions: the series conductance of a
+        // terminal resistance, qb/RBI and qbp/RBP for the modulated ones (an
+        // independent RBI port current has none), and the Kull partial, which
+        // the node-space derivatives cannot separate from Vbci and Vbcx.
+        let irci_conductance = if anchors[1] == own_drops[1] {
+            0.0
+        } else {
+            self.with_temperature_variant(vrth, |model| {
+                model.vbic_irci_branch(anchors[1], vbi - vci, vbi - vcx).1
+            })
+        };
+        let parasitics = [
+            (
+                eval.ircx,
+                eval.ircx.d_external[EXT_C],
+                [-1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0, 0.0],
+            ),
+            (
+                eval.irci,
+                irci_conductance,
+                [1.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                zero_external,
+            ),
+            (
+                eval.irbx,
+                eval.irbx.d_external[EXT_B],
+                [0.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+                [0.0, 1.0, 0.0, 0.0],
+            ),
+            (
+                eval.irbi,
+                eval.irbi.d_internal[IDX_VBX],
+                [0.0, 0.0, 1.0, -1.0, 0.0, 0.0, 0.0, 0.0],
+                zero_external,
+            ),
+            (
+                eval.ire,
+                eval.ire.d_external[EXT_E],
+                [0.0, 0.0, 0.0, 0.0, -1.0, 0.0, 0.0, 0.0],
+                [0.0, 0.0, 1.0, 0.0],
+            ),
+            (
+                eval.irbp,
+                -eval.irbp.d_internal[IDX_VCX],
+                [-1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0],
+                zero_external,
+            ),
+            (
+                eval.irs,
+                eval.irs.d_external[EXT_S],
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, -1.0, 0.0],
+                [0.0, 0.0, 0.0, 1.0],
+            ),
+        ];
+        for (index, (branch, conductance, d_voltage_internal, d_voltage_external)) in
+            parasitics.into_iter().enumerate()
+        {
+            power = Self::add_branches(
+                power,
+                Self::dissipation_about_drop(
+                    branch,
+                    conductance,
+                    own_drops[index],
+                    anchors[index],
+                    d_voltage_internal,
+                    d_voltage_external,
+                ),
+            );
+        }
 
+        power
+    }
+
+    /// `branch·drop` expanded about the drop `anchor` instead, restated at
+    /// `drop`: the current there is `I + c·(anchor − drop)`, and the value
+    /// carries the step back to `drop` along `dP/dV = I + c·V`. Identical to
+    /// the plain product when the two drops agree.
+    #[inline]
+    fn dissipation_about_drop(
+        branch: BranchLinearization,
+        conductance: Value,
+        drop: Value,
+        anchor: Value,
+        d_voltage_internal: [Value; INTERNAL_DIM],
+        d_voltage_external: [Value; EXTERNAL_DIM],
+    ) -> BranchLinearization {
+        if anchor == drop {
+            return Self::power_from_branch(branch, drop, d_voltage_internal, d_voltage_external);
+        }
+        let shift = anchor - drop;
+        let at_anchor = BranchLinearization {
+            current: branch.current + conductance * shift,
+            ..branch
+        };
+        let mut power =
+            Self::power_from_branch(at_anchor, anchor, d_voltage_internal, d_voltage_external);
+        power.current -= (at_anchor.current + conductance * anchor) * shift;
         power
     }
 
