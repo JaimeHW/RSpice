@@ -411,7 +411,9 @@ fn workspace_and_run_commands_resolve_the_pending_field_first() {
     editor.edit("Instance", "invalid name");
     Command::OpenWorkspace(Workspace::Simulate).execute(&mut editor.app);
     assert_eq!(editor.app.state.workbench.workspace, Workspace::Design);
-    Command::RunSimulation.execute(&mut editor.app);
+    editor
+        .app
+        .execute_command_key(crate::workbench::framework::command_registry::ids::RUN_SIMULATION);
     assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());
     editor.app.execute_shortcut_command(Command::RunSimulation);
     assert!(!editor.app.state.runs.preflight.take_run_and_queue_request());

@@ -638,7 +638,8 @@ fn the_editor_clones_reorders_and_removes_the_instance_it_is_open_on() {
 /// it, and no modal claim standing behind them.
 #[test]
 fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_new_instance() {
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::command_registry;
+    use crate::workbench::simulate::commands::SimulateCommand;
 
     let app = RSpiceApp::test_instance();
     let before = app
@@ -656,7 +657,7 @@ fn adding_an_analysis_from_another_route_opens_the_catalogue_and_lands_on_the_ne
         "nothing is open before the press"
     );
 
-    studio.click(|label| label == Command::AddAnalysis.spec().label);
+    studio.click(|label| label == command_registry().label(SimulateCommand::AddAnalysis.key()));
     assert!(
         studio.app.state.model.sim_setup.session.palette_open,
         "the press arms the catalogue"

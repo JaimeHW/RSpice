@@ -666,7 +666,8 @@ fn a_run_still_executing_is_named_as_in_progress_rather_than_immutable() {
 /// carries the command rather than pointing at a panel that may not be drawn.
 #[test]
 fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::commands::vocabulary::command_registry;
+    use crate::workbench::simulate::commands::SimulateCommand;
 
     let empty = render_with(SimulationPage::Analyses, 1400.0, |state| {
         let ids = state
@@ -697,7 +698,7 @@ fn the_empty_analysis_rail_offers_the_action_that_fills_it() {
         "the rail states what it is holding:\n{empty}"
     );
     assert!(
-        empty.contains(Command::AddAnalysis.spec().label),
+        empty.contains(command_registry().label(SimulateCommand::AddAnalysis.key())),
         "and offers the command that fills it, rather than naming a panel:\n{empty}"
     );
 }

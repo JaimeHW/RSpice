@@ -412,7 +412,7 @@ fn first_enabled_instance(app: &RSpiceApp) -> crate::product::AnalysisInstanceId
 ///
 /// Ten fixtures for one window, because the control that opens it is on all of
 /// them: the navigator's creating action is drawn on all nine setup routes,
-/// and `Command::AddAnalysis` reaches it from the Simulate menu and the palette
+/// and `SimulateCommand::AddAnalysis` reaches it from the Simulate menu and the palette
 /// on any workspace at all. The window itself used to be drawn by the Analyses
 /// rail, so nine of these ten armed a modal that no pass rendered — and
 /// `palette_open` is one of the terms of `AppState::application_modal_open`, so

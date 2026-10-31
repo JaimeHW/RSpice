@@ -15,6 +15,7 @@ use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::docks::console::problems::active_problem_count;
 use crate::workbench::docks::console::*;
 use crate::workbench::layout::LayoutSpec;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, WorkbenchSession};
 use rspice_design::drc::DrcResult;
 
@@ -106,7 +107,7 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 // The real command, on an empty design: a schematic with no
                 // components cannot be dispatched, so the pass blocks.
                 app.state.model.schematic = crate::state::SchematicState::default();
-                Command::PreflightChecks.execute(&mut app);
+                app.execute_command_key(SimulateCommand::Preflight.key());
             }
             DiagnosticOwner::Run => {
                 use rspice_results::convergence_attribution::{

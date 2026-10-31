@@ -14,6 +14,7 @@ use super::*;
 use crate::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 use rspice_design::library::metadata::{cell_parameter_contract, decode_source_view_ports};
 use rspice_design::symbol::generated::GENERATED_SYMBOL_VIEW;
@@ -467,8 +468,8 @@ fn run_plan(user: &mut User, device: &Device) -> RunOutcome {
         "no configuration is made by hand"
     );
     let runs_before = user.app.state.model.simulation.retained.runs.len();
-    assert!(Command::RunSimulation.is_enabled(&user.app));
-    Command::RunSimulation.execute(&mut user.app);
+    assert!(user.app.command_key_enabled(SimulateCommand::Run.key()));
+    user.app.execute_command_key(SimulateCommand::Run.key());
     user.frame(Vec::new());
     if let Some(report) = user.app.state.runs.preflight.report.as_ref() {
         assert!(

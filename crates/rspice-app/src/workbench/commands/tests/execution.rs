@@ -7,6 +7,7 @@
 //! keeps advancing rather than restarting once a jump has changed workspace.
 
 use super::*;
+use crate::workbench::simulate::commands::SimulateCommand;
 
 #[test]
 fn tuning_command_opens_the_transactional_sandbox() {
@@ -83,17 +84,17 @@ fn run_controls_follow_stable_execution_ownership_through_cancellation() {
     app.state.model.simulation.execution.active_execution = Some(identity);
     app.state.model.simulation.execution.is_running = false;
 
-    assert!(!Command::RunSimulation.is_enabled(&app));
-    assert!(Command::StopSimulation.is_enabled(&app));
+    assert!(!app.command_key_enabled(SimulateCommand::Run.key()));
+    assert!(app.command_key_enabled(SimulateCommand::Stop.key()));
 
     app.state
         .model
         .simulation
         .request_abort_active_run()
         .unwrap();
-    assert!(!Command::StopSimulation.is_enabled(&app));
+    assert!(!app.command_key_enabled(SimulateCommand::Stop.key()));
     assert_eq!(
-        Command::StopSimulation.availability(&app),
+        app.command_availability(SimulateCommand::Stop.key()),
         CommandAvailability::Disabled("simulation cancellation is already in progress")
     );
 }

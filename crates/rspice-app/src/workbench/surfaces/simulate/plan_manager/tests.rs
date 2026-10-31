@@ -510,8 +510,8 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
 /// A portrait viewport stacks the two columns, and the surface still fits.
 ///
 /// This is the arrangement the stacked path exists for, and it is reachable:
-/// `Command::ManageSimulationPlans` is a `ShortcutContext::Global` entry in
-/// `COMMAND_REGISTRY`, and the command palette that lists it has its own
+/// `SimulateCommand::ManagePlans` is a `ShortcutContext::Global` command the
+/// registry lists, and the command palette that lists it has its own
 /// phone layout — so a narrow viewport can open this dialog, and at 560 the
 /// dialog is the whole viewport rather than a panel inside it.
 ///

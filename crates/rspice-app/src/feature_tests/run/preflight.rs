@@ -9,12 +9,12 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::diagnostic_routes::apply_remediation;
 use crate::workbench::preflight::{
     collect_report, poll, preparation_remediation, queue_retained_run, start,
     temperature_validity_advisories,
 };
+use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::{ConsolePage, Workspace};
 
 mod engine;
@@ -74,8 +74,8 @@ fn run_command_remains_actionable_and_surfaces_preflight_blockers() {
     app.state.workbench.problems_view.text = "no blocker says this".to_owned();
     app.state.workbench.problems_view.producer = Some("rspice.netlist.parser".to_owned());
 
-    assert!(Command::RunSimulation.is_enabled(&app));
-    Command::RunSimulation.execute(&mut app);
+    assert!(app.command_key_enabled(SimulateCommand::Run.key()));
+    app.execute_command_key(SimulateCommand::Run.key());
 
     // Run records the request rather than calling the workflow, so that
     // the command vocabulary does not have to name a module above it.
@@ -908,8 +908,8 @@ fn stop_during_the_engine_pass_authorizes_and_queues_nothing() {
         app.state.runs.preflight.run_awaits_check(),
         "the press waits on the engine's pass over its decks"
     );
-    assert!(Command::StopSimulation.is_enabled(&app));
-    Command::StopSimulation.execute(&mut app);
+    assert!(app.command_key_enabled(SimulateCommand::Stop.key()));
+    app.execute_command_key(SimulateCommand::Stop.key());
     app.settle_preflight();
 
     assert!(app.state.runs.preflight.checking.is_none());

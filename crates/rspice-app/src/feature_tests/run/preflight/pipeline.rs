@@ -128,8 +128,8 @@ fn stop_during_preparation_queues_nothing_and_leaves_nothing_behind() {
         Some(PreflightStage::Preparing(_))
     ));
 
-    assert!(Command::StopSimulation.is_enabled(&app));
-    Command::StopSimulation.execute(&mut app);
+    assert!(app.command_key_enabled(SimulateCommand::Stop.key()));
+    app.execute_command_key(SimulateCommand::Stop.key());
     poll(&mut app.state, &mut app.simulation_controller);
     release.send(()).expect("the worker waits to prepare");
     await_workers(&app, 1);
