@@ -485,6 +485,9 @@ pub enum DiagnosticOwner {
     Run,
     /// What the project's stored rule deck could not apply as written.
     RuleDeck,
+    /// The characters no typeface here can letter, wherever the project's
+    /// text holds them.
+    Lettering,
 }
 
 impl DiagnosticOwner {
@@ -495,12 +498,13 @@ impl DiagnosticOwner {
     /// the assertion below holds this list to one owner per place. The tests
     /// that must drive every owner walk this list rather than naming the
     /// owners they happen to know about.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::DesignRules,
         Self::SymbolPins,
         Self::Dispatch,
         Self::Run,
         Self::RuleDeck,
+        Self::Lettering,
     ];
 
     /// This owner's place in [`Self::ALL`].
@@ -511,6 +515,7 @@ impl DiagnosticOwner {
             Self::Dispatch => 2,
             Self::Run => 3,
             Self::RuleDeck => 4,
+            Self::Lettering => 5,
         }
     }
 
@@ -521,6 +526,7 @@ impl DiagnosticOwner {
             Self::Dispatch => "dispatch",
             Self::Run => "run",
             Self::RuleDeck => "rule-deck",
+            Self::Lettering => "lettering",
         }
     }
 }
@@ -568,6 +574,9 @@ pub enum DiagnosticInputs {
     /// The project's stored rule deck: what it holds that this build did not
     /// apply as written.
     RuleDeck,
+    /// Every text the project letters, and what the typefaces here are known
+    /// to have.
+    Lettering,
 }
 
 impl DiagnosticInputs {
@@ -578,6 +587,7 @@ impl DiagnosticInputs {
             Self::Dispatch => DiagnosticOwner::Dispatch,
             Self::Run { .. } | Self::CampaignMember { .. } => DiagnosticOwner::Run,
             Self::RuleDeck => DiagnosticOwner::RuleDeck,
+            Self::Lettering => DiagnosticOwner::Lettering,
         }
     }
 
@@ -617,6 +627,9 @@ impl DiagnosticInputs {
             Self::RuleDeck => {
                 "the project's rule deck has changed since this was reported".to_owned()
             }
+            Self::Lettering => "the project's text, or what the typefaces here are known to \
+                                have, has changed since this was reported"
+                .to_owned(),
         }
     }
 
@@ -647,7 +660,7 @@ impl DiagnosticInputs {
                 );
                 format!("{owner}\u{1f}live\u{1f}{subject}")
             }
-            Self::Dispatch | Self::RuleDeck => owner.to_owned(),
+            Self::Dispatch | Self::RuleDeck | Self::Lettering => owner.to_owned(),
             Self::Run { run_sequence } => format!("{owner}\u{1f}{run_sequence:020}"),
             // After every run, and in the order the campaign dispatched them.
             Self::CampaignMember {
@@ -696,6 +709,7 @@ impl DiagnosticInputs {
                 member_index,
             } => dispatched_setup_digest(scope, &(campaign, member_index)),
             Self::RuleDeck => super::rule_deck::live_input_digest(model),
+            Self::Lettering => super::lettering::live_input_digest(model),
         }
     }
 
@@ -1410,7 +1424,8 @@ impl Model {
                 | DiagnosticInputs::LiveCheck { .. }
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
-                | DiagnosticInputs::RuleDeck => false,
+                | DiagnosticInputs::RuleDeck
+                | DiagnosticInputs::Lettering => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();
@@ -1444,7 +1459,8 @@ impl Model {
                 | DiagnosticInputs::SymbolPins { .. }
                 | DiagnosticInputs::Dispatch
                 | DiagnosticInputs::CampaignMember { .. }
-                | DiagnosticInputs::RuleDeck => false,
+                | DiagnosticInputs::RuleDeck
+                | DiagnosticInputs::Lettering => false,
             })
             .map(|batch| batch.inputs.clone())
             .collect();

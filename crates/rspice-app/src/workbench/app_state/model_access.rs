@@ -208,6 +208,7 @@ impl AppState {
     // Application half of a model operation; it becomes a request.
     pub(crate) fn refresh_live_checks(&mut self, now: Instant) -> Option<Duration> {
         let facts = self.slot_facts();
+        self.model.refresh_lettering(facts);
         self.model.refresh_live_checks(now, facts)
     }
 

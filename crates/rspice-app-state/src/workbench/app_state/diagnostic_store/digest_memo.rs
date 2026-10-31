@@ -62,6 +62,9 @@ pub(super) enum DigestKey {
         project: ProjectId,
         label: String,
     },
+    /// The stamps of every text the project letters, and how often the
+    /// faces' coverage has been settled.
+    Lettering(super::super::lettering::LetteringKey),
 }
 
 impl DigestKey {
@@ -133,6 +136,9 @@ impl DigestKey {
                 project,
                 label: super::super::rule_deck::project_file_label(model),
             }),
+            DiagnosticInputs::Lettering => {
+                Some(Self::Lettering(super::super::lettering::inputs_key(model)))
+            }
         }
     }
 }

@@ -65,6 +65,7 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
                 DiagnosticInputs::Run { run_sequence: 3 }
             }
             DiagnosticOwner::RuleDeck => DiagnosticInputs::RuleDeck,
+            DiagnosticOwner::Lettering => DiagnosticInputs::Lettering,
         };
         state
             .publish_diagnostics(inputs.clone(), Vec::new())
@@ -129,6 +130,23 @@ fn an_input_change_stales_a_published_batch_for_every_owner() {
                     serde_json::from_str(r#"{"schema_version":2}"#)
                         .expect("a stored deck always reads");
             }
+            DiagnosticOwner::Lettering => {
+                // A part's value in a code point no embedded face has.
+                let part = state.model.schematic.add_component(
+                    crate::state::ComponentType::Resistor,
+                    crate::state::Point::new(0, 0),
+                );
+                if let Some(part) = state
+                    .model
+                    .schematic
+                    .document_mut_for_test()
+                    .components
+                    .iter_mut()
+                    .find(|component| component.id == part)
+                {
+                    part.value = "\u{3a2}".to_owned();
+                }
+            }
         }
 
         assert_eq!(
@@ -184,7 +202,8 @@ fn run_batches(state: &AppState) -> Vec<u64> {
             | DiagnosticInputs::SymbolPins { .. }
             | DiagnosticInputs::Dispatch
             | DiagnosticInputs::CampaignMember { .. }
-            | DiagnosticInputs::RuleDeck => None,
+            | DiagnosticInputs::RuleDeck
+            | DiagnosticInputs::Lettering => None,
         })
         .collect()
 }

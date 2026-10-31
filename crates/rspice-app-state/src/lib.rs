@@ -45,6 +45,7 @@ pub mod workbench {
         pub mod design_checks;
         pub mod design_history;
         pub mod diagnostic_store;
+        mod lettering;
         pub mod model;
         pub mod rule_deck;
         pub mod run_identity;

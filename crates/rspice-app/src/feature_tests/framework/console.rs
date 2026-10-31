@@ -137,6 +137,31 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                         .expect("a stored deck always reads");
                 app.state.publish_rule_deck_issues();
             }
+            DiagnosticOwner::Lettering => {
+                // A part's value in a code point no typeface has, once the
+                // faces are known not to have it; the frame's refresh reads
+                // the drawing.
+                let unassigned = settled_missing('\u{38b}');
+                let resistor = app
+                    .state
+                    .model
+                    .schematic
+                    .add_component(crate::state::ComponentType::Resistor, Point::new(40, 40));
+                if let Some(part) = app
+                    .state
+                    .model
+                    .schematic
+                    .document_mut_for_test()
+                    .components
+                    .iter_mut()
+                    .find(|part| part.id == resistor)
+                {
+                    part.value = format!("10 k{unassigned}");
+                }
+                let _ = app
+                    .state
+                    .refresh_live_checks(crate::time_compat::Instant::now());
+            }
         }
 
         let batch = app
@@ -183,10 +208,11 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
                 record.message
             );
         }
-        // A deck that is not applied does not stop a run, so it is a warning,
-        // not an error; it still has to count.
+        // A deck that is not applied does not stop a run, and a square in
+        // place of a character does not either, so each is a warning, not an
+        // error; it still has to count.
         let counted = match owner {
-            DiagnosticOwner::RuleDeck => listed.counts().warnings,
+            DiagnosticOwner::RuleDeck | DiagnosticOwner::Lettering => listed.counts().warnings,
             _ => listed.counts().errors,
         };
         assert!(
@@ -195,6 +221,37 @@ fn every_producer_puts_its_failures_on_the_page_as_canonical_records() {
             listed.counts()
         );
     }
+}
+
+/// `character`, once the faces are known not to have it. On the desktop a
+/// worker with no faces to read is asked about it and answers on a frame; a
+/// browser reads no installed faces, so there it is known at once.
+fn settled_missing(character: char) -> char {
+    use rspice_ui_kit::fonts::coverage::{Coverage, coverage};
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        use rspice_ui_kit::fonts::system::{self, HanVariant, Source, SystemFonts};
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        system::attach_with(
+            &ctx,
+            SystemFonts::spawn(Source::files(Vec::new()), HanVariant::Simplified.order()),
+            Vec::new(),
+        );
+        rspice_ui_kit::fonts::coverage::ask([character]);
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(60);
+        while coverage(character) == Coverage::Unsettled {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the faces are asked about {character:?}"
+            );
+            let _ = ctx.run_ui(egui::RawInput::default(), |_| {});
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+    assert_eq!(coverage(character), Coverage::Missing);
+    character
 }
 
 /// A run that completes with an engine warning puts it on the page, as the
