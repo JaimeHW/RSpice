@@ -36,6 +36,10 @@ impl Drop for RestoreWallClock {
 fn wall_clock_adjustments_do_not_change_elapsed_time() {
     let _restore = RestoreWallClock(replace_date_now(1_700_000_000_123.0));
     assert_eq!(time_compat::checked_unix_time_ms(), Ok(1_700_000_000_123));
+    assert_eq!(
+        time_compat::utc_stamp(1_700_000_000_123),
+        "2023-11-14 22:13 UTC"
+    );
     time_compat::with_unix_epoch(Err("injected clock failure"), || {
         assert!(time_compat::checked_unix_time_ms().is_err());
     });
