@@ -1223,6 +1223,9 @@ pub struct Bjt {
     /// raw solution, so convergence and residual acceptance must wait until
     /// the limiter disengages.
     legacy_junction_limited: bool,
+    /// No matrix load and no second `update` has seen the iterate the last
+    /// legacy `update` limited yet.
+    legacy_update_open: Cell<bool>,
     ic: Value,
     ib: Value,
     ie: Value,
@@ -1872,6 +1875,7 @@ impl Bjt {
         debug_assert_eq!(cursor, values.len());
 
         self.legacy_junction_limited = checkpoint.legacy_junction_limited;
+        self.legacy_update_open.set(false);
         self.reduced_linearization_cache_valid
             .set(checkpoint.reduced_linearization_valid);
         self.previous_reduced_linearization_valid = checkpoint.previous_reduced_linearization_valid;
@@ -2158,6 +2162,7 @@ impl Bjt {
             vs_ext: 0.0,
             eval_anchor: [0.0; EXTERNAL_DIM],
             legacy_junction_limited: false,
+            legacy_update_open: Cell::new(false),
             ic: 0.0,
             ib: 0.0,
             ie: 0.0,
@@ -2578,11 +2583,13 @@ impl NonlinearDevice for Bjt {
             return;
         }
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
+        let open = self.legacy_update_open.replace(false);
         // A limited state must advance toward the raw bias even when ideal
         // sources or ground keep every terminal unchanged. Matrix loads use
-        // this cached evaluation without advancing history; an update starts
-        // the next device iterate. Only an unlimited evaluation can be reused
-        // indefinitely. GMIN changes invalidate the cache separately.
+        // this cached evaluation without advancing history; an update after
+        // a load starts the next device iterate. Only an unlimited evaluation
+        // can be reused indefinitely. GMIN changes invalidate the cache
+        // separately.
         if self.reduced_linearization_cache_valid.get()
             && self.cache_exactly_matches_external_biases(vc, vb, ve, vs)
             && !self.legacy_junction_limited
@@ -2598,6 +2605,20 @@ impl NonlinearDevice for Bjt {
                 self.vbc_prev = self.vbc;
                 self.intrinsic_linearization_prev = self.intrinsic_linearization;
             }
+            return;
+        }
+        // One Newton iterate reaches `update` twice, after its solve and again
+        // before its stamp. bjtload.c limits each load once against
+        // CKTstate0, so the second pass of a pnjlim-limited iterate keeps the
+        // first pass's evaluation instead of limiting the same raw junctions
+        // again against its own output. (The startup state, which replaces
+        // the junctions outright, is released by the next update as before.)
+        if open
+            && self.legacy_junction_limited
+            && self.previous_reduced_linearization_valid
+            && self.reduced_linearization_cache_valid.get()
+            && self.cache_exactly_matches_external_biases(vc, vb, ve, vs)
+        {
             return;
         }
         let previous_linearization_available = self.reduced_linearization_cache_valid.get();
@@ -2715,6 +2736,7 @@ impl NonlinearDevice for Bjt {
         self.reduced_linearization_cache.set(reduced);
         self.reduced_linearization_cache_valid.set(true);
         self.charge_snapshot_cache_valid.set(false);
+        self.legacy_update_open.set(true);
     }
 
     fn stamp_nonlinear(
@@ -2729,6 +2751,9 @@ impl NonlinearDevice for Bjt {
             self.stamp_mna(matrix);
             return;
         }
+        // The load closes the iterate: an update at the same raw voltages
+        // after it is the next Newton iteration.
+        self.legacy_update_open.set(false);
         let biases = self.external_terminal_voltages(voltages);
         let (rows, rhs) = self.stamped_reduced_external_system(
             biases[EXT_C],
@@ -2774,6 +2799,7 @@ impl Bjt {
         self.previous_reduced_linearization_valid = false;
         self.charge_snapshot_cache_valid.set(false);
         self.legacy_junction_limited = false;
+        self.legacy_update_open.set(false);
         if self.mna_promoted {
             self.mna_eval = None;
             self.mna_limited_from.set(None);

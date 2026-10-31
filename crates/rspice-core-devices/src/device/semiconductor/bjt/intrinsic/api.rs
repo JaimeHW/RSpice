@@ -126,6 +126,8 @@ impl Bjt {
             self.stamp_mna(&mut stamper);
             return;
         }
+        // The load closes the iterate (see `stamp_nonlinear`).
+        self.legacy_update_open.set(false);
         let [vc, vb, ve, vs] = self.external_terminal_voltages(voltages);
         let (rows, source) = self.stamped_reduced_external_system(vc, vb, ve, vs);
         let nodes = self.external_terminal_nodes();
@@ -707,5 +709,35 @@ mod tests {
             "a normal instance must stay forward biased, found vbe={:.17e}",
             on.vbe
         );
+    }
+
+    #[test]
+    fn a_limited_legacy_iterate_updated_twice_is_limited_once() {
+        let mut bjt = Bjt::new_npn("q".to_string(), 1, 2, 3);
+        let settled = [0.0; 3];
+        for _ in 0..4 {
+            bjt.update(&settled);
+            bjt.stamp_nonlinear(&settled, &mut DenseStamper::new(3), &mut []);
+        }
+        assert!(!bjt.legacy_junction_limited_for_trace());
+
+        // A 2 V base step, which DEVpnjlim holds near tVcrit.
+        let candidate = [0.0, 2.0, 0.0];
+        let mut once = bjt.clone();
+        once.update(&candidate);
+        assert!(once.legacy_junction_limited_for_trace());
+        let once = once.vbe;
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes see one limiting.
+        bjt.update(&candidate);
+        bjt.update(&candidate);
+        assert_eq!(bjt.vbe.to_bits(), once.to_bits());
+
+        // A solve that returns the same voltages after the load is the next
+        // iteration, which limits again from where this one stopped.
+        bjt.stamp_nonlinear(&candidate, &mut DenseStamper::new(3), &mut []);
+        bjt.update(&candidate);
+        assert!(bjt.vbe > once, "the next iteration advances: {}", bjt.vbe);
     }
 }
