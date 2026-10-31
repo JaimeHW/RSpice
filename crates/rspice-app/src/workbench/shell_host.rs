@@ -180,7 +180,12 @@ impl Host for RSpiceApp {
                     {
                         veriloga::show(ui, app);
                     }
-                    Workspace::Design => design::show(ui, app),
+                    // A hand-off the navigator raised into another
+                    // workspace is answered once it has drawn.
+                    Workspace::Design => {
+                        design::show(ui, app);
+                        app.after_contribution();
+                    }
                     Workspace::Results => {
                         features::show_navigator::<ResultsFeature>(app, ui);
                         app.after_contribution();

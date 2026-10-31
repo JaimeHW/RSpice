@@ -550,10 +550,20 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "19",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app,",
+            "ConfirmPackAttach {",
+            "crate::workbench::models::ModelsFeature::confirm_pack_attach(",
+            "&mut features::cx(app),",
+            "app.execute_command_key(ids::MODELS_CATALOG);",
+        ],
     ),
     (
         "20",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "21",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -641,6 +651,19 @@ const MODELS_CONTRIBUTIONS: &[Step] = &[
            Workspace::Netlist =>"],
     ),
 ];
+
+/// The shell's `contribute`, at the design docks that hand off into the
+/// Models workspace: each has what it raised answered once it has drawn,
+/// before the next point draws.
+const DESIGN_CONTRIBUTIONS: &[Step] = &[(
+    "navigator",
+    &["Workspace::Design => {\
+       design::show(ui, app);\
+       app.after_contribution();\
+       }\
+       Workspace::Results => {\
+       features::show_navigator::<ResultsFeature>(app, ui);"],
+)];
 
 /// `answer_result_requests`, step 11.31 of the frame: the export requests
 /// the result documents raised, then Export dataset…, drawn between the
@@ -1189,8 +1212,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        20,
-        "`after_contribution` answers exactly the twenty requests it lists"
+        21,
+        "`after_contribution` answers exactly the twenty-one requests it lists"
     );
 }
 
@@ -1252,6 +1275,15 @@ fn a_models_contribution_answers_nothing_where_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         MODELS_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        DESIGN_CONTRIBUTIONS,
     );
 }
 

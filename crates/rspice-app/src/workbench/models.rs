@@ -26,7 +26,9 @@ use crate::workbench::framework::feature::{
     NoHandles, Reads, held_back,
 };
 use crate::workbench::slots::ModelsState;
-use crate::workbench::state::{WorkbenchSession, Workspace};
+use crate::workbench::state::{
+    ModelsWorkbenchDialog, PackReleaseConfirmation, WorkbenchSession, Workspace,
+};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::ModelsCommand;
 use model_editor_workflow::{
@@ -132,6 +134,38 @@ impl ModelsFeature {
             },
             ctx,
         );
+    }
+}
+
+impl ModelsFeature {
+    /// Put up the confirmation of attaching the model pack release
+    /// `pack_id` `version` for its part `part_id`, or say on the status bar
+    /// that the model hub no longer describes that release. Returns whether
+    /// the confirmation is up, for the caller to show the catalog it sits on.
+    pub(in crate::workbench) fn confirm_pack_attach(
+        cx: &mut Cx<'_, ModelsFeature>,
+        part_id: String,
+        pack_id: String,
+        version: String,
+    ) -> bool {
+        let Some(release) = PackReleaseConfirmation::for_release(
+            cx.handles.model_hub,
+            &pack_id,
+            &version,
+            Some(part_id.clone()),
+        ) else {
+            cx.wb.prompt(format!(
+                "The model hub no longer describes {pack_id} {version}, so '{part_id}' cannot be \
+                 added."
+            ));
+            return false;
+        };
+        cx.state.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+            pack_id,
+            attach: true,
+            release: Some(Box::new(release)),
+        });
+        true
     }
 }
 

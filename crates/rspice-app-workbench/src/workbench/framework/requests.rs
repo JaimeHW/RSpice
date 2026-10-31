@@ -493,6 +493,21 @@ impl Request for ShowProjectModels {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Ask on the Models workspace's catalog to attach the model pack release
+/// `pack_id` `version` that offers the part `part_id`. Raised by the
+/// schematic's component shelf, and taken straight after the call that
+/// raised it.
+#[derive(Clone, Debug)]
+pub struct ConfirmPackAttach {
+    pub part_id: String,
+    pub pack_id: String,
+    pub version: String,
+}
+
+impl Request for ConfirmPackAttach {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

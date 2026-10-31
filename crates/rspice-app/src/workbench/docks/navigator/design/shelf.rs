@@ -36,7 +36,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::framework::requests::FocusPlacementSearch;
+use crate::workbench::framework::requests::{ConfirmPackAttach, FocusPlacementSearch};
 
 use super::super::super::super::design_system::{
     WorkbenchIcon, section_header as shelf_section_header,
@@ -583,27 +583,11 @@ fn arm_library_part(
 /// on the cursor when the install completes, so the round trip ends where the
 /// user started.
 fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, version: String) {
-    use crate::workbench::framework::command_registry::ids;
-    use crate::workbench::state::{ModelsWorkbenchDialog, PackReleaseConfirmation};
-
-    let Some(release) = PackReleaseConfirmation::for_release(
-        &app.model_hub,
-        &pack_id,
-        &version,
-        Some(part_id.clone()),
-    ) else {
-        app.state.prompt(format!(
-            "The model hub no longer describes {pack_id} {version}, so '{part_id}' cannot be \
-             added."
-        ));
-        return;
-    };
-    app.state.models.models_view.dialog = Some(ModelsWorkbenchDialog::ConfirmPack {
+    app.state.workbench.outbox.push(ConfirmPackAttach {
+        part_id,
         pack_id,
-        attach: true,
-        release: Some(Box::new(release)),
+        version,
     });
-    app.execute_command_key(ids::MODELS_CATALOG);
 }
 
 pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usize {
