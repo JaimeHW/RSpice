@@ -150,6 +150,9 @@ pub struct Bsim4v8Device {
     /// The raw voltages the last `update` limited and the state it limited
     /// them against ([`Self::limit_anchor`]).
     last_update: Option<Bsim4v8LimitAnchor>,
+    /// No matrix load and no second `update` has seen the iterate
+    /// `last_update` holds yet ([`Self::begin_update`]).
+    last_update_open: std::cell::Cell<bool>,
     /// `DEVpnjlim` flagged the body junction on the last update (ngspice
     /// bumps `CKTnoncon`, b4ld.c:4070-4072; here it vetoes device
     /// convergence for the iterate).
@@ -219,6 +222,7 @@ impl Bsim4v8Device {
             has_history: false,
             limit_anchor_valid: std::cell::Cell::new(false),
             last_update: None,
+            last_update_open: std::cell::Cell::new(false),
             last_limited: std::cell::Cell::new(false),
             initial_off,
             initial_off_seed_pending: true,
@@ -442,14 +446,37 @@ impl Bsim4v8Device {
     ) -> Bsim4v8LimitAnchor {
         match self.last_update {
             Some(anchor) if anchor.raw == raw && anchor.raw_junction == raw_junction => anchor,
-            _ => Bsim4v8LimitAnchor {
-                raw,
-                raw_junction,
-                bias: self.bias,
-                junction_bias: self.junction_bias,
-                von: self.von_prev,
-                valid: self.limit_anchor_valid.get(),
-            },
+            _ => self.present_limit_anchor(raw, raw_junction),
+        }
+    }
+
+    fn present_limit_anchor(
+        &self,
+        raw: Bsim4v8Bias,
+        raw_junction: Option<Bsim4v8JunctionBias>,
+    ) -> Bsim4v8LimitAnchor {
+        Bsim4v8LimitAnchor {
+            raw,
+            raw_junction,
+            bias: self.bias,
+            junction_bias: self.junction_bias,
+            von: self.von_prev,
+            valid: self.limit_anchor_valid.get(),
+        }
+    }
+
+    /// Record the iterate an `update` limits. The second update of one
+    /// iterate keeps the first one's anchor; once a matrix load or that
+    /// second update has used it, the same raw voltages are a new iterate (a
+    /// solve that repeats them must still advance the limiter towards them).
+    fn begin_update(&mut self, raw: Bsim4v8Bias, raw_junction: Option<Bsim4v8JunctionBias>) {
+        let same_iterate = self
+            .last_update
+            .is_some_and(|anchor| anchor.raw == raw && anchor.raw_junction == raw_junction)
+            && self.last_update_open.replace(false);
+        if !same_iterate {
+            self.last_update = Some(self.present_limit_anchor(raw, raw_junction));
+            self.last_update_open.set(true);
         }
     }
 
@@ -2052,10 +2079,10 @@ impl NonlinearDevice for Bsim4v8Device {
                 self.initial_off_seed_raw = Some(raw);
             }
         }
-        self.last_update = Some(self.limit_anchor(
+        self.begin_update(
             self.raw_branch_voltages(voltages),
             self.raw_junction_bias(voltages),
-        ));
+        );
         let (bias, junction_bias, check) = self.limited_branch_voltages(voltages);
         self.last_limited.set(check);
         self.bias = bias;
@@ -2075,6 +2102,9 @@ impl NonlinearDevice for Bsim4v8Device {
         _rhs: &mut [Value],
     ) {
         let (bias, junction_bias, _) = self.limited_branch_voltages(voltages);
+        // The load closes the iterate: an update at the same raw voltages
+        // after it is the next Newton iteration.
+        self.last_update_open.set(false);
         if bias == self.bias && (!self.rbody_enabled() || junction_bias == Some(self.junction_bias))
         {
             self.stamp_op(&self.op, bias, junction_bias, voltages, matrix);
@@ -2232,8 +2262,9 @@ mod tests {
         assert!((ceqgcrg + 2.64).abs() < 1e-14);
     }
 
-    #[test]
-    fn an_iterate_updated_twice_is_limited_once() {
+    /// A default-card NMOS: drain on node 1, gate on node 2, source and body
+    /// grounded.
+    fn nmos() -> Bsim4v8Device {
         use crate::device::mosfet::bsim4v8::{Bsim4v8Geometry, Bsim4v8Model};
         let model = std::sync::Arc::new(Bsim4v8Model::from_params(
             &std::collections::HashMap::new(),
@@ -2247,8 +2278,7 @@ mod tests {
             ..Bsim4v8Geometry::default()
         };
         let core = Bsim4v8::new("m1".to_string(), model, geometry, 300.15).expect("BSIM4 instance");
-        // Drain on node 1, gate on node 2, source and body grounded.
-        let mut device = Bsim4v8Device::new(
+        Bsim4v8Device::new(
             "m1".to_string(),
             1,
             1,
@@ -2264,7 +2294,19 @@ mod tests {
             0,
             1.0,
             core,
-        );
+        )
+    }
+
+    struct NoStamp;
+
+    impl MatrixStamper for NoStamp {
+        fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
+        fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    #[test]
+    fn an_iterate_updated_twice_is_limited_once() {
+        let mut device = nmos();
         device.update(&[0.0, 0.0]);
         let (anchor, von) = (device.bias, device.op.von);
 
@@ -2280,5 +2322,30 @@ mod tests {
         device.update(&iterate);
         assert_eq!(device.bias, once);
         assert_eq!(device.limited_branch_voltages(&iterate).0, once);
+    }
+
+    /// A Newton solve can return the voltages it was linearised at (every
+    /// terminal pinned by a source, or an iterate projected back to the same
+    /// point). After the load the next update is the next iteration and
+    /// moves the limited bias on towards them, as b4ld.c's next load limits
+    /// against the CKTstate0 this one wrote.
+    #[test]
+    fn a_repeated_iterate_after_a_load_advances_the_limiter() {
+        let mut device = nmos();
+        device.update(&[0.0, 0.0]);
+        let iterate = [0.05, 4.0];
+        device.update(&iterate);
+        device.update(&iterate);
+        device.stamp_nonlinear(&iterate, &mut NoStamp, &mut []);
+        let first = device.bias;
+        assert!(first.vgs < 2.0, "the first step is limited: {first:?}");
+
+        device.update(&iterate);
+        assert!(
+            device.bias.vgs > first.vgs,
+            "{first:?} -> {:?}",
+            device.bias
+        );
+        assert!(device.bias.vgs <= 4.0, "{:?}", device.bias);
     }
 }
