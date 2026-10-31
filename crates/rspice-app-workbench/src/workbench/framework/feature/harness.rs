@@ -385,7 +385,7 @@ where
                 model_hub: &mut self.model_hub,
             },
             Peers::new(
-                &mut self.ports,
+                Some(&mut self.ports),
                 Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&mut self.results_peer),

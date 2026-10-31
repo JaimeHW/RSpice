@@ -225,7 +225,9 @@ pub trait ModelsPort {
 /// taken earlier; and the one thing it may ask of one, letting go of
 /// design's canvas gesture.
 pub struct Peers<'a> {
-    design: &'a mut dyn DesignPeer,
+    /// `None` in design's own context, as `results` is in the results
+    /// feature's.
+    design: Option<&'a mut dyn DesignPeer>,
     /// `None` in the cloud feature's own context, as `results` is in the
     /// results feature's.
     cloud: Option<&'a dyn CloudPort>,
@@ -247,7 +249,7 @@ pub struct Peers<'a> {
 
 impl<'a> Peers<'a> {
     pub fn new(
-        design: &'a mut dyn DesignPeer,
+        design: Option<&'a mut dyn DesignPeer>,
         cloud: Option<&'a dyn CloudPort>,
         hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a mut dyn ResultsPeer>,
@@ -266,8 +268,13 @@ impl<'a> Peers<'a> {
         }
     }
 
+    /// What design shows. Design's own context holds no such peer, because
+    /// the feature reads its own state; its code asking for one is a fault
+    /// in that code.
     pub fn design(&self) -> &dyn DesignPort {
-        &*self.design
+        self.design
+            .as_deref()
+            .expect("design reads its own state, never itself as a peer")
     }
 
     /// What the cloud shows. The cloud feature's own context holds no such
@@ -340,7 +347,10 @@ pub struct LowerHandles<'a> {
 
 impl CanvasGesturePort for Peers<'_> {
     fn let_go_of_canvas_gesture(&mut self, model: &mut Model) {
-        self.design.let_go_of_canvas_gesture(model);
+        self.design
+            .as_deref_mut()
+            .expect("design lets go of its own gesture, never through a peer")
+            .let_go_of_canvas_gesture(model);
     }
 }
 

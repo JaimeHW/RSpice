@@ -54,7 +54,7 @@ fn cx<'a>(
             model_hub,
         },
         Peers::new(
-            &mut *state.design,
+            Some(&mut *state.design),
             Some(&*state.cloud),
             None,
             Some(&mut *state.results),

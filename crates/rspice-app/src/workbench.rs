@@ -100,6 +100,7 @@ pub(crate) mod chrome {
 pub(crate) use rspice_app_cloud::workbench::cloud;
 pub(crate) mod commands;
 mod cross_probe;
+pub(crate) mod design;
 pub(crate) mod diagnostic_routes;
 pub(crate) use rspice_ui_kit::panels as design_system;
 mod dispatch;

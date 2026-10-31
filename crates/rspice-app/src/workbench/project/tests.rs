@@ -27,7 +27,7 @@ pub(super) fn with_cx<R>(
         &mut state.runs,
         handles,
         Peers::new(
-            &mut *state.design,
+            Some(&mut *state.design),
             Some(&*state.cloud),
             Some(&*state.hardcopy),
             Some(&mut *state.results),

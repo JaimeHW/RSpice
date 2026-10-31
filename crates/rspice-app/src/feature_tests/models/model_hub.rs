@@ -93,7 +93,7 @@ fn with_cx<R>(
             model_hub,
         },
         Peers::new(
-            &mut *state.design,
+            Some(&mut *state.design),
             Some(&*state.cloud),
             Some(&*state.hardcopy),
             Some(&mut *state.results),

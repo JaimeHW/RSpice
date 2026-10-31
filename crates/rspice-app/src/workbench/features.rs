@@ -18,6 +18,7 @@ use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::cloud::CloudFeature;
 use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
@@ -105,6 +106,17 @@ macro_rules! simulate_peer {
     };
 }
 
+/// The design peer a context over `state` holds for the feature whose slot
+/// is `slot`: none for design itself, whose slot it is.
+macro_rules! design_peer {
+    (design, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&mut *$state.design)
+    };
+}
+
 /// What a context over `app` lends the feature as what it runs: the
 /// application's field `own`, or nothing for a feature that runs nothing.
 macro_rules! own {
@@ -165,7 +177,7 @@ macro_rules! features {
                         &mut *state.runs,
                         handles,
                         Peers::new(
-                            &mut *state.design,
+                            design_peer!($slot, state),
                             cloud_peer!($slot, state),
                             hardcopy_peer!($slot, state),
                             results_peer!($slot, state),
@@ -311,6 +323,7 @@ features! {
     models: ModelsFeature,
     simulate: SimulateFeature,
     project: ProjectFeature,
+    design: DesignFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers

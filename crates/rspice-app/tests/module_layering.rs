@@ -887,6 +887,8 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "project",
     // The simulate feature's home.
     "simulate",
+    // The design feature's home.
+    "design",
     // The shell's list of registered features, which builds each one's
     // context from the application state.
     "features",
