@@ -28,6 +28,7 @@ pub use rspice_design::properties as property_types;
 pub use rspice_results::result_presentation;
 mod schematic;
 pub mod shortcuts;
+mod simulate_pages;
 mod simulation;
 pub mod stimulus_library;
 use rspice_design::symbol;
@@ -136,6 +137,7 @@ pub use rspice_vocabulary::hierarchy_path::{
     HierarchyPathError, InstancePath, InstancePathPattern, MAX_INSTANCE_PATH_BYTES,
     MAX_INSTANCE_PATH_DEPTH, PatternSegment, ProbeTarget,
 };
+pub use simulate_pages::{SimulationPage, VerificationPage};
 // The design-management model is a crate of its own so the offline
 // drawing-sheet publisher can link it without linking the GUI. It is
 // re-exported here because it is still the application's state authority and
