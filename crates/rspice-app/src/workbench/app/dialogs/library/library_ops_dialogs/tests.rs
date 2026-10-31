@@ -111,6 +111,7 @@ fn the_deletion_review_reports_the_same_blocker_the_transaction_enforces() {
         .expect("deletion review opens");
 
     let blocker = state
+        .model
         .library_deletion_blocker("work")
         .expect("the project root library is undeletable");
     let committed = state

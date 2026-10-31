@@ -66,7 +66,7 @@ impl AppState {
         if let Some(error) = validate_lcv_name(&name, "Library name") {
             return Err(error);
         }
-        self.create_library(&name).map(|()| name)
+        self.model.create_library(&name).map(|()| name)
     }
 
     fn commit_rename_library_dialog(&mut self) -> Result<Option<usize>, String> {
@@ -118,7 +118,7 @@ fn library_deletion_impact(state: &AppState, library: &str) -> LibraryDeletionIm
             .iter()
             .filter(|open| open.reference.library == library)
             .count(),
-        instance_references: state.external_instance_references_to_library(library),
+        instance_references: state.model.external_instance_references_to_library(library),
         source_bundles: state
             .model
             .workspace
@@ -293,7 +293,7 @@ impl RSpiceApp {
         let impact = library_deletion_impact(&self.state, &library);
         let catalog_current = self.state.model.library_manager.revision()
             == self.state.project.delete_library_library_revision;
-        let blocker = self.state.library_deletion_blocker(&library);
+        let blocker = self.state.model.library_deletion_blocker(&library);
         let displayed_error = if catalog_current {
             blocker
                 .clone()

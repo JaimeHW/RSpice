@@ -28,6 +28,7 @@ mod symbol_context;
 mod test_technology;
 
 pub use definition_index::DefinitionRow;
+pub use library_catalog::{LibraryRemoval, WorkspacePruned};
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };

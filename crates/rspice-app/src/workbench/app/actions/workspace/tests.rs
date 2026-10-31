@@ -1709,6 +1709,7 @@ fn create_library_rejects_a_canonical_identity_collision() {
     let before = state.model.library_manager.library_count();
 
     state
+        .model
         .create_library("vendor")
         .expect("a fresh library name is accepted");
     assert_eq!(state.model.library_manager.library_count(), before + 1);
@@ -1723,6 +1724,7 @@ fn create_library_rejects_a_canonical_identity_collision() {
     ));
 
     let error = state
+        .model
         .create_library("VENDOR")
         .expect_err("a case-folded duplicate is the same library identity");
     assert!(error.contains("vendor"), "{error}");
