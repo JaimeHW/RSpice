@@ -504,7 +504,7 @@ pub struct Mosfet {
     /// this instance.
     cold: Option<Box<MosfetCold>>,
     /// The startup state of the first operating-point load (an `OFF`
-    /// instance's zero bias) is still unspent.
+    /// instance's zero bias, or the MODEINITJCT seed) is still unspent.
     initial_off_seed_pending: bool,
     /// How many consecutive evaluations the pending startup state has served
     /// at an unchanged terminal bias.
@@ -575,8 +575,8 @@ pub(crate) struct MosfetCold {
     /// Instance `IC=VDS,VGS,VBS`, read once at `UIC` transient startup.
     pub(crate) initial_condition: Option<MosfetInitialCondition>,
     /// Present while an operating-point solve has primed the instance and its
-    /// startup state is pending: an `OFF` instance holds its zero bias
-    /// through MODEINITFIX.
+    /// startup state is pending: the MODEINITJCT seed applies, and an `OFF`
+    /// instance holds its zero bias through MODEINITFIX.
     pub(crate) operating_point_startup: Option<OperatingPointStartup>,
 }
 
@@ -735,10 +735,7 @@ impl Mosfet {
     pub fn enter_operating_point(&mut self, warm_start: bool) {
         if warm_start {
             self.retire_startup_state();
-        } else if self.initial_off
-            && self.initial_off_seed_pending
-            && self.operating_point_startup().is_none()
-        {
+        } else if self.initial_off_seed_pending && self.operating_point_startup().is_none() {
             self.set_operating_point_startup(Some(OperatingPointStartup::default()));
         }
     }
@@ -767,10 +764,26 @@ impl Mosfet {
     }
 
     /// The bias a pending startup state evaluates instead of the Newton
-    /// iterate: `vbs = vgs = vds = 0` for an `OFF` instance (mos1load.c:397-410,
-    /// and its level 2/3/6/9 twins).
+    /// iterate (mos1load.c:397-410, and its level 2/3/6/9 twins):
+    /// `vbs = vgs = vds = 0` for an `OFF` instance, else, in the first
+    /// operating-point load, `vgs = VTO, vds = 0, vbs = -1` in model space.
     pub(in crate::device::mosfet) fn pending_startup_bias(&self) -> Option<(Value, Value, Value)> {
-        (self.initial_off_seed_pending && self.initial_off).then_some((0.0, 0.0, 0.0))
+        if !self.initial_off_seed_pending {
+            return None;
+        }
+        if self.initial_off {
+            return Some((0.0, 0.0, 0.0));
+        }
+        // An instance `IC=` vector would be ngspice's seed instead; those
+        // instances keep starting from the Newton iterate.
+        let seeded = self.operating_point_startup().is_some()
+            && matches!(self.level, 1 | 2 | 3 | 6 | 9)
+            && !self.uses_legacy_bsim()
+            && self
+                .cold
+                .as_deref()
+                .is_none_or(|cold| cold.initial_condition.is_none());
+        seeded.then(|| (self.vto, 0.0, -self.polarity()))
     }
 
     /// True when the deck marked this instance `OFF`.

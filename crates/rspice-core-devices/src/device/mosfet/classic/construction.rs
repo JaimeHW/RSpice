@@ -1814,6 +1814,34 @@ mod tests {
     }
 
     #[test]
+    fn primed_instance_takes_the_initial_junction_seed_for_one_iterate() {
+        use crate::device::NonlinearDevice;
+
+        // mos1load.c's MODEINITJCT arm: vgs = VTO, vds = 0, vbs = -1 in model
+        // space for the first operating-point load only.
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 1.0);
+        params.insert("VTO".to_string(), -0.8);
+        let mut pmos = Mosfet::new_pmos("m1".to_string(), 1, 2, 3, 4).with_params(&params);
+        let start = [0.0, 0.0, 5.0, 5.0];
+        pmos.enter_operating_point(false);
+        for _ in 0..2 {
+            pmos.update(&start);
+            assert_eq!(
+                (pmos.eval_vgs, pmos.eval_vds, pmos.eval_vbs),
+                (-0.8, 0.0, 1.0)
+            );
+        }
+        pmos.update(&[1.0, 0.0, 5.0, 5.0]);
+        assert_ne!((pmos.eval_vgs, pmos.eval_vds), (-0.8, 0.0));
+
+        // Without an operating-point prime the device evaluates the iterate.
+        let mut unprimed = Mosfet::new_pmos("m2".to_string(), 1, 2, 3, 4).with_params(&params);
+        unprimed.update(&start);
+        assert_eq!((unprimed.eval_vgs, unprimed.eval_vds), (-5.0, -5.0));
+    }
+
+    #[test]
     fn physical_cache_marker_tracks_newton_limiting_exactly() {
         use crate::device::NonlinearDevice;
 

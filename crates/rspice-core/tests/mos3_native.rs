@@ -994,3 +994,33 @@ fn mos3_off_devices_stay_cut_off_until_the_rest_of_the_latch_converges() {
         1.0e-6,
     );
 }
+
+#[test]
+fn mos3_operating_point_starts_from_the_initial_junction_seed() {
+    // A Schmitt trigger whose input a self-biased inverter holds at its trip
+    // point has two operating points. ngspice-46, LTspice 26.1.1 and QSPICE
+    // load every MOSFET at vgs = VTO, vds = 0, vbs = -1 first, and that
+    // first iterate lands on out = 10 V, n = 5.101242 V. Starting from the
+    // all-zero guess instead lands on out = 2.0e-8 V.
+    let deck = r#"* Schmitt trigger held at its trip point by a self-biased inverter
+.model nm nmos level=3 vto=0.9 uo=700 nsub=3e16 tox=45n kappa=0.02 theta=0.03
++ vmax=2e5 eta=1.4 delta=6.9 xj=0.6u
+.model pm pmos level=3 vto=-1.3 uo=220 nsub=3e15 tox=45n kappa=0.02 theta=0.1
++ vmax=1.2e6 eta=2.5 delta=0.5 xj=0.6u
+vdd vdd 0 10
+mp1 a in vdd vdd pm l=3u w=56u
+mn1 a in 0 0 nm l=3u w=23u
+r1 in a 1meg
+mp2 p a vdd vdd pm l=3u w=56u
+mp3 out a p vdd pm l=3u w=56u
+mp4 0 out p vdd pm l=3u w=56u
+mn2 out a n n nm l=3u w=23u
+mn3 n a 0 0 nm l=3u w=23u
+mn4 vdd out n n nm l=3u w=23u
+.op
+.end
+"#;
+    assert_close("a", dc_node_voltage(deck, "a"), 4.885_991, 1.0e-4, 0.0);
+    assert_close("out", dc_node_voltage(deck, "out"), 10.0, 1.0e-5, 0.0);
+    assert_close("n", dc_node_voltage(deck, "n"), 5.101_242, 1.0e-3, 0.0);
+}
