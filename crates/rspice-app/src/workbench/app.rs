@@ -1058,6 +1058,18 @@ impl eframe::App for RSpiceApp {
         self.render_frame_chrome(ui);
         self.render_secondary_application_windows(&ctx);
         self.refresh_live_checks(&ctx);
+        // Whatever raised a request for straight after its call had it
+        // answered as that call returned, so the dialog walk starts with
+        // none waiting, and a feature's dialog step answers only what it
+        // raised itself.
+        debug_assert!(
+            !self
+                .state
+                .workbench
+                .outbox
+                .waits_at(crate::workbench::framework::requests::Drain::AfterContribution),
+            "a request raised before the dialog walk was left unanswered"
+        );
         self.render_frame_dialogs(&ctx);
         self.state
             .preferences_file_parts()
