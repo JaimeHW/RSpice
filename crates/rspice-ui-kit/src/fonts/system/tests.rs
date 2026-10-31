@@ -33,10 +33,12 @@ fn japanese() -> KnownFace {
     )
 }
 
-fn arabic() -> KnownFace {
+/// Every script face in assets/fonts is embedded on a desktop, so a face no
+/// chain holds is offered as an installed script face in their place.
+fn script_stand_in() -> KnownFace {
     KnownFace::new(
-        fixture("IBMPlexSansArabic-Regular.ttf"),
-        "IBM Plex Sans Arabic",
+        fixture("IBMPlexSansJP-Regular.ttf"),
+        "IBM Plex Sans JP",
         FaceClass::Script,
     )
 }
@@ -160,12 +162,12 @@ fn the_first_frame_does_not_wait_for_the_font_files() {
 
 #[test]
 fn faces_found_for_one_frame_join_in_one_rebuild_scripts_before_cjk() {
-    let ctx = context(Source::files(vec![korean(), arabic()]));
-    settle(&ctx, "한 عدد");
+    let ctx = context(Source::files(vec![korean(), script_stand_in()]));
+    settle(&ctx, "한 カナ");
     assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), 1);
     assert_eq!(
         joined_families(&ctx),
-        ["IBM Plex Sans Arabic", "IBM Plex Sans KR"]
+        ["IBM Plex Sans JP", "IBM Plex Sans KR"]
     );
     let keys: Vec<String> = plugin(&ctx, |plugin| {
         plugin.joined.iter().map(SystemFace::key).collect()
@@ -173,8 +175,9 @@ fn faces_found_for_one_frame_join_in_one_rebuild_scripts_before_cjk() {
     let fonts = plugin(&ctx, |plugin| definitions(&plugin.joined));
     for role in Role::ALL {
         let chain = &fonts.families[&role.egui_family()];
-        assert_eq!(chain[chain.len() - 2..], keys, "{role:?}");
-        assert_eq!(chain[chain.len() - 3], rspice_fonts::Face::Symbols.key());
+        let embedded: Vec<&str> = role.chain().iter().map(|face| face.key()).collect();
+        assert_eq!(chain[..embedded.len()], embedded, "{role:?}");
+        assert_eq!(chain[embedded.len()..], keys, "{role:?}");
     }
 }
 

@@ -10,7 +10,7 @@
 
 use std::sync::OnceLock;
 
-use rspice_fonts::{Face, Role, Run};
+use rspice_fonts::{Face, Role, Run, Sink};
 
 use super::*;
 
@@ -41,8 +41,9 @@ impl PrintFaces {
         static FACES: OnceLock<Result<PrintFaces, &'static str>> = OnceLock::new();
         FACES
             .get_or_init(|| {
-                Face::ALL
-                    .into_iter()
+                Sink::Print
+                    .faces()
+                    .iter()
                     .map(|face| ttf_parser::Face::parse(face.bytes(), 0).map_err(|_| face.name()))
                     .collect::<Result<Vec<_>, _>>()
                     .map(|faces| Self { faces })
@@ -77,7 +78,7 @@ impl PrintFaces {
         let mut advance = 0_i64;
         let mut left = 0_i64;
         let mut right = 0_i64;
-        for run in font.role().runs(grapheme) {
+        for run in font.role().runs(Sink::Print, grapheme) {
             let face = self.face(run.face);
             let scale = |value: i64| value * primary / i64::from(face.units_per_em());
             for character in run.text.chars() {

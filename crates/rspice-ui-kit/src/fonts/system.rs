@@ -19,7 +19,7 @@ use egui::{Context, FontData, FontDefinitions, FontFamily, FullOutput, Shape, te
 pub use rspice_fonts::HanVariant;
 use rspice_fonts::system::SystemFace;
 pub use rspice_fonts::system::{FaceClass, KnownFace, Source, SystemFonts};
-use rspice_fonts::{HanPreference, Role, han_order};
+use rspice_fonts::{HanPreference, Role, Sink, han_order};
 
 /// How often a frame looks for the worker's answer while a request is out.
 const POLL: Duration = Duration::from_millis(50);
@@ -137,7 +137,8 @@ impl SystemFontsPlugin {
 
     /// Whether `character` letters from a face of `role`'s family.
     fn covers(&self, role: Role, character: char) -> bool {
-        role.covers(character) || self.joined.iter().any(|face| face.covers(character))
+        role.covers(Sink::Screen, character)
+            || self.joined.iter().any(|face| face.covers(character))
     }
 
     fn scan(&mut self, shape: &Shape, wanted: &mut Vec<char>) {

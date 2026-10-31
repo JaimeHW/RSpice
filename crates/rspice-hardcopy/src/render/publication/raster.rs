@@ -125,7 +125,7 @@ fn publication_fontdb() -> Arc<usvg::fontdb::Database> {
     static DATABASE: OnceLock<Arc<usvg::fontdb::Database>> = OnceLock::new();
     Arc::clone(DATABASE.get_or_init(|| {
         let mut database = usvg::fontdb::Database::new();
-        for face in Face::ALL {
+        for &face in Sink::Print.faces() {
             let (family, _) = publication_face(face);
             let data = face.bytes();
             for id in database.load_font_source(usvg::fontdb::Source::Binary(Arc::new(data))) {
@@ -310,7 +310,11 @@ mod tests {
         // face it has, so a cut filed under the wrong weight, or missing,
         // draws the line at another weight without failing anything.
         let database = publication_fontdb();
-        for (family, weight) in Face::ALL.map(publication_face) {
+        for (family, weight) in Sink::Print
+            .faces()
+            .iter()
+            .map(|face| publication_face(*face))
+        {
             let weight = usvg::fontdb::Weight(weight.parse().expect("a CSS weight is numeric"));
             let id = database
                 .query(&usvg::fontdb::Query {

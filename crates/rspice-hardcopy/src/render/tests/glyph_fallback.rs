@@ -3,7 +3,7 @@
 //! carries prints as the replacement square the canvas paints for it: text
 //! never refuses a print.
 
-use rspice_fonts::{REPLACEMENT, Role};
+use rspice_fonts::{REPLACEMENT, Role, Sink};
 
 use super::*;
 
@@ -56,7 +56,11 @@ fn each_scene_font_prints_through_its_screen_role() {
         [Role::Sans, Role::SansSemibold, Role::Mono, Role::MonoMedium]
     );
     for font in FONTS {
-        assert_eq!(font.role().chain().last(), Some(&Face::Symbols), "{font:?}");
+        assert_eq!(
+            font.role().faces_in(Sink::Print).last(),
+            Some(Face::Symbols),
+            "{font:?}"
+        );
     }
 }
 
@@ -64,14 +68,14 @@ fn each_scene_font_prints_through_its_screen_role() {
 fn each_font_letters_engineering_symbols_through_its_chain() {
     for font in FONTS {
         for symbol in "Ωµμ Δ≥≤±°×·√".chars().filter(|c| !c.is_whitespace()) {
-            let (face, lettered) = font.role().resolve(symbol);
+            let (face, lettered) = font.role().resolve(Sink::Print, symbol);
             assert_eq!(lettered, symbol, "{font:?} letters {symbol}");
             assert!(font.role().chain().contains(&face), "{font:?} {symbol}");
         }
         // What no Plex face carries prints from RSpice Symbols.
         for symbol in "⌀∅⏚⌭⌖Ⓜ∠".chars() {
             assert_eq!(
-                font.role().resolve(symbol),
+                font.role().resolve(Sink::Print, symbol),
                 (Face::Symbols, symbol),
                 "{font:?} {symbol}"
             );
@@ -80,26 +84,29 @@ fn each_font_letters_engineering_symbols_through_its_chain() {
     // Plex Mono carries no Greek, so mono borrows it from Plex Sans at its own
     // weight, as the canvas's mono families do.
     assert_eq!(
-        SceneFont::Monospace.role().resolve('Ω'),
+        SceneFont::Monospace.role().resolve(Sink::Print, 'Ω'),
         (Face::SansRegular, 'Ω')
     );
     assert_eq!(
-        SceneFont::MonospaceMedium.role().resolve('Ω'),
+        SceneFont::MonospaceMedium.role().resolve(Sink::Print, 'Ω'),
         (Face::SansMedium, 'Ω')
     );
     for font in [SceneFont::Monospace, SceneFont::MonospaceMedium] {
-        assert_eq!(font.role().resolve('R'), (font.role().primary(), 'R'));
+        assert_eq!(
+            font.role().resolve(Sink::Print, 'R'),
+            (font.role().primary(), 'R')
+        );
     }
     // Box drawing is Plex Mono's alone, and no face carries CJK: each prints
     // the replacement square from RSpice Symbols.
     assert_eq!(
-        SceneFont::SansSemibold.role().resolve('─'),
+        SceneFont::SansSemibold.role().resolve(Sink::Print, '─'),
         (Face::Symbols, REPLACEMENT)
     );
     for font in FONTS {
         for uncovered in ['中', '\u{10ffff}'] {
             assert_eq!(
-                font.role().resolve(uncovered),
+                font.role().resolve(Sink::Print, uncovered),
                 (Face::Symbols, REPLACEMENT),
                 "{font:?} {uncovered}"
             );
@@ -257,4 +264,77 @@ fn svg_embeds_only_the_faces_its_text_is_lettered_in() {
     let blank = undecorated_svg(Vec::new());
     assert!(!blank.contains("<style>"), "{blank}");
     assert!(embedded_faces(&blank).is_empty());
+}
+
+/// Print does not yet order right-to-left text, join Arabic or stack Thai
+/// marks, so it letters those scripts as the replacement square, which says
+/// the glyph is missing, while the screen letters them.
+#[test]
+fn print_letters_unshaped_scripts_as_the_replacement_square() {
+    let content = extent(150_000, 40_000);
+    let scene = text_scene(
+        content,
+        vec![text(SceneFont::Sans, "قيمة שלום ไทย R1", 20_000)],
+    );
+    let svg_plan = plan(OutputFormat::SvgVector, content, false);
+    let publication = HardcopyRenderer::render(&svg_plan, &scene).unwrap();
+    let svg = std::str::from_utf8(publication.single_part().unwrap().bytes()).unwrap();
+    let symbols = "<tspan font-family=\"RSpice Symbols\" font-weight=\"400\">";
+    let squares = |count: usize| "\u{25FB}".repeat(count);
+    assert!(
+        svg.contains(&format!(
+            ">{symbols}{}</tspan> {symbols}{}</tspan> {symbols}{}</tspan> R1</text>",
+            squares(4),
+            squares(4),
+            squares(3)
+        )),
+        "{svg}"
+    );
+    assert!(
+        !svg.chars().any(
+            |character| matches!(character, '\u{0590}'..='\u{08FF}' | '\u{0E00}'..='\u{0E7F}')
+        ),
+        "{svg}"
+    );
+
+    let pdf_plan = plan(OutputFormat::PdfVector, content, false);
+    let publication = HardcopyRenderer::render(&pdf_plan, &scene).unwrap();
+    let pdf = ParsedPdf::load_mem(publication.single_part().unwrap().bytes()).unwrap();
+    let page = pdf.get_pages()[&1];
+    let base_fonts = pdf
+        .get_page_fonts(page)
+        .unwrap()
+        .values()
+        .map(|font| {
+            String::from_utf8_lossy(font.get(b"BaseFont").unwrap().as_name().unwrap()).into_owned()
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        base_fonts.iter().any(|name| name.contains("RSpiceSymbols")),
+        "{base_fonts:?}"
+    );
+    assert!(
+        !base_fonts.iter().any(|name| ["Arabic", "Hebrew", "Thai"]
+            .iter()
+            .any(|script| name.contains(script))),
+        "{base_fonts:?}"
+    );
+
+    // The screen letters the same text from Plex Sans Arabic, Hebrew and Thai.
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(
+        SceneFont::Sans
+            .role()
+            .runs(Sink::Screen, "قيمة שלום ไทย")
+            .into_iter()
+            .map(|run| run.face)
+            .collect::<Vec<_>>(),
+        [
+            Face::SansArabicRegular,
+            Face::SansRegular,
+            Face::SansHebrewRegular,
+            Face::SansRegular,
+            Face::SansThaiRegular,
+        ]
+    );
 }

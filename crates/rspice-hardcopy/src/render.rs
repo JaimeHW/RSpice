@@ -27,7 +27,7 @@ mod publication;
 
 use compiler::*;
 use glyph_runs::PrintFaces;
-use rspice_fonts::Face;
+use rspice_fonts::{Face, Sink};
 
 use publication::auto_trace_pattern;
 pub use publication::*;

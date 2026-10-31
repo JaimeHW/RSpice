@@ -97,10 +97,11 @@ mod tests {
         // A bare count, in every build: a workspace build unifies features
         // with crates that keep egui's `default_fonts`, and the set must not
         // take on egui's four faces there.
+        let embedded = if cfg!(target_arch = "wasm32") { 6 } else { 12 };
         assert_eq!(
             fonts.font_data.len(),
-            6,
-            "the product embeds exactly its five IBM Plex faces and RSpice Symbols"
+            embedded,
+            "the product embeds exactly its five IBM Plex faces and RSpice Symbols,              and on a desktop IBM Plex Sans Arabic, Hebrew and Thai in two weights"
         );
         for face in Face::ALL {
             assert!(

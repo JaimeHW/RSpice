@@ -427,7 +427,7 @@ pub(super) fn write_svg_text_runs(
     text: &str,
 ) {
     let own = font.role().primary();
-    for run in font.role().runs(text) {
+    for run in font.role().runs(Sink::Print, text) {
         faces.insert(run.face);
         if run.face == own {
             escape_xml_into(&run.text, output);

@@ -86,13 +86,19 @@ fn rspice_symbols_has_every_guaranteed_symbol_and_the_replacement() {
 fn every_role_letters_every_guaranteed_symbol() {
     for role in Role::ALL {
         for symbol in guaranteed_symbols() {
-            assert_eq!(role.resolve(symbol), (Face::Symbols, symbol), "{role:?}");
+            for sink in [Sink::Screen, Sink::Print] {
+                assert_eq!(
+                    role.resolve(sink, symbol),
+                    (Face::Symbols, symbol),
+                    "{role:?}"
+                );
+            }
         }
     }
 }
 
 #[test]
-fn every_chain_starts_at_its_role_and_ends_in_symbols() {
+fn every_chain_starts_at_its_role_and_print_ends_in_symbols() {
     for (role, family, weight) in [
         (Role::Sans, "IBM Plex Sans", 400),
         (Role::SansMedium, "IBM Plex Sans", 500),
@@ -103,7 +109,11 @@ fn every_chain_starts_at_its_role_and_ends_in_symbols() {
         let chain = role.chain();
         assert_eq!(role.primary().family(), family, "{role:?}");
         assert_eq!(role.primary().weight(), weight, "{role:?}");
-        assert_eq!(chain.last(), Some(&Face::Symbols), "{role:?}");
+        assert_eq!(
+            role.faces_in(Sink::Print).last(),
+            Some(Face::Symbols),
+            "{role:?}"
+        );
         let mut seen = chain.to_vec();
         seen.sort();
         seen.dedup();
@@ -115,17 +125,31 @@ fn every_chain_starts_at_its_role_and_ends_in_symbols() {
 fn the_mono_roles_borrow_greek_from_plex_sans_at_their_weight() {
     for greek in ['Δ', 'Ω', 'μ'] {
         assert!(!Face::MonoRegular.covers(greek));
-        assert_eq!(Role::Mono.face_for(greek), Some(Face::SansRegular));
-        assert_eq!(Role::MonoMedium.face_for(greek), Some(Face::SansMedium));
+        assert_eq!(
+            Role::Mono.face_for(Sink::Print, greek),
+            Some(Face::SansRegular)
+        );
+        assert_eq!(
+            Role::MonoMedium.face_for(Sink::Print, greek),
+            Some(Face::SansMedium)
+        );
     }
-    assert_eq!(Role::Mono.face_for('A'), Some(Face::MonoRegular));
+    assert_eq!(
+        Role::Mono.face_for(Sink::Screen, 'A'),
+        Some(Face::MonoRegular)
+    );
 }
 
 #[test]
 fn a_character_no_face_has_resolves_to_the_replacement_square() {
     for role in Role::ALL {
-        assert!(!role.covers('\u{10FFFD}'));
-        assert_eq!(role.resolve('\u{10FFFD}'), (Face::Symbols, REPLACEMENT));
+        for sink in [Sink::Screen, Sink::Print] {
+            assert!(!role.covers(sink, '\u{10FFFD}'));
+            assert_eq!(
+                role.resolve(sink, '\u{10FFFD}'),
+                (Face::Symbols, REPLACEMENT)
+            );
+        }
     }
 }
 
@@ -141,14 +165,14 @@ fn expected(runs: &[(Face, &str)]) -> Vec<Run> {
 #[test]
 fn runs_split_where_the_face_changes() {
     assert_eq!(
-        Role::Mono.runs("⌀10 mm Δ"),
+        Role::Mono.runs(Sink::Print, "⌀10 mm Δ"),
         expected(&[
             (Face::Symbols, "⌀"),
             (Face::MonoRegular, "10 mm "),
             (Face::SansRegular, "Δ"),
         ])
     );
-    assert!(Role::Sans.runs("").is_empty());
+    assert!(Role::Sans.runs(Sink::Print, "").is_empty());
 }
 
 #[test]
@@ -156,12 +180,12 @@ fn a_grapheme_cluster_is_lettered_by_one_face() {
     // A variation selector does not draw, so the face that has the base
     // letters the whole cluster.
     assert_eq!(
-        Role::Sans.runs("⚠\u{FE0F}"),
+        Role::Sans.runs(Sink::Print, "⚠\u{FE0F}"),
         expected(&[(Face::Symbols, "⚠\u{FE0F}")])
     );
     // An unknown base takes its marks with it into one replacement.
     assert_eq!(
-        Role::Sans.runs("a\u{10FFFD}\u{301}b"),
+        Role::Sans.runs(Sink::Print, "a\u{10FFFD}\u{301}b"),
         expected(&[
             (Face::SansRegular, "a"),
             (Face::Symbols, "\u{25FB}"),
@@ -185,4 +209,76 @@ fn every_egui_family_holds_its_roles_chain() {
     }
     assert_eq!(Role::Sans.egui_family(), egui::FontFamily::Proportional);
     assert_eq!(Role::Mono.egui_family(), egui::FontFamily::Monospace);
+}
+
+#[test]
+fn print_faces_come_first_so_a_table_of_them_is_indexed_by_face() {
+    let printed: Vec<Face> = Face::ALL
+        .into_iter()
+        .filter(|face| Sink::Print.letters(*face))
+        .collect();
+    assert_eq!(Sink::Print.faces(), printed);
+    for (index, face) in Sink::Print.faces().iter().enumerate() {
+        assert_eq!(*face as usize, index, "{face:?}");
+    }
+    assert_eq!(Sink::Screen.faces(), Face::ALL);
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn print_letters_the_square_where_the_screen_letters_a_script_it_cannot_order() {
+    for (letter, regular, semibold) in [
+        ('ب', Face::SansArabicRegular, Face::SansArabicSemibold),
+        ('ש', Face::SansHebrewRegular, Face::SansHebrewSemibold),
+        ('ก', Face::SansThaiRegular, Face::SansThaiSemibold),
+    ] {
+        for role in Role::ALL {
+            let screen = if role == Role::SansSemibold {
+                semibold
+            } else {
+                regular
+            };
+            assert_eq!(
+                role.resolve(Sink::Screen, letter),
+                (screen, letter),
+                "{role:?}"
+            );
+            assert_eq!(
+                role.resolve(Sink::Print, letter),
+                (Face::Symbols, REPLACEMENT),
+                "{role:?}"
+            );
+        }
+    }
+    assert_eq!(
+        Role::Sans.runs(Sink::Print, "قيمة R1"),
+        expected(&[
+            (Face::Symbols, "\u{25FB}\u{25FB}\u{25FB}\u{25FB}"),
+            (Face::SansRegular, " R1"),
+        ])
+    );
+    assert_eq!(
+        Role::Sans.runs(Sink::Screen, "قيمة R1"),
+        expected(&[
+            (Face::SansArabicRegular, "قيمة"),
+            (Face::SansRegular, " R1"),
+        ])
+    );
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn latin_never_reaches_the_script_faces() {
+    // Plex Sans Arabic, Hebrew and Thai carry Latin too; it must letter
+    // from Plex Sans and Mono, as it does without them.
+    for role in Role::ALL {
+        for character in (' '..='~').chain("ΔΩμ±°·–—…".chars()) {
+            let face = role.face_for(Sink::Screen, character);
+            assert_eq!(
+                face,
+                role.face_for(Sink::Print, character),
+                "{role:?} {character:?}"
+            );
+        }
+    }
 }

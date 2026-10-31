@@ -30,6 +30,15 @@ pub(super) const fn publication_face(face: Face) -> (&'static str, &'static str)
         Face::MonoRegular => (PUBLICATION_MONO, "400"),
         Face::MonoMedium => (PUBLICATION_MONO, "500"),
         Face::Symbols => (PUBLICATION_SYMBOLS, "400"),
+        // Print letters none of these until it shapes their scripts; see
+        // `Sink::Print`.
+        #[cfg(not(target_arch = "wasm32"))]
+        Face::SansArabicRegular
+        | Face::SansArabicSemibold
+        | Face::SansHebrewRegular
+        | Face::SansHebrewSemibold
+        | Face::SansThaiRegular
+        | Face::SansThaiSemibold => panic!("print letters no right-to-left or Thai face"),
     }
 }
 

@@ -24,7 +24,7 @@ use std::ops::Range;
 use unicode_bidi::BidiInfo;
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{Face, Role};
+use crate::{Face, Role, Sink};
 
 /// Whether `text` is displayed in its logical order: it has no character of
 /// a right-to-left script, no Arabic number, and no control that opens a
@@ -157,7 +157,7 @@ fn face_runs(text: &str, run: Range<usize>, role: Role) -> Vec<(Range<usize>, Op
         let face = cluster
             .chars()
             .next()
-            .and_then(|first| role.face_for(first));
+            .and_then(|first| role.face_for(Sink::Screen, first));
         match faces.last_mut() {
             Some((range, previous)) if *previous == face => range.end = end,
             _ => faces.push((start..end, face)),

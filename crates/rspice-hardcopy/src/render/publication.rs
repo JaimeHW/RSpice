@@ -2264,7 +2264,8 @@ fn validate_render_budget(
             maximum: MAX_ESTIMATED_VECTOR_BYTES,
         })?;
     let embedded_font_bytes = if plan.setup().render().fonts().embed_fonts() {
-        Face::ALL
+        Sink::Print
+            .faces()
             .iter()
             .map(|face| face.bytes().len() as u64)
             .sum::<u64>()

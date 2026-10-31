@@ -7,9 +7,16 @@
 //!
 //! A [`Role`] is what a run of text asks for: sans or mono, at a weight. Its
 //! [`Role::chain`] lists the faces a character is looked for in, in order.
-//! Every chain ends in RSpice Symbols, which carries the engineering symbols
+//! Every chain holds RSpice Symbols, which carries the engineering symbols
 //! no Plex face has (⌀ ∅ ⏚, the GD&T characteristics, the interface marks)
 //! and [`REPLACEMENT`], the square lettered for a character no face covers.
+//! A desktop build goes on to IBM Plex Sans Arabic, Hebrew and Thai; a
+//! browser does not embed them.
+//!
+//! A [`Sink`] is where text is lettered. The screen letters from every face
+//! in a chain. Print does not yet order right-to-left text, join Arabic or
+//! stack Thai marks, so it letters none of those scripts' faces, and their
+//! characters print as the replacement square.
 //!
 //! The faces are distributed under the SIL Open Font License 1.1; each
 //! face's [`Face::licence`] is the text that must travel with it.
@@ -65,6 +72,18 @@ face_static!(SANS_SEMIBOLD, "IBMPlexSans-SemiBold.ttf");
 face_static!(MONO_REGULAR, "IBMPlexMono-Regular.ttf");
 face_static!(MONO_MEDIUM, "IBMPlexMono-Medium.ttf");
 face_static!(SYMBOLS, "RSpiceSymbols-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_ARABIC_REGULAR, "IBMPlexSansArabic-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_ARABIC_SEMIBOLD, "IBMPlexSansArabic-SemiBold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_HEBREW_REGULAR, "IBMPlexSansHebrew-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_HEBREW_SEMIBOLD, "IBMPlexSansHebrew-SemiBold.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_THAI_REGULAR, "IBMPlexSansThai-Regular.ttf");
+#[cfg(not(target_arch = "wasm32"))]
+face_static!(SANS_THAI_SEMIBOLD, "IBMPlexSansThai-SemiBold.ttf");
 
 const IBM_PLEX_LICENCE: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -76,6 +95,9 @@ const RSPICE_SYMBOLS_LICENCE: &str = include_str!(concat!(
 ));
 
 /// One embedded face.
+///
+/// The faces print letters come first, so a table of them indexed by
+/// `face as usize` holds no others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Face {
     SansRegular,
@@ -84,16 +106,47 @@ pub enum Face {
     MonoRegular,
     MonoMedium,
     Symbols,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansArabicRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansArabicSemibold,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansHebrewRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansHebrewSemibold,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansThaiRegular,
+    #[cfg(not(target_arch = "wasm32"))]
+    SansThaiSemibold,
 }
 
+/// The faces every sink letters, in declaration order.
+const PRINTED: [Face; 6] = [
+    Face::SansRegular,
+    Face::SansMedium,
+    Face::SansSemibold,
+    Face::MonoRegular,
+    Face::MonoMedium,
+    Face::Symbols,
+];
+
 impl Face {
-    pub const ALL: [Self; 6] = [
+    #[cfg(target_arch = "wasm32")]
+    pub const ALL: [Self; 6] = PRINTED;
+    #[cfg(not(target_arch = "wasm32"))]
+    pub const ALL: [Self; 12] = [
         Self::SansRegular,
         Self::SansMedium,
         Self::SansSemibold,
         Self::MonoRegular,
         Self::MonoMedium,
         Self::Symbols,
+        Self::SansArabicRegular,
+        Self::SansArabicSemibold,
+        Self::SansHebrewRegular,
+        Self::SansHebrewSemibold,
+        Self::SansThaiRegular,
+        Self::SansThaiSemibold,
     ];
 
     /// The face's TrueType bytes, as embedded in the binary.
@@ -106,6 +159,18 @@ impl Face {
             Self::MonoRegular => &MONO_REGULAR,
             Self::MonoMedium => &MONO_MEDIUM,
             Self::Symbols => &SYMBOLS,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular => &SANS_ARABIC_REGULAR,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold => &SANS_ARABIC_SEMIBOLD,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular => &SANS_HEBREW_REGULAR,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewSemibold => &SANS_HEBREW_SEMIBOLD,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular => &SANS_THAI_REGULAR,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiSemibold => &SANS_THAI_SEMIBOLD,
         }
     }
 
@@ -116,6 +181,12 @@ impl Face {
             Self::SansRegular | Self::SansMedium | Self::SansSemibold => "IBM Plex Sans",
             Self::MonoRegular | Self::MonoMedium => "IBM Plex Mono",
             Self::Symbols => "RSpice Symbols",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular | Self::SansArabicSemibold => "IBM Plex Sans Arabic",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular | Self::SansHebrewSemibold => "IBM Plex Sans Hebrew",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular | Self::SansThaiSemibold => "IBM Plex Sans Thai",
         }
     }
 
@@ -129,6 +200,18 @@ impl Face {
             Self::MonoRegular => "IBM Plex Mono Regular",
             Self::MonoMedium => "IBM Plex Mono Medium",
             Self::Symbols => "RSpice Symbols Regular",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular => "IBM Plex Sans Arabic Regular",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold => "IBM Plex Sans Arabic SemiBold",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular => "IBM Plex Sans Hebrew Regular",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewSemibold => "IBM Plex Sans Hebrew SemiBold",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular => "IBM Plex Sans Thai Regular",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiSemibold => "IBM Plex Sans Thai SemiBold",
         }
     }
 
@@ -139,6 +222,10 @@ impl Face {
             Self::SansRegular | Self::MonoRegular | Self::Symbols => 400,
             Self::SansMedium | Self::MonoMedium => 500,
             Self::SansSemibold => 600,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular | Self::SansHebrewRegular | Self::SansThaiRegular => 400,
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold | Self::SansHebrewSemibold | Self::SansThaiSemibold => 600,
         }
     }
 
@@ -152,6 +239,18 @@ impl Face {
             Self::MonoRegular => "plex-mono",
             Self::MonoMedium => "plex-mono-medium",
             Self::Symbols => "rspice-symbols",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular => "plex-sans-arabic",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicSemibold => "plex-sans-arabic-semibold",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewRegular => "plex-sans-hebrew",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansHebrewSemibold => "plex-sans-hebrew-semibold",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiRegular => "plex-sans-thai",
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansThaiSemibold => "plex-sans-thai-semibold",
         }
     }
 
@@ -209,20 +308,69 @@ impl Role {
     /// A weighted role borrows from its own weight first, so a borrowed glyph
     /// keeps its stroke where a face of that weight has it. Plex Mono has no
     /// Greek, so the mono roles borrow Δ, Ω and μ from Plex Sans. Every chain
-    /// ends in RSpice Symbols.
+    /// holds RSpice Symbols after the Plex Latin faces. On a desktop the
+    /// Arabic, Hebrew and Thai faces follow it: SemiBold for the SemiBold
+    /// role, Regular for the others, which have no cut of their weight. Their
+    /// Latin is also in Plex Sans, which comes first, so Latin never reaches
+    /// them.
     #[must_use]
     pub const fn chain(self) -> &'static [Face] {
         match self {
-            Self::Sans => &[Face::SansRegular, Face::Symbols],
-            Self::SansMedium => &[Face::SansMedium, Face::SansRegular, Face::Symbols],
-            Self::SansSemibold => &[Face::SansSemibold, Face::SansRegular, Face::Symbols],
-            Self::Mono => &[Face::MonoRegular, Face::SansRegular, Face::Symbols],
+            Self::Sans => &[
+                Face::SansRegular,
+                Face::Symbols,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansArabicRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansHebrewRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansThaiRegular,
+            ],
+            Self::SansMedium => &[
+                Face::SansMedium,
+                Face::SansRegular,
+                Face::Symbols,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansArabicRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansHebrewRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansThaiRegular,
+            ],
+            Self::SansSemibold => &[
+                Face::SansSemibold,
+                Face::SansRegular,
+                Face::Symbols,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansArabicSemibold,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansHebrewSemibold,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansThaiSemibold,
+            ],
+            Self::Mono => &[
+                Face::MonoRegular,
+                Face::SansRegular,
+                Face::Symbols,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansArabicRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansHebrewRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansThaiRegular,
+            ],
             Self::MonoMedium => &[
                 Face::MonoMedium,
                 Face::MonoRegular,
                 Face::SansMedium,
                 Face::SansRegular,
                 Face::Symbols,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansArabicRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansHebrewRegular,
+                #[cfg(not(target_arch = "wasm32"))]
+                Face::SansThaiRegular,
             ],
         }
     }
@@ -234,31 +382,38 @@ impl Role {
         self.chain()[0]
     }
 
-    /// The first face in the chain that has `character`.
-    #[must_use]
-    pub fn face_for(self, character: char) -> Option<Face> {
+    /// The faces of the chain that `sink` letters from, in order.
+    pub fn faces_in(self, sink: Sink) -> impl Iterator<Item = Face> {
         self.chain()
             .iter()
             .copied()
-            .find(|face| face.covers(character))
+            .filter(move |face| sink.letters(*face))
     }
 
-    /// Whether some face in the chain has `character`.
+    /// The first face in the chain that `sink` letters from and that has
+    /// `character`.
     #[must_use]
-    pub fn covers(self, character: char) -> bool {
-        self.face_for(character).is_some()
+    pub fn face_for(self, sink: Sink, character: char) -> Option<Face> {
+        self.faces_in(sink).find(|face| face.covers(character))
     }
 
-    /// The face that letters `character`, and the character it letters: the
-    /// character itself from the first face that has it, or [`REPLACEMENT`]
-    /// from RSpice Symbols.
+    /// Whether some face in the chain that `sink` letters from has
+    /// `character`.
     #[must_use]
-    pub fn resolve(self, character: char) -> (Face, char) {
-        self.face_for(character)
+    pub fn covers(self, sink: Sink, character: char) -> bool {
+        self.face_for(sink, character).is_some()
+    }
+
+    /// The face that letters `character` in `sink`, and the character it
+    /// letters: the character itself from the first face that has it, or
+    /// [`REPLACEMENT`] from RSpice Symbols.
+    #[must_use]
+    pub fn resolve(self, sink: Sink, character: char) -> (Face, char) {
+        self.face_for(sink, character)
             .map_or((Face::Symbols, REPLACEMENT), |face| (face, character))
     }
 
-    /// `text` as the role letters it, split where the face changes.
+    /// `text` as the role letters it in `sink`, split where the face changes.
     ///
     /// A grapheme cluster is never split between faces: it is lettered by the
     /// first face that has every character of it that draws, or else by the
@@ -266,10 +421,10 @@ impl Role {
     /// cluster whose first character no face has letters as one
     /// [`REPLACEMENT`].
     #[must_use]
-    pub fn runs(self, text: &str) -> Vec<Run> {
+    pub fn runs(self, sink: Sink, text: &str) -> Vec<Run> {
         let mut runs: Vec<Run> = Vec::new();
         for cluster in text.graphemes(true) {
-            let (face, lettered) = self.letter_cluster(cluster);
+            let (face, lettered) = self.letter_cluster(sink, cluster);
             match runs.last_mut() {
                 Some(run) if run.face == face => run.text.push_str(lettered),
                 _ => runs.push(Run {
@@ -281,8 +436,8 @@ impl Role {
         runs
     }
 
-    fn letter_cluster(self, cluster: &str) -> (Face, &str) {
-        let whole = self.chain().iter().copied().find(|face| {
+    fn letter_cluster(self, sink: Sink, cluster: &str) -> (Face, &str) {
+        let whole = self.faces_in(sink).find(|face| {
             cluster
                 .chars()
                 .filter(|character| draws(*character))
@@ -294,11 +449,63 @@ impl Role {
         match cluster
             .chars()
             .next()
-            .and_then(|first| self.face_for(first))
+            .and_then(|first| self.face_for(sink, first))
         {
             Some(face) => (face, cluster),
             None => (Face::Symbols, REPLACEMENT_TEXT),
         }
+    }
+}
+
+/// Where a run of text is lettered.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Sink {
+    /// The screen. egui shapes every run, and ui-kit lays right-to-left
+    /// lines out in display order.
+    Screen,
+    /// Print and export: PDF, SVG and raster pages. They do not yet order
+    /// right-to-left text, join Arabic or stack Thai marks, so they letter
+    /// none of those scripts' faces. Arabic set out unjoined and in reverse
+    /// would look like text and read wrong; the replacement square says
+    /// plainly that the glyph is missing.
+    Print,
+}
+
+impl Sink {
+    /// Whether the sink letters from `face`.
+    #[must_use]
+    pub const fn letters(self, face: Face) -> bool {
+        match self {
+            Self::Screen => true,
+            Self::Print => !face.needs_complex_shaping(),
+        }
+    }
+
+    /// Every embedded face the sink letters from. Print's faces come first
+    /// in [`Face::ALL`], so a table of them indexed by `face as usize`
+    /// covers every face print letters.
+    #[must_use]
+    pub const fn faces(self) -> &'static [Face] {
+        match self {
+            Self::Screen => &Face::ALL,
+            Self::Print => &PRINTED,
+        }
+    }
+}
+
+impl Face {
+    /// Whether the face letters a script that must be ordered right to left,
+    /// or have its marks stacked, before it reads correctly.
+    const fn needs_complex_shaping(self) -> bool {
+        !matches!(
+            self,
+            Self::SansRegular
+                | Self::SansMedium
+                | Self::SansSemibold
+                | Self::MonoRegular
+                | Self::MonoMedium
+                | Self::Symbols
+        )
     }
 }
 

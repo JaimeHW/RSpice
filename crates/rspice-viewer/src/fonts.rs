@@ -83,8 +83,11 @@ mod tests {
                 "{font:?} must letter from a face of weight {weight}, not fall back"
             );
             // A symbol Plex lacks, and the replacement square, letter from
-            // RSpice Symbols at the end of every chain.
-            assert_eq!(chain.last().map(String::as_str), Some(Face::Symbols.key()));
+            // RSpice Symbols, which every chain holds.
+            assert!(
+                chain.iter().any(|key| key == Face::Symbols.key()),
+                "{font:?}"
+            );
         }
         // egui's default faces are not installed.
         assert_eq!(fonts.font_data.len(), Face::ALL.len());
