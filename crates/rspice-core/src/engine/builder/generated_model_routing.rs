@@ -12,6 +12,7 @@ struct GeneratedTarget {
     model_name: &'static str,
     pass_level_parameter: bool,
     consumes_geometry_bin_metadata: bool,
+    consumes_version_metadata: bool,
     optional_internal_nodes: &'static [&'static str],
 }
 
@@ -21,6 +22,7 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: false,
             consumes_geometry_bin_metadata: false,
+            consumes_version_metadata: false,
             optional_internal_nodes: &[],
         }
     }
@@ -30,6 +32,7 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: true,
             consumes_geometry_bin_metadata: false,
+            consumes_version_metadata: false,
             optional_internal_nodes: &[],
         }
     }
@@ -39,8 +42,15 @@ impl GeneratedTarget {
             model_name,
             pass_level_parameter: false,
             consumes_geometry_bin_metadata: true,
+            consumes_version_metadata: false,
             optional_internal_nodes: &[],
         }
+    }
+
+    /// The card's VERSION chose this module and is not one of its parameters.
+    const fn consuming_version_metadata(mut self) -> Self {
+        self.consumes_version_metadata = true;
+        self
     }
 
     const fn with_optional_internal_nodes(mut self, names: &'static [&'static str]) -> Self {
@@ -580,9 +590,16 @@ fn generated_mos_target(
         // they must not be shadowed merely because this generated artifact is
         // compiled into the same binary.
         Some(70) => Some(GeneratedTarget::new("bsimsoi_va")),
-        Some(107 | 108 | 110 | 111) => Some(GeneratedTarget::consuming_geometry_bin_metadata(
-            "bsimcmg_va",
-        )),
+        // Xyce registers each BSIM-CMG release it ships as its own LEVEL: 107,
+        // 108, 110 and 111 (111.2.1). The built-in is BSIM-CMG 112.1.0, a later
+        // release with its own equations and parameter set, so a LEVEL that
+        // names an earlier release is not run on it; the card is refused as a
+        // release this build lacks. A card that also states VERSION=112 asks
+        // for the release the built-in is.
+        Some(107 | 108 | 110 | 111) => card_version_in(model, 112.0..113.0).then_some(
+            GeneratedTarget::consuming_geometry_bin_metadata("bsimcmg_va")
+                .consuming_version_metadata(),
+        ),
         Some(260) => Some(GeneratedTarget::new("ekv_va")),
         Some(70470) => Some(GeneratedTarget::new("bsimsoi__18c250bc")),
         Some(1000) => Some(GeneratedTarget::with_level_parameter("mosvar")),
@@ -590,6 +607,29 @@ fn generated_mos_target(
         Some(10240) => Some(GeneratedTarget::new("l_utsoi__832ce87d")),
         _ => None,
     })
+}
+
+/// Whether the card's own VERSION falls in `releases`: the card asks for the
+/// release a built-in is, rather than for the one its LEVEL names.
+fn card_version_in(model: &ModelDef, releases: std::ops::Range<f64>) -> bool {
+    card_version(model).is_some_and(|version| releases.contains(&version))
+}
+
+/// The card's VERSION, numeric or dotted (`4.6.1`).
+fn card_version(model: &ModelDef) -> Option<f64> {
+    let numeric = model
+        .params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case("VERSION"))
+        .map(|(_, value)| *value);
+    let dotted = || {
+        model
+            .string_params
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case("VERSION"))
+            .and_then(|(_, value)| parse_dotted_version_metadata(value))
+    };
+    numeric.or_else(dotted)
 }
 
 fn generated_mos_target_by_type(model_type: &str) -> Option<GeneratedTarget> {
@@ -1347,8 +1387,11 @@ fn generated_model_card_assignment_for_scope(
 }
 
 fn should_pass_model_param(target: GeneratedTarget, name: &str) -> bool {
-    !(target.consumes_geometry_bin_metadata && is_model_binning_metadata(name))
-        && (target.pass_level_parameter || !name.eq_ignore_ascii_case("LEVEL"))
+    let consumed_by_routing = (target.consumes_geometry_bin_metadata
+        && is_model_binning_metadata(name))
+        || (target.consumes_version_metadata && name.eq_ignore_ascii_case("VERSION"))
+        || (!target.pass_level_parameter && name.eq_ignore_ascii_case("LEVEL"));
+    !consumed_by_routing
 }
 
 fn is_model_binning_metadata(name: &str) -> bool {
@@ -2157,6 +2200,47 @@ mod release_routing_tests {
             "generated MOS release routing\nM1 d g s b model\n.MODEL model {card}\n.END\n"
         ))
         .expect("release routing fixture parses")
+    }
+
+    fn mos_model_target(card: &str) -> Option<GeneratedTarget> {
+        let netlist = mos_model(card);
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        generated_mos_target("model", Some(model)).expect("level classification succeeds")
+    }
+
+    #[test]
+    fn xyce_bsimcmg_release_levels_do_not_run_on_the_112_built_in() {
+        for level in [107, 108, 110, 111] {
+            assert!(
+                mos_model_target(&format!("NMOS LEVEL={level}")).is_none(),
+                "BSIM-CMG LEVEL={level} names an earlier release than the 112.1.0 built-in"
+            );
+            assert!(
+                mos_model_target(&format!("NMOS LEVEL={level} VERSION=111.2")).is_none(),
+                "a VERSION outside release 112 must not select the 112.1.0 built-in"
+            );
+        }
+    }
+
+    #[test]
+    fn a_bsimcmg_card_that_selects_release_112_runs_on_the_built_in() {
+        for card in [
+            "NMOS LEVEL=107 VERSION=112.1",
+            "NMOS LEVEL=111 VERSION=\"112.1.0\"",
+            "BSIMCMG",
+            "BSIMCMG_VA",
+        ] {
+            let target =
+                mos_model_target(card).unwrap_or_else(|| panic!("`{card}` selects BSIM-CMG 112"));
+            assert_eq!(target.model_name, "bsimcmg_va", "{card}");
+            assert!(!should_pass_model_param(target, "LMIN"), "{card}");
+        }
+        let by_version = mos_model_target("NMOS LEVEL=107 VERSION=112.1")
+            .expect("VERSION=112.1 selects BSIM-CMG 112");
+        assert!(
+            !should_pass_model_param(by_version, "VERSION"),
+            "the selecting VERSION is not a bsimcmg_va parameter"
+        );
     }
 
     #[test]

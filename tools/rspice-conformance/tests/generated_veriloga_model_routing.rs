@@ -302,8 +302,8 @@ fn mos_bsimcmg_binned_levels_route_by_l_and_nfin_to_generated_bsimcmg() {
         r#"
 v1 d 0 dc 0
 m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
-.model nmos1.1 nmos level=107 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
-.model nmos1.2 nmos level=107 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1
+.model nmos1.1 nmos level=107 version=112.1 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
+.model nmos1.2 nmos level=107 version=112.1 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1
 .op
 .end
 "#,
@@ -314,7 +314,7 @@ m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
     assert_eq!(
         routed_device_kind(&circuit, "m1"),
         "BSIMCMG_VA",
-        "BSIM-CMG binned LEVEL=107 should not also instantiate a native MOS evaluator"
+        "BSIM-CMG 112 binned LEVEL=107 VERSION=112.1 should not also instantiate a native MOS evaluator"
     );
 }
 
@@ -350,8 +350,8 @@ fn generated_model_compatibility_metadata_does_not_hide_unknown_or_canonical_par
         r#"
 v1 d 0 dc 0
 m1 d g s b nmos1 tfin=15n l=30n nfin=10 nrs=1 nrd=1
-.model nmos1.1 nmos level=107 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
-.model nmos1.2 nmos level=107 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1 not_a_parameter=1
+.model nmos1.1 nmos level=107 version=112.1 lmin=0 lmax=29n nfinmin=1 nfinmax=4 type=1
+.model nmos1.2 nmos level=107 version=112.1 lmin=29n lmax=35n nfinmin=5 nfinmax=100 type=1 not_a_parameter=1
 .op
 .end
 "#,
