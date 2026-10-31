@@ -110,3 +110,76 @@ impl MatrixStamper for ReplayStamper<'_> {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn matrix(extra: Option<(usize, usize)>) -> StaticMatrix {
+        let mut triplets = vec![
+            (0, 0, 0.0),
+            (0, 1, 0.0),
+            (1, 0, 0.0),
+            (1, 1, 0.0),
+            (2, 2, 0.0),
+        ];
+        triplets.extend(extra.map(|(row, col)| (row, col, 0.0)));
+        StaticMatrix::from_triplets(3, 3, &triplets).expect("pattern")
+    }
+
+    fn bits(matrix: &StaticMatrix) -> Vec<(usize, usize, u64)> {
+        matrix
+            .stored_entries()
+            .map(|(row, col, value)| (row, col, value.to_bits()))
+            .collect()
+    }
+
+    /// Loads that skip a recorded position, add one the record lacks, and
+    /// move to another pattern leave exactly the matrix `add` builds.
+    #[test]
+    fn replayed_loads_build_the_matrix_plain_adds_build() {
+        let loads: [&[(NodeId, NodeId, Value)]; 4] = [
+            &[
+                (1, 1, 1.0),
+                (1, 2, 2.0),
+                (2, 1, 3.0),
+                (2, 2, 4.0),
+                (1, 1, 0.5),
+            ],
+            &[(1, 1, 0.5), (2, 1, 3.5), (2, 2, 4.5), (1, 1, 0.25)],
+            &[
+                (1, 1, 0.25),
+                (3, 3, 7.0),
+                (1, 2, 2.25),
+                (0, 2, 9.0),
+                (2, 1, 1.0),
+            ],
+            &[(3, 1, 0.125), (1, 1, 1.5), (2, 2, -4.0)],
+        ];
+        // The first three loads share one pattern, as Newton loads do; the
+        // last moves to another.
+        let (shared, other) = (matrix(None), matrix(Some((2, 0))));
+        let mut replay = StampReplay::default();
+        for (index, load) in loads.iter().enumerate() {
+            let base = if index == 3 { &other } else { &shared };
+            let (mut replayed, mut plain) = (base.clone_structure(), base.clone_structure());
+            let (mut replayed_rhs, mut plain_rhs) = ([0.0; 3], [0.0; 3]);
+            replay.prepare(&replayed, 1);
+            let mut stamper = replay.stamper(0, &mut replayed, &mut replayed_rhs);
+            for &(row, col, value) in *load {
+                stamper.stamp(row, col, value);
+                stamper.stamp_rhs(row, value);
+            }
+            for &(row, col, value) in *load {
+                if row > 0 && col > 0 {
+                    plain.add(row - 1, col - 1, value);
+                }
+                if row > 0 {
+                    plain_rhs[row - 1] += value;
+                }
+            }
+            assert_eq!(bits(&replayed), bits(&plain), "load {index}");
+            assert_eq!(replayed_rhs, plain_rhs, "load {index}");
+        }
+    }
+}
