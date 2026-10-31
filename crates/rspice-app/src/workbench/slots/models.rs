@@ -80,6 +80,32 @@ impl ModelsState {
             .map(crate::workbench::documents::model_editor::ModelEditorRecoveryDraft::capture);
     }
 
+    /// Reopen the model editor's unsaved draft a restored session carried,
+    /// against the model libraries and project revision it restored with. A
+    /// draft that no longer applies is dropped, with a warning saying why.
+    pub(crate) fn reopen_authoring_recovery(
+        &mut self,
+        model: &mut rspice_app_state::workbench::app_state::model::Model,
+    ) {
+        use rspice_app_state::diagnostics::{LogSeverity, LogSource};
+        if let Some(recovery) = self.model_editor_recovery.clone() {
+            match recovery.restore(
+                &model.model_library_manager,
+                model.workspace.content.project.revision(),
+            ) {
+                Ok(draft) => self.model_editor.draft = Some(draft),
+                Err(error) => {
+                    self.model_editor_recovery = None;
+                    model.record(
+                        LogSeverity::Warning,
+                        LogSource::Studio,
+                        format!("Unsaved model-editor recovery was not reopened because {error}."),
+                    );
+                }
+            }
+        }
+    }
+
     #[must_use]
     pub(crate) fn model_editor_has_unsaved_changes(&self) -> bool {
         self.model_editor

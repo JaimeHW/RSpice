@@ -20,6 +20,7 @@ const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
 const MODELS: &str = include_str!("../../workbench/models.rs");
 const RESULTS: &str = include_str!("../../../../rspice-app-results/src/workbench/results.rs");
+const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/serialization.rs");
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 
@@ -697,6 +698,115 @@ const LIVE_SESSION_PUMP: &[Step] = &[
     ("6", &["live_session.pump_outbound(&mut live_host(state))"]),
 ];
 
+/// `end_frame`, step 16 of the frame: the models feature's authoring
+/// recovery point is captured once the frame's edits and cross-probes have
+/// settled, and before a project the frame replaced takes its automation
+/// authority with it.
+const END_FRAME: &[Step] = &[
+    (
+        "16.1",
+        &["self.invalidate_simulation_preflight_after_frame_edit(simulation_input_before_frame)"],
+    ),
+    (
+        "16.2",
+        &["crate::workbench::synchronize_schematic_cross_probe(&mut self.state)"],
+    ),
+    ("16.3", &["self.state.models.capture_authoring_recovery()"]),
+    (
+        "16.4",
+        &["self.terminate_automation_runtime_after_project_change()"],
+    ),
+];
+
+/// `sync_window_title`, step 5.33 of the frame: the title's dirty mark and
+/// the browser's leave-page guard read the models feature's unsaved
+/// authoring beside the project's own unsaved changes.
+const SYNC_WINDOW_TITLE: &[Step] = &[
+    (
+        "5.33.1",
+        &["project_lifecycle::has_unsaved_changes(&self.state)"],
+    ),
+    (
+        "5.33.2",
+        &["self.state.models.has_unsaved_authoring_changes()"],
+    ),
+    (
+        "5.33.3",
+        &[
+            "should_warn_before_browser_unload(",
+            "project_has_unsaved_changes,",
+            "authoring_has_unsaved_changes,",
+        ],
+    ),
+    (
+        "5.33.4",
+        &["if project_has_unsaved_changes || authoring_has_unsaved_changes"],
+    ),
+];
+
+/// eframe's `save`: the models feature's authoring recovery point is
+/// captured after the active schematic is synced into the workspace, so the
+/// session stored after both carries both.
+const SAVE: &[Step] = &[
+    (
+        "1",
+        &["self.state.preferences_file_parts().flush_preferences_file()"],
+    ),
+    (
+        "2",
+        &[
+            "if !should_persist_application_state(&self.state)",
+            "return;",
+        ],
+    ),
+    ("3", &["self.state.sync_active_schematic_to_workspace()"]),
+    ("4", &["self.state.models.capture_authoring_recovery()"]),
+    ("5", &["save_global_veriloga_library("]),
+    ("6", &["self.state.store_session(storage)"]),
+];
+
+/// `RSpiceApp::new`: once the session's project is open, the browser's
+/// stores start reading in this order, the models feature's PDK and pack
+/// stores after the surface navigation and before the license backfill.
+const STARTUP: &[Step] = &[
+    ("1", &["project_workflow::open_session_project(&mut state)"]),
+    (
+        "2",
+        &["initialize_browser_surface_navigation(&mut state, &cc.egui_ctx)"],
+    ),
+    (
+        "3",
+        &["pdk_persistence::initialize_browser_pdk_persistence(&cc.egui_ctx)"],
+    ),
+    (
+        "4",
+        &["pack_persistence::initialize_browser_pack_restore(&cc.egui_ctx)"],
+    ),
+    ("5", &["state.cloud.restore_stored_license()"]),
+];
+
+/// The session's deserialization, once its stores are restored: the
+/// restore's warnings are logged, then the models feature reopens the model
+/// editor's unsaved draft, then the active schematic is saved into the
+/// workspace.
+const SESSION_RESTORE: &[Step] = &[
+    (
+        "1",
+        &["state.record(LogSeverity::Warning, LogSource::Studio, warning);"],
+    ),
+    (
+        "2",
+        &["state.models.reopen_authoring_recovery(&mut state.model);"],
+    ),
+    (
+        "3",
+        &[
+            ".save_active_schematic(&state.model.schematic);",
+            "Ok(state)",
+        ],
+    ),
+];
+
 /// The body of the one function `signature` opens in `source`'s shipped half,
 /// without its comment lines.
 fn body(source: &str, signature: &str) -> String {
@@ -1119,6 +1229,35 @@ fn the_models_feature_takes_browser_pdk_storage_news_where_the_frame_did() {
                );"],
         )],
     );
+}
+
+#[test]
+fn the_models_feature_keeps_its_authoring_recovery_where_the_shell_did() {
+    assert_runs_in_order(
+        "RSpiceApp::end_frame",
+        &body(APP, "fn end_frame("),
+        END_FRAME,
+    );
+    assert_runs_in_order("RSpiceApp::save", &body(APP, "fn save("), SAVE);
+    assert_runs_in_order(
+        "AppState::deserialize",
+        &body(SERIALIZATION, "fn deserialize<D>("),
+        SESSION_RESTORE,
+    );
+}
+
+#[test]
+fn the_window_title_reads_the_unsaved_authoring_where_it_did() {
+    assert_runs_in_order(
+        "RSpiceApp::sync_window_title",
+        &body(APP, "fn sync_window_title("),
+        SYNC_WINDOW_TITLE,
+    );
+}
+
+#[test]
+fn the_browser_stores_start_reading_in_todays_order() {
+    assert_runs_in_order("RSpiceApp::new", &body(APP, "fn new("), STARTUP);
 }
 
 #[test]

@@ -496,22 +496,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         {
             state.record(LogSeverity::Warning, LogSource::Studio, warning);
         }
-        if let Some(recovery) = state.models.model_editor_recovery.clone() {
-            match recovery.restore(
-                &state.model.model_library_manager,
-                state.model.workspace.content.project.revision(),
-            ) {
-                Ok(draft) => state.models.model_editor.draft = Some(draft),
-                Err(error) => {
-                    state.models.model_editor_recovery = None;
-                    state.record(
-                        LogSeverity::Warning,
-                        LogSource::Studio,
-                        format!("Unsaved model-editor recovery was not reopened because {error}."),
-                    );
-                }
-            }
-        }
+        state.models.reopen_authoring_recovery(&mut state.model);
         state
             .model
             .workspace
