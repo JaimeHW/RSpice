@@ -4,15 +4,36 @@
 use egui::Context;
 
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 
 use super::new_view::seeded_symbol_view;
+
+/// What the footer says: why Create is refused, or, while the form waits for
+/// a name, that it does, as a plain fact.
+fn new_cell_status<'a>(
+    catalog_current: bool,
+    any_writable_library: bool,
+    name: &str,
+    error: Option<&'a str>,
+) -> Result<Option<&'a str>, &'a str> {
+    if !catalog_current {
+        return Err(LIBRARY_CATALOG_STALE_MESSAGE);
+    }
+    if !any_writable_library {
+        return Err("There is no writable library to create the cell in.");
+    }
+    if let Some(error) = error {
+        return Err(error);
+    }
+    if name.trim().is_empty() {
+        return Ok(Some("Enter a name for the cell."));
+    }
+    Ok(None)
+}
 
 impl ProjectFeature {
     /// Draw New Cell. What a created cell leaves outside its catalog change
@@ -43,80 +64,56 @@ impl ProjectFeature {
         }
 
         let dialogs = &mut *cx.state;
-        let choice = Dialog::new("New cell", "Create")
-            .description(
-                "Create a named cell in a writable library with the selected initial views.",
+        let status = new_cell_status(
+            catalog_current,
+            !lib_names.is_empty(),
+            &dialogs.new_cell_name,
+            dialogs.new_cell_error.as_deref(),
+        );
+        let mut name_changed = false;
+        let choice = CommandForm::new("New cell", "Create")
+            .describe("Create a named cell in a writable library with the selected initial views.")
+            .primary_enabled(
+                catalog_current
+                    && !lib_names.is_empty()
+                    && !dialogs.new_cell_name.trim().is_empty(),
             )
-            .size(DialogSize::Transaction)
-            .ghost("Cancel")
-            .primary_enabled(catalog_current && !dialogs.new_cell_name.trim().is_empty())
-            .show(ctx, |ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                let t = Tokens::get(ui.ctx());
-                let c = t.color;
-
-                // Target library.
-                ui.allocate_ui_with_layout(
-                    egui::vec2(ui.available_width(), t.metrics.row_h),
-                    egui::Layout::left_to_right(egui::Align::Center),
-                    |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
-                        let (label_rect, _) = ui.allocate_exact_size(
-                            egui::vec2(92.0, t.metrics.row_h),
-                            egui::Sense::hover(),
-                        );
-                        ui.painter().text(
-                            egui::pos2(label_rect.left(), label_rect.center().y),
-                            egui::Align2::LEFT_CENTER,
-                            "Library",
-                            theme::sans(tokens::FS_1, FontWeight::Regular),
-                            c.text_dim,
-                        );
-                        egui::ComboBox::from_id_salt("cell_library_combo")
-                            .selected_text(&dialogs.new_cell_library)
-                            .width(ui.available_width())
-                            .show_ui(ui, |ui| {
-                                for name in &lib_names {
-                                    ui.selectable_value(
-                                        &mut dialogs.new_cell_library,
-                                        name.clone(),
-                                        name,
-                                    );
-                                }
-                            });
-                    },
-                );
-
-                input_row(ui, "Cell name", &mut dialogs.new_cell_name);
-                input_row(ui, "Description", &mut dialogs.new_cell_description);
-
-                ui.add_space(8.0);
-                let mut kicker = egui::text::LayoutJob::default();
-                kicker.append(
-                    "VIEWS TO CREATE",
-                    0.0,
-                    egui::TextFormat {
-                        font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
-                        color: c.text_faint,
-                        extra_letter_spacing: 0.08 * tokens::FS_0,
-                        ..Default::default()
-                    },
-                );
-                ui.label(kicker);
-                switch_row(ui, "Schematic", &mut dialogs.new_cell_create_schematic);
-                switch_row(ui, "Symbol", &mut dialogs.new_cell_create_symbol);
-                switch_row(ui, "Testbench", &mut dialogs.new_cell_create_testbench);
-                switch_row(ui, "Verilog-A", &mut dialogs.new_cell_create_veriloga);
-
-                if let Some(error) = dialogs.new_cell_error.clone() {
-                    ui.add_space(6.0);
-                    ui.label(
-                        egui::RichText::new(error)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.err),
-                    );
+            .status(status)
+            .show(ctx, |rows| {
+                if let Some(index) = rows.select(
+                    "Library",
+                    "new-cell-library",
+                    &dialogs.new_cell_library,
+                    &lib_names,
+                ) {
+                    dialogs.new_cell_library = lib_names[index].clone();
                 }
+                let name = egui::Id::new("new-cell-name");
+                name_changed = rows
+                    .text("Cell name", name, &mut dialogs.new_cell_name, "")
+                    .changed();
+                rows.text(
+                    "Description",
+                    egui::Id::new("new-cell-description"),
+                    &mut dialogs.new_cell_description,
+                    "",
+                );
+                rows.checks(
+                    "Views",
+                    &mut [
+                        ("Schematic", &mut dialogs.new_cell_create_schematic),
+                        ("Symbol", &mut dialogs.new_cell_create_symbol),
+                        ("Testbench", &mut dialogs.new_cell_create_testbench),
+                        ("Verilog-A", &mut dialogs.new_cell_create_veriloga),
+                    ],
+                );
+                Some(name)
             });
+        // A refusal of the create belongs to the name it refused; a new name
+        // has not been refused yet.
+        if name_changed && catalog_current {
+            cx.state.new_cell_error = None;
+        }
 
         match choice {
             DialogChoice::Primary => should_create = true,
@@ -308,6 +305,48 @@ mod tests {
         let created = with_cx(app, create_new_cell);
         app.after_contribution();
         created
+    }
+
+    /// A disabled Create says why: a name it waits for as a fact, anything
+    /// that refuses it as a refusal.
+    #[test]
+    fn the_new_cell_form_says_why_create_is_off() {
+        assert_eq!(
+            new_cell_status(true, true, " ", None),
+            Ok(Some("Enter a name for the cell."))
+        );
+        assert_eq!(new_cell_status(true, true, "amp", None), Ok(None));
+        assert_eq!(
+            new_cell_status(false, true, "amp", None),
+            Err(LIBRARY_CATALOG_STALE_MESSAGE)
+        );
+        assert!(new_cell_status(true, false, "amp", None).is_err());
+        assert_eq!(
+            new_cell_status(true, true, "amp", Some("A cell named amp exists.")),
+            Err("A cell named amp exists.")
+        );
+    }
+
+    /// New cell is the 420-point command form: the views are checks on the
+    /// grid under one label, with no kicker over them and no switches.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_new_cell_form_puts_its_views_on_the_grid() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.project.new_cell_dialog = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
+        let painted = crate::ui::widgets::painted_runs::painted_runs(
+            egui::vec2(1440.0, 900.0),
+            crate::ui::tokens::Mode::Light,
+            3,
+            |ctx| with_cx(&mut app, |cx| ProjectFeature::process_new_cell_dialog(cx, ctx)),
+        );
+        assert_eq!(painted.surface.width(), 420.0);
+        assert!(painted.rect_of("VIEWS TO CREATE").is_none());
+        let views = painted.rect_of("Views").expect("the Views row");
+        let library = painted.rect_of("Library").expect("the Library row");
+        assert!((views.left() - library.left()).abs() < 0.5);
+        assert!(painted.rect_of("Enter a name for the cell.").is_some());
     }
 
     fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> crate::state::View {
