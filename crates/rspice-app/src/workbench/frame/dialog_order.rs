@@ -231,7 +231,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.project_revision_history"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.project_revision_history.open),
-        render: |app, ctx| app.render_project_revision_history_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::render_project_revision_history_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("code.source_document"),

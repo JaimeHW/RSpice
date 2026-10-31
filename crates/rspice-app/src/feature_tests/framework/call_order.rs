@@ -348,7 +348,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "sheets"),
     ("render_design_management_dialog", "project"),
     ("render_selection_bulk_edit_dialog", "design"),
-    ("render_project_revision_history_dialog", "project"),
+    (
+        "ProjectFeature::render_project_revision_history_dialog",
+        "project",
+    ),
     ("render_source_document_dialog", "code"),
     ("render_source_find_dialog", "code"),
     ("render_source_language_tools_dialog", "code"),

@@ -9,10 +9,11 @@ pub(crate) mod commands;
 pub(crate) mod configuration_state;
 mod library_dialogs;
 mod new_project;
+mod revision_history;
 pub(crate) mod workspace_state;
 
 use crate::state::ViewType;
-use crate::workbench::app::{open_design_management_dialog, open_project_revision_history};
+use crate::workbench::app::open_design_management_dialog;
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
@@ -29,6 +30,7 @@ use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::ProjectCommand;
 use library_dialogs::new_view_target;
+use revision_history::open_project_revision_history;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 /// The project feature.

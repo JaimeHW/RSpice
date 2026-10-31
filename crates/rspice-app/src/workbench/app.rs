@@ -132,9 +132,7 @@ pub(crate) use dialogs::project::{
     TechnologyAttachmentDialogState, new_project::open_new_project_dialog,
 };
 
-pub(crate) use dialogs::project_revision_history::{
-    ProjectRevisionHistoryDialogState, open_project_revision_history,
-};
+pub(crate) use dialogs::project_revision_history::ProjectRevisionHistoryDialogState;
 
 pub(crate) use dialogs::source_document::{
     open_source_document_dialog, source_document_dialog_is_available,
