@@ -3,8 +3,10 @@
 //! editors' session, with the netlist documents opened and the outline groups
 //! collapsed; and what code shows other features.
 
+use crate::simulation::NetlistShown;
 use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::framework::feature::CodePort;
+use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 /// What the code feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -64,6 +66,24 @@ impl CodeState {
         self.netlist = Default::default();
         self.netlist_open_documents.clear();
     }
+
+    /// Which netlist document the editor shows, as a manual-deck run reads it.
+    pub(crate) fn netlist_shown(&self) -> NetlistShown {
+        NetlistShown {
+            settled: self.netlist.active_document_initialized,
+            comparison: self.netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
+            owned_source: self.netlist.active_document == ActiveNetlistDocument::OwnedSource,
+        }
+    }
+
+    /// The receipt of the project's current Verilog-A compilation.
+    pub(crate) fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
+        self.code_workspace
+            .veriloga
+            .receipt
+            .as_ref()
+            .map(|receipt| &receipt.compilation)
+    }
 }
 
 impl CodePort for CodeState {
@@ -78,5 +98,13 @@ impl CodePort for CodeState {
 
     fn netlist_cursor_line(&self) -> usize {
         self.netlist.cursor_line
+    }
+
+    fn netlist_shown(&self) -> NetlistShown {
+        CodeState::netlist_shown(self)
+    }
+
+    fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
+        CodeState::veriloga_compilation(self)
     }
 }

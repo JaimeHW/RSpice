@@ -9,7 +9,7 @@
 
 use rspice_results_ui::eye_diagram::{EyeTimebase, EyeTimebaseProvenance};
 use rspice_results_ui::fft::FftInputOptions;
-use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
+pub use rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt;
 
 use crate::state::{CellViewRef, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::slots::runs::RunsState;

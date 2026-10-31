@@ -1985,6 +1985,20 @@ mod tests {
         fn netlist_cursor_line(&self) -> usize {
             0
         }
+
+        fn netlist_shown(&self) -> rspice_app_runs::simulation::NetlistShown {
+            rspice_app_runs::simulation::NetlistShown {
+                settled: false,
+                comparison: false,
+                owned_source: false,
+            }
+        }
+
+        fn veriloga_compilation(
+            &self,
+        ) -> Option<&rspice_app_runs::simulation::ProjectCompileReceipt> {
+            None
+        }
     }
 
     impl ResultPresentationSource for NoReads {

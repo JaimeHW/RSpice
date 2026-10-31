@@ -12,7 +12,6 @@ use super::design_checks::CheckScope;
 use super::{AppState, Model, RunsState, SlotFacts};
 use crate::simulation::{NetlistShown, RunHost, ViewerHost, ViewerReading};
 use crate::state::{CellViewRef, SpecializedViewerCacheProvenance};
-use crate::workbench::documents::netlist_document::ActiveNetlistDocument;
 use crate::workbench::state::Workspace;
 
 impl AppState {
@@ -79,21 +78,11 @@ impl RunHost for AppState {
     }
 
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
-        self.code
-            .code_workspace
-            .veriloga
-            .receipt
-            .as_ref()
-            .map(|receipt| &receipt.compilation)
+        self.code.veriloga_compilation()
     }
 
     fn netlist_shown(&self) -> NetlistShown {
-        let netlist = &self.code.netlist;
-        NetlistShown {
-            settled: netlist.active_document_initialized,
-            comparison: netlist.active_document == ActiveNetlistDocument::GeneratedDiff,
-            owned_source: netlist.active_document == ActiveNetlistDocument::OwnedSource,
-        }
+        self.code.netlist_shown()
     }
 
     fn show_problem_findings(&mut self) {
