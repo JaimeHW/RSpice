@@ -1629,6 +1629,17 @@ pub fn parse_save_probe(raw: &str) -> Option<super::SaveSignal> {
         return Some(SaveSignal::Raw(rest.trim().to_string()));
     }
 
+    // ngspice names a branch current `<device>#branch`.
+    if let Some(device) = trimmed
+        .len()
+        .checked_sub("#branch".len())
+        .filter(|&split| split > 0 && trimmed.is_char_boundary(split))
+        .filter(|&split| trimmed[split..].eq_ignore_ascii_case("#branch"))
+        .map(|split| &trimmed[..split])
+    {
+        return Some(SaveSignal::Current(device.to_string()));
+    }
+
     Some(SaveSignal::Raw(trimmed.to_string()))
 }
 
@@ -8685,6 +8696,32 @@ mod tests {
                 .unwrap_or_else(|error| panic!("{card}: {error}"));
             assert_eq!(transient_fields(&netlist), expected, "{card}");
         }
+    }
+
+    /// ngspice prints a branch current as `<device>#branch` (the mes/subth
+    /// and mesa decks print `vids#branch`): it is that device's current.
+    #[test]
+    fn a_branch_vector_name_is_the_device_current() {
+        assert_eq!(
+            super::parse_save_probe("vids#branch"),
+            Some(SaveSignal::Current("vids".to_string()))
+        );
+        assert_eq!(
+            super::parse_save_probe("X1.VD#BRANCH"),
+            Some(SaveSignal::Current("X1.VD".to_string()))
+        );
+        assert_eq!(
+            super::parse_save_probe("#branch"),
+            Some(SaveSignal::Raw("#branch".to_string()))
+        );
+        let netlist = Netlist::parse(
+            "branch\nV1 1 0 1\nvids 1 2 0\nR1 2 0 1k\n.dc v1 0 1 1\n.print dc vids#branch\n.end\n",
+        )
+        .expect("a branch vector prints");
+        assert!(matches!(
+            netlist.output_requests[0].operand_kinds.as_slice(),
+            [crate::netlist::OutputOperandKind::Probe(SaveSignal::Current(device))] if device == "vids"
+        ));
     }
 
     /// TSTEP=0 is LTspice's and Xyce's "no print step"; ngspice refuses it

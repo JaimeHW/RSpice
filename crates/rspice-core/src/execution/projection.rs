@@ -1189,20 +1189,29 @@ fn complex_alias_selects(selection: &SaveSet, candidate: &ProjectionSourceSignal
         let SaveSignal::Raw(authored) = signal else {
             return false;
         };
-        let Some((operator, argument)) = split_accessor(authored) else {
-            return false;
-        };
-        let compatible = match candidate.descriptor.kind() {
-            SignalKind::Voltage => {
-                matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB")
-            }
-            SignalKind::Current => {
-                matches!(operator.as_str(), "I" | "IR" | "II" | "IM" | "IP" | "IDB")
-            }
-            SignalKind::Digital | SignalKind::Scalar | SignalKind::DeviceObservable => false,
-        };
-        compatible && argument.eq_ignore_ascii_case(registry)
+        complex_accessor(authored).is_some_and(|(kind, argument)| {
+            kind == candidate.descriptor.kind() && argument.eq_ignore_ascii_case(registry)
+        })
     })
+}
+
+/// The complex column an authored accessor renders: `VM(out)`, `IDB(v1)`,
+/// or ngspice's vector functions of one probe, `db(i(v1))`, `ph(v(out))`.
+fn complex_accessor(authored: &str) -> Option<(SignalKind, String)> {
+    let (operator, argument) = split_accessor(authored)?;
+    match operator.as_str() {
+        "V" | "VR" | "VI" | "VM" | "VP" | "VDB" => Some((SignalKind::Voltage, argument)),
+        "I" | "IR" | "II" | "IM" | "IP" | "IDB" => Some((SignalKind::Current, argument)),
+        "DB" | "MAG" | "PH" | "PHASE" | "CPH" | "REAL" | "RE" | "IMAG" => {
+            let (inner, argument) = split_accessor(&argument)?;
+            match inner.as_str() {
+                "V" => Some((SignalKind::Voltage, argument)),
+                "I" => Some((SignalKind::Current, argument)),
+                _ => None,
+            }
+        }
+        _ => None,
+    }
 }
 
 fn split_accessor(authored: &str) -> Option<(String, String)> {
@@ -1373,12 +1382,7 @@ fn complex_accessor_column(
     source: &ProjectionSource<'_>,
     authored: &str,
 ) -> Option<ProjectedSignal> {
-    let (operator, argument) = split_accessor(authored)?;
-    let expected = match operator.as_str() {
-        "V" | "VR" | "VI" | "VM" | "VP" | "VDB" => SignalKind::Voltage,
-        "I" | "IR" | "II" | "IM" | "IP" | "IDB" => SignalKind::Current,
-        _ => return None,
-    };
+    let (expected, argument) = complex_accessor(authored)?;
     source
         .signals
         .iter()
@@ -1627,6 +1631,48 @@ mod tests {
         let (real, imag) = projected.signals()[0].complex().expect("complex column");
         assert_eq!(real, [0.5, 0.5]);
         assert_eq!(imag, [-0.25, -0.25]);
+    }
+
+    /// ngspice's `db()`/`ph()` of one probe (vbic/CEamp prints
+    /// `db(i(vmeas))`) select the probe's complex column as `idb(vmeas)` does.
+    #[test]
+    fn an_ngspice_function_of_one_probe_selects_its_complex_column() {
+        let netlist = parse(
+            "functions\nI1 0 a AC 1\nVM a b 0\nR1 b 0 1k\n.AC DEC 1 1 10\n\
+             .PRINT AC db(i(vm)) ph(v(a))\n.END\n",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+            .with_axis(vec![1.0, 10.0])
+            .with_signals(vec![
+                complex_signal(
+                    "V(a)",
+                    "a",
+                    SignalKind::Voltage,
+                    vec![1e3, 1e3],
+                    vec![0.0, 1.0],
+                ),
+                complex_signal(
+                    "I(VM)",
+                    "VM",
+                    SignalKind::Current,
+                    vec![1.0, 1.0],
+                    vec![0.0, 1e-3],
+                ),
+            ]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("both functions resolve");
+        assert_eq!(projected.signals().len(), 2);
+        assert_eq!(
+            projected.signals()[0].descriptor().kind(),
+            SignalKind::Current
+        );
+        let (real, imag) = projected.signals()[0].complex().expect("complex column");
+        assert_eq!(real, [1.0, 1.0]);
+        assert_eq!(imag, [0.0, 1e-3]);
+        let (real, _) = projected.signals()[1].complex().expect("complex column");
+        assert_eq!(real, [1e3, 1e3]);
     }
 
     /// A terminal current `@x1[ia]` is solved in the branch of the meter on
