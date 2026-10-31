@@ -19,6 +19,9 @@ use rspice_app_state::workbench::workspace::restore_model_library_manager;
 
 use super::ModelsFeature;
 
+/// The cases of the models feature's commands that the feature answers.
+mod commands;
+
 /// The models feature on its own, over what a new session starts with:
 /// the model over the empty PDK configuration a test session reads, and a
 /// new session's workbench.

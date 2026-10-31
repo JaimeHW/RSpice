@@ -999,7 +999,9 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     ("documents/code_workspace", "app", 5),
     // The model editor document's tests run over the models feature on its
     // own, and the feature builds that harness, as the results feature's test
-    // host holds the slot its parts run against.
+    // host holds the slot its parts run against. The row retires when the
+    // document moves into the models crate with the feature, where the edge
+    // is internal to it.
     ("documents/model_editor", "models", 1),
     // Dispatch reaching up into what it renders. A command should name a
     // route or a state transition, not the widget that draws the result.
