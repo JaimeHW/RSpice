@@ -13,7 +13,7 @@
 
 use std::collections::BTreeSet;
 
-use super::diagnostic_store::DiagnosticLevel;
+use rspice_app_state::workbench::app_state::diagnostic_store::DiagnosticLevel;
 
 /// One column of the grid: what it says, and what ordering by it means.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -37,7 +37,7 @@ use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
 use crate::workbench::app_state::diagnostic_store::listing::{
     DiagnosticListing, DiagnosticRow, RowFacet,
 };
-use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemGrouping, ProblemsView};
+use crate::workbench::state::problems_view::{ProblemColumn, ProblemGrouping, ProblemsView};
 
 /// One printed line of the body.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

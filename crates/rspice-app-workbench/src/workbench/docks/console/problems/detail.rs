@@ -21,9 +21,9 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Button;
 use crate::workbench::app_state::diagnostic_store::DiagnosticRoute;
 use crate::workbench::app_state::diagnostic_store::listing::DiagnosticRow;
-use crate::workbench::app_state::problems_view::WaiverDraft;
 use crate::workbench::app_state::session::shortcuts::report_escape_owner;
 use crate::workbench::app_state::waivers::WaiverAction;
+use crate::workbench::state::problems_view::WaiverDraft;
 
 /// The height of the verb row above the detail lines.
 const ACTION_ROW_HEIGHT: f32 = 24.0;

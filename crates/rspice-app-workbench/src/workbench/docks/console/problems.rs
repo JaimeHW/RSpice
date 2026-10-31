@@ -55,12 +55,12 @@ use crate::workbench::app_state::diagnostic_store::listing::{
     DiagnosticListing, DiagnosticRow, EmptyReason, ListingSource, RowStanding, listing_in_pass,
 };
 use crate::workbench::app_state::diagnostic_store::{DiagnosticLevel, DiagnosticRoute};
-use crate::workbench::app_state::problems_view::{ProblemsView, WaiverDraft};
 use crate::workbench::app_state::session::shortcuts::{
     report_escape_owner, request_engineering_canvas_focus,
 };
 use crate::workbench::app_state::waivers::{WaiverAction, WaiverTarget};
 use crate::workbench::framework::workbench_host::ConsoleHost;
+use crate::workbench::state::problems_view::{ProblemsView, WaiverDraft};
 
 use crate::ui::widgets::{Problem, StatusMark};
 use arrange::{Arrangement, Line};
@@ -1068,7 +1068,7 @@ fn tsv_field(text: &str) -> Cow<'_, str> {
 /// the filters admit, so a collapsed group's findings are copied too: the
 /// count on the button that copies them says so.
 pub fn copy_of_listed(listed: &DiagnosticListing<'_>, arrangement: &Arrangement) -> String {
-    use crate::workbench::app_state::problems_view::ProblemColumn;
+    use crate::workbench::state::problems_view::ProblemColumn;
 
     let mut text = ProblemColumn::ALL
         .iter()

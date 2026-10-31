@@ -67,7 +67,6 @@ pub mod workbench {
         pub use rspice_app_services::workbench::slots::platform::PlatformState;
         pub use rspice_app_state::workbench::app_state::model::Model;
         pub use rspice_app_state::workbench::app_state::{diagnostic_store, waivers};
-        pub mod problems_view;
         pub mod session {
             pub mod shortcuts;
         }
@@ -90,6 +89,7 @@ pub mod workbench {
     pub mod state {
         pub mod console_views;
         pub mod navigator_tree;
+        pub mod problems_view;
         pub mod retired_documents;
         pub mod workbench_session;
 

@@ -30,7 +30,7 @@ use super::super::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Problem, StatusMark, paint_status_mark};
-use crate::workbench::app_state::problems_view::{ProblemColumn, ProblemsView};
+use crate::workbench::state::problems_view::{ProblemColumn, ProblemsView};
 
 use super::arrange::Group;
 

@@ -19,7 +19,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{chip, select_mono_with_response};
 use crate::workbench::app_state::diagnostic_store::DiagnosticLevel;
-use crate::workbench::app_state::problems_view::{ProblemGrouping, ProblemsView};
+use crate::workbench::state::problems_view::{ProblemGrouping, ProblemsView};
 
 /// What the producer control says when the grid is narrowed to none.
 const EVERY_PRODUCER: &str = "All producers";

@@ -11,10 +11,10 @@ use crate::diagnostics::LogAnchor;
 use crate::state::CellViewRef;
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::diagnostic_store::listing::ListingSource;
-use crate::workbench::app_state::problems_view::ProblemsView;
 use crate::workbench::app_state::waivers::WaiverTarget;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleSource, PlatformState};
+use crate::workbench::state::problems_view::ProblemsView;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 
