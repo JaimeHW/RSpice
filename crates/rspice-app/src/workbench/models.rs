@@ -16,7 +16,7 @@ use crate::workbench::documents::model_editor::{
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::ModelsState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -38,7 +38,37 @@ impl Feature for ModelsFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ModelsCommand>();
+        registry.navigator(FeatureNavigator {
+            show: show_navigator,
+        });
+        registry.inspector(FeatureInspector {
+            show: show_inspector,
+            // The section only reports: it holds nothing typed to commit.
+            commit_pending_edit: |_, _| {},
+        });
     }
+}
+
+/// The Models workspace's navigator: its pages and the loaded model
+/// libraries.
+fn show_navigator(cx: &mut Cx<'_, ModelsFeature>, ui: &mut egui::Ui) {
+    let models = &mut *cx.state;
+    crate::workbench::docks::navigator::models::models(
+        ui,
+        &mut models.models_page,
+        &mut models.selected_model,
+        cx.model,
+        cx.wb,
+    );
+}
+
+/// What the inspector says about the model library a reader has selected.
+fn show_inspector(cx: &mut Cx<'_, ModelsFeature>, ui: &mut egui::Ui) {
+    crate::workbench::docks::inspector::models::show(
+        ui,
+        cx.state.selected_model.as_deref(),
+        cx.model,
+    );
 }
 
 /// What the model commands' selection rules read, from what the feature

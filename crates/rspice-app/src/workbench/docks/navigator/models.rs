@@ -5,9 +5,16 @@ use egui::Ui;
 
 use crate::state::ModelsPage;
 use crate::ui::panels::{WorkbenchIcon, section_header};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
-pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn models(
+    ui: &mut Ui,
+    models_page: &mut ModelsPage,
+    selected_model: &mut Option<String>,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) {
     // "Model ownership" titled a page index. Nothing under it is about who
     // owns a model.
     section_header(ui, "Pages", None);
@@ -16,39 +23,25 @@ pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             WorkbenchIcon::Models,
             page.label(),
-            app.state.models.models_page == page,
+            *models_page == page,
             None,
         ) {
-            app.state.models.models_page = page;
+            *models_page = page;
         }
     }
     section_header(
         ui,
         "Loaded model libraries",
-        Some(
-            &app.state
-                .model
-                .model_library_manager
-                .library_count()
-                .to_string(),
-        ),
+        Some(&model.model_library_manager.library_count().to_string()),
     );
-    let libraries: Vec<_> = app
-        .state
-        .model
+    let libraries: Vec<_> = model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
         .map(|library| (library.name.clone(), library.model_count()))
         .collect();
     for (name, count) in libraries {
-        let selected = app
-            .state
-            .model
-            .model_library_manager
-            .selected_library
-            .as_deref()
-            == Some(&name);
+        let selected = model.model_library_manager.selected_library.as_deref() == Some(&name);
         if nav_row(
             ui,
             WorkbenchIcon::Models,
@@ -57,12 +50,10 @@ pub(in crate::workbench) fn models(ui: &mut Ui, app: &mut RSpiceApp) {
             Some(&count.to_string()),
         ) {
             crate::workbench::models::workspace_state::select_library_or_prompt(
-                &mut app.state.model,
-                &mut app.state.workbench,
-                &name,
+                model, workbench, &name,
             );
-            app.state.models.models_page = ModelsPage::Models;
-            app.state.models.selected_model = None;
+            *models_page = ModelsPage::Models;
+            *selected_model = None;
         }
     }
 }

@@ -13,7 +13,7 @@
 use egui::Ui;
 
 use crate::quantity::format_engineering_value;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 use super::super::super::design_system::property_row;
 use rspice_ui_kit::panels::section_header;
@@ -26,22 +26,15 @@ fn declared(ui: &mut Ui, label: &str, value: &str) {
     property_row(ui, label, value);
 }
 
-pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(library) = app
-        .state
-        .model
-        .model_library_manager
-        .current_library()
-        .cloned()
-    else {
+pub(in crate::workbench) fn show(ui: &mut Ui, selected_model: Option<&str>, model: &Model) {
+    let Some(library) = model.model_library_manager.current_library().cloned() else {
         return;
     };
     section_header(ui, "Library", None);
     property_row(
         ui,
         "Library",
-        app.state
-            .model
+        model
             .model_library_manager
             .selected_library
             .as_deref()
@@ -53,13 +46,7 @@ pub(in crate::workbench) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(corner) = library.selected_corner.as_deref() {
         property_row(ui, "Selected corner", corner);
     }
-    let Some(model) = app
-        .state
-        .models
-        .selected_model
-        .as_ref()
-        .and_then(|name| library.models.get(name))
-    else {
+    let Some(model) = selected_model.and_then(|name| library.models.get(name)) else {
         return;
     };
     // The model's own name is the section's title: a "Name" row under a

@@ -46,6 +46,7 @@ use crate::workbench::framework::workbench_host::{ConsoleHost, WorkbenchHost};
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::sheets::SheetsFeature;
@@ -142,7 +143,6 @@ impl Host for RSpiceApp {
             }
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
-                use crate::workbench::docks::navigator::models::models;
                 use crate::workbench::docks::navigator::netlist::{code_workspace_pages, netlist};
                 use crate::workbench::docks::navigator::project::project;
                 use crate::workbench::docks::navigator::simulate::simulate;
@@ -189,7 +189,7 @@ impl Host for RSpiceApp {
                     Workspace::Simulate => simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Verify => verify(ui, app),
-                    Workspace::Models => models(ui, app),
+                    Workspace::Models => features::show_navigator::<ModelsFeature>(app, ui),
                 }
             }
             Point::Inspector(InspectorScope::AnyWorkspace) => {
@@ -202,7 +202,7 @@ impl Host for RSpiceApp {
                 use crate::workbench::docks::inspector::project::project;
                 use crate::workbench::docks::inspector::verify::verify;
                 use crate::workbench::docks::inspector::{
-                    design, models, simulation, stimulus, symbol, veriloga,
+                    design, simulation, stimulus, symbol, veriloga,
                 };
 
                 match workspace {
@@ -231,7 +231,7 @@ impl Host for RSpiceApp {
                         app.after_contribution();
                     }
                     Workspace::Verify => verify(ui, app),
-                    Workspace::Models => models::show(ui, app),
+                    Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),
                     Workspace::Netlist => code_workspace_inspector(ui, app),
                 }
             }

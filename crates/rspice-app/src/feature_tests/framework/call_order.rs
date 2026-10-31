@@ -546,6 +546,24 @@ const RESULTS_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
+/// The shell's `contribute`, at the points the models feature draws in its
+/// context: none answers anything there, as none did when the shell drew
+/// them, so a request another point left waits for the answer it waited for.
+const MODELS_CONTRIBUTIONS: &[Step] = &[
+    (
+        "navigator",
+        &["Workspace::Verify => verify(ui, app),\
+           Workspace::Models => features::show_navigator::<ModelsFeature>(app, ui),\
+           }"],
+    ),
+    (
+        "workspace inspector",
+        &["Workspace::Verify => verify(ui, app),\
+           Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),\
+           Workspace::Netlist =>"],
+    ),
+];
+
 /// `answer_result_requests`, step 11.31 of the frame: the export requests
 /// the result documents raised, then Export dataset…, drawn between the
 /// request that opens it and the plan hop.
@@ -1038,6 +1056,15 @@ fn a_results_contribution_has_what_it_raised_answered_once_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         RESULTS_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_models_contribution_answers_nothing_where_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        MODELS_CONTRIBUTIONS,
     );
 }
 
