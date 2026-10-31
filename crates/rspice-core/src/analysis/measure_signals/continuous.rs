@@ -352,7 +352,16 @@ pub fn evaluate_dc_continuous_measurements_with_parameter_contexts_limits_and_ab
         Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
         Err(error) => return failed(&statements, &error.to_string(), abort),
     };
+    let sweep_variables = super::DcSweepVariables::of(netlist, series.axis().len());
     let mut signals = series.signal_map();
+    sweep_variables.insert(
+        &mut signals,
+        series.axis(),
+        sweep
+            .first()
+            .map(|(_, point)| point.node_names.as_slice())
+            .unwrap_or_default(),
+    );
     if !point_params.is_empty() && point_params.len() != series.axis().len() {
         return failed(
             &statements,

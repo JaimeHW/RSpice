@@ -2128,36 +2128,63 @@ fn evaluate_dc_output_columns_with_abort(
             output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
         }
     })?;
-    let mut outer_values = Vec::new();
+    let sweep_variables = DcSweepVariables::of(netlist, series.axis.len());
     let mut signals = series.signal_map();
     alias_projection.augment(&mut signals).map_err(|detail| {
         output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
     })?;
-    // Xyce prints a swept device or parameter (`.DC R1 ...` with `.PRINT DC
-    // R1`) by its bare name: the column is the sweep value at each row. Only
-    // a deck's single .DC names its sweeps unambiguously, and a node or
-    // signal of that name keeps its meaning.
-    let mut dc_sweeps = netlist
-        .analyses
-        .iter()
-        .filter_map(|analysis| match analysis {
-            crate::netlist::AnalysisCommand::Dc {
-                source,
-                start,
-                stop,
-                step,
-                mode,
-                sweep2,
-                ..
-            } => Some((source, start, stop, step, mode, sweep2)),
-            _ => None,
-        });
-    let mut swept = Vec::new();
-    if let (Some((source, start, stop, step, mode, sweep2)), None) =
-        (dc_sweeps.next(), dc_sweeps.next())
-    {
-        swept.push((source.trim(), false));
-        if let Some(sweep2) = sweep2 {
+    sweep_variables.insert(
+        &mut signals,
+        &series.axis,
+        node_metadata.map(|nodes| nodes.names).unwrap_or_default(),
+    );
+    evaluate_real_output_requests(
+        &requests,
+        OutputAnalysisKind::Dc,
+        &series.axis,
+        &signals,
+        &netlist.params,
+        &projection,
+        abort,
+    )
+}
+
+/// A deck's `.DC` sweep variables as named series. Xyce reads a swept
+/// device, source or parameter by its bare name, in `.PRINT DC R1` and in
+/// expressions such as `{P*2}` alike: the inner variable is the axis value at
+/// each row and the outer variable of a two-source sweep is its own value.
+/// Only a deck's single `.DC` names its sweeps unambiguously.
+struct DcSweepVariables {
+    inner: Option<String>,
+    outer: Option<(String, Vec<Value>)>,
+}
+
+impl DcSweepVariables {
+    fn of(netlist: &Netlist, point_count: usize) -> Self {
+        let mut sweeps = netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                crate::netlist::AnalysisCommand::Dc {
+                    source,
+                    start,
+                    stop,
+                    step,
+                    mode,
+                    sweep2,
+                    ..
+                } => Some((source, start, stop, step, mode, sweep2)),
+                _ => None,
+            });
+        let (Some((source, start, stop, step, mode, sweep2)), None) =
+            (sweeps.next(), sweeps.next())
+        else {
+            return Self {
+                inner: None,
+                outer: None,
+            };
+        };
+        let outer = sweep2.as_ref().and_then(|sweep2| {
             let inner = crate::netlist::DcSweepSpec {
                 start: *start,
                 stop: *stop,
@@ -2168,42 +2195,54 @@ fn evaluate_dc_output_columns_with_abort(
             .points()
             .len();
             let outer = sweep2.spec().points();
-            if inner > 0 && inner.checked_mul(outer.len()) == Some(series.axis.len()) {
-                outer_values = outer
+            (inner > 0 && inner.checked_mul(outer.len()) == Some(point_count)).then(|| {
+                let values = outer
                     .iter()
                     .flat_map(|&value| std::iter::repeat_n(value, inner))
                     .collect();
-                swept.push((sweep2.source.trim(), true));
+                (sweep2.source.trim().to_string(), values)
+            })
+        });
+        Self {
+            inner: Some(source.trim().to_string()),
+            outer,
+        }
+    }
+
+    /// Name each sweep variable in `signals` unless a node or a signal
+    /// already has that name, which keeps its meaning.
+    fn insert<'a>(
+        &'a self,
+        signals: &mut HashMap<String, &'a [Value]>,
+        axis: &'a [Value],
+        node_names: &[String],
+    ) {
+        let variables = self
+            .inner
+            .as_deref()
+            .map(|name| (name, axis))
+            .into_iter()
+            .chain(
+                self.outer
+                    .as_ref()
+                    .map(|(name, values)| (name.as_str(), values.as_slice())),
+            );
+        for (name, values) in variables {
+            let named = node_names
+                .iter()
+                .any(|node| node.eq_ignore_ascii_case(name))
+                || [
+                    name.to_string(),
+                    name.to_ascii_lowercase(),
+                    name.to_ascii_uppercase(),
+                ]
+                .iter()
+                .any(|spelling| signals.contains_key(spelling));
+            if !named {
+                insert_case_variants(signals, name, values);
             }
         }
     }
-    for (source, outer) in swept {
-        let unnamed = !node_metadata.is_some_and(|nodes| {
-            nodes
-                .names
-                .iter()
-                .any(|node| node.eq_ignore_ascii_case(source))
-        }) && [
-            source.to_string(),
-            source.to_ascii_lowercase(),
-            source.to_ascii_uppercase(),
-        ]
-        .iter()
-        .all(|name| !signals.contains_key(name));
-        if unnamed {
-            let values = if outer { &outer_values } else { &series.axis };
-            insert_case_variants(&mut signals, source, values);
-        }
-    }
-    evaluate_real_output_requests(
-        &requests,
-        OutputAnalysisKind::Dc,
-        &series.axis,
-        &signals,
-        &netlist.params,
-        &projection,
-        abort,
-    )
 }
 
 /// Evaluate ordered real `.PRINT DC` columns for frontend export.
@@ -2374,6 +2413,18 @@ fn resolved_output_column_kind(
     }
     if names_solved_branch(signal, signals) {
         return OutputColumnKind::Current;
+    }
+    // A bare name is ngspice's shorthand for a node voltage, but a DC sweep
+    // variable read by its bare name is not a voltage.
+    if let SaveSignal::Raw(name) = signal
+        && !name.contains(':')
+        && !name.starts_with('@')
+        && signals
+            .get(&format!("V({})", name.trim()))
+            .is_ok_and(|value| value.is_none())
+        && signals.get(name.trim()).is_ok_and(|value| value.is_some())
+    {
+        return OutputColumnKind::Scalar;
     }
     output_column_kind(signal)
 }
@@ -6837,6 +6888,7 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             return Ok(failed_measurements(&statements, &error));
         }
     };
+    let sweep_variables = DcSweepVariables::of(netlist, series.axis().len());
     let mut signals = series.signal_map();
     match alias_projection.augment_with_abort(&mut signals, abort) {
         Ok(()) => {}
@@ -6847,6 +6899,14 @@ pub fn evaluate_dc_measurements_with_parameter_contexts_and_abort(
             return Ok(failed_measurements(&statements, &error));
         }
     }
+    sweep_variables.insert(
+        &mut signals,
+        series.axis(),
+        sweep
+            .first()
+            .map(|(_, point)| point.node_names.as_slice())
+            .unwrap_or_default(),
+    );
     let parameter_series = if point_params.is_empty() {
         Vec::new()
     } else if point_params.len() != series.axis().len() {
@@ -7759,6 +7819,49 @@ mod tests {
         assert_eq!(projected[0].name, "P");
         assert_eq!(projected[0].values, vec![1.0, 2.0, 1.0, 2.0]);
         assert_eq!(projected[1].values, vec![7.0, 7.0, 8.0, 8.0]);
+    }
+
+    #[test]
+    fn dc_outputs_read_a_swept_parameter_at_each_point_not_its_default() {
+        // Xyce 7.10 prints {P*2} as 2, 4 and measures 4 for each: P is 2 at
+        // the last point. Reading the .PARAM default gave 10.
+        let netlist = xyce_netlist(
+            "DC swept parameter measures\n\
+             .PARAM P=5\n\
+             V1 1 0 1\n\
+             R1 1 0 {P}\n\
+             .DC P 1 2 1\n\
+             .MEAS DC FOUND FIND {P*2} AT=2\n\
+             .MEAS DC LARGEST MAX {P*2}\n\
+             .MEAS DC LAST PARAM {P*2}\n\
+             .PRINT DC P {P*2} V(1)\n\
+             .END\n",
+        );
+        let point = || {
+            let mut result = SimulationResult::new(2, 0);
+            result.node_names = ["0", "1"].map(str::to_string).to_vec();
+            result.node_voltages = vec![0.0, 1.0];
+            result
+        };
+        let sweep = [(1.0, point()), (2.0, point())];
+        let projected = evaluate_dc_output_requests(&netlist, &sweep).expect("{P*2} evaluates");
+        assert_eq!(projected[0].values, vec![1.0, 2.0]);
+        assert_eq!(projected[1].values, vec![2.0, 4.0]);
+        // The sweep variable is not a voltage; V(1) still is.
+        assert_eq!(projected[0].kind, OutputColumnKind::Scalar);
+        assert_eq!(projected[2].kind, OutputColumnKind::Voltage);
+        let results = evaluate_dc_measurements(&netlist, &sweep);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| (result.name.as_str(), result.value))
+                .collect::<Vec<_>>(),
+            [
+                ("FOUND", Some(4.0)),
+                ("LARGEST", Some(4.0)),
+                ("LAST", Some(4.0))
+            ]
+        );
     }
 
     #[test]
