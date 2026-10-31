@@ -17,12 +17,13 @@ use std::sync::{Mutex, OnceLock};
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
 };
 use crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogResult;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::{ModelsAttemptedOperation, ModelsOperationalState};
 
 /// The refusal every model operation gives while another one is running.
@@ -41,12 +42,12 @@ const MODEL_OPERATION_RUNNING: &str = "A model import or refresh is already runn
 /// otherwise had nothing but a formatted progress sentence to recover a pack
 /// identifier from.
 fn note_models_operation(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ModelsFeature>,
     label: String,
     reissuable: bool,
     landing_pack: Option<String>,
 ) {
-    state.models.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+    cx.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
         label,
         reissuable,
         landing_pack,
@@ -231,7 +232,8 @@ thread_local! {
 
 #[cfg(any(test, target_arch = "wasm32"))]
 fn prepare_pdk_configuration(
-    state: &AppState,
+    model: &Model,
+    platform: &PlatformState,
     config: crate::state::pdk_config::PdkConfig,
 ) -> Result<
     (
@@ -241,15 +243,15 @@ fn prepare_pdk_configuration(
     ),
     Vec<String>,
 > {
-    if state.platform.project_lifecycle.is_open() && state.model.safe_mode.project_read_only() {
+    if platform.project_lifecycle.is_open() && model.safe_mode.project_read_only() {
         return Err(vec![
             "PDK settings cannot change while the project is read-only.".to_owned(),
         ]);
     }
     prepare_pdk_configuration_candidate(
-        state.model.model_library_manager.clone(),
-        &state.model.pdk_config,
-        state.model.workspace.content.project.technology_binding(),
+        model.model_library_manager.clone(),
+        &model.pdk_config,
+        model.workspace.content.project.technology_binding(),
         config,
     )
 }
@@ -281,17 +283,21 @@ fn prepare_pdk_configuration_candidate(
 
 #[cfg(test)]
 fn apply_pdk_configuration_with_persistence(
-    state: &mut AppState,
+    model: &mut Model,
+    platform: &PlatformState,
     config: crate::state::pdk_config::PdkConfig,
     persist: impl FnMut(&crate::state::pdk_config::PdkConfig) -> Result<(), String>,
 ) -> Result<usize, Vec<String>> {
-    let previous = state.model.pdk_config.clone();
-    let prepared = prepare_pdk_configuration(state, config)?;
-    publish_prepared_pdk_configuration_with_persistence(state, previous, prepared, persist)
+    let previous = model.pdk_config.clone();
+    let prepared = prepare_pdk_configuration(model, platform, config)?;
+    publish_prepared_pdk_configuration_with_persistence(
+        model, platform, previous, prepared, persist,
+    )
 }
 
 fn publish_prepared_pdk_configuration_with_persistence(
-    state: &mut AppState,
+    model: &mut Model,
+    platform: &PlatformState,
     previous: crate::state::pdk_config::PdkConfig,
     prepared: (
         crate::state::pdk_config::PdkConfig,
@@ -307,15 +313,11 @@ fn publish_prepared_pdk_configuration_with_persistence(
         )]
     })?;
 
-    let publication = if state.platform.project_lifecycle.is_open() {
-        publish_model_library_set_candidate(
-            &mut state.model,
-            candidate,
-            "apply configured PDK model sources",
-        )
-        .map(|_| ())
+    let publication = if platform.project_lifecycle.is_open() {
+        publish_model_library_set_candidate(model, candidate, "apply configured PDK model sources")
+            .map(|_| ())
     } else {
-        state.model.model_library_manager = candidate;
+        model.model_library_manager = candidate;
         Ok(())
     };
     if let Err(error) = publication {
@@ -329,12 +331,12 @@ fn publish_prepared_pdk_configuration_with_persistence(
         return Err(errors);
     }
 
-    state.model.pdk_config = config;
+    model.pdk_config = config;
     Ok(loaded)
 }
 
-fn emit_pdk_save_warning(state: &mut AppState, operation: &str, error: impl AsRef<str>) {
-    state.record(
+fn emit_pdk_save_warning(model: &mut Model, operation: &str, error: impl AsRef<str>) {
+    model.record(
         LogSeverity::Warning,
         LogSource::Studio,
         format!(
@@ -345,17 +347,17 @@ fn emit_pdk_save_warning(state: &mut AppState, operation: &str, error: impl AsRe
     );
 }
 
-fn emit_pdk_apply_messages(state: &mut AppState, load_result: Result<usize, Vec<String>>) {
+fn emit_pdk_apply_messages(model: &mut Model, load_result: Result<usize, Vec<String>>) {
     match load_result {
         Ok(count) => {
-            state.record(
+            model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("PDK settings applied: {count} libraries loaded"),
             );
         }
         Err(errors) => {
-            state.record(
+            model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!(
@@ -368,20 +370,20 @@ fn emit_pdk_apply_messages(state: &mut AppState, load_result: Result<usize, Vec<
 }
 
 fn emit_pdk_file_load_success_message(
-    state: &mut AppState,
+    model: &mut Model,
     path: &Path,
     library_name: &str,
     library_stats: Option<(usize, usize)>,
 ) {
-    state.model.pdk_config.add_recent_file(path);
-    if let Err(err) = crate::state::pdk_config::save(&state.model.pdk_config) {
-        emit_pdk_save_warning(state, "was updated", err.to_string());
+    model.pdk_config.add_recent_file(path);
+    if let Err(err) = crate::state::pdk_config::save(&model.pdk_config) {
+        emit_pdk_save_warning(model, "was updated", err.to_string());
     }
 
     let contents = library_stats.map_or_else(String::new, |(models, corners)| {
         format!(": {models} models, {corners} corners")
     });
-    state.record(
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(
@@ -391,22 +393,25 @@ fn emit_pdk_file_load_success_message(
     );
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn start_model_source_import(&mut self, _ctx: &Context) {
-        if self.state.models.models_view.model_import_in_progress {
-            self.state.prompt(MODEL_OPERATION_RUNNING);
+impl ModelsFeature {
+    pub(in crate::workbench) fn start_model_source_import(
+        cx: &mut Cx<'_, ModelsFeature>,
+        _ctx: &Context,
+    ) {
+        if cx.state.models_view.model_import_in_progress {
+            cx.wb.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
         #[cfg(target_arch = "wasm32")]
         {
-            note_models_operation(&mut self.state, "model import".to_owned(), false, None);
-            self.state.models.models_view.model_import_in_progress = true;
-            self.state.models.models_view.model_import_label =
+            note_models_operation(cx, "model import".to_owned(), false, None);
+            cx.state.models_view.model_import_in_progress = true;
+            cx.state.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
-            if let Err(error) = start_browser_model_import(_ctx, &self.state, None) {
-                self.state.models.models_view.model_import_in_progress = false;
-                self.state.models.models_view.model_import_label = None;
-                self.state.record(
+            if let Err(error) = start_browser_model_import(_ctx, cx.model, cx.platform, None) {
+                cx.state.models_view.model_import_in_progress = false;
+                cx.state.models_view.model_import_label = None;
+                cx.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("Model import could not start: {error}"),
@@ -422,22 +427,22 @@ impl RSpiceApp {
                 )
                 .pick_file();
             if let Some(path) = picked {
-                self.start_native_model_source_parse(_ctx, path);
+                Self::start_native_model_source_parse(cx, _ctx, path);
             }
         }
     }
 
     #[cfg(target_arch = "wasm32")]
     pub(in crate::workbench) fn select_browser_model_import_root(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         root_name: String,
     ) {
         let pending = BROWSER_PENDING_MODEL_ROOT.with(|pending| pending.borrow_mut().take());
         let Some(pending) = pending else {
-            self.state
+            cx.wb
                 .prompt("The model source selection is gone; choose the files again.");
-            self.state.models.models_view.dialog = None;
+            cx.state.models_view.dialog = None;
             return;
         };
         if !pending
@@ -445,7 +450,7 @@ impl RSpiceApp {
             .iter()
             .any(|candidate| candidate == &root_name)
         {
-            self.state.prompt(format!(
+            cx.wb.prompt(format!(
                 "'{root_name}' is not one of the selected entry files."
             ));
             BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
@@ -467,63 +472,68 @@ impl RSpiceApp {
             browser_model_import_worker::start(metadata, buffers, authority, ctx.clone())
         {
             BROWSER_PENDING_MODEL_ROOT.with(|slot| *slot.borrow_mut() = Some(pending));
-            self.state.record(
+            cx.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Model import could not start: {error}"),
             );
             return;
         }
-        self.state.models.models_view.dialog = None;
-        self.state.models.models_view.model_import_in_progress = true;
-        self.state.models.models_view.model_import_label =
+        cx.state.models_view.dialog = None;
+        cx.state.models_view.model_import_in_progress = true;
+        cx.state.models_view.model_import_label =
             Some(format!("Reading model source tree from '{root_name}'..."));
     }
 
     #[cfg(target_arch = "wasm32")]
-    pub(in crate::workbench) fn cancel_browser_model_import_root(&mut self) {
+    pub(in crate::workbench) fn cancel_browser_model_import_root(cx: &mut Cx<'_, ModelsFeature>) {
         BROWSER_PENDING_MODEL_ROOT.with(|pending| {
             pending.borrow_mut().take();
         });
-        self.state.models.models_view.dialog = None;
-        self.state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
-        self.state.models.models_view.action_receipt = Some(Ok(
+        cx.state.models_view.dialog = None;
+        cx.state.models_view.operational_state = ModelsOperationalState::Cancelled;
+        cx.state.models_view.action_receipt = Some(Ok(
             "Browser model-source selection was cancelled.".to_owned(),
         ));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    fn start_native_model_source_parse(&mut self, ctx: &Context, path: std::path::PathBuf) {
-        self.start_native_model_catalog_operation(
+    fn start_native_model_source_parse(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+        path: std::path::PathBuf,
+    ) {
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::ImportFile { path },
         );
     }
 
     pub(in crate::workbench) fn start_model_library_refresh(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         library_name: String,
     ) {
-        let Some(library) = self
-            .state
+        let Some(library) = cx
             .model
             .model_library_manager
             .get_library(&library_name)
             .cloned()
         else {
-            self.state
+            cx.wb
                 .prompt(format!("Model library '{library_name}' no longer exists."));
             return;
         };
         let Some(root) = library.root_path.clone() else {
-            self.state.prompt(format!(
+            cx.wb.prompt(format!(
                 "Model library '{library_name}' was not read from source files, so it cannot be refreshed."
             ));
             return;
         };
         #[cfg(not(target_arch = "wasm32"))]
-        self.start_native_model_catalog_operation(
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::RefreshLibrary {
                 library: library_name,
@@ -534,24 +544,26 @@ impl RSpiceApp {
         );
         #[cfg(target_arch = "wasm32")]
         {
-            if self.state.models.models_view.model_import_in_progress {
-                self.state.prompt(MODEL_OPERATION_RUNNING);
+            if cx.state.models_view.model_import_in_progress {
+                cx.wb.prompt(MODEL_OPERATION_RUNNING);
                 return;
             }
             note_models_operation(
-                &mut self.state,
+                cx,
                 format!("model-library refresh for '{library_name}'"),
                 false,
                 None,
             );
-            self.state.models.models_view.model_import_in_progress = true;
-            self.state.models.models_view.model_import_label = Some(format!(
+            cx.state.models_view.model_import_in_progress = true;
+            cx.state.models_view.model_import_label = Some(format!(
                 "Selecting replacement sources for '{library_name}'…"
             ));
-            if let Err(error) = start_browser_model_import(ctx, &self.state, Some(library_name)) {
-                self.state.models.models_view.model_import_in_progress = false;
-                self.state.models.models_view.model_import_label = None;
-                self.state.record(
+            if let Err(error) =
+                start_browser_model_import(ctx, cx.model, cx.platform, Some(library_name))
+            {
+                cx.state.models_view.model_import_in_progress = false;
+                cx.state.models_view.model_import_label = None;
+                cx.model.record(
                     LogSeverity::Error,
                     LogSource::Studio,
                     format!("Model library refresh could not start: {error}"),
@@ -569,16 +581,22 @@ impl RSpiceApp {
     /// control labelled "Attach pack" that instead asked the reader to go and
     /// find a model source, which is a different operation with a different
     /// outcome and a different provenance.
-    pub(in crate::workbench) fn start_model_pack_attach(&mut self, ctx: &Context, pack_id: String) {
+    pub(in crate::workbench) fn start_model_pack_attach(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+        pack_id: String,
+    ) {
         #[cfg(not(target_arch = "wasm32"))]
-        self.start_native_model_catalog_operation(
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::AttachPack { pack_id },
         );
         #[cfg(target_arch = "wasm32")]
         {
             let _ = ctx;
-            self.refuse_shipped_tree_operation(
+            Self::refuse_shipped_tree_operation(
+                cx,
                 format!("model-pack attach for '{pack_id}'"),
                 format!(
                     "The shipped model tree is a directory beside the desktop application, and a \
@@ -597,20 +615,22 @@ impl RSpiceApp {
     /// selection would be retained "as a generic project import" — which is
     /// neither the part that was asked for nor an import anybody chose.
     pub(in crate::workbench) fn start_model_part_add(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         pack_id: String,
         part_name: String,
     ) {
         #[cfg(not(target_arch = "wasm32"))]
-        self.start_native_model_catalog_operation(
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::AddPart { pack_id, part_name },
         );
         #[cfg(target_arch = "wasm32")]
         {
             let _ = ctx;
-            self.refuse_shipped_tree_operation(
+            Self::refuse_shipped_tree_operation(
+                cx,
                 format!("model-part add for '{part_name}' from '{pack_id}'"),
                 format!(
                     "The shipped model tree is a directory beside the desktop application, and a \
@@ -628,39 +648,40 @@ impl RSpiceApp {
     /// the status bar — because a refusal arriving by a private route would be
     /// a second failure vocabulary for one platform.
     #[cfg(target_arch = "wasm32")]
-    fn refuse_shipped_tree_operation(&mut self, attempted: String, reason: String) {
-        note_models_operation(&mut self.state, attempted, false, None);
-        self.state.models.models_view.operational_state =
-            ModelsOperationalState::from_failure(&reason);
-        self.state.models.models_view.action_receipt = Some(Err(reason.clone()));
-        self.state.prompt(reason);
+    fn refuse_shipped_tree_operation(
+        cx: &mut Cx<'_, ModelsFeature>,
+        attempted: String,
+        reason: String,
+    ) {
+        note_models_operation(cx, attempted, false, None);
+        cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&reason);
+        cx.state.models_view.action_receipt = Some(Err(reason.clone()));
+        cx.wb.prompt(reason);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn start_native_pdk_configuration_apply(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         config: crate::state::pdk_config::PdkConfig,
     ) {
-        if self.state.platform.project_lifecycle.is_open()
-            && self.state.model.safe_mode.project_read_only()
-        {
+        if cx.platform.project_lifecycle.is_open() && cx.model.safe_mode.project_read_only() {
             emit_pdk_apply_messages(
-                &mut self.state,
+                cx.model,
                 Err(vec![
                     "PDK settings cannot change while the project is read-only.".to_owned(),
                 ]),
             );
             return;
         }
-        self.start_native_model_catalog_operation(
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::ApplyConfiguration(Box::new(
                 NativePdkConfigurationOperation {
-                    previous: self.state.model.pdk_config.clone(),
+                    previous: cx.model.pdk_config.clone(),
                     config,
-                    technology_binding: self
-                        .state
+                    technology_binding: cx
                         .model
                         .workspace
                         .content
@@ -677,22 +698,24 @@ impl RSpiceApp {
     /// It is called from the frame loop rather than from any one surface,
     /// because a hub install started from the component shelf must finish even
     /// if the user has since walked away from the Models workspace.
-    pub(in crate::workbench) fn pump_model_catalog_operations(&mut self, ctx: &Context) {
+    pub(in crate::workbench) fn pump_model_catalog_operations(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+    ) {
         #[cfg(not(target_arch = "wasm32"))]
-        poll_native_model_imports(ctx, &mut self.state, &mut self.model_hub);
+        poll_native_model_imports(ctx, cx);
         #[cfg(target_arch = "wasm32")]
         {
-            poll_browser_model_imports(&mut self.state);
-            poll_browser_model_hub_operations(ctx, &mut self.state, &mut self.model_hub);
+            poll_browser_model_imports(cx);
+            poll_browser_model_hub_operations(ctx, cx);
         }
-        self.state.models.models_view.model_import_progress = self
+        cx.state.models_view.model_import_progress = cx
             .state
-            .models
             .models_view
             .model_import_in_progress
             .then(|| model_hub_progress().fraction())
             .flatten();
-        self.report_recalled_pins(ctx);
+        Self::report_recalled_pins(cx, ctx);
     }
 
     /// Tells the reader when this project is pinned to a recalled release.
@@ -708,10 +731,11 @@ impl RSpiceApp {
     /// library still resolves, and a design pinned to a recalled release
     /// solves exactly as it did — which is the whole of decision D-E, and the
     /// reason this is a warning and not a blocked project.
-    fn report_recalled_pins(&mut self, ctx: &Context) {
+    fn report_recalled_pins(cx: &mut Cx<'_, ModelsFeature>, ctx: &Context) {
         use crate::workbench::models::workspace_state::RecallNoticeScope;
 
-        let Some(identity) = self
+        let Some(identity) = cx
+            .handles
             .model_hub
             .hub()
             .and_then(crate::state::model_hub::ModelHub::catalog_identity)
@@ -722,26 +746,22 @@ impl RSpiceApp {
         };
         let scope = RecallNoticeScope {
             catalog_digest: identity.digest.clone(),
-            pack_pin_key: crate::state::model_hub::pack_pin_key(
-                &self.state.model.model_library_manager,
-            ),
+            pack_pin_key: crate::state::model_hub::pack_pin_key(&cx.model.model_library_manager),
         };
-        if self.state.models.models_view.recall_notice.as_ref() == Some(&scope) {
+        if cx.state.models_view.recall_notice.as_ref() == Some(&scope) {
             return;
         }
-        self.state.models.models_view.recall_notice = Some(scope);
-        let Some(hub) = self.model_hub.hub() else {
+        cx.state.models_view.recall_notice = Some(scope);
+        let Some(hub) = cx.handles.model_hub.hub() else {
             return;
         };
-        let recalled = crate::state::model_hub::recalled_pins(
-            hub.recalls(),
-            &self.state.model.model_library_manager,
-        );
+        let recalled =
+            crate::state::model_hub::recalled_pins(hub.recalls(), &cx.model.model_library_manager);
         if recalled.is_empty() {
             return;
         }
         for pin in &recalled {
-            self.state.record(
+            cx.model.record(
                 LogSeverity::Warning,
                 LogSource::Studio,
                 format!(
@@ -752,7 +772,7 @@ impl RSpiceApp {
                 ),
             );
         }
-        self.state.workbench.toasts.warn_with_title(
+        cx.wb.toasts.warn_with_title(
             ctx,
             "Recalled model release",
             format!(
@@ -767,53 +787,54 @@ impl RSpiceApp {
 
     /// Starts one Model Hub operation on the shared operation machine.
     pub(in crate::workbench) fn start_model_hub_operation(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         operation: ModelHubRequest,
     ) {
-        if self.model_hub.hub().is_none() {
-            let reason = self
+        if cx.handles.model_hub.hub().is_none() {
+            let reason = cx
+                .handles
                 .model_hub
                 .unavailable_reason()
                 .unwrap_or("The model hub is unavailable on this machine.")
                 .to_owned();
             note_models_operation(
-                &mut self.state,
+                cx,
                 operation.description(),
                 matches!(operation, ModelHubRequest::FetchSnapshot),
                 operation.landing_pack(),
             );
-            self.state.models.models_view.operational_state =
-                ModelsOperationalState::from_failure(&reason);
-            self.state.models.models_view.action_receipt = Some(Err(reason.clone()));
-            self.state.prompt(reason);
+            cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&reason);
+            cx.state.models_view.action_receipt = Some(Err(reason.clone()));
+            cx.wb.prompt(reason);
             return;
         }
         #[cfg(not(target_arch = "wasm32"))]
-        self.start_native_model_catalog_operation(
+        Self::start_native_model_catalog_operation(
+            cx,
             ctx,
             NativeModelCatalogOperation::ModelHub(operation),
         );
         #[cfg(target_arch = "wasm32")]
-        self.start_browser_model_hub_operation(ctx, operation);
+        Self::start_browser_model_hub_operation(cx, ctx, operation);
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn start_native_model_catalog_operation(
-        &mut self,
+        cx: &mut Cx<'_, ModelsFeature>,
         ctx: &Context,
         operation: NativeModelCatalogOperation,
     ) {
-        if self.state.models.models_view.model_import_in_progress {
-            self.state.prompt(MODEL_OPERATION_RUNNING);
+        if cx.state.models_view.model_import_in_progress {
+            cx.wb.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
-        let authority = capture_native_model_import_authority(&self.state);
-        let candidate = self.state.model.model_library_manager.clone();
-        let store = self.model_hub.store().cloned();
-        let transport_provider = self.model_hub.transport_provider();
+        let authority = capture_native_model_import_authority(cx.model, cx.platform);
+        let candidate = cx.model.model_library_manager.clone();
+        let store = cx.handles.model_hub.store().cloned();
+        let transport_provider = cx.handles.model_hub.transport_provider();
         note_models_operation(
-            &mut self.state,
+            cx,
             operation.description(),
             matches!(
                 operation,
@@ -821,8 +842,8 @@ impl RSpiceApp {
             ),
             operation.landing_pack(),
         );
-        self.state.models.models_view.model_import_in_progress = true;
-        self.state.models.models_view.model_import_label = Some(operation.progress_label());
+        cx.state.models_view.model_import_in_progress = true;
+        cx.state.models_view.model_import_label = Some(operation.progress_label());
         model_hub_progress().clear();
         let repaint = ctx.clone();
         let worker_operation = operation.clone();
@@ -856,54 +877,56 @@ impl RSpiceApp {
                 repaint.request_repaint();
             });
         if let Err(error) = spawn {
-            self.state.models.models_view.model_import_in_progress = false;
-            self.state.models.models_view.model_import_label = None;
+            cx.state.models_view.model_import_in_progress = false;
+            cx.state.models_view.model_import_label = None;
             let message = format!("Could not start the background model-source operation: {error}");
-            self.state.models.models_view.operational_state =
-                ModelsOperationalState::from_failure(&message);
-            self.state.models.models_view.action_receipt = Some(Err(message.clone()));
-            self.state
+            cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&message);
+            cx.state.models_view.action_receipt = Some(Err(message.clone()));
+            cx.model
                 .record(LogSeverity::Error, LogSource::Studio, message);
         }
     }
 
-    pub(in crate::workbench) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
-        self.pump_model_catalog_operations(ctx);
+    pub(in crate::workbench) fn process_pdk_settings_dialog(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+    ) {
+        Self::pump_model_catalog_operations(cx, ctx);
         let result = crate::workbench::app::dialogs::pdk_settings::render_pdk_settings_dialog(
             ctx,
-            &mut self.state.models.pdk_settings_dialog,
+            &mut cx.state.pdk_settings_dialog,
         );
         match result {
             PdkSettingsDialogResult::Applied(config) => {
                 let config = *config;
                 #[cfg(not(target_arch = "wasm32"))]
-                self.start_native_pdk_configuration_apply(ctx, config);
+                Self::start_native_pdk_configuration_apply(cx, ctx, config);
                 #[cfg(target_arch = "wasm32")]
-                match prepare_pdk_configuration(&self.state, config) {
+                match prepare_pdk_configuration(cx.model, cx.platform, config) {
                     Ok((config, candidate, loaded)) => {
                         if let Err(error) =
                             crate::workbench::models::pdk_persistence::start_browser_pdk_settings_publication(
                                 ctx,
-                                &self.state.model.pdk_config,
+                                &cx.model.pdk_config,
                                 config,
                                 candidate,
                                 loaded,
                             )
                         {
-                            emit_pdk_apply_messages(&mut self.state, Err(vec![error]));
+                            emit_pdk_apply_messages(cx.model, Err(vec![error]));
                         }
                     }
-                    Err(errors) => emit_pdk_apply_messages(&mut self.state, Err(errors)),
+                    Err(errors) => emit_pdk_apply_messages(cx.model, Err(errors)),
                 }
             }
             PdkSettingsDialogResult::LoadFile(path) => {
                 #[cfg(not(target_arch = "wasm32"))]
-                self.start_native_model_source_parse(ctx, path);
+                Self::start_native_model_source_parse(cx, ctx, path);
                 #[cfg(target_arch = "wasm32")]
                 let _ = path;
             }
             PdkSettingsDialogResult::ImportBrowserFile => {
-                self.start_model_source_import(ctx);
+                Self::start_model_source_import(cx, ctx);
             }
             PdkSettingsDialogResult::Cancelled => {}
             PdkSettingsDialogResult::None => {}
@@ -912,31 +935,33 @@ impl RSpiceApp {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn capture_native_model_import_authority(state: &AppState) -> NativeModelImportAuthority {
+fn capture_native_model_import_authority(
+    model: &Model,
+    platform: &PlatformState,
+) -> NativeModelImportAuthority {
     NativeModelImportAuthority {
-        project_id: state
-            .platform
+        project_id: platform
             .project_lifecycle
             .is_open()
-            .then(|| state.model.workspace.content.project.id().to_string()),
-        project_revision: state.model.workspace.content.project.revision().get(),
-        catalog_digest: state.model.model_library_manager.execution_catalog_digest(),
+            .then(|| model.workspace.content.project.id().to_string()),
+        project_revision: model.workspace.content.project.revision().get(),
+        catalog_digest: model.model_library_manager.execution_catalog_digest(),
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
 fn native_model_import_authority_is_current(
     authority: &NativeModelImportAuthority,
-    state: &AppState,
+    model: &Model,
+    platform: &PlatformState,
 ) -> bool {
     authority.project_id
-        == state
-            .platform
+        == platform
             .project_lifecycle
             .is_open()
-            .then(|| state.model.workspace.content.project.id().to_string())
-        && authority.project_revision == state.model.workspace.content.project.revision().get()
-        && authority.catalog_digest == state.model.model_library_manager.execution_catalog_digest()
+            .then(|| model.workspace.content.project.id().to_string())
+        && authority.project_revision == model.workspace.content.project.revision().get()
+        && authority.catalog_digest == model.model_library_manager.execution_catalog_digest()
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1026,14 +1051,14 @@ fn run_native_model_catalog_operation(
 
 #[cfg(not(target_arch = "wasm32"))]
 fn publish_native_model_catalog_library(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ModelsFeature>,
     operation: &NativeModelCatalogOperation,
     candidate: crate::state::model_library::ModelLibraryManager,
     library_name: &str,
     library_stats: Option<(usize, usize)>,
 ) -> Result<String, Vec<String>> {
     if let NativeModelCatalogOperation::AddPart { part_name, .. } = operation
-        && state
+        && cx
             .model
             .model_library_manager
             .get_library(library_name)
@@ -1064,13 +1089,13 @@ fn publish_native_model_catalog_library(
             ]);
         }
     };
-    let revision = if state.platform.project_lifecycle.is_open() {
+    let revision = if cx.platform.project_lifecycle.is_open() {
         Some(
-            publish_model_library_candidate(&mut state.model, candidate, library_name, reason)
+            publish_model_library_candidate(cx.model, candidate, library_name, reason)
                 .map_err(|error| vec![error])?,
         )
     } else {
-        state.model.model_library_manager = candidate;
+        cx.model.model_library_manager = candidate;
         None
     };
     let location = revision.map_or_else(
@@ -1079,7 +1104,12 @@ fn publish_native_model_catalog_library(
     );
     let message = match operation {
         NativeModelCatalogOperation::ImportFile { path } => {
-            emit_pdk_file_load_success_message(state, path.as_path(), library_name, library_stats);
+            emit_pdk_file_load_success_message(
+                cx.model,
+                path.as_path(),
+                library_name,
+                library_stats,
+            );
             format!("Imported model library '{library_name}' and its included files {location}.")
         }
         NativeModelCatalogOperation::RefreshLibrary { .. } => {
@@ -1098,26 +1128,22 @@ fn publish_native_model_catalog_library(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_native_model_imports(
-    ctx: &Context,
-    state: &mut AppState,
-    model_hub: &mut crate::services::model_hub::ModelHubService,
-) {
+fn poll_native_model_imports(ctx: &Context, cx: &mut Cx<'_, ModelsFeature>) {
     let completions = match native_model_imports().lock() {
         Ok(mut queue) => queue.drain(..).collect::<Vec<_>>(),
         Err(poisoned) => poisoned.into_inner().drain(..).collect::<Vec<_>>(),
     };
     for completion in completions {
-        state.models.models_view.model_import_in_progress = false;
-        state.models.models_view.model_import_label = None;
-        state.models.models_view.model_import_progress = None;
+        cx.state.models_view.model_import_in_progress = false;
+        cx.state.models_view.model_import_label = None;
+        cx.state.models_view.model_import_progress = None;
         model_hub_progress().clear();
         // A re-proof's verdict is recorded whichever way it went, before any
         // of the publishing below can return early on an unrelated condition.
         if let (NativeModelCatalogOperation::ModelHub(request), Err(errors)) =
             (&completion.operation, &completion.result)
         {
-            model_hub::note_pack_verification(state, request, Err(errors.join("; ")));
+            model_hub::note_pack_verification(cx, request, Err(errors.join("; ")));
         }
         // The authority recheck exists to stop a candidate parsed against an
         // older project from being published over a newer one. A hub
@@ -1136,17 +1162,21 @@ fn poll_native_model_imports(
             _ => true,
         };
         if carries_project_candidate
-            && !native_model_import_authority_is_current(&completion.authority, state)
+            && !native_model_import_authority_is_current(
+                &completion.authority,
+                cx.model,
+                cx.platform,
+            )
         {
             let error = format!(
                 "The {} finished after the project or model catalog changed, so its result was discarded and nothing changed. Run it again against the current project.",
                 completion.operation.description()
             );
-            state.models.models_view.operational_state = ModelsOperationalState::Stale;
-            state.models.models_view.action_receipt = Some(Err(error.clone()));
-            state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
-            state
-                .workbench
+            cx.state.models_view.operational_state = ModelsOperationalState::Stale;
+            cx.state.models_view.action_receipt = Some(Err(error.clone()));
+            cx.model
+                .record(LogSeverity::Warning, LogSource::Studio, error.clone());
+            cx.wb
                 .toasts
                 .warn_with_title(ctx, "Stale model import discarded", error);
             continue;
@@ -1157,19 +1187,20 @@ fn poll_native_model_imports(
                 library_name,
                 library_stats,
             }) => match publish_native_model_catalog_library(
-                state,
+                cx,
                 &completion.operation,
                 *candidate,
                 &library_name,
                 library_stats,
             ) {
                 Ok(receipt) => {
-                    state.models.models_view.operational_state = ModelsOperationalState::Ready;
-                    state.models.models_view.action_receipt = Some(Ok(receipt.clone()));
-                    state.record(LogSeverity::Info, LogSource::Studio, receipt);
+                    cx.state.models_view.operational_state = ModelsOperationalState::Ready;
+                    cx.state.models_view.action_receipt = Some(Ok(receipt.clone()));
+                    cx.model
+                        .record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(errors) => {
-                    emit_native_model_catalog_errors(state, errors);
+                    emit_native_model_catalog_errors(cx, errors);
                 }
             },
             Ok(NativeModelCatalogOutput::ModelHub(output)) => {
@@ -1177,13 +1208,13 @@ fn poll_native_model_imports(
                     NativeModelCatalogOperation::ModelHub(request) => request.clone(),
                     _ => {
                         emit_native_model_catalog_errors(
-                            state,
+                            cx,
                             vec!["Internal model-hub operation/result mismatch.".to_owned()],
                         );
                         continue;
                     }
                 };
-                publish_model_hub_output(ctx, state, model_hub, &request, *output);
+                publish_model_hub_output(ctx, cx, &request, *output);
             }
             Ok(NativeModelCatalogOutput::Configuration(output)) => {
                 let NativePdkConfigurationOutput {
@@ -1192,21 +1223,21 @@ fn poll_native_model_imports(
                     candidate,
                     loaded,
                 } = *output;
-                if state.model.pdk_config != previous {
+                if cx.model.pdk_config != previous {
                     let error = "PDK settings changed while their model sources were loading, so the loaded result was discarded and nothing changed. Apply the current settings again."
                         .to_owned();
-                    state.models.models_view.operational_state = ModelsOperationalState::Stale;
-                    state.models.models_view.action_receipt = Some(Err(error.clone()));
-                    state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
-                    state.workbench.toasts.warn_with_title(
-                        ctx,
-                        "Stale PDK settings discarded",
-                        error,
-                    );
+                    cx.state.models_view.operational_state = ModelsOperationalState::Stale;
+                    cx.state.models_view.action_receipt = Some(Err(error.clone()));
+                    cx.model
+                        .record(LogSeverity::Warning, LogSource::Studio, error.clone());
+                    cx.wb
+                        .toasts
+                        .warn_with_title(ctx, "Stale PDK settings discarded", error);
                     continue;
                 }
                 let result = publish_prepared_pdk_configuration_with_persistence(
-                    state,
+                    cx.model,
+                    cx.platform,
                     previous,
                     (config, candidate, loaded),
                     |config| {
@@ -1215,44 +1246,45 @@ fn poll_native_model_imports(
                 );
                 match result {
                     Ok(loaded) => {
-                        emit_pdk_apply_messages(state, Ok(loaded));
+                        emit_pdk_apply_messages(cx.model, Ok(loaded));
                         let receipt = format!("Applied PDK settings ({loaded} libraries loaded).");
-                        state.models.models_view.operational_state = ModelsOperationalState::Ready;
-                        state.models.models_view.action_receipt = Some(Ok(receipt));
+                        cx.state.models_view.operational_state = ModelsOperationalState::Ready;
+                        cx.state.models_view.action_receipt = Some(Ok(receipt));
                     }
                     Err(errors) => {
                         // The settings line already names every reason; the
                         // workspace takes the same failure without a second
                         // record of it.
-                        emit_pdk_apply_messages(state, Err(errors.clone()));
-                        note_native_model_catalog_failure(state, &errors);
+                        emit_pdk_apply_messages(cx.model, Err(errors.clone()));
+                        note_native_model_catalog_failure(cx, &errors);
                     }
                 }
             }
             Err(errors) => {
-                emit_native_model_catalog_errors(state, errors);
+                emit_native_model_catalog_errors(cx, errors);
             }
         }
     }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn emit_native_model_catalog_errors(state: &mut AppState, errors: Vec<String>) {
+fn emit_native_model_catalog_errors(cx: &mut Cx<'_, ModelsFeature>, errors: Vec<String>) {
     for error in &errors {
-        state.record(LogSeverity::Error, LogSource::Studio, error.clone());
+        cx.model
+            .record(LogSeverity::Error, LogSource::Studio, error.clone());
     }
-    note_native_model_catalog_failure(state, &errors);
+    note_native_model_catalog_failure(cx, &errors);
 }
 
 /// Puts a failed model-source operation on the Models workspace's banner.
 #[cfg(not(target_arch = "wasm32"))]
-fn note_native_model_catalog_failure(state: &mut AppState, errors: &[String]) {
+fn note_native_model_catalog_failure(cx: &mut Cx<'_, ModelsFeature>, errors: &[String]) {
     let first = errors.first().map_or(
         "The model-source operation failed without a diagnostic.",
         String::as_str,
     );
-    state.models.models_view.operational_state = ModelsOperationalState::from_failure(first);
-    state.models.models_view.action_receipt = Some(Err(errors.join("; ")));
+    cx.state.models_view.operational_state = ModelsOperationalState::from_failure(first);
+    cx.state.models_view.action_receipt = Some(Err(errors.join("; ")));
 }
 
 #[cfg(any(test, target_arch = "wasm32"))]
@@ -1464,17 +1496,17 @@ async fn pick_browser_model_source_tree() -> Result<Option<Vec<(String, Vec<u8>)
 #[cfg(target_arch = "wasm32")]
 fn start_browser_model_import(
     ctx: &Context,
-    state: &AppState,
+    model: &Model,
+    platform: &PlatformState,
     replace_library: Option<String>,
 ) -> Result<(), String> {
     let authority = BrowserModelImportAuthority {
-        project_id: state
-            .platform
+        project_id: platform
             .project_lifecycle
             .is_open()
-            .then(|| state.model.workspace.content.project.id().to_string()),
-        project_revision: state.model.workspace.content.project.revision().get(),
-        catalog_digest: state.model.model_library_manager.execution_catalog_digest(),
+            .then(|| model.workspace.content.project.id().to_string()),
+        project_revision: model.workspace.content.project.revision().get(),
+        catalog_digest: model.model_library_manager.execution_catalog_digest(),
         replace_library: replace_library.clone(),
     };
     let repaint = ctx.clone();
@@ -1603,47 +1635,46 @@ thread_local! {
 }
 
 #[cfg(target_arch = "wasm32")]
-impl RSpiceApp {
+impl ModelsFeature {
     /// Starts one Model Hub operation as a browser task.
     ///
     /// The shape is the desktop's with the thread replaced by a task: capture
     /// the authority stamp before going async, work on a candidate nothing
     /// else can see, queue the completion, and wake the frame loop.
-    fn start_browser_model_hub_operation(&mut self, ctx: &Context, request: ModelHubRequest) {
-        if self.state.models.models_view.model_import_in_progress {
-            self.state.prompt(MODEL_OPERATION_RUNNING);
+    fn start_browser_model_hub_operation(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &Context,
+        request: ModelHubRequest,
+    ) {
+        if cx.state.models_view.model_import_in_progress {
+            cx.wb.prompt(MODEL_OPERATION_RUNNING);
             return;
         }
-        let Some(store) = self.model_hub.store().cloned() else {
-            self.state
+        let Some(store) = cx.handles.model_hub.store().cloned() else {
+            cx.wb
                 .prompt("The model hub is unavailable in this browser session.");
             return;
         };
         let authority = BrowserModelImportAuthority {
-            project_id: self
-                .state
+            project_id: cx
                 .platform
                 .project_lifecycle
                 .is_open()
-                .then(|| self.state.model.workspace.content.project.id().to_string()),
-            project_revision: self.state.model.workspace.content.project.revision().get(),
-            catalog_digest: self
-                .state
-                .model
-                .model_library_manager
-                .execution_catalog_digest(),
+                .then(|| cx.model.workspace.content.project.id().to_string()),
+            project_revision: cx.model.workspace.content.project.revision().get(),
+            catalog_digest: cx.model.model_library_manager.execution_catalog_digest(),
             replace_library: None,
         };
-        let transport_provider = self.model_hub.transport_provider();
-        let candidate = self.state.model.model_library_manager.clone();
+        let transport_provider = cx.handles.model_hub.transport_provider();
+        let candidate = cx.model.model_library_manager.clone();
         note_models_operation(
-            &mut self.state,
+            cx,
             request.description(),
             matches!(request, ModelHubRequest::FetchSnapshot),
             request.landing_pack(),
         );
-        self.state.models.models_view.model_import_in_progress = true;
-        self.state.models.models_view.model_import_label = Some(request.progress_label());
+        cx.state.models_view.model_import_in_progress = true;
+        cx.state.models_view.model_import_label = Some(request.progress_label());
         model_hub_progress().clear();
         let repaint = ctx.clone();
         wasm_bindgen_futures::spawn_local(async move {
@@ -1668,54 +1699,49 @@ impl RSpiceApp {
 
 /// Drains completed browser Model Hub work into the session.
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_model_hub_operations(
-    ctx: &Context,
-    state: &mut AppState,
-    model_hub: &mut crate::services::model_hub::ModelHubService,
-) {
+fn poll_browser_model_hub_operations(ctx: &Context, cx: &mut Cx<'_, ModelsFeature>) {
     let completions =
         BROWSER_MODEL_HUB.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        state.models.models_view.model_import_in_progress = false;
-        state.models.models_view.model_import_label = None;
-        state.models.models_view.model_import_progress = None;
+        cx.state.models_view.model_import_in_progress = false;
+        cx.state.models_view.model_import_label = None;
+        cx.state.models_view.model_import_progress = None;
         model_hub_progress().clear();
         match completion.result {
             Ok(output) => {
                 // Only a result that carries a project candidate can be made
                 // stale by the project moving; a pack that landed on this
                 // machine landed regardless of what the project did.
-                let current = state
+                let current = cx
                     .platform
                     .project_lifecycle
                     .is_open()
-                    .then(|| state.model.workspace.content.project.id().to_string());
+                    .then(|| cx.model.workspace.content.project.id().to_string());
                 let authority_current = completion.authority.project_id == current
                     && completion.authority.project_revision
-                        == state.model.workspace.content.project.revision().get()
+                        == cx.model.workspace.content.project.revision().get()
                     && completion.authority.catalog_digest
-                        == state.model.model_library_manager.execution_catalog_digest();
+                        == cx.model.model_library_manager.execution_catalog_digest();
                 if output.part.is_some() && !authority_current {
                     let error = format!(
                         "The {} finished after the project changed, so its result was discarded \
                          and nothing changed. Run it again against the current project.",
                         completion.request.description()
                     );
-                    state.models.models_view.operational_state = ModelsOperationalState::Stale;
-                    state.models.models_view.action_receipt = Some(Err(error.clone()));
-                    state.record(LogSeverity::Warning, LogSource::Studio, error.clone());
-                    state.workbench.toasts.warn_with_title(
-                        ctx,
-                        "Stale model-hub result discarded",
-                        error,
-                    );
+                    cx.state.models_view.operational_state = ModelsOperationalState::Stale;
+                    cx.state.models_view.action_receipt = Some(Err(error.clone()));
+                    cx.model
+                        .record(LogSeverity::Warning, LogSource::Studio, error.clone());
+                    cx.wb
+                        .toasts
+                        .warn_with_title(ctx, "Stale model-hub result discarded", error);
                     continue;
                 }
-                publish_model_hub_output(ctx, state, model_hub, &completion.request, output);
+                publish_model_hub_output(ctx, cx, &completion.request, output);
             }
             Err(error) => {
-                model_hub::note_pack_verification(state, &completion.request, Err(error.clone()));
-                model_hub::emit_model_hub_errors(state, vec![error]);
+                model_hub::note_pack_verification(cx, &completion.request, Err(error.clone()));
+                model_hub::emit_model_hub_errors(cx, vec![error]);
             }
         }
     }
@@ -1727,27 +1753,27 @@ fn queue_browser_model_import(completion: BrowserModelImport) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_model_imports(state: &mut AppState) {
+fn poll_browser_model_imports(cx: &mut Cx<'_, ModelsFeature>) {
     let completions =
         BROWSER_MODEL_IMPORTS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        state.models.models_view.model_import_in_progress = false;
-        state.models.models_view.model_import_label = None;
+        cx.state.models_view.model_import_in_progress = false;
+        cx.state.models_view.model_import_label = None;
         browser_model_import_worker::finish();
-        let current_project_id = state
+        let current_project_id = cx
             .platform
             .project_lifecycle
             .is_open()
-            .then(|| state.model.workspace.content.project.id().to_string());
+            .then(|| cx.model.workspace.content.project.id().to_string());
         let authority_current = completion.authority.project_id == current_project_id
             && completion.authority.project_revision
-                == state.model.workspace.content.project.revision().get()
+                == cx.model.workspace.content.project.revision().get()
             && completion.authority.catalog_digest
-                == state.model.model_library_manager.execution_catalog_digest();
+                == cx.model.model_library_manager.execution_catalog_digest();
         let replace_library = completion.authority.replace_library.clone();
         if let Some(candidates) = completion.root_candidates {
             if authority_current {
-                state.models.models_view.dialog = Some(
+                cx.state.models_view.dialog = Some(
                     crate::workbench::state::ModelsWorkbenchDialog::SelectBrowserImportRoot {
                         candidates,
                         selected: 0,
@@ -1758,12 +1784,10 @@ fn poll_browser_model_imports(state: &mut AppState) {
                 // user who has navigated away leaves an invisible modal with
                 // no way to answer it. Every other producer of this dialog
                 // either lives in the Models surface or navigates there first.
-                state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Models);
-                state.models.models_page = crate::state::ModelsPage::Models;
-                state.models.models_view.operational_state = ModelsOperationalState::Ready;
-                state.models.models_view.action_receipt = Some(Ok(
+                cx.wb.activate(crate::workbench::state::Workspace::Models);
+                cx.state.models_page = crate::state::ModelsPage::Models;
+                cx.state.models_view.operational_state = ModelsOperationalState::Ready;
+                cx.state.models_view.action_receipt = Some(Ok(
                     "Select the executable entry file for the browser model source tree."
                         .to_owned(),
                 ));
@@ -1773,9 +1797,10 @@ fn poll_browser_model_imports(state: &mut AppState) {
                 });
                 let error = "The project or model catalog changed while browser model sources were being selected; the pending selection was discarded."
                     .to_owned();
-                state.models.models_view.operational_state = ModelsOperationalState::Stale;
-                state.models.models_view.action_receipt = Some(Err(error.clone()));
-                state.record(LogSeverity::Error, LogSource::Studio, error);
+                cx.state.models_view.operational_state = ModelsOperationalState::Stale;
+                cx.state.models_view.action_receipt = Some(Err(error.clone()));
+                cx.model
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
             continue;
         }
@@ -1796,13 +1821,12 @@ fn poll_browser_model_imports(state: &mut AppState) {
                         "Replacement sources resolved library '{library_name}' instead of expected '{expected}'; the candidate was discarded."
                     ));
                 }
-                if state.model.model_library_manager.get_library(expected).is_none() {
+                if cx.model.model_library_manager.get_library(expected).is_none() {
                     return Err(format!(
                         "Model library '{expected}' was removed while replacement sources were parsing."
                     ));
                 }
-            } else if state
-                .model.model_library_manager
+            } else if cx.model.model_library_manager
                 .get_library(&library_name)
                 .is_some()
             {
@@ -1816,11 +1840,11 @@ fn poll_browser_model_imports(state: &mut AppState) {
                         .to_owned(),
                 );
             }
-            let mut candidate = state.model.model_library_manager.clone();
+            let mut candidate = cx.model.model_library_manager.clone();
             candidate.add_library(parsed.library);
-            if state.platform.project_lifecycle.is_open() {
+            if cx.platform.project_lifecycle.is_open() {
                 publish_model_library_candidate(
-                    &mut state.model,
+                    cx.model,
                     candidate,
                     &library_name,
                     if replace_library.is_some() {
@@ -1830,7 +1854,7 @@ fn poll_browser_model_imports(state: &mut AppState) {
                     },
                 )?;
             } else {
-                state.model.model_library_manager = candidate;
+                cx.model.model_library_manager = candidate;
             }
             Ok(Some((
                 library_name,
@@ -1845,24 +1869,26 @@ fn poll_browser_model_imports(state: &mut AppState) {
                     if replaced { "Refreshed" } else { "Imported" },
                     if file_count == 1 { "" } else { "s" }
                 );
-                state.models.models_view.operational_state = ModelsOperationalState::Ready;
-                state.models.models_view.action_receipt = Some(Ok(message.clone()));
-                state.record(LogSeverity::Info, LogSource::Studio, message);
+                cx.state.models_view.operational_state = ModelsOperationalState::Ready;
+                cx.state.models_view.action_receipt = Some(Ok(message.clone()));
+                cx.model
+                    .record(LogSeverity::Info, LogSource::Studio, message);
             }
             Ok(None) => {
-                state.models.models_view.operational_state = ModelsOperationalState::Cancelled;
-                state.models.models_view.action_receipt = Some(Ok(
+                cx.state.models_view.operational_state = ModelsOperationalState::Cancelled;
+                cx.state.models_view.action_receipt = Some(Ok(
                     "Browser model-source selection was cancelled.".to_owned(),
                 ));
             }
             Err(error) => {
-                state.models.models_view.operational_state = if authority_current {
+                cx.state.models_view.operational_state = if authority_current {
                     ModelsOperationalState::from_failure(&error)
                 } else {
                     ModelsOperationalState::Stale
                 };
-                state.models.models_view.action_receipt = Some(Err(error.clone()));
-                state.record(LogSeverity::Error, LogSource::Studio, error);
+                cx.state.models_view.action_receipt = Some(Err(error.clone()));
+                cx.model
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }
@@ -2145,6 +2171,7 @@ mod browser_model_import_worker {
 mod tests {
     use super::*;
     use crate::state::pdk_config::PdkConfig;
+    use crate::workbench::app_state::AppState;
 
     #[test]
     fn browser_directory_selection_strips_only_the_selected_root() {
@@ -2207,8 +2234,13 @@ mod tests {
         config.add_library_path(beta_root.to_string_lossy().into_owned());
 
         assert_eq!(
-            apply_pdk_configuration_with_persistence(&mut state, config, |_| Ok(()))
-                .expect("configured sources publish"),
+            apply_pdk_configuration_with_persistence(
+                &mut state.model,
+                &state.platform,
+                config,
+                |_| Ok(())
+            )
+            .expect("configured sources publish"),
             2
         );
         let first_revision = state.model.workspace.content.project.revision();
@@ -2238,8 +2270,13 @@ mod tests {
         let mut disabled = state.model.pdk_config.clone();
         disabled.toggle_path_enabled(0);
         assert_eq!(
-            apply_pdk_configuration_with_persistence(&mut state, disabled, |_| Ok(()))
-                .expect("disabled source publishes"),
+            apply_pdk_configuration_with_persistence(
+                &mut state.model,
+                &state.platform,
+                disabled,
+                |_| Ok(())
+            )
+            .expect("disabled source publishes"),
             1
         );
         assert!(state.model.workspace.content.project.revision() > first_revision);
@@ -2303,9 +2340,12 @@ mod tests {
         let mut config = PdkConfig::default();
         config.add_library_path(root.to_string_lossy().into_owned());
 
-        let errors = apply_pdk_configuration_with_persistence(&mut state, config, |_| {
-            Err("storage unavailable".to_owned())
-        })
+        let errors = apply_pdk_configuration_with_persistence(
+            &mut state.model,
+            &state.platform,
+            config,
+            |_| Err("storage unavailable".to_owned()),
+        )
         .expect_err("failed persistence rejects the candidate");
 
         assert!(
@@ -2367,8 +2407,12 @@ mod tests {
         let mut state = AppState::default();
         state.open_project_session();
         state.model.model_library_manager.clear();
-        let authority = capture_native_model_import_authority(&state);
-        assert!(native_model_import_authority_is_current(&authority, &state));
+        let authority = capture_native_model_import_authority(&state.model, &state.platform);
+        assert!(native_model_import_authority_is_current(
+            &authority,
+            &state.model,
+            &state.platform
+        ));
 
         let output = run_native_model_catalog_operation(
             state.model.model_library_manager.clone(),
@@ -2400,7 +2444,9 @@ mod tests {
             crate::state::model_library::ModelLibrary::new("concurrent-change"),
         );
         assert!(!native_model_import_authority_is_current(
-            &authority, &state
+            &authority,
+            &state.model,
+            &state.platform
         ));
         assert!(
             state
@@ -2417,12 +2463,18 @@ mod tests {
     fn background_authority_binds_the_exact_project_lifecycle() {
         let mut state = AppState::default();
         state.open_project_session();
-        let authority = capture_native_model_import_authority(&state);
-        assert!(native_model_import_authority_is_current(&authority, &state));
+        let authority = capture_native_model_import_authority(&state.model, &state.platform);
+        assert!(native_model_import_authority_is_current(
+            &authority,
+            &state.model,
+            &state.platform
+        ));
 
         state.close_project_session();
         assert!(!native_model_import_authority_is_current(
-            &authority, &state
+            &authority,
+            &state.model,
+            &state.platform
         ));
     }
 }

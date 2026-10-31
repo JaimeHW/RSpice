@@ -22,8 +22,9 @@ mod tests;
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_history::publish_model_library_candidate;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
 
 /// One unit of Model Hub work, on either target.
@@ -627,24 +628,23 @@ pub(super) async fn run_browser_model_hub_operation(
 /// which step failed.
 pub(super) fn publish_model_hub_output(
     ctx: &Context,
-    state: &mut AppState,
-    model_hub: &mut crate::services::model_hub::ModelHubService,
+    cx: &mut Cx<'_, ModelsFeature>,
     request: &ModelHubRequest,
     output: ModelHubOutput,
 ) {
-    if let Err(error) = model_hub.reload() {
+    if let Err(error) = cx.handles.model_hub.reload() {
         emit_model_hub_errors(
-            state,
+            cx,
             vec![format!(
                 "The operation completed but RSpice could not re-read its pack store: {error}"
             )],
         );
         return;
     }
-    note_pack_verification(state, request, Ok(()));
+    note_pack_verification(cx, request, Ok(()));
     let ModelHubOutput { receipt, part } = output;
     let Some(part) = part else {
-        apply_model_hub_receipt(state, receipt);
+        apply_model_hub_receipt(cx, receipt);
         return;
     };
     let ModelHubPartOutput {
@@ -653,30 +653,30 @@ pub(super) fn publish_model_hub_output(
         part_id,
         placement,
     } = part;
-    if state.platform.project_lifecycle.is_open() {
+    if cx.platform.project_lifecycle.is_open() {
         let published = publish_model_library_candidate(
-            &mut state.model,
+            cx.model,
             *candidate,
             &library_name,
             request.revision_reason(&part_id),
         );
         if let Err(error) = published {
-            emit_model_hub_errors(state, vec![error]);
+            emit_model_hub_errors(cx, vec![error]);
             return;
         }
     } else {
-        state.model.model_library_manager = *candidate;
+        cx.model.model_library_manager = *candidate;
     }
     // A part that arrived to be placed is armed and the canvas takes focus; a
     // part that only moved onto a newer release did neither, and pulling the
     // reader into the schematic would answer a question nobody asked.
     let Some(placement) = placement else {
-        apply_model_hub_receipt(state, receipt);
+        apply_model_hub_receipt(cx, receipt);
         return;
     };
-    let armed = crate::workbench::app::arm_pack_part(state, placement);
+    let armed = crate::workbench::app::arm_pack_part(cx.model, placement);
     rspice_schematic_editor::view::canvas::request_focus(ctx);
-    apply_model_hub_receipt(state, format!("{receipt} {armed} is armed for placement."));
+    apply_model_hub_receipt(cx, format!("{receipt} {armed} is armed for placement."));
 }
 
 /// Records what one re-proof concluded, when the operation was one.
@@ -685,14 +685,14 @@ pub(super) fn publish_model_hub_output(
 /// the one place that holds both the request and its outcome: a receipt alone
 /// knows what happened and not which release it happened to.
 pub(super) fn note_pack_verification(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ModelsFeature>,
     request: &ModelHubRequest,
     outcome: Result<(), String>,
 ) {
     let Some(key) = request.verification_key() else {
         return;
     };
-    state.models.models_view.pack_verification.insert(
+    cx.state.models_view.pack_verification.insert(
         key,
         match outcome {
             Ok(()) => crate::workbench::models::workspace_state::PackReProof::Verified,
@@ -702,27 +702,29 @@ pub(super) fn note_pack_verification(
 }
 
 /// Records a successful hub receipt everywhere a receipt is read.
-fn apply_model_hub_receipt(state: &mut AppState, receipt: String) {
-    state.models.models_view.operational_state = ModelsOperationalState::Ready;
-    state.models.models_view.action_receipt = Some(Ok(receipt.clone()));
-    state.record(LogSeverity::Info, LogSource::Studio, receipt);
+fn apply_model_hub_receipt(cx: &mut Cx<'_, ModelsFeature>, receipt: String) {
+    cx.state.models_view.operational_state = ModelsOperationalState::Ready;
+    cx.state.models_view.action_receipt = Some(Ok(receipt.clone()));
+    cx.model
+        .record(LogSeverity::Info, LogSource::Studio, receipt);
 }
 
 /// Records a failed hub operation. Nothing partial is left behind: every step
 /// that can fail either completed or changed nothing at all.
-pub(super) fn emit_model_hub_errors(state: &mut AppState, errors: Vec<String>) {
+pub(super) fn emit_model_hub_errors(cx: &mut Cx<'_, ModelsFeature>, errors: Vec<String>) {
     let first = errors
         .first()
         .cloned()
         .unwrap_or_else(|| "The model-hub operation failed without a diagnostic.".to_owned());
     for error in &errors {
-        state.record(LogSeverity::Error, LogSource::Studio, error.clone());
+        cx.model
+            .record(LogSeverity::Error, LogSource::Studio, error.clone());
     }
     // Release the once-per-session stale-catalog latch. It exists to stop the
     // automatic refresh firing every frame the workspace is visible, not to
     // spend a session's only attempt on a machine that happened to be offline
     // when the workspace first opened: a later visit must be allowed to retry.
-    state.models.models_view.catalog_refresh_requested = false;
-    state.models.models_view.operational_state = ModelsOperationalState::from_failure(&first);
-    state.models.models_view.action_receipt = Some(Err(errors.join("; ")));
+    cx.state.models_view.catalog_refresh_requested = false;
+    cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&first);
+    cx.state.models_view.action_receipt = Some(Err(errors.join("; ")));
 }

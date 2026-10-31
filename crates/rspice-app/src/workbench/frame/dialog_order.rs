@@ -10,6 +10,7 @@ use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::{RSpiceApp, SurfaceId};
 
 pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] = &[
@@ -46,7 +47,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("models.pdk_settings"),
         modality: Modality::Application,
         is_open: Some(|state| state.models.pdk_settings_dialog.open),
-        render: |app, ctx| app.process_pdk_settings_dialog(ctx),
+        render: |app, ctx| ModelsFeature::process_pdk_settings_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("settings.preferences"),

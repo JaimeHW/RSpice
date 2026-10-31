@@ -58,6 +58,8 @@ use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
+use crate::workbench::features;
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::models::workspace_state::{
     ModelHubFacet, ModelPackFacet, ModelsCatalogSortKey, ModelsOperationalState, ModelsTableSort,
@@ -311,23 +313,38 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     for action in pending_actions {
         match action {
             ManagerAction::Command(key) => app.execute_command_key(key),
-            ManagerAction::ImportModelSource => app.start_model_source_import(&context),
+            ManagerAction::ImportModelSource => {
+                ModelsFeature::start_model_source_import(&mut features::cx(app), &context)
+            }
             ManagerAction::RefreshLibrary { library } => {
-                app.start_model_library_refresh(&context, library);
+                ModelsFeature::start_model_library_refresh(
+                    &mut features::cx(app),
+                    &context,
+                    library,
+                );
             }
             ManagerAction::AttachPack { pack_id } => {
-                app.start_model_pack_attach(&context, pack_id);
+                ModelsFeature::start_model_pack_attach(&mut features::cx(app), &context, pack_id);
             }
             ManagerAction::AddPart { pack_id, part_name } => {
-                app.start_model_part_add(&context, pack_id, part_name);
+                ModelsFeature::start_model_part_add(
+                    &mut features::cx(app),
+                    &context,
+                    pack_id,
+                    part_name,
+                );
             }
             #[cfg(target_arch = "wasm32")]
             ManagerAction::SelectBrowserImportRoot { root } => {
-                app.select_browser_model_import_root(&context, root);
+                ModelsFeature::select_browser_model_import_root(
+                    &mut features::cx(app),
+                    &context,
+                    root,
+                );
             }
             #[cfg(target_arch = "wasm32")]
             ManagerAction::CancelBrowserImportRoot => {
-                app.cancel_browser_model_import_root();
+                ModelsFeature::cancel_browser_model_import_root(&mut features::cx(app));
             }
             ManagerAction::BindComponentModel {
                 component_id,
@@ -346,7 +363,7 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             ManagerAction::ScanSourceDrift => app.state.model.scan_source_drift(),
             ManagerAction::ModelHub(request) => {
-                app.start_model_hub_operation(&context, request);
+                ModelsFeature::start_model_hub_operation(&mut features::cx(app), &context, request);
             }
             ManagerAction::PlacePart(placement) => {
                 place::arm(&mut app.state, &context, *placement);

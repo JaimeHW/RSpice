@@ -309,7 +309,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "framework",
     ),
     ("dialogs::property_dialog::render_property_dialog", "design"),
-    ("process_pdk_settings_dialog", "models"),
+    ("ModelsFeature::process_pdk_settings_dialog", "models"),
     ("features::render_dialog", "settings"),
     ("features::render_dialog", "cloud"),
     ("render_new_project_dialog", "project"),

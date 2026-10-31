@@ -571,7 +571,7 @@ fn arm_library_part(
     placement: PartPlacement,
     ctx: &egui::Context,
 ) {
-    let _ = crate::workbench::app::arm_pack_part(state, placement);
+    let _ = crate::workbench::app::arm_pack_part(&mut state.model, placement);
     finish_shelf_placement(state, ctx);
 }
 

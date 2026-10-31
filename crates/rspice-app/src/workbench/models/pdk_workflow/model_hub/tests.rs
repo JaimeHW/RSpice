@@ -7,6 +7,8 @@
 //! therefore exercised the actual signature check, the actual staging and
 //! rename, the actual project retention, and the actual placement arming.
 
+use crate::services::model_hub::ModelHubService;
+use crate::simulation::SimulationController;
 use crate::state::model_hub::tests::{
     NEXT_VERSION, PACK_ID, StubTransport, VERSION, anchor_for, hub_signing_key, signed_archive,
     signed_archive_at, signed_snapshot, signed_snapshot_of,
@@ -17,6 +19,9 @@ use crate::state::model_hub::{
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{ComponentType, Tool};
 use crate::workbench::app_state::AppState;
+use crate::workbench::commands::vocabulary::command_registry;
+use crate::workbench::framework::feature::{Cx, LowerHandles, Peers};
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
 
 use super::{ModelHubOutput, ModelHubRequest, execute, publish_model_hub_output};
@@ -62,6 +67,47 @@ fn installed_hub(
     (hub, handle, store)
 }
 
+/// Runs `call` in the models feature's context over `state`, lending it
+/// `model_hub` and an idle run controller, as the frame lends the
+/// application's.
+fn with_cx<R>(
+    state: &mut AppState,
+    model_hub: &mut ModelHubService,
+    call: impl FnOnce(&mut Cx<'_, ModelsFeature>) -> R,
+) -> R {
+    let mut run_controller = SimulationController::new();
+    call(&mut Cx::new(
+        &mut *state.models,
+        &mut [],
+        &mut state.model,
+        &mut *state.workbench,
+        &mut state.platform,
+        &mut state.runs,
+        LowerHandles {
+            export_io:
+                &rspice_app_services::workbench::workflows::export_workflow::NativeExportWorkflowIo,
+            run_controller: &mut run_controller,
+            model_hub,
+        },
+        Peers::new(
+            &mut *state.design,
+            Some(&*state.cloud),
+            Some(&*state.hardcopy),
+            Some(&*state.results),
+            &*state.simulate,
+        ),
+        command_registry(),
+    ))
+}
+
+/// Reports `errors` as the frame does when a hub operation fails.
+fn emit_errors(state: &mut AppState, errors: Vec<String>) {
+    let mut model_hub = ModelHubService::unavailable("This test reports a failure it was handed.");
+    with_cx(state, &mut model_hub, |cx| {
+        super::emit_model_hub_errors(cx, errors)
+    });
+}
+
 fn open_project() -> AppState {
     let mut state = AppState::default();
     state.open_project_session();
@@ -78,8 +124,10 @@ fn publish(
     output: ModelHubOutput,
 ) {
     let ctx = egui::Context::default();
-    let mut service = crate::services::model_hub::ModelHubService::with_store(handle, hub);
-    publish_model_hub_output(&ctx, state, &mut service, request, output);
+    let mut service = ModelHubService::with_store(handle, hub);
+    with_cx(state, &mut service, |cx| {
+        publish_model_hub_output(&ctx, cx, request, output)
+    });
 }
 
 #[test]
@@ -568,7 +616,7 @@ fn a_failed_transfer_leaves_no_partial_state_and_reports_the_failure() {
 
     // The frame loop turns that into a console error and a typed operational
     // state, and touches no project state on the way.
-    super::emit_model_hub_errors(&mut state, vec![failure]);
+    emit_errors(&mut state, vec![failure]);
     assert_eq!(
         state.models.models_view.operational_state,
         ModelsOperationalState::Offline
@@ -791,7 +839,7 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
     // entry point the operation machine uses.
     let mut state = open_project();
     let armed = crate::workbench::app::arm_pack_part(
-        &mut state,
+        &mut state.model,
         PartPlacement::NativeDevice {
             component_type: ComponentType::Diode,
             variant: Some("zener".to_owned()),
@@ -868,7 +916,7 @@ fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
     // workspace went on reporting a week-old catalog for the rest of the day.
     let mut state = AppState::default();
     state.models.models_view.catalog_refresh_requested = true;
-    super::emit_model_hub_errors(
+    emit_errors(
         &mut state,
         vec!["the model hub could not be reached".to_owned()],
     );
@@ -1263,7 +1311,7 @@ fn an_update_onto_a_recalled_release_refuses_on_the_operation_machine() {
     // The same refusal reaching the session leaves the banner the workspace
     // already paints, with no new vocabulary of its own.
     let mut state = open_project();
-    super::emit_model_hub_errors(&mut state, vec![error]);
+    emit_errors(&mut state, vec![error]);
     assert_eq!(
         state.models.models_view.operational_state,
         ModelsOperationalState::Recalled
@@ -1330,7 +1378,9 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
     app.state = open_project();
     app.state.model.model_library_manager = project.clone();
 
-    app.pump_model_catalog_operations(&ctx);
+    with_cx(&mut app.state, &mut app.model_hub, |cx| {
+        ModelsFeature::pump_model_catalog_operations(cx, &ctx)
+    });
     let warnings = |app: &RSpiceApp| {
         app.state
             .model
@@ -1350,8 +1400,12 @@ fn a_project_pinned_to_a_recalled_release_is_warned_on_open_and_still_solves() {
     );
 
     // Every later frame is silent about a fact that has not changed.
-    app.pump_model_catalog_operations(&ctx);
-    app.pump_model_catalog_operations(&ctx);
+    with_cx(&mut app.state, &mut app.model_hub, |cx| {
+        ModelsFeature::pump_model_catalog_operations(cx, &ctx)
+    });
+    with_cx(&mut app.state, &mut app.model_hub, |cx| {
+        ModelsFeature::pump_model_catalog_operations(cx, &ctx)
+    });
     assert_eq!(warnings(&app), 1, "and not once per frame");
 
     // Nothing was blocked. The retained bytes are the same bytes and solve to

@@ -1357,7 +1357,7 @@ mod tests {
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("a card the build already holds is armed, not retained: {route:?}");
         };
-        crate::workbench::app::arm_pack_part(&mut state, *placement);
+        crate::workbench::app::arm_pack_part(&mut state.model, *placement);
         assert_eq!(
             state.model.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::Diode)
@@ -1408,7 +1408,7 @@ mod tests {
         let place::PlaceRoute::Arm(placement) = route else {
             panic!("bytes already in the project are armed, not retained: {route:?}");
         };
-        crate::workbench::app::arm_pack_part(&mut state, *placement);
+        crate::workbench::app::arm_pack_part(&mut state.model, *placement);
         assert_eq!(
             state.model.schematic.session.editor.tool,
             crate::state::Tool::Place(crate::state::ComponentType::CellInstance)
@@ -1514,7 +1514,7 @@ mod tests {
         else {
             panic!("bytes already retained are armed, not retained again");
         };
-        crate::workbench::app::arm_pack_part(&mut state, *placement);
+        crate::workbench::app::arm_pack_part(&mut state.model, *placement);
         assert_eq!(
             state
                 .model
