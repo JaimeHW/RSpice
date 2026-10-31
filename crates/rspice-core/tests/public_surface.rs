@@ -501,7 +501,11 @@ const MAX_PUBLIC_ITEMS: usize = 5234;
 // `BuiltinVerilogAInstance::limits_newton_steps` adds one: the engine's
 // Newton policy asks a generated device whether its own `$limit` is active.
 // The census is 1,603, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1603;
+// `Bjt::reset_vbic_operating_point_history` adds one: GMIN and source stepping
+// (`rspice-core` engine/convergence/continuation.rs, through circuit/nonlinear.rs)
+// reopen a VBIC on its MODEINITJCT load with it. The census is 1,604, with no
+// slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1604;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
