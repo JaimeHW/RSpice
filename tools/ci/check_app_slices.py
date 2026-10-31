@@ -248,7 +248,7 @@ SLICE_RULES = [
     (W + r"state/plan_provenance", "results"),
     (W + r"state/session_views", "session"),
     (W + r"state/stimulus_", "design"),
-    (W + r"state/workflow_drafts", "simulate"),
+    (W + r"state/(workflow_drafts|simulate_session)", "simulate"),
     (W + r"shortcuts", "settings"),
     (W + r"preferences\.rs$", "model"),
     (W + r"preferences/drawing_sheet", "model"),
