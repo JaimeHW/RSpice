@@ -475,7 +475,14 @@ pub(super) fn draw_operating_point_annotations(
                 .map(|line| line.replace('\u{03bc}', "\u{00b5}"))
                 .collect::<Vec<_>>()
                 .join("\n");
-            painter.layout_no_wrap(text, theme::mono(size_pt, weight), palette.info)
+            painter.fonts_mut(|fonts| {
+                rspice_ui_kit::text::layout_no_wrap(
+                    fonts,
+                    &text,
+                    theme::mono(size_pt, weight),
+                    palette.info,
+                )
+            })
         })
         .collect();
     let sizes: Vec<Vec2> = galleys

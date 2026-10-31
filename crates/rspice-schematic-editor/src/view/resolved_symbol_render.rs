@@ -184,7 +184,8 @@ fn draw_symbol_body(
                 else {
                     continue;
                 };
-                painter.text(
+                rspice_ui_kit::text::paint_text(
+                    painter,
                     to_screen_symbol(origin, scale, component, symbol, *anchor),
                     symbol_text_align(component, *align),
                     text,
@@ -297,7 +298,8 @@ fn draw_symbol_labels(
         && component.display_mode.show_value(visibility)
         && !value.is_empty()
     {
-        painter.text(
+        rspice_ui_kit::text::paint_text(
+            painter,
             to_screen_symbol(origin, scale, component, symbol, value_anchor),
             instance_label_align(component, symbol, value_anchor),
             value,
@@ -904,11 +906,16 @@ mod tests {
     /// A symbol whose whole body is one text run, so a render says only
     /// whether authored text reached the instance.
     fn lettered_symbol(anchor: Point, align: SymbolTextAlign) -> ResolvedCellSymbol {
+        symbol_lettering("AMP", anchor, align)
+    }
+
+    /// [`lettered_symbol`] whose one run is `text`.
+    fn symbol_lettering(text: &str, anchor: Point, align: SymbolTextAlign) -> ResolvedCellSymbol {
         ResolvedCellSymbol::from_authored_document(
             SymbolDocument {
                 body: vec![SymbolShape::Text {
                     anchor,
-                    text: "AMP".to_owned(),
+                    text: text.to_owned(),
                     size: SymbolTextSize::Normal,
                     align,
                 }],
@@ -1334,6 +1341,54 @@ mod tests {
             columns > rows,
             "the glyph run must stay horizontal: {columns} columns by {rows} rows"
         );
+    }
+
+    /// The stretches of columns of `search` that carry paint, left to right.
+    fn painted_stretches(canvas: &Canvas, search: egui::Rect) -> Vec<std::ops::Range<i32>> {
+        let mut stretches: Vec<std::ops::Range<i32>> = Vec::new();
+        for x in search.left() as i32..search.right() as i32 {
+            let strip = egui::Rect::from_min_max(
+                pos2(x as f32, search.top()),
+                pos2(x as f32 + 1.0, search.bottom()),
+            );
+            if painted_pixels(canvas, strip).1 == 0 {
+                continue;
+            }
+            match stretches.last_mut() {
+                Some(stretch) if stretch.end == x => stretch.end = x + 1,
+                _ => stretches.push(x..x + 1),
+            }
+        }
+        stretches
+    }
+
+    /// Text a symbol carries in Hebrew reads from the right, and the number
+    /// inside it reads left to right where it stands: last, so first from
+    /// the anchor of a left-aligned run, drawn where the number alone is.
+    #[test]
+    fn a_hebrew_run_is_drawn_in_the_order_it_is_read() {
+        let component = Component::new(1, ComponentType::CellInstance, Point::origin());
+        let origin = pos2(40.0, 160.0);
+        let run = egui::Rect::from_min_max(pos2(40.0, 140.0), pos2(320.0, 180.0));
+        let drawn = |text: &str| {
+            let symbol = symbol_lettering(text, Point::origin(), SymbolTextAlign::Left);
+            painted_stretches(&raster_instance(&component, &symbol, origin), run)
+        };
+
+        let phrase = drawn("מגבר 2");
+        let number = drawn("2");
+
+        assert!(
+            !number.is_empty() && phrase.len() > number.len(),
+            "{phrase:?}"
+        );
+        for (in_phrase, alone) in phrase.iter().zip(&number) {
+            assert!(
+                (in_phrase.start - alone.start).abs() <= 1
+                    && (in_phrase.end - alone.end).abs() <= 1,
+                "the number leads the run: {phrase:?} against {number:?}"
+            );
+        }
     }
 
     /// T14: a mirrored instance exports one `<text>` at the mirrored anchor,

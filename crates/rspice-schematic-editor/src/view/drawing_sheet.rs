@@ -1264,7 +1264,8 @@ fn draw_frame(
                 text,
                 lettering_um,
             } => {
-                painter.text(
+                rspice_ui_kit::text::paint_text(
+                    painter,
                     to_screen(*centre),
                     Align2::CENTER_CENTER,
                     text,
@@ -1382,7 +1383,8 @@ fn draw_title_block(
                 (palette.block_ink, theme::FontWeight::Regular)
             }
         };
-        painter.with_clip_rect(clip).text(
+        rspice_ui_kit::text::paint_text(
+            &painter.with_clip_rect(clip),
             pos2(x_at(line.x_um), y_at(line.seat_um)),
             Align2::LEFT_CENTER,
             line.text,
@@ -1413,7 +1415,8 @@ fn draw_same_revision_note(
     else {
         return;
     };
-    painter.text(
+    rspice_ui_kit::text::paint_text(
+        painter,
         sheet_point_to_screen(viewport, (note.x_um, note.seat_um)),
         Align2::LEFT_CENTER,
         note.text,

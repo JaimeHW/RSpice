@@ -54,8 +54,9 @@ fn screen_layout(
     for (index, source) in text.split('\n').enumerate() {
         let source = if source.is_empty() { " " } else { source };
         let galley = ctx.fonts_mut(|fonts| {
-            fonts.layout_no_wrap(
-                source.to_owned(),
+            rspice_ui_kit::text::layout_no_wrap(
+                fonts,
+                source,
                 theme::mono(font_size, FontWeight::Regular),
                 color,
             )

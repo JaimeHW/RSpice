@@ -636,13 +636,8 @@ fn line(ui: &mut Ui, ends: &mut Ends, text: &str, color: egui::Color32, weight: 
     if text.is_empty() {
         return;
     }
-    let galley = ui.painter().layout(
-        text.to_owned(),
-        theme::mono(CONSOLE_FONT_SIZE, weight),
-        color,
-        ui.available_width(),
-    );
-    let drawn = ui.add(egui::Label::new(Arc::clone(&galley)));
+    let (drawn, galley) =
+        rspice_ui_kit::text::user_text(ui, text, theme::mono(CONSOLE_FONT_SIZE, weight), color);
     ends.text(drawn.rect, &galley);
 }
 

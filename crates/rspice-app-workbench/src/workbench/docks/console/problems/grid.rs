@@ -748,7 +748,8 @@ pub(super) fn row(
                 elide_tail(text, room, columns)
             }
         };
-        ui.painter().text(
+        rspice_ui_kit::text::paint_text(
+            ui.painter(),
             egui::pos2(rect.left() + columns.text_offset(column), center_y),
             egui::Align2::LEFT_CENTER,
             printed,

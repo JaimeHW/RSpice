@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use egui::epaint::text::FontsView;
 use egui::text::{LayoutJob, TextFormat, TextWrapping};
-use egui::{
-    Align2, Color32, FontId, Galley, Painter, Pos2, Rect, Response, TextStyle, TextWrapMode, Ui,
-};
+use egui::{Align2, Color32, FontId, Galley, Painter, Pos2, Rect, Response, Ui};
 use rspice_fonts::Role;
 use rspice_fonts::bidi::{BidiText, is_logical_order};
 
@@ -97,22 +95,13 @@ pub fn paint_text(
     rect
 }
 
-/// A label of text a person typed, in the order it is read, wrapped or cut
-/// short as the [`Ui`] wraps its labels.
-pub fn user_text(ui: &mut Ui, text: &str) -> Response {
-    if is_logical_order(text) {
-        return ui.label(text);
-    }
-    let font = TextStyle::Body.resolve(ui.style());
-    let color = ui.visuals().text_color();
-    let width = ui.available_width();
-    let wrap = match ui.wrap_mode() {
-        TextWrapMode::Extend => TextWrapping::no_max_width(),
-        TextWrapMode::Wrap => TextWrapping::wrap_at_width(width),
-        TextWrapMode::Truncate => TextWrapping::truncate_at_width(width),
-    };
+/// A label of text a person typed, in `font` and `color`, wrapped at the
+/// width left in the [`Ui`] and in the order it is read. Returns the label
+/// and the galley it shows.
+pub fn user_text(ui: &mut Ui, text: &str, font: FontId, color: Color32) -> (Response, Arc<Galley>) {
+    let wrap = TextWrapping::wrap_at_width(ui.available_width());
     let galley = ui.fonts_mut(|fonts| layout(fonts, text, TextFormat::simple(font, color), wrap));
-    ui.label(galley)
+    (ui.label(Arc::clone(&galley)), galley)
 }
 
 fn job(text: &str, format: TextFormat, wrap: TextWrapping) -> LayoutJob {

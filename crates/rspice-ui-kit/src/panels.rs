@@ -1853,9 +1853,9 @@ fn property_row_with_tone(
     };
     let value_width = (value_rect.width() - status_prefix).max(1.0);
     let display_value = elide_value(ui, value, &value_font, value_width);
-    let value_galley = ui
-        .painter()
-        .layout_no_wrap(display_value, value_font, value_tone);
+    let value_galley = ui.fonts_mut(|fonts| {
+        crate::text::layout_no_wrap(fonts, &display_value, value_font, value_tone)
+    });
     row_label(ui, slot.label, label);
     if let Some((mark, mark_tone)) = mark {
         let side = crate::widgets::PROBLEM_MARK_SIDE;

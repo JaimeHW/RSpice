@@ -901,13 +901,40 @@ const HAN_VALUES: &str = "电阻电容晶体管放大器输入输出电源地线
 /// values are legible and so are lettered.
 #[cfg(not(target_arch = "wasm32"))]
 fn chinese_values_at_100() -> AppState {
-    let mut state = fixture_without_overlay().state;
     let han: Vec<char> = HAN_VALUES.chars().collect();
+    values_at_100(|ordinal| {
+        (0..4)
+            .map(|glyph| han[(ordinal * 7 + glyph * 13) % han.len()])
+            .collect()
+    })
+}
+
+/// Part values in Arabic and Hebrew, each with a number, a unit or a
+/// bracket, so every one is put in reading order before it is lettered.
+#[cfg(not(target_arch = "wasm32"))]
+const RIGHT_TO_LEFT_VALUES: [&str; 6] = [
+    "مقاومة 4.7 k",
+    "مكثف 100 nF",
+    "مضخم (A1)",
+    "נגד 10 k",
+    "קבל 22 pF",
+    "מגבר [U2]",
+];
+
+/// The scale fixture with every part's value in Arabic or Hebrew, at 100 %.
+#[cfg(not(target_arch = "wasm32"))]
+fn right_to_left_values_at_100() -> AppState {
+    values_at_100(|ordinal| RIGHT_TO_LEFT_VALUES[ordinal % RIGHT_TO_LEFT_VALUES.len()].to_owned())
+}
+
+/// The scale fixture with each part's value given by its ordinal, at 100 %,
+/// where the values are legible and so are lettered.
+#[cfg(not(target_arch = "wasm32"))]
+fn values_at_100(value: impl Fn(usize) -> String) -> AppState {
+    let mut state = fixture_without_overlay().state;
     let document = state.model.schematic.document_mut_for_test();
     for (ordinal, component) in document.components.iter_mut().enumerate() {
-        component.value = (0..4)
-            .map(|glyph| han[(ordinal * 7 + glyph * 13) % han.len()])
-            .collect();
+        component.value = value(ordinal);
     }
     let centre = Point::new(ORIGIN + PITCH * 4, ORIGIN + PITCH * 3);
     let editor = &mut state.model.schematic.session.editor;
@@ -1033,6 +1060,22 @@ fn chinese_values() -> [FrameTimes; 3] {
             every_frame: false,
         },
     ]
+}
+
+/// Arabic and Hebrew values at 100 %, lettered from the bundled faces: what
+/// putting typed text in reading order costs a frame full of it.
+#[cfg(not(target_arch = "wasm32"))]
+fn right_to_left_values() -> FrameTimes {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let symbols = super::super::symbols::SymbolLibrary::load_embedded().ok();
+    let frames_ms = hover_frames(&ctx, &mut right_to_left_values_at_100(), symbols.as_ref());
+    FrameTimes {
+        name: "Arabic and Hebrew values, 100 %",
+        budget_ms: 4.0,
+        frames_ms,
+        every_frame: false,
+    }
 }
 
 /// One suspected site's cost on its own: the median of seven calls, in
@@ -1340,10 +1383,10 @@ fn idle_frame_circles_and_tessellation() -> (usize, f64) {
 /// 8 ms; a part drag's press and every one of its moves under 8 ms, and its
 /// drop under one 60 Hz frame, each by its slowest frame and not only its
 /// median. On desktop, the installed-face plugin is held to the idle budget,
-/// Chinese values to it before and after their face joins, and the frame the
-/// face joins in, which rebuilds the fonts, to one 60 Hz frame. Every
-/// scenario is printed before any budget is asserted, so a failing run still
-/// reports them all.
+/// Chinese values to it before and after their face joins, Arabic and Hebrew
+/// values to it, and the frame the face joins in, which rebuilds the fonts,
+/// to one 60 Hz frame. Every scenario is printed before any budget is
+/// asserted, so a failing run still reports them all.
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[ignore = "frame-cost probe"]
@@ -1364,6 +1407,7 @@ fn canvas_frame_cost_at_scale() {
     {
         scenarios.push(idle_hover_with_system_faces());
         scenarios.extend(chinese_values());
+        scenarios.push(right_to_left_values());
     }
     let mut table =
         String::from("scenario                            min ms  median ms     max ms   budget\n");

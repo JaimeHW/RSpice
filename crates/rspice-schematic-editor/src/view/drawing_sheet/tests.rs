@@ -551,6 +551,64 @@ fn an_empty_authored_field_is_painted_as_its_caption_alone() {
     }
 }
 
+/// The left and right edges of the glyphs of `galley` lettering a character
+/// `of` picks, in the galley's own frame.
+fn glyph_span(galley: &egui::Galley, of: impl Fn(char) -> bool) -> (f32, f32) {
+    galley
+        .rows
+        .iter()
+        .flat_map(|row| row.row.glyphs.iter().map(move |glyph| (row.pos.x, glyph)))
+        .filter(|(_, glyph)| of(glyph.chr))
+        .fold(
+            (f32::INFINITY, f32::NEG_INFINITY),
+            |(left, right), (x, glyph)| {
+                (
+                    left.min(x + glyph.pos.x),
+                    right.max(x + glyph.pos.x + glyph.advance_width),
+                )
+            },
+        )
+}
+
+#[test]
+fn a_title_typed_in_arabic_is_lettered_in_the_order_it_is_read() {
+    // Arabic reads from the right, and the sheet number inside the title
+    // reads left to right where it stands: last, so at the left of the line.
+    let sheet = test_sheet();
+    let fields = rspice_design_model::design_management::resolve_drawing_sheet_title_fields(
+        &sheet.format,
+        &[(
+            rspice_design_model::design_management::DrawingSheetTitleFieldId::SheetTitle,
+            "مخطط المضخم 12".to_owned(),
+        )]
+        .into_iter()
+        .collect(),
+    );
+    let shapes = painted_title_block(&sheet, &fields);
+    let title = shapes
+        .iter()
+        .find_map(|shape| match shape {
+            Shape::Text(text) if text.galley.text().contains("12") => Some(&text.galley),
+            _ => None,
+        })
+        .expect("the title is lettered");
+    let arabic = |character: char| ('\u{0600}'..='\u{06FF}').contains(&character);
+    let (number_left, number_right) = glyph_span(title, |character| character.is_ascii_digit());
+    let (arabic_left, arabic_right) = glyph_span(title, arabic);
+    assert!(number_left < number_right && arabic_left < arabic_right);
+    // Glyphs are seated on whole pixels, so neighbours may overlap by less
+    // than one.
+    assert!(
+        number_right < arabic_left + 1.0,
+        "the number stands left of the words: {number_left}..{number_right} \
+         against {arabic_left}..{arabic_right}"
+    );
+    // "12" keeps its own order inside the line.
+    let one = glyph_span(title, |character| character == '1');
+    let two = glyph_span(title, |character| character == '2');
+    assert!(one.1 < two.0 + 1.0, "{one:?} {two:?}");
+}
+
 #[test]
 fn title_block_lines_are_the_plots_widths_magnified_with_the_sheet() {
     // 0.7 mm outline and 0.35 mm rules at four world units per millimetre.

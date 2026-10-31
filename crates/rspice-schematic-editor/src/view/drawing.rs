@@ -1140,7 +1140,8 @@ fn draw_component_labels(
                 let value_text =
                     super::super::source_labels::component_value_label_cached(component);
                 if !value_text.is_empty() {
-                    painter.text(
+                    rspice_ui_kit::text::paint_text(
+                        painter,
                         layout.value_pos,
                         layout.value_align,
                         value_text.as_ref(),

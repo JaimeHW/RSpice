@@ -125,8 +125,9 @@ fn screen_layout(
         match lod::text_lod(LABEL_FONT_WORLD_SIZE, zoom, ppp, TextClass::Electrical) {
             TextLod::Draw(font_size) => {
                 let galley = ctx.fonts_mut(|fonts| {
-                    fonts.layout_no_wrap(
-                        name.to_owned(),
+                    rspice_ui_kit::text::layout_no_wrap(
+                        fonts,
+                        name,
                         theme::mono(font_size, FontWeight::Medium),
                         color,
                     )

@@ -1401,3 +1401,49 @@ fn a_default_reads_apart_from_the_form_a_value_is_written_in() {
     assert_eq!(ink(&painted("YYYY-MM-DD")), palette.text_faint);
     assert_eq!(ink(&painted("top")), palette.text);
 }
+
+/// The stretches of columns of `canvas` carrying the ink of text, left to
+/// right.
+fn ink_stretches(canvas: &crate::raster::Canvas) -> Vec<std::ops::Range<usize>> {
+    let background = canvas.background().to_array();
+    let inked = |x: usize| {
+        (0..canvas.height()).any(|y| {
+            canvas.pixel(x, y).is_some_and(|pixel| {
+                let pixel = pixel.to_array();
+                (0..3).any(|channel| pixel[channel].abs_diff(background[channel]) > 96)
+            })
+        })
+    };
+    let mut stretches: Vec<std::ops::Range<usize>> = Vec::new();
+    for x in (0..canvas.width()).filter(|x| inked(*x)) {
+        match stretches.last_mut() {
+            Some(stretch) if stretch.end == x => stretch.end = x + 1,
+            _ => stretches.push(x..x + 1),
+        }
+    }
+    stretches
+}
+
+#[test]
+fn a_value_typed_in_arabic_is_drawn_in_the_order_it_is_read() {
+    // Arabic reads from the right, and the number inside the value reads
+    // left to right where it stands: last, so first from the left, drawn
+    // exactly where the number alone is drawn.
+    let drawn = |value: &str| {
+        ink_stretches(&crate::raster::render(egui::vec2(320.0, 32.0), |ui, _| {
+            property_row(ui, "", value);
+        }))
+    };
+    let phrase = drawn("مقاومة 47");
+    let number = drawn("47");
+    assert!(
+        !number.is_empty() && phrase.len() > number.len(),
+        "{phrase:?}"
+    );
+    for (in_phrase, alone) in phrase.iter().zip(&number) {
+        assert!(
+            in_phrase.start.abs_diff(alone.start) <= 1 && in_phrase.end.abs_diff(alone.end) <= 1,
+            "the number leads the value: {phrase:?} against {number:?}"
+        );
+    }
+}
