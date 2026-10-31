@@ -515,10 +515,18 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "15",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app, BindComponentModel { component_id, library, model, }|",
+            "crate::workbench::docks::inspector::design::bind_component_model_from_catalog(",
+            "app.state.models.models_view.note_receipt(result);",
+        ],
     ),
     (
         "16",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "17",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -1154,8 +1162,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        16,
-        "`after_contribution` answers exactly the sixteen requests it lists"
+        17,
+        "`after_contribution` answers exactly the seventeen requests it lists"
     );
 }
 

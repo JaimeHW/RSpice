@@ -606,6 +606,18 @@ impl Default for ModelsWorkbenchViewState {
     }
 }
 
+impl ModelsWorkbenchViewState {
+    /// Put an action's outcome on the workspace's banner: its receipt, and
+    /// the operational state a failure names.
+    pub fn note_receipt(&mut self, result: Result<String, String>) {
+        self.operational_state = match &result {
+            Ok(_) => ModelsOperationalState::Ready,
+            Err(message) => ModelsOperationalState::from_failure(message),
+        };
+        self.action_receipt = Some(result);
+    }
+}
+
 /// Which packs the Model Hub ledger lists.
 ///
 /// The ledger always spans installed *and* available packs, because "what this

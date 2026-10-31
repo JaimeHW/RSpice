@@ -59,6 +59,7 @@ use crate::workbench::app_state::design_history::{
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
 use crate::workbench::features;
+use crate::workbench::framework::requests::BindComponentModel;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::models::workspace_state::{
@@ -351,15 +352,11 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                 library,
                 model,
             } => {
-                let result =
-                    crate::workbench::docks::inspector::design::bind_component_model_from_catalog(
-                        app,
-                        component_id,
-                        &library,
-                        &model,
-                    )
-                    .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
-                apply_receipt(&mut app.state, result);
+                app.state.workbench.outbox.push(BindComponentModel {
+                    component_id,
+                    library,
+                    model,
+                });
             }
             ManagerAction::ScanSourceDrift => app.state.model.scan_source_drift(),
             ManagerAction::ModelHub(request) => {
@@ -1879,11 +1876,7 @@ fn receipt(app: &mut ManagerRenderContext<'_>, result: Result<String, String>) {
 /// Show an action's outcome on the page. A caller whose action changed the
 /// project or wrote a file records it as well; a refusal stays on the page.
 fn apply_receipt(state: &mut AppState, result: Result<String, String>) {
-    state.models.models_view.operational_state = match &result {
-        Ok(_) => ModelsOperationalState::Ready,
-        Err(message) => ModelsOperationalState::from_failure(message),
-    };
-    state.models.models_view.action_receipt = Some(result);
+    state.models.models_view.note_receipt(result);
 }
 
 fn navigate_specialist(app: &mut ManagerRenderContext<'_>, surface: crate::workbench::SurfaceId) {

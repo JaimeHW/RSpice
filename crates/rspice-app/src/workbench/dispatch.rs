@@ -36,10 +36,10 @@ use crate::workbench::framework::command_registry::{
 };
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
-    self, ApplyWaveformDefaults, ArmPartPlacement, CloseForLiveMirror, ExportDataset,
-    FollowSchematicGrid, MarkFailureSites, OpenProjectDialog, PrintActiveView, ProjectFileAction,
-    PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter,
-    ShowSchematicAnnotations, ShowWaveforms,
+    self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
+    ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenProjectDialog, PrintActiveView,
+    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance,
+    SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -258,6 +258,26 @@ impl RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |app, ArmPartPlacement(placement)| {
                 crate::workbench::app::arm_pack_part(&mut app.state.model, placement);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app,
+             BindComponentModel {
+                 component_id,
+                 library,
+                 model,
+             }| {
+                let result =
+                    crate::workbench::docks::inspector::design::bind_component_model_from_catalog(
+                        app,
+                        component_id,
+                        &library,
+                        &model,
+                    )
+                    .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
+                app.state.models.models_view.note_receipt(result);
             },
         );
         requests::drain(

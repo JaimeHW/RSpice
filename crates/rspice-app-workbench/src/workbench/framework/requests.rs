@@ -425,6 +425,21 @@ impl Request for ArmPartPlacement {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Bind the schematic instance `component_id` to the catalog model `model`
+/// of `library`. Raised by the models feature's binding action, and taken
+/// straight after the call that raised it; the outcome goes on the Models
+/// workspace's banner.
+#[derive(Clone, Debug)]
+pub struct BindComponentModel {
+    pub component_id: u64,
+    pub library: String,
+    pub model: String,
+}
+
+impl Request for BindComponentModel {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

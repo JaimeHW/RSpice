@@ -563,6 +563,9 @@ impl ModelsStudio {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
                     .show(ctx, |ui| show(ui, app));
+                // The shell answers what the workspace raised once it has
+                // drawn.
+                app.after_contribution();
             },
         );
         self.painted = painted_text(&output);
