@@ -30,24 +30,11 @@ pub struct Schema {
     /// What the caller is told when another tab holds the database open
     /// across an upgrade.
     pub blocked: &'static str,
-    pub failure: FailurePolicy,
-}
-
-/// How a database's operations end when they fail or outlive their timeout.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FailurePolicy {
-    /// Keeps the handlers of the last `retained` operations, settled or not,
-    /// and leaves a failed or abandoned transaction, and a connection that
-    /// opens after its caller gave up, to the browser.
-    Lenient { retained: usize },
-    /// Aborts the transaction behind a failed or abandoned request, closes a
-    /// connection that opens after its caller gave up, keeps an operation's
-    /// handlers only until it settles, and refuses an operation with
-    /// `refusal` while `pending` others are unsettled.
-    Strict {
-        pending: usize,
-        refusal: &'static str,
-    },
+    /// How many operations may be unsettled at once. One more is refused with
+    /// `refusal` rather than started, because its handlers could only be kept
+    /// by dropping those of an operation still in flight.
+    pub pending: usize,
+    pub refusal: &'static str,
 }
 
 /// The Model Hub's verified packs: the catalog snapshot, its serial, and each
@@ -61,7 +48,8 @@ pub const MODEL_HUB: Schema = Schema {
     // that silently never lists a pack.
     timeout_ms: 30_000,
     blocked: "another RSpice tab is upgrading pack storage",
-    failure: FailurePolicy::Lenient { retained: 64 },
+    pending: 64,
+    refusal: "too many model-pack storage operations are still pending",
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -75,7 +63,7 @@ mod browser {
     use wasm_bindgen::JsValue;
     use wasm_bindgen::closure::Closure;
 
-    use super::{FailurePolicy, Schema};
+    use super::Schema;
 
     type Handler = Closure<dyn FnMut()>;
 
@@ -276,7 +264,7 @@ mod browser {
             let result = await_promise(completion, "IndexedDB transaction", schema.timeout_ms)
                 .await
                 .map(|_| ());
-            if result.is_err() && strict(schema) {
+            if result.is_err() {
                 let _ = call(&self.value, "abort", &[]);
             }
             result
@@ -294,10 +282,6 @@ mod browser {
         value
             .is_instance_of::<js_sys::Uint8Array>()
             .then(|| js_sys::Uint8Array::new(value).to_vec())
-    }
-
-    fn strict(schema: &Schema) -> bool {
-        matches!(schema.failure, FailurePolicy::Strict { .. })
     }
 
     /// Settles an `IDBOpenDBRequest`, keeping its handlers alive until it does.
@@ -323,10 +307,10 @@ mod browser {
             let success = Closure::<dyn FnMut()>::new(move || {
                 let result = js_sys::Reflect::get(&success_request, &JsValue::from_str("result"))
                     .unwrap_or(JsValue::UNDEFINED);
-                if !success_reported.replace(true) {
-                    let _ = success_resolve.call1(&JsValue::UNDEFINED, &result);
-                } else if strict(schema) {
+                if success_reported.replace(true) {
                     let _ = call(&result, "close", &[]);
+                } else {
+                    let _ = success_resolve.call1(&JsValue::UNDEFINED, &result);
                 }
                 success_retire.set(true);
             });
@@ -422,7 +406,6 @@ mod browser {
         });
         let result = await_promise(promise, "IndexedDB request", schema.timeout_ms).await;
         if result.is_err()
-            && strict(schema)
             && let Ok(transaction) =
                 js_sys::Reflect::get(request, &JsValue::from_str("transaction"))
             && !transaction.is_null()
@@ -514,8 +497,7 @@ mod browser {
         ///
         /// A `Closure` dropped while an event source still points at it leaves
         /// the browser calling into a dropped handler, so each set is held
-        /// until the operation that armed it can no longer fire, within the
-        /// bound its database's [`FailurePolicy`] sets.
+        /// until the operation that armed it settles.
         static RETAINED: RefCell<Vec<Retained>> = const { RefCell::new(Vec::new()) };
     }
 
@@ -527,22 +509,10 @@ mod browser {
         let database = schema.database;
         RETAINED.with(|retained| {
             let mut retained = retained.borrow_mut();
-            match schema.failure {
-                FailurePolicy::Lenient { retained: limit } => {
-                    let held = retained.iter().filter(|r| r.database == database).count();
-                    if held >= limit
-                        && let Some(oldest) = retained.iter().position(|r| r.database == database)
-                    {
-                        retained.remove(oldest);
-                    }
-                }
-                FailurePolicy::Strict { pending, refusal } => {
-                    retained.retain(|r| r.database != database || !r.settled.get());
-                    let held = retained.iter().filter(|r| r.database == database).count();
-                    if held >= pending {
-                        return Err(refusal.to_owned());
-                    }
-                }
+            retained.retain(|r| r.database != database || !r.settled.get());
+            let held = retained.iter().filter(|r| r.database == database).count();
+            if held >= schema.pending {
+                return Err(schema.refusal.to_owned());
             }
             retained.push(Retained {
                 database,

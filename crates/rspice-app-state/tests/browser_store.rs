@@ -2,7 +2,7 @@
 
 #![cfg(target_arch = "wasm32")]
 
-use rspice_app_state::browser_store::{self, FailurePolicy, Schema};
+use rspice_app_state::browser_store::{self, Schema};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen_test::{wasm_bindgen_test, wasm_bindgen_test_configure};
 
@@ -65,10 +65,8 @@ const fn schema(database: &'static str, version: u32) -> Schema {
         store: "records",
         timeout_ms: 15_000,
         blocked: "another tab holds the test database open",
-        failure: FailurePolicy::Strict {
-            pending: 32,
-            refusal: "too many test operations are pending",
-        },
+        pending: 32,
+        refusal: "too many test operations are pending",
     }
 }
 
@@ -76,6 +74,10 @@ static ROUND_TRIP: Schema = schema("rspice-browser-store-round-trip", 1);
 static ADD: Schema = schema("rspice-browser-store-add", 1);
 static ABORT: Schema = schema("rspice-browser-store-abort", 1);
 static UPGRADE: Schema = schema("rspice-browser-store-upgrade", 2);
+static CAPPED: Schema = Schema {
+    pending: 2,
+    ..schema("rspice-browser-store-capped", 1)
+};
 
 async fn fresh(schema: &Schema) {
     wasm_bindgen_futures::JsFuture::from(delete_database(schema.database))
@@ -219,4 +221,45 @@ async fn opening_at_a_newer_version_keeps_every_record() {
         .await
         .expect("read version");
     assert_eq!(version.as_f64(), Some(2.0));
+}
+
+#[wasm_bindgen_test]
+async fn an_operation_past_the_pending_cap_is_refused_and_the_others_complete() {
+    fresh(&CAPPED).await;
+    let database = browser_store::open(&CAPPED).await.expect("open");
+    let first = database.write().expect("first write transaction");
+    let second = database.write().expect("second write transaction");
+
+    // Both transactions' completions are armed and unsettled, so a write in
+    // either one needs a third slot. It is refused rather than given one by
+    // dropping the handlers of an operation still in flight.
+    let refused = first
+        .put("refused", &JsValue::from_str("refused"))
+        .await
+        .expect_err("a write past the cap is refused");
+    assert_eq!(refused, CAPPED.refusal);
+    assert!(
+        first.commit().await.is_err(),
+        "the refused write's transaction aborts"
+    );
+    second
+        .commit()
+        .await
+        .expect("the transaction still in flight completes");
+
+    let retry = database.write().expect("write transaction");
+    retry
+        .put("kept", &JsValue::from_str("kept"))
+        .await
+        .expect("a write under the cap");
+    retry.commit().await.expect("commit under the cap");
+    drop(database);
+    assert!(stored(&CAPPED, "refused").await.is_none());
+    assert_eq!(
+        stored(&CAPPED, "kept")
+            .await
+            .and_then(|value| value.as_string())
+            .as_deref(),
+        Some("kept")
+    );
 }
