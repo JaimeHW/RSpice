@@ -58,6 +58,10 @@ pub enum DesignManagementError {
     NoChanges(&'static str),
     #[error("{field} value {value:?} is empty, padded, or contains control characters")]
     InvalidText { field: &'static str, value: String },
+    /// Text a file holds decomposed, which this program never writes: it
+    /// composes text where it is entered.
+    #[error("{field} value {value:?} is not in Unicode composed form (NFC)")]
+    TextNotComposed { field: &'static str, value: String },
     /// A document control that cannot stand as written, said the way the
     /// person correcting it needs to read it.
     #[error("{0}")]

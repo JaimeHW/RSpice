@@ -9,7 +9,7 @@ use crate::state::{
     DrawingSheetReleaseStatus, DrawingSheetStandard, DrawingSheetTitleBlockTemplate,
     DrawingSheetTitleFieldId, DrawingSheetTransactionKind, DrawingSheetTransactionReceipt,
     DrawingSheetZoneMode, SchematicPageOrientation, SchematicSheetFormat, SheetId,
-    drawing_sheet_sizes_mixed,
+    drawing_sheet_sizes_mixed, entered_text,
 };
 use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
 use crate::workbench::state::WorkbenchSession;
@@ -252,14 +252,14 @@ impl SheetTransaction {
             }
             DrawingSheetEdit::TitleField(field, value) => {
                 refuse_organization_locked(draft, field)?;
-                self.stage_title_value(model, field, value);
+                self.stage_title_value(model, field, entered_text(&value));
             }
             DrawingSheetEdit::Status(status) => {
                 self.stage_document_control(model, |control| control.status = status);
             }
             DrawingSheetEdit::ChangeReference(reference) => {
                 self.stage_document_control(model, |control| {
-                    control.change_reference = reference;
+                    control.change_reference = entered_text(&reference);
                 });
             }
         }

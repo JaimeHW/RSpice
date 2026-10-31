@@ -12,7 +12,7 @@ use crate::schematic::view::sheet_visibility::object_is_on_active_sheet;
 use crate::state::{
     Bus, BusDeclaration, BusPropertyImpact, BusSlice, BusTap, BusTapOrientation, DesignNote,
     DesignNoteKind, DesignReviewState, DocumentationShape, DocumentationShapeGeometry, NetLabel,
-    Point, SchematicState,
+    Point, SchematicState, entered_text,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::RSpiceApp;
@@ -815,7 +815,8 @@ fn validate_design_note_draft(
         return stale_validation("The selected design note changed while properties were open.");
     }
     let mut candidate = draft.original.clone();
-    match candidate.update(draft.kind, draft.text.clone()) {
+    let text = entered_text(&draft.text);
+    match candidate.update(draft.kind, text.clone()) {
         Ok(()) => {
             if let Some(review_state) = draft.review_state
                 && let Err(error) = candidate.set_review_state(review_state)
@@ -829,7 +830,7 @@ fn validate_design_note_draft(
                 Box::new(PropertyCommit::DesignNote {
                     expected: draft.original.clone(),
                     kind: draft.kind,
-                    text: draft.text.trim().to_owned(),
+                    text,
                     review_state: draft.review_state,
                 }),
                 None,

@@ -375,7 +375,7 @@ def command_gates(
                 cargo_jobs,
                 "--lib",
             ),
-            202,
+            203,
         ),
         Gate(
             "ui-drawing-sheet",
@@ -411,7 +411,7 @@ def command_gates(
                 "sheets::commands::sheet_format_manager_requires_live_schematic_edit_authority",
                 "grid_labels_measure_the_pitch_on_the_printed_sheet",
             ),
-            97,
+            100,
         ),
         Gate(
             "ui-hardcopy",
@@ -436,7 +436,7 @@ def command_gates(
                 "--lib",
                 "hardcopy",
             ),
-            192 if host_system == "Windows" else 189,
+            243 if host_system == "Windows" else 239,
         ),
         Gate(
             "hardcopy-contract",

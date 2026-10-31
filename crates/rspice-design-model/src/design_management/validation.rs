@@ -782,9 +782,16 @@ pub(super) fn validate_value(
     value: &str,
     allow_empty: bool,
 ) -> Result<(), DesignManagementError> {
-    let normalized = value.nfc().collect::<String>();
-    if value.trim() != value || normalized != value || (!allow_empty && value.is_empty()) {
+    if value.trim() != value || (!allow_empty && value.is_empty()) {
         return Err(DesignManagementError::InvalidText {
+            field,
+            value: value.to_owned(),
+        });
+    }
+    // Text enters composed (`entered_text`), so decomposed text here came
+    // from a file written elsewhere.
+    if !value.is_ascii() && value.nfc().ne(value.chars()) {
+        return Err(DesignManagementError::TextNotComposed {
             field,
             value: value.to_owned(),
         });
@@ -861,7 +868,19 @@ pub(super) fn validate_reference_designator(value: &str) -> Result<(), DesignMan
 }
 
 pub(super) fn normalize_text(value: &str) -> String {
-    value.trim().nfc().collect()
+    entered_text(value)
+}
+
+/// Text as a person enters it: trimmed and in Unicode composed form (NFC),
+/// so a pasted decomposed "é" is stored as the one character a typed one is.
+/// Text is composed where it is committed, never while it is being typed.
+pub fn entered_text(value: &str) -> String {
+    let value = value.trim();
+    if value.is_ascii() {
+        value.to_owned()
+    } else {
+        value.nfc().collect()
+    }
 }
 
 pub(super) fn normalize_prefix(value: &str) -> String {

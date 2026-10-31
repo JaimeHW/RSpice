@@ -28,6 +28,7 @@ use crate::state::{
     AuthoredDrawingSheetSize, DRAWING_SHEET_TITLE_VALUE_CUT_ADVISORY, DrawingSheetReleaseStatus,
     DrawingSheetTitleBlockTemplate, DrawingSheetTitleFieldId, DrawingSheetTitleFieldValueAuthority,
     NetNamingPolicy, SchematicGridPitch, SchematicSheetFormat, SheetId, drawing_sheet_title_layout,
+    entered_text,
 };
 use crate::workbench::app::drawing_sheet_edit::{
     DrawingSheetEdit, apply_drawing_sheet_edit_on, drawing_sheet_editable, format_sheet_length,
@@ -707,7 +708,8 @@ enum Empty<'a> {
 
 /// One typed value. It lands once, as one undo step, when the field is left
 /// — Enter, Tab or a click elsewhere — and Escape abandons it. Returns the
-/// text that lands, trimmed, when it differs from `stored`.
+/// text that lands, as entered text is stored, when it differs from `stored`.
+/// The field keeps what was typed; only the value that lands is composed.
 fn text_row(
     ui: &mut Ui,
     sheet: &SheetIdentity,
@@ -739,7 +741,8 @@ fn text_row(
         return None;
     }
     let abandoned = ui.input(|input| input.key_pressed(egui::Key::Escape));
-    (draft.is_some() && !abandoned && typed.trim() != stored).then(|| typed.trim().to_owned())
+    let entered = entered_text(&typed);
+    (draft.is_some() && !abandoned && entered != stored).then_some(entered)
 }
 
 /// Commit a value still being typed when the panel stops showing the sheet.
@@ -761,11 +764,12 @@ pub fn commit_pending_sheet_text(
             continue;
         }
         let format = model.active_drawing_sheet().format;
-        if draft.text.trim() == text.stored(model, &format) {
+        let entered = entered_text(&draft.text);
+        if entered == text.stored(model, &format) {
             continue;
         }
         if let Err(error) = text
-            .edit(&format, draft.text.trim().to_owned())
+            .edit(&format, entered)
             .and_then(|edit| apply_drawing_sheet_edit_on(model, workbench, edit))
         {
             workbench.prompt(error);

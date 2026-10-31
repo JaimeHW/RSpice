@@ -3,7 +3,7 @@
 use egui::Context;
 use rspice_schematic_editor::annotations::note_placement;
 
-use crate::state::{PendingDesignNotePlacement, Tool};
+use crate::state::{PendingDesignNotePlacement, Tool, entered_text};
 use crate::ui::widgets::{CommandForm, DialogChoice};
 
 use crate::workbench::app::{RSpiceApp, schematic_editor_request_source};
@@ -132,7 +132,7 @@ fn validate_draft(state: &AppState) -> Result<PendingDesignNotePlacement, String
     }
     match PendingDesignNotePlacement::new(
         draft.kind,
-        draft.text.clone(),
+        entered_text(&draft.text),
         source.topology_version,
         &state.model.schematic.document().design_notes,
     ) {
@@ -203,6 +203,20 @@ mod tests {
         assert_eq!(state.design.design_note.text, "");
         assert!(validate_draft(&state).is_err());
         assert!(state.model.schematic.document().design_notes.is_empty());
+    }
+
+    /// A note pasted decomposed is placed composed: the "é" it reads is the
+    /// one character a typed one is.
+    #[test]
+    fn a_decomposed_note_is_placed_composed() {
+        let mut state = AppState::default();
+        let source = schematic_editor_request_source(&state);
+        state.design.design_note.open(source);
+        state.design.design_note.text = " Cafe\u{301} bias ".to_owned();
+        let Ok(pending) = validate_draft(&state) else {
+            panic!("valid draft");
+        };
+        assert_eq!(pending.text, "Caf\u{e9} bias");
     }
 
     #[test]

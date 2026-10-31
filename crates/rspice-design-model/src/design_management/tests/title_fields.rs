@@ -731,3 +731,19 @@ fn an_organization_template_sealed_while_paper_size_was_withdrawn_still_loads() 
         .is_err()
     );
 }
+
+#[test]
+fn text_enters_composed_and_a_decomposed_file_value_is_named_as_such() {
+    assert_eq!(entered_text("  Cafe\u{301} "), "Caf\u{e9}");
+    assert_eq!(entered_text(" Sheet 1 "), "Sheet 1");
+    assert_eq!(entered_text("\u{2126}"), "\u{3a9}");
+    assert!(matches!(
+        validate_value("title", "Cafe\u{301}", false),
+        Err(DesignManagementError::TextNotComposed { field: "title", .. })
+    ));
+    assert!(validate_value("title", "Caf\u{e9}", false).is_ok());
+    assert!(matches!(
+        validate_value("title", " Caf\u{e9}", false),
+        Err(DesignManagementError::InvalidText { field: "title", .. })
+    ));
+}

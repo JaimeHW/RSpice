@@ -1062,6 +1062,81 @@ fn chinese_values() -> [FrameTimes; 3] {
     ]
 }
 
+/// Title values in Arabic with its vowel marks, Hebrew with a number and a
+/// unit, Thai with its tone marks, Japanese and Latin, each long enough to be
+/// cut short in its cell.
+#[cfg(not(target_arch = "wasm32"))]
+const TITLE_VALUES: [&str; 5] = [
+    "\u{645}\u{64e}\u{631}\u{652}\u{62d}\u{64e}\u{628}\u{64b}\u{627} \u{628}\u{650}\u{643}\u{64f}\u{645}\u{652} ",
+    "\u{5de}\u{5d2}\u{5d1}\u{5e8} R1 = 10 k\u{3a9} (V+) ",
+    "\u{e2a}\u{e27}\u{e31}\u{e2a}\u{e14}\u{e35}\u{e04}\u{e23}\u{e31}\u{e1a} ",
+    "\u{65e5}\u{672c}\u{8a9e}\u{306e}\u{56de}\u{8def}\u{56f3} ",
+    "Whitfield Analog Devices ",
+];
+
+/// The title block at 100 %, every value the sheet keeps in one of
+/// [`TITLE_VALUES`]' scripts and cut by its shaped width: what lettering the
+/// block costs a frame that shows it.
+#[cfg(not(target_arch = "wasm32"))]
+fn title_block_values() -> FrameTimes {
+    use crate::state::DrawingSheetTitleFieldValueAuthority;
+
+    let mut state = fixture_without_overlay().state;
+    let key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    let catalog = state
+        .model
+        .workspace
+        .content
+        .design_management
+        .sheet_catalog_mut(&key)
+        .expect("sheet catalog");
+    let sheet = catalog.active().expect("an active sheet");
+    let (id, revision) = (sheet.id(), sheet.revision());
+    let mut scripts = TITLE_VALUES.iter().cycle();
+    let mut lettered = 0;
+    let format = sheet
+        .page_format()
+        .try_update(|draft| {
+            for (field, entry) in &mut draft.title_block.fields {
+                if field.policy().value_authority == DrawingSheetTitleFieldValueAuthority::Authored
+                    && !field.is_signature_date()
+                    && entry.visible
+                    && let Some(script) = scripts.next()
+                {
+                    entry.value = script.repeat(6).trim_end().to_owned();
+                    lettered += 1;
+                }
+            }
+        })
+        .expect("title values");
+    assert!(lettered >= TITLE_VALUES.len(), "every script has a field");
+    catalog
+        .update_sheet_page_format(id, revision, format)
+        .expect("the sheet takes its title values");
+    let block = state
+        .model
+        .active_drawing_sheet()
+        .geometry
+        .title_block
+        .expect("a title block");
+    let centre = Point::new(
+        ((block.min_x + block.max_x) * 0.5).round() as i32,
+        ((block.min_y + block.max_y) * 0.5).round() as i32,
+    );
+    time_scenario_in(
+        "title block values, 100 %",
+        4.0,
+        state,
+        Some((1.0, centre)),
+        |_| {},
+    )
+}
+
 /// Arabic and Hebrew values at 100 %, lettered from the bundled faces: what
 /// putting typed text in reading order costs a frame full of it.
 #[cfg(not(target_arch = "wasm32"))]
@@ -1408,6 +1483,7 @@ fn canvas_frame_cost_at_scale() {
         scenarios.push(idle_hover_with_system_faces());
         scenarios.extend(chinese_values());
         scenarios.push(right_to_left_values());
+        scenarios.push(title_block_values());
     }
     let mut table =
         String::from("scenario                            min ms  median ms     max ms   budget\n");

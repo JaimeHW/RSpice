@@ -620,6 +620,29 @@ fn escape_abandons_a_typed_title_value() {
     assert!(!panel.app.state.model.can_undo_project_design());
 }
 
+/// A value pasted decomposed lands composed, the "é" it reads stored as the
+/// one character a typed one is, on the sheet and on the project alike; the
+/// same value entered decomposed again over it changes nothing.
+#[test]
+fn a_decomposed_title_value_lands_composed() {
+    let mut panel = SheetPanel::new();
+    panel.enter("Created by", " Rene\u{301} Cafe\u{301} ");
+    panel.enter("Legal owner", "Re\u{301}seau Analogique");
+    assert_eq!(
+        panel.title_value(DrawingSheetTitleFieldId::DrawnBy),
+        "Ren\u{e9} Caf\u{e9}"
+    );
+    assert_eq!(
+        panel.document_value(DrawingSheetTitleFieldId::Organization),
+        "R\u{e9}seau Analogique"
+    );
+
+    panel.enter("Created by", "Rene\u{301} Cafe\u{301}");
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert!(panel.app.state.undo_project_design().unwrap().is_some());
+    assert!(!panel.app.state.model.can_undo_project_design());
+}
+
 /// Selecting something on the canvas mid-edit swaps the panel in the same
 /// frame; what was typed still lands on the sheet it was typed on.
 #[test]

@@ -6,7 +6,9 @@
 
 use egui::{Align, Context, Frame, Layout, RichText, ScrollArea, Stroke, TextEdit, Ui, Vec2};
 
-use crate::state::{DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point};
+use crate::state::{
+    DesignNote, DesignNoteKind, DesignReviewMutation, DesignReviewState, Point, entered_text,
+};
 use crate::time_compat::checked_unix_time_ms;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -331,7 +333,7 @@ impl RSpiceApp {
                         return;
                     }
                 };
-                let body = self.state.design.design_review_comments.reply.clone();
+                let body = entered_text(&self.state.design.design_review_comments.reply);
                 let author = self.review_actor();
                 self.apply_review_mutation(if matches!(action, ReviewAction::Resolve) {
                     DesignReviewMutation::Resolve {

@@ -42,6 +42,7 @@ pub const MAX_DESIGN_VALUE_BYTES: usize = 8_192;
 pub const MAX_PREFIX_BYTES: usize = 16;
 
 mod validation;
+pub use validation::entered_text;
 use validation::*;
 
 mod identity;
