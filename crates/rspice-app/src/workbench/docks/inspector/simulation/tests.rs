@@ -6,12 +6,13 @@
 use egui::Vec2;
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use crate::state::VerificationPage;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisType, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };

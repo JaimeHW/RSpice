@@ -11,12 +11,12 @@ use egui::{Rect, vec2};
 
 use super::pages;
 use crate::product::ContentDigest;
+use crate::state::SimulationPage;
 use crate::state::{
     AnalysisResult, AnalysisResultProvenance, AnalysisResultSourceDomain, AnalysisType,
     PreparedRunReceipt, PreparedRunTaskReceipt, PreparedSourceCheckReceipt, RetainedTrace,
     SavedOutput, SavedOutputMaterializationStatus, SavedOutputReceipt, SpecEntry, SpecPointScope,
 };
-use crate::workbench::state::SimulationPage;
 use crate::workbench::{AppState, RSpiceApp};
 
 const RENDER_VIEWPORT_HEIGHT: f32 = 2600.0;

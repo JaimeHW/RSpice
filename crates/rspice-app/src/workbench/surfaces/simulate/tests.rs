@@ -1906,7 +1906,7 @@ fn an_unattributed_measurement_never_answers_a_narrowed_specification() {
 
 /// Run one frame: the studio on `page`, or the overlay host alone when there
 /// is no page because the reader is not on this workspace at all.
-fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::workbench::state::SimulationPage>) {
+fn simulate_frame(app: &mut RSpiceApp, page: Option<crate::state::SimulationPage>) {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     if let Some(page) = page {
@@ -1968,7 +1968,7 @@ fn a_restored_session_starts_from_the_default_lifecycle_outcome() {
 /// and that must stay one event.
 #[test]
 fn a_render_path_refusal_restated_every_frame_is_one_event() {
-    use crate::workbench::state::SimulationPage;
+    use crate::state::SimulationPage;
 
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = None;

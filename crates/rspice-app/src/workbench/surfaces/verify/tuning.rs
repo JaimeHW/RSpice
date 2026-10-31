@@ -623,7 +623,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
             "No active simulation plan. Add an analysis in the Simulation setup.",
             Some("Open analyses"),
         ) {
-            Command::SimulationPage(crate::workbench::state::SimulationPage::Analyses).execute(app);
+            Command::SimulationPage(crate::state::SimulationPage::Analyses).execute(app);
         }
         return;
     };
@@ -715,8 +715,7 @@ pub(super) fn tuning(ui: &mut Ui, app: &mut RSpiceApp) {
             "No design variables are configured. Add variables in the Simulation setup.",
             Some("Open variables"),
         ) {
-            Command::SimulationPage(crate::workbench::state::SimulationPage::Variables)
-                .execute(app);
+            Command::SimulationPage(crate::state::SimulationPage::Variables).execute(app);
         }
         return;
     }

@@ -14,7 +14,7 @@ use super::{OptionsDialogState, RSpiceApp, SimulationOptions};
 /// has, which is why this asks the accessibility tree rather than the source.
 #[test]
 fn the_solver_page_publishes_no_override_authoring_control() {
-    use crate::workbench::state::SimulationPage;
+    use crate::state::SimulationPage;
 
     let names: Vec<String> = studio_route_nodes(studio_route(SimulationPage::Solver, None), 1280.0)
         .into_iter()

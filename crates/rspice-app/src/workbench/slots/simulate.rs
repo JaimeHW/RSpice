@@ -17,9 +17,9 @@ pub(crate) struct SimulateState {
     pub(crate) plan_removal_refusal:
         crate::workbench::app::dialogs::plan_removal::PlanRemovalRefusal,
 
-    pub verification_page: crate::workbench::state::VerificationPage,
+    pub verification_page: crate::state::VerificationPage,
     /// Selected Simulation Studio setup route.
-    pub simulation_page: crate::workbench::state::SimulationPage,
+    pub simulation_page: crate::state::SimulationPage,
     pub verification: crate::workbench::state::VerificationSessionState,
     /// Analysis row whose configuration is shown in the simulation plan.
     /// Retained only to migrate pre-instance session selection.
@@ -112,8 +112,8 @@ impl Default for SimulateState {
         Self {
             plan_removal_review: Default::default(),
             plan_removal_refusal: Default::default(),
-            verification_page: crate::workbench::state::VerificationPage::Yield,
-            simulation_page: crate::workbench::state::SimulationPage::Analyses,
+            verification_page: crate::state::VerificationPage::Yield,
+            simulation_page: crate::state::SimulationPage::Analyses,
             verification: Default::default(),
             active_analysis: crate::workbench::state::default_analysis_index(),
             active_analysis_instance: None,

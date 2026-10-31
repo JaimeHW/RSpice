@@ -14,7 +14,7 @@
 use egui::Ui;
 
 use crate::state::NominalFailurePolicy;
-use crate::workbench::state::SimulationPage;
+use crate::state::SimulationPage;
 use rspice_simulation_contract::run_set::{
     ReferencePoint, RunSetDimensionKind, RunSetState, nominal_point_key, resolve,
 };

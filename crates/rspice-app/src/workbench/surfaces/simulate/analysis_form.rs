@@ -1085,7 +1085,7 @@ pub(super) fn form(
     op_context: OpContextAvailability,
     run_space: &run_space::RunSpaceContext<'_>,
     study_bases: &[(crate::product::AnalysisInstanceId, String)],
-    route: &mut Option<crate::workbench::state::SimulationPage>,
+    route: &mut Option<crate::state::SimulationPage>,
 ) {
     clear_pending_cell(ui);
     ui.spacing_mut().item_spacing.y = FIELD_ROW_GAP;

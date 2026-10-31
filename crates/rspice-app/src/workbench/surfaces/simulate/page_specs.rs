@@ -7,6 +7,7 @@
 
 use egui::Ui;
 
+use crate::state::SimulationPage;
 use crate::state::workspace::SimulationPlanPayload;
 use crate::state::{
     MissingMeasurementPolicy, MonteCarloSpecificationGate, NominalFailurePolicy,
@@ -16,7 +17,7 @@ use crate::state::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
-use crate::workbench::state::{SimulationPage, SpecificationEvidenceFilter};
+use crate::workbench::state::SpecificationEvidenceFilter;
 
 use crate::ui::widgets::{Button, select};
 

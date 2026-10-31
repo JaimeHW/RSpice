@@ -650,7 +650,7 @@ pub(super) const REVEAL_ACTION: &str = "Open in Analyses";
 /// handler that asked for the whole application could mutate every subsystem to
 /// do it.
 pub(super) fn reveal_in_analyses(state: &mut AppState, instance: AnalysisInstanceId) {
-    state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
     state.simulate.active_analysis_instance = Some(instance);
 }
 

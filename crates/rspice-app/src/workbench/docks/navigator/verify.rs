@@ -8,8 +8,8 @@ use crate::ui::widgets::Problem;
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::{property_row, section_header};
-use super::super::super::state::VerificationPage;
 use super::flow_row;
+use crate::state::VerificationPage;
 
 /// Whether a navigator `available_height` tall keeps its scroll bar showing:
 /// the verification flows and the coverage history under them need more.

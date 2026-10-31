@@ -10,8 +10,8 @@ use crate::workbench::RSpiceApp;
 
 use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{WorkbenchIcon, section_header};
-use super::super::super::state::SimulationPage;
 use super::{nav_matches, nav_row};
+use crate::state::SimulationPage;
 
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
 // run-set values remain visually contained beside the analysis-stack divider.

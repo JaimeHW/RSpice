@@ -40,6 +40,7 @@ use crate::simulation::plan::{
     AnalysisDependency, AnalysisDependencyRepairContext, AnalysisDraft, AnalysisKind,
     AnalysisLifecycleCommand, AnalysisLifecycleReceipt, AnalysisLifecycleState, AnalysisPlanIssue,
 };
+use crate::state::SimulationPage;
 use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
@@ -51,7 +52,7 @@ use crate::workbench::app_state::SimSetupState;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::state::{
     AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
-    SavedOutputDraft, SimulationPage, SimulationPlanManagerDraft, SimulationPlanManagerMode,
+    SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
     SimulationWorkflowDialog, Workspace,
 };
 use crate::workbench::{AppState, RSpiceApp};
@@ -2210,7 +2211,7 @@ fn analysis_form_body(
     app: &RSpiceApp,
     draft: &mut AnalysisDraft,
     envelope_sources: Option<&EnvelopeSourceCatalog>,
-    route: &mut Option<crate::workbench::state::SimulationPage>,
+    route: &mut Option<crate::state::SimulationPage>,
     // The analysis's advanced options are fields of this form, and an edit to
     // one is not part of the draft: it lands on the instance's own override
     // record, through the plan transaction, after this frame has closed.

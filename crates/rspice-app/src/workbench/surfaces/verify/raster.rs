@@ -12,13 +12,14 @@
 use egui::{Rect, vec2};
 
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
+use crate::state::VerificationPage;
 use crate::state::{
     AnalysisResult, AnalysisResultFamilyMetadata, AnalysisType, FamilyMeasurementEvidence,
     FamilyMemberId, FamilyMemberMeasurements, RetainedTrace, SimulationRun, SimulationRunLifecycle,
     SpecEntry, SpecPointScope,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 use rspice_results::family_metadata::MonteCarloVariableMetadata;
 use rspice_simulation_contract::analysis_kind::AnalysisKind;
 

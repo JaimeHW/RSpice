@@ -558,7 +558,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
         if empty_line(ui, &text, Some("Open run set")) {
-            Command::SimulationPage(crate::workbench::state::SimulationPage::RunSet).execute(app);
+            Command::SimulationPage(crate::state::SimulationPage::RunSet).execute(app);
         }
         return;
     };
@@ -568,7 +568,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             "This corner run kept no outputs. Add measurements to the plan's outputs, then run it again.",
             Some("Open outputs"),
         ) {
-            Command::SimulationPage(crate::workbench::state::SimulationPage::Outputs).execute(app);
+            Command::SimulationPage(crate::state::SimulationPage::Outputs).execute(app);
         }
         return;
     }

@@ -15,7 +15,7 @@
 use super::*;
 
 use crate::simulation::plan::{AnalysisKind, NumericOverrideOption as O, SolverOwnership};
-use crate::workbench::state::SimulationPage;
+use crate::state::SimulationPage;
 
 #[test]
 fn hb_transient_startup_controls_reach_the_solver_and_follow_mode_changes() {

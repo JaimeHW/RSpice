@@ -10,8 +10,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::workbench::RSpiceApp;
 
 use super::super::super::design_system::property_row;
-use super::super::super::state::VerificationPage;
 use super::compact_readout;
+use crate::state::VerificationPage;
 
 /// The Verify inspector states only what its page does not: the Monte Carlo
 /// run's definition and worst samples, a corner run that failed, and the

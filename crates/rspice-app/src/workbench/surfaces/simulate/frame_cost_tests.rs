@@ -34,7 +34,7 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
         &mut app.state.model.schematic,
     );
     app.state.sync_active_schematic_to_workspace();
-    app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
     for dimension in &mut app.state.model.sim_setup.run_set.dimensions {
         dimension.enabled =
             dimension.kind == rspice_simulation_contract::run_set::RunSetDimensionKind::Temperature;
@@ -72,7 +72,7 @@ fn the_analyses_route_expands_the_declared_space_once_a_frame() {
 /// The counters are per thread and the routes are drawn one at a time, so a
 /// frame's cost is exactly what this returns.
 #[cfg(not(target_arch = "wasm32"))]
-fn derivations_for_route(page: crate::workbench::state::SimulationPage) -> (usize, usize, usize) {
+fn derivations_for_route(page: crate::state::SimulationPage) -> (usize, usize, usize) {
     use crate::simulation::cost_probe::{Derivation, count, reset};
 
     let ctx = egui::Context::default();
@@ -129,8 +129,7 @@ fn derivations_for_route(page: crate::workbench::state::SimulationPage) -> (usiz
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_run_set_route_derives_its_space_once_a_frame() {
-    let (expansions, validations, _) =
-        derivations_for_route(crate::workbench::state::SimulationPage::RunSet);
+    let (expansions, validations, _) = derivations_for_route(crate::state::SimulationPage::RunSet);
     assert_eq!(
         (expansions, validations),
         (1, 1),
@@ -147,7 +146,7 @@ fn the_run_set_route_derives_its_space_once_a_frame() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_outputs_and_save_routes_derive_the_space_once_a_frame() {
-    use crate::workbench::state::SimulationPage;
+    use crate::state::SimulationPage;
 
     for page in [SimulationPage::Outputs, SimulationPage::Save] {
         let (expansions, validations, _) = derivations_for_route(page);
@@ -173,7 +172,7 @@ fn the_outputs_and_save_routes_derive_the_space_once_a_frame() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_excitations_route_walks_the_whole_design_once_a_frame() {
-    let (_, _, walks) = derivations_for_route(crate::workbench::state::SimulationPage::Excitations);
+    let (_, _, walks) = derivations_for_route(crate::state::SimulationPage::Excitations);
     assert_eq!(
         walks, 1,
         "the route walked the design {walks} times to paint one ledger"

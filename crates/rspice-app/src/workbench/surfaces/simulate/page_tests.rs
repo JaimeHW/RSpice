@@ -22,7 +22,7 @@ use super::page_kit::column_rects;
 use super::pages;
 use crate::simulation::dialog::SimulationOptions;
 use crate::simulation::plan::OptionsDialogState;
-use crate::workbench::state::SimulationPage;
+use crate::state::SimulationPage;
 use crate::workbench::{AppState, RSpiceApp};
 
 /// Render one page and collect the text it painted.

@@ -17,8 +17,9 @@ use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{
     AnalysisResult, AnalysisResultPayload, AnalysisType, SimulationRun, SimulationState,
 };
+use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::{SimulationPage, VerificationPage, Workspace};
+use crate::workbench::state::Workspace;
 use rspice_results::yield_analysis::{
     DistributionStats, MonteCarloSamplingMode, YieldAnalysisProvenance, YieldResult, YieldSpec,
 };

@@ -20,8 +20,8 @@
 
 use egui::vec2;
 
+use crate::state::SimulationPage;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::SimulationPage;
 
 /// A control as its accessibility tree published it: what it announces, and
 /// where it is.

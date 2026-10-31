@@ -13,9 +13,9 @@
 
 use egui::vec2;
 
+use crate::state::SimulationPage;
 use crate::ui::raster::Canvas;
 use crate::workbench::RSpiceApp;
-use crate::workbench::state::SimulationPage;
 
 const APPROVED_PAGE_WIDTH: f32 = 1100.0;
 #[derive(Clone, Copy)]

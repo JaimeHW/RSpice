@@ -56,7 +56,7 @@ fn analyses_route_painted_lines(width: f32) -> Vec<PaintedLine> {
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
     let mut app = RSpiceApp::test_instance();
-    app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
     let output = ctx.run_ui(
         egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(width, 900.0))),
@@ -226,7 +226,7 @@ fn analyses_form_lines(kind: AnalysisKind, width: f32) -> Option<Vec<PaintedLine
         Some(instance) => instance.id(),
         None => plan.insert(kind).ok()?.0,
     };
-    app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+    app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
     app.state.simulate.active_analysis_instance = Some(instance);
     let mut run = || {
         ctx.run_ui(
@@ -455,7 +455,7 @@ impl AnalysesRoute {
     fn open(mut app: RSpiceApp, height: f32) -> Self {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        app.state.simulate.simulation_page = crate::workbench::state::SimulationPage::Analyses;
+        app.state.simulate.simulation_page = crate::state::SimulationPage::Analyses;
         let mut route = Self { ctx, app, height };
         route.settle(Vec::new());
         route
