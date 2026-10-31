@@ -138,10 +138,9 @@ pub(crate) mod docks {
         pub(in crate::workbench) mod source_bundle;
         pub(in crate::workbench) mod stimulus;
         pub(in crate::workbench) mod symbol;
+        mod verification_footer;
         pub(in crate::workbench) mod verify;
         pub(in crate::workbench) mod veriloga;
-        use netlist::*;
-        mod verification_footer;
         use verification_footer::*;
     }
 }

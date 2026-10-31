@@ -2300,25 +2300,5 @@ pub(super) fn netlist_source_mapping(ui: &mut Ui, app: &mut RSpiceApp, active_li
         });
 }
 
-/// A navigator row that states, in the row's own place, why a section is
-/// empty — a filtered-out list and an empty design must never look alike.
-pub(super) fn empty_navigator_row(ui: &mut Ui, message: &str) {
-    let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(
-        egui::vec2(ui.available_width().max(1.0), t.metrics.row_h.max(29.0)),
-        egui::Sense::hover(),
-    );
-    ui.painter().text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        message,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        t.color.text_dim,
-    );
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), message)
-    });
-}
-
 #[cfg(test)]
 mod tests;
