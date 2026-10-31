@@ -284,3 +284,27 @@ fn the_receipt_names_the_script_faces_a_page_letters() {
         ]
     );
 }
+
+/// The render budget allows each page the faces it can embed: a Latin
+/// sheet the six faces every build embeds, as before Arabic, Hebrew and
+/// Thai could print, and an Arabic sheet the Arabic cut as well.
+#[test]
+fn the_render_budget_allows_for_the_faces_a_page_letters_in() {
+    let content = extent(150_000, 40_000);
+    let allowance = |value: &str| {
+        let plan = undecorated_plan(OutputFormat::SvgVector, content);
+        crate::render::publication::embedded_font_allowance(
+            &plan,
+            &line_scene(content, SceneFont::Sans, value),
+        )
+        .unwrap()
+    };
+    // Plex Sans R, M and SB, Plex Mono R and M, and RSpice Symbols, twice.
+    let every_build = 1_777_480;
+    assert_eq!(allowance("Latin text, 10 kΩ ⌀6"), every_build);
+    #[cfg(not(target_arch = "wasm32"))]
+    assert_eq!(
+        allowance("قيمة R1"),
+        every_build + 2 * PrintFace::SansArabicRegular.bytes().len() as u64
+    );
+}

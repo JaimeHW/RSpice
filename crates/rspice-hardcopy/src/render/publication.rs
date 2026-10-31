@@ -2128,6 +2128,39 @@ pub(super) fn scene_contains_text(scene: &HardcopyScene) -> bool {
         || !scene.metadata.provenance_lines.is_empty()
 }
 
+/// The faces every build embeds. They letter Latin, Greek and the
+/// engineering symbols, so the render budget allows for them on any page.
+const EVERY_BUILD_FACES: [PrintFace; 6] = [
+    PrintFace::SansRegular,
+    PrintFace::SansMedium,
+    PrintFace::SansSemibold,
+    PrintFace::MonoRegular,
+    PrintFace::MonoMedium,
+    PrintFace::Symbols,
+];
+
+/// The bytes the render budget allows a page for the faces it embeds: the
+/// faces every build embeds, and any other face the plan's text letters
+/// in, such as Plex Sans Arabic. A page with no Arabic is not charged for
+/// it.
+pub(crate) fn embedded_font_allowance(
+    plan: &HardcopyPlan,
+    scene: &HardcopyScene,
+) -> Result<u64, HardcopyRenderError> {
+    if !plan.setup().render().fonts().embed_fonts() {
+        return Ok(0);
+    }
+    let mut faces: std::collections::BTreeSet<PrintFace> = EVERY_BUILD_FACES.into();
+    for page in plan.pagination().pages() {
+        add_page_faces(&mut faces, plan, scene, page)?;
+    }
+    Ok(faces
+        .iter()
+        .map(|face| face.bytes().len() as u64)
+        .sum::<u64>()
+        * 2)
+}
+
 fn validate_render_budget(
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
@@ -2263,15 +2296,7 @@ fn validate_render_budget(
             scope: "estimated vector bytes",
             maximum: MAX_ESTIMATED_VECTOR_BYTES,
         })?;
-    let embedded_font_bytes = if plan.setup().render().fonts().embed_fonts() {
-        PrintFace::ALL
-            .iter()
-            .map(|face| face.bytes().len() as u64)
-            .sum::<u64>()
-            * 2
-    } else {
-        0
-    };
+    let embedded_font_bytes = embedded_font_allowance(plan, scene)?;
     let format = plan.setup().render().format();
     let font_instances = if matches!(
         format,
