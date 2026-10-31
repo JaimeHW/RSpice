@@ -1,0 +1,78 @@
+[package]
+name = "rspice-app-models"
+version.workspace = true
+edition.workspace = true
+description = "The RSpice application's models feature: the Models & PDKs workspace, the device-model editor, measurement correlation and PDK authoring"
+license-file.workspace = true
+publish.workspace = true
+rust-version.workspace = true
+
+[lib]
+doctest = false
+
+[features]
+# Opens the feature's test-only seams (its harness fixtures and the PDK
+# workflow's persistence step) to the application's own tests; the fixtures
+# build over the framework's feature harness.
+test-support = ["rspice-app-workbench/test-support"]
+
+[dependencies]
+rspice-app-state.workspace = true
+rspice-app-services.workspace = true
+rspice-app-runs.workspace = true
+rspice-app-workbench.workspace = true
+rspice-vocabulary.workspace = true
+rspice-ui-kit.workspace = true
+rspice-schematic-editor.workspace = true
+rspice-model-library.workspace = true
+rspice-formats = { workspace = true, features = ["result-csv"] }
+rspice-simulation-contract.workspace = true
+rspice-simulation.workspace = true
+# Model Hub trust: the crate that signs a pack in RSpice Cloud is the crate
+# that verifies it here, on every target, so one code path reaches every
+# trust verdict.
+rspice-pack.workspace = true
+egui = { version = "0.35.0", default-features = false }
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json.workspace = true
+thiserror.workspace = true
+sha2 = "0.10"
+base64 = "0.23"
+# Complex number support
+num-complex = "0.4"
+uuid = { version = "1", features = ["v4", "v5", "v7", "serde"] }
+# Native file dialogs
+rfd = { version = "0.17", features = ["file-handle-inner"] }
+
+[dev-dependencies]
+rspice-app-state = { workspace = true, features = ["test-support"] }
+rspice-app-services = { workspace = true, features = ["test-support"] }
+rspice-app-runs = { workspace = true, features = ["test-support"] }
+rspice-app-workbench = { workspace = true, features = ["test-support"] }
+rspice-schematic-editor = { workspace = true, features = ["test-support"] }
+rspice-ui-kit = { workspace = true, features = ["test-support"] }
+rspice-model-library = { workspace = true, features = ["catalog-test-observation"] }
+rspice-simulation = { workspace = true, features = ["pdk-test-fixtures"] }
+rspice-simulation-contract = { workspace = true, features = ["derivation-test-observation"] }
+rspice-project = { workspace = true, features = ["library-test-fixtures"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga-native"] }
+
+[target.'cfg(all(not(target_arch = "wasm32"), not(all(any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))))'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga"] }
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
+wasm-bindgen = "0.2"
+serde-wasm-bindgen = "0.6"
+# uuid needs an explicit browser entropy source on wasm32-unknown-unknown
+uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
+wasm-bindgen-futures = "0.4"
+# The PDK workflow's browser half: the directory picker's input and the files
+# it hands back, and the module worker that imports a PDK off the page thread.
+web-sys = { version = "0.3", features = ["Window", "Document", "Element", "Event", "EventTarget", "HtmlElement", "HtmlInputElement", "File", "FileList", "Blob", "Url", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent"] }
+js-sys = "0.3"
+
+[lints]
+workspace = true

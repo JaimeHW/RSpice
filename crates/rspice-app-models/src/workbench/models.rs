@@ -5,15 +5,15 @@
 //! session aggregate that holds the models slot and the wire that persists
 //! it, so both name it without reaching up into the surfaces.
 
-pub(crate) mod commands;
-pub(crate) mod model_editor_workflow;
+pub mod commands;
+pub mod model_editor_workflow;
 #[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) mod pack_persistence;
+pub mod pack_persistence;
 #[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) mod pdk_persistence;
-pub(crate) mod pdk_workflow;
+pub mod pdk_persistence;
+pub mod pdk_workflow;
 pub(in crate::workbench) mod qualification;
-pub(crate) mod workspace_state;
+pub mod workspace_state;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ModelsPage;
@@ -514,5 +514,5 @@ fn render_model_browser_dialog(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Conte
 }
 
 /// What the models feature's tests build from.
-#[cfg(test)]
-pub(crate) mod tests;
+#[cfg(any(test, feature = "test-support"))]
+pub mod tests;

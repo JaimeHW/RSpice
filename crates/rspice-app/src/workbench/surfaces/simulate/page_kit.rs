@@ -1481,6 +1481,8 @@ mod tests {
         let results =
             Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-results/src/workbench");
         let cloud = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-cloud/src/workbench");
+        let models =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../rspice-app-models/src/workbench");
         let mut sites = Vec::new();
         for (surface, files, also) in STATUS_IN_COLOUR_SLICES {
             for file in files {
@@ -1490,6 +1492,7 @@ mod tests {
                     settings.join(file),
                     results.join(file),
                     cloud.join(file),
+                    models.join(file),
                 ]
                 .into_iter()
                 .find(|path| path.is_file())

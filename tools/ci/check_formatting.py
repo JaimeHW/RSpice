@@ -19,7 +19,7 @@ EXCLUDED_MEMBER_PREFIXES = ("rspice-veriloga-model-",)
 # The workspace has not had fewer members than this since the application
 # crates were extracted. Without the floor, a metadata read that returned a
 # handful of packages would report success for having checked almost nothing.
-MINIMUM_MEMBERS = 52
+MINIMUM_MEMBERS = 53
 
 # Windows caps a command line at 32767 bytes for the whole line, and cargo fmt
 # hands every target of a package to one rustfmt process. rspice-core declares

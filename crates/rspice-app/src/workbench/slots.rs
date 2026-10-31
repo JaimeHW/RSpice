@@ -12,7 +12,7 @@ use rspice_app_cloud::workbench::slots::cloud;
 mod code;
 mod design;
 use rspice_app_hardcopy::workbench::slots::hardcopy;
-mod models;
+use rspice_app_models::workbench::slots::models;
 pub(in crate::workbench) use rspice_app_services::workbench::slots::platform;
 mod project;
 use rspice_app_results::workbench::slots::results;

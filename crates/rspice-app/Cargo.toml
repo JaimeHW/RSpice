@@ -41,6 +41,7 @@ rspice-app-runs.workspace = true
 rspice-app-workbench.workspace = true
 rspice-app-hardcopy.workspace = true
 rspice-app-cloud.workspace = true
+rspice-app-models.workspace = true
 rspice-app-results.workspace = true
 rspice-app-settings.workspace = true
 rspice-app-sheets.workspace = true
@@ -79,9 +80,6 @@ similar = "2.7"
 log = "0.4"
 web-time.workspace = true
 
-# Complex number support
-num-complex = "0.4"
-
 # Image encoding for GPU output
 png = "0.18"
 base64 = "0.23"
@@ -109,6 +107,7 @@ rspice-app-runs = { workspace = true, features = ["test-support"] }
 rspice-app-workbench = { workspace = true, features = ["test-support"] }
 rspice-app-hardcopy = { workspace = true, features = ["test-support"] }
 rspice-app-cloud = { workspace = true, features = ["test-support"] }
+rspice-app-models = { workspace = true, features = ["test-support"] }
 rspice-app-results = { workspace = true, features = ["test-support"] }
 rspice-app-settings = { workspace = true, features = ["test-support"] }
 rspice-results-ui = { workspace = true, features = ["test-support"] }
@@ -129,6 +128,10 @@ wat = "1"
 # drawing-sheet preset tests sign a package with a fixed dalek key.
 time = { workspace = true }
 ed25519-dalek = { version = "2", default-features = false, features = ["std", "zeroize"] }
+
+# The Model Hub's feature tests and the design shelf's tests verify signed
+# packs with the trust crate the models feature verifies them with.
+rspice-pack = { workspace = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
 lopdf = { version = "0.45", default-features = false }
@@ -158,10 +161,6 @@ env_logger = "0.11"
 # `time` answers that only in a single-threaded process on Unix, and this one
 # never is; chrono reads the zone database itself. The browser asks `Date`.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
-
-# Model Hub trust: the crate that signs a pack in RSpice Cloud is the crate
-# that verifies it here, so one code path reaches every trust verdict.
-rspice-pack = { workspace = true }
 
 [target.'cfg(all(not(target_arch = "wasm32"), any(target_arch = "x86_64", target_arch = "aarch64"), any(target_os = "macos", target_os = "linux", windows)))'.dependencies]
 # Default features keep the desktop solver's parallel paths. The native
@@ -209,16 +208,12 @@ wgpu = { version = "29.0", default-features = false, features = ["webgpu"] }
 # secondary-module emitter and verifier from being duplicated in both images.
 rspice-core = { path = "../rspice-core", version = "0.1.0", default-features = false, features = ["veriloga", "wasm"] }
 wasm-bindgen = "0.2"
-serde-wasm-bindgen = "0.6"
 # uuid needs an explicit browser entropy source on wasm32-unknown-unknown
 uuid = { version = "1", features = ["v4", "v5", "v7", "js", "serde"] }
 wasm-bindgen-futures = "0.4"
 # The Notification group is the run alert a hidden tab raises.
-web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "HtmlInputElement", "File", "FileList", "CanvasRenderingContext2d", "Node", "Blob", "BlobPropertyBag", "Url", "Performance", "Storage", "Worker", "WorkerOptions", "WorkerType", "MessageEvent", "ErrorEvent", "console", "Notification", "NotificationOptions", "NotificationPermission"] }
+web-sys = { version = "0.3", features = ["Window", "Location", "History", "PopStateEvent", "Document", "Element", "Event", "EventTarget", "BeforeUnloadEvent", "HtmlCanvasElement", "HtmlElement", "CanvasRenderingContext2d", "Node", "BlobPropertyBag", "Url", "Performance", "Storage", "console", "Notification", "NotificationOptions", "NotificationPermission"] }
 js-sys = "0.3"
-
-# The pack trust crate is portable and reaches the same verdict in the browser.
-rspice-pack = { workspace = true }
 
 [target.'cfg(target_arch = "wasm32")'.dev-dependencies]
 wasm-bindgen-test = "0.3.76"

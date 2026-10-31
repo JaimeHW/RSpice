@@ -1,6 +1,6 @@
 //! PDK setup workflow.
 
-pub(crate) mod model_hub;
+pub mod model_hub;
 
 pub(in crate::workbench) use model_hub::ModelHubRequest;
 #[cfg(not(target_arch = "wasm32"))]
@@ -230,7 +230,7 @@ thread_local! {
         const { std::cell::RefCell::new(None) };
 }
 
-#[cfg(any(test, target_arch = "wasm32"))]
+#[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]
 fn prepare_pdk_configuration(
     model: &Model,
     platform: &PlatformState,
@@ -283,7 +283,7 @@ fn prepare_pdk_configuration_candidate(
 
 /// A directory holding one model source file, for a PDK configuration to
 /// name.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn configured_root(label: &str, file_name: &str, model_name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "rspice-pdk-workflow-{label}-{}",
@@ -298,7 +298,7 @@ pub fn configured_root(label: &str, file_name: &str, model_name: &str) -> std::p
     root
 }
 
-#[cfg(test)]
+#[cfg(any(test, feature = "test-support"))]
 pub fn apply_pdk_configuration_with_persistence(
     model: &mut Model,
     platform: &PlatformState,

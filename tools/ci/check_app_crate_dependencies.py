@@ -125,6 +125,16 @@ ALLOWED: dict[str, set[str]] = {
         "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
         "rspice-simulation-contract",
     },
+    # The models feature: the persisted model, the platform services, the run
+    # tier whose controller prepares the netlists it inspects, the workbench
+    # framework it registers with, and the model library, simulation, format,
+    # schematic and painting crates its workspace, editor and qualification
+    # are built on.
+    "rspice-app-models": {
+        "rspice-app-state", "rspice-app-services", "rspice-app-runs", "rspice-app-workbench",
+        "rspice-model-library", "rspice-simulation", "rspice-simulation-contract",
+        "rspice-formats", "rspice-schematic-editor", "rspice-ui-kit", "rspice-vocabulary",
+    },
     "rspice-worker": {
         "rspice-vocabulary", "rspice-results", "rspice-model-library",
         "rspice-simulation-contract", "rspice-hardcopy-contract", "rspice-design",
@@ -135,6 +145,7 @@ HEADLESS = set(ALLOWED) - {
     "rspice-fonts", "rspice-ui-kit", "rspice-schematic-editor", "rspice-results-ui", "rspice-app-state",
     "rspice-app-services", "rspice-app-runs", "rspice-app-workbench", "rspice-app-sheets",
     "rspice-app-settings", "rspice-app-results", "rspice-app-hardcopy", "rspice-app-cloud",
+    "rspice-app-models",
 }
 # The application's features, each a crate of its own once it is extracted. A
 # feature reaches no other feature, and nothing above the workbench framework.

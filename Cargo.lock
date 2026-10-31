@@ -5172,7 +5172,6 @@ dependencies = [
  "js-sys",
  "log",
  "lopdf",
- "num-complex",
  "parquet",
  "png",
  "rfd",
@@ -5180,6 +5179,7 @@ dependencies = [
  "ropey",
  "rspice-app-cloud",
  "rspice-app-hardcopy",
+ "rspice-app-models",
  "rspice-app-results",
  "rspice-app-runs",
  "rspice-app-services",
@@ -5211,7 +5211,6 @@ dependencies = [
  "rustyhdf5",
  "semver",
  "serde",
- "serde-wasm-bindgen",
  "serde_json",
  "sha2 0.10.9",
  "similar",
@@ -5304,6 +5303,40 @@ dependencies = [
  "wasm-bindgen",
  "web-sys",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "rspice-app-models"
+version = "0.1.0"
+dependencies = [
+ "base64 0.23.1",
+ "egui",
+ "js-sys",
+ "num-complex",
+ "rfd",
+ "rspice-app-runs",
+ "rspice-app-services",
+ "rspice-app-state",
+ "rspice-app-workbench",
+ "rspice-core",
+ "rspice-formats",
+ "rspice-model-library",
+ "rspice-pack",
+ "rspice-project",
+ "rspice-schematic-editor",
+ "rspice-simulation",
+ "rspice-simulation-contract",
+ "rspice-ui-kit",
+ "rspice-vocabulary",
+ "serde",
+ "serde-wasm-bindgen",
+ "serde_json",
+ "sha2 0.10.9",
+ "thiserror 2.0.21",
+ "uuid",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

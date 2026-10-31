@@ -69,7 +69,7 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::document_bar::*;
         pub(crate) mod code;
         pub(crate) mod design;
-        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) use rspice_app_models::workbench::chrome::document_bar::models;
         pub(in crate::workbench) mod project;
         pub(in crate::workbench) use rspice_app_results::workbench::chrome::document_bar::results;
         pub(in crate::workbench) mod simulate;
@@ -90,7 +90,7 @@ pub(crate) mod chrome {
         pub use rspice_app_workbench::workbench::chrome::toolbar::*;
         pub(in crate::workbench) mod code;
         pub(crate) mod design;
-        pub(in crate::workbench) mod models;
+        pub(in crate::workbench) use rspice_app_models::workbench::chrome::toolbar::models;
         pub(in crate::workbench) mod project;
         pub(crate) use rspice_app_results::workbench::chrome::toolbar::results;
         pub(in crate::workbench) mod run_config_chip;
@@ -112,7 +112,6 @@ pub(crate) mod docks {
         pub use rspice_app_workbench::workbench::docks::inspector::*;
         pub(in crate::workbench) mod code_workspace;
         pub(crate) mod design;
-        pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod project;
         #[cfg(test)]
         pub(crate) use rspice_app_results::workbench::docks::inspector::results;
@@ -133,7 +132,6 @@ pub(crate) mod docks {
     pub(super) mod navigator {
         pub use rspice_app_workbench::workbench::docks::navigator::*;
         pub(in crate::workbench) mod design;
-        pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod netlist;
         pub(in crate::workbench) mod project;
         pub(in crate::workbench) mod simulate;
@@ -150,8 +148,9 @@ pub(crate) mod docks {
 pub(crate) mod documents {
     pub use rspice_app_workbench::workbench::documents::*;
     pub(crate) mod code_workspace;
-    pub(crate) mod model_correlation;
-    pub(crate) mod model_editor;
+    #[cfg(test)]
+    pub(crate) use rspice_app_models::workbench::documents::model_correlation;
+    pub(crate) use rspice_app_models::workbench::documents::model_editor;
     pub(crate) mod netlist_document;
     pub(crate) use rspice_app_results::workbench::documents::result_document;
     pub(crate) mod text_document_model;
@@ -200,7 +199,7 @@ pub(crate) use rspice_app_cloud::workbench::live_session;
 pub(crate) use rspice_app_workbench::workbench::localization;
 pub(crate) mod logging;
 pub(crate) mod menu_bar;
-pub(crate) mod models;
+pub(crate) use rspice_app_models::workbench::models;
 pub(crate) mod project;
 pub(crate) use rspice_app_results::workbench::results;
 pub(crate) use rspice_app_runs::workbench::preflight;
@@ -223,12 +222,7 @@ pub(crate) mod surfaces {
     pub(super) mod automation;
     pub(super) mod design;
     pub(super) mod library_cellview_manager;
-    pub(super) mod model_correlation;
-    mod model_correlation_controller;
-    pub(super) mod model_editor;
-    pub(super) mod models;
     pub(super) mod netlist;
-    pub(super) mod pdk_technology_admin;
     pub(super) mod project;
     pub(super) mod simulate;
     pub(super) mod stimulus;

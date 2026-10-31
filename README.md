@@ -415,6 +415,7 @@ use faer.
 | [`rspice-app-results`](crates/rspice-app-results) | The application's results feature: the Results workspace, its result documents and viewers, result import and waveform export |
 | [`rspice-app-hardcopy`](crates/rspice-app-hardcopy) | The application's hardcopy feature: Page Setup, Print and Export, report authoring, hardcopy sources and the publication snapshot |
 | [`rspice-app-cloud`](crates/rspice-app-cloud) | The application's cloud feature: the RSpice Cloud account and licence, web publication and the live session |
+| [`rspice-app-models`](crates/rspice-app-models) | The application's models feature: the Models & PDKs workspace, the device-model editor, measurement correlation and PDK authoring |
 | [`rspice-design`](crates/rspice-design) | Schematic documents, connectivity, hierarchy, rule checks and symbols |
 | [`rspice-design-model`](crates/rspice-design-model) | Design-management data and the signed drawing-sheet package |
 | [`rspice-schematic-editor`](crates/rspice-schematic-editor) | Schematic and symbol editor painting and interaction |

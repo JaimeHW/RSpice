@@ -128,7 +128,6 @@ pub(crate) mod services {
     mod drc_tests;
     pub(crate) use rspice_app_cloud::services::license;
     pub(crate) use rspice_app_services::services::model_hub;
-    pub(crate) mod model_qualification;
     pub(crate) use rspice_app_services::services::recent_files;
     pub(crate) use rspice_app_services::services::session;
 

@@ -20,6 +20,7 @@ use rspice_app_state::workbench::workspace::restore_model_library_manager;
 use super::ModelsFeature;
 
 /// The cases of the models feature's commands that the feature answers.
+#[cfg(test)]
 mod commands;
 
 /// The models feature on its own, over what a new session starts with:
