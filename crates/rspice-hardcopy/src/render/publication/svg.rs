@@ -98,7 +98,7 @@ pub(super) fn render_page_svg(
 /// page's SVG makes, writing nothing: every backend letters a run through the
 /// same chain, so the faces are the same whatever the format.
 pub(super) fn add_page_faces(
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -114,7 +114,7 @@ pub(super) fn add_page_faces(
 
 /// An `@font-face` rule, with the face's data inline, for each face in
 /// `faces`.
-pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<Face>) {
+pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<PrintFace>) {
     let encoded = |bytes: &[u8]| base64::engine::general_purpose::STANDARD.encode(bytes);
     output.push_str("<style>");
     for &face in faces {
@@ -131,7 +131,7 @@ pub(super) fn write_embedded_svg_fonts(output: &mut String, faces: &BTreeSet<Fac
 
 pub(super) fn write_svg_primitive(
     output: &mut String,
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     plan: &HardcopyPlan,
     transform: PageTransform,
     primitive: &ScenePrimitive,
@@ -412,7 +412,7 @@ pub(super) fn write_svg_fill(output: &mut String, plan: &HardcopyPlan, fill: Opt
 }
 
 pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
-    publication_face(font.role().primary())
+    publication_face(font.role().print_primary())
 }
 
 /// Write `text` as `font` letters it. A run in the element's own face is
@@ -422,12 +422,12 @@ pub(super) fn svg_font(font: SceneFont) -> (&'static str, &'static str) {
 /// lettered in joins `faces`, the set the page embeds.
 pub(super) fn write_svg_text_runs(
     output: &mut String,
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     font: SceneFont,
     text: &str,
 ) {
-    let own = font.role().primary();
-    for run in font.role().runs(Sink::Print, text) {
+    let own = font.role().print_primary();
+    for run in font.role().runs(text) {
         faces.insert(run.face);
         if run.face == own {
             escape_xml_into(&run.text, output);
@@ -459,7 +459,7 @@ pub(super) fn escape_xml_into(value: &str, output: &mut String) {
 
 pub(super) fn write_svg_decorations(
     output: &mut String,
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -611,7 +611,7 @@ pub(super) fn write_svg_trim_marks(output: &mut String, plan: &HardcopyPlan, pag
 
 pub(super) fn write_svg_watermark(
     output: &mut String,
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     plan: &HardcopyPlan,
     scene: &HardcopyScene,
     page: &PreviewPage,
@@ -639,7 +639,7 @@ pub(super) fn write_svg_watermark(
 
 pub(super) fn write_svg_registration_marks(
     output: &mut String,
-    faces: &mut BTreeSet<Face>,
+    faces: &mut BTreeSet<PrintFace>,
     plan: &HardcopyPlan,
     page: &PreviewPage,
 ) {

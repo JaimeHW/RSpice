@@ -22,23 +22,14 @@ pub(super) const PUBLICATION_MONO: &str = "RSpice Plex Mono";
 pub(super) const PUBLICATION_SYMBOLS: &str = "RSpice Symbols";
 
 /// The family and CSS weight each embedded face is published under.
-pub(super) const fn publication_face(face: Face) -> (&'static str, &'static str) {
+pub(super) const fn publication_face(face: PrintFace) -> (&'static str, &'static str) {
     match face {
-        Face::SansRegular => (PUBLICATION_SANS, "400"),
-        Face::SansMedium => (PUBLICATION_SANS, "500"),
-        Face::SansSemibold => (PUBLICATION_SANS, "600"),
-        Face::MonoRegular => (PUBLICATION_MONO, "400"),
-        Face::MonoMedium => (PUBLICATION_MONO, "500"),
-        Face::Symbols => (PUBLICATION_SYMBOLS, "400"),
-        // Print letters none of these until it shapes their scripts; see
-        // `Sink::Print`.
-        #[cfg(not(target_arch = "wasm32"))]
-        Face::SansArabicRegular
-        | Face::SansArabicSemibold
-        | Face::SansHebrewRegular
-        | Face::SansHebrewSemibold
-        | Face::SansThaiRegular
-        | Face::SansThaiSemibold => panic!("print letters no right-to-left or Thai face"),
+        PrintFace::SansRegular => (PUBLICATION_SANS, "400"),
+        PrintFace::SansMedium => (PUBLICATION_SANS, "500"),
+        PrintFace::SansSemibold => (PUBLICATION_SANS, "600"),
+        PrintFace::MonoRegular => (PUBLICATION_MONO, "400"),
+        PrintFace::MonoMedium => (PUBLICATION_MONO, "500"),
+        PrintFace::Symbols => (PUBLICATION_SYMBOLS, "400"),
     }
 }
 

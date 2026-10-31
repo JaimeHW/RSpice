@@ -10,7 +10,7 @@
 
 use std::sync::OnceLock;
 
-use rspice_fonts::{Face, Role, Run, Sink};
+use rspice_fonts::{PrintFace, Role, Run};
 
 use super::*;
 
@@ -41,9 +41,8 @@ impl PrintFaces {
         static FACES: OnceLock<Result<PrintFaces, &'static str>> = OnceLock::new();
         FACES
             .get_or_init(|| {
-                Sink::Print
-                    .faces()
-                    .iter()
+                PrintFace::ALL
+                    .into_iter()
                     .map(|face| ttf_parser::Face::parse(face.bytes(), 0).map_err(|_| face.name()))
                     .collect::<Result<Vec<_>, _>>()
                     .map(|faces| Self { faces })
@@ -52,7 +51,7 @@ impl PrintFaces {
             .map_err(|name| HardcopyRenderError::InvalidEmbeddedFont(name))
     }
 
-    pub(crate) fn face(&self, face: Face) -> &ttf_parser::Face<'static> {
+    pub(crate) fn face(&self, face: PrintFace) -> &ttf_parser::Face<'static> {
         &self.faces[face as usize]
     }
 
@@ -74,11 +73,11 @@ impl PrintFaces {
     /// first face's em. Overhangs count as well as advances, so a grapheme
     /// kept whole at a wrap never inks past its measured width.
     pub(crate) fn grapheme_width(&self, font: SceneFont, grapheme: &str) -> u64 {
-        let primary = i64::from(self.face(font.role().primary()).units_per_em());
+        let primary = i64::from(self.face(font.role().print_primary()).units_per_em());
         let mut advance = 0_i64;
         let mut left = 0_i64;
         let mut right = 0_i64;
-        for run in font.role().runs(Sink::Print, grapheme) {
+        for run in font.role().runs(grapheme) {
             let face = self.face(run.face);
             let scale = |value: i64| value * primary / i64::from(face.units_per_em());
             for character in run.text.chars() {
@@ -98,10 +97,10 @@ impl PrintFaces {
 
     /// The em of `font`'s first face, in its own units.
     pub(crate) fn units_per_em(&self, font: SceneFont) -> u64 {
-        u64::from(self.face(font.role().primary()).units_per_em())
+        u64::from(self.face(font.role().print_primary()).units_per_em())
     }
 
-    fn to_primary_units(&self, font: SceneFont, face: Face, value: u64) -> u64 {
+    fn to_primary_units(&self, font: SceneFont, face: PrintFace, value: u64) -> u64 {
         let primary = self.units_per_em(font);
         value * primary / u64::from(self.face(face).units_per_em())
     }
@@ -111,14 +110,14 @@ impl PrintFaces {
 /// family, weight and version, and the SHA-256 of the bytes the binary
 /// embeds, worked out once per process.
 pub(crate) fn receipt_faces(
-    faces: &std::collections::BTreeSet<Face>,
+    faces: &std::collections::BTreeSet<PrintFace>,
 ) -> Result<Vec<HardcopyFace>, HardcopyRenderError> {
     use rspice_hardcopy_contract::HardcopyFaceSource;
 
     static ENTRIES: OnceLock<Result<Vec<HardcopyFace>, &'static str>> = OnceLock::new();
     let entries = ENTRIES
         .get_or_init(|| {
-            Face::ALL
+            PrintFace::ALL
                 .into_iter()
                 .map(|face| {
                     let parsed =
@@ -130,8 +129,8 @@ pub(crate) fn receipt_faces(
                         .find_map(|name| name.to_string())
                         .ok_or(face.name())?;
                     HardcopyFace::try_new(
-                        face.family(),
-                        face.weight(),
+                        face.face().family(),
+                        face.face().weight(),
                         version.trim(),
                         ContentDigest::from_bytes(Sha256::digest(face.bytes()).into()),
                         HardcopyFaceSource::Bundled,

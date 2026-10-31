@@ -18,15 +18,14 @@ impl PdfFonts {
     fn load() -> Result<Self, HardcopyRenderError> {
         Ok(Self {
             faces: PrintFaces::get()?,
-            fonts: Sink::Print
-                .faces()
-                .iter()
+            fonts: PrintFace::ALL
+                .into_iter()
                 .map(|face| load_pdf_font(face.bytes(), face.name()))
                 .collect::<Result<_, _>>()?,
         })
     }
 
-    fn font(&self, face: Face) -> &Font {
+    fn font(&self, face: PrintFace) -> &Font {
         &self.fonts[face as usize]
     }
 }
@@ -585,7 +584,7 @@ fn draw_pdf_text(
         outlined,
         opacity,
     } = style;
-    let runs = font.role().runs(Sink::Print, text);
+    let runs = font.role().runs(text);
     let em = fonts.faces.units_per_em(font) as f32;
     let advances = runs
         .iter()

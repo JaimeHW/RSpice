@@ -16,7 +16,9 @@
 //! A [`Sink`] is where text is lettered. The screen letters from every face
 //! in a chain. Print does not yet order right-to-left text, join Arabic or
 //! stack Thai marks, so it letters none of those scripts' faces, and their
-//! characters print as the replacement square.
+//! characters print as the replacement square. Print names its faces with
+//! [`PrintFace`], which has no name for those faces, so a face resolved for
+//! the screen cannot reach a print table.
 //!
 //! The faces are distributed under the SIL Open Font License 1.1; each
 //! face's [`Face::licence`] is the text that must travel with it.
@@ -95,9 +97,6 @@ const RSPICE_SYMBOLS_LICENCE: &str = include_str!(concat!(
 ));
 
 /// One embedded face.
-///
-/// The faces print letters come first, so a table of them indexed by
-/// `face as usize` holds no others.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub enum Face {
     SansRegular,
@@ -120,19 +119,16 @@ pub enum Face {
     SansThaiSemibold,
 }
 
-/// The faces every sink letters, in declaration order.
-const PRINTED: [Face; 6] = [
-    Face::SansRegular,
-    Face::SansMedium,
-    Face::SansSemibold,
-    Face::MonoRegular,
-    Face::MonoMedium,
-    Face::Symbols,
-];
-
 impl Face {
     #[cfg(target_arch = "wasm32")]
-    pub const ALL: [Self; 6] = PRINTED;
+    pub const ALL: [Self; 6] = [
+        Self::SansRegular,
+        Self::SansMedium,
+        Self::SansSemibold,
+        Self::MonoRegular,
+        Self::MonoMedium,
+        Self::Symbols,
+    ];
     #[cfg(not(target_arch = "wasm32"))]
     pub const ALL: [Self; 12] = [
         Self::SansRegular,
@@ -413,7 +409,20 @@ impl Role {
             .map_or((Face::Symbols, REPLACEMENT), |face| (face, character))
     }
 
-    /// `text` as the role letters it in `sink`, split where the face changes.
+    /// The face print letters the role's own text in: [`Self::primary`],
+    /// which every sink letters from.
+    #[must_use]
+    pub const fn print_primary(self) -> PrintFace {
+        match self {
+            Self::Sans => PrintFace::SansRegular,
+            Self::SansMedium => PrintFace::SansMedium,
+            Self::SansSemibold => PrintFace::SansSemibold,
+            Self::Mono => PrintFace::MonoRegular,
+            Self::MonoMedium => PrintFace::MonoMedium,
+        }
+    }
+
+    /// `text` as print letters it in the role, split where the face changes.
     ///
     /// A grapheme cluster is never split between faces: it is lettered by the
     /// first face that has every character of it that draws, or else by the
@@ -421,10 +430,10 @@ impl Role {
     /// cluster whose first character no face has letters as one
     /// [`REPLACEMENT`].
     #[must_use]
-    pub fn runs(self, sink: Sink, text: &str) -> Vec<Run> {
+    pub fn runs(self, text: &str) -> Vec<Run> {
         let mut runs: Vec<Run> = Vec::new();
         for cluster in text.graphemes(true) {
-            let (face, lettered) = self.letter_cluster(sink, cluster);
+            let (face, lettered) = self.letter_cluster(cluster);
             match runs.last_mut() {
                 Some(run) if run.face == face => run.text.push_str(lettered),
                 _ => runs.push(Run {
@@ -436,23 +445,28 @@ impl Role {
         runs
     }
 
-    fn letter_cluster(self, sink: Sink, cluster: &str) -> (Face, &str) {
-        let whole = self.faces_in(sink).find(|face| {
+    /// The faces of the chain print letters from, in order.
+    fn print_faces(self) -> impl Iterator<Item = PrintFace> {
+        self.chain().iter().filter_map(|face| face.printed())
+    }
+
+    fn letter_cluster(self, cluster: &str) -> (PrintFace, &str) {
+        let whole = self.print_faces().find(|face| {
             cluster
                 .chars()
                 .filter(|character| draws(*character))
-                .all(|character| face.covers(character))
+                .all(|character| face.face().covers(character))
         });
         if let Some(face) = whole {
             return (face, cluster);
         }
-        match cluster
+        let first = cluster
             .chars()
             .next()
-            .and_then(|first| self.face_for(sink, first))
-        {
+            .and_then(|first| self.print_faces().find(|face| face.face().covers(first)));
+        match first {
             Some(face) => (face, cluster),
-            None => (Face::Symbols, REPLACEMENT_TEXT),
+            None => (PrintFace::Symbols, REPLACEMENT_TEXT),
         }
     }
 }
@@ -477,35 +491,81 @@ impl Sink {
     pub const fn letters(self, face: Face) -> bool {
         match self {
             Self::Screen => true,
-            Self::Print => !face.needs_complex_shaping(),
-        }
-    }
-
-    /// Every embedded face the sink letters from. Print's faces come first
-    /// in [`Face::ALL`], so a table of them indexed by `face as usize`
-    /// covers every face print letters.
-    #[must_use]
-    pub const fn faces(self) -> &'static [Face] {
-        match self {
-            Self::Screen => &Face::ALL,
-            Self::Print => &PRINTED,
+            Self::Print => face.printed().is_some(),
         }
     }
 }
 
+/// A face print letters from. It cannot name a face of a script print does
+/// not yet shape, so a print table indexed by it holds every face print can
+/// ask for, and print cannot be handed a face the screen resolved.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub enum PrintFace {
+    SansRegular,
+    SansMedium,
+    SansSemibold,
+    MonoRegular,
+    MonoMedium,
+    Symbols,
+}
+
+impl PrintFace {
+    pub const ALL: [Self; 6] = [
+        Self::SansRegular,
+        Self::SansMedium,
+        Self::SansSemibold,
+        Self::MonoRegular,
+        Self::MonoMedium,
+        Self::Symbols,
+    ];
+
+    /// The embedded face.
+    #[must_use]
+    pub const fn face(self) -> Face {
+        match self {
+            Self::SansRegular => Face::SansRegular,
+            Self::SansMedium => Face::SansMedium,
+            Self::SansSemibold => Face::SansSemibold,
+            Self::MonoRegular => Face::MonoRegular,
+            Self::MonoMedium => Face::MonoMedium,
+            Self::Symbols => Face::Symbols,
+        }
+    }
+
+    /// The face's TrueType bytes; see [`Face::bytes`].
+    #[must_use]
+    pub const fn bytes(self) -> &'static [u8] {
+        self.face().bytes()
+    }
+
+    /// The face's family and weight; see [`Face::name`].
+    #[must_use]
+    pub const fn name(self) -> &'static str {
+        self.face().name()
+    }
+}
+
 impl Face {
-    /// Whether the face letters a script that must be ordered right to left,
-    /// or have its marks stacked, before it reads correctly.
-    const fn needs_complex_shaping(self) -> bool {
-        !matches!(
-            self,
-            Self::SansRegular
-                | Self::SansMedium
-                | Self::SansSemibold
-                | Self::MonoRegular
-                | Self::MonoMedium
-                | Self::Symbols
-        )
+    /// The face as print names it, or `None` for a face of a script that
+    /// must be ordered right to left, or have its marks stacked, before it
+    /// reads correctly, which print does not yet do.
+    #[must_use]
+    pub const fn printed(self) -> Option<PrintFace> {
+        match self {
+            Self::SansRegular => Some(PrintFace::SansRegular),
+            Self::SansMedium => Some(PrintFace::SansMedium),
+            Self::SansSemibold => Some(PrintFace::SansSemibold),
+            Self::MonoRegular => Some(PrintFace::MonoRegular),
+            Self::MonoMedium => Some(PrintFace::MonoMedium),
+            Self::Symbols => Some(PrintFace::Symbols),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::SansArabicRegular
+            | Self::SansArabicSemibold
+            | Self::SansHebrewRegular
+            | Self::SansHebrewSemibold
+            | Self::SansThaiRegular
+            | Self::SansThaiSemibold => None,
+        }
     }
 }
 
@@ -519,10 +579,10 @@ fn draws(character: char) -> bool {
     )
 }
 
-/// A stretch of text lettered in one face.
+/// A stretch of text print letters in one face.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Run {
-    pub face: Face,
+    pub face: PrintFace,
     pub text: String,
 }
 

@@ -3,7 +3,7 @@
 //! carries prints as the replacement square the canvas paints for it: text
 //! never refuses a print.
 
-use rspice_fonts::{REPLACEMENT, Role, Sink};
+use rspice_fonts::{Face, REPLACEMENT, Role, Sink};
 
 use super::*;
 
@@ -323,18 +323,12 @@ fn print_letters_unshaped_scripts_as_the_replacement_square() {
     // The screen letters the same text from Plex Sans Arabic, Hebrew and Thai.
     #[cfg(not(target_arch = "wasm32"))]
     assert_eq!(
-        SceneFont::Sans
-            .role()
-            .runs(Sink::Screen, "قيمة שלום ไทย")
-            .into_iter()
-            .map(|run| run.face)
-            .collect::<Vec<_>>(),
+        ['ق', ' ', 'ש', 'ไ'].map(|letter| SceneFont::Sans.role().face_for(Sink::Screen, letter)),
         [
-            Face::SansArabicRegular,
-            Face::SansRegular,
-            Face::SansHebrewRegular,
-            Face::SansRegular,
-            Face::SansThaiRegular,
+            Some(Face::SansArabicRegular),
+            Some(Face::SansRegular),
+            Some(Face::SansHebrewRegular),
+            Some(Face::SansThaiRegular),
         ]
     );
 }

@@ -153,7 +153,7 @@ fn a_character_no_face_has_resolves_to_the_replacement_square() {
     }
 }
 
-fn expected(runs: &[(Face, &str)]) -> Vec<Run> {
+fn expected(runs: &[(PrintFace, &str)]) -> Vec<Run> {
     runs.iter()
         .map(|(face, text)| Run {
             face: *face,
@@ -165,14 +165,14 @@ fn expected(runs: &[(Face, &str)]) -> Vec<Run> {
 #[test]
 fn runs_split_where_the_face_changes() {
     assert_eq!(
-        Role::Mono.runs(Sink::Print, "⌀10 mm Δ"),
+        Role::Mono.runs("⌀10 mm Δ"),
         expected(&[
-            (Face::Symbols, "⌀"),
-            (Face::MonoRegular, "10 mm "),
-            (Face::SansRegular, "Δ"),
+            (PrintFace::Symbols, "⌀"),
+            (PrintFace::MonoRegular, "10 mm "),
+            (PrintFace::SansRegular, "Δ"),
         ])
     );
-    assert!(Role::Sans.runs(Sink::Print, "").is_empty());
+    assert!(Role::Sans.runs("").is_empty());
 }
 
 #[test]
@@ -180,16 +180,16 @@ fn a_grapheme_cluster_is_lettered_by_one_face() {
     // A variation selector does not draw, so the face that has the base
     // letters the whole cluster.
     assert_eq!(
-        Role::Sans.runs(Sink::Print, "⚠\u{FE0F}"),
-        expected(&[(Face::Symbols, "⚠\u{FE0F}")])
+        Role::Sans.runs("⚠\u{FE0F}"),
+        expected(&[(PrintFace::Symbols, "⚠\u{FE0F}")])
     );
     // An unknown base takes its marks with it into one replacement.
     assert_eq!(
-        Role::Sans.runs(Sink::Print, "a\u{10FFFD}\u{301}b"),
+        Role::Sans.runs("a\u{10FFFD}\u{301}b"),
         expected(&[
-            (Face::SansRegular, "a"),
-            (Face::Symbols, "\u{25FB}"),
-            (Face::SansRegular, "b"),
+            (PrintFace::SansRegular, "a"),
+            (PrintFace::Symbols, "\u{25FB}"),
+            (PrintFace::SansRegular, "b"),
         ])
     );
 }
@@ -212,16 +212,19 @@ fn every_egui_family_holds_its_roles_chain() {
 }
 
 #[test]
-fn print_faces_come_first_so_a_table_of_them_is_indexed_by_face() {
+fn print_names_exactly_the_faces_it_letters_from() {
     let printed: Vec<Face> = Face::ALL
         .into_iter()
         .filter(|face| Sink::Print.letters(*face))
         .collect();
-    assert_eq!(Sink::Print.faces(), printed);
-    for (index, face) in Sink::Print.faces().iter().enumerate() {
-        assert_eq!(*face as usize, index, "{face:?}");
+    assert_eq!(PrintFace::ALL.map(PrintFace::face).to_vec(), printed);
+    for face in PrintFace::ALL {
+        assert_eq!(face.face().printed(), Some(face), "{face:?}");
     }
-    assert_eq!(Sink::Screen.faces(), Face::ALL);
+    assert!(Face::ALL.into_iter().all(|face| Sink::Screen.letters(face)));
+    for role in Role::ALL {
+        assert_eq!(role.print_primary().face(), role.primary(), "{role:?}");
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -251,17 +254,10 @@ fn print_letters_the_square_where_the_screen_letters_a_script_it_cannot_order() 
         }
     }
     assert_eq!(
-        Role::Sans.runs(Sink::Print, "قيمة R1"),
+        Role::Sans.runs("قيمة R1"),
         expected(&[
-            (Face::Symbols, "\u{25FB}\u{25FB}\u{25FB}\u{25FB}"),
-            (Face::SansRegular, " R1"),
-        ])
-    );
-    assert_eq!(
-        Role::Sans.runs(Sink::Screen, "قيمة R1"),
-        expected(&[
-            (Face::SansArabicRegular, "قيمة"),
-            (Face::SansRegular, " R1"),
+            (PrintFace::Symbols, "\u{25FB}\u{25FB}\u{25FB}\u{25FB}"),
+            (PrintFace::SansRegular, " R1"),
         ])
     );
 }
