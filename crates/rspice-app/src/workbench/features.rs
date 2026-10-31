@@ -303,6 +303,13 @@ macro_rules! features {
             dialogs
         }
 
+        /// The commands each registered feature reads the dispatcher's answer
+        /// for, with the slot of the feature that reads them.
+        #[cfg(test)]
+        fn foreign_availability() -> Vec<(&'static str, &'static [CommandKey])> {
+            vec![$((stringify!($slot), <$feature as Feature>::FOREIGN_AVAILABILITY)),+]
+        }
+
         /// Draw the feature dialog step `key` names for this frame, then
         /// answer what it raised for straight after.
         pub(super) fn render_dialog(app: &mut RSpiceApp, ctx: &egui::Context, key: DialogKey) {
@@ -439,6 +446,26 @@ mod tests {
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
         );
+    }
+
+    /// Every command a feature reads the dispatcher's answer for is one the
+    /// dispatcher answers to, read once, and no feature reads more answers
+    /// than a context holds.
+    #[test]
+    fn every_command_a_feature_reads_is_one_the_dispatcher_answers() {
+        use crate::workbench::commands::vocabulary::legacy_command;
+        use crate::workbench::framework::feature::ForeignAvailability;
+
+        for (slot, keys) in foreign_availability() {
+            assert!(keys.len() <= ForeignAvailability::CAPACITY, "{slot}");
+            for (index, key) in keys.iter().enumerate() {
+                assert!(
+                    spec(*key).is_some() || legacy_command(*key).is_some(),
+                    "{slot} reads {key:?}, which no command answers to"
+                );
+                assert!(!keys[..index].contains(key), "{slot} reads {key:?} twice");
+            }
+        }
     }
 
     /// A command a feature leaves out of the registry is not ordered, and the

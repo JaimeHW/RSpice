@@ -53,6 +53,15 @@ pub trait Feature: Sized + 'static {
     /// [`NoHandles`] for a feature that runs none.
     type Handles: 'static;
 
+    /// The commands whose dispatcher answer the feature reads: whether each
+    /// would run if raised now, as a menu row or a toolbar button shows it.
+    /// Each is another feature's command, or one of the feature's own that
+    /// the shell can answer ahead of it, with a guard or with an arm that
+    /// takes the command where the reader is working. The shell takes the
+    /// answers when it lends the feature a context for a call that reads
+    /// them, and [`Cx::foreign_available`] reads them.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[];
+
     /// Hand the registry everything the feature declares.
     fn register(registry: &mut FeatureRegistry<Self>);
 }
@@ -378,6 +387,9 @@ pub struct Cx<'a, F: Feature> {
     /// what a shortcut profile is checked against and a command is labelled
     /// by.
     pub commands: &'static Registry,
+    /// The dispatcher's answers for [`Feature::FOREIGN_AVAILABILITY`], where
+    /// the shell lent the context for a call that reads them.
+    foreign: Option<ForeignAvailability>,
 }
 
 impl<'a, F: Feature> Cx<'a, F> {
@@ -402,13 +414,71 @@ impl<'a, F: Feature> Cx<'a, F> {
             handles,
             peers,
             commands,
+            foreign: None,
         }
+    }
+
+    /// The context holding `foreign`, the dispatcher's answers the shell took
+    /// for the commands the feature declares it reads.
+    #[must_use]
+    pub fn with_foreign_availability(mut self, foreign: ForeignAvailability) -> Self {
+        self.foreign = Some(foreign);
+        self
     }
 
     /// Run the command `key` names once this context's call returns, behind
     /// the prologue every command shares.
     pub fn execute(&mut self, key: CommandKey) {
         self.wb.outbox().push(Execute(key));
+    }
+
+    /// Whether the command `key` names would run if raised now, as the
+    /// dispatcher answered when the shell lent this context. `key` is one
+    /// the feature declares in [`Feature::FOREIGN_AVAILABILITY`], and the
+    /// shell lent the context with the answers: reading one from a context
+    /// lent without them is a fault in the call that reads it, not a no.
+    pub fn foreign_available(&self, key: CommandKey) -> bool {
+        let index = F::FOREIGN_AVAILABILITY
+            .iter()
+            .position(|declared| *declared == key);
+        debug_assert!(
+            index.is_some(),
+            "{key:?} is not a command the feature declares it reads"
+        );
+        debug_assert!(
+            self.foreign.is_some(),
+            "the shell lent this context without the dispatcher's answers"
+        );
+        index
+            .zip(self.foreign)
+            .is_some_and(|(index, foreign)| foreign.0 & (1 << index) != 0)
+    }
+}
+
+/// The dispatcher's answers for the commands a feature declares in
+/// [`Feature::FOREIGN_AVAILABILITY`], taken as the shell lends it a context:
+/// whether each would run if raised then, in the order it declares them.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ForeignAvailability(u32);
+
+impl ForeignAvailability {
+    /// The most commands a feature may declare it reads.
+    pub const CAPACITY: usize = u32::BITS as usize;
+
+    /// The answers `available` gives for `keys`, in order.
+    pub fn take(keys: &[CommandKey], mut available: impl FnMut(CommandKey) -> bool) -> Self {
+        debug_assert!(
+            keys.len() <= Self::CAPACITY,
+            "a feature reads at most {} commands' answers",
+            Self::CAPACITY
+        );
+        let mut answers = 0;
+        for (index, key) in keys.iter().enumerate() {
+            if available(*key) {
+                answers |= 1 << index;
+            }
+        }
+        Self(answers)
     }
 }
 

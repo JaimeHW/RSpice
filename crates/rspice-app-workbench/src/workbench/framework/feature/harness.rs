@@ -468,6 +468,65 @@ fn command<F: Feature>(registry: &FeatureRegistry<F>, key: CommandKey) -> &Featu
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::pdk_config::PdkConfig;
+    use crate::workbench::framework::feature::{ForeignAvailability, NoHandles};
+
+    const FIRST: CommandKey = CommandKey::new("first");
+    const SECOND: CommandKey = CommandKey::new("second");
+    const THIRD: CommandKey = CommandKey::new("third");
+
+    /// A feature that reads three commands' dispatcher answers.
+    struct Reader;
+
+    impl Feature for Reader {
+        type State = ();
+        type Session = WorkbenchSession;
+        type Handles = NoHandles;
+        const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[FIRST, SECOND, THIRD];
+
+        fn register(_registry: &mut FeatureRegistry<Self>) {}
+    }
+
+    fn reader() -> FeatureHarness<Reader> {
+        FeatureHarness::with_model(
+            Model::session_start(PdkConfig::default(), None, |_| Err(Vec::new())),
+            WorkbenchSession::default(),
+        )
+    }
+
+    /// A context reads each command's answer, by its key, as the shell took
+    /// it when it lent the context.
+    #[test]
+    fn a_context_reads_the_answers_the_shell_took_for_it() {
+        let mut harness = reader();
+        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |key| key != SECOND);
+        let cx = harness.cx().with_foreign_availability(answers);
+        assert!(cx.foreign_available(FIRST));
+        assert!(!cx.foreign_available(SECOND));
+        assert!(cx.foreign_available(THIRD));
+    }
+
+    /// Reading an answer from a context the shell lent without them is a
+    /// fault in the call that reads it, never a silent no.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "the shell lent this context without the dispatcher's answers")]
+    fn a_context_lent_without_the_answers_refuses_to_read_one() {
+        let mut harness = reader();
+        harness.cx().foreign_available(FIRST);
+    }
+
+    /// Reading the answer for a command the feature does not declare it
+    /// reads is a fault in the feature's code.
+    #[cfg(debug_assertions)]
+    #[test]
+    #[should_panic(expected = "is not a command the feature declares it reads")]
+    fn a_context_refuses_a_command_the_feature_does_not_read() {
+        let mut harness = reader();
+        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |_| true);
+        let cx = harness.cx().with_foreign_availability(answers);
+        cx.foreign_available(CommandKey::new("unread"));
+    }
 
     /// A feature's own test reads no clock: the null hardcopy port stamps a
     /// publication with the epoch, the stamp the hardcopy feature falls back
