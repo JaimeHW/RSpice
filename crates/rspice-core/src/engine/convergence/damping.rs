@@ -130,6 +130,150 @@ impl NoGainVoltageBox {
     }
 }
 
+/// The bound on how far one DC Newton iterate moves a self-heating BJT's
+/// thermal node.
+///
+/// Temperature enters a junction's currents through Arrhenius factors whose
+/// linearization holds over a few kelvin (a silicon saturation current
+/// changes by e every kT²/qEg, about 7 K, at 300 K), while the power that
+/// drives the thermal row multiplies currents by voltages that junction
+/// limiting extrapolates over volts. The exact Newton step can then settle
+/// the electrical residual with a temperature its linearization cannot
+/// reach. Where a junction is biased beyond its activation energy the
+/// collector current falls as the device heats, and the step heats it
+/// instead of saturating it: vbic99_tran's second iterate asked for 271 K
+/// and sent the collector to +56 V, where the isothermal step sends it to
+/// -456 V towards saturation.
+///
+/// A thermal row that steps further than [`Self::STEP`] is held at the
+/// bound and the iterate re-solved with it held. That is the exact Newton
+/// step of the system with that temperature fixed: the heat flow that holds
+/// the node there is found from the factored Jacobian, so the Jacobian is
+/// neither changed nor relaxed. An iterate the bound held is not a converged
+/// one: its linearized residual carries that heat flow.
+pub(in crate::engine::convergence) struct ThermalStepBound {
+    rows: Vec<usize>,
+}
+
+impl ThermalStepBound {
+    /// Kelvin one iterate may move a thermal node.
+    ///
+    /// The scale is the Arrhenius one above. Xyce's VBIC 1.3 holds 5 K
+    /// (limRTH, N_DEV_ADMSvbic13_4t.C:3837); vbic99_tran converges directly
+    /// in 10-11 iterations for any bound from 2 to 50 K and fails at
+    /// ngspice's 100 K logarithmic limit (vbicload.c:670).
+    pub(in crate::engine::convergence) const STEP: Value = 10.0;
+
+    pub(in crate::engine::convergence) fn of(circuit: &CircuitData) -> Option<Self> {
+        let mut rows: Vec<usize> = circuit
+            .bjts
+            .devices
+            .iter()
+            .filter_map(|bjt| bjt.node_rth.checked_sub(1))
+            .collect();
+        rows.sort_unstable();
+        rows.dedup();
+        (!rows.is_empty()).then_some(Self { rows })
+    }
+
+    /// Hold every thermal row of `proposal` that steps further than
+    /// [`Self::STEP`] from `previous` at the bound, re-solving the rest of
+    /// the iterate through the Jacobian factored in `matrix`. Rows held at
+    /// one pass stay held while the re-solve pushes others past the bound.
+    /// A system that cannot be re-solved keeps the unbounded step.
+    pub(in crate::engine::convergence) fn impose(
+        &self,
+        matrix: &mut StaticMatrix,
+        denominator_floors: Option<&[Value]>,
+        previous: &[Value],
+        proposal: &mut [Value],
+    ) {
+        let unbounded = proposal.to_vec();
+        // Each held row with its target and the response J⁻¹e of the iterate
+        // to a unit heat flow injected there.
+        let mut held: Vec<(usize, Value, Vec<Value>)> = Vec::new();
+        loop {
+            let held_before = held.len();
+            for &row in &self.rows {
+                let step = proposal[row] - previous[row];
+                if step.abs() <= Self::STEP || held.iter().any(|(held_row, ..)| *held_row == row) {
+                    continue;
+                }
+                let mut unit = vec![0.0; proposal.len()];
+                unit[row] = 1.0;
+                let mut response = Vec::with_capacity(proposal.len());
+                let solved = Engine::solve_dc_linearization_system(
+                    matrix,
+                    &unit,
+                    denominator_floors,
+                    &mut response,
+                    super::solve::DcSolve::NewtonIteration,
+                );
+                if solved.is_err() || !response.iter().all(|value| value.is_finite()) {
+                    proposal.copy_from_slice(&unbounded);
+                    return;
+                }
+                held.push((row, previous[row] + Self::STEP.copysign(step), response));
+            }
+            if held.len() == held_before {
+                return;
+            }
+            // The heat flows that put every held row on its target together.
+            let mut system: Vec<Vec<Value>> = held
+                .iter()
+                .map(|(row, target, _)| {
+                    let mut equation: Vec<Value> =
+                        held.iter().map(|(_, _, response)| response[*row]).collect();
+                    equation.push(target - unbounded[*row]);
+                    equation
+                })
+                .collect();
+            let Some(flows) = Self::solve_small_dense(&mut system) else {
+                proposal.copy_from_slice(&unbounded);
+                return;
+            };
+            for (index, value) in proposal.iter_mut().enumerate() {
+                *value = unbounded[index]
+                    + held
+                        .iter()
+                        .zip(&flows)
+                        .map(|((_, _, response), flow)| flow * response[index])
+                        .sum::<Value>();
+            }
+        }
+    }
+
+    /// Gaussian elimination with partial pivoting on an augmented system.
+    fn solve_small_dense(system: &mut [Vec<Value>]) -> Option<Vec<Value>> {
+        let size = system.len();
+        for column in 0..size {
+            let pivot = (column..size)
+                .max_by(|&a, &b| system[a][column].abs().total_cmp(&system[b][column].abs()))?;
+            if !(system[pivot][column].abs() > 0.0) {
+                return None;
+            }
+            system.swap(column, pivot);
+            for row in column + 1..size {
+                let factor = system[row][column] / system[column][column];
+                for entry in column..=size {
+                    system[row][entry] -= factor * system[column][entry];
+                }
+            }
+        }
+        let mut solution = vec![0.0; size];
+        for row in (0..size).rev() {
+            let known: Value = (row + 1..size)
+                .map(|column| system[row][column] * solution[column])
+                .sum();
+            solution[row] = (system[row][size] - known) / system[row][row];
+        }
+        solution
+            .iter()
+            .all(|value| value.is_finite())
+            .then_some(solution)
+    }
+}
+
 impl Engine {
     #[inline]
     pub(in crate::engine::convergence) fn has_nonfinite_values(solution: &[Value]) -> bool {
@@ -894,5 +1038,58 @@ mod tests {
         }
         let iterations = engine.convergence_quality().total_iterations;
         assert!(iterations <= 8, "{iterations} Newton iterations");
+    }
+
+    /// vbic99_tran's self-heating VBIC oscillated through 100 direct
+    /// iterates in every dialect, its exact Newton heating the device by
+    /// hundreds of kelvin to settle the collector (ngspice-46, whose heat row
+    /// negates its own derivatives, converges in 13). With the thermal step
+    /// bounded it takes the isothermal path to the operating point.
+    #[test]
+    fn a_bounded_thermal_step_takes_vbic99_to_its_operating_point_directly() {
+        let netlist = crate::netlist::Netlist::parse(include_str!(
+            "../../../../../tests/paranoia/vbic/vbic99_tran.sp"
+        ))
+        .unwrap();
+        for dialect in [
+            crate::engine::SpiceDialect::Ngspice,
+            crate::engine::SpiceDialect::BestAvailable,
+            crate::engine::SpiceDialect::Xyce,
+        ] {
+            let mut config = crate::engine::SimulationConfig::default();
+            config.spice_dialect = dialect;
+            config.convergence_config.gmin_stepping = false;
+            config.convergence_config.source_stepping = false;
+            config.convergence_config.pseudo_transient = false;
+            config.convergence_config.arc_length = false;
+            let engine = Engine::new_with_resolved_config(config);
+            let result = engine
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+            let voltage = |name: &str| {
+                let index = result
+                    .node_names
+                    .iter()
+                    .position(|n| n.eq_ignore_ascii_case(name))
+                    .unwrap();
+                result.node_voltages[index]
+            };
+            // ngspice-46: v(3) = 0.2220443, v(t) = 1.440860.
+            assert!(
+                (voltage("3") - 0.22204).abs() < 1e-4,
+                "{dialect:?} v(3) = {}",
+                voltage("3")
+            );
+            assert!(
+                (voltage("t") - 1.4409).abs() < 1e-3,
+                "{dialect:?} v(t) = {}",
+                voltage("t")
+            );
+            let iterations = engine.convergence_quality().total_iterations;
+            assert!(
+                iterations <= 20,
+                "{dialect:?}: {iterations} Newton iterations"
+            );
+        }
     }
 }

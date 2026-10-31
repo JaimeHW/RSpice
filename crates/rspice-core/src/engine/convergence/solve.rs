@@ -1049,6 +1049,7 @@ impl Engine {
         let mut limit_cycle_detected = false;
         let mut direct_solver_error = None;
         let voltage_box = damping::NoGainVoltageBox::of(circuit);
+        let thermal_step_bound = damping::ThermalStepBound::of(circuit);
         for iteration in 0..dc_max_iterations {
             direct_iterations = iteration + 1;
             if abort.is_aborted() {
@@ -1125,6 +1126,14 @@ impl Engine {
                     direct_solver_error = Some(err);
                     break;
                 }
+            }
+            if let Some(bound) = &thermal_step_bound {
+                bound.impose(
+                    matrix,
+                    solve_denominator_floors.as_deref(),
+                    &solution,
+                    &mut raw_solution,
+                );
             }
             // Voltage-limiting style damping is critical for strongly-coupled
             // semiconductor nonlinearities, but it can unnecessarily throttle
