@@ -13,7 +13,9 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use egui::Key;
+use rspice_app_services::services::recent_files::RecentKind;
 use rspice_app_state::workbench::app_state::model::WorkspacePruned;
+use rspice_app_workbench::workbench::app::dialogs::confirmation_state::ConfirmationAction;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
@@ -257,11 +259,10 @@ impl ProjectCommand {
 /// What the project feature hands the shell, which carries it out over the
 /// whole application as the feature once did in place: the Configurations
 /// command of the shell's own table, opening the selected view in the
-/// workspace that edits it, and what a
-/// library catalog change, or a created or deleted cell or view, left
-/// outside the model. Each place that raises one raises one, carrying
-/// everything it once did after that point, in order. Taken straight after
-/// the call that raised it.
+/// workspace that edits it, and what a library catalog change, or a created
+/// or deleted cell or view, left outside the model. Each place that raises
+/// one raises one, carrying everything it once did after that point, in
+/// order. Taken straight after the call that raised it.
 #[derive(Clone, Debug)]
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
@@ -322,6 +323,13 @@ pub(crate) enum ProjectRequest {
     /// Open Create hierarchy, which design owns, over the selection Design
     /// management handed on when a move asked for a new child cell.
     OpenCreateHierarchy,
+    /// Go on with leaving the project once the configuration edits held
+    /// for it are settled: ask about the project's unsaved work, or carry
+    /// out `action`, with the recent project an Open recent asked for.
+    GoOnLeaving {
+        action: ConfirmationAction,
+        recent: Option<(std::path::PathBuf, RecentKind)>,
+    },
 }
 
 impl Request for ProjectRequest {

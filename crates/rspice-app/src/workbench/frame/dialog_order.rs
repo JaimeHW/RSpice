@@ -279,7 +279,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
                 || state.project.configuration_dialog.leaving.is_some()
                 || state.project.configuration.pending_selection.is_some()
         }),
-        render: |app, ctx| app.render_configuration_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::render_configuration_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     // A new deck changes what blocks a run, so a run prepared under the
     // old one is not authorized under it.

@@ -2,7 +2,24 @@
 
 use super::*;
 
+use crate::workbench::app::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
+
+/// The configuration dialogs' parts over `app`, as the project feature's
+/// context lends them.
+fn parts(app: &mut RSpiceApp) -> ConfigurationDialogParts<'_> {
+    let state = &mut app.state;
+    ConfigurationDialogParts {
+        dialogs: &mut state.project.configuration_dialog,
+        configuration: &mut state.project.configuration,
+        project_page: &mut state.project.project_page,
+        model: &mut state.model,
+        platform: &state.platform,
+        wb: &mut state.workbench,
+        runs: &mut state.runs,
+        run_controller: &mut app.simulation_controller,
+    }
+}
 
 fn reference_app() -> (RSpiceApp, ConfigurationSetId) {
     let mut app = RSpiceApp::test_instance();
@@ -24,7 +41,7 @@ fn announced(app: &mut RSpiceApp) -> Vec<String> {
             )),
             ..Default::default()
         },
-        |ui| app.render_configuration_dialog(ui.ctx()),
+        |ui| render_configuration_dialog(&mut parts(app), ui.ctx()),
     );
     output
         .platform_output
@@ -210,7 +227,8 @@ fn leaving(app: &RSpiceApp) -> Option<&Leaving> {
     app.state.project.configuration_dialog.leaving.as_ref()
 }
 
-/// One frame of the configuration dialogs with `keys` pressed.
+/// One frame of the configuration dialogs with `keys` pressed, and what
+/// they raised answered as they return, as the frame's dialog step does.
 fn press(app: &mut RSpiceApp, ctx: &egui::Context, keys: &[egui::Key]) {
     let events = keys
         .iter()
@@ -231,8 +249,9 @@ fn press(app: &mut RSpiceApp, ctx: &egui::Context, keys: &[egui::Key]) {
             events,
             ..Default::default()
         },
-        |ui| app.render_configuration_dialog(ui.ctx()),
+        |ui| render_configuration_dialog(&mut parts(app), ui.ctx()),
     );
+    app.after_contribution();
 }
 
 #[test]
@@ -259,7 +278,11 @@ fn leaving_the_project_asks_about_configuration_edits_first() {
         "{words:#?}"
     );
     assert_eq!(
-        answer_leaving(&mut app.state, DialogChoice::None),
+        answer_leaving(
+            &mut app.state.project.configuration_dialog,
+            &mut app.state.project.configuration,
+            DialogChoice::None
+        ),
         LeavingAnswer::Stay
     );
     assert!(
@@ -267,7 +290,11 @@ fn leaving_the_project_asks_about_configuration_edits_first() {
         "an unanswered question stays asked"
     );
     assert_eq!(
-        answer_leaving(&mut app.state, DialogChoice::Ghost),
+        answer_leaving(
+            &mut app.state.project.configuration_dialog,
+            &mut app.state.project.configuration,
+            DialogChoice::Ghost
+        ),
         LeavingAnswer::Stay
     );
     assert!(leaving(&app).is_none());
@@ -281,7 +308,11 @@ fn leaving_the_project_asks_about_configuration_edits_first() {
         ConfirmationAction::ProjectNew,
         None
     ));
-    let LeavingAnswer::GoOn(going) = answer_leaving(&mut app.state, DialogChoice::Secondary) else {
+    let LeavingAnswer::GoOn(going) = answer_leaving(
+        &mut app.state.project.configuration_dialog,
+        &mut app.state.project.configuration,
+        DialogChoice::Secondary,
+    ) else {
         panic!("Discard goes on leaving");
     };
     assert!(app.state.project.configuration.draft().is_none());
@@ -367,4 +398,37 @@ fn a_refused_apply_before_leaving_stays_on_the_configuration_page() {
         app.state.project.configuration.refusal
     );
     assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
+}
+
+/// Going on leaving, handed to the shell, ends where the dialog once went on
+/// in place: the question about the project's unsaved work asked about the
+/// action that was held.
+#[test]
+fn going_on_leaving_handed_to_the_shell_ends_where_it_went_on_in_place() {
+    for handed in [false, true] {
+        let (mut app, _) = reference_app();
+        let leaving = Leaving {
+            action: ConfirmationAction::ProjectNew,
+            recent: None,
+        };
+        if handed {
+            app.state
+                .workbench
+                .outbox
+                .push(ProjectRequest::GoOnLeaving {
+                    action: leaving.action,
+                    recent: leaving.recent,
+                });
+            app.after_contribution();
+        } else if let Some((action, path, kind)) = go_on_leaving(&mut app.state, leaving) {
+            app.execute_pending_action(action, path, kind, None);
+        }
+        let confirmation = &app.state.workbench.confirmation_dialog;
+        assert!(confirmation.visible, "handed {handed}");
+        assert_eq!(
+            confirmation.pending_action,
+            Some(ConfirmationAction::ProjectNew),
+            "handed {handed}"
+        );
+    }
 }

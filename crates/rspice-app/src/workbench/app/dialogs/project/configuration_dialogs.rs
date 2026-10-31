@@ -17,16 +17,21 @@ use crate::ui::widgets::{
     Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, field_label,
     kv_row, select, switch_row,
 };
+use crate::workbench::app::ConfirmationAction;
 use crate::workbench::app::dialogs::project::configuration::{
-    ConfigurationTransaction, commit_configuration_transaction, delete_refusal,
+    ConfigurationTransaction, commit_configuration, delete_refusal,
 };
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
-use crate::workbench::app::{ConfirmationAction, RSpiceApp};
 use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::framework::feature::ModelsPort;
-use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
+use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::configuration_state::{
+    ConfigurationPageState, ConfigurationSelection, used_for_runs,
+};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::simulation::SimulationController;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 
 /// Where a new configuration's view list and stop list come from.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -274,85 +279,123 @@ pub(in crate::workbench) fn configuration_actions_menu(
     picked
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_configuration_dialog(&mut self, ctx: &Context) {
-        if self.state.project.configuration_dialog.leaving.is_some() {
-            let choice = edits_prompt(ctx, &self.state).unwrap_or(DialogChoice::Secondary);
-            let leaving = match answer_leaving(&mut self.state, choice) {
-                LeavingAnswer::Stay => None,
-                LeavingAnswer::GoOn(leaving) => Some(leaving),
-                LeavingAnswer::ApplyThenGoOn(leaving) => {
-                    match commit_configuration_transaction(self, ConfigurationTransaction::Apply) {
-                        Ok(()) => Some(leaving),
-                        // A refused apply stays, on the page, saying why.
-                        Err(refusal) => {
-                            self.state.project.configuration.refusal = Some(refusal);
-                            show_configuration_page(&mut self.state);
-                            None
-                        }
+/// What the configuration dialogs draw over and commit against, lent by the
+/// project feature's context for the one call: their own state, the
+/// Configuration page and the Project page they bring forward, the model,
+/// the session, and the run tier a committed change voids.
+pub(in crate::workbench) struct ConfigurationDialogParts<'a> {
+    pub(in crate::workbench) dialogs: &'a mut ConfigurationDialogState,
+    pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
+    pub(in crate::workbench) project_page: &'a mut ProjectPage,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) platform: &'a PlatformState,
+    pub(in crate::workbench) wb: &'a mut WorkbenchSession,
+    pub(in crate::workbench) runs: &'a mut RunsState,
+    pub(in crate::workbench) run_controller: &'a mut SimulationController,
+}
+
+/// Draw the question about edits not applied, asked before leaving the
+/// project or picking another configuration, or the configuration dialog
+/// that is open, and commit what the reader chose.
+pub(in crate::workbench) fn render_configuration_dialog(
+    parts: &mut ConfigurationDialogParts<'_>,
+    ctx: &Context,
+) {
+    if parts.dialogs.leaving.is_some() {
+        let choice =
+            edits_prompt(ctx, parts.configuration, parts.model).unwrap_or(DialogChoice::Secondary);
+        let leaving = match answer_leaving(parts.dialogs, parts.configuration, choice) {
+            LeavingAnswer::Stay => None,
+            LeavingAnswer::GoOn(leaving) => Some(leaving),
+            LeavingAnswer::ApplyThenGoOn(leaving) => {
+                match commit(parts, ConfigurationTransaction::Apply) {
+                    Ok(()) => Some(leaving),
+                    // A refused apply stays, on the page, saying why.
+                    Err(refusal) => {
+                        parts.configuration.refusal = Some(refusal);
+                        show_configuration_page_in(parts.platform, parts.wb, parts.project_page);
+                        None
                     }
                 }
-            };
-            if let Some((action, path, kind)) =
-                leaving.and_then(|leaving| go_on_leaving(&mut self.state, leaving))
-            {
-                self.execute_pending_action(action, path, kind, None);
-            }
-            return;
-        }
-        if let Some((target, choice)) = selection_prompt(ctx, &self.state) {
-            match choice {
-                DialogChoice::Primary => {
-                    self.state.project.configuration.pending_selection = None;
-                    match commit_configuration_transaction(self, ConfigurationTransaction::Apply) {
-                        Ok(()) => self.state.project.configuration.select(target),
-                        Err(refusal) => {
-                            self.state.project.configuration.refusal = Some(refusal);
-                        }
-                    }
-                }
-                DialogChoice::Secondary => self.state.project.configuration.select(target),
-                DialogChoice::Ghost | DialogChoice::Cancelled => {
-                    self.state.project.configuration.pending_selection = None;
-                }
-                DialogChoice::None => {}
-            }
-            return;
-        }
-        let Some(dialog) = self.state.project.configuration_dialog.open.clone() else {
-            return;
-        };
-        let write_allowed = !self.state.model.safe_mode.project_read_only();
-        let refusal = self.state.project.configuration_dialog.refusal.clone();
-        let (choice, transaction) = match dialog {
-            ConfigurationDialog::New { .. } => {
-                new_dialog(ctx, &mut self.state, write_allowed, refusal)
-            }
-            ConfigurationDialog::Clone { .. } | ConfigurationDialog::Rename { .. } => {
-                name_dialog(ctx, &mut self.state, write_allowed, refusal)
-            }
-            ConfigurationDialog::Delete(id) => {
-                delete_dialog(ctx, &self.state, id, write_allowed, refusal)
             }
         };
+        // Going on leaving asks about the project's unsaved work or carries
+        // the action out, over the whole application: the shell does it as
+        // this dialog returns.
+        if let Some(Leaving { action, recent }) = leaving {
+            parts
+                .wb
+                .outbox
+                .push(ProjectRequest::GoOnLeaving { action, recent });
+        }
+        return;
+    }
+    if let Some((target, choice)) = selection_prompt(ctx, parts.configuration, parts.model) {
         match choice {
             DialogChoice::Primary => {
-                let Some(transaction) = transaction else {
-                    return;
-                };
-                match commit_configuration_transaction(self, transaction) {
-                    Ok(()) => self.state.project.configuration_dialog.close(),
+                parts.configuration.pending_selection = None;
+                match commit(parts, ConfigurationTransaction::Apply) {
+                    Ok(()) => parts.configuration.select(target),
                     Err(refusal) => {
-                        self.state.project.configuration_dialog.refusal = Some(refusal);
+                        parts.configuration.refusal = Some(refusal);
                     }
                 }
             }
+            DialogChoice::Secondary => parts.configuration.select(target),
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.project.configuration_dialog.close();
+                parts.configuration.pending_selection = None;
             }
-            DialogChoice::Secondary | DialogChoice::None => {}
+            DialogChoice::None => {}
         }
+        return;
     }
+    let Some(dialog) = parts.dialogs.open.clone() else {
+        return;
+    };
+    let write_allowed = !parts.model.safe_mode.project_read_only();
+    let refusal = parts.dialogs.refusal.clone();
+    let (choice, transaction) = match dialog {
+        ConfigurationDialog::New { .. } => {
+            new_dialog(ctx, parts.dialogs, parts.model, write_allowed, refusal)
+        }
+        ConfigurationDialog::Clone { .. } | ConfigurationDialog::Rename { .. } => {
+            name_dialog(ctx, parts.dialogs, parts.model, write_allowed, refusal)
+        }
+        ConfigurationDialog::Delete(id) => {
+            delete_dialog(ctx, parts.model, id, write_allowed, refusal)
+        }
+    };
+    match choice {
+        DialogChoice::Primary => {
+            let Some(transaction) = transaction else {
+                return;
+            };
+            match commit(parts, transaction) {
+                Ok(()) => parts.dialogs.close(),
+                Err(refusal) => {
+                    parts.dialogs.refusal = Some(refusal);
+                }
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            parts.dialogs.close();
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+/// Commit `transaction` over the parts, as the application's commit does.
+fn commit(
+    parts: &mut ConfigurationDialogParts<'_>,
+    transaction: ConfigurationTransaction,
+) -> Result<(), String> {
+    commit_configuration(
+        parts.configuration,
+        parts.model,
+        parts.runs,
+        parts.run_controller,
+        transaction,
+    )
 }
 
 /// What the answer to the question asked before leaving the project leaves
@@ -370,17 +413,21 @@ enum LeavingAnswer {
 /// Take the reader's answer about the configuration edits held before
 /// leaving the project. Discard drops them here; Apply is the caller's,
 /// because it commits through the application.
-fn answer_leaving(state: &mut AppState, choice: DialogChoice) -> LeavingAnswer {
+fn answer_leaving(
+    dialogs: &mut ConfigurationDialogState,
+    configuration: &mut ConfigurationPageState,
+    choice: DialogChoice,
+) -> LeavingAnswer {
     if choice == DialogChoice::None {
         return LeavingAnswer::Stay;
     }
-    let Some(leaving) = state.project.configuration_dialog.leaving.take() else {
+    let Some(leaving) = dialogs.leaving.take() else {
         return LeavingAnswer::Stay;
     };
     match choice {
         DialogChoice::Primary => LeavingAnswer::ApplyThenGoOn(leaving),
         DialogChoice::Secondary => {
-            state.project.configuration.revert();
+            configuration.revert();
             LeavingAnswer::GoOn(leaving)
         }
         DialogChoice::Ghost | DialogChoice::Cancelled | DialogChoice::None => LeavingAnswer::Stay,
@@ -391,7 +438,8 @@ fn answer_leaving(state: &mut AppState, choice: DialogChoice) -> LeavingAnswer {
 /// the project's unsaved work first, as the request itself does, or hand back
 /// the action to carry out now. An applied edit is unsaved work too: the
 /// project changed.
-fn go_on_leaving(
+// The shell runs this until the project feature's dialogs read the models port.
+pub(in crate::workbench) fn go_on_leaving(
     state: &mut AppState,
     Leaving { action, recent }: Leaving,
 ) -> Option<(
@@ -425,21 +473,22 @@ fn go_on_leaving(
 
 fn new_dialog(
     ctx: &Context,
-    state: &mut AppState,
+    dialogs: &mut ConfigurationDialogState,
+    model: &Model,
     write_allowed: bool,
     refusal: Option<String>,
 ) -> (DialogChoice, Option<ConfigurationTransaction>) {
-    let choices = top_cells(state);
+    let choices = top_cells(model);
     let Some(ConfigurationDialog::New {
         name,
         start,
         top,
         use_for_runs,
-    }) = state.project.configuration_dialog.open.as_mut()
+    }) = dialogs.open.as_mut()
     else {
         return (DialogChoice::None, None);
     };
-    let dut = default_dut_path(&state.model.workspace, &state.model.schematic, top);
+    let dut = default_dut_path(&model.workspace, &model.schematic, top);
     let problem = refusal.or_else(|| {
         dut.is_none().then(|| {
             format!(
@@ -521,12 +570,13 @@ fn new_dialog(
 /// Clone and Rename: a name, and for Clone whether runs use the copy.
 fn name_dialog(
     ctx: &Context,
-    state: &mut AppState,
+    dialogs: &mut ConfigurationDialogState,
+    model: &Model,
     write_allowed: bool,
     refusal: Option<String>,
 ) -> (DialogChoice, Option<ConfigurationTransaction>) {
-    let catalog: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
-    let (title, primary, source_name) = match state.project.configuration_dialog.open.as_ref() {
+    let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
+    let (title, primary, source_name) = match dialogs.open.as_ref() {
         Some(ConfigurationDialog::Clone { source, .. }) => (
             "Clone configuration",
             "Clone",
@@ -540,7 +590,7 @@ fn name_dialog(
         _ => return (DialogChoice::None, None),
     };
     let Some(source_name) = source_name else {
-        state.project.configuration_dialog.close();
+        dialogs.close();
         return (DialogChoice::None, None);
     };
     let description = if primary == "Clone" {
@@ -549,7 +599,7 @@ fn name_dialog(
         format!("Rename {source_name}. Runs and its bindings are not affected.")
     };
     let mut transaction = None;
-    let dialog_state = &mut state.project.configuration_dialog;
+    let dialog_state = &mut *dialogs;
     let name_empty = match dialog_state.open.as_ref() {
         Some(
             ConfigurationDialog::Clone { name, .. } | ConfigurationDialog::Rename { name, .. },
@@ -612,20 +662,25 @@ fn name_dialog(
 /// choice and the configuration it was asked for.
 fn selection_prompt(
     ctx: &Context,
-    state: &AppState,
+    configuration: &ConfigurationPageState,
+    model: &Model,
 ) -> Option<(ConfigurationSelection, DialogChoice)> {
-    let target = state.project.configuration.pending_selection?;
+    let target = configuration.pending_selection?;
     Some((
         target,
-        edits_prompt(ctx, state).unwrap_or(DialogChoice::Secondary),
+        edits_prompt(ctx, configuration, model).unwrap_or(DialogChoice::Secondary),
     ))
 }
 
 /// Apply, discard or keep the edits not applied to the configuration in
 /// front. `None` when there are none left to ask about.
-fn edits_prompt(ctx: &Context, state: &AppState) -> Option<DialogChoice> {
-    let catalog: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
-    let draft = state.project.configuration.draft()?;
+fn edits_prompt(
+    ctx: &Context,
+    configuration: &ConfigurationPageState,
+    model: &Model,
+) -> Option<DialogChoice> {
+    let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
+    let draft = configuration.draft()?;
     let name = catalog.find(draft.id).map_or_else(
         || draft.definition.name.clone(),
         |committed| committed.name().to_owned(),
@@ -637,7 +692,7 @@ fn edits_prompt(ctx: &Context, state: &AppState) -> Option<DialogChoice> {
     let choice = Dialog::new(&title, "Apply")
         .description(&consequence)
         .size(DialogSize::Confirmation)
-        .primary_enabled(!state.model.safe_mode.project_read_only())
+        .primary_enabled(!model.safe_mode.project_read_only())
         .secondary("Discard")
         .secondary_leading()
         .ghost("Cancel")
@@ -663,12 +718,12 @@ fn consequence_text(ui: &mut Ui, consequence: &str) {
 
 fn delete_dialog(
     ctx: &Context,
-    state: &AppState,
+    model: &Model,
     id: ConfigurationSetId,
     write_allowed: bool,
     refusal: Option<String>,
 ) -> (DialogChoice, Option<ConfigurationTransaction>) {
-    let catalog: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
+    let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
     let Some(configuration) = catalog.find(id) else {
         return (DialogChoice::Cancelled, None);
     };
@@ -737,10 +792,10 @@ fn picker(
 
 /// The schematic and testbench views a new configuration can take as its
 /// top cell.
-fn top_cells(state: &AppState) -> Vec<CellViewRef> {
-    let workspace = &state.model.workspace;
+fn top_cells(model: &Model) -> Vec<CellViewRef> {
+    let workspace = &model.workspace;
     let mut roots = Vec::new();
-    for (library_key, library) in state.model.library_manager.libraries_by_key() {
+    for (library_key, library) in model.library_manager.libraries_by_key() {
         for (cell_key, cell) in &library.cells {
             for (view_key, view) in &cell.views {
                 if !matches!(view.view_type, ViewType::Schematic | ViewType::Testbench) {

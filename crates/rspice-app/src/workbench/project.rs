@@ -19,6 +19,9 @@ use crate::workbench::app::dialogs::design_management::{
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration,
 };
+use crate::workbench::app::dialogs::project::configuration_dialogs::{
+    ConfigurationDialogParts, render_configuration_dialog,
+};
 use crate::workbench::app::open_design_management_dialog;
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
@@ -78,6 +81,29 @@ impl ProjectFeature {
         } else if !route_active && cx.state.design_management.open {
             cx.state.design_management.close_and_discard();
         }
+    }
+
+    /// Draw the configuration dialogs over what the feature's context lends
+    /// them. Going on leaving the project once its configuration edits are
+    /// settled is asked of the shell, which carries it out as they return.
+    pub(in crate::workbench) fn render_configuration_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        let project = &mut *cx.state;
+        render_configuration_dialog(
+            &mut ConfigurationDialogParts {
+                dialogs: &mut project.configuration_dialog,
+                configuration: &mut project.configuration,
+                project_page: &mut project.project_page,
+                model: &mut *cx.model,
+                platform: &*cx.platform,
+                wb: &mut *cx.wb,
+                runs: &mut *cx.runs,
+                run_controller: &mut *cx.handles.run_controller,
+            },
+            ctx,
+        );
     }
 
     /// Draw Design management over what the feature's context lends it.

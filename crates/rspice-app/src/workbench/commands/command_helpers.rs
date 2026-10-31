@@ -3,6 +3,7 @@
 use super::*;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
+use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
@@ -450,6 +451,13 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         }
         ProjectRequest::OpenCreateHierarchy => {
             crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
+        }
+        ProjectRequest::GoOnLeaving { action, recent } => {
+            if let Some((action, path, kind)) =
+                go_on_leaving(&mut app.state, Leaving { action, recent })
+            {
+                app.execute_pending_action(action, path, kind, None);
+            }
         }
     }
 }

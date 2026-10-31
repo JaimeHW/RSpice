@@ -357,7 +357,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_source_language_tools_dialog", "code"),
     ("render_create_model_bound_symbol_dialog", "design"),
     ("render_symbol_definition_dialogs", "design"),
-    ("render_configuration_dialog", "project"),
+    ("ProjectFeature::render_configuration_dialog", "project"),
     ("dialogs::rule_setup::render_rule_setup_dialog", "design"),
     ("invalidate_simulation_preflight", "shell"),
     ("features::render_dialog", "sheets"),
@@ -1709,6 +1709,48 @@ fn the_design_management_dialog_draws_in_the_project_context_and_what_it_raises_
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
         CREATE_HIERARCHY_OPENED,
+    );
+}
+
+/// What the configuration dialogs hand the shell is going on leaving the
+/// project once its configuration edits are settled, as the dialog once went
+/// on in place: the question about unsaved work, or the action carried out.
+const LEAVING_GONE_ON: &[Step] = &[(
+    "GoOnLeaving",
+    &[
+        "ProjectRequest::GoOnLeaving { action, recent } => {",
+        "go_on_leaving(&mut app.state, Leaving { action, recent })",
+        "app.execute_pending_action(action, path, kind, None);",
+    ],
+)];
+
+/// The configuration dialogs draw in the project feature's context, and
+/// going on leaving, which they hand over, is answered straight after they
+/// draw, in the step that drew them.
+#[test]
+fn the_configuration_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_as_they_return()
+ {
+    let order = without_whitespace(DIALOG_ORDER);
+    let configuration = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"project.configuration\")"))
+        .expect("the shell's dialog order draws the configuration dialogs");
+    assert!(
+        configuration.contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::render_configuration_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "the configuration dialogs draw in the project feature's context, and what they raise \
+         is answered straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        LEAVING_GONE_ON,
     );
 }
 
