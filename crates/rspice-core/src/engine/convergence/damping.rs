@@ -323,11 +323,9 @@ impl Engine {
                 .devices
                 .iter()
                 .any(|bjt| bjt.uses_legacy_junction_limiting() || bjt.uses_vbic_dynamic_charges())
-            || circuit
-                .vdmoses
-                .devices
-                .iter()
-                .any(|vdmos| vdmos.xyce_level18)
+            // VDMOS limits its channel and body diode in both dialects
+            // (vdmosload.c), not only as Xyce LEVEL=18.
+            || !circuit.vdmoses.devices.is_empty()
             || Self::generated_limiting_owns_newton_steps(circuit)
     }
 

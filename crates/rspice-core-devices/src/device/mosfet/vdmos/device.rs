@@ -326,6 +326,13 @@ pub struct Vdmos {
     /// The last `update` began an iterate that no second `update` has seen
     /// yet (see `update`).
     update_open: bool,
+    /// Body-diode junction voltage of the last `update`, before limiting.
+    d1_vd_raw: Value,
+    /// Body-diode junction voltage the last `update` evaluated D1 at.
+    d1_vd: Value,
+    /// Body-diode junction voltage of the previous iterate, which DEVpnjlim
+    /// limits the next one against.
+    d1_vd_prev: Value,
     has_branch_history: bool,
     /// The deck marked this instance `OFF`.
     initial_off: bool,
@@ -501,6 +508,9 @@ impl Vdmos {
             id_eq: Value::NAN,
             limiter_applied: false,
             update_open: false,
+            d1_vd_raw: Value::NAN,
+            d1_vd: Value::NAN,
+            d1_vd_prev: Value::NAN,
             has_branch_history: false,
             initial_off: false,
             initial_off_seed_pending: true,
@@ -1276,14 +1286,16 @@ impl Vdmos {
         // handed to fetlim/limvds. Hold it until Newton moves the terminals so
         // the first stamped linearization is the cut-off device the deck asked
         // for; that is the whole lever OFF has on which branch of a bistable
-        // operating point the solve settles into. The Xyce LEVEL=18 gate below
-        // selects the limiter, never the startup state, so this arm sits ahead
-        // of it.
+        // operating point the solve settles into. The limiter below never
+        // selects the startup state, so this arm sits ahead of it.
         if self.initial_off && self.initial_off_seed_pending {
             return (0.0, 0.0, 0.0, false);
         }
-        if !self.xyce_level18
-            || !self.has_branch_history
+        // Both dialects limit the channel as vdmosload.c:247-266 does:
+        // DEVfetlim on vgs (vgd in reverse mode) and DEVlimvds on vds, against
+        // the previous iterate. Only Xyce LEVEL=18 has a bulk junction here;
+        // an ngspice card's body diode is D1, limited on its own.
+        if !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
             || !self.eval_vbs_prev.is_finite()
@@ -1320,7 +1332,9 @@ impl Vdmos {
 
         let vt = self.body_junction_thermal_voltage();
         let pnjlim_limited;
-        if vds_m >= 0.0 {
+        if !self.xyce_level18 {
+            pnjlim_limited = false;
+        } else if vds_m >= 0.0 {
             let limited;
             (limited, pnjlim_limited) =
                 Self::dev_pnjlim(vbs_m, old_vbs_m, vt, self.source_body_vcrit());
@@ -2318,18 +2332,68 @@ impl Vdmos {
             return None;
         }
 
+        let p = self.polarity();
+        let junction = self.d1_evaluation_voltage_at(voltages);
+        let (diode_current, diode_conductance) = self.d1_current_and_conductance(junction);
+        let current = p * (-diode_current);
+        let conductance = diode_conductance.max(0.0);
+        // The branch runs from the drain to the D1 node, against the junction.
+        let vdiff = -p * junction;
+        let ieq = current - conductance * vdiff;
+        Some((self.drain, self.d1_prime_node(), conductance, ieq))
+    }
+
+    /// The body-diode junction voltage, from D1's source-side node (anode) to
+    /// the external drain (cathode), polarity normalized.
+    #[inline]
+    fn d1_junction_voltage_at(&self, voltages: &[Value]) -> Value {
         let d = self.drain;
         let pnode = self.d1_prime_node();
         let vd = if d > 0 { voltages[d - 1] } else { 0.0 };
         let vp = if pnode > 0 { voltages[pnode - 1] } else { 0.0 };
-        let p = self.polarity();
-        let normalized_vds = p * (vd - vp);
-        let (diode_current, diode_conductance) = self.d1_current_and_conductance(-normalized_vds);
-        let current = p * (-diode_current);
-        let conductance = diode_conductance.max(0.0);
-        let vdiff = vd - vp;
-        let ieq = current - conductance * vdiff;
-        Some((d, pnode, conductance, ieq))
+        self.polarity() * (vp - vd)
+    }
+
+    /// The junction voltage D1 is linearized at: the one `update` limited when
+    /// `voltages` is the iterate it saw, else `voltages` limited the same way.
+    #[inline]
+    fn d1_evaluation_voltage_at(&self, voltages: &[Value]) -> Value {
+        let raw = self.d1_junction_voltage_at(voltages);
+        if raw.to_bits() == self.d1_vd_raw.to_bits() {
+            self.d1_vd
+        } else {
+            self.limited_d1_junction_voltage(raw).0
+        }
+    }
+
+    /// DEVpnjlim on an ngspice card's body diode against the previous
+    /// iterate's junction voltage (vdmosload.c:786-800), mirrored about the
+    /// breakdown voltage when BV is given and the junction nears it. Before
+    /// the first iterate the junction sits at vcrit, where MODEINITJCT seeds
+    /// it. Xyce LEVEL=18 limits its bulk junction with the channel instead.
+    fn limited_d1_junction_voltage(&self, vd: Value) -> (Value, bool) {
+        if self.xyce_level18 || !self.d1_current_enabled || !vd.is_finite() {
+            return (vd, false);
+        }
+        let vt = self.d1_thermal_voltage();
+        let isat = self.d1_temperature_adjusted_saturation_current(vt);
+        if isat <= 0.0 {
+            return (vd, false);
+        }
+        let nvt = (self.d1_n.max(1.0e-12) * vt).max(1.0e-12);
+        let vcrit = nvt * (nvt / (std::f64::consts::SQRT_2 * isat)).ln();
+        let vold = if self.d1_vd_prev.is_finite() {
+            self.d1_vd_prev
+        } else {
+            vcrit
+        };
+        if let Some(bv) = self.d1_effective_breakdown_voltage(isat, vt)
+            && vd < (10.0 * nvt - bv).min(0.0)
+        {
+            let (mirrored, limited) = Self::dev_pnjlim(-(vd + bv), -(vold + bv), nvt, vcrit);
+            return (-(mirrored + bv), limited);
+        }
+        Self::dev_pnjlim(vd, vold, nvt, vcrit)
     }
 
     #[inline]
@@ -2987,6 +3051,7 @@ impl NonlinearDevice for Vdmos {
         let vgs = vg - vsi;
         let vds = vdi - vsi;
         let vbs = vb - vsi;
+        let d1_vd_raw = self.d1_junction_voltage_at(voltages);
         // One Newton iterate reaches `update` twice, after its solve and again
         // before its stamp. The device limits each load once against the
         // previous iterate, so the second pass of a limited iterate keeps the
@@ -2998,9 +3063,11 @@ impl NonlinearDevice for Vdmos {
             && self.limiter_applied
             && self.has_branch_history
             && !(self.initial_off && self.initial_off_seed_pending)
-            && [vgs, vds, vbs].map(Value::to_bits)
-                == [self.prev_vgs, self.prev_vds, self.prev_vbs].map(Value::to_bits);
+            && [vgs, vds, vbs, d1_vd_raw].map(Value::to_bits)
+                == [self.prev_vgs, self.prev_vds, self.prev_vbs, self.d1_vd_raw]
+                    .map(Value::to_bits);
         if !same_iterate {
+            self.d1_vd_prev = self.d1_vd;
             self.vgs_prev = self.prev_vgs;
             self.vds_prev = self.prev_vds;
             self.vbs_prev = self.prev_vbs;
@@ -3034,6 +3101,7 @@ impl NonlinearDevice for Vdmos {
         }
         let (eval_vgs, eval_vds, eval_vbs, limited) =
             self.limited_branch_voltages_for_eval(vgs, vds, vbs);
+        let (d1_vd, d1_limited) = self.limited_d1_junction_voltage(d1_vd_raw);
 
         self.prev_vgs = vgs;
         self.prev_vds = vds;
@@ -3041,7 +3109,9 @@ impl NonlinearDevice for Vdmos {
         self.eval_vgs = eval_vgs;
         self.eval_vds = eval_vds;
         self.eval_vbs = eval_vbs;
-        self.limiter_applied = limited;
+        self.d1_vd_raw = d1_vd_raw;
+        self.d1_vd = d1_vd;
+        self.limiter_applied = limited || d1_limited;
 
         let (id, region, gm, gds, gmb, id_eq) =
             self.linearized_operating_point(eval_vgs, eval_vds, eval_vbs);
@@ -3065,10 +3135,7 @@ impl NonlinearDevice for Vdmos {
             } else {
                 0.0
             };
-            let d1p = self.d1_prime_node();
-            let vp = if d1p > 0 { voltages[d1p - 1] } else { 0.0 };
-            let normalized_vds = self.polarity() * (vd - vp);
-            self.id_diode = self.d1_current_and_conductance(-normalized_vds).0;
+            self.id_diode = self.d1_current_and_conductance(d1_vd).0;
             let vs = if self.source > 0 {
                 voltages[self.source - 1]
             } else {
@@ -3637,5 +3704,75 @@ mod tests {
             "the next iteration advances: {}",
             vdmos.eval_vgs
         );
+    }
+
+    #[test]
+    fn an_ngspice_card_limits_its_channel_and_body_diode_once_per_iterate() {
+        // vdmosload.c:247-266 limits the channel with DEVfetlim and DEVlimvds
+        // and 786-800 the body diode with DEVpnjlim, each against the
+        // previous iterate. Node 1 drain, 2 gate, 3 source.
+        let params = HashMap::from([("VTO".to_string(), 3.0), ("IS".to_string(), 1.0e-14)]);
+        let mut vdmos = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        assert!(!vdmos.xyce_level18 && vdmos.d1_current_enabled);
+        vdmos.update(&[0.0; 3]);
+
+        // A 10 V gate step out of cutoff, which DEVfetlim holds at vto + 0.5;
+        // the drain it reverses DEVlimvds holds at -0.5 V.
+        let gate_step = [1.0, 10.0, 0.0];
+        let mut once = vdmos.clone();
+        once.update(&gate_step);
+        assert!(once.limiter_applied);
+        assert!(
+            (once.eval_vgs - 3.5).abs() < 1.0e-12,
+            "vgs {}",
+            once.eval_vgs
+        );
+        assert!(
+            (once.eval_vds + 0.5).abs() < 1.0e-12,
+            "vds {}",
+            once.eval_vds
+        );
+        let once = (once.eval_vgs, once.eval_vds, once.eval_vbs);
+        let mut twice = vdmos.clone();
+        twice.update(&gate_step);
+        twice.update(&gate_step);
+        assert_eq!((twice.eval_vgs, twice.eval_vds, twice.eval_vbs), once);
+
+        // A 5 V forward step across the body diode from zero, which DEVpnjlim
+        // takes to vt ln(5 / vt) = 0.136 V.
+        let diode_step = [-5.0, 0.0, 0.0];
+        let mut once = vdmos.clone();
+        once.update(&diode_step);
+        assert!(once.limiter_applied);
+        let vt = once.d1_thermal_voltage();
+        let (current, conductance) = once.d1_current_and_conductance(vt * (5.0 / vt).ln());
+        assert_eq!(once.id_diode, current);
+        let mut twice = vdmos.clone();
+        twice.update(&diode_step);
+        twice.update(&diode_step);
+        assert_eq!(twice.id_diode, current);
+
+        // The stamp linearizes D1 at the limited junction voltage.
+        let (_, _, stamped, _) = twice
+            .d1_current_branch_terms_at(&diode_step)
+            .expect("an ngspice card stamps its body diode");
+        assert_eq!(stamped, conductance);
+
+        // The next iteration limits from where this one stopped.
+        twice.update(&diode_step);
+        assert!(
+            twice.id_diode > current && twice.id_diode < 1.0e-6,
+            "diode current {}",
+            twice.id_diode
+        );
+
+        // A fresh device's junction starts at vcrit, where MODEINITJCT seeds
+        // it, so even its first iterate is limited.
+        let mut fresh = Vdmos::new_nvdmos("m1".to_string(), 1, 2, 3).with_params(&params);
+        fresh.update(&diode_step);
+        let isat = fresh.d1_temperature_adjusted_saturation_current(vt);
+        let vcrit = vt * (vt / (std::f64::consts::SQRT_2 * isat)).ln();
+        let first = vcrit + vt * (2.0 + ((5.0 - vcrit) / vt - 2.0).ln());
+        assert_eq!(fresh.id_diode, fresh.d1_current_and_conductance(first).0);
     }
 }
