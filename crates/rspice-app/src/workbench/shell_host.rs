@@ -204,14 +204,20 @@ impl Host for RSpiceApp {
             // A workspace's own inspector section.
             Point::Inspector(InspectorScope::Workspace(workspace)) => {
                 use crate::workbench::docks::inspector::code_workspace::code_workspace_inspector;
-                use crate::workbench::docks::inspector::project::project;
                 use crate::workbench::docks::inspector::verify::verify;
                 use crate::workbench::docks::inspector::{
                     design, simulation, stimulus, symbol, veriloga,
                 };
 
                 match workspace {
-                    Workspace::Project => project(ui, app),
+                    // What the reader asked of the project inspector is
+                    // answered once it has drawn. Whatever raised a request
+                    // for straight after its call had it answered as that
+                    // call returned, so this answers only the inspector's.
+                    Workspace::Project => {
+                        features::show_inspector::<ProjectFeature>(app, ui);
+                        app.after_contribution();
+                    }
                     // A symbol cellview is edited against its pin contract,
                     // not against a schematic selection.
                     Workspace::Design

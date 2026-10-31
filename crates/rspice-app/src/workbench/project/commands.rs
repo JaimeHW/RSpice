@@ -5,13 +5,19 @@
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
+//!
+//! Beside them is what the Project workspace's inspector hands the shell to
+//! carry out, which the feature's own context cannot.
 
 use egui::Key;
 
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
+use crate::state::{CellViewRef, ViewType};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
+use crate::workbench::framework::requests::{Drain, Request};
+use crate::workbench::project::configuration_state::ConfigurationSelection;
 use crate::workbench::project::workspace_state::ProjectPage;
 
 /// One command of the project feature.
@@ -241,4 +247,20 @@ impl ProjectCommand {
             owner: CommandOwner::Project,
         }
     }
+}
+
+/// What the Project workspace's inspector hands the shell, which carries it
+/// out over the whole application as the inspector once did in place: the
+/// Configurations command of the shell's own table, opening the selected
+/// view in the workspace that edits it, and using a configuration for runs.
+/// Taken straight after the inspector has drawn.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum ProjectInspectorRequest {
+    ConfigurationSets,
+    OpenView(CellViewRef, ViewType),
+    UseForRuns(ConfigurationSelection),
+}
+
+impl Request for ProjectInspectorRequest {
+    const DRAIN: Drain = Drain::AfterContribution;
 }

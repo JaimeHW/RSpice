@@ -15,6 +15,8 @@ const CLOUD: &str = include_str!("../../../../rspice-app-cloud/src/workbench/clo
 const FRAME: &str = include_str!("../../workbench/frame.rs");
 const DIALOG_ORDER: &str = include_str!("../../workbench/frame/dialog_order.rs");
 const DISPATCH: &str = include_str!("../../workbench/dispatch.rs");
+const COMMAND_HELPERS: &str = include_str!("../../workbench/commands/command_helpers.rs");
+const CONFIGURATION_PAGE: &str = include_str!("../../workbench/surfaces/project/configuration.rs");
 const EXPORT_IMAGE: &str = include_str!("../../workbench/app/actions/export_image.rs");
 const SHELL_HOST: &str = include_str!("../../workbench/shell_host.rs");
 const FEATURES: &str = include_str!("../../workbench/features.rs");
@@ -572,10 +574,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "21",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &["|app, request: ProjectInspectorRequest| answer_project_inspector(app, request)"],
     ),
     (
         "22",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "23",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -698,8 +704,10 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
 ];
 
 /// The shell's `contribute`, at the project feature's points: the navigator
-/// draws in the feature's context and the toolbars over the workbench
-/// host. None raises anything, so none answers anything where it draws.
+/// and the inspector draw in the feature's context and the toolbars over the
+/// workbench host. The inspector has what it raised answered once it has
+/// drawn, before the next point draws; the navigator and the toolbars raise
+/// nothing, so they answer nothing where they draw.
 const PROJECT_CONTRIBUTIONS: &[Step] = &[
     (
         "navigator",
@@ -707,6 +715,15 @@ const PROJECT_CONTRIBUTIONS: &[Step] = &[
             "Workspace::Project => features::show_navigator::<ProjectFeature>(app, ui),\
            Workspace::Simulate => simulate(ui, app),",
         ],
+    ),
+    (
+        "workspace inspector",
+        &["match workspace {\
+           Workspace::Project => {\
+           features::show_inspector::<ProjectFeature>(app, ui);\
+           app.after_contribution();\
+           }\
+           Workspace::Design"],
     ),
     (
         "no-project toolbar",
@@ -1269,8 +1286,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        22,
-        "`after_contribution` answers exactly the twenty-two requests it lists"
+        23,
+        "`after_contribution` answers exactly the twenty-three requests it lists"
     );
 }
 
@@ -1345,12 +1362,79 @@ fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
 }
 
 #[test]
-fn a_project_contribution_answers_nothing_where_it_draws() {
+fn of_the_project_contributions_only_the_inspector_answers_what_it_raised_once_it_draws() {
     assert_runs_in_order(
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         PROJECT_CONTRIBUTIONS,
     );
+}
+
+/// Where a configuration the Project inspector used for runs is refused, the
+/// order from the inspector's drawing to the Configuration page's refusal
+/// strip: the docked inspector draws before the stage, the shell answers
+/// what it raised as it returns, that answer writes the refusal, and the
+/// stage's Configuration page states it. A docked inspector's refusal is
+/// stated in the frame its button was pressed in; an inspector in its drawer
+/// draws after the stage, so its refusal is stated in the next, as it always
+/// was.
+const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
+    (
+        "workbench::show",
+        FRAME,
+        "pub fn show(",
+        &[
+            "docks::show_inspector(root, app, layout)",
+            "CentralPanel::default()",
+            "surfaces::show(ui, app)",
+        ],
+    ),
+    (
+        "RSpiceApp::contribute",
+        SHELL_HOST,
+        "fn contribute(",
+        &["features::show_inspector::<ProjectFeature>(app, ui);\
+             app.after_contribution();"],
+    ),
+    (
+        "RSpiceApp::after_contribution",
+        DISPATCH,
+        "pub(crate) fn after_contribution(",
+        &["|app, request: ProjectInspectorRequest| answer_project_inspector(app, request)"],
+    ),
+    (
+        "answer_project_inspector",
+        COMMAND_HELPERS,
+        "fn answer_project_inspector(",
+        &[
+            "ProjectInspectorRequest::UseForRuns(target) => {",
+            "commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))",
+            "app.state.project.configuration.refusal = refusal;",
+        ],
+    ),
+    (
+        "the Configuration page",
+        CONFIGURATION_PAGE,
+        "pub(super) fn configuration(",
+        &[
+            "if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {\
+             refusal_strip(ui, refusal);",
+        ],
+    ),
+];
+
+#[test]
+fn the_docked_project_inspector_has_a_configuration_refused_for_runs_stated_in_the_same_frame() {
+    for (function, source, signature, calls) in CONFIGURATION_REFUSAL {
+        let steps = calls
+            .iter()
+            .map(|call| (*function, std::slice::from_ref(call)))
+            .collect::<Vec<Step>>();
+        // The Configuration page declares its test module above its code, so
+        // each file is read with its test items blanked where they sit.
+        let shipped = crate::source_guard::without_test_items(source);
+        assert_runs_in_order(function, &body(&shipped, signature), &steps);
+    }
 }
 
 #[test]

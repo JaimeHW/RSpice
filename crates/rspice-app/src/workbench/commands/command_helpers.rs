@@ -1,7 +1,13 @@
 //! Command-dispatch helpers that apply concrete workbench state transitions.
 
 use super::*;
+use crate::state::ViewType;
+use crate::workbench::app::dialogs::project::configuration::{
+    ConfigurationTransaction, commit_configuration_transaction,
+};
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
+use crate::workbench::project::commands::ProjectInspectorRequest;
+use crate::workbench::project::workspace_state::ProjectPage;
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
@@ -331,6 +337,38 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
     match dialog {
         OpenProjectDialog::CheckAndSave => {
             crate::workbench::app::open_check_and_save_dialog(&mut app.state);
+        }
+    }
+}
+
+/// Carry out what the Project workspace's inspector handed over, as the
+/// inspector did in place: the Configurations command, opening the selected
+/// view where it is edited, and using a configuration for runs, whose
+/// refusal the Configuration page states.
+pub(in crate::workbench) fn answer_project_inspector(
+    app: &mut RSpiceApp,
+    request: ProjectInspectorRequest,
+) {
+    match request {
+        ProjectInspectorRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
+        ProjectInspectorRequest::OpenView(reference, view_type) => {
+            app.state.open_workspace_view(reference);
+            // Source views are cell views too: Design shows a Verilog-A module's
+            // editor and states what a SPICE or Verilog view is bound to.
+            let workspace = match view_type {
+                ViewType::Config => {
+                    app.state.project.project_page = ProjectPage::Configuration;
+                    Workspace::Project
+                }
+                _ => Workspace::Design,
+            };
+            Command::OpenWorkspace(workspace).execute(app);
+        }
+        ProjectInspectorRequest::UseForRuns(target) => {
+            let refusal =
+                commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
+                    .err();
+            app.state.project.configuration.refusal = refusal;
         }
     }
 }

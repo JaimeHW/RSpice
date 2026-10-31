@@ -12,16 +12,13 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{ordered_chips, select};
-use crate::workbench::RSpiceApp;
-use crate::workbench::app::dialogs::project::configuration::{
-    ConfigurationTransaction, commit_configuration_transaction,
-};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::design_system::{property_row, property_row_wrapped};
 use crate::workbench::project::configuration_state::{
-    BindingChange, ConfigurationResolution, ConfigurationRow, ConfigurationSelection, FieldEdit,
-    apply_binding_change, apply_cell_binding_change, cell_binding, cell_view_names,
-    governing_binding, instance_binding, runs_on_label, used_for_runs,
+    BindingChange, ConfigurationPageState, ConfigurationResolution, ConfigurationRow,
+    ConfigurationSelection, FieldEdit, apply_binding_change, apply_cell_binding_change,
+    cell_binding, cell_view_names, governing_binding, instance_binding, runs_on_label,
+    used_for_runs,
 };
 
 const RUNS_ON: [&str; 3] = ["All", "Desktop", "Browser"];
@@ -45,22 +42,29 @@ enum InspectorAction {
     Deselect,
 }
 
-pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    let state = &app.state;
-    let catalog = &state.model.workspace.content.configuration_sets;
-    let page = &state.project.configuration;
-    let selection = page.selection(catalog);
-    let resolution = page.last_resolution();
-    let mut buffer = page.field_edit.clone();
+/// The Configuration page's inspector over the page and the model. The
+/// edits it asks for land on the page as it draws; using a configuration for
+/// runs commits a project transaction, so the target is handed back for the
+/// shell to carry out.
+pub(super) fn project_configuration(
+    ui: &mut Ui,
+    page: &mut ConfigurationPageState,
+    model: &Model,
+) -> Option<ConfigurationSelection> {
+    let catalog = &model.workspace.content.configuration_sets;
+    let shown = &*page;
+    let selection = shown.selection(catalog);
+    let resolution = shown.last_resolution();
+    let mut buffer = shown.field_edit.clone();
     let definition = match selection {
-        ConfigurationSelection::Configuration(id) => page.definition(catalog, id),
+        ConfigurationSelection::Configuration(id) => shown.definition(catalog, id),
         ConfigurationSelection::Default => None,
     };
-    let editable = definition.is_some() && !state.model.safe_mode.project_read_only();
-    let action = match page.row.clone() {
+    let editable = definition.is_some() && !model.safe_mode.project_read_only();
+    let action = match shown.row.clone() {
         Some(ConfigurationRow::Instance(path)) => instance(
             ui,
-            state,
+            model,
             definition,
             resolution.as_deref(),
             &path,
@@ -69,7 +73,7 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         ),
         Some(ConfigurationRow::Cell { library, cell }) => cell_facts(
             ui,
-            state,
+            model,
             definition,
             resolution.as_deref(),
             (&library, &cell),
@@ -87,32 +91,24 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
         }),
         None => match definition {
             Some(definition) => {
-                configuration(ui, state, selection, definition, editable, &mut buffer)
+                configuration(ui, model, selection, definition, editable, &mut buffer)
             }
-            None => default_facts(ui, state),
+            None => default_facts(ui, model),
         },
     };
-    app.state.project.configuration.field_edit = buffer;
-    let Some(action) = action else {
-        return;
-    };
-    match action {
-        InspectorAction::UseForRuns(target) => {
-            let refusal =
-                commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
-                    .err();
-            app.state.project.configuration.refusal = refusal;
-        }
-        InspectorAction::Deselect => app.state.project.configuration.row = None,
+    page.field_edit = buffer;
+    match action? {
+        InspectorAction::UseForRuns(target) => return Some(target),
+        InspectorAction::Deselect => page.row = None,
         InspectorAction::CellBinding {
             library,
             cell,
             inherited,
             change,
-        } => edit(&mut app.state, selection, |definition| {
+        } => edit(page, model, selection, |definition| {
             apply_cell_binding_change(definition, &library, &cell, &inherited, change);
         }),
-        InspectorAction::Rename(name) => edit(&mut app.state, selection, |definition| {
+        InspectorAction::Rename(name) => edit(page, model, selection, |definition| {
             definition.name = name;
         }),
         InspectorAction::Binding {
@@ -125,10 +121,9 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
                 _ => None,
             };
             let removed = change == BindingChange::Remove;
-            edit(&mut app.state, selection, |definition| {
+            edit(page, model, selection, |definition| {
                 apply_binding_change(definition, &path, &inherited, change);
             });
-            let page = &mut app.state.project.configuration;
             if let Some(pattern) = renamed {
                 page.row = Some(ConfigurationRow::Pattern(pattern));
             } else if removed && matches!(page.row, Some(ConfigurationRow::Pattern(_))) {
@@ -136,26 +131,24 @@ pub(super) fn project_configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
     }
+    None
 }
 
 fn edit(
-    state: &mut AppState,
+    page: &mut ConfigurationPageState,
+    model: &Model,
     selection: ConfigurationSelection,
     change: impl FnOnce(&mut ConfigurationSetDefinition),
 ) {
     if let ConfigurationSelection::Configuration(id) = selection {
-        state.project.configuration.edit(
-            &state.model.workspace.content.configuration_sets,
-            id,
-            change,
-        );
+        page.edit(&model.workspace.content.configuration_sets, id, change);
     }
 }
 
 /// The built-in Default's facts.
-fn default_facts(ui: &mut Ui, state: &AppState) -> Option<InspectorAction> {
-    let project = &state.model.workspace.content.project;
-    let catalog = &state.model.workspace.content.configuration_sets;
+fn default_facts(ui: &mut Ui, model: &Model) -> Option<InspectorAction> {
+    let project = &model.workspace.content.project;
+    let catalog = &model.workspace.content.configuration_sets;
     property_row(ui, "Name", "Default");
     property_row(
         ui,
@@ -177,13 +170,13 @@ fn default_facts(ui: &mut Ui, state: &AppState) -> Option<InspectorAction> {
             .join(", "),
     );
     property_row(ui, "Unresolved cells", "Stop the netlist");
-    used_for_runs_row(ui, state, ConfigurationSelection::Default, catalog)
+    used_for_runs_row(ui, model, ConfigurationSelection::Default, catalog)
 }
 
 /// "Used for runs" as a fact, or the action that makes it one.
 fn used_for_runs_row(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     selection: ConfigurationSelection,
     catalog: &crate::state::ConfigurationSetCatalog,
 ) -> Option<InspectorAction> {
@@ -192,12 +185,8 @@ fn used_for_runs_row(
         return None;
     }
     property_row(ui, "Used for runs", "No");
-    action_button(
-        ui,
-        "Use for runs",
-        !state.model.safe_mode.project_read_only(),
-    )
-    .then_some(InspectorAction::UseForRuns(selection))
+    action_button(ui, "Use for runs", !model.safe_mode.project_read_only())
+        .then_some(InspectorAction::UseForRuns(selection))
 }
 
 fn action_button(ui: &mut Ui, label: &str, enabled: bool) -> bool {
@@ -215,13 +204,13 @@ fn action_button(ui: &mut Ui, label: &str, enabled: bool) -> bool {
 /// The configuration itself, with no row selected.
 fn configuration(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     selection: ConfigurationSelection,
     definition: &ConfigurationSetDefinition,
     editable: bool,
     buffer: &mut Option<FieldEdit>,
 ) -> Option<InspectorAction> {
-    let catalog = &state.model.workspace.content.configuration_sets;
+    let catalog = &model.workspace.content.configuration_sets;
     let mut action = committed_text(
         ui,
         buffer,
@@ -244,7 +233,7 @@ fn configuration(
         "Cell bindings",
         &definition.cell_bindings.len().to_string(),
     );
-    if let Some(use_for_runs) = used_for_runs_row(ui, state, selection, catalog) {
+    if let Some(use_for_runs) = used_for_runs_row(ui, model, selection, catalog) {
         action = Some(use_for_runs);
     }
     action
@@ -253,7 +242,7 @@ fn configuration(
 /// One instance: what it resolved to, and its own binding.
 fn instance(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     definition: Option<&ConfigurationSetDefinition>,
     resolution: Option<&ConfigurationResolution>,
     path: &str,
@@ -322,11 +311,7 @@ fn instance(
         binding.eligible_platforms.clone()
     });
     let views_owned = views.clone();
-    let addable = cell_view_names(
-        &state.model.library_manager,
-        &reference.library,
-        &reference.cell,
-    );
+    let addable = cell_view_names(&model.library_manager, &reference.library, &reference.cell);
     let change = binding_fields(
         ui,
         &format!("instance-{path}"),
@@ -355,7 +340,7 @@ fn instance(
 /// they all follow.
 fn cell_facts(
     ui: &mut Ui,
-    state: &AppState,
+    model: &Model,
     definition: Option<&ConfigurationSetDefinition>,
     resolution: Option<&ConfigurationResolution>,
     (library, cell): (&str, &str),
@@ -406,7 +391,7 @@ fn cell_facts(
         |binding| binding.executable_views.clone(),
     );
     let stop = binding.and_then(|binding| binding.stop_view.clone());
-    let addable = cell_view_names(&state.model.library_manager, library, cell);
+    let addable = cell_view_names(&model.library_manager, library, cell);
     let mut unused = None;
     let change = binding_fields(
         ui,

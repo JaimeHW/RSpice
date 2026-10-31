@@ -6,30 +6,69 @@ mod configuration;
 use egui::Ui;
 use rspice_ui_kit::panels::{Problem, section_header};
 
+use crate::state::command_catalog::CommandKey;
 use crate::state::{CellViewRef, ViewType};
-use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
+use crate::workbench::app_state::{DesignCheckStatus, Model, SlotFacts};
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
+use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, dirty_document_count};
 
-use super::super::super::commands::vocabulary::Command;
 use super::super::super::design_system::{property_row, property_row_problem};
-use super::super::super::state::Workspace;
-use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::commands::{ProjectCommand, ProjectInspectorRequest};
+use crate::workbench::project::configuration_state::ConfigurationPageState;
 use crate::workbench::project::workspace_state::ProjectPage;
 
-pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.project.project_page {
-        ProjectPage::Overview => project_overview(ui, app),
-        ProjectPage::Library => project_library(ui, app),
-        ProjectPage::Configuration => configuration::project_configuration(ui, app),
-        ProjectPage::Dependencies => project_dependency(ui, app),
-        ProjectPage::Recovery => project_recovery(ui, app),
+/// What the Project workspace's inspector reads and writes: the project
+/// feature's page and the selections its rails keep, the configuration
+/// page, the recovery catalog and the model, with what the design checks
+/// read of the other features' state and the project as its lifecycle reads
+/// it.
+pub(in crate::workbench) struct ProjectInspector<'a> {
+    pub(in crate::workbench) page: ProjectPage,
+    pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
+    pub(in crate::workbench) dependency_selection: &'a Option<String>,
+    pub(in crate::workbench) checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
+    pub(in crate::workbench) checkpoint_selection: &'a Option<String>,
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) facts: SlotFacts,
+    /// Read for how many documents a save would write.
+    pub(in crate::workbench) lifecycle: LifecycleView<'a>,
+}
+
+/// What the reader asked of the inspector this frame, raised once it has
+/// drawn.
+pub(in crate::workbench) enum ProjectInspectorAction {
+    /// Run the command this key names.
+    Execute(CommandKey),
+    /// Hand the shell what only it carries out.
+    Shell(ProjectInspectorRequest),
+}
+
+pub(in crate::workbench) fn project(
+    ui: &mut Ui,
+    inspector: &mut ProjectInspector<'_>,
+) -> Option<ProjectInspectorAction> {
+    match inspector.page {
+        ProjectPage::Overview => project_overview(ui, inspector),
+        ProjectPage::Library => project_library(ui, inspector),
+        ProjectPage::Configuration => {
+            configuration::project_configuration(ui, inspector.configuration, inspector.model).map(
+                |target| ProjectInspectorAction::Shell(ProjectInspectorRequest::UseForRuns(target)),
+            )
+        }
+        ProjectPage::Dependencies => project_dependency(ui, inspector),
+        ProjectPage::Recovery => {
+            project_recovery(ui, inspector);
+            None
+        }
     }
 }
 
-fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
-    let project = &app.state.model.workspace.content;
+fn project_overview(
+    ui: &mut Ui,
+    inspector: &ProjectInspector<'_>,
+) -> Option<ProjectInspectorAction> {
+    let project = &inspector.model.workspace.content;
     // With no configuration used for runs, runs use Default: the project's
     // own top cell through the built-in view list.
     let testbench = project.simulation_root_reference().display_path();
@@ -37,7 +76,7 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
         .configuration_sets
         .active()
         .map_or_else(|| "Default".to_owned(), |item| item.name().to_owned());
-    let modified = dirty_document_count(&app.state);
+    let modified = dirty_document_count(&inspector.lifecycle);
 
     // No "CURRENT"/"REVIEW" meta: the Configuration row names what runs use,
     // Default included. The run plan
@@ -71,7 +110,9 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
         ),
     );
 
-    let check_status = app.state.simulation_root_design_check_status();
+    let check_status = inspector
+        .model
+        .simulation_root_design_check_status(inspector.facts);
     let check_meta = match &check_status {
         DesignCheckStatus::Current(_) => None,
         DesignCheckStatus::NotRun => Some("not run"),
@@ -104,24 +145,36 @@ fn project_overview(ui: &mut Ui, app: &mut RSpiceApp) {
             property_row(ui, "Checks", &reason);
         }
     }
-    if let Some(advisory) = app.state.model.pdk_config.scan_errors.first() {
+    if let Some(advisory) = inspector.model.pdk_config.scan_errors.first() {
         property_row(ui, "Model advisory", advisory);
     }
 
     section_header(ui, "Project actions", None);
+    let mut action = None;
     if inspector_action(ui, "Revision history\u{2026}") {
-        app.execute_command_key(ProjectCommand::RevisionHistory.key());
+        action = Some(ProjectInspectorAction::Execute(
+            ProjectCommand::RevisionHistory.key(),
+        ));
     }
     if inspector_action(ui, "Configurations") {
-        Command::ConfigurationSets.execute(app);
+        action = Some(ProjectInspectorAction::Shell(
+            ProjectInspectorRequest::ConfigurationSets,
+        ));
     }
     if inspector_action(ui, "Switch project\u{2026}") {
-        app.execute_command_key(ProjectCommand::ProjectLauncher.key());
+        action = Some(ProjectInspectorAction::Execute(
+            ProjectCommand::ProjectLauncher.key(),
+        ));
     }
+    action
 }
 
-fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
-    let library = app.state.model.library_manager.current_library();
+fn project_library(
+    ui: &mut Ui,
+    inspector: &ProjectInspector<'_>,
+) -> Option<ProjectInspectorAction> {
+    let model = inspector.model;
+    let library = model.library_manager.current_library();
     let library_path = library
         .and_then(|item| item.path.as_ref())
         .map_or_else(|| "not bound".to_owned(), |path| path.display().to_string());
@@ -132,11 +185,11 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
             item.technology.as_str()
         }
     });
-    let view = app.state.model.library_manager.current_view();
+    let view = model.library_manager.current_view();
     let view_type = view.map_or("—", |item| item.view_type.display_name());
     let open_target = match (
-        app.state.model.library_manager.current_library(),
-        app.state.model.library_manager.current_cell(),
+        model.library_manager.current_library(),
+        model.library_manager.current_cell(),
         view,
     ) {
         (Some(library), Some(cell), Some(view)) => Some((
@@ -147,10 +200,10 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     };
     let usage = open_target
         .as_ref()
-        .map_or_else(Vec::new, |(reference, _)| library_usage(app, reference));
+        .map_or_else(Vec::new, |(reference, _)| library_usage(model, reference));
     let (checks_meta, checks) = match open_target.as_ref() {
         Some((reference, ViewType::Schematic | ViewType::Testbench)) => {
-            match app.state.design_check_status(reference) {
+            match model.design_check_status(reference, inspector.facts) {
                 DesignCheckStatus::Current(receipt) => {
                     let summary = receipt.result.summary();
                     (
@@ -207,40 +260,27 @@ fn project_library(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     section_header(ui, "Actions", None);
-    if inspector_action_enabled(ui, "Open selected view", open_target.is_some())
-        && let Some((reference, view_type)) = open_target.as_ref()
-    {
-        app.state.open_workspace_view(reference.clone());
-        // Source views are cell views too: Design shows a Verilog-A module's
-        // editor and states what a SPICE or Verilog view is bound to.
-        let workspace = match view_type {
-            ViewType::Config => {
-                app.state.project.project_page = ProjectPage::Configuration;
-                Workspace::Project
-            }
-            _ => Workspace::Design,
-        };
-        Command::OpenWorkspace(workspace).execute(app);
-    }
+    let open = inspector_action_enabled(ui, "Open selected view", open_target.is_some());
     // No "Where used & impact…": it wrote the consumers to the console, and
     // the "Used by" row above names them in place. No "Revision history…"
     // either — it is a project-level dialog, and the Project overview
     // inspector is where the project's own actions live.
+    open_target.filter(|_| open).map(|(reference, view_type)| {
+        ProjectInspectorAction::Shell(ProjectInspectorRequest::OpenView(reference, view_type))
+    })
 }
 
-fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selection = app
-        .state
-        .project
-        .project_dependency_selection
+fn project_dependency(
+    ui: &mut Ui,
+    inspector: &ProjectInspector<'_>,
+) -> Option<ProjectInspectorAction> {
+    let model = inspector.model;
+    let selection = inspector
+        .dependency_selection
         .clone()
         .unwrap_or_else(|| "No dependency selected".to_owned());
-    let design_library = app.state.model.library_manager.get_library(&selection);
-    let model_library = app
-        .state
-        .model
-        .model_library_manager
-        .get_library(&selection);
+    let design_library = model.library_manager.get_library(&selection);
+    let model_library = model.model_library_manager.get_library(&selection);
 
     section_header(ui, "Resolved dependency", None);
     property_row(ui, "Name", &selection);
@@ -282,9 +322,7 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
     property_row(
         ui,
         "Technology",
-        if app
-            .state
-            .model
+        if model
             .workspace
             .content
             .project
@@ -298,35 +336,24 @@ fn project_dependency(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 
     section_header(ui, "Actions", None);
+    let mut action = None;
     if inspector_action(ui, "Model & library catalog") {
-        app.execute_command_key(ids::MODELS_CATALOG);
+        action = Some(ProjectInspectorAction::Execute(ids::MODELS_CATALOG));
     }
     if inspector_action(ui, "PDK and model paths\u{2026}") {
-        app.execute_command_key(ids::PDK_SETTINGS);
+        action = Some(ProjectInspectorAction::Execute(ids::PDK_SETTINGS));
     }
+    action
 }
 
-fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selected = app.state.project.project_checkpoint_selection.as_deref();
-    let checkpoint = app
-        .state
-        .project
-        .project_checkpoint_recovery
+fn project_recovery(ui: &mut Ui, inspector: &ProjectInspector<'_>) {
+    let recovery = inspector.checkpoint_recovery;
+    let selected = inspector.checkpoint_selection.as_deref();
+    let checkpoint = recovery
         .checkpoints
         .iter()
         .find(|item| selected.is_some_and(|id| id == item.checkpoint_id().to_string()));
-    let integrity = app
-        .state
-        .project
-        .project_checkpoint_recovery
-        .error
-        .is_none()
-        && app
-            .state
-            .project
-            .project_checkpoint_recovery
-            .quarantined
-            .is_empty();
+    let integrity = recovery.error.is_none() && recovery.quarantined.is_empty();
 
     // Only a selected checkpoint has anything to say. The revision counter,
     // the payload's byte count and the checkpoint's internal id are not
@@ -336,12 +363,7 @@ fn project_recovery(ui: &mut Ui, app: &mut RSpiceApp) {
         property_row(ui, "Reason", checkpoint.reason().label());
     }
 
-    let quarantined = app
-        .state
-        .project
-        .project_checkpoint_recovery
-        .quarantined
-        .len();
+    let quarantined = recovery.quarantined.len();
     // The store is in order or it is not: "verified" is success, and the
     // restore mode and what it leaves alone are constants that belong on the
     // Restore control. Damaged checkpoints are the one thing to report.
@@ -377,10 +399,8 @@ fn inspector_action_enabled(ui: &mut Ui, label: &str, enabled: bool) -> bool {
 }
 
 /// The schematics that place `reference`, each once.
-fn library_usage(app: &RSpiceApp, reference: &CellViewRef) -> Vec<String> {
-    let mut consumers = app
-        .state
-        .model
+fn library_usage(model: &Model, reference: &CellViewRef) -> Vec<String> {
+    let mut consumers = model
         .cell_instances(&reference.library, &reference.cell, Some(&reference.view))
         .into_iter()
         .map(|usage| usage.schematic.display_path())

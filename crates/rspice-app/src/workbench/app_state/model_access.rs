@@ -137,6 +137,7 @@ impl AppState {
         self.model.publish_rule_deck_issues(facts);
     }
 
+    #[cfg(test)]
     pub(crate) fn design_check_status(&self, subject: &CellViewRef) -> DesignCheckStatus<'_> {
         self.model.design_check_status(subject, self.slot_facts())
     }

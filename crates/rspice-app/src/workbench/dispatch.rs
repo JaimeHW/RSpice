@@ -26,8 +26,8 @@ use crate::workbench::app_state::PlatformState;
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
-    active_schematic_editor, command_edits_schematic, file_action, open_project_dialog,
-    run_project_file_action,
+    active_schematic_editor, answer_project_inspector, command_edits_schematic, file_action,
+    open_project_dialog, run_project_file_action,
 };
 use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::features;
@@ -44,6 +44,7 @@ use crate::workbench::framework::requests::{
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
+use crate::workbench::project::commands::ProjectInspectorRequest;
 use crate::workbench::{RSpiceApp, WorkbenchSession};
 
 /// The dispatcher by key: where a key becomes the command it names, a
@@ -366,6 +367,11 @@ impl RSpiceApp {
                     model,
                 );
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: ProjectInspectorRequest| answer_project_inspector(app, request),
         );
         requests::drain(
             self,

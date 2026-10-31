@@ -1253,7 +1253,8 @@ mod command_helpers;
 pub(crate) use command_helpers::reset_active_view;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
-    active_schematic_editor, file_action, open_project_dialog, run_project_file_action,
+    active_schematic_editor, answer_project_inspector, file_action, open_project_dialog,
+    run_project_file_action,
 };
 
 #[cfg(test)]

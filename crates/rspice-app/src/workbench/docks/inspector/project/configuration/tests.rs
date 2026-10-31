@@ -3,6 +3,7 @@
 
 use super::*;
 
+use crate::workbench::RSpiceApp;
 use crate::workbench::examples::hierarchy_reference;
 
 fn reference_app() -> RSpiceApp {
@@ -34,7 +35,9 @@ fn frame(ctx: &egui::Context, app: &mut RSpiceApp, events: Vec<egui::Event>) -> 
             ..Default::default()
         },
         |ui| {
-            egui::CentralPanel::default().show(ui, |ui| project_configuration(ui, app));
+            egui::CentralPanel::default().show(ui, |ui| {
+                project_configuration(ui, &mut app.state.project.configuration, &app.state.model)
+            });
         },
     );
     fn collect(shape: &egui::epaint::Shape, out: &mut Vec<String>) {

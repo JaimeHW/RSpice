@@ -12,11 +12,12 @@ pub(crate) mod workspace_state;
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::library::new_view_target;
 use crate::workbench::app::{open_design_management_dialog, open_project_revision_history};
-use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
+use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::framework::requests::{
     FocusProjectLauncherSearch, OpenProjectDialog, ProjectFileAction,
@@ -40,6 +41,13 @@ impl Feature for ProjectFeature {
         registry.commands::<ProjectCommand>();
         registry.navigator(FeatureNavigator {
             show: show_navigator,
+        });
+        registry.inspector(FeatureInspector {
+            show: show_inspector,
+            // What the section holds typed is committed by its own fields as
+            // the reader leaves them, so it holds nothing for the shell to
+            // commit.
+            commit_pending_edit: |_, _| {},
         });
     }
 }
@@ -80,6 +88,42 @@ fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
             filter: cx.wb.navigator_filter(),
         },
     );
+}
+
+/// The Project workspace's inspector: the page in front, over the feature's
+/// state and the model, with what the design checks read of the other
+/// features and the project as its lifecycle reads it. What the reader asked
+/// of it is raised once it has drawn: a command, or what only the shell
+/// carries out.
+fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
+    let model = &*cx.model;
+    let project = &mut *cx.state;
+    let action = crate::workbench::docks::inspector::project::project(
+        ui,
+        &mut ProjectInspector {
+            page: project.project_page,
+            configuration: &mut project.configuration,
+            dependency_selection: &project.project_dependency_selection,
+            checkpoint_recovery: &project.project_checkpoint_recovery,
+            checkpoint_selection: &project.project_checkpoint_selection,
+            model,
+            facts: SlotFacts {
+                preflight_report_retained: cx.runs.preflight.report.is_some(),
+                review_markers: cx.peers.design().review_markers(),
+            },
+            lifecycle: LifecycleView {
+                model,
+                platform: cx.platform,
+                workspace: cx.wb.workspace,
+                presentation: cx.peers.results().saved_presentation(),
+            },
+        },
+    );
+    match action {
+        Some(ProjectInspectorAction::Execute(key)) => cx.execute(key),
+        Some(ProjectInspectorAction::Shell(request)) => cx.wb.outbox.push(request),
+        None => {}
+    }
 }
 
 #[cfg(target_arch = "wasm32")]
