@@ -17,8 +17,8 @@
 use crate::Value;
 
 const XYCE_DAMPED_NORMAL_CONVERGENCE_CODE: i32 = 2;
-const XYCE_DAMPED_NEAR_CONVERGENCE_CODE: i32 = -3;
-const XYCE_DAMPED_SMALL_UPDATE_CODE: i32 = 4;
+const XYCE_NEAR_CONVERGENCE_CODE: i32 = 3;
+const XYCE_SMALL_UPDATE_CODE: i32 = 4;
 const XYCE_DAMPED_TOO_MANY_STEPS_CODE: i32 = -1;
 const XYCE_DAMPED_UPDATE_TOO_BIG_CODE: i32 = -2;
 const XYCE_DAMPED_STALLED_CODE: i32 = -3;
@@ -33,24 +33,38 @@ const XYCE_DAMPED_STAGNATION_TOLERANCE: Value = 1.0e-3;
 const XYCE_DAMPED_MAX_BAD_STEPS: usize = 5;
 const XYCE_DAMPED_SMALL_UPDATE_TOLERANCE: Value = 1.0e-6;
 
-/// The return-code policy configured by Xyce's `TIMEINT` options.
+/// The return-code policy configured by Xyce's `TIMEINT` options, shared by
+/// the DampedNewton and NOX status tests.
 ///
 /// Xyce 7.10 defaults `NLNEARCONV=0` (near convergence rejects the
 /// timepoint) and `NLSMALLUPDATE=1` (a small update is accepted so the time
-/// integrator can make the LTE decision).  The policy is explicit here so a
-/// future parser can expose those options without changing the state machine.
+/// integrator can make the LTE decision).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) struct XyceDampedReturnCodes {
+pub(super) struct XyceNonlinearReturnCodes {
     pub(super) near_convergence: i32,
     pub(super) small_update: i32,
 }
 
-impl Default for XyceDampedReturnCodes {
-    fn default() -> Self {
+impl XyceNonlinearReturnCodes {
+    /// The codes for authored `TIMEINT NLNEARCONV` / `NLSMALLUPDATE` values;
+    /// `None` keeps the TIMEINT default (N_TIA_TIAParams.C:430-431). A true
+    /// value selects the positive code and a false one its negation
+    /// (N_NLS_Manager.C:277-290).
+    pub(super) fn from_timeint(near_convergence: Option<bool>, small_update: Option<bool>) -> Self {
+        let code = |enabled: bool, code: i32| if enabled { code } else { -code };
         Self {
-            near_convergence: XYCE_DAMPED_NEAR_CONVERGENCE_CODE,
-            small_update: XYCE_DAMPED_SMALL_UPDATE_CODE,
+            near_convergence: code(
+                near_convergence.unwrap_or(false),
+                XYCE_NEAR_CONVERGENCE_CODE,
+            ),
+            small_update: code(small_update.unwrap_or(true), XYCE_SMALL_UPDATE_CODE),
         }
+    }
+}
+
+impl Default for XyceNonlinearReturnCodes {
+    fn default() -> Self {
+        Self::from_timeint(None, None)
     }
 }
 
@@ -203,7 +217,7 @@ pub(super) fn xyce_damped_transient_weights(
 #[derive(Debug, Clone)]
 pub(super) struct XyceTransientDampedStatus {
     max_iterations: usize,
-    return_codes: XyceDampedReturnCodes,
+    return_codes: XyceNonlinearReturnCodes,
     initial_residual_l2_norm: Option<Value>,
     previous_residual_l2_norm: Option<Value>,
     bad_step_count: usize,
@@ -212,15 +226,16 @@ pub(super) struct XyceTransientDampedStatus {
 
 impl XyceTransientDampedStatus {
     /// Create a status object with Xyce 7.10's default return-code policy.
+    #[cfg(test)]
     pub(super) fn new(max_iterations: usize) -> Self {
-        Self::with_return_codes(max_iterations, XyceDampedReturnCodes::default())
+        Self::with_return_codes(max_iterations, XyceNonlinearReturnCodes::default())
     }
 
     /// Create a status object with explicit `NLNEARCONV`/`NLSMALLUPDATE`
     /// return codes.
     pub(super) fn with_return_codes(
         max_iterations: usize,
-        return_codes: XyceDampedReturnCodes,
+        return_codes: XyceNonlinearReturnCodes,
     ) -> Self {
         Self {
             max_iterations: max_iterations.max(1),
@@ -447,12 +462,22 @@ impl XyceTransientDampedStatus {
 
         if self.bad_step_count >= XYCE_DAMPED_MAX_BAD_STEPS {
             self.bad_step_count = 0;
+            // A stall that still made progress returns the near-convergence
+            // code (N_NLS_DampedNewton.C:1356-1370), which NLNEARCONV=1 turns
+            // into a success.
             return if relative_rate < XYCE_DAMPED_MIN_RESIDUAL_REDUCTION
                 && self.min_convergence_rate <= 1.0
             {
-                XyceDampedDecision::Failed {
-                    test: 7,
-                    return_code: self.return_codes.near_convergence,
+                if self.return_codes.near_convergence > 0 {
+                    XyceDampedDecision::Accepted {
+                        test: 7,
+                        return_code: self.return_codes.near_convergence,
+                    }
+                } else {
+                    XyceDampedDecision::Failed {
+                        test: 7,
+                        return_code: self.return_codes.near_convergence,
+                    }
                 }
             } else {
                 XyceDampedDecision::Failed {
@@ -588,7 +613,7 @@ mod tests {
     fn configured_positive_near_convergence_is_accepted() {
         let mut status = XyceTransientDampedStatus::with_return_codes(
             2,
-            XyceDampedReturnCodes {
+            XyceNonlinearReturnCodes {
                 near_convergence: 3,
                 small_update: 4,
             },
@@ -627,6 +652,48 @@ mod tests {
         assert_eq!(
             status.evaluate(sample(7, 1.0, norm, 1.0), 0.33, 1.0e-2),
             failed(7, -3)
+        );
+    }
+
+    #[test]
+    fn configured_positive_near_convergence_accepts_a_progressing_stall() {
+        // Five stagnating steps after a 20% reduction return the
+        // near-convergence code, which NLNEARCONV=1 makes a success; a stall
+        // whose residual grew keeps the stalled failure (-3) either way.
+        let stall = |rate: Value| {
+            let mut status = XyceTransientDampedStatus::with_return_codes(
+                20,
+                XyceNonlinearReturnCodes::from_timeint(Some(true), None),
+            );
+            let _ = status.evaluate(sample(1, 1.0, 100.0, 1.0), 0.33, 1.0e-2);
+            let _ = status.evaluate(sample(2, 1.0, 80.0, 1.0), 0.33, 1.0e-2);
+            let mut norm = 80.0;
+            for newton_step in 3..=6 {
+                norm *= rate;
+                let _ = status.evaluate(sample(newton_step, 1.0, norm, 1.0), 0.33, 1.0e-2);
+            }
+            norm *= rate;
+            status.evaluate(sample(7, 1.0, norm, 1.0), 0.33, 1.0e-2)
+        };
+        assert_eq!(stall(0.9995), accepted(7, 3));
+        assert_eq!(stall(1.0005), failed(7, -3));
+    }
+
+    #[test]
+    fn timeint_options_select_xyce_return_codes() {
+        assert_eq!(
+            XyceNonlinearReturnCodes::default(),
+            XyceNonlinearReturnCodes {
+                near_convergence: -3,
+                small_update: 4,
+            }
+        );
+        assert_eq!(
+            XyceNonlinearReturnCodes::from_timeint(Some(true), Some(false)),
+            XyceNonlinearReturnCodes {
+                near_convergence: 3,
+                small_update: -4,
+            }
         );
     }
 
@@ -694,7 +761,7 @@ mod tests {
             }
         );
 
-        let configured_codes = XyceDampedReturnCodes {
+        let configured_codes = XyceNonlinearReturnCodes {
             near_convergence: 3,
             small_update: -4,
         };

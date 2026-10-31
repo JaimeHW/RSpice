@@ -4,14 +4,10 @@
 //! Its ordered tests also return configured nonlinear return codes for near
 //! convergence, tiny updates, and sustained stagnation.
 
+use super::damped_status::XyceNonlinearReturnCodes;
 use crate::Value;
 
 const XYCE_NOX_NORMAL_CONVERGENCE_CODE: i32 = 2;
-// Xyce 7.10's TIMEINT metadata defaults NLNEARCONV to zero, which remaps the
-// nominal +3 near-convergence return to -3. Thus Tests 3 and 7 reject the
-// timestep unless a deck explicitly opts into near-convergence acceptance.
-const XYCE_NOX_NEAR_CONVERGENCE_CODE: i32 = -3;
-const XYCE_NOX_SMALL_UPDATE_CODE: i32 = 4;
 const XYCE_NOX_TOO_MANY_STEPS_CODE: i32 = -1;
 const XYCE_NOX_UPDATE_TOO_BIG_CODE: i32 = -2;
 const XYCE_NOX_STALLED_CODE: i32 = -3;
@@ -44,6 +40,7 @@ pub(super) struct XyceNoxSample {
 #[derive(Debug, Clone)]
 pub(super) struct XyceTransientNoxStatus {
     max_iterations: usize,
+    return_codes: XyceNonlinearReturnCodes,
     initial_residual_l2_norm: Option<Value>,
     previous_residual_l2_norm: Option<Value>,
     bad_step_count: usize,
@@ -52,9 +49,22 @@ pub(super) struct XyceTransientNoxStatus {
 }
 
 impl XyceTransientNoxStatus {
+    #[cfg(test)]
     pub(super) fn new(max_iterations: usize) -> Self {
+        Self::with_return_codes(max_iterations, XyceNonlinearReturnCodes::default())
+    }
+
+    /// A status with the `TIMEINT NLNEARCONV` / `NLSMALLUPDATE` codes. Xyce
+    /// 7.10's TIMEINT metadata defaults NLNEARCONV to zero, which remaps the
+    /// nominal +3 near-convergence return to -3, so Tests 3 and 7 reject the
+    /// timestep unless a deck opts into near-convergence acceptance.
+    pub(super) fn with_return_codes(
+        max_iterations: usize,
+        return_codes: XyceNonlinearReturnCodes,
+    ) -> Self {
         Self {
             max_iterations: max_iterations.max(1),
+            return_codes,
             initial_residual_l2_norm: None,
             previous_residual_l2_norm: None,
             bad_step_count: 0,
@@ -156,15 +166,13 @@ impl XyceTransientNoxStatus {
     ) -> XyceNoxDecision {
         // Xyce Test 3: at MAXSTEP, a non-increasing last residual and at
         // least 10% total reduction return the configured near-convergence
-        // code. Xyce 7.10 defaults that code to failure (-3).
+        // code (N_NLS_NOX_XyceTests.C:468-481). Xyce 7.10 defaults that code
+        // to failure (-3).
         if iteration >= self.max_iterations {
             return if current_rate <= XYCE_NOX_REQUESTED_CONVERGENCE_RATE
                 && relative_rate <= XYCE_NOX_REQUESTED_RELATIVE_CONVERGENCE_RATE
             {
-                XyceNoxDecision::Failed {
-                    test: 3,
-                    return_code: XYCE_NOX_NEAR_CONVERGENCE_CODE,
-                }
+                self.configured(3, self.return_codes.near_convergence)
             } else {
                 XyceNoxDecision::Failed {
                     test: 3,
@@ -173,13 +181,11 @@ impl XyceTransientNoxStatus {
             };
         }
 
-        // Xyce Test 4: a tiny weighted update returns +4 so the time
-        // integrator, rather than the nonlinear solver, decides the step.
+        // Xyce Test 4: a tiny weighted update returns the small-update code,
+        // +4 by default, so the time integrator rather than the nonlinear
+        // solver decides the step (N_NLS_NOX_XyceTests.C:493-498).
         if iteration > 0 && weighted_update < XYCE_NOX_SMALL_UPDATE_TOLERANCE {
-            return XyceNoxDecision::Accepted {
-                test: 4,
-                return_code: XYCE_NOX_SMALL_UPDATE_CODE,
-            };
+            return self.configured(4, self.return_codes.small_update);
         }
 
         // Xyce Test 6.
@@ -211,10 +217,7 @@ impl XyceTransientNoxStatus {
             return if relative_rate <= XYCE_NOX_REQUESTED_RELATIVE_CONVERGENCE_RATE
                 && self.min_convergence_rate <= 1.0
             {
-                XyceNoxDecision::Failed {
-                    test: 7,
-                    return_code: XYCE_NOX_NEAR_CONVERGENCE_CODE,
-                }
+                self.configured(7, self.return_codes.near_convergence)
             } else {
                 XyceNoxDecision::Failed {
                     test: 7,
@@ -224,6 +227,16 @@ impl XyceTransientNoxStatus {
         }
 
         XyceNoxDecision::Continue
+    }
+
+    /// A test that returns a TIMEINT-configured code succeeds exactly when
+    /// that code is positive.
+    fn configured(&self, test: u8, return_code: i32) -> XyceNoxDecision {
+        if return_code > 0 {
+            XyceNoxDecision::Accepted { test, return_code }
+        } else {
+            XyceNoxDecision::Failed { test, return_code }
+        }
     }
 }
 
@@ -311,6 +324,51 @@ mod tests {
             XyceNoxDecision::Failed {
                 test: 3,
                 return_code: -3
+            }
+        );
+    }
+
+    #[test]
+    fn configured_near_convergence_accepts_at_max_iteration_and_on_a_stall() {
+        let codes = XyceNonlinearReturnCodes::from_timeint(Some(true), None);
+        let mut status = XyceTransientNoxStatus::with_return_codes(20, codes);
+        let _ = status.evaluate(sample(0, 100.0, 100.0, None), 0.33, 1.0e-2);
+        assert_eq!(
+            status.evaluate(sample(20, 90.0, 90.0, Some(1.0)), 0.33, 1.0e-2),
+            XyceNoxDecision::Accepted {
+                test: 3,
+                return_code: 3
+            }
+        );
+
+        let mut status = XyceTransientNoxStatus::with_return_codes(20, codes);
+        let _ = status.evaluate(sample(0, 100.0, 100.0, None), 0.33, 1.0e-2);
+        let _ = status.evaluate(sample(1, 80.0, 80.0, Some(1.0)), 0.33, 1.0e-2);
+        let mut norm = 80.0;
+        for iteration in 2..6 {
+            norm *= 0.9995;
+            let _ = status.evaluate(sample(iteration, norm, norm, Some(1.0)), 0.33, 1.0e-2);
+        }
+        norm *= 0.9995;
+        assert_eq!(
+            status.evaluate(sample(6, norm, norm, Some(1.0)), 0.33, 1.0e-2),
+            XyceNoxDecision::Accepted {
+                test: 7,
+                return_code: 3
+            }
+        );
+    }
+
+    #[test]
+    fn disabled_small_update_fails_the_solve() {
+        let codes = XyceNonlinearReturnCodes::from_timeint(None, Some(false));
+        let mut status = XyceTransientNoxStatus::with_return_codes(20, codes);
+        let _ = status.evaluate(sample(0, 10.0, 10.0, None), 0.33, 1.0e-2);
+        assert_eq!(
+            status.evaluate(sample(1, 1.0, 1.0, Some(1.0e-7)), 0.33, 1.0e-2),
+            XyceNoxDecision::Failed {
+                test: 4,
+                return_code: -4
             }
         );
     }

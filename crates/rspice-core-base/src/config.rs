@@ -640,6 +640,14 @@ pub struct SimulationConfig {
     /// Explicit Xyce transient nonlinear solver selection. `None` preserves
     /// Xyce's default DampedNewton solver; `Some(true)` selects NOX.
     pub transient_nonlinear_nox: Option<bool>,
+    /// Xyce `TIMEINT NLNEARCONV`. `None` keeps Xyce 7.10's default of 0,
+    /// under which a near-converged transient Newton solve fails (`-3`);
+    /// `Some(true)` makes it succeed (`+3`) and leaves the step to LTE control.
+    pub transient_nonlinear_near_convergence: Option<bool>,
+    /// Xyce `TIMEINT NLSMALLUPDATE`. `None` keeps Xyce 7.10's default of 1,
+    /// under which a transient Newton solve stopped by a tiny update succeeds
+    /// (`+4`); `Some(false)` makes it fail (`-4`).
+    pub transient_nonlinear_small_update: Option<bool>,
     /// Reference magnitude policy for normalized transient LTE control.
     /// `None` selects the active [`SpiceDialect`]'s default policy.
     pub transient_lte_reference: Option<TransientLteReference>,
@@ -1178,6 +1186,8 @@ impl Default for SimulationConfig {
             transient_nonlinear_max_iterations: None,
             transient_enforce_device_convergence: None,
             transient_nonlinear_nox: None,
+            transient_nonlinear_near_convergence: None,
+            transient_nonlinear_small_update: None,
             transient_lte_reference: None,
             transient_new_bp_stepping: true,
             transient_node_activity_bound: crate::constants::DEVICE_ACTIVITY_STEP_BOUND,

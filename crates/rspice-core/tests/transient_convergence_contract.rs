@@ -399,3 +399,31 @@ fn a_force_accepted_edge_does_not_cap_step_growth_for_the_rest_of_the_run() {
          disarmed (1.5 is the armed accepted-step growth limit)"
     );
 }
+
+/// Xyce's `.OPTIONS TIMEINT NLNEARCONV=1` makes a near-converged transient
+/// Newton solve succeed with +3 and leaves the step to LTE control
+/// (N_NLS_Manager.C:277-283; N_NLS_NOX_XyceTests.C:468-481 and :570-583).
+/// CircuitSim90's MOS2 NAND sets it under NOX. Ignoring the option rejected
+/// every near-converged solve at the 50.11 ns edge, where the internal
+/// series-NMOS nodes sit at vds ~ 0, and the step collapsed to 1e-20 s; Xyce
+/// 7.10 takes 357 steps over the run.
+#[test]
+fn xyce_nlnearconv_accepts_the_mos2_nand_near_converged_edge() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists/CircuitSim90/MOS2/nand.cir");
+    let netlist = Netlist::parse_file(&path).expect("CircuitSim90 MOS2 NAND parses");
+    assert_eq!(netlist.options.timeint_nl_near_convergence, Some(true));
+    let engine = Engine::new(rspice_core::engine::resolve_simulation_config(
+        &SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        },
+        Some(&netlist.options),
+        &Default::default(),
+    ));
+    let result = engine
+        .run_tran(&netlist, 100.0e-9, 10.0e-9)
+        .expect("the NAND transient passes its near-converged edge");
+    assert_eq!(result.time.last().copied(), Some(100.0e-9));
+    assert_eq!(engine.convergence_quality().force_accepted_points, 0);
+}

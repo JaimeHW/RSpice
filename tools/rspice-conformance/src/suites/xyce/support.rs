@@ -2489,6 +2489,8 @@ impl XyceTestRunner {
             timeint_min_steps_between_breakpoints,
             timeint_nlmin,
             timeint_nlmax,
+            timeint_nl_near_convergence,
+            timeint_nl_small_update,
             timeint_min_order,
             timeint_max_order,
             timeint_timesteps_reversal,
@@ -2582,6 +2584,8 @@ impl XyceTestRunner {
             && timeint_min_steps_between_breakpoints.is_none()
             && timeint_nlmin.is_none()
             && timeint_nlmax.is_none()
+            && timeint_nl_near_convergence.is_none()
+            && timeint_nl_small_update.is_none()
             && timeint_min_order.is_none()
             && timeint_max_order.is_none()
             && timeint_timesteps_reversal.is_none()

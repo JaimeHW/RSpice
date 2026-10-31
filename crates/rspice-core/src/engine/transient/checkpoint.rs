@@ -1522,6 +1522,16 @@ pub(crate) fn simulation_checkpoint_identity(config: &SimulationConfig) -> Strin
     );
     hash_field(
         &mut hasher,
+        "transient_nonlinear_near_convergence",
+        config.transient_nonlinear_near_convergence,
+    );
+    hash_field(
+        &mut hasher,
+        "transient_nonlinear_small_update",
+        config.transient_nonlinear_small_update,
+    );
+    hash_field(
+        &mut hasher,
         "transient_lte_reference",
         config.transient_lte_reference,
     );

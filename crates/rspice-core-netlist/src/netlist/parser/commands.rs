@@ -7465,6 +7465,47 @@ mod tests {
     }
 
     #[test]
+    fn xyce_timeint_nonlinear_return_codes_take_any_nonzero_integer_first_value_wins() {
+        let netlist = Netlist::parse(&deck_with_options(
+            ".options timeint nlnearconv=1 nlsmallupdate=0\n\
+             .options timeint nlnearconv=0 nlsmallupdate=1",
+        ))
+        .expect("Xyce TIMEINT nonlinear return codes parse");
+        assert_eq!(netlist.options.timeint_nl_near_convergence, Some(true));
+        assert_eq!(netlist.options.timeint_nl_small_update, Some(false));
+        assert_eq!(
+            netlist
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "duplicate-option")
+                .count(),
+            2
+        );
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "unknown-option"),
+            "{:?}",
+            netlist.diagnostics
+        );
+
+        // Param::getImmutableValue<int>() truncates, and any nonzero result
+        // selects the positive code (N_NLS_Manager.C:281, :288).
+        let truncated = Netlist::parse(&deck_with_options(
+            ".options timeint nlnearconv=2.7 nlsmallupdate=0.5",
+        ))
+        .expect("real-valued return-code options parse");
+        assert_eq!(truncated.options.timeint_nl_near_convergence, Some(true));
+        assert_eq!(truncated.options.timeint_nl_small_update, Some(false));
+
+        let unset = Netlist::parse(&deck_with_options(".options timeint reltol=1e-3"))
+            .expect("deck without the return-code options parses");
+        assert_eq!(unset.options.timeint_nl_near_convergence, None);
+        assert_eq!(unset.options.timeint_nl_small_update, None);
+    }
+
+    #[test]
     fn xyce_timeint_iteration_control_rejects_invalid_integer_domains_and_ranges() {
         for options in [
             ".options timeint erroption=2",

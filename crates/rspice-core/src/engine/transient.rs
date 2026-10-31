@@ -7080,9 +7080,14 @@ impl Engine {
         // full-step nonlinear attempt fails; it must not perturb a step that
         // already follows the source-faithful orbit.
         let mut xyce_damped_first_solver_call = true;
+        let xyce_return_codes = damped_status::XyceNonlinearReturnCodes::from_timeint(
+            self.config.transient_nonlinear_near_convergence,
+            self.config.transient_nonlinear_small_update,
+        );
         let mut xyce_damped_status = uses_xyce_damped_solver.then(|| {
-            damped_status::XyceTransientDampedStatus::new(
+            damped_status::XyceTransientDampedStatus::with_return_codes(
                 self.transient_newton_iteration_budget(false),
+                xyce_return_codes,
             )
         });
         if let Some(restored_runtime) = restored_accepted_integration_runtime {
@@ -8934,8 +8939,12 @@ impl Engine {
             let tran_max_iterations = self.transient_newton_iteration_budget(startup_recovery);
             let uses_xyce_nox_status = self.config.spice_dialect == SpiceDialect::Xyce
                 && self.config.transient_nonlinear_nox.unwrap_or(false);
-            let mut xyce_nox_status = uses_xyce_nox_status
-                .then(|| nox_status::XyceTransientNoxStatus::new(tran_max_iterations));
+            let mut xyce_nox_status = uses_xyce_nox_status.then(|| {
+                nox_status::XyceTransientNoxStatus::with_return_codes(
+                    tran_max_iterations,
+                    xyce_return_codes,
+                )
+            });
             let mut xyce_weighted_update_norm = None;
             // Portless models still execute the candidate/acceptance lifecycle
             // below, but there are no circuit equations to solve.

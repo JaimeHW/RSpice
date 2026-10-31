@@ -763,6 +763,32 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         );
                     }
                 }
+                // N_NLS_Manager.C:277-290 maps any nonzero integer to the
+                // positive return code, after Param::getImmutableValue<int>.
+                (Some("TIMEINT"), "NLNEARCONV") => {
+                    let value = expect_value(stream, line_num, params)?;
+                    if options.timeint_nl_near_convergence.is_none() {
+                        options.timeint_nl_near_convergence = Some(
+                            parse_xyce_i32_option("TIMEINT.NLNEARCONV", value, line_num)? != 0,
+                        );
+                    } else {
+                        warn_duplicate_packaged_option("TIMEINT.NLNEARCONV", line_num, diagnostics);
+                    }
+                }
+                (Some("TIMEINT"), "NLSMALLUPDATE") => {
+                    let value = expect_value(stream, line_num, params)?;
+                    if options.timeint_nl_small_update.is_none() {
+                        options.timeint_nl_small_update = Some(
+                            parse_xyce_i32_option("TIMEINT.NLSMALLUPDATE", value, line_num)? != 0,
+                        );
+                    } else {
+                        warn_duplicate_packaged_option(
+                            "TIMEINT.NLSMALLUPDATE",
+                            line_num,
+                            diagnostics,
+                        );
+                    }
+                }
                 (Some("TIMEINT"), "MINORD") => {
                     let value = expect_value(stream, line_num, params)?;
                     if options.timeint_min_order.is_none() {

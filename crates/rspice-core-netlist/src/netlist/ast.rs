@@ -4691,6 +4691,12 @@ pub struct SimulationOptions {
     pub timeint_max_order: Option<u8>,
     /// Xyce `TIMESTEPSREVERSAL` acceptance policy.
     pub timeint_timesteps_reversal: Option<bool>,
+    /// Xyce `TIMEINT NLNEARCONV`: whether a near-converged transient Newton
+    /// solve succeeds (`+3`) rather than fails (`-3`).
+    pub timeint_nl_near_convergence: Option<bool>,
+    /// Xyce `TIMEINT NLSMALLUPDATE`: whether a transient Newton solve that
+    /// stops on a tiny update succeeds (`+4`) rather than fails (`-4`).
+    pub timeint_nl_small_update: Option<bool>,
     /// Xyce `.OPTIONS TIMEINT DEBUGLEVEL`: signed 32-bit time-integrator
     /// diagnostic verbosity after Xyce-compatible numeric conversion. This
     /// is retained as metadata and does not alter transient equations or
@@ -5074,6 +5080,12 @@ impl SimulationOptions {
         }
         if self.timeint_timesteps_reversal.is_none() && other.timeint_timesteps_reversal.is_some() {
             self.timeint_timesteps_reversal = other.timeint_timesteps_reversal;
+        }
+        if self.timeint_nl_near_convergence.is_none() {
+            self.timeint_nl_near_convergence = other.timeint_nl_near_convergence;
+        }
+        if self.timeint_nl_small_update.is_none() {
+            self.timeint_nl_small_update = other.timeint_nl_small_update;
         }
         if other.timeint_debug_level.is_some() {
             self.timeint_debug_level = other.timeint_debug_level;
