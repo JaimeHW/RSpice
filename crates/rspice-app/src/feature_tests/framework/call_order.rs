@@ -696,6 +696,31 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
+/// The shell's `contribute`, at the project feature's points: the navigator
+/// draws in the feature's context and the toolbars over the workbench
+/// host. None raises anything, so none answers anything where it draws.
+const PROJECT_CONTRIBUTIONS: &[Step] = &[
+    (
+        "navigator",
+        &[
+            "Workspace::Project => features::show_navigator::<ProjectFeature>(app, ui),\
+           Workspace::Simulate => simulate(ui, app),",
+        ],
+    ),
+    (
+        "no-project toolbar",
+        &[
+            "ToolbarScope::NoProject => no_project_tools(ui, app, layout),\
+           ToolbarScope::Surface(SurfaceOwner::ReportAuthoring) =>",
+        ],
+    ),
+    (
+        "workspace toolbar",
+        &["ToolbarScope::Workspace(workspace) => match workspace {\
+           Workspace::Project => project_tools(ui, app, layout),"],
+    ),
+];
+
 /// `answer_result_requests`, step 11.31 of the frame: the export requests
 /// the result documents raised, then Export dataset…, drawn between the
 /// request that opens it and the plan hop.
@@ -1315,6 +1340,15 @@ fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         DESIGN_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_project_contribution_answers_nothing_where_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        PROJECT_CONTRIBUTIONS,
     );
 }
 

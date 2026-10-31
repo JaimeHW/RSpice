@@ -45,7 +45,11 @@ fn announced(app: &mut RSpiceApp) -> Vec<String> {
 #[test]
 fn new_configuration_asks_for_a_name_a_start_and_whether_runs_use_it() {
     let (mut app, _) = reference_app();
-    open_configuration_dialog(&mut app.state, ConfigurationDialogRequest::New);
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::New,
+    );
     let Some(ConfigurationDialog::New { use_for_runs, .. }) =
         &app.state.project.configuration_dialog.open
     else {
@@ -104,7 +108,11 @@ fn starting_from_default_writes_every_view_default_stops_at() {
 #[test]
 fn a_first_configuration_is_used_for_runs_and_a_clone_follows_its_source() {
     let mut app = RSpiceApp::test_instance();
-    open_configuration_dialog(&mut app.state, ConfigurationDialogRequest::New);
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::New,
+    );
     assert!(matches!(
         app.state.project.configuration_dialog.open,
         Some(ConfigurationDialog::New {
@@ -114,7 +122,11 @@ fn a_first_configuration_is_used_for_runs_and_a_clone_follows_its_source() {
     ));
 
     let (mut app, id) = reference_app();
-    open_configuration_dialog(&mut app.state, ConfigurationDialogRequest::Clone(id));
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::Clone(id),
+    );
     assert!(matches!(
         &app.state.project.configuration_dialog.open,
         Some(ConfigurationDialog::Clone {
@@ -168,7 +180,11 @@ fn default_offers_only_a_new_configuration() {
 #[test]
 fn deleting_what_runs_use_says_why_it_cannot() {
     let (mut app, id) = reference_app();
-    open_configuration_dialog(&mut app.state, ConfigurationDialogRequest::Delete(id));
+    open_configuration_dialog(
+        &mut app.state.project.configuration_dialog,
+        &app.state.model,
+        ConfigurationDialogRequest::Delete(id),
+    );
     let words = announced(&mut app);
     assert!(
         words

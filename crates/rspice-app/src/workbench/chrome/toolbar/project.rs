@@ -1,8 +1,8 @@
 //! The toolbar's project tools: the launcher row shown while no project is
 //! open, and the Project workspace's tools.
 
-use crate::workbench::RSpiceApp;
 use crate::workbench::design_system::WorkbenchIcon;
+use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::project::commands::ProjectCommand;
 
@@ -10,7 +10,7 @@ use super::toolbar_text_command;
 
 pub(in crate::workbench) fn no_project_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
     toolbar_text_command(
@@ -33,7 +33,7 @@ pub(in crate::workbench) fn no_project_tools(
 
 pub(in crate::workbench) fn project_tools(
     ui: &mut egui::Ui,
-    app: &mut RSpiceApp,
+    app: &mut impl WorkbenchHost,
     layout: LayoutSpec,
 ) {
     toolbar_text_command(

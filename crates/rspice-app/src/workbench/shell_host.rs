@@ -47,6 +47,7 @@ use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::layout::LayoutSpec;
 use crate::workbench::lifecycle::project_lifecycle::{ProjectCloseDestination, RevertReviewToken};
 use crate::workbench::models::ModelsFeature;
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::sheets::SheetsFeature;
@@ -144,7 +145,6 @@ impl Host for RSpiceApp {
             // A workspace's navigator, below the heading and the filter field.
             Point::Navigator(workspace) => {
                 use crate::workbench::docks::navigator::netlist::{code_workspace_pages, netlist};
-                use crate::workbench::docks::navigator::project::project;
                 use crate::workbench::docks::navigator::simulate::simulate;
                 use crate::workbench::docks::navigator::verify::verify;
                 use crate::workbench::docks::navigator::{
@@ -190,7 +190,7 @@ impl Host for RSpiceApp {
                         features::show_navigator::<ResultsFeature>(app, ui);
                         app.after_contribution();
                     }
-                    Workspace::Project => project(ui, app),
+                    Workspace::Project => features::show_navigator::<ProjectFeature>(app, ui),
                     Workspace::Simulate => simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Verify => verify(ui, app),

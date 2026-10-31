@@ -22,7 +22,7 @@ use crate::workbench::app::dialogs::project::configuration::{
 };
 use crate::workbench::app::dialogs::review_primitives::text_edit_field;
 use crate::workbench::app::{ConfirmationAction, RSpiceApp};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -178,15 +178,16 @@ pub(in crate::workbench) enum ConfigurationDialogRequest {
 
 /// Open the dialog `request` names, filled in from the project.
 pub(in crate::workbench) fn open_configuration_dialog(
-    state: &mut AppState,
+    dialogs: &mut ConfigurationDialogState,
+    model: &Model,
     request: ConfigurationDialogRequest,
 ) {
-    let catalog: &ConfigurationSetCatalog = &state.model.workspace.content.configuration_sets;
+    let catalog: &ConfigurationSetCatalog = &model.workspace.content.configuration_sets;
     let dialog = match request {
         ConfigurationDialogRequest::New => ConfigurationDialog::New {
             name: unique_name(catalog, "Configuration"),
             start: StartFrom::Default,
-            top: state.model.workspace.content.simulation_root_reference(),
+            top: model.workspace.content.simulation_root_reference(),
             // A project's first configuration is what it means to run with
             // one; with others already there, a new one waits to be chosen.
             use_for_runs: catalog.configurations().is_empty(),
@@ -212,8 +213,8 @@ pub(in crate::workbench) fn open_configuration_dialog(
         }
         ConfigurationDialogRequest::Delete(id) => ConfigurationDialog::Delete(id),
     };
-    state.project.configuration_dialog.open = Some(dialog);
-    state.project.configuration_dialog.refusal = None;
+    dialogs.open = Some(dialog);
+    dialogs.refusal = None;
 }
 
 fn name_id() -> Id {

@@ -13,9 +13,10 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::library::new_view_target;
 use crate::workbench::app::{open_design_management_dialog, open_project_revision_history};
 use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::framework::requests::{
     FocusProjectLauncherSearch, OpenProjectDialog, ProjectFileAction,
@@ -37,6 +38,9 @@ impl Feature for ProjectFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ProjectCommand>();
+        registry.navigator(FeatureNavigator {
+            show: show_navigator,
+        });
     }
 }
 
@@ -57,6 +61,25 @@ impl ProjectFeature {
             cx.state.design_management.close_and_discard();
         }
     }
+}
+
+/// The Project workspace's navigator: the rail of the page in front, over
+/// the feature's state, the model and the navigator's filter.
+fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
+    let project = &mut *cx.state;
+    crate::workbench::docks::navigator::project::project(
+        ui,
+        &mut ProjectNavigator {
+            page: project.project_page,
+            configuration: &mut project.configuration,
+            configuration_dialog: &mut project.configuration_dialog,
+            dependency_selection: &mut project.project_dependency_selection,
+            checkpoint_recovery: &project.project_checkpoint_recovery,
+            checkpoint_selection: &mut project.project_checkpoint_selection,
+            model: cx.model,
+            filter: cx.wb.navigator_filter(),
+        },
+    );
 }
 
 /// Open the project launcher on its Projects page, on the launcher's route,

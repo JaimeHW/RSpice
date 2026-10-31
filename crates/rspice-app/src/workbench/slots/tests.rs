@@ -452,7 +452,8 @@ const DIALOG_GATE: &[DialogRow] = &[
     }),
     ("configuration_dialog", |dialogs| {
         crate::workbench::app::dialogs::project::configuration_dialogs::open_configuration_dialog(
-            dialogs,
+            &mut dialogs.project.configuration_dialog,
+            &dialogs.model,
             crate::workbench::app::dialogs::project::configuration_dialogs::ConfigurationDialogRequest::New,
         );
     }),

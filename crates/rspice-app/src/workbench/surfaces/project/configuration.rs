@@ -63,7 +63,11 @@ pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
             app.state.project.configuration.refusal = refusal;
         }
         Some(ToolbarIntent::Revert) => app.state.project.configuration.revert(),
-        Some(ToolbarIntent::Open(request)) => open_configuration_dialog(&mut app.state, request),
+        Some(ToolbarIntent::Open(request)) => open_configuration_dialog(
+            &mut app.state.project.configuration_dialog,
+            &app.state.model,
+            request,
+        ),
         None => {}
     }
     if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {

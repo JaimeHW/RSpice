@@ -3,38 +3,49 @@
 
 use egui::{ScrollArea, Ui};
 
-use crate::workbench::RSpiceApp;
-
 use super::super::super::design_system::{WorkbenchIcon, section_header};
 use super::{nav_row, nav_row_response, row_context_menu};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
+use crate::workbench::app::dialogs::project::ProjectCheckpointRecoveryState;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{
-    configuration_actions_menu, open_configuration_dialog,
+    ConfigurationDialogState, configuration_actions_menu, open_configuration_dialog,
 };
-use crate::workbench::project::configuration_state::{ConfigurationSelection, used_for_runs};
+use crate::workbench::app_state::Model;
+use crate::workbench::project::configuration_state::{
+    ConfigurationPageState, ConfigurationSelection, used_for_runs,
+};
 use crate::workbench::project::workspace_state::ProjectPage;
 
-pub(in crate::workbench) fn project(ui: &mut Ui, app: &mut RSpiceApp) {
+/// What the Project workspace's navigator reads and writes: the project
+/// feature's page and the selections its rails keep, the configuration
+/// page and its dialogs, the recovery catalog, the model, and the
+/// navigator's filter.
+pub(in crate::workbench) struct ProjectNavigator<'a> {
+    pub(in crate::workbench) page: ProjectPage,
+    pub(in crate::workbench) configuration: &'a mut ConfigurationPageState,
+    pub(in crate::workbench) configuration_dialog: &'a mut ConfigurationDialogState,
+    pub(in crate::workbench) dependency_selection: &'a mut Option<String>,
+    pub(in crate::workbench) checkpoint_recovery: &'a ProjectCheckpointRecoveryState,
+    pub(in crate::workbench) checkpoint_selection: &'a mut Option<String>,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) filter: &'a str,
+}
+
+pub(in crate::workbench) fn project(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
     ScrollArea::vertical()
         .auto_shrink([false, true])
-        .show(ui, |ui| match app.state.project.project_page {
-            ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, app),
-            ProjectPage::Configuration => project_configuration_navigator(ui, app),
-            ProjectPage::Dependencies => project_dependency_navigator(ui, app),
-            ProjectPage::Recovery => project_recovery_navigator(ui, app),
+        .show(ui, |ui| match nav.page {
+            ProjectPage::Overview | ProjectPage::Library => project_library_navigator(ui, nav),
+            ProjectPage::Configuration => project_configuration_navigator(ui, nav),
+            ProjectPage::Dependencies => project_dependency_navigator(ui, nav),
+            ProjectPage::Recovery => project_recovery_navigator(ui, nav),
         });
 }
 
-fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
-    let libraries = app
-        .state
+fn project_library_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
+    let query = nav.filter.trim().to_ascii_lowercase();
+    let libraries = nav
         .model
         .library_manager
         .libraries_sorted()
@@ -76,26 +87,21 @@ fn project_library_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
                 WorkbenchIcon::Project
             },
             &name,
-            app.state.model.library_manager.selected_library.as_deref() == Some(name.as_str()),
+            nav.model.library_manager.selected_library.as_deref() == Some(name.as_str()),
             read_only.then_some("read-only"),
         ) {
-            app.state.model.library_manager.select_library(&name);
+            nav.model.library_manager.select_library(&name);
         }
     }
 }
 
 /// The project's configurations, Default first. A row puts its configuration
 /// in front of the reader; which one runs use changes only on the page.
-fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
-    let catalog = &app.state.model.workspace.content.configuration_sets;
-    let selection = app.state.project.configuration.selection(catalog);
-    let project = &app.state.model.workspace.content.project;
+fn project_configuration_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
+    let query = nav.filter.trim().to_ascii_lowercase();
+    let catalog = &nav.model.workspace.content.configuration_sets;
+    let selection = nav.configuration.selection(catalog);
+    let project = &nav.model.workspace.content.project;
     let default_top = format!("{}/{}", project.root_library, project.top_cell);
     let rows = std::iter::once((
         ConfigurationSelection::Default,
@@ -124,12 +130,12 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             .then(|| format!("{} / {total}", rows.len()))
             .as_deref(),
     );
-    let page = &app.state.project.configuration;
+    let page = &nav.configuration;
     let edited = page
         .is_dirty(catalog)
         .then(|| page.draft().map(|draft| draft.id))
         .flatten();
-    let write_allowed = !app.state.model.safe_mode.project_read_only();
+    let write_allowed = !nav.model.safe_mode.project_read_only();
     let mut picked = None;
     let mut dialog = None;
     for (target, name, runs) in rows {
@@ -151,13 +157,11 @@ fn project_configuration_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     }
     if let Some(target) = picked {
-        app.state.project.configuration.request_selection(
-            &app.state.model.workspace.content.configuration_sets,
-            target,
-        );
+        nav.configuration
+            .request_selection(&nav.model.workspace.content.configuration_sets, target);
     }
     if let Some(request) = dialog {
-        open_configuration_dialog(&mut app.state, request);
+        open_configuration_dialog(nav.configuration_dialog, nav.model, request);
     }
 }
 
@@ -189,15 +193,9 @@ fn unsaved_mark(ui: &Ui, response: &egui::Response, meta: Option<&str>) {
     });
 }
 
-fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
-    let mut rows = app
-        .state
+fn project_dependency_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
+    let query = nav.filter.trim().to_ascii_lowercase();
+    let mut rows = nav
         .model
         .library_manager
         .libraries_sorted()
@@ -213,8 +211,7 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             )
         })
         .chain(
-            app.state
-                .model
+            nav.model
                 .model_library_manager
                 .libraries_sorted()
                 .into_iter()
@@ -237,9 +234,8 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .collect::<Vec<_>>();
     rows.sort_by(|left, right| left.0.cmp(&right.0));
-    if app.state.project.project_dependency_selection.is_none() {
-        app.state.project.project_dependency_selection =
-            rows.first().map(|(name, _, _, _)| name.clone());
+    if nav.dependency_selection.is_none() {
+        *nav.dependency_selection = rows.first().map(|(name, _, _, _)| name.clone());
     }
     section_header(ui, "Dependencies", Some(&rows.len().to_string()));
     for (name, _, status, icon) in &rows {
@@ -247,25 +243,18 @@ fn project_dependency_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             *icon,
             name,
-            app.state.project.project_dependency_selection.as_deref() == Some(name.as_str()),
+            nav.dependency_selection.as_deref() == Some(name.as_str()),
             *status,
         ) {
-            app.state.project.project_dependency_selection = Some(name.clone());
+            *nav.dependency_selection = Some(name.clone());
         }
     }
 }
 
-fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
-    let checkpoints = app
-        .state
-        .project
-        .project_checkpoint_recovery
+fn project_recovery_navigator(ui: &mut Ui, nav: &mut ProjectNavigator<'_>) {
+    let query = nav.filter.trim().to_ascii_lowercase();
+    let checkpoints = nav
+        .checkpoint_recovery
         .checkpoints
         .iter()
         .filter(|checkpoint| {
@@ -281,8 +270,8 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .cloned()
         .collect::<Vec<_>>();
-    if app.state.project.project_checkpoint_selection.is_none() {
-        app.state.project.project_checkpoint_selection = checkpoints
+    if nav.checkpoint_selection.is_none() {
+        *nav.checkpoint_selection = checkpoints
             .first()
             .map(|checkpoint| checkpoint.checkpoint_id().to_string());
     }
@@ -302,10 +291,10 @@ fn project_recovery_navigator(ui: &mut Ui, app: &mut RSpiceApp) {
             ui,
             WorkbenchIcon::History,
             checkpoint.reason().label(),
-            app.state.project.project_checkpoint_selection.as_deref() == Some(id.as_str()),
+            nav.checkpoint_selection.as_deref() == Some(id.as_str()),
             Some(&age),
         ) {
-            app.state.project.project_checkpoint_selection = Some(id);
+            *nav.checkpoint_selection = Some(id);
         }
     }
 }
@@ -331,6 +320,7 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
 mod tests {
     use super::super::show;
     use super::*;
+    use crate::workbench::RSpiceApp;
     use crate::workbench::state::Workspace;
 
     /// A project with two libraries, an active configuration and a recovery
