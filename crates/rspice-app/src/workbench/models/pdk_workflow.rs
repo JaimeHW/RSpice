@@ -281,8 +281,29 @@ fn prepare_pdk_configuration_candidate(
     Ok((config, candidate, loaded))
 }
 
+/// A directory holding one model source file, for a PDK configuration to
+/// name.
 #[cfg(test)]
-fn apply_pdk_configuration_with_persistence(
+pub(crate) fn configured_root(
+    label: &str,
+    file_name: &str,
+    model_name: &str,
+) -> std::path::PathBuf {
+    let root = std::env::temp_dir().join(format!(
+        "rspice-pdk-workflow-{label}-{}",
+        uuid::Uuid::new_v4()
+    ));
+    std::fs::create_dir_all(&root).expect("create configured source root");
+    std::fs::write(
+        root.join(file_name),
+        format!(".model {model_name} NMOS (LEVEL=1)\n"),
+    )
+    .expect("write configured model source");
+    root
+}
+
+#[cfg(test)]
+pub(crate) fn apply_pdk_configuration_with_persistence(
     model: &mut Model,
     platform: &PlatformState,
     config: crate::state::pdk_config::PdkConfig,
@@ -2171,7 +2192,7 @@ mod browser_model_import_worker {
 mod tests {
     use super::*;
     use crate::state::pdk_config::PdkConfig;
-    use crate::workbench::app_state::AppState;
+    use crate::workbench::models::tests::harness;
 
     #[test]
     fn browser_directory_selection_strips_only_the_selected_root() {
@@ -2205,133 +2226,10 @@ mod tests {
         assert!(mixed.contains("more than one source root"), "{mixed}");
     }
 
-    fn configured_root(label: &str, file_name: &str, model_name: &str) -> std::path::PathBuf {
-        let root = std::env::temp_dir().join(format!(
-            "rspice-pdk-workflow-{label}-{}",
-            uuid::Uuid::new_v4()
-        ));
-        std::fs::create_dir_all(&root).expect("create configured source root");
-        std::fs::write(
-            root.join(file_name),
-            format!(".model {model_name} NMOS (LEVEL=1)\n"),
-        )
-        .expect("write configured model source");
-        root
-    }
-
-    #[test]
-    fn configured_sources_publish_and_unload_as_one_guarded_project_transaction() {
-        let alpha_root = configured_root("alpha", "alpha.lib", "alpha_n");
-        let beta_root = configured_root("beta", "beta.lib", "beta_n");
-        let mut state = AppState::default();
-        state.open_project_session();
-        state.model.model_library_manager.clear();
-        state.model.pdk_config = PdkConfig::default();
-        let initial_revision = state.model.workspace.content.project.revision();
-        let initial_epoch = state.model.design_execution_epoch;
-        let mut config = PdkConfig::default();
-        config.add_library_path(alpha_root.to_string_lossy().into_owned());
-        config.add_library_path(beta_root.to_string_lossy().into_owned());
-
-        assert_eq!(
-            apply_pdk_configuration_with_persistence(
-                &mut state.model,
-                &state.platform,
-                config,
-                |_| Ok(())
-            )
-            .expect("configured sources publish"),
-            2
-        );
-        let first_revision = state.model.workspace.content.project.revision();
-        assert!(first_revision > initial_revision);
-        assert_eq!(
-            state.model.design_execution_epoch,
-            initial_epoch.wrapping_add(1)
-        );
-        assert!(state.model.workspace.content.project_metadata_dirty);
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("alpha")
-                .is_some()
-        );
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("beta")
-                .is_some()
-        );
-        assert_eq!(state.model.pdk_config.managed_model_sources.len(), 2);
-        assert!(state.model.can_undo_project_design());
-
-        let mut disabled = state.model.pdk_config.clone();
-        disabled.toggle_path_enabled(0);
-        assert_eq!(
-            apply_pdk_configuration_with_persistence(
-                &mut state.model,
-                &state.platform,
-                disabled,
-                |_| Ok(())
-            )
-            .expect("disabled source publishes"),
-            1
-        );
-        assert!(state.model.workspace.content.project.revision() > first_revision);
-        assert_eq!(
-            state.model.design_execution_epoch,
-            initial_epoch.wrapping_add(2)
-        );
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("alpha")
-                .is_none()
-        );
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("beta")
-                .is_some()
-        );
-
-        assert_eq!(
-            state
-                .undo_project_design()
-                .expect("undo configured source set"),
-            Some("apply configured PDK model sources".to_owned())
-        );
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("alpha")
-                .is_some()
-        );
-        assert!(
-            state
-                .model
-                .model_library_manager
-                .get_library("beta")
-                .is_some()
-        );
-        assert_eq!(
-            state.model.design_execution_epoch,
-            initial_epoch.wrapping_add(3)
-        );
-
-        std::fs::remove_dir_all(alpha_root).expect("remove alpha source root");
-        std::fs::remove_dir_all(beta_root).expect("remove beta source root");
-    }
-
     #[test]
     fn persistence_failure_leaves_configuration_manager_and_project_unchanged() {
         let root = configured_root("persistence", "persisted.lib", "persisted_n");
-        let mut state = AppState::default();
+        let mut state = harness();
         state.open_project_session();
         state.model.model_library_manager.clear();
         state.model.pdk_config = PdkConfig::default();
@@ -2371,7 +2269,7 @@ mod tests {
     #[test]
     fn startup_service_hydrates_persisted_sources_without_dirtying_a_closed_project() {
         let root = configured_root("startup", "startup.lib", "startup_n");
-        let mut state = AppState::default();
+        let mut state = harness();
         state.model.model_library_manager.clear();
         let revision = state.model.workspace.content.project.revision();
         let epoch = state.model.design_execution_epoch;
@@ -2404,7 +2302,7 @@ mod tests {
     fn background_catalog_candidate_is_isolated_and_rejected_after_authority_drift() {
         let root = configured_root("background", "background.lib", "background_n");
         let path = root.join("background.lib");
-        let mut state = AppState::default();
+        let mut state = harness();
         state.open_project_session();
         state.model.model_library_manager.clear();
         let authority = capture_native_model_import_authority(&state.model, &state.platform);
@@ -2461,7 +2359,7 @@ mod tests {
 
     #[test]
     fn background_authority_binds_the_exact_project_lifecycle() {
-        let mut state = AppState::default();
+        let mut state = harness();
         state.open_project_session();
         let authority = capture_native_model_import_authority(&state.model, &state.platform);
         assert!(native_model_import_authority_is_current(

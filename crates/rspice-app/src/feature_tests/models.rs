@@ -2,3 +2,4 @@
 //! commands' selection authority, over the session the shell builds.
 
 mod commands;
+mod pdk_workflow;

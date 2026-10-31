@@ -12,7 +12,10 @@
 
 use std::sync::LazyLock;
 
-use rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
+use rspice_app_services::workbench::lifecycle::project_lifecycle::{
+    LifecycleParts, LifecycleSource, LifecycleSourceMut, LifecycleView, ResultPresentationSource,
+    close_project_session_for_test, open_project_session_for_test,
+};
 use rspice_results::result_presentation::{
     AnalysisPresentationKey, ResultPresentation, ResultViewer, SourceWaveformPresentationKey,
 };
@@ -29,6 +32,7 @@ use crate::state::SimulationState;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::framework::command_registry::{CommandAvailability, Registry};
+use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::simulation::SimulationController;
 use rspice_app_runs::workbench::slots::runs::RunsState;
 
@@ -243,6 +247,8 @@ pub struct FeatureHarness<F: Feature> {
     pub(crate) model_hub: rspice_app_services::services::model_hub::ModelHubService,
     /// Every command the feature reads as registered.
     pub commands: &'static Registry,
+    /// The design peer, the one a context lends mutably.
+    ports: NullPorts,
 }
 
 impl<F: Feature> FeatureHarness<F>
@@ -264,7 +270,36 @@ where
                 "The feature harness runs without a model-pack store.",
             ),
             commands: &NO_COMMANDS,
+            ports: NullPorts,
         }
+    }
+
+    /// The feature's context over the harness, as the shell lends one for a
+    /// call: the feature's own state and handles, the model, the session and
+    /// the platform and run tiers, with every peer as a fresh session shows
+    /// it.
+    pub fn cx(&mut self) -> Cx<'_, F> {
+        Cx::new(
+            &mut self.state,
+            &mut self.own,
+            &mut self.model,
+            &mut self.wb,
+            &mut self.platform,
+            &mut self.runs,
+            LowerHandles {
+                export_io: &NullExportIo,
+                run_controller: &mut self.run_controller,
+                model_hub: &mut self.model_hub,
+            },
+            Peers::new(
+                &mut self.ports,
+                Some(&NullPorts),
+                Some(&NullPorts),
+                Some(&NullPorts),
+                &NullPorts,
+            ),
+            self.commands,
+        )
     }
 
     /// Whether the feature's command `key` can run here, as the feature
@@ -284,27 +319,45 @@ where
     /// Carry out the feature's command `key`, as the prologue would have let
     /// it through.
     pub fn execute(&mut self, key: CommandKey) {
-        command(&FeatureRegistry::<F>::build(), key).execute(&mut Cx::new(
-            &mut self.state,
-            &mut self.own,
-            &mut self.model,
-            &mut self.wb,
-            &mut self.platform,
-            &mut self.runs,
-            LowerHandles {
-                export_io: &NullExportIo,
-                run_controller: &mut self.run_controller,
-                model_hub: &mut self.model_hub,
-            },
-            Peers::new(
-                &mut NullPorts,
-                Some(&NullPorts),
-                Some(&NullPorts),
-                Some(&NullPorts),
-                &NullPorts,
-            ),
-            self.commands,
-        ));
+        command(&FeatureRegistry::<F>::build(), key).execute(&mut self.cx());
+    }
+}
+
+/// The project lifecycle reads a harness over the workbench session as it
+/// reads the application: the model, the platform services' state and the
+/// workspace in front, with the results a fresh session presents.
+impl<F: Feature<Session = WorkbenchSession>> LifecycleSource for FeatureHarness<F> {
+    fn lifecycle_view(&self) -> LifecycleView<'_> {
+        LifecycleView {
+            model: &self.model,
+            platform: &self.platform,
+            workspace: self.wb.workspace,
+            presentation: &NullPorts,
+        }
+    }
+}
+
+impl<F: Feature<Session = WorkbenchSession>> LifecycleSourceMut for FeatureHarness<F> {
+    fn lifecycle_parts(&mut self) -> LifecycleParts<'_> {
+        LifecycleParts {
+            model: &mut self.model,
+            platform: &mut self.platform,
+            workspace: self.wb.workspace,
+            presentation: &NullPorts,
+        }
+    }
+}
+
+impl<F: Feature<Session = WorkbenchSession>> FeatureHarness<F> {
+    /// Open a project session as the application's test setter does: the
+    /// lifecycle's authority moves, with no baseline or binding.
+    pub fn open_project_session(&mut self) {
+        open_project_session_for_test(self);
+    }
+
+    /// Close the project session as the application's test setter does.
+    pub fn close_project_session(&mut self) {
+        close_project_session_for_test(self);
     }
 }
 
