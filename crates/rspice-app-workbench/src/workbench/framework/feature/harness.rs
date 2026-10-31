@@ -390,7 +390,7 @@ where
                 Some(&NullPorts),
                 Some(&mut self.results_peer),
                 Some(&NullPorts),
-                &NullPorts,
+                Some(&NullPorts),
                 Some(&NullPorts),
             ),
             self.commands,

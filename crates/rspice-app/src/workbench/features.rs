@@ -17,6 +17,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::cloud::CloudFeature;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
@@ -117,6 +118,17 @@ macro_rules! design_peer {
     };
 }
 
+/// The code peer a context over `state` holds for the feature whose slot is
+/// `slot`: none for code itself, whose slot it is.
+macro_rules! code_peer {
+    (code, $state:ident) => {
+        None
+    };
+    ($slot:ident, $state:ident) => {
+        Some(&*$state.code)
+    };
+}
+
 /// What a context over `app` lends the feature as what it runs: the
 /// application's field `own`, or nothing for a feature that runs nothing.
 macro_rules! own {
@@ -182,7 +194,7 @@ macro_rules! features {
                             hardcopy_peer!($slot, state),
                             results_peer!($slot, state),
                             simulate_peer!($slot, state),
-                            &*state.code,
+                            code_peer!($slot, state),
                             models_peer!($slot, state),
                         ),
                         command_registry(),
@@ -324,6 +336,7 @@ features! {
     simulate: SimulateFeature,
     project: ProjectFeature,
     design: DesignFeature,
+    code: CodeFeature,
 }
 
 /// Draw `F`'s inspector section in the container's `ui`. The caller answers

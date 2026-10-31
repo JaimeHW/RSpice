@@ -98,6 +98,7 @@ pub(crate) mod chrome {
     }
 }
 pub(crate) use rspice_app_cloud::workbench::cloud;
+pub(crate) mod code;
 pub(crate) mod commands;
 mod cross_probe;
 pub(crate) mod design;

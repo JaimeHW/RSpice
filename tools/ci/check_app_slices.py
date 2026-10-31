@@ -203,6 +203,7 @@ SLICE_RULES = [
     (W + r"project(\.rs$|/)", "project"),
     (W + r"simulate(\.rs$|/)", "simulate"),
     (W + r"design(\.rs$|/)", "design"),
+    (W + r"code(\.rs$|/)", "code"),
     (W + r"shell_host(\.rs$|/)", "shell"),
     (W + r"menu_bar/waveform_export", "results"),
     (W + r"menu_bar/netlist_compat", "code"),

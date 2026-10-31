@@ -32,7 +32,7 @@ pub(super) fn with_cx<R>(
             Some(&*state.hardcopy),
             Some(&mut *state.results),
             Some(&*state.simulate),
-            &*state.code,
+            Some(&*state.code),
             Some(&*state.models),
         ),
         command_registry(),

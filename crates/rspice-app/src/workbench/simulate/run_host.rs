@@ -326,7 +326,7 @@ mod tests {
                 Some(&*state.hardcopy),
                 Some(&mut *state.results),
                 None,
-                &*state.code,
+                Some(&*state.code),
                 Some(&*state.models),
             ),
             command_registry(),
