@@ -476,6 +476,12 @@ impl Engine {
             // (vdmosload.c), not only as Xyce LEVEL=18.
             || !circuit.vdmoses.devices.is_empty()
             || Self::generated_limiting_owns_newton_steps(circuit)
+            // The JFET, MESFET and HFET loads (jfetload.c, mesload.c,
+            // mesaload.c, hfetload.c) limit their gate voltages with
+            // `DEVpnjlim` and `DEVfetlim` against the previous iterate too.
+            // Merit-shrunk, a GMIN stage from zero froze where its first
+            // damped step left it and spent its whole budget there.
+            || !circuit.jfets.is_empty()
     }
 
     /// A generated Verilog-A model with an active `$limit` (VBIC's ngspice

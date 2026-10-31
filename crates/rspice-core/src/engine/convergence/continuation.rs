@@ -1848,6 +1848,50 @@ m2 d2 g 0 0 nmos150 w=150e-9 l=150e-9 nf=1 off
         assert!(failure.reached.is_some(), "{failure}");
     }
 
+    /// ngspice's dynamic GMIN stepping solves each of these single gate-FET
+    /// decks from zero in its first stage. The old stage damped the
+    /// limited JFET, MESFET and HFET steps by their merit and froze, so the
+    /// walk stopped before its first stage.
+    #[test]
+    fn gmin_stepping_solves_single_gate_fets_from_zero() {
+        let mut solved = 0;
+        for deck in REOPENED_FAMILIES {
+            let title = deck.lines().next().unwrap_or_default();
+            if !["* JFET", "* MESFET", "* HFET"].contains(&title) {
+                continue;
+            }
+            let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: crate::engine::SpiceDialect::Ngspice,
+                ..SimulationConfig::default()
+            })
+            .resolved_for_netlist(&netlist);
+            let fresh = || linked(&engine, engine.build_circuit(&netlist).unwrap());
+            let (mut circuit, mut matrix) = fresh();
+            let zero = vec![0.0; circuit.matrix_size()];
+            let direct = engine
+                .solve_nonlinear_with_guess_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    Some(&zero),
+                    &NoAbort,
+                )
+                .unwrap_or_else(|error| panic!("{title}: direct solve: {error}"));
+            let (mut circuit, mut matrix) = fresh();
+            let stepped = engine
+                .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
+                .unwrap_or_else(|error| panic!("{title}: {error}"));
+            for (index, (&stepped, &direct)) in stepped.iter().zip(&direct).enumerate() {
+                assert!(
+                    (stepped - direct).abs() <= 1e-6 * direct.abs() + 1e-12,
+                    "{title}: x[{index}] = {stepped:e}, direct {direct:e}"
+                );
+            }
+            solved += 1;
+        }
+        assert_eq!(solved, 3);
+    }
+
     /// ngspice's OPtran and Xyce's pseudo-transient both solve a resistive
     /// divider in their first step. The old stages also put a
     /// pseudo-capacitor on every branch row, so on any circuit an ideal
