@@ -8760,6 +8760,17 @@ mod tests {
         assert_eq!(netlist.options.timeint_reltol, Some(1e-4));
     }
 
+    /// `numfreq=11,7` lists one count per tone, as `numfreq=11 numfreq2=7`.
+    #[test]
+    fn hbint_numfreq_takes_one_count_per_tone() {
+        let netlist = parse_in(
+            "hb tones\nV1 1 0 1\nR1 1 0 1k\n.options hbint numfreq=11,7 tahb=1\n.hb 1e5 1.1e5\n.end\n",
+            crate::config::SpiceDialect::Xyce,
+        )
+        .expect("a per-tone list parses");
+        assert_eq!(netlist.options.hb_num_frequencies, [11, 7]);
+    }
+
     /// ngspice prints a branch current as `<device>#branch` (the mes/subth
     /// and mesa decks print `vids#branch`): it is that device's current.
     #[test]

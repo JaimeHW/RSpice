@@ -301,16 +301,26 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     )?);
                 }
                 (Some("HBINT"), key) if key.starts_with("NUMFREQ") => {
-                    let value = expect_value(stream, line_num, params)?;
-                    let count = parse_usize_option("HBINT.NUMFREQ", value, line_num)?;
-                    if count == 0 {
-                        return Err(ParseError::Syntax {
-                            line: line_num,
-                            message: "HBINT.NUMFREQ must be a positive integer, found 0"
-                                .to_string(),
-                        });
+                    // Xyce lists one count per tone, `numfreq=11,7`, or
+                    // spells them `numfreq=11 numfreq2=7`.
+                    loop {
+                        let value = expect_value(stream, line_num, params)?;
+                        let count = parse_usize_option("HBINT.NUMFREQ", value, line_num)?;
+                        if count == 0 {
+                            return Err(ParseError::Syntax {
+                                line: line_num,
+                                message: "HBINT.NUMFREQ must be a positive integer, found 0"
+                                    .to_string(),
+                            });
+                        }
+                        options.hb_num_frequencies.push(count);
+                        if !matches!(stream.peek().kind, TokenKind::Comma)
+                            || !matches!(stream.peek_n(1).kind, TokenKind::Number(_))
+                        {
+                            break;
+                        }
+                        stream.advance();
                     }
-                    options.hb_num_frequencies.push(count);
                 }
                 (Some("HBINT"), "SAVEICDATA") => {
                     options.hb_save_ic_data =
