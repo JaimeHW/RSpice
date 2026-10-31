@@ -1208,6 +1208,67 @@ pub(super) fn parse_inductor(
     Ok(())
 }
 
+/// LTspice's `Rser=` and `Cpar=` on a voltage source: a resistance in series
+/// with it and a capacitance across its terminals. They are taken off the line
+/// before the source specification is read, so every waveform form keeps them.
+fn take_voltage_source_parasitics(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    name: &str,
+) -> Result<(Option<Value>, Option<Value>), ParseError> {
+    let mut rser = None;
+    let mut cpar = None;
+    loop {
+        let base = stream.checkpoint();
+        let tokens = stream.remaining_line_tokens();
+        let mut depth = 0usize;
+        let mut found = None;
+        for (index, token) in tokens.iter().enumerate() {
+            match &token.kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => depth = depth.saturating_sub(1),
+                TokenKind::Ident(word)
+                    if depth == 0
+                        && (word.eq_ignore_ascii_case("RSER")
+                            || word.eq_ignore_ascii_case("CPAR"))
+                        && matches!(
+                            tokens.get(index + 1).map(|token| &token.kind),
+                            Some(TokenKind::Equals)
+                        ) =>
+                {
+                    found = Some((index, word.to_ascii_uppercase()));
+                    break;
+                }
+                _ => {}
+            }
+        }
+        let Some((index, key)) = found else {
+            return Ok((rser, cpar));
+        };
+        let mut probe = stream.clone();
+        probe.restore_checkpoint(base + index + 2);
+        let value = expect_value(&mut probe, line_num, params).map_err(|_| ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "Voltage source '{name}' {key}= needs a value known where the source is read;                  declare the parasitic as an explicit element instead"
+            ),
+        })?;
+        if !value.is_finite() || value < 0.0 {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Voltage source '{name}' {key}={value} must be finite and non-negative"
+                ),
+            });
+        }
+        let end = probe.checkpoint();
+        stream.remove_tokens(base + index..end);
+        let slot = if key == "RSER" { &mut rser } else { &mut cpar };
+        *slot = (value > 0.0).then_some(value);
+    }
+}
+
 pub(super) fn parse_voltage_source(
     stream: &mut TokenStream,
     line_num: usize,
@@ -1217,8 +1278,47 @@ pub(super) fn parse_voltage_source(
     parameter_direction: Option<&mut ParameterDirectionCapture>,
 ) -> Result<(), ParseError> {
     let name = expect_element_name(stream, line_num)?;
-    let node_pos = expect_node(stream, line_num)?;
+    let mut node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
+    let (rser, cpar) = take_voltage_source_parasitics(stream, line_num, params, &name)?;
+    if let Some(cpar) = cpar {
+        elements.push(Element {
+            name: format!("C{}#PAR", name.to_ascii_uppercase()),
+            kind: ElementKind::Capacitor {
+                value: cpar,
+                value_expr: None,
+                initial_voltage: None,
+                model: None,
+                instance_params: Vec::new(),
+                deferred_params: Vec::new(),
+            },
+            nodes: vec![node_pos.clone(), node_neg.clone()],
+            provenance: ElementProvenance::GeneratedPassiveHelper {
+                owner: name.clone(),
+                role: GeneratedPassiveHelperRole::ParallelCapacitance,
+            },
+        });
+    }
+    if let Some(rser) = rser {
+        let tag = name.to_ascii_uppercase();
+        let internal = format!("{tag}#SER");
+        let outer = std::mem::replace(&mut node_pos, internal.clone());
+        elements.push(Element {
+            name: format!("R{tag}#SER"),
+            kind: ElementKind::Resistor {
+                value: rser,
+                value_expr: None,
+                model: None,
+                instance_params: Vec::new(),
+                deferred_params: Vec::new(),
+            },
+            nodes: vec![outer, internal],
+            provenance: ElementProvenance::GeneratedPassiveHelper {
+                owner: name.clone(),
+                role: GeneratedPassiveHelperRole::SeriesResistance,
+            },
+        });
+    }
 
     if params.expression_dialect() != crate::config::ExpressionDialect::Xyce
         && source_specs::voltage_source_assigns_multiplier(stream)

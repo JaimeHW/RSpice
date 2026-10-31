@@ -914,6 +914,17 @@ impl TokenStream {
         self.pos = position;
     }
 
+    /// Drop unconsumed tokens `range` (absolute positions) from the line.
+    ///
+    /// Checkpoints taken past `range.start` no longer name the same token.
+    pub(crate) fn remove_tokens(&mut self, range: std::ops::Range<usize>) {
+        assert!(
+            self.pos <= range.start && range.end < self.tokens.len(),
+            "only unconsumed tokens before end of input are removed"
+        );
+        self.tokens.drain(range);
+    }
+
     /// Borrow the unconsumed tokens on the current logical line.
     ///
     /// Parsers that only need to inspect the remainder of a command can use

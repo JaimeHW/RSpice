@@ -5385,3 +5385,39 @@ mod model_parameter_identity_tests {
         parse_netlist(source).expect("ngspice permits repeated model parameters");
     }
 }
+
+#[cfg(test)]
+mod ltspice_source_syntax_tests {
+    use super::*;
+
+    fn element<'a>(netlist: &'a Netlist, name: &str) -> &'a Element {
+        netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .unwrap_or_else(|| panic!("no element {name}"))
+    }
+
+    /// LTspice puts `Rser` in series with the source and `Cpar` across its
+    /// terminals; LTspice-26 matches this explicit equivalent exactly.
+    #[test]
+    fn a_voltage_source_rser_and_cpar_become_series_and_parallel_elements() {
+        let netlist = Netlist::parse(
+            "source parasitics\nV1 a 0 PULSE(0 1 1u 1n 1n 10u 20u) Rser=1k Cpar=1n\nR1 a 0 1k\n\
+             .tran 0 10u\n.end\n",
+        )
+        .expect("Rser and Cpar parse");
+        let source = element(&netlist, "V1");
+        assert_eq!(source.nodes, ["V1#SER", "0"]);
+        assert!(matches!(
+            source.kind,
+            ElementKind::VoltageSource(SourceSpec::Pulse { .. })
+        ));
+        let series = element(&netlist, "RV1#SER");
+        assert_eq!(series.nodes, ["A", "V1#SER"]);
+        assert!(matches!(series.kind, ElementKind::Resistor { value, .. } if value == 1e3));
+        let parallel = element(&netlist, "CV1#PAR");
+        assert_eq!(parallel.nodes, ["A", "0"]);
+        assert!(matches!(parallel.kind, ElementKind::Capacitor { value, .. } if value == 1e-9));
+    }
+}
