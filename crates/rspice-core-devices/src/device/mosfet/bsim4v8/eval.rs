@@ -320,7 +320,7 @@ fn poly_depletion(
 ///
 /// Errors only when charges are requested with an unported charge model
 /// (`capMod` 0 or an unknown `cvchargeMod` selector).
-#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+#[allow(clippy::too_many_arguments)]
 pub fn eval(
     model: &Bsim4v8Model,
     mt: &Bsim4v8ModelTemp,
@@ -332,6 +332,35 @@ pub fn eval(
     gmin: Value,
     compute_charges: bool,
 ) -> Result<Bsim4v8Op, String> {
+    eval_with_dc_output_vdsat(
+        model,
+        mt,
+        p,
+        inst,
+        bias,
+        junction_bias,
+        gate_mid_vgs,
+        gmin,
+        compute_charges,
+    )
+    .map(|(op, _)| op)
+}
+
+/// [`eval`], also returning the `output_vdsat` of the DC section: the charge
+/// model overwrites the operating point's with its own saturation voltage, so
+/// this is how one evaluation with charges also yields the DC-only result.
+#[allow(clippy::too_many_arguments, clippy::too_many_lines)]
+pub(crate) fn eval_with_dc_output_vdsat(
+    model: &Bsim4v8Model,
+    mt: &Bsim4v8ModelTemp,
+    p: &Bsim4v8SizeDep,
+    inst: &Bsim4v8InstTemp,
+    bias: Bsim4v8Bias,
+    junction_bias: Option<Bsim4v8JunctionBias>,
+    gate_mid_vgs: Option<Value>,
+    gmin: Value,
+    compute_charges: bool,
+) -> Result<(Bsim4v8Op, Value), String> {
     if compute_charges {
         if !(0..=2).contains(&model.cap_mod) {
             return Err(format!(
@@ -2341,8 +2370,9 @@ pub fn eval(
     }
 
     // ===================== BSIM4 C-V begins =====================
+    let dc_output_vdsat = op.output_vdsat;
     if !compute_charges {
-        return Ok(op);
+        return Ok((op, dc_output_vdsat));
     }
 
     let mut ch = Bsim4v8Charge::default();
@@ -3394,5 +3424,5 @@ pub fn eval(
     }
 
     op.charge = Some(ch);
-    Ok(op)
+    Ok((op, dc_output_vdsat))
 }

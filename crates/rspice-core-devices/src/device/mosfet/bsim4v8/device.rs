@@ -40,7 +40,10 @@ mod ac_response;
 #[doc(hidden)]
 pub mod checkpoint;
 mod continuation;
+mod eval_memo;
 mod periodic;
+
+use eval_memo::{Bsim4v8EvalInputs, Bsim4v8EvalMemo};
 
 /// Mode-assembled charge-companion conductance matrix: the `gc**` of
 /// b4ld.c:4216-4260 (mode > 0) / 4408-4456 (mode < 0) *before* the `ag0`
@@ -166,6 +169,12 @@ pub struct Bsim4v8Device {
     /// Raw branch voltages the last update saw while the `OFF` startup state
     /// was still pending; `self.bias` holds the startup state instead.
     initial_off_seed_raw: Option<Bsim4v8Bias>,
+    /// The most recent module evaluations, reused at identical inputs.
+    eval_memo: Bsim4v8EvalMemo,
+    /// A charge state was requested since the last `update`: the next update
+    /// runs the charge model with its DC evaluation, as b4ld.c's transient
+    /// load does, so the charge companion of that iterate reuses it.
+    charges_consumed: std::cell::Cell<bool>,
 }
 
 impl Bsim4v8Device {
@@ -228,6 +237,8 @@ impl Bsim4v8Device {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_raw: None,
+            eval_memo: Bsim4v8EvalMemo::default(),
+            charges_consumed: std::cell::Cell::new(false),
         }
     }
 
@@ -484,9 +495,38 @@ impl Bsim4v8Device {
     /// of the module's `eval` are charge-model rejections, which the
     /// builder rules out at construction; the DC-only call cannot fail.
     fn eval_dc(&self, bias: Bsim4v8Bias, junction_bias: Option<Bsim4v8JunctionBias>) -> Bsim4v8Op {
-        self.core
-            .eval_with_junction_bias(bias, junction_bias, self.gmin, false)
-            .expect("BSIM4 DC eval: no charge model requested")
+        self.eval_dc_with_charges(bias, junction_bias, false)
+    }
+
+    /// [`Self::eval_dc`]; with `with_charges` a new evaluation also runs the
+    /// charge model and records it for the charge requests that follow.
+    fn eval_dc_with_charges(
+        &self,
+        bias: Bsim4v8Bias,
+        junction_bias: Option<Bsim4v8JunctionBias>,
+        with_charges: bool,
+    ) -> Bsim4v8Op {
+        let inputs = Bsim4v8EvalInputs::new(bias, junction_bias, None, self.gmin);
+        if let Some(op) = self.eval_memo.dc(&inputs) {
+            return op;
+        }
+        // rgateMod=3 charges read the gate-mid bias, which this caller lacks.
+        let evaluated = (with_charges && self.core.model.rgate_mod != 3)
+            .then(|| {
+                self.core
+                    .eval_with_dc_output_vdsat(bias, junction_bias, None, self.gmin, true)
+                    .ok()
+            })
+            .flatten();
+        let (mut op, dc_output_vdsat) = evaluated.unwrap_or_else(|| {
+            self.core
+                .eval_with_dc_output_vdsat(bias, junction_bias, None, self.gmin, false)
+                .expect("BSIM4 DC eval: no charge model requested")
+        });
+        self.eval_memo.record(inputs, &op, dc_output_vdsat);
+        op.charge = None;
+        op.output_vdsat = dc_output_vdsat;
+        op
     }
 
     #[doc(hidden)]
@@ -527,16 +567,16 @@ impl Bsim4v8Device {
                 * (Self::node_voltage(v, self.node_gate_mid)
                     - Self::node_voltage(v, self.node_source))
         });
-        let op = self
+        self.charges_consumed.set(true);
+        let inputs = Bsim4v8EvalInputs::new(bias, junction_bias, gate_mid_vgs, self.gmin);
+        if let Some(recorded) = self.eval_memo.charge(&inputs) {
+            return recorded;
+        }
+        let (op, dc_output_vdsat) = self
             .core
-            .eval_with_junction_and_gate_mid_bias(
-                bias,
-                junction_bias,
-                gate_mid_vgs,
-                self.gmin,
-                true,
-            )
+            .eval_with_dc_output_vdsat(bias, junction_bias, gate_mid_vgs, self.gmin, true)
             .expect("BSIM4 charge eval: charge model validated at build");
+        self.eval_memo.record(inputs, &op, dc_output_vdsat);
         let charge = op
             .charge
             .expect("compute_charges=true yields a charge state");
@@ -2089,7 +2129,8 @@ impl NonlinearDevice for Bsim4v8Device {
         if let Some(junction_bias) = junction_bias {
             self.junction_bias = junction_bias;
         }
-        self.op = self.eval_dc(bias, junction_bias);
+        let with_charges = self.charges_consumed.replace(false);
+        self.op = self.eval_dc_with_charges(bias, junction_bias, with_charges);
         self.von_prev = self.op.von;
         self.has_history = true;
         self.limit_anchor_valid.set(true);
@@ -2347,5 +2388,36 @@ mod tests {
             device.bias
         );
         assert!(device.bias.vgs <= 4.0, "{:?}", device.bias);
+    }
+
+    /// The evaluations repeated at one iterate (update, charge companion,
+    /// physical probe, truncation, history commit) return exactly what a
+    /// fresh evaluation does, and an update that also ran the charge model
+    /// keeps the DC-only operating point.
+    #[test]
+    fn repeated_evaluations_match_fresh_ones_bit_for_bit() {
+        let mut device = nmos();
+        device.update(&[0.0, 0.0]);
+        let _ = device.charge_at(&[0.0, 0.0]);
+        // A clone starts with no recorded evaluation; this one also lacks
+        // the charge request, so its update evaluates the DC model only.
+        let mut fresh = device.clone();
+        fresh.charges_consumed.set(false);
+        let iterate = [0.4, 0.9];
+        device.update(&iterate);
+        fresh.update(&iterate);
+        assert!(device.op.charge.is_none());
+        assert_eq!(format!("{:?}", device.op), format!("{:?}", fresh.op));
+
+        let charge = format!("{:?}", fresh.clone().charge_at(&iterate));
+        assert_eq!(format!("{:?}", device.charge_at(&iterate)), charge);
+        assert_eq!(format!("{:?}", device.charge_at(&iterate)), charge);
+        let probe = format!("{:?}", fresh.clone().charge_at_with_probe(&iterate, true));
+        assert_eq!(
+            format!("{:?}", device.charge_at_with_probe(&iterate, true)),
+            probe
+        );
+        device.update(&iterate);
+        assert_eq!(format!("{:?}", device.op), format!("{:?}", fresh.op));
     }
 }

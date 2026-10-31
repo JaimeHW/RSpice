@@ -285,6 +285,29 @@ impl Bsim4v8 {
         )
     }
 
+    /// [`Self::eval_with_junction_and_gate_mid_bias`], also returning the DC
+    /// section's `output_vdsat` ([`eval::eval_with_dc_output_vdsat`]).
+    pub(crate) fn eval_with_dc_output_vdsat(
+        &self,
+        bias: Bsim4v8Bias,
+        junction_bias: Option<Bsim4v8JunctionBias>,
+        gate_mid_vgs: Option<Value>,
+        gmin: Value,
+        compute_charges: bool,
+    ) -> Result<(Bsim4v8Op, Value), String> {
+        eval::eval_with_dc_output_vdsat(
+            &self.model,
+            &self.model_temp,
+            &self.size,
+            &self.inst,
+            bias,
+            junction_bias,
+            gate_mid_vgs,
+            gmin,
+            compute_charges,
+        )
+    }
+
     /// Evaluate the operating point at raw node-space voltages: `mtype` is
     /// folded into the branch voltages here, exactly as b4ld.c forms
     /// `vbs`/`vgs`/`vds` from the node vector (b4ld.c:380-391).
