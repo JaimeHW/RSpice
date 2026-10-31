@@ -379,10 +379,13 @@ impl ParsedAnalysisCard {
                     _ => false,
                 };
                 // LTspice reads a lone field as `.tran 0 <Tstop>`; ngspice
-                // and Xyce refuse the card.
+                // and Xyce refuse the card, and so does a deck read with
+                // Xyce expressions.
                 let (step, stop) = if !lone_field {
                     (first, expect_value(stream, line_num, params)?)
-                } else if spice_dialect == crate::config::SpiceDialect::BestAvailable {
+                } else if spice_dialect == crate::config::SpiceDialect::BestAvailable
+                    && params.expression_dialect() != crate::config::ExpressionDialect::Xyce
+                {
                     (0.0, first)
                 } else {
                     return Err(ParseError::Syntax {

@@ -8686,6 +8686,19 @@ mod tests {
                 "{dialect:?}: {error:?}"
             );
         }
+        // Xyce's BUG_636_SON deck is read with Xyce expressions and no
+        // dialect; it must keep Xyce's refusal.
+        let xyce_expressions = Netlist::parse_with_options(
+            "lone field\nR1 1 0 1\n.tran 1u\n.end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        );
+        assert!(
+            matches!(xyce_expressions, Err(ParseError::Syntax { line: 3, .. })),
+            "{xyce_expressions:?}"
+        );
         for (card, expected) in [
             (".tran 1u", (0.0, 1e-6, None, None, false)),
             (".tran 1u uic", (0.0, 1e-6, None, None, true)),
