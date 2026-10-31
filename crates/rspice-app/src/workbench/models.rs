@@ -7,6 +7,7 @@
 
 pub(crate) mod commands;
 pub(crate) mod model_editor_workflow;
+pub(in crate::workbench) mod pdk_workflow;
 pub(crate) mod workspace_state;
 
 use crate::diagnostics::{LogSeverity, LogSource};

@@ -131,7 +131,7 @@ enum ManagerAction {
     /// from a frame and run outside it: the frame decides *that* the corpus
     /// moved, never how many megabytes hashing it costs.
     ScanSourceDrift,
-    ModelHub(crate::workbench::app::ModelHubRequest),
+    ModelHub(crate::workbench::models::pdk_workflow::ModelHubRequest),
     /// Arm the schematic cursor with a part the project already holds. The hub's
     /// own placements arrive the same way, one operation later, once the bytes
     /// they name have been retained.
@@ -192,7 +192,10 @@ impl ManagerRenderContext<'_> {
             });
     }
 
-    fn queue_model_hub(&mut self, request: crate::workbench::app::ModelHubRequest) {
+    fn queue_model_hub(
+        &mut self,
+        request: crate::workbench::models::pdk_workflow::ModelHubRequest,
+    ) {
         self.pending_actions.push(ManagerAction::ModelHub(request));
     }
 

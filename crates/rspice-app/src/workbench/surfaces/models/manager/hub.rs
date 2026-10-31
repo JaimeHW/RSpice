@@ -41,7 +41,7 @@ use crate::services::model_hub::ModelHubService;
 use crate::state::model_hub::{ArchiveEvidence, ReleaseDiff, missing_capabilities, precedence};
 use crate::state::model_library::PackPartPin;
 use crate::ui::accessibility::counted;
-use crate::workbench::app::ModelHubRequest;
+use crate::workbench::models::pdk_workflow::ModelHubRequest;
 use crate::workbench::models::workspace_state::{ModelHubFacet, PackReProof};
 use crate::workbench::state::PackReleaseConfirmation;
 

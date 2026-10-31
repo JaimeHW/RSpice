@@ -29,7 +29,7 @@ use super::*;
 use crate::services::model_hub::ModelHubService;
 use crate::state::model_hub::{PartFact, PartStanding, ReleaseDiff};
 use crate::state::model_library::PackPartPin;
-use crate::workbench::app::ModelHubRequest;
+use crate::workbench::models::pdk_workflow::ModelHubRequest;
 
 use super::hub::{HubCatalog, HubLedgerRow, announced, announced_widget, plain_list, selected_row};
 

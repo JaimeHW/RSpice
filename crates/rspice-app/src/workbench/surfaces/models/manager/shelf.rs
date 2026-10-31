@@ -900,11 +900,13 @@ fn place_action(
             pack_id,
             version,
             part,
-        }) => app.queue_model_hub(crate::workbench::app::ModelHubRequest::InstallPack {
-            pack_id,
-            version,
-            part: Some(part),
-        }),
+        }) => app.queue_model_hub(
+            crate::workbench::models::pdk_workflow::ModelHubRequest::InstallPack {
+                pack_id,
+                version,
+                part: Some(part),
+            },
+        ),
         None => {}
     }
 }

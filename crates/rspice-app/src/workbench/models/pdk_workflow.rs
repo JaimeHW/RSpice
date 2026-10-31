@@ -869,7 +869,7 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn process_pdk_settings_dialog(&mut self, ctx: &Context) {
         self.pump_model_catalog_operations(ctx);
-        let result = super::pdk_settings::render_pdk_settings_dialog(
+        let result = crate::workbench::app::dialogs::pdk_settings::render_pdk_settings_dialog(
             ctx,
             &mut self.state.models.pdk_settings_dialog,
         );
