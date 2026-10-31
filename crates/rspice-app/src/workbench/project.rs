@@ -233,6 +233,18 @@ pub(crate) fn open_project_launcher(
     wb.outbox.push(FocusProjectLauncherSearch);
 }
 
+/// Open the project launcher with every project listed: File ▸ Open recent
+/// ends in it, so the launcher it opens is not narrowed again to the recent
+/// ones.
+fn open_all_projects(
+    project: &mut ProjectState,
+    wb: &mut WorkbenchSession,
+    platform: &mut PlatformState,
+) {
+    open_project_launcher(project, wb, platform);
+    project.project_launcher_filter = ProjectLauncherFilter::All;
+}
+
 /// Open the project launcher filtered to the recent projects.
 fn open_recent_projects(
     project: &mut ProjectState,
@@ -388,7 +400,7 @@ impl CommandSet for ProjectCommand {
     /// command returns.
     fn execute(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
-            Self::ProjectLauncher => open_project_launcher(cx.state, cx.wb, cx.platform),
+            Self::ProjectLauncher => open_all_projects(cx.state, cx.wb, cx.platform),
             Self::RecentProjects => open_recent_projects(cx.state, cx.wb, cx.platform),
             Self::NewProject => cx.wb.outbox.push(ProjectFileAction::NewProject),
             Self::OpenProject => cx.wb.outbox.push(ProjectFileAction::OpenProject),

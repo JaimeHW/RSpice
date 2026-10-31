@@ -112,6 +112,12 @@ const CLOSE_PROJECT: &[ShortcutBinding] = &[primary(
     chord(Key::W, true, false, true, "Ctrl+Shift+W"),
     DESKTOP,
 )];
+// Ctrl+N belongs to the browser and the tablet's host (a new window), so a
+// new cell has a key only on the desktop.
+const NEW_CELL: &[ShortcutBinding] = &[primary(
+    chord(Key::N, true, false, false, "Ctrl+N"),
+    DESKTOP,
+)];
 const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
     chord(Key::E, true, false, true, "Ctrl+Shift+E"),
     ALL,
@@ -212,8 +218,8 @@ impl ProjectCommand {
             Self::SaveAs => ("Save as…", "File", open, global, SAVE_PROJECT_AS),
             Self::SaveAll => ("Save all", "File", open, global, SAVE_ALL),
             Self::CloseProject => ("Close project…", "File", open, global, CLOSE_PROJECT),
-            Self::NewCell => ("New cell…", "File", open, global, NONE),
-            Self::NewView => ("New view…", "File", open, global, NONE),
+            Self::NewCell => ("New cell…", "File", open, global, NEW_CELL),
+            Self::NewView => ("New cell view…", "File", open, global, NONE),
             Self::OpenSchematic => ("Open schematic…", "File", waits, global, NONE),
             Self::Page(ProjectPage::Overview) => {
                 ("Open project overview", "Project", page, global, NONE)

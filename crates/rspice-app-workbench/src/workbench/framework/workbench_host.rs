@@ -84,6 +84,10 @@ pub trait WorkbenchHost: Host<WorkspaceKey = Workspace, Layout = LayoutSpec> {
     /// Show the waveform `waveform` of analysis `analysis` of retained run
     /// `run` in the Results workspace.
     fn show_signal(&mut self, run: usize, analysis: usize, waveform: usize);
+
+    /// Open `recent`, a file from the recent-files list, asking first about
+    /// unsaved changes as opening any file does.
+    fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile);
 }
 
 /// The session the console's pages draw from: the model, the workbench

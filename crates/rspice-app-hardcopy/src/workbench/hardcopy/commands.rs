@@ -70,24 +70,16 @@ const PRINT_HARDCOPY: &[ShortcutBinding] = &[
         "Ctrl+Alt+P",
     ),
 ];
-const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[
-    binding(
-        ShortcutKind::Primary,
-        DESKTOP,
-        Key::P,
-        false,
-        true,
-        "Ctrl+Shift+P",
-    ),
-    binding(
-        ShortcutKind::Alternate,
-        HOST,
-        Key::E,
-        true,
-        true,
-        "Ctrl+Alt+Shift+E",
-    ),
-];
+/// One chord on every platform: the browser keeps Ctrl+Shift+P, so the
+/// desktop takes the chord the browser's profile always had.
+const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[binding(
+    ShortcutKind::Primary,
+    &CommandPlatform::ALL,
+    Key::E,
+    true,
+    true,
+    "Ctrl+Alt+Shift+E",
+)];
 
 /// What every listed hardcopy command declares: it is in the palette and
 /// needs an open project.
@@ -170,14 +162,14 @@ impl HardcopyCommand {
                 NONE,
             ),
             Self::PrintHardcopy => (
-                "Print / hardcopy\u{2026}",
+                "Print\u{2026}",
                 "File",
                 ACTIVE_VIEW_OUTPUT,
                 ShortcutContext::Global,
                 PRINT_HARDCOPY,
             ),
             Self::ExportActiveView => (
-                "Export active view\u{2026}",
+                "Export image or PDF\u{2026}",
                 "File",
                 ACTIVE_VIEW_OUTPUT,
                 ShortcutContext::Global,

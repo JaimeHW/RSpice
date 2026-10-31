@@ -288,6 +288,13 @@ pub trait Host: 'static {
     /// What the command `key` names is called.
     fn label(&self, key: CommandKey) -> &'static str;
 
+    /// What a menu row of the command `key` names reads right now: its label,
+    /// or a label that names what it would act on, such as the step Undo
+    /// would take back.
+    fn menu_label(&self, key: CommandKey) -> std::borrow::Cow<'static, str> {
+        self.label(key).into()
+    }
+
     /// The keys the reader's profile binds the command `key` names to on
     /// `platform`, written as `os` writes them; empty for none.
     fn shortcut_label(

@@ -285,12 +285,10 @@ impl Command {
             Self::OpenWorkspace(Workspace::Netlist) => {
                 spec("netlist", "Open Netlist & Script Editor", "Navigate")
             }
-            Self::RevertActiveDocument => {
-                spec("revert-document", "Revert active document…", "File")
-            }
-            Self::CloseActiveDocument => spec("close-document", "Close active document", "File"),
+            Self::RevertActiveDocument => spec("revert-document", "Revert to saved…", "File"),
+            Self::CloseActiveDocument => spec("close-document", "Close", "File"),
             Self::NewVerilogADevice => spec("new-veriloga-device", "New Verilog-A device…", "File"),
-            Self::OpenNetlist => spec("open-netlist", "Open netlist…", "File"),
+            Self::OpenNetlist => spec("open-netlist", "Open netlist as project…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
@@ -305,7 +303,7 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Xyce) => {
                 spec("export-netlist-xyce", "Export Xyce netlist…", "File")
             }
-            Self::Exit => spec("exit-rspice", "Exit RSpice…", "File"),
+            Self::Exit => spec("exit-rspice", "Exit", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
             Self::Redo => spec("redo", "Redo", "Edit"),
             Self::Cut => spec("cut-selection", "Cut selection", "Edit"),
@@ -390,10 +388,8 @@ impl Command {
             ),
             Self::PreviousDocument => spec("previous-document", "Previous document", "Window"),
             Self::NextDocument => spec("next-document", "Next document", "Window"),
-            Self::CloseOtherDocuments => {
-                spec("close-other-documents", "Close other documents", "Window")
-            }
-            Self::CloseAllDocuments => spec("close-all-documents", "Close all documents", "Window"),
+            Self::CloseOtherDocuments => spec("close-other-documents", "Close others", "File"),
+            Self::CloseAllDocuments => spec("close-all-documents", "Close all", "File"),
             Self::WindowManager => spec(
                 "window-manager",
                 "Windows, documents and session\u{2026}",

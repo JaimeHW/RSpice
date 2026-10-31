@@ -748,6 +748,10 @@ impl WorkbenchHost for RSpiceApp {
         self.state.open_workspace_view(reference);
     }
 
+    fn open_recent_file(&mut self, recent: crate::services::recent_files::RecentFile) {
+        RSpiceApp::open_recent_file(self, recent);
+    }
+
     fn show_catalog_model(&mut self, library: &str, model: String) {
         let state = &mut self.state;
         state.select_model_library(library);

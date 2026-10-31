@@ -27,6 +27,16 @@ pub enum MenuEntry {
     Separator,
     /// Entries shown only while the context holds.
     Only(MenuContext, &'static [MenuEntry]),
+    /// The recently opened files, newest first, one row each, offered while
+    /// the command the key names can run.
+    RecentFiles(CommandKey),
+}
+
+/// What choosing a row read from the application's state does, in place of
+/// running its command.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum MenuAction {
+    OpenRecent(crate::services::recent_files::RecentFile),
 }
 
 /// A command's row as written down: which command, under what label, with
@@ -62,16 +72,31 @@ pub enum MenuContext {
     /// RSpice runs as a desktop application, not in a browser or on a
     /// tablet or phone.
     DesktopApplication,
+    /// RSpice runs as a desktop application on Windows or Linux, whose File
+    /// menu ends in Exit. On macOS the application menu's Quit ends it.
+    ExitInFileMenu,
+    /// A project is open.
+    ProjectOpen,
+    /// No project is open: the start screen.
+    NoProject,
 }
 
 impl MenuContext {
-    fn holds(self, app: &impl WorkbenchHost, platform: CommandPlatform) -> bool {
+    fn holds(
+        self,
+        app: &impl WorkbenchHost,
+        platform: CommandPlatform,
+        os: OperatingSystem,
+    ) -> bool {
         let editor = app.workbench().active_source_editor;
         match self {
             Self::SourceEditor => editor.is_some(),
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),
             Self::Drawing => editor.is_none(),
             Self::DesktopApplication => file_menu_shows_exit(platform),
+            Self::ExitInFileMenu => file_menu_shows_exit(platform) && os != OperatingSystem::Mac,
+            Self::ProjectOpen => app.platform().project_lifecycle.is_open(),
+            Self::NoProject => !app.platform().project_lifecycle.is_open(),
         }
     }
 }
@@ -117,7 +142,7 @@ pub fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
             MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
                 menu_keys(entries, keys);
             }
-            MenuEntry::Separator => {}
+            MenuEntry::Separator | MenuEntry::RecentFiles(_) => {}
         }
     }
 }
@@ -136,7 +161,7 @@ pub enum MenuRow {
 #[derive(Debug, Clone)]
 pub struct CommandRow {
     pub command: CommandKey,
-    pub label: &'static str,
+    pub label: std::borrow::Cow<'static, str>,
     /// The key painted at the row's right edge, empty for none.
     pub shortcut: String,
     pub availability: CommandAvailability,
@@ -146,6 +171,8 @@ pub struct CommandRow {
     /// The icon the row wears where it shows no check mark.
     icon: Option<WorkbenchIcon>,
     palette_scope: Option<&'static str>,
+    /// What choosing the row does when it is not running `command`.
+    pub action: Option<MenuAction>,
 }
 
 /// The rows `entries` show in the window `ctx` draws.
@@ -183,14 +210,15 @@ fn push_menu_rows(
             MenuEntry::Command(item) => rows.push(MenuRow::Command(CommandRow {
                 command: item.command,
                 label: match item.label {
-                    MenuLabel::Command => app.label(item.command),
-                    MenuLabel::Fixed(label) => label,
+                    MenuLabel::Command => app.menu_label(item.command),
+                    MenuLabel::Fixed(label) => label.into(),
                 },
                 shortcut: shortcut_for_occurrence(app, platform, os, item.command, item.shortcut),
                 availability: app.availability(item.command),
                 checked: app.checked(item.command),
                 icon: app.command_icon(item.command),
                 palette_scope: item.palette_scope,
+                action: None,
             })),
             MenuEntry::Submenu { label, entries } => rows.push(MenuRow::Submenu {
                 label,
@@ -198,24 +226,65 @@ fn push_menu_rows(
             }),
             MenuEntry::Separator => rows.push(MenuRow::Separator),
             MenuEntry::Only(context, entries) => {
-                if context.holds(app, platform) {
+                if context.holds(app, platform, os) {
                     push_menu_rows(rows, entries, app, platform, os);
                 }
+            }
+            MenuEntry::RecentFiles(command) => {
+                let availability = app.availability(command);
+                rows.extend(app.platform().recent_files.iter().map(|recent| {
+                    MenuRow::Command(CommandRow {
+                        command,
+                        label: recent_file_name(recent).into(),
+                        shortcut: String::new(),
+                        availability,
+                        checked: None,
+                        icon: None,
+                        palette_scope: None,
+                        action: Some(MenuAction::OpenRecent(recent.clone())),
+                    })
+                }));
             }
         }
     }
 }
 
+/// How File ▸ Open recent names a recent file: a project by its name, any
+/// other file by its file name.
+fn recent_file_name(recent: &crate::services::recent_files::RecentFile) -> String {
+    let name = if recent.kind == crate::services::recent_files::RecentKind::Project {
+        recent.path.file_stem()
+    } else {
+        recent.path.file_name()
+    };
+    name.map_or_else(
+        || recent.path.display().to_string(),
+        |name| name.to_string_lossy().into_owned(),
+    )
+}
+
 /// The row a reader chose from a menu, carried out once the menu is drawn.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuChoice {
     command: CommandKey,
     palette_scope: Option<&'static str>,
+    action: Option<MenuAction>,
 }
 
 impl MenuChoice {
+    /// What choosing `row` does.
+    pub(super) fn for_row(row: &CommandRow) -> Self {
+        Self {
+            command: row.command,
+            palette_scope: row.palette_scope,
+            action: row.action.clone(),
+        }
+    }
+
     pub(super) fn run(self, app: &mut impl WorkbenchHost) {
-        if let Some(scope) = self.palette_scope {
+        if let Some(MenuAction::OpenRecent(recent)) = self.action {
+            app.open_recent_file(recent);
+        } else if let Some(scope) = self.palette_scope {
             app.workbench_mut().command_palette.open_in_scope(scope);
         } else {
             app.execute(self.command);
@@ -301,7 +370,7 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     if availability == CommandAvailability::Hidden {
         return None;
     }
-    let label = row.label;
+    let label = row.label.as_ref();
     let enabled = availability.is_available();
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     // A greyed row is still a live widget: it takes the focus, so the keys
@@ -356,10 +425,7 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     };
     if enabled && response.clicked() {
         ui.close();
-        return Some(MenuChoice {
-            command: row.command,
-            palette_scope: row.palette_scope,
-        });
+        return Some(MenuChoice::for_row(row));
     }
     None
 }
@@ -503,7 +569,7 @@ pub fn menu_rows_fit(ui: &Ui, rows: &[MenuRow]) -> f32 {
                 } else {
                     measure(&row.shortcut, &shortcut_font) + 7.0
                 };
-                Some(measure(row.label, &label_font) + keys)
+                Some(measure(&row.label, &label_font) + keys)
             }
             MenuRow::Submenu { label, .. } => Some(measure(label, &label_font) + 12.0 + 7.0),
             MenuRow::Command(_) | MenuRow::Separator => None,

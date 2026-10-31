@@ -89,47 +89,98 @@ pub(in crate::workbench) const fn application_menu_entries(
     }
 }
 
+/// File makes, opens, closes, keeps, brings in and sends out: the project,
+/// its cells and the documents open on them.
 const FILE_MENU: &[MenuEntry] = &[
-    project(ProjectCommand::ProjectLauncher),
+    project(ProjectCommand::NewProject),
+    project(ProjectCommand::NewCell),
+    project(ProjectCommand::NewView),
+    command(Command::NewVerilogADevice),
     Separator,
+    // A schematic file is opened as a document of its own only on the start
+    // screen; inside a project it is imported as a new cell view.
+    MenuEntry::Only(
+        MenuContext::NoProject,
+        &[project(ProjectCommand::OpenSchematic)],
+    ),
     project(ProjectCommand::OpenProject),
     command(Command::OpenNetlist),
-    project(ProjectCommand::NewProject),
-    project(ProjectCommand::RecentProjects),
+    MenuEntry::Submenu {
+        label: "Open recent",
+        entries: OPEN_RECENT_MENU,
+    },
     Separator,
-    project(ProjectCommand::NewCell),
-    project(ProjectCommand::OpenSchematic),
+    command(Command::CloseActiveDocument),
+    command(Command::CloseOtherDocuments),
+    command(Command::CloseAllDocuments),
+    project(ProjectCommand::CloseProject),
     Separator,
     project(ProjectCommand::Save),
     project(ProjectCommand::SaveAs),
     project(ProjectCommand::SaveAll),
     command(Command::RevertActiveDocument),
+    project(ProjectCommand::RevisionHistory),
     Separator,
-    command(Command::ImportNetlist),
-    command(Command::ImportVerilogA),
+    MenuEntry::Submenu {
+        label: "Import",
+        entries: IMPORT_MENU,
+    },
+    MenuEntry::Submenu {
+        label: "Export",
+        entries: EXPORT_MENU,
+    },
     Separator,
-    hardcopy(HardcopyCommand::ExportSchematicSvg),
-    results(ResultsCommand::ExportWaveformsCsv),
-    hardcopy(HardcopyCommand::ExportPublicationSnapshot),
-    command(Command::ExportNetlist(crate::io::NetlistFormat::Spice)),
-    Separator,
-    cloud(CloudCommand::LiveSession),
     cloud(CloudCommand::PublishToWeb),
+    cloud(CloudCommand::LiveSession),
     Separator,
-    command(Command::CloseActiveDocument),
-    project(ProjectCommand::CloseProject),
-    Separator,
-    // The drawing sheet's workflows, in the order the sheet is set up.
-    sheets(SheetsCommand::SheetProperties),
-    sheets(SheetsCommand::SheetFormatManager),
-    sheets(SheetsCommand::CustomSheetSizes),
-    sheets(SheetsCommand::SheetDefaults),
     hardcopy(HardcopyCommand::PrintHardcopy),
-    hardcopy(HardcopyCommand::ExportActiveView),
     MenuEntry::Only(
-        MenuContext::DesktopApplication,
+        MenuContext::ExitInFileMenu,
         &[Separator, command(Command::Exit)],
     ),
+];
+
+/// The files opened lately, newest first, then the launcher holding every
+/// project.
+const OPEN_RECENT_MENU: &[MenuEntry] = &[
+    MenuEntry::RecentFiles(ProjectCommand::OpenProject.key()),
+    Separator,
+    MenuEntry::command_as(
+        ProjectCommand::ProjectLauncher.key(),
+        "All projects\u{2026}",
+    ),
+];
+
+const IMPORT_MENU: &[MenuEntry] = &[
+    command_as(Command::ImportNetlist, "SPICE deck\u{2026}"),
+    command_as(Command::ImportVerilogA, "Verilog-A\u{2026}"),
+    MenuEntry::command_as(
+        ResultsCommand::ImportResultDataset.key(),
+        "Result dataset\u{2026}",
+    ),
+    MenuEntry::Only(
+        MenuContext::ProjectOpen,
+        &[MenuEntry::command_as(
+            ProjectCommand::OpenSchematic.key(),
+            "Schematic into new cell view\u{2026}",
+        )],
+    ),
+];
+
+const EXPORT_MENU: &[MenuEntry] = &[
+    MenuEntry::command_as(
+        HardcopyCommand::ExportActiveView.key(),
+        "Image or PDF\u{2026}",
+    ),
+    command_as(
+        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
+        "SPICE netlist\u{2026}",
+    ),
+    command_as(
+        Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
+        "Spectre netlist\u{2026}",
+    ),
+    MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}"),
 ];
 
 /// Edit acts on what the page shows: with a source editor as the document,
@@ -236,6 +287,9 @@ const DESIGN_MENU: &[MenuEntry] = &[
     sheets(SheetsCommand::NextSheet),
     sheets(SheetsCommand::NewSheet),
     sheets(SheetsCommand::DeleteSheet),
+    sheets(SheetsCommand::SheetProperties),
+    sheets(SheetsCommand::SheetFormatManager),
+    sheets(SheetsCommand::SheetDefaults),
     Separator,
     command(Command::CreateHierarchy),
     project(ProjectCommand::DesignManagement),
@@ -244,7 +298,6 @@ const DESIGN_MENU: &[MenuEntry] = &[
     command(Command::ConfigurationSets),
     command(Command::RuleSetup),
     command(Command::ReviewComments),
-    project(ProjectCommand::RevisionHistory),
     Separator,
     command_as(
         Command::DesignSpecialistWorkspaces,
@@ -330,9 +383,6 @@ const RESULTS_MENU: &[MenuEntry] = &[
     results(ResultsCommand::MeasurementLibrary),
     results(ResultsCommand::FamilySlicing),
     results(ResultsCommand::VisualizationDocumentProperties),
-    Separator,
-    results(ResultsCommand::ImportResultDataset),
-    results(ResultsCommand::ExportWaveformsCsv),
 ];
 
 const VERIFY_MENU: &[MenuEntry] = &[
@@ -390,8 +440,6 @@ const WINDOW_MENU: &[MenuEntry] = &[
     Separator,
     command(Command::PreviousDocument),
     command(Command::NextDocument),
-    command(Command::CloseOtherDocuments),
-    command(Command::CloseAllDocuments),
     Separator,
     settings(SettingsCommand::WorkspaceLayouts),
     command(Command::WindowManager),

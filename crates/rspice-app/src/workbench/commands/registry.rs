@@ -871,6 +871,9 @@ impl Command {
             Self::RepeatLastCommand if app.state.workbench.last_repeatable_command.is_none() => {
                 "no placement or edit has run yet"
             }
+            Self::CloseOtherDocuments => "no other closable document is open",
+            Self::CloseAllDocuments => "no closable document is open",
+            Self::PreviousDocument | Self::NextDocument => "only one document is open",
             _ => "command is unavailable in this context",
         };
         CommandAvailability::Disabled(reason)

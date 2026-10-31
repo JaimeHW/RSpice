@@ -204,7 +204,7 @@ fn listed_commands(entries: &[MenuEntry]) -> Vec<CommandKey> {
             MenuEntry::Submenu { entries, .. } | MenuEntry::Only(_, entries) => {
                 commands.extend(listed_commands(entries));
             }
-            MenuEntry::Separator => {}
+            MenuEntry::Separator | MenuEntry::RecentFiles(_) => {}
         }
     }
     commands
@@ -608,19 +608,6 @@ fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
 }
 
 #[test]
-fn file_menu_exposes_the_canonical_drawing_sheet_workflows_in_order() {
-    assert_menu_lists(
-        ApplicationMenu::File,
-        &[
-            SheetsCommand::SheetProperties.key(),
-            SheetsCommand::SheetFormatManager.key(),
-            SheetsCommand::CustomSheetSizes.key(),
-            SheetsCommand::SheetDefaults.key(),
-        ],
-    );
-}
-
-#[test]
 fn application_menu_height_is_viewport_bounded() {
     assert_eq!(menu_popup_height_for_viewport(900.0), 560.0);
     assert_eq!(menu_popup_height_for_viewport(600.0), 536.0);
@@ -751,7 +738,7 @@ const DESIGN_EDIT_COMMANDS: [Command; 4] = [
     Command::ArraySelection,
     Command::ReplaceInstance,
 ];
-const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 8] = [
+const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 7] = [
     Command::CreateHierarchy.key(),
     ProjectCommand::DesignManagement.key(),
     Command::SelectionBulkEdit.key(),
@@ -759,7 +746,6 @@ const DESIGN_MANAGEMENT_COMMANDS: [CommandKey; 8] = [
     Command::ConfigurationSets.key(),
     Command::RuleSetup.key(),
     Command::ReviewComments.key(),
-    ProjectCommand::RevisionHistory.key(),
 ];
 const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::PreviousSheet,
@@ -1002,8 +988,6 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
             "Measurement library…",
             "Family slicing and pivot…",
             "Plot document properties…",
-            "Import result dataset…",
-            "Export dataset…",
         ]
     );
 }
@@ -1158,36 +1142,64 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
 /// `label >`. Keys are the Windows desktop ones.
 #[cfg(not(target_arch = "wasm32"))]
 fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
-    menu_entries::resolve_menu_rows(
-        entries,
-        app,
-        crate::state::command_catalog::CommandPlatform::Desktop,
-        egui::os::OperatingSystem::Windows,
-    )
-    .iter()
-    .map(|row| match row {
-        menu_entries::MenuRow::Command(row) => {
-            let state = match row.availability {
-                CommandAvailability::Available => "on".to_owned(),
-                CommandAvailability::Disabled(reason) => format!("off: {reason}"),
-                CommandAvailability::Hidden => "hidden".to_owned(),
-            };
-            let mark = match row.checked {
-                Some(true) => " | checked",
-                Some(false) => " | unchecked",
-                None => "",
-            };
-            format!(
-                "{} | {} | {} | {state}{mark}",
-                row.label,
-                row.command.as_str(),
-                row.shortcut
-            )
+    menu_pin_on(entries, app, egui::os::OperatingSystem::Windows)
+}
+
+/// `entries` as rows read on `os`, a submenu's rows under its row, indented.
+fn menu_pin_on(
+    entries: &[MenuEntry],
+    app: &RSpiceApp,
+    os: egui::os::OperatingSystem,
+) -> Vec<String> {
+    fn pin(rows: &[menu_entries::MenuRow], indent: &str, out: &mut Vec<String>) {
+        for row in rows {
+            match row {
+                menu_entries::MenuRow::Command(row) => {
+                    let state = match row.availability {
+                        CommandAvailability::Available => "on".to_owned(),
+                        CommandAvailability::Disabled(reason) => format!("off: {reason}"),
+                        CommandAvailability::Hidden => "hidden".to_owned(),
+                    };
+                    let mark = match row.checked {
+                        Some(true) => " | checked",
+                        Some(false) => " | unchecked",
+                        None => "",
+                    };
+                    out.push(format!(
+                        "{indent}{} | {} | {} | {state}{mark}",
+                        row.label,
+                        row.command.as_str(),
+                        row.shortcut
+                    ));
+                }
+                menu_entries::MenuRow::Separator => out.push(format!("{indent}---")),
+                menu_entries::MenuRow::Submenu { label, rows } => {
+                    out.push(format!("{indent}{label} >"));
+                    pin(rows, &format!("{indent}  "), out);
+                }
+            }
         }
-        menu_entries::MenuRow::Separator => "---".to_owned(),
-        menu_entries::MenuRow::Submenu { label, .. } => format!("{label} >"),
-    })
-    .collect()
+    }
+    let mut out = Vec::new();
+    pin(
+        &menu_entries::resolve_menu_rows(
+            entries,
+            app,
+            crate::state::command_catalog::CommandPlatform::Desktop,
+            os,
+        ),
+        "",
+        &mut out,
+    );
+    out
+}
+
+/// The application with no project open: the start screen.
+#[cfg(not(target_arch = "wasm32"))]
+fn no_project_app() -> RSpiceApp {
+    let mut app = title_test_app();
+    app.state.close_project_session();
+    app
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -1236,12 +1248,85 @@ fn every_menu_shows_exactly_its_pinned_rows() {
             expected,
         );
     }
+    for (menu, expected) in PINNED_NO_PROJECT_MENUS {
+        check(
+            &format!("{} with no project open", menu.label()),
+            menu_pin(application_menu_entries(menu), &no_project_app()),
+            expected,
+        );
+    }
     check(
         "Compact Menu button",
-        menu_pin(title_test_app().compact_menu(), &title_test_app()),
+        menu_pin(title_test_app().compact_menu(), &title_test_app())
+            .into_iter()
+            .filter(|row| !row.starts_with(' '))
+            .collect(),
         &PINNED_COMPACT_MENU,
     );
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n\n"));
+}
+
+/// Exit ends the File menu on Windows and Linux; on macOS the application
+/// menu's Quit ends the application, so File does not repeat it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn exit_ends_the_file_menu_on_windows_and_linux_but_not_macos() {
+    let app = title_test_app();
+    let file = application_menu_entries(ApplicationMenu::File);
+    for os in [
+        egui::os::OperatingSystem::Windows,
+        egui::os::OperatingSystem::Nix,
+    ] {
+        let rows = menu_pin_on(file, &app, os);
+        assert_eq!(
+            rows.last().map(String::as_str),
+            Some("Exit | exit-rspice | Alt+F4 | on"),
+            "{os:?}"
+        );
+    }
+    let rows = menu_pin_on(file, &app, egui::os::OperatingSystem::Mac);
+    assert!(
+        rows.iter().all(|row| !row.contains("exit-rspice")),
+        "{rows:#?}"
+    );
+}
+
+/// File ▸ Open recent lists the recent-files list as it stands, newest
+/// first, projects by name and schematics by file name, and ends in the
+/// launcher holding every project.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn open_recent_lists_the_recent_files_newest_first_then_all_projects() {
+    use crate::services::recent_files::{RecentFile, RecentKind};
+    let recent = |kind, path: &str| RecentFile {
+        kind,
+        path: std::path::PathBuf::from(path),
+        opened_at_unix_ms: 0,
+        pinned: false,
+        owner: None,
+        tags: Vec::new(),
+    };
+    let mut app = title_test_app();
+    app.state.platform.recent_files = vec![
+        recent(RecentKind::Project, "C:/work/amplifier.rsproj"),
+        recent(RecentKind::Schematic, "C:/work/bias.rsch"),
+        recent(RecentKind::Project, "C:/work/filter.rsproj"),
+    ];
+    let rows = menu_pin(application_menu_entries(ApplicationMenu::File), &app);
+    let start = rows
+        .iter()
+        .position(|row| row == "Open recent >")
+        .expect("File lists Open recent");
+    assert_eq!(
+        rows[start + 1..start + 6],
+        [
+            "  amplifier | open-project |  | on",
+            "  bias.rsch | open-project |  | on",
+            "  filter | open-project |  | on",
+            "  ---",
+            "  All projects… | project-launcher | Ctrl+Shift+O | on",
+        ]
+    );
 }
 
 /// Run is grey only while a run is in progress: an unrunnable plan stays
@@ -1292,11 +1377,11 @@ fn a_build_without_cloud_endpoints_leaves_out_live_session_and_publish() {
     let shown = visible_row_names(&rows);
     let export = shown
         .iter()
-        .position(|name| name == "Export SPICE netlist…")
-        .expect("File lists the SPICE export");
+        .position(|name| name == "Export")
+        .expect("File lists the Export submenu");
     assert_eq!(
         shown[export + 1..export + 3],
-        ["---", "Close active document"],
+        ["---", "Print…"],
         "{shown:?}"
     );
 }
@@ -1484,7 +1569,7 @@ fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
         .into_iter()
         .filter_map(|row| match row {
             menu_entries::MenuRow::Command(row) => {
-                Some((row.label.to_owned(), row.availability.is_available()))
+                Some((row.label.to_string(), row.availability.is_available()))
             }
             menu_entries::MenuRow::Submenu { label, .. } => Some(((*label).to_owned(), true)),
             menu_entries::MenuRow::Separator => None,
@@ -1992,7 +2077,7 @@ fn visible_row_names(rows: &[menu_entries::MenuRow]) -> Vec<String> {
     menu_entries::visible_rows(rows)
         .into_iter()
         .map(|row| match row {
-            menu_entries::MenuRow::Command(row) => row.label.to_owned(),
+            menu_entries::MenuRow::Command(row) => row.label.to_string(),
             menu_entries::MenuRow::Separator => "---".to_owned(),
             menu_entries::MenuRow::Submenu { label, .. } => (*label).to_owned(),
         })
@@ -2033,43 +2118,45 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::File,
         &[
-            "Project launcher… | project-launcher | Ctrl+Shift+O | on",
+            "New project… | new-project | Ctrl+Shift+N | on",
+            "New cell… | new-cell | Ctrl+N | on",
+            "New cell view… | new-view |  | on",
+            "New Verilog-A device… | new-veriloga-device |  | on",
             "---",
             "Open project… | open-project | Ctrl+O | on",
-            "Open netlist… | open-netlist | Ctrl+Shift+L | on",
-            "New project… | new-project | Ctrl+Shift+N | on",
-            "Recent projects… | recent-projects |  | on",
+            "Open netlist as project… | open-netlist | Ctrl+Shift+L | on",
+            "Open recent >",
+            "  ---",
+            "  All projects… | project-launcher | Ctrl+Shift+O | on",
             "---",
-            "New cell… | new-cell |  | on",
-            "Open schematic… | open-schematic |  | on",
+            "Close | close-document | Ctrl+W | off: no closable document is active",
+            "Close others | close-other-documents |  | off: no other closable document is open",
+            "Close all | close-all-documents |  | off: no closable document is open",
+            "Close project… | close-project | Ctrl+Shift+W | on",
             "---",
             "Save | save-project | Ctrl+S | on",
             "Save as… | save-project-as | Ctrl+Alt+Shift+S | on",
             "Save all | save-all | Ctrl+Shift+S | on",
-            "Revert active document… | revert-document |  | off: active document has no changes to revert",
+            "Revert to saved… | revert-document |  | off: active document has no changes to revert",
+            "Revision history… | revision-history |  | on",
             "---",
-            "Import SPICE deck… | import-netlist |  | on",
-            "Import Verilog-A… | import-veriloga |  | on",
+            "Import >",
+            "  SPICE deck… | import-netlist |  | on",
+            "  Verilog-A… | import-veriloga |  | on",
+            "  Result dataset… | import-dataset |  | on",
+            "  Schematic into new cell view… | open-schematic |  | on",
+            "Export >",
+            "  Image or PDF… | export-active-view | Ctrl+Alt+Shift+E | off: command is unavailable in this context",
+            "  SPICE netlist… | export-netlist-spice |  | on",
+            "  Spectre netlist… | export-netlist-spectre |  | on",
+            "  Dataset… | export-results |  | off: no result dataset is available",
             "---",
-            "Export schematic SVG… | export-schematic-svg |  | on",
-            "Export dataset… | export-results |  | off: no result dataset is available",
-            "Export publication snapshot… | export-publication-snapshot |  | on",
-            "Export SPICE netlist… | export-netlist-spice |  | on",
-            "---",
-            "Live session… | live-session |  | hidden",
             "Publish to web… | publish-web |  | hidden",
+            "Live session… | live-session |  | hidden",
             "---",
-            "Close active document | close-document | Ctrl+W | off: no closable document is active",
-            "Close project… | close-project | Ctrl+Shift+W | on",
+            "Print… | print-hardcopy | Ctrl+P | off: command is unavailable in this context",
             "---",
-            "Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
-            "Sheet formats across this document… | sheet-format-manager |  | off: give the open sheet a property of its own in Sheet properties first",
-            "Custom sheet sizes… | sheet-preset-library |  | on",
-            "Sheet defaults… | sheet-defaults |  | on",
-            "Print / hardcopy… | print-hardcopy | Ctrl+P | off: command is unavailable in this context",
-            "Export active view… | export-active-view | Ctrl+Shift+P | off: command is unavailable in this context",
-            "---",
-            "Exit RSpice… | exit-rspice | Alt+F4 | on",
+            "Exit | exit-rspice | Alt+F4 | on",
         ],
     ),
     (
@@ -2137,12 +2224,31 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Create array… | array-selection |  | off: select an editable object",
             "Replace instance… | replace-instance |  | off: select an editable object",
             "Arrange >",
+            "  Rotate clockwise | rotate-selection | Ctrl+R | off: select an editable object",
+            "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: select an editable object",
+            "  Mirror about vertical axis | mirror-selection-horizontal | Ctrl+M | off: select an editable object",
+            "  Mirror vertically | mirror-selection-vertical | Ctrl+Shift+M | off: select an editable object",
+            "  ---",
+            "  Align left | align-selection-left |  | off: command is unavailable in this context",
+            "  Align horizontal centers | align-selection-horizontal-centers |  | off: command is unavailable in this context",
+            "  Align right | align-selection-right |  | off: command is unavailable in this context",
+            "  Align top | align-selection-top |  | off: command is unavailable in this context",
+            "  Align vertical centers | align-selection-vertical-centers |  | off: command is unavailable in this context",
+            "  Align bottom | align-selection-bottom |  | off: command is unavailable in this context",
+            "  ---",
+            "  Distribute horizontally | distribute-selection-horizontal |  | off: command is unavailable in this context",
+            "  Distribute vertically | distribute-selection-vertical |  | off: command is unavailable in this context",
+            "  ---",
+            "  Snap selection to grid | snap-selection-to-grid |  | off: select an editable object",
             "Join collinear wires | join-collinear-wires |  | on",
             "---",
             "Previous sheet | previous-sheet | PageUp | off: the active cell view has a single sheet",
             "Next sheet | next-sheet | PageDown | off: the active cell view has a single sheet",
             "New sheet | new-sheet |  | on",
             "Delete active sheet | delete-sheet |  | off: the active cell view has a single sheet",
+            "Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
+            "Sheet formats across this document… | sheet-format-manager |  | off: give the open sheet a property of its own in Sheet properties first",
+            "Sheet defaults… | sheet-defaults |  | on",
             "---",
             "Create hierarchy from selection… | create-hierarchy |  | off: select an editable object",
             "Sheets, variants and annotation… | design-management |  | on",
@@ -2151,7 +2257,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Configurations | configuration-sets |  | on",
             "Design rule setup… | design-rule-setup |  | on",
             "Review comments… | review-comments |  | on",
-            "Revision history… | revision-history |  | on",
             "---",
             "Specialist workspaces… | specialist-tools-design |  | on",
             "---",
@@ -2194,9 +2299,6 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Measurement library… | measurement-library |  | off: open a result in Results",
             "Family slicing and pivot… | family-slicing |  | off: open a result in Results",
             "Plot document properties… | plot-properties |  | off: open a result in Results",
-            "---",
-            "Import result dataset… | import-dataset |  | on",
-            "Export dataset… | export-results |  | off: no result dataset is available",
         ],
     ),
     (
@@ -2239,10 +2341,8 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "Consolidate all windows… | consolidate-windows |  | off: there are no detached application windows",
             "Recover off-screen windows… | monitor-recovery |  | off: there are no secondary application windows to recover",
             "---",
-            "Previous document | previous-document | Ctrl+Shift+Tab | off: command is unavailable in this context",
-            "Next document | next-document | Ctrl+Tab | off: command is unavailable in this context",
-            "Close other documents | close-other-documents |  | off: command is unavailable in this context",
-            "Close all documents | close-all-documents |  | off: command is unavailable in this context",
+            "Previous document | previous-document | Ctrl+Shift+Tab | off: only one document is open",
+            "Next document | next-document | Ctrl+Tab | off: only one document is open",
             "---",
             "Workspace layouts… | workspace-layouts |  | on",
             "Windows, documents and session… | window-manager |  | on",
@@ -2315,6 +2415,52 @@ const PINNED_SOURCE_EDITOR_MENUS: [(ApplicationMenu, &[&str]); 2] = [
         ],
     ),
 ];
+
+#[cfg(not(target_arch = "wasm32"))]
+const PINNED_NO_PROJECT_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
+    ApplicationMenu::File,
+    &[
+        "New project… | new-project | Ctrl+Shift+N | on",
+        "New cell… | new-cell | Ctrl+N | off: no project is open",
+        "New cell view… | new-view |  | off: no project is open",
+        "New Verilog-A device… | new-veriloga-device |  | off: no project is open",
+        "---",
+        "Open schematic… | open-schematic |  | on",
+        "Open project… | open-project | Ctrl+O | on",
+        "Open netlist as project… | open-netlist | Ctrl+Shift+L | on",
+        "Open recent >",
+        "  ---",
+        "  All projects… | project-launcher | Ctrl+Shift+O | on",
+        "---",
+        "Close | close-document | Ctrl+W | off: no project is open",
+        "Close others | close-other-documents |  | off: no project is open",
+        "Close all | close-all-documents |  | off: no project is open",
+        "Close project… | close-project | Ctrl+Shift+W | off: no project is open",
+        "---",
+        "Save | save-project | Ctrl+S | off: no project is open",
+        "Save as… | save-project-as | Ctrl+Alt+Shift+S | off: no project is open",
+        "Save all | save-all | Ctrl+Shift+S | off: no project is open",
+        "Revert to saved… | revert-document |  | off: no project is open",
+        "Revision history… | revision-history |  | off: no project is open",
+        "---",
+        "Import >",
+        "  SPICE deck… | import-netlist |  | off: no project is open",
+        "  Verilog-A… | import-veriloga |  | off: no project is open",
+        "  Result dataset… | import-dataset |  | off: no project is open",
+        "Export >",
+        "  Image or PDF… | export-active-view | Ctrl+Alt+Shift+E | off: no project is open",
+        "  SPICE netlist… | export-netlist-spice |  | off: no project is open",
+        "  Spectre netlist… | export-netlist-spectre |  | off: no project is open",
+        "  Dataset… | export-results |  | off: no project is open",
+        "---",
+        "Publish to web… | publish-web |  | hidden",
+        "Live session… | live-session |  | hidden",
+        "---",
+        "Print… | print-hardcopy | Ctrl+P | off: no project is open",
+        "---",
+        "Exit | exit-rspice | Alt+F4 | on",
+    ],
+)];
 
 #[cfg(not(target_arch = "wasm32"))]
 const PINNED_COMPACT_MENU: [&str; 11] = [
