@@ -768,8 +768,10 @@ impl Mosfet {
         if let Some(&v) = params.get("W") {
             self.w = v;
         }
+        // LD is signed: a negative lateral diffusion lengthens the channel,
+        // as in ngspice's and Xyce's L - 2*LD.
         if let Some(&v) = params.get("LD") {
-            self.ld = v.max(0.0);
+            self.ld = v;
         }
         if let Some(tox) = tox {
             self.cox = EPS_OX_REL * EPS0 / tox;
@@ -1411,8 +1413,8 @@ impl Mosfet {
         if !self.w.is_finite() || self.w <= 0.0 {
             return Some("W must be finite and positive");
         }
-        if !self.ld.is_finite() || self.ld < 0.0 {
-            return Some("LD must be finite and nonnegative");
+        if !self.ld.is_finite() {
+            return Some("LD must be finite");
         }
         let effective_length = self.l - 2.0 * self.ld;
         if !effective_length.is_finite() || effective_length <= 0.0 {

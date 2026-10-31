@@ -1363,6 +1363,44 @@ mod tests {
         assert!(gmb.is_finite(), "gmb={gmb:e}");
     }
 
+    #[test]
+    fn level2_negative_lateral_diffusion_lengthens_the_channel() {
+        // MCNC 1.25 um NMOS card (LD = -0.168u), reverse-biased in weak
+        // inversion. ngspice-46 `show` at vgs=0, vds=-0.6, vbs=-5:
+        // id=-1.65272e-8, von=1.34079, vdsat=0.142814. Clamping LD to zero
+        // shortens Leff from 1.336u to 1u and gives id=-8.18e-8.
+        let mut params = HashMap::new();
+        for (name, value) in [
+            ("LEVEL", 2.0),
+            ("LD", -0.168e-6),
+            ("TOX", 241.0e-10),
+            ("NSUB", 1.066e16),
+            ("VTO", 0.761),
+            ("KP", 3.843e-5),
+            ("GAMMA", 0.639243),
+            ("PHI", 0.31),
+            ("UO", 790.0),
+            ("UEXP", 4.612355e-2),
+            ("UCRIT", 174667.0),
+            ("DELTA", 0.0),
+            ("VMAX", 177269.0),
+            ("XJ", 0.9e-6),
+            ("LAMBDA", 0.0),
+            ("NFS", 4.55168e12),
+            ("NEFF", 4.6883),
+        ] {
+            params.insert(name.to_string(), value);
+        }
+        let mos = Mosfet::new_nmos("mn3".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(5.0e-6, 1.0e-6);
+
+        let eval = mos.level2_evaluate(0.0, -0.6, -5.0);
+        assert_relative(eval.id, -1.65272e-8, 2.0e-3);
+        assert_relative(eval.von, 1.34079, 1.0e-4);
+        assert_relative(eval.vdsat, 0.142814, 1.0e-4);
+    }
+
     fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
         let scale = actual.abs().max(expected.abs()).max(1.0e-18);
         assert!(
