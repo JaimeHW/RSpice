@@ -20,10 +20,6 @@ use crate::state::model_library::{
     ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform, short_digest,
 };
 use crate::workbench::RSpiceApp;
-use crate::workbench::app::{
-    open_create_model_bound_symbol_dialog, open_symbol_import_dialog,
-    open_symbol_parameter_form_dialog,
-};
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use crate::workbench::documents::model_editor::{self, ModelEditorSection};

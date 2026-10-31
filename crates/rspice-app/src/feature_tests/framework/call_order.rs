@@ -523,10 +523,29 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "16",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app, request: OpenSymbolAuthoring| match request {",
+            "crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);",
+            "crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);",
+            "crate::workbench::app::open_symbol_import_dialog(&mut app.state);",
+            "crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(",
+            "app.state.models.models_view.note_receipt(result);",
+        ],
     ),
     (
         "17",
+        &[
+            "|app, OpenInDesign(reference)|",
+            "app.state.open_workspace_view(reference);",
+            ".activate(crate::workbench::state::Workspace::Design);",
+        ],
+    ),
+    (
+        "18",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "19",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -1162,8 +1181,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        17,
-        "`after_contribution` answers exactly the seventeen requests it lists"
+        19,
+        "`after_contribution` answers exactly the nineteen requests it lists"
     );
 }
 

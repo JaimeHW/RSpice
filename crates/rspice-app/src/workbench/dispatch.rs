@@ -37,9 +37,10 @@ use crate::workbench::framework::command_registry::{
 use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
-    ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenProjectDialog, PrintActiveView,
-    ProjectFileAction, PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance,
-    SetFamilyFilter, ShowSchematicAnnotations, ShowWaveforms,
+    ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign, OpenProjectDialog,
+    OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
+    RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter, ShowSchematicAnnotations,
+    ShowWaveforms, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -278,6 +279,53 @@ impl RSpiceApp {
                     )
                     .map(|()| format!("Bound selected instance to model '{library} / {model}'."));
                 app.state.models.models_view.note_receipt(result);
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: OpenSymbolAuthoring| match request {
+                OpenSymbolAuthoring::ModelBound => {
+                    crate::workbench::app::open_create_model_bound_symbol_dialog(&mut app.state);
+                }
+                OpenSymbolAuthoring::ParameterForm => {
+                    crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
+                }
+                OpenSymbolAuthoring::Import => {
+                    crate::workbench::app::open_symbol_import_dialog(&mut app.state);
+                }
+                OpenSymbolAuthoring::SubcircuitBound(source) => {
+                    let SubcircuitSymbolSource {
+                        library,
+                        subcircuit,
+                        source_path,
+                        ordered_ports,
+                        section,
+                        parameter_defaults,
+                        opened_receipt,
+                    } = *source;
+                    let result = crate::workbench::app::open_create_subcircuit_bound_symbol_dialog(
+                        &mut app.state,
+                        library,
+                        subcircuit,
+                        source_path,
+                        ordered_ports,
+                        section,
+                        parameter_defaults,
+                    )
+                    .map(|()| opened_receipt);
+                    app.state.models.models_view.note_receipt(result);
+                }
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, OpenInDesign(reference)| {
+                app.state.open_workspace_view(reference);
+                app.state
+                    .workbench
+                    .activate(crate::workbench::state::Workspace::Design);
             },
         );
         requests::drain(

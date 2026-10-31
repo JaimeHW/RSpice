@@ -17,6 +17,7 @@ use super::symbol_contracts::{
     project_row_count, symbol_rows, technology_group_band,
 };
 use super::*;
+use crate::workbench::framework::requests::OpenInDesign;
 
 pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     // The rows come first so the page bar can state the registry's real
@@ -46,13 +47,19 @@ pub(super) fn symbols_page(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         // Outermost-right first: the band lays its actions out right to left.
         |ui| {
             if Button::new("Create symbol").accent().show(ui).clicked() {
-                super::super::open_create_model_bound_symbol_dialog(app.state);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(OpenSymbolAuthoring::ModelBound);
             }
             if Button::new("Form designer").show(ui).clicked() {
-                super::super::open_symbol_parameter_form_dialog(app.state);
+                app.state
+                    .workbench
+                    .outbox
+                    .push(OpenSymbolAuthoring::ParameterForm);
             }
             if Button::new("Import symbol").show(ui).clicked() {
-                super::super::open_symbol_import_dialog(app.state);
+                app.state.workbench.outbox.push(OpenSymbolAuthoring::Import);
             }
             if Button::new("Library manager").show(ui).clicked() {
                 navigate_specialist(app, crate::workbench::SurfaceId::LibraryCellviewManager);
@@ -545,10 +552,10 @@ fn symbol_detail(
                                     Err("This read-only design library is not a signed technology overlay and cannot be varied here.".to_owned()),
                                 );
                             } else {
-                                app.state.open_workspace_view(row.reference.clone());
                                 app.state
                                     .workbench
-                                    .activate(crate::workbench::state::Workspace::Design);
+                                    .outbox
+                                    .push(OpenInDesign(row.reference.clone()));
                             }
                         }
                         if Button::new("Edit form…").enabled(!row.read_only()).show(ui)
@@ -562,7 +569,7 @@ fn symbol_detail(
                                 &row.reference.cell,
                                 &row.reference.view,
                             );
-                            super::super::open_symbol_parameter_form_dialog(app.state);
+                            app.state.workbench.outbox.push(OpenSymbolAuthoring::ParameterForm);
                         }
                     });
                 });

@@ -53,13 +53,14 @@ use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
     paint_problem_mark, problem_line,
 };
-use crate::workbench::app::open_create_subcircuit_bound_symbol_dialog;
 use crate::workbench::app_state::design_history::{
     publish_model_library_candidate, publish_model_library_set_candidate,
     publish_model_resolution_candidate, publish_symbol_definition_candidate,
 };
 use crate::workbench::features;
-use crate::workbench::framework::requests::BindComponentModel;
+use crate::workbench::framework::requests::{
+    BindComponentModel, OpenSymbolAuthoring, SubcircuitSymbolSource,
+};
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::models::workspace_state::{
@@ -368,15 +369,14 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             ManagerAction::CreateSubcircuitSymbol {
                 library,
                 subcircuit,
-            } => {
-                let result = open_subcircuit_symbol_workflow(&mut app.state, &library, &subcircuit)
-                    .map(|()| {
-                        format!(
-                            "Opened governed symbol creation for subcircuit '{library} / {subcircuit}'."
-                        )
-                    });
-                apply_receipt(&mut app.state, result);
-            }
+            } => match subcircuit_symbol_source(&app.state, &library, &subcircuit) {
+                Ok(source) => app
+                    .state
+                    .workbench
+                    .outbox
+                    .push(OpenSymbolAuthoring::SubcircuitBound(Box::new(source))),
+                Err(error) => apply_receipt(&mut app.state, Err(error)),
+            },
         }
     }
 }
@@ -414,11 +414,13 @@ fn divide_document_remainder(ui: &Ui) {
     );
 }
 
-fn open_subcircuit_symbol_workflow(
-    state: &mut AppState,
+/// The interface a symbol for the subcircuit `subcircuit_name` of the
+/// library `library_name` is created from, as the catalog executes it.
+fn subcircuit_symbol_source(
+    state: &AppState,
     library_name: &str,
     subcircuit_name: &str,
-) -> Result<(), String> {
+) -> Result<SubcircuitSymbolSource, String> {
     let provider = state
         .model
         .model_library_manager
@@ -481,15 +483,17 @@ fn open_subcircuit_symbol_workflow(
                 provider.library, provider.definition
             )
         })?;
-    open_create_subcircuit_bound_symbol_dialog(
-        state,
-        provider.library,
-        interface.name.clone(),
+    Ok(SubcircuitSymbolSource {
+        library: provider.library,
+        subcircuit: interface.name.clone(),
         source_path,
-        interface.ports.clone(),
-        interface.section.clone(),
-        interface.parameter_defaults.clone(),
-    )
+        ordered_ports: interface.ports.clone(),
+        section: interface.section.clone(),
+        parameter_defaults: interface.parameter_defaults.clone(),
+        opened_receipt: format!(
+            "Opened governed symbol creation for subcircuit '{library_name} / {subcircuit_name}'."
+        ),
+    })
 }
 
 fn page_tabs(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {

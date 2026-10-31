@@ -440,6 +440,49 @@ impl Request for BindComponentModel {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Open one of the schematic's symbol-authoring dialogs. Raised by the
+/// models feature's symbol pages and actions, and taken straight after the
+/// call that raised it.
+#[derive(Clone, Debug)]
+pub enum OpenSymbolAuthoring {
+    /// Create a symbol bound to the model the Models workspace selected.
+    ModelBound,
+    /// Design the parameter form of the selected symbol.
+    ParameterForm,
+    /// Import a symbol into a writable design library.
+    Import,
+    /// Create a symbol bound to one subcircuit's interface. Whether its
+    /// dialog opened goes on the Models workspace's banner.
+    SubcircuitBound(Box<SubcircuitSymbolSource>),
+}
+
+impl Request for OpenSymbolAuthoring {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// The subcircuit interface a bound symbol is created from, and what the
+/// Models workspace's banner says once its dialog has opened.
+#[derive(Clone, Debug)]
+pub struct SubcircuitSymbolSource {
+    pub library: String,
+    pub subcircuit: String,
+    pub source_path: std::path::PathBuf,
+    pub ordered_ports: Vec<String>,
+    pub section: Option<String>,
+    pub parameter_defaults: std::collections::BTreeMap<String, String>,
+    pub opened_receipt: String,
+}
+
+/// Open a cell view in the Design workspace and show that workspace.
+/// Raised by the models feature's symbol pages, and taken straight after
+/// the call that raised it.
+#[derive(Clone, Debug)]
+pub struct OpenInDesign(pub crate::state::CellViewRef);
+
+impl Request for OpenInDesign {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;
