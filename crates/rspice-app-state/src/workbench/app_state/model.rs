@@ -189,8 +189,8 @@ impl Model {
         self.report(NoticeKind::Error, title.into(), detail.into());
     }
 
-    /// Report something that completed, but not the way the user asked, as
-    /// [`AppState::report_warning`](super::AppState::report_warning) states it.
+    /// Report something that completed, but not the way the user asked: saved
+    /// as a download, not kept for the next session.
     pub fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
         self.report(NoticeKind::Warning, title.into(), detail.into());
     }

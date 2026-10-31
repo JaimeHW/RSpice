@@ -831,13 +831,6 @@ impl AppState {
         self.model.report_failure(title, detail);
     }
 
-    /// [`Self::report_failure`] for something that completed, but not the way
-    /// the user asked: saved as a download, not kept for the next session.
-    #[cfg(any(test, target_arch = "wasm32"))]
-    pub(crate) fn report_warning(&mut self, title: impl Into<String>, detail: impl Into<String>) {
-        self.model.report_warning(title, detail);
-    }
-
     /// Bring the reader to the findings a pass or a check just filed: the
     /// Problems page, listing them. A filter left from earlier reading could
     /// hide the very findings that stopped a run, or that a check the reader

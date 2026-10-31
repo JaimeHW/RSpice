@@ -535,7 +535,7 @@ fn start_browser_project_save(
                         "Downloaded a copy of the project; the open project is unchanged.",
                     );
                 } else {
-                    state.report_warning(
+                    state.model.report_warning(
                         "Saved as a download instead",
                         "The project was downloaded as a copy, not saved; it still has unsaved \
                          changes.",
@@ -765,7 +765,7 @@ pub(crate) fn poll_browser_project_save(state: &mut AppState) -> Option<SaveCont
                         ),
                     );
                 } else {
-                    state.report_warning(
+                    state.model.report_warning(
                         "Project will not reopen on restart",
                         format!(
                             "Saved {display_name}, but browser storage failed: \
@@ -1592,7 +1592,7 @@ pub(crate) fn poll_browser_project_import(state: &mut AppState) -> bool {
                             format!("{display_name} will reopen when the browser restarts."),
                         );
                     }
-                    Err(error) => state.report_warning(
+                    Err(error) => state.model.report_warning(
                         "Project will not reopen on restart",
                         format!(
                             "{display_name} will not reopen when the browser restarts: browser \

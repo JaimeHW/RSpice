@@ -59,7 +59,9 @@ mod tests {
             candidate.model.notices.is_empty(),
             "a clone duplicates nothing"
         );
-        candidate.report_warning("Netlist updated", "One device was renamed.");
+        candidate
+            .model
+            .report_warning("Netlist updated", "One device was renamed.");
 
         live.commit_candidate(candidate);
 
