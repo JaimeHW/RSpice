@@ -278,12 +278,23 @@ fn collect_behavioral_data_inputs(
     } else {
         netlist.params.clone()
     };
-    let prepared =
-        crate::netlist::expr::prepare_behavioral_expression_with_abort(expression, &params, abort)
-            .map_err(|error| match error {
-                BehavioralPreparationError::Aborted => SimulationError::Aborted,
-                BehavioralPreparationError::Semantic(message) => error_context(message),
-            })?;
+    let prepared = match crate::netlist::expr::prepare_behavioral_expression_with_abort(
+        expression, &params, abort,
+    ) {
+        Ok(prepared) => prepared,
+        Err(BehavioralPreparationError::Aborted) => return Err(SimulationError::Aborted),
+        // A resistance with no behavioral form (a statistical draw) is a
+        // parameter value; it names no data file, and construction
+        // resolves or refuses it by name.
+        Err(BehavioralPreparationError::Semantic(_))
+            if matches!(element.kind, ElementKind::Resistor { .. }) =>
+        {
+            return Ok(());
+        }
+        Err(BehavioralPreparationError::Semantic(message)) => {
+            return Err(error_context(message));
+        }
+    };
     let expression =
         crate::expr::parse_expression_strict_with_abort(&prepared, abort).map_err(|error| {
             match error {

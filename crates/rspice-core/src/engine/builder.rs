@@ -6624,18 +6624,31 @@ impl Engine {
                     let _ = deferred_params;
 
                     let authored_value_expr = value_expr.as_deref();
-                    let prepared_value_expr = value_expr
-                        .as_deref()
-                        .map(|expression| {
-                            prepare_behavioral_expression(expression, &base_eval_context(netlist))
-                                .map_err(|error| {
-                                    SimulationError::Circuit(format!(
-                                        "Resistor '{}' value expression could not be prepared: {}",
-                                        element.name, error
-                                    ))
-                                })
-                        })
-                        .transpose()?;
+                    let scalar_primary = authored_value_expr.is_some()
+                        && !value.is_finite()
+                        && model.is_none()
+                        && instance_params.is_empty()
+                        && deferred_params.is_empty()
+                        && !netlist.params.has_retained_parameter_expressions();
+                    let prepared_value_expr = match value_expr.as_deref() {
+                        None => None,
+                        Some(expression) => match prepare_behavioral_expression(
+                            expression,
+                            &base_eval_context(netlist),
+                        ) {
+                            Ok(prepared) => Some(prepared),
+                            // A statistical draw such as `agauss(10k,0.5k,1)` has
+                            // no behavioral form; the parameter evaluator below
+                            // draws it once, as ngspice's numparam does.
+                            Err(_) if scalar_primary => None,
+                            Err(error) => {
+                                return Err(SimulationError::Circuit(format!(
+                                    "Resistor '{}' value expression could not be prepared: {}",
+                                    element.name, error
+                                )));
+                            }
+                        },
+                    };
                     let value_expr = prepared_value_expr.as_deref();
 
                     #[cfg(feature = "veriloga-builtins-base")]
@@ -6684,12 +6697,6 @@ impl Engine {
                     // Scalar parameter expressions use the parameter evaluator, which
                     // preserves complex bindings and function argument evaluation. The
                     // behavioral expansion above only classifies circuit-state values.
-                    let scalar_primary = authored_value_expr.is_some()
-                        && !value.is_finite()
-                        && model.is_none()
-                        && instance_params.is_empty()
-                        && deferred_params.is_empty()
-                        && !netlist.params.has_retained_parameter_expressions();
                     let mut direction = None;
                     let primary_value = if scalar_primary {
                         let context =
@@ -12604,6 +12611,25 @@ mod tests {
         // AREA = (20u)^2 = 400p, PJ = 2*(20u+20u) = 80u.
         assert!((diode.is - 2.2959e-7 * 400e-12).abs() <= diode.is * 1e-12);
         assert!((diode.sidewall_perimeter - 80e-6).abs() <= 1e-18);
+    }
+
+    /// `R1 a 0 {agauss(10k,0.5k,1)}` is a draw, not a behavioral resistance:
+    /// ngspice's numparam evaluates it once and the circuit runs.
+    #[test]
+    fn a_statistical_resistance_is_drawn_once_and_runs() {
+        let deck = "statistical resistance\nI1 0 a 1m\nR1 a 0 {agauss(10k,0.5k,1)}\n.op\n.end\n";
+        let netlist = Netlist::parse(deck).expect("a statistical resistance parses");
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op(&netlist)
+            .expect("a statistical resistance solves");
+        let resistance = result
+            .try_voltage_named("a")
+            .expect("the node voltage is reported")
+            / 1e-3;
+        assert!(
+            (7.5e3..=12.5e3).contains(&resistance),
+            "a five-sigma draw of 10k +- 0.5k, got {resistance}"
+        );
     }
 
     struct DiscardingStamper;
