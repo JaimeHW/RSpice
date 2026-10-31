@@ -196,7 +196,10 @@ impl ThermalStepBound {
             let held_before = held.len();
             for &row in &self.rows {
                 let step = proposal[row] - previous[row];
-                if step.abs() <= Self::STEP || held.iter().any(|(held_row, ..)| *held_row == row) {
+                if !step.is_finite()
+                    || step.abs() <= Self::STEP
+                    || held.iter().any(|(held_row, ..)| *held_row == row)
+                {
                     continue;
                 }
                 let mut unit = vec![0.0; proposal.len()];
@@ -249,14 +252,16 @@ impl ThermalStepBound {
         for column in 0..size {
             let pivot = (column..size)
                 .max_by(|&a, &b| system[a][column].abs().total_cmp(&system[b][column].abs()))?;
-            if !(system[pivot][column].abs() > 0.0) {
+            if system[pivot][column] == 0.0 {
                 return None;
             }
             system.swap(column, pivot);
             for row in column + 1..size {
-                let factor = system[row][column] / system[column][column];
-                for entry in column..=size {
-                    system[row][entry] -= factor * system[column][entry];
+                let (upper, lower) = system.split_at_mut(row);
+                let (pivot_row, target) = (&upper[column], &mut lower[0]);
+                let factor = target[column] / pivot_row[column];
+                for (entry, pivot_entry) in target[column..].iter_mut().zip(&pivot_row[column..]) {
+                    *entry -= factor * pivot_entry;
                 }
             }
         }
@@ -1056,12 +1061,17 @@ mod tests {
             crate::engine::SpiceDialect::BestAvailable,
             crate::engine::SpiceDialect::Xyce,
         ] {
-            let mut config = crate::engine::SimulationConfig::default();
-            config.spice_dialect = dialect;
-            config.convergence_config.gmin_stepping = false;
-            config.convergence_config.source_stepping = false;
-            config.convergence_config.pseudo_transient = false;
-            config.convergence_config.arc_length = false;
+            let config = crate::engine::SimulationConfig {
+                spice_dialect: dialect,
+                convergence_config: crate::config::ConvergenceConfig {
+                    gmin_stepping: false,
+                    source_stepping: false,
+                    pseudo_transient: false,
+                    arc_length: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
             let engine = Engine::new_with_resolved_config(config);
             let result = engine
                 .run_dc_op(&netlist)
