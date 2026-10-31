@@ -27,6 +27,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "fixture_root"),
     ("lib.rs", "model"),
     ("lib.rs", "placed_sources"),
+    ("lib.rs", "placement"),
     ("lib.rs", "plan"),
     ("lib.rs", "preferences"),
     ("lib.rs", "product"),

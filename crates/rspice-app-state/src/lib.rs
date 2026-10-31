@@ -39,6 +39,7 @@ pub mod workbench {
     pub mod app {
         pub mod schematic {
             pub mod edit_authority;
+            pub mod placement;
         }
     }
     pub mod app_state {

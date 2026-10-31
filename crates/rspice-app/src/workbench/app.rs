@@ -173,10 +173,11 @@ pub(in crate::workbench) use dialogs::plan_removal::REVEAL_BLOCKER;
 #[cfg(test)]
 pub(in crate::workbench) use dialogs::selection::rename::RenameSelectionTarget;
 
+pub(crate) use rspice_app_state::workbench::app::schematic::placement::arm_pack_part;
 pub(crate) use schematic::edit_authority::{
     SchematicEditAuthority, schematic_editor_request_source, symbol_context_revision,
 };
-pub(crate) use schematic::placement::{arm_library_cell_placement, arm_pack_part};
+pub(crate) use schematic::placement::arm_library_cell_placement;
 
 pub(crate) use schematic::named_net::{
     NamedNetTarget, apply_named_net_rename, selected_named_net_target, validate_named_net_rename,
