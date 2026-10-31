@@ -265,6 +265,21 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
         &self.analysis.histogram_state
     }
 
+    fn viewer_reading(&self) -> crate::simulation::ViewerReading {
+        self.analysis.viewer_reading()
+    }
+
+    fn fft_input_options(&self, time: &[f64]) -> rspice_results_ui::fft::FftInputOptions {
+        self.analysis.fft_input_options(time)
+    }
+
+    fn eye_timebase_for(
+        &self,
+        owner: crate::state::SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeTimebase {
+        self.results.eye_timebase_for(owner)
+    }
+
     fn displayed_dataset_view(
         &self,
         model: &crate::workbench::app_state::Model,
@@ -304,5 +319,9 @@ impl crate::workbench::framework::ports::ResultsPort for ResultsState {
     ) -> &dyn rspice_app_services::workbench::lifecycle::project_lifecycle::ResultPresentationSource
     {
         &self.results
+    }
+
+    fn frozen(&self) -> Box<dyn crate::workbench::framework::ports::ResultsPeer> {
+        Box::new(self.clone())
     }
 }

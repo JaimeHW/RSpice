@@ -47,7 +47,7 @@ use super::{
     SimulatePort,
 };
 use crate::workbench::framework::ports::{
-    CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPort, RunEventPort,
+    CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPeer, ResultsPort, RunEventPort,
 };
 
 /// Peers as a fresh session shows them.
@@ -250,6 +250,29 @@ impl ResultsPort for NullPorts {
         &FRESH_HISTOGRAM
     }
 
+    /// The viewers hold nothing.
+    fn viewer_reading(&self) -> crate::simulation::ViewerReading {
+        crate::simulation::ViewerReading {
+            eye_has_traces: false,
+            eye_timebase: None,
+            fft_has_data: false,
+            fft_failed: false,
+            fft_source: None,
+        }
+    }
+
+    fn fft_input_options(&self, time: &[f64]) -> rspice_results_ui::fft::FftInputOptions {
+        FRESH_FFT.input_options_for_waveform(time)
+    }
+
+    /// The reader stated no bit period.
+    fn eye_timebase_for(
+        &self,
+        _owner: crate::state::SpecializedViewerCacheProvenance,
+    ) -> rspice_results_ui::eye_diagram::EyeTimebase {
+        rspice_results_ui::eye_diagram::EyeTimebase::default()
+    }
+
     fn displayed_dataset_view(
         &self,
         _model: &Model,
@@ -265,6 +288,10 @@ impl ResultsPort for NullPorts {
 
     fn saved_presentation(&self) -> &dyn ResultPresentationSource {
         self
+    }
+
+    fn frozen(&self) -> Box<dyn ResultsPeer> {
+        Box::new(NullPorts)
     }
 }
 

@@ -15,25 +15,38 @@ use rspice_results_ui::fft::FftInputOptions;
 use crate::simulation::{ViewerHost, ViewerReading};
 use crate::state::{ActiveViewer, RunEvent, RunEventSink, SpecializedViewerCacheProvenance};
 use crate::workbench::app_state::Model;
+use crate::workbench::app_state::viewer_capabilities::AnalysisWorkspaceState;
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
 
-impl ResultsReads<'_> {
+impl AnalysisWorkspaceState {
     /// What the transient viewers hold now.
-    pub fn viewer_reading(self) -> ViewerReading {
-        let analysis = self.analysis;
+    pub(crate) fn viewer_reading(&self) -> ViewerReading {
         ViewerReading {
-            eye_has_traces: analysis.eye_diagram_state.trace_count() > 0,
-            eye_timebase: analysis.eye_diagram_state.timebase_provenance().cloned(),
-            fft_has_data: analysis.fft_state.has_data(),
-            fft_failed: analysis.fft_state.last_error.is_some(),
-            fft_source: analysis.fft_state.selected_source.clone(),
+            eye_has_traces: self.eye_diagram_state.trace_count() > 0,
+            eye_timebase: self.eye_diagram_state.timebase_provenance().cloned(),
+            fft_has_data: self.fft_state.has_data(),
+            fft_failed: self.fft_state.last_error.is_some(),
+            fft_source: self.fft_state.selected_source.clone(),
         }
     }
 
     /// How the FFT prepares the input it is given over `time`, as the reader
     /// set it.
+    pub(crate) fn fft_input_options(&self, time: &[f64]) -> FftInputOptions {
+        self.fft_state.input_options_for_waveform(time)
+    }
+}
+
+impl ResultsReads<'_> {
+    /// What the transient viewers hold now.
+    pub fn viewer_reading(self) -> ViewerReading {
+        self.analysis.viewer_reading()
+    }
+
+    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// set it.
     pub fn fft_input_options(self, time: &[f64]) -> FftInputOptions {
-        self.analysis.fft_state.input_options_for_waveform(time)
+        self.analysis.fft_input_options(time)
     }
 
     /// The bit period the reader chose for this result's eye.

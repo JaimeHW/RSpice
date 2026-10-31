@@ -12,14 +12,16 @@ use rspice_results::result_presentation::{
     AnalysisPresentationKey, ResultViewer, SourceWaveformPresentationKey,
 };
 use rspice_results::visualization_document::{PageId, PaneId};
-use rspice_results_ui::fft::FftState;
+use rspice_results_ui::eye_diagram::EyeTimebase;
+use rspice_results_ui::fft::{FftInputOptions, FftState};
 use rspice_results_ui::histogram::HistogramState;
 use rspice_results_ui::presentation::PlotView;
 use rspice_results_ui::session::MarkerView;
 use rspice_ui_kit::plot::CursorPair;
 use rspice_vocabulary::product::ResultDocumentId;
 
-use crate::state::RunEvent;
+use crate::simulation::ViewerReading;
+use crate::state::{RunEvent, SpecializedViewerCacheProvenance};
 use crate::workbench::framework::command_registry::Registry;
 use crate::workbench::state::WorkbenchSession;
 use rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState;
@@ -177,6 +179,13 @@ pub trait ResultsPort {
     fn fft_settings(&self) -> &FftState;
     /// How the histogram viewer is set up.
     fn histogram_settings(&self) -> &HistogramState;
+    /// What the transient viewers hold now.
+    fn viewer_reading(&self) -> ViewerReading;
+    /// How the FFT prepares the input it is given over `time`, as the reader
+    /// set it.
+    fn fft_input_options(&self, time: &[f64]) -> FftInputOptions;
+    /// The bit period the reader chose for the eye of the result `owner`.
+    fn eye_timebase_for(&self, owner: SpecializedViewerCacheProvenance) -> EyeTimebase;
     /// The retained dataset the workspace shows opened directly, over the
     /// model's runs and the session's open documents; `None` when the
     /// workspace shows no dataset, or one that is no longer retained as it
@@ -196,4 +205,9 @@ pub trait ResultsPort {
     /// project lifecycle reads it beside the model when it captures the
     /// project: whether the project holds unsaved work asks it.
     fn saved_presentation(&self) -> &dyn ResultPresentationSource;
+
+    /// The workspace as it stands now, as a copy that owns everything it
+    /// holds. A campaign's frozen host reports into the copy and reads it
+    /// back, so the workspace the reader sees is left as it was.
+    fn frozen(&self) -> Box<dyn ResultsPeer>;
 }
