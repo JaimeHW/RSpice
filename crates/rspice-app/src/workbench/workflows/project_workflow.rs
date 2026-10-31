@@ -1768,10 +1768,7 @@ pub(crate) fn poll_browser_project_import(
     model: &mut Model,
     platform: &mut PlatformState,
 ) -> Option<BrowserProjectOpen> {
-    let Some(event) = BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| queue.borrow_mut().pop_front())
-    else {
-        return None;
-    };
+    let event = BROWSER_PROJECT_IMPORT_RESULTS.with(|queue| queue.borrow_mut().pop_front())?;
     match event {
         BrowserProjectImportResult::CanonicalPromoted {
             context,
