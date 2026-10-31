@@ -1214,6 +1214,9 @@ pub(super) fn bundle_documents(bundle: &ProjectSourceBundle) -> impl Iterator<It
 }
 
 fn lex_identifiers(logical_path: &str, source: &str, syntax: DocumentSyntax) -> Vec<IndexedToken> {
+    if syntax == DocumentSyntax::VerilogA {
+        return lex_veriloga_identifiers(logical_path, source);
+    }
     let bytes = source.as_bytes();
     let mut tokens = Vec::new();
     let mut cursor = 0;
@@ -1226,23 +1229,10 @@ fn lex_identifiers(logical_path: &str, source: &str, syntax: DocumentSyntax) -> 
             line_start = cursor;
             continue;
         }
-        if starts_comment(bytes, cursor, syntax) {
-            if matches!(syntax, DocumentSyntax::VerilogA)
-                && bytes.get(cursor..cursor + 2) == Some(b"/*")
-            {
-                cursor += 2;
-                while cursor + 1 < bytes.len() && &bytes[cursor..cursor + 2] != b"*/" {
-                    if bytes[cursor] == b'\n' {
-                        line += 1;
-                        line_start = cursor + 1;
-                    }
-                    cursor += 1;
-                }
-                cursor = (cursor + 2).min(bytes.len());
-            } else {
-                while cursor < bytes.len() && bytes[cursor] != b'\n' {
-                    cursor += 1;
-                }
+        // Python, YAML and TOML each comment from `#` to the end of the line.
+        if bytes[cursor] == b'#' {
+            while cursor < bytes.len() && bytes[cursor] != b'\n' {
+                cursor += 1;
             }
             continue;
         }
@@ -1306,14 +1296,100 @@ fn lex_identifiers(logical_path: &str, source: &str, syntax: DocumentSyntax) -> 
     tokens
 }
 
-fn starts_comment(bytes: &[u8], cursor: usize, syntax: DocumentSyntax) -> bool {
-    match syntax {
-        DocumentSyntax::VerilogA => {
-            matches!(bytes.get(cursor..cursor + 2), Some(b"//") | Some(b"/*"))
+/// The names of a Verilog-A source, read through the compiler's own lexer.
+///
+/// A number such as `10p`, `1e-3` or the `10ns` of a time scale, a based
+/// number such as `4'b1010` and a string each hold no name, so neither a
+/// rename nor a reference search reaches into one, and the code after a based
+/// number is read as code. Inside every other token a name is a word as the
+/// editor reads words, so `$temperature` and a macro's `` `NAME `` index their
+/// word. A stretch the lexer refuses, as a half-typed source holds, is stepped
+/// over and lexing resumes after it, so the names on either side stay indexed.
+fn lex_veriloga_identifiers(logical_path: &str, source: &str) -> Vec<IndexedToken> {
+    use rspice_veriloga::TokenKind;
+
+    let mut source_map = rspice_veriloga::SourceMap::new();
+    let source_id = source_map.add_source_mut(logical_path, source);
+    let line_starts = std::iter::once(0)
+        .chain(source.match_indices('\n').map(|(index, _)| index + 1))
+        .collect::<Vec<_>>();
+    let mut tokens = Vec::new();
+    let mut resume = 0;
+    // Where the number just read ends: a word that starts right there is the
+    // rest of its text, as `s` is of `10ns`, and no name.
+    let mut number_end = None;
+    while resume < source.len() {
+        let mut lexer = rspice_veriloga::Lexer::new(&source[resume..], source_id);
+        let refused = loop {
+            let token = match lexer.next_token() {
+                Ok(token) if token.kind == TokenKind::Eof => break None,
+                Ok(token) => token,
+                Err(error) => break Some(error.span),
+            };
+            let start = resume + token.span.start as usize;
+            let glued = number_end.take() == Some(start);
+            let end = match token.kind {
+                TokenKind::IntegerLiteral | TokenKind::RealLiteral => {
+                    number_end = Some(resume + token.span.end as usize);
+                    continue;
+                }
+                TokenKind::FourStateLiteral | TokenKind::StringLiteral => continue,
+                TokenKind::Identifier if glued => continue,
+                // A directive's span runs on over the operand its line gives
+                // it, whose own tokens the lexer still yields after it.
+                TokenKind::Directive => start + token.text.as_deref().map_or(0, str::len),
+                _ => resume + token.span.end as usize,
+            };
+            push_identifier_words(&mut tokens, logical_path, source, &line_starts, start..end);
+        };
+        let Some(span) = refused else {
+            break;
+        };
+        let start = resume + span.start as usize;
+        let end = resume + span.end as usize;
+        resume = if end > start {
+            end
+        } else {
+            start + source[start..].chars().next().map_or(1, char::len_utf8)
+        };
+    }
+    tokens
+}
+
+/// Index each word of `source[range]`: a letter or `_`, then letters, digits
+/// and `_`, the shape every syntax's names take here.
+fn push_identifier_words(
+    tokens: &mut Vec<IndexedToken>,
+    logical_path: &str,
+    source: &str,
+    line_starts: &[usize],
+    range: Range<usize>,
+) {
+    let mut characters = source[range.clone()].char_indices().peekable();
+    while let Some((offset, character)) = characters.next() {
+        if !(character == '_' || character.is_alphabetic()) {
+            continue;
         }
-        DocumentSyntax::Python | DocumentSyntax::Yaml | DocumentSyntax::Toml => {
-            bytes[cursor] == b'#'
+        let mut word_end = offset + character.len_utf8();
+        while let Some(&(next_offset, next)) = characters.peek() {
+            if !(next == '_' || next.is_alphanumeric()) {
+                break;
+            }
+            word_end = next_offset + next.len_utf8();
+            characters.next();
         }
+        let start = range.start + offset;
+        let end = range.start + word_end;
+        let line = line_starts.partition_point(|&line_start| line_start <= start);
+        tokens.push(IndexedToken {
+            name: source[start..end].to_owned(),
+            logical_path: logical_path.to_owned(),
+            byte_range: start..end,
+            line,
+            column: source[line_starts[line - 1]..start].chars().count() + 1,
+            definition: false,
+            renamable: false,
+        });
     }
 }
 
@@ -1614,6 +1690,85 @@ mod tests {
             .unwrap();
         assert!(helper.1.contains("\"resistance\""));
         assert!(helper.1.contains("copy = r_value"));
+    }
+
+    /// A parameter named like a scale factor or an exponent shares its letter
+    /// with number literals; renaming it rewrote `10p` and `1e-3` as well, and
+    /// a time scale's `1ns` read as a name.
+    #[test]
+    fn renaming_a_verilog_a_name_leaves_number_literals_alone() {
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "models/leaky_cap.va",
+            "`timescale 1ns/1ps\nmodule leaky_cap(a, b);\ninout a, b;\nelectrical a, b;\nparameter real p = 10p;\nparameter real e = 2.5e-3;\nanalog I(a, b) <+ p * ddt(V(a, b)) + e * 1e-3 * V(a, b);\nendmodule\n",
+            vec![],
+        );
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        assert_eq!(index.references("p").len(), 2);
+        assert_eq!(index.references("e").len(), 2);
+        assert!(index.references("ns").is_empty());
+        assert!(index.references("s").is_empty());
+
+        let changed = index.rename_preview("p", "capacitance").unwrap();
+        assert_eq!(changed.len(), 1);
+        assert!(changed[0].1.contains("parameter real capacitance = 10p;"));
+        assert!(changed[0].1.contains("<+ capacitance * ddt"));
+
+        let changed = index.rename_preview("e", "leakage").unwrap();
+        assert!(changed[0].1.contains("parameter real leakage = 2.5e-3;"));
+        assert!(changed[0].1.contains("+ leakage * 1e-3 *"));
+    }
+
+    /// A based number's apostrophe once opened a quoted span that ran to the
+    /// next apostrophe, hiding every name after it from references.
+    #[test]
+    fn names_after_a_based_verilog_a_number_are_indexed() {
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "models/masked_gain.va",
+            "module masked_gain(out);\noutput out;\nelectrical out;\nparameter integer mask = 4'b1010;\nparameter real gain = 2.0;\nanalog V(out) <+ gain * mask;\nendmodule\n",
+            vec![],
+        );
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        assert_eq!(index.definitions("gain").len(), 1);
+        assert_eq!(index.references("gain").len(), 2);
+        assert_eq!(index.references("mask").len(), 2);
+        let changed = index.rename_preview("gain", "scale").unwrap();
+        assert!(changed[0].1.contains("<+ scale * mask;"));
+    }
+
+    /// A source the lexer refuses somewhere, as one being typed is, keeps the
+    /// names before and after the refused stretch.
+    #[test]
+    fn a_verilog_a_stretch_the_lexer_refuses_hides_no_names_around_it() {
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "models/half_typed.va",
+            "module half_typed(a);\ninout a;\nelectrical a;\nparameter real before = 1.0;\nreal broken = 3e+;\nparameter real after = 2.0;\nanalog V(a) <+ before + after * \"unterminated",
+            vec![],
+        );
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        assert_eq!(index.definitions("before").len(), 1);
+        assert_eq!(index.definitions("after").len(), 1);
+        assert_eq!(index.references("before").len(), 2);
+        assert_eq!(index.references("after").len(), 2);
+        assert!(index.references("unterminated").is_empty());
+    }
+
+    /// A string continued onto the next line with `\` was counted as one line,
+    /// so every name after it was placed a line early.
+    #[test]
+    fn verilog_a_names_after_a_continued_string_keep_their_lines() {
+        let bundle = bundle(
+            ProjectSourceLanguage::VerilogA,
+            "models/continued.va",
+            "module continued(a);\ninout a;\nelectrical a;\n`define WARN $strobe(\"first \\\nsecond\")\nparameter real gain = 1.0;\nanalog V(a) <+ gain;\nendmodule\n",
+            vec![],
+        );
+        let index = LanguageServiceIndex::build(ProjectId::new(), &bundle).unwrap();
+        let definitions = index.definitions("gain");
+        assert_eq!(definitions.len(), 1);
+        assert_eq!((definitions[0].line, definitions[0].column), (6, 16));
     }
 
     #[test]
