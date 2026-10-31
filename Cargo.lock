@@ -1850,8 +1850,6 @@ dependencies = [
 [[package]]
 name = "epaint"
 version = "0.35.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4e60a8888b51da911df23918fd7301359b1d43a406a0ff3b8863af093dd7fc6c"
 dependencies = [
  "ahash",
  "bytemuck",
@@ -5812,7 +5810,10 @@ version = "0.1.0"
 dependencies = [
  "egui",
  "fontdb",
+ "harfrust 0.7.0",
  "skrifa 0.42.1",
+ "unicode-bidi",
+ "unicode-bidi-mirroring",
  "unicode-segmentation",
 ]
 

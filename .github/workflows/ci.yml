@@ -121,6 +121,9 @@ jobs:
       - name: Vendored cloud client integrity
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_cloud_client_vendor.py
+      - name: Vendored epaint integrity
+        if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
+        run: python3 tools/ci/test_vendored_epaint.py
       - name: WASM IDE worker tests
         if: ${{ !cancelled() && steps.checkout.outcome == 'success' }}
         run: python3 tools/ci/test_ide_worker.py

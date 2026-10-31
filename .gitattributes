@@ -110,3 +110,8 @@ crates/rspice-core/tests/testdata/xspice_nand_ripple_adder_8bit.cir text eol=lf
 # GP feedback oracle hashes describe canonical LF decks and numeric traces.
 crates/rspice-core/tests/testdata/gp_feedback_*.cir text eol=lf
 crates/rspice-core/tests/testdata/gp_feedback_*.tsv text eol=lf
+
+# crates.io epaint and the patch applied to it, kept byte for byte so
+# tools/vendor/vendor_epaint.py can prove the tree on every platform.
+vendor/epaint/** -text
+tools/vendor/epaint.patch -text

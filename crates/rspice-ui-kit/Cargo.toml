@@ -18,7 +18,7 @@ test-support = ["dep:sha2"]
 
 [dependencies]
 egui = { version = "0.35.0", default-features = false }
-rspice-fonts = { workspace = true, features = ["egui"] }
+rspice-fonts = { workspace = true, features = ["bidi", "egui"] }
 serde.workspace = true
 unicode-segmentation = "1.12"
 rspice-vocabulary = { workspace = true, optional = true }
@@ -27,7 +27,7 @@ sha2 = { workspace = true, optional = true }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 # A desktop letters what no embedded face has from the faces installed there.
-rspice-fonts = { workspace = true, features = ["egui", "system"] }
+rspice-fonts = { workspace = true, features = ["bidi", "egui", "system"] }
 
 [dev-dependencies]
 serde_json.workspace = true
