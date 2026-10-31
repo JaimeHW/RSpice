@@ -1133,7 +1133,8 @@ impl Engine {
         if !circuit.has_bsim4v8_devices() {
             return;
         }
-        let mut stamper = StaticMatrixChargeStamper { matrix, rhs };
+        let mut replay = circuit.bsim4_charge_replay.borrow_mut();
+        replay.prepare(matrix, circuit.bsim4v8.devices.len());
         for (idx, dev) in circuit.bsim4v8.devices.iter().enumerate() {
             let coeff = if dev.uses_trnqs() { trnqs_coeff } else { coeff };
             // ag0 = the bare integration gain (companion geq for unit capacitance).
@@ -1141,6 +1142,7 @@ impl Engine {
             if ag0 <= 0.0 {
                 continue;
             }
+            let mut stamper = replay.stamper(idx, &mut *matrix, &mut *rhs);
             let (charge, mode) = dev.charge_at_with_probe(voltages, physical_probe);
             let rbody = dev.rbody_enabled();
             let (qg, qgmid, qb, qd, qbs, qbd) = if dev.uses_trnqs() {

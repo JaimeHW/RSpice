@@ -1610,12 +1610,19 @@ impl CircuitData {
             }
         }
         // BSIM4 rides the identical path (b4ld.c ceqdrn/ceqbd/ceqbs/ceqj*
-        // rows through the stamper's RHS hook).
-        if stamp_mode == NonlinearStampMode::LimitedNewton {
-            self.bsim4v8.stamp_all(&mut stamper, &mut [], voltages);
-        } else {
-            for device in &self.bsim4v8.devices {
-                device.stamp_static_probe(voltages, &mut stamper);
+        // rows through the stamper's RHS hook), replaying each instance's
+        // recorded matrix offsets.
+        if !self.bsim4v8.is_empty() {
+            let replay = &mut self.bsim4_stamp_replay;
+            replay.prepare(&*stamper.matrix, self.bsim4v8.devices.len());
+            for (index, device) in self.bsim4v8.devices.iter().enumerate() {
+                let mut device_stamper =
+                    replay.stamper(index, &mut *stamper.matrix, &mut *stamper.rhs);
+                if stamp_mode == NonlinearStampMode::LimitedNewton {
+                    device.stamp_nonlinear(voltages, &mut device_stamper, &mut []);
+                } else {
+                    device.stamp_static_probe(voltages, &mut device_stamper);
+                }
             }
         }
         self.ekv26s.stamp_all(&mut stamper, &mut [], voltages);

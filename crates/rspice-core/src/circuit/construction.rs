@@ -58,6 +58,8 @@ impl CircuitData {
             dc_floating_component_is_certain: Vec::new(),
             bsim3v3: Bsim3v3s::new(),
             bsim4v8: Bsim4v8s::new(),
+            bsim4_stamp_replay: Default::default(),
+            bsim4_charge_replay: Default::default(),
             ekv26s: EkvMosfets::new(),
             ekv3s: Ekv3Mosfets::new(),
             vdmoses: Vdmoses::new(),

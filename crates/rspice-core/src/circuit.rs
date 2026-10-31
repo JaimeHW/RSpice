@@ -15,6 +15,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use thiserror::Error;
 
+mod stamp_replay;
 mod storage;
 pub(crate) use magnetic::XyceCoreCompanionMode;
 pub use storage::{
@@ -596,6 +597,10 @@ pub struct CircuitData {
     pub(crate) dc_floating_component_is_certain: Vec<bool>,
     pub(crate) bsim3v3: Bsim3v3s,
     pub(crate) bsim4v8: Bsim4v8s,
+    /// Recorded matrix offsets of the BSIM4 conductance stamps.
+    pub(crate) bsim4_stamp_replay: stamp_replay::StampReplay,
+    /// Recorded matrix offsets of the BSIM4 transient charge companions.
+    pub(crate) bsim4_charge_replay: std::cell::RefCell<stamp_replay::StampReplay>,
     pub(crate) ekv26s: EkvMosfets,
     pub(crate) ekv3s: Ekv3Mosfets,
     pub(crate) vdmoses: Vdmoses,
