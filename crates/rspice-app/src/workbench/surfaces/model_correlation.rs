@@ -31,7 +31,8 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, DialogTransactionTone, Problem, paint_problem_mark,
 };
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 
 use super::super::design_system;
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
@@ -294,18 +295,13 @@ fn correlation_projection_cache_id() -> egui::Id {
 }
 
 impl CorrelationProjection {
-    fn from_app(ctx: &egui::Context, app: &RSpiceApp) -> Arc<Self> {
+    fn cached(ctx: &egui::Context, cx: &Cx<'_, ModelsFeature>) -> Arc<Self> {
         let key = CorrelationProjectionCacheKey {
-            project_id: app.state.model.workspace.content.project.id(),
-            project_revision: app.state.model.workspace.content.project.revision(),
-            library: app
-                .state
-                .model
-                .model_library_manager
-                .selected_library
-                .clone(),
-            model: app.state.models.selected_model.clone(),
-            selected_suite_id: app.state.models.model_correlation.selected_suite_id.clone(),
+            project_id: cx.model.workspace.content.project.id(),
+            project_revision: cx.model.workspace.content.project.revision(),
+            library: cx.model.model_library_manager.selected_library.clone(),
+            model: cx.state.selected_model.clone(),
+            selected_suite_id: cx.state.model_correlation.selected_suite_id.clone(),
         };
         if let Some(cache) = ctx.data(|data| {
             data.get_temp::<CorrelationProjectionCache>(correlation_projection_cache_id())
@@ -313,7 +309,7 @@ impl CorrelationProjection {
         {
             return cache.projection;
         }
-        let projection = Arc::new(Self::build(app));
+        let projection = Arc::new(Self::build(cx));
         ctx.data_mut(|data| {
             data.insert_temp(
                 correlation_projection_cache_id(),
@@ -326,28 +322,20 @@ impl CorrelationProjection {
         projection
     }
 
-    fn build(app: &RSpiceApp) -> Self {
-        let library = app
-            .state
-            .model
-            .model_library_manager
-            .selected_library
-            .clone();
-        let model = app.state.models.selected_model.clone();
+    fn build(cx: &Cx<'_, ModelsFeature>) -> Self {
+        let library = cx.model.model_library_manager.selected_library.clone();
+        let model = cx.state.selected_model.clone();
         let resolved = match (library.as_deref(), model.as_deref()) {
-            (Some(library), Some(model)) => resolve_project_model_for_editor(
-                &app.state.model.model_library_manager,
-                library,
-                model,
-            ),
+            (Some(library), Some(model)) => {
+                resolve_project_model_for_editor(&cx.model.model_library_manager, library, model)
+            }
             (None, _) => Err("Select a project-owned model library first".to_owned()),
             (_, None) => Err("Select a project-owned model family first".to_owned()),
         };
         let source_error = resolved.as_ref().err().cloned();
         let source = resolved.ok();
         let correlation = match (library.as_deref(), model.as_deref()) {
-            (Some(library_name), Some(model_name)) => app
-                .state
+            (Some(library_name), Some(model_name)) => cx
                 .model
                 .model_library_manager
                 .get_library(library_name)
@@ -365,12 +353,7 @@ impl CorrelationProjection {
             )
             .ok()
         });
-        let selected_id = app
-            .state
-            .models
-            .model_correlation
-            .selected_suite_id
-            .as_deref();
+        let selected_id = cx.state.model_correlation.selected_suite_id.as_deref();
         let suite = selected_id
             .and_then(|id| correlation.latest_suite(id))
             .or_else(|| {
@@ -584,7 +567,18 @@ impl CorrelationProjection {
     }
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+impl ModelsFeature {
+    /// Draw the measurement correlation route's surface in the feature's
+    /// context, with the correlation dialog it opens.
+    pub(in crate::workbench) fn show_model_correlation(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ui: &mut Ui,
+    ) {
+        show(ui, cx);
+    }
+}
+
+fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     let t = Tokens::get(ui.ctx());
     let size = ui.available_size().max(Vec2::splat(1.0));
     let (viewport, _) = ui.allocate_exact_size(size, Sense::hover());
@@ -596,42 +590,31 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     );
     surface.spacing_mut().item_spacing = Vec2::ZERO;
 
-    let projection = CorrelationProjection::from_app(ui.ctx(), app);
+    let projection = CorrelationProjection::cached(ui.ctx(), cx);
     let projected_suite_id = projection.suite.as_ref().map(|suite| suite.id.clone());
-    let creating_suite_for_current_source = app
-        .state
-        .models
-        .model_correlation
-        .selected_suite_id
-        .is_none()
+    let creating_suite_for_current_source = cx.state.model_correlation.selected_suite_id.is_none()
         && !projection.source_current
         && matches!(
-            &app.state.models.model_correlation.dialog,
+            &cx.state.model_correlation.dialog,
             Some(ModelCorrelationDialog::AddDataset(_))
         );
     if !creating_suite_for_current_source
-        && app
-            .state
-            .models
-            .model_correlation
-            .selected_suite_id
-            .as_deref()
-            != projected_suite_id.as_deref()
+        && cx.state.model_correlation.selected_suite_id.as_deref() != projected_suite_id.as_deref()
     {
-        let workspace = &mut app.state.models.model_correlation;
+        let workspace = &mut cx.state.model_correlation;
         workspace.selected_suite_id = projected_suite_id;
         workspace.selected_dataset_id = None;
         workspace.selected_metric_id = None;
     }
-    outer_header(&mut surface, app, &projection);
+    outer_header(&mut surface, cx, &projection);
     summary_header(&mut surface, &projection);
     evidence_ledger(&mut surface, &projection);
-    correlation_notice(&mut surface, app);
-    workspace_body(&mut surface, app, &projection);
-    show_correlation_dialog(ui.ctx(), app);
+    correlation_notice(&mut surface, cx);
+    workspace_body(&mut surface, cx, &projection);
+    show_correlation_dialog(ui.ctx(), cx);
 }
 
-fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjection) {
+fn outer_header(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, projection: &CorrelationProjection) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
     let stacked = width < 700.0;
@@ -690,7 +673,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
     );
     actions.spacing_mut().item_spacing.x = 6.0;
 
-    let validate_blocker = correlation_action_blocker(app, projection, true, true);
+    let validate_blocker = correlation_action_blocker(cx, projection, true, true);
     let validate = Button::new("Validate suite")
         .accent()
         .enabled(validate_blocker.is_none())
@@ -703,7 +686,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
     } else if validate.clicked() {
         open_correlation_dialog(
             ui.ctx(),
-            app,
+            cx,
             ModelCorrelationDialog::Review(CorrelationReviewDraft::default()),
         );
     }
@@ -716,7 +699,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         .show(&mut actions);
     if viewer.clicked() {
         select_section(
-            &mut app.state.models.model_correlation,
+            &mut cx.state.model_correlation,
             ModelCorrelationSection::Comparison,
         );
     } else if !viewer_enabled {
@@ -728,7 +711,7 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         );
     }
 
-    let metric_blocker = correlation_action_blocker(app, projection, true, false);
+    let metric_blocker = correlation_action_blocker(cx, projection, true, false);
     let add_metric = Button::new("Add metric")
         .enabled(metric_blocker.is_none())
         .min_width(92.0)
@@ -739,12 +722,12 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
     } else if add_metric.clicked() {
         open_correlation_dialog(
             ui.ctx(),
-            app,
+            cx,
             ModelCorrelationDialog::AddMetric(initial_metric_draft(projection)),
         );
     }
 
-    let dataset_blocker = correlation_action_blocker(app, projection, false, false);
+    let dataset_blocker = correlation_action_blocker(cx, projection, false, false);
     let add_dataset = Button::new("Add dataset")
         .enabled(dataset_blocker.is_none())
         .min_width(98.0)
@@ -754,11 +737,11 @@ fn outer_header(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjec
         add_dataset.on_disabled_hover_text(blocker);
     } else if add_dataset.clicked() {
         if projection.suite.is_some() && !projection.source_current {
-            app.state.models.model_correlation.selected_suite_id = None;
+            cx.state.model_correlation.selected_suite_id = None;
         }
         open_correlation_dialog(
             ui.ctx(),
-            app,
+            cx,
             ModelCorrelationDialog::AddDataset(CorrelationDatasetDraft::default()),
         );
     }
@@ -968,20 +951,20 @@ fn evidence_ledger(ui: &mut Ui, projection: &CorrelationProjection) {
     );
 }
 
-fn workspace_body(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjection) {
+fn workspace_body(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>, projection: &CorrelationProjection) {
     let size = ui.available_size().max(Vec2::splat(1.0));
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     if rect.width() <= COMPACT_BREAKPOINT {
-        compact_workspace(ui, rect, app, projection);
+        compact_workspace(ui, rect, cx, projection);
     } else {
-        desktop_workspace(ui, rect, app, projection);
+        desktop_workspace(ui, rect, cx, projection);
     }
 }
 
 fn desktop_workspace(
     ui: &mut Ui,
     rect: Rect,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let nav_rect = Rect::from_min_max(
@@ -989,14 +972,14 @@ fn desktop_workspace(
         Pos2::new((rect.left() + NAV_W).min(rect.right()), rect.bottom()),
     );
     let content_rect = Rect::from_min_max(Pos2::new(nav_rect.right(), rect.top()), rect.max);
-    section_navigation(ui, nav_rect, app, false);
-    section_content(ui, content_rect, app, projection);
+    section_navigation(ui, nav_rect, cx, false);
+    section_content(ui, content_rect, cx, projection);
 }
 
 fn compact_workspace(
     ui: &mut Ui,
     rect: Rect,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let nav_h = NAV_ROW_H + 1.0;
@@ -1005,11 +988,11 @@ fn compact_workspace(
         Pos2::new(rect.right(), (rect.top() + nav_h).min(rect.bottom())),
     );
     let content_rect = Rect::from_min_max(Pos2::new(rect.left(), nav_rect.bottom()), rect.max);
-    section_navigation(ui, nav_rect, app, true);
-    section_content(ui, content_rect, app, projection);
+    section_navigation(ui, nav_rect, cx, true);
+    section_content(ui, content_rect, cx, projection);
 }
 
-fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: bool) {
+fn section_navigation(ui: &mut Ui, rect: Rect, cx: &mut Cx<'_, ModelsFeature>, compact: bool) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     if compact {
@@ -1031,7 +1014,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing = Vec2::ZERO;
                     for section in ModelCorrelationSection::ALL {
-                        let selected = app.state.models.model_correlation.section == section;
+                        let selected = cx.state.model_correlation.section == section;
                         let response = navigation_row(
                             ui,
                             section,
@@ -1040,7 +1023,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
                             true,
                         );
                         if response.clicked() {
-                            select_section(&mut app.state.models.model_correlation, section);
+                            select_section(&mut cx.state.model_correlation, section);
                         }
                     }
                 });
@@ -1060,7 +1043,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
     );
     nav.spacing_mut().item_spacing = Vec2::ZERO;
     for section in ModelCorrelationSection::ALL {
-        let selected = app.state.models.model_correlation.section == section;
+        let selected = cx.state.model_correlation.section == section;
         let response = navigation_row(
             &mut nav,
             section,
@@ -1069,7 +1052,7 @@ fn section_navigation(ui: &mut Ui, rect: Rect, app: &mut RSpiceApp, compact: boo
             false,
         );
         if response.clicked() {
-            select_section(&mut app.state.models.model_correlation, section);
+            select_section(&mut cx.state.model_correlation, section);
         }
     }
 }
@@ -1168,29 +1151,29 @@ fn navigation_row(
 fn section_content(
     ui: &mut Ui,
     rect: Rect,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_app);
-    let section = app.state.models.model_correlation.section;
+    let section = cx.state.model_correlation.section;
     let mut content = ui.new_child(
         egui::UiBuilder::new()
             .max_rect(rect)
             .layout(Layout::top_down(Align::Min)),
     );
     content.spacing_mut().item_spacing = Vec2::ZERO;
-    let initial_scroll_offset = app.state.models.model_correlation.scroll_offset;
+    let initial_scroll_offset = cx.state.model_correlation.scroll_offset;
     let output = ScrollArea::vertical()
         .id_salt(("model-correlation-content", section as u8))
         .vertical_scroll_offset(initial_scroll_offset)
         .auto_shrink([false, false])
         .show(&mut content, |ui| {
             section_heading(ui, section);
-            section_body(ui, app, projection, section);
+            section_body(ui, cx, projection, section);
             ui.add_space(14.0);
         });
-    app.state.models.model_correlation.scroll_offset = output.state.offset.y;
+    cx.state.model_correlation.scroll_offset = output.state.offset.y;
 }
 
 fn section_heading(ui: &mut Ui, section: ModelCorrelationSection) {
@@ -1242,7 +1225,7 @@ const fn section_copy(section: ModelCorrelationSection) -> &'static str {
 
 fn section_body(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
     section: ModelCorrelationSection,
 ) {
@@ -1251,15 +1234,15 @@ fn section_body(
         .inner_margin(egui::Margin::symmetric(12, 0))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width().max(1.0));
-            suite_selector(ui, app, projection);
+            suite_selector(ui, cx, projection);
             match section {
-                ModelCorrelationSection::Datasets => datasets_section(ui, app, projection),
+                ModelCorrelationSection::Datasets => datasets_section(ui, cx, projection),
                 ModelCorrelationSection::Conditions => conditions_section(ui, projection),
-                ModelCorrelationSection::Metrics => metrics_section(ui, app, projection),
-                ModelCorrelationSection::Comparison => comparison_section(ui, app, projection),
-                ModelCorrelationSection::Outliers => outliers_section(ui, app, projection),
+                ModelCorrelationSection::Metrics => metrics_section(ui, cx, projection),
+                ModelCorrelationSection::Comparison => comparison_section(ui, cx, projection),
+                ModelCorrelationSection::Outliers => outliers_section(ui, cx, projection),
                 ModelCorrelationSection::Evidence => evidence_section(ui, projection),
-                ModelCorrelationSection::Gate => gate_section(ui, app, projection),
+                ModelCorrelationSection::Gate => gate_section(ui, cx, projection),
             }
         });
 }

@@ -78,8 +78,8 @@ impl Host for RSpiceApp {
             // from the workspace's page.
             Point::Surface(workspace) => {
                 use crate::workbench::surfaces::{
-                    automation, design, library_cellview_manager, model_correlation, model_editor,
-                    models, netlist, pdk_technology_admin, project, simulate, stimulus, verify,
+                    automation, design, library_cellview_manager, model_editor, models, netlist,
+                    pdk_technology_admin, project, simulate, stimulus, verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -97,7 +97,7 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::ModelCorrelation
                 {
-                    model_correlation::show(ui, app);
+                    ModelsFeature::show_model_correlation(&mut features::cx(app), ui);
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()

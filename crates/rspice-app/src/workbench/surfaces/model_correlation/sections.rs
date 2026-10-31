@@ -8,12 +8,16 @@
 
 use super::*;
 
-pub(super) fn suite_selector(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjection) {
+pub(super) fn suite_selector(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ModelsFeature>,
+    projection: &CorrelationProjection,
+) {
     let lineages = projection.correlation.suite_lineages();
     if lineages.len() <= 1 {
         return;
     }
-    let current_source = model_correlation_controller::current_source_binding(app).ok();
+    let current_source = model_correlation_controller::current_source_binding(cx).ok();
     let selected = projection
         .suite
         .as_ref()
@@ -48,10 +52,9 @@ pub(super) fn suite_selector(ui: &mut Ui, app: &mut RSpiceApp, projection: &Corr
                         )
                         .clicked()
                     {
-                        app.state.models.model_correlation.selected_suite_id =
-                            Some(suite.id.clone());
-                        app.state.models.model_correlation.selected_dataset_id = None;
-                        app.state.models.model_correlation.selected_metric_id = None;
+                        cx.state.model_correlation.selected_suite_id = Some(suite.id.clone());
+                        cx.state.model_correlation.selected_dataset_id = None;
+                        cx.state.model_correlation.selected_metric_id = None;
                     }
                 }
             });
@@ -61,7 +64,7 @@ pub(super) fn suite_selector(ui: &mut Ui, app: &mut RSpiceApp, projection: &Corr
 
 pub(super) fn datasets_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let Some(suite) = projection.suite.as_ref() else {
@@ -111,15 +114,14 @@ pub(super) fn datasets_section(
                         table_header(ui, "SHA-256");
                         ui.end_row();
                         for dataset in &datasets {
-                            let selected = app
+                            let selected = cx
                                 .state
-                                .models
                                 .model_correlation
                                 .selected_dataset_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&dataset.id));
                             if ui.selectable_label(selected, &dataset.name).clicked() {
-                                app.state.models.model_correlation.selected_dataset_id =
+                                cx.state.model_correlation.selected_dataset_id =
                                     Some(dataset.id.clone());
                             }
                             ui.label(dataset_class_label(dataset.class));
@@ -134,9 +136,8 @@ pub(super) fn datasets_section(
     });
     ui.add_space(10.0);
     section_panel(ui, "Selected dataset", |ui| {
-        let selected = app
+        let selected = cx
             .state
-            .models
             .model_correlation
             .selected_dataset_id
             .as_deref()
@@ -319,7 +320,7 @@ pub(super) fn conditions_section(ui: &mut Ui, projection: &CorrelationProjection
 
 pub(super) fn metrics_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let Some(suite) = projection.suite.as_ref() else {
@@ -377,15 +378,14 @@ pub(super) fn metrics_section(
                         }
                         ui.end_row();
                         for metric in &suite.metrics[page.start..page.end] {
-                            let selected = app
+                            let selected = cx
                                 .state
-                                .models
                                 .model_correlation
                                 .selected_metric_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&metric.id));
                             if ui.selectable_label(selected, &metric.name).clicked() {
-                                app.state.models.model_correlation.selected_metric_id =
+                                cx.state.model_correlation.selected_metric_id =
                                     Some(metric.id.clone());
                             }
                             ui.monospace(&metric.quantity);
@@ -401,9 +401,8 @@ pub(super) fn metrics_section(
                     });
             });
         ui.add_space(8.0);
-        let selected_metric = app
+        let selected_metric = cx
             .state
-            .models
             .model_correlation
             .selected_metric_id
             .as_deref()
@@ -413,7 +412,7 @@ pub(super) fn metrics_section(
                     .iter()
                     .find(|metric| metric.id.eq_ignore_ascii_case(id))
             });
-        let blocker = correlation_action_blocker(app, projection, true, false);
+        let blocker = correlation_action_blocker(cx, projection, true, false);
         let revise = Button::new("Revise selected metric")
             .enabled(selected_metric.is_some() && blocker.is_none())
             .show(ui);
@@ -426,7 +425,7 @@ pub(super) fn metrics_section(
         {
             open_correlation_dialog(
                 ui.ctx(),
-                app,
+                cx,
                 ModelCorrelationDialog::AddMetric(metric_draft_from_definition(metric)),
             );
         }
@@ -435,7 +434,7 @@ pub(super) fn metrics_section(
 
 pub(super) fn comparison_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     if let Some(error) = projection.evaluation_error.as_deref() {
@@ -451,9 +450,8 @@ pub(super) fn comparison_section(
         );
         return;
     };
-    let selected = app
+    let selected = cx
         .state
-        .models
         .model_correlation
         .selected_metric_id
         .as_deref()
@@ -506,15 +504,14 @@ pub(super) fn comparison_section(
                         }
                         ui.end_row();
                         for outcome in &evaluation.metric_outcomes[page.start..page.end] {
-                            let selected = app
+                            let selected = cx
                                 .state
-                                .models
                                 .model_correlation
                                 .selected_metric_id
                                 .as_deref()
                                 .is_some_and(|id| id.eq_ignore_ascii_case(&outcome.metric_id));
                             if ui.selectable_label(selected, &outcome.metric_id).clicked() {
-                                app.state.models.model_correlation.selected_metric_id =
+                                cx.state.model_correlation.selected_metric_id =
                                     Some(outcome.metric_id.clone());
                             }
                             ui.label(release_role_label(outcome.release_role));
@@ -827,7 +824,7 @@ pub(super) fn comparison_plot(ui: &mut Ui, outcome: &CorrelationMetricOutcome) {
 
 pub(super) fn outliers_section(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
 ) {
     let Some(suite) = projection.suite.as_ref() else {
@@ -901,7 +898,7 @@ pub(super) fn outliers_section(
     let Some(evaluation) = projection.evaluation.as_ref() else {
         return;
     };
-    let disposition_blocker = correlation_action_blocker(app, projection, true, false);
+    let disposition_blocker = correlation_action_blocker(cx, projection, true, false);
     section_panel(ui, "Review residual scope", |ui| {
         let residual_count = evaluation
             .metric_outcomes
@@ -953,7 +950,7 @@ pub(super) fn outliers_section(
                             } else if review.clicked() {
                                 open_correlation_dialog(
                                     ui.ctx(),
-                                    app,
+                                    cx,
                                     ModelCorrelationDialog::Disposition(CorrelationOutlierDraft {
                                         metric_id: outcome.metric_id.clone(),
                                         reference_observation_id: residual
@@ -1066,7 +1063,11 @@ pub(super) fn evidence_section(ui: &mut Ui, projection: &CorrelationProjection) 
     });
 }
 
-pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &CorrelationProjection) {
+pub(super) fn gate_section(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ModelsFeature>,
+    projection: &CorrelationProjection,
+) {
     let current = projection.current_evidence.last();
     section_panel(ui, "Qualification handoff", |ui| {
         match (projection.suite.as_ref(), current) {
@@ -1114,9 +1115,9 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
         if let Some(reason) = vector_blocker {
             review_vectors.on_disabled_hover_text(reason);
         } else if review_vectors.clicked()
-            && let Err(error) = open_affected_vectors(app)
+            && let Err(error) = open_affected_vectors(cx)
         {
-            app.state.models.model_correlation.notice = Some(error);
+            cx.state.model_correlation.notice = Some(error);
         }
         if Button::new("Return to qualification")
             .accent()
@@ -1124,42 +1125,43 @@ pub(super) fn gate_section(ui: &mut Ui, app: &mut RSpiceApp, projection: &Correl
             .show(ui)
             .clicked()
         {
-            app.state.models.models_page = crate::state::ModelsPage::Qualification;
-            if let Err(error) = app.state.workbench.navigate(
+            cx.state.models_page = crate::state::ModelsPage::Qualification;
+            if let Err(error) = cx.wb.navigate(
                 SurfaceRoute::surface(SurfaceId::Models),
                 RouteTransitionSource::User,
             ) {
-                app.state.models.model_correlation.notice = Some(error.to_string());
+                cx.state.model_correlation.notice = Some(error.to_string());
             }
         }
     });
 }
 
-pub(super) fn open_affected_vectors(app: &mut RSpiceApp) -> Result<(), String> {
-    let library = app
-        .state
+pub(super) fn open_affected_vectors(cx: &mut Cx<'_, ModelsFeature>) -> Result<(), String> {
+    let library = cx
         .model
         .model_library_manager
         .selected_library
         .clone()
         .ok_or_else(|| "Select a project-owned model library first".to_owned())?;
-    let model = app
+    let model = cx
         .state
-        .models
         .selected_model
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
-    open_project_model(&mut app.state.model_editor_parts(), &library, &model)
-        .map_err(|error| format!("Qualification vectors cannot be opened: {error}"))?;
-    app.state
-        .workbench
+    open_project_model(
+        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
+        &library,
+        &model,
+    )
+    .map_err(|error| format!("Qualification vectors cannot be opened: {error}"))?;
+    cx.wb
         .navigate(
             SurfaceRoute::surface(SurfaceId::ModelEditor),
             RouteTransitionSource::User,
         )
         .map_err(|error| format!("Qualification vector browser cannot be shown: {error}"))?;
-    app.state.models.model_editor.active_section = ModelEditorSection::Tests;
-    app.state.models.model_editor.qualification_plan_open = true;
+    cx.state.model_editor.active_section = ModelEditorSection::Tests;
+    cx.state.model_editor.qualification_plan_open = true;
     Ok(())
 }
 
@@ -1225,8 +1227,8 @@ pub(super) fn empty_state(
     describe_region(ui, &response, title, &accessible_detail);
 }
 
-pub(super) fn correlation_notice(ui: &mut Ui, app: &mut RSpiceApp) {
-    let Some(notice) = app.state.models.model_correlation.notice.clone() else {
+pub(super) fn correlation_notice(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
+    let Some(notice) = cx.state.model_correlation.notice.clone() else {
         return;
     };
     let t = Tokens::get(ui.ctx());
@@ -1260,7 +1262,7 @@ pub(super) fn correlation_notice(ui: &mut Ui, app: &mut RSpiceApp) {
             .layout(Layout::right_to_left(Align::Center)),
     );
     if Button::new("Dismiss").ghost().show(&mut dismiss).clicked() {
-        app.state.models.model_correlation.notice = None;
+        cx.state.model_correlation.notice = None;
     }
     describe_region(ui, &response, "Correlation notification", &notice);
 }
@@ -1274,18 +1276,18 @@ pub(super) fn select_section(
 }
 
 pub(super) fn correlation_action_blocker(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     projection: &CorrelationProjection,
     require_datasets: bool,
     require_evaluation: bool,
 ) -> Option<String> {
-    if app.state.model.safe_mode.project_read_only() {
+    if cx.model.safe_mode.project_read_only() {
         return Some("Correlation records cannot change while the project is read-only".to_owned());
     }
     if let Some(error) = projection.source_error.as_deref() {
         return Some(error.to_owned());
     }
-    if model_correlation_controller::current_source_binding(app).is_err() {
+    if model_correlation_controller::current_source_binding(cx).is_err() {
         return Some("Select an editable project-owned model source first".to_owned());
     }
     if require_datasets {

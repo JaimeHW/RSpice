@@ -9,31 +9,31 @@ use super::*;
 
 pub(super) fn open_correlation_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     dialog: ModelCorrelationDialog,
 ) {
-    match model_correlation_controller::current_source_binding(app) {
+    match model_correlation_controller::current_source_binding(cx) {
         Ok(source) => {
-            app.state.models.model_correlation.dialog_source = Some(source);
+            cx.state.model_correlation.dialog_source = Some(source);
             ctx.data_mut(|data| {
                 data.remove::<String>(correlation_dialog_error_id());
             });
-            app.state.models.model_correlation.dialog = Some(dialog);
+            cx.state.model_correlation.dialog = Some(dialog);
         }
         Err(error) => {
-            app.state.models.model_correlation.notice = Some(error);
+            cx.state.model_correlation.notice = Some(error);
         }
     }
 }
 
-pub(super) fn correlation_dialog_source_blocker(app: &RSpiceApp) -> Option<String> {
-    let Some(opening) = app.state.models.model_correlation.dialog_source.as_ref() else {
+pub(super) fn correlation_dialog_source_blocker(cx: &Cx<'_, ModelsFeature>) -> Option<String> {
+    let Some(opening) = cx.state.model_correlation.dialog_source.as_ref() else {
         return Some(
             "The dialog has no opening source identity; close it and reopen from the current model"
                 .to_owned(),
         );
     };
-    match model_correlation_controller::current_source_binding(app) {
+    match model_correlation_controller::current_source_binding(cx) {
         Ok(current) if current == *opening => None,
         Ok(_) => Some(
             "The selected model source changed after this dialog opened; cancel and reopen it"
@@ -55,8 +55,8 @@ pub(super) fn dialog_field_width(ui: &Ui) -> f32 {
     (ui.ctx().content_rect().width() - 220.0).clamp(140.0, 430.0)
 }
 
-pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    let Some(mut dialog) = app.state.models.model_correlation.dialog.take() else {
+pub(super) fn show_correlation_dialog(ctx: &egui::Context, cx: &mut Cx<'_, ModelsFeature>) {
+    let Some(mut dialog) = cx.state.model_correlation.dialog.take() else {
         return;
     };
     let (title, primary, description, contains_multiline) = match &dialog {
@@ -85,19 +85,19 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
             false,
         ),
     };
-    let projection = CorrelationProjection::from_app(ctx, app);
+    let projection = CorrelationProjection::cached(ctx, cx);
     let action_blocker = match &dialog {
         ModelCorrelationDialog::AddDataset(_) => {
-            correlation_action_blocker(app, &projection, false, false)
+            correlation_action_blocker(cx, &projection, false, false)
         }
         ModelCorrelationDialog::AddMetric(_) | ModelCorrelationDialog::Disposition(_) => {
-            correlation_action_blocker(app, &projection, true, false)
+            correlation_action_blocker(cx, &projection, true, false)
         }
         ModelCorrelationDialog::Review(_) => {
-            correlation_action_blocker(app, &projection, true, true)
+            correlation_action_blocker(cx, &projection, true, true)
         }
     };
-    let source_blocker = correlation_dialog_source_blocker(app);
+    let source_blocker = correlation_dialog_source_blocker(cx);
     let submit_error = ctx.data(|data| data.get_temp::<String>(correlation_dialog_error_id()));
     let draft_error = match &dialog {
         ModelCorrelationDialog::AddDataset(draft) => draft.validation_error.as_deref(),
@@ -126,9 +126,9 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
     let choice = shell.show(ctx, |ui| {
         ui.spacing_mut().item_spacing.y = 8.0;
         match &mut dialog {
-            ModelCorrelationDialog::AddDataset(draft) => dataset_dialog_body(ui, app, draft),
+            ModelCorrelationDialog::AddDataset(draft) => dataset_dialog_body(ui, cx, draft),
             ModelCorrelationDialog::AddMetric(draft) => metric_dialog_body(ui, draft),
-            ModelCorrelationDialog::Review(draft) => review_dialog_body(ui, app, draft),
+            ModelCorrelationDialog::Review(draft) => review_dialog_body(ui, cx, draft),
             ModelCorrelationDialog::Disposition(draft) => disposition_dialog_body(ui, draft),
         }
     });
@@ -137,23 +137,23 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         DialogChoice::None | DialogChoice::Secondary => true,
         DialogChoice::Ghost | DialogChoice::Cancelled => {
             clear_correlation_dialog_runtime(ctx);
-            app.state.models.model_correlation.dialog_source = None;
+            cx.state.model_correlation.dialog_source = None;
             false
         }
         DialogChoice::Primary => {
-            let result = correlation_dialog_source_blocker(app).map_or_else(
+            let result = correlation_dialog_source_blocker(cx).map_or_else(
                 || match &dialog {
                     ModelCorrelationDialog::AddDataset(draft) => {
-                        model_correlation_controller::append_dataset(app, draft)
+                        model_correlation_controller::append_dataset(cx, draft)
                     }
                     ModelCorrelationDialog::AddMetric(draft) => {
-                        model_correlation_controller::append_metric(app, draft)
+                        model_correlation_controller::append_metric(cx, draft)
                     }
                     ModelCorrelationDialog::Review(draft) => {
-                        model_correlation_controller::append_review_evidence(app, draft)
+                        model_correlation_controller::append_review_evidence(cx, draft)
                     }
                     ModelCorrelationDialog::Disposition(draft) => {
-                        model_correlation_controller::append_disposition(app, draft)
+                        model_correlation_controller::append_disposition(cx, draft)
                     }
                 },
                 Err,
@@ -161,7 +161,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
             match result {
                 Ok(()) => {
                     clear_correlation_dialog_runtime(ctx);
-                    app.state.models.model_correlation.dialog_source = None;
+                    cx.state.model_correlation.dialog_source = None;
                     false
                 }
                 Err(error) => {
@@ -174,7 +174,7 @@ pub(super) fn show_correlation_dialog(ctx: &egui::Context, app: &mut RSpiceApp) 
         }
     };
     if keep_open {
-        app.state.models.model_correlation.dialog = Some(dialog);
+        cx.state.model_correlation.dialog = Some(dialog);
     }
 }
 
@@ -213,15 +213,14 @@ pub(super) struct RetainedRunOption {
     analyses: Vec<RetainedAnalysisOption>,
 }
 
-pub(super) fn retained_run_options(app: &RSpiceApp) -> Vec<RetainedRunOption> {
-    let Some(source) = app.state.models.model_correlation.dialog_source.as_ref() else {
+pub(super) fn retained_run_options(cx: &Cx<'_, ModelsFeature>) -> Vec<RetainedRunOption> {
+    let Some(source) = cx.state.model_correlation.dialog_source.as_ref() else {
         return Vec::new();
     };
     let Some(source_id) = source.source_id else {
         return Vec::new();
     };
-    app.state
-        .model
+    cx.model
         .simulation
         .retained
         .runs
@@ -288,11 +287,11 @@ pub(super) fn retained_run_options(app: &RSpiceApp) -> Vec<RetainedRunOption> {
 
 pub(super) fn dataset_dialog_body(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     draft: &mut CorrelationDatasetDraft,
 ) {
-    let projection = CorrelationProjection::from_app(ui.ctx(), app);
-    let current_source = model_correlation_controller::current_source_binding(app).ok();
+    let projection = CorrelationProjection::cached(ui.ctx(), cx);
+    let current_source = model_correlation_controller::current_source_binding(cx).ok();
     let current_suite = current_source.as_ref().and_then(|source| {
         projection
             .correlation
@@ -335,7 +334,7 @@ pub(super) fn dataset_dialog_body(
         });
     ui.add_space(8.0);
     if draft.class == CorrelationDatasetClassDraft::Simulated {
-        retained_simulation_picker(ui, app, draft);
+        retained_simulation_picker(ui, cx, draft);
     } else {
         ui.label("CSV source");
         ui.label(
@@ -353,10 +352,10 @@ pub(super) fn dataset_dialog_body(
 
 pub(super) fn retained_simulation_picker(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     draft: &mut CorrelationDatasetDraft,
 ) {
-    let runs = retained_run_options(app);
+    let runs = retained_run_options(cx);
     section_panel(ui, "Saved simulation run", |ui| {
         ui.label(
             "Select a completed run of this project model revision. RSpice writes the CSV from the saved waveform and records its checksum.",
@@ -603,8 +602,12 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
     });
 }
 
-pub(super) fn review_dialog_body(ui: &mut Ui, app: &RSpiceApp, draft: &mut CorrelationReviewDraft) {
-    let projection = CorrelationProjection::from_app(ui.ctx(), app);
+pub(super) fn review_dialog_body(
+    ui: &mut Ui,
+    cx: &Cx<'_, ModelsFeature>,
+    draft: &mut CorrelationReviewDraft,
+) {
+    let projection = CorrelationProjection::cached(ui.ctx(), cx);
     section_panel(ui, "Evaluation to be retained", |ui| {
         if let Some(evaluation) = projection.evaluation.as_ref() {
             status_text(
@@ -732,6 +735,8 @@ pub(super) fn describe_region(ui: &Ui, response: &egui::Response, label: &str, d
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
+    use crate::workbench::features;
     use rspice_model_library::correlation::{
         CorrelationDatasetImport, CorrelationMetricInput, CorrelationSuiteInput,
     };
@@ -1080,7 +1085,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             |ctx| {
                 egui::CentralPanel::default()
                     .frame(egui::Frame::NONE)
-                    .show(ctx, |ui| show(ui, app));
+                    .show(ctx, |ui| show(ui, &mut features::cx(app)));
             },
         );
         output
@@ -1101,7 +1106,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     fn the_ledger_publishes_every_measure_with_its_value_and_caption() {
         let mut app = correlated_app();
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
-        let projection = CorrelationProjection::build(&app);
+        let projection = CorrelationProjection::build(&features::cx(&mut app));
         for measure in projection.measures() {
             let expected = format!("{}: {}. {}", measure.label, measure.value, measure.detail);
             // egui gives `WidgetType::Label` AccessKit's Label role, whose
@@ -1127,7 +1132,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
     fn the_state_verdict_is_stated_once_and_on_the_ledger() {
         let mut app = correlated_app();
         let nodes = correlation_nodes(&mut app, Vec2::new(1_180.0, 900.0));
-        let projection = CorrelationProjection::build(&app);
+        let projection = CorrelationProjection::build(&features::cx(&mut app));
         let (state, _) = projection.state_label();
         let owners = nodes
             .iter()
@@ -1162,7 +1167,7 @@ s3,gain,-1.9,dB,0.04,1,1000,27\n";
             "the datasets panel head never stated its count"
         );
         assert!(
-            CorrelationProjection::build(&app)
+            CorrelationProjection::build(&features::cx(&mut app))
                 .measures()
                 .iter()
                 .all(|measure| measure.label != "Datasets"),

@@ -21,7 +21,8 @@ use crate::state::model_library::{
     ModelCorrelationState, ModelSourceEvidenceBinding, NonNegativeFinite,
 };
 use crate::state::{AnalysisType, RetainedTrace, SimulationRunLifecycle};
-use crate::workbench::RSpiceApp;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 
 use crate::workbench::documents::model_correlation::{
     CorrelationAggregationDraft, CorrelationAlignmentDraft, CorrelationCalculationDraft,
@@ -54,25 +55,20 @@ struct PublicationSelection {
 /// Resolve the exact project-owned source identity currently selected by the
 /// correlation workspace.
 pub(super) fn current_source_binding(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
 ) -> Result<ModelSourceEvidenceBinding, String> {
-    current_context(app).map(|context| context.source)
+    current_context(cx).map(|context| context.source)
 }
 
 /// Append one immutable dataset revision by publishing a new suite revision.
 pub(super) fn append_dataset(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     draft: &CorrelationDatasetDraft,
 ) -> Result<(), String> {
-    preflight_mutation(app)?;
-    let context = current_context(app)?;
-    require_dialog_source(app, &context.source)?;
-    let selected_suite_id = app
-        .state
-        .models
-        .model_correlation
-        .selected_suite_id
-        .as_deref();
+    preflight_mutation(cx)?;
+    let context = current_context(cx)?;
+    require_dialog_source(cx, &context.source)?;
+    let selected_suite_id = cx.state.model_correlation.selected_suite_id.as_deref();
     let base = select_current_suite(&context, selected_suite_id, true)?.cloned();
 
     let dataset_id = required_text("Dataset ID", &draft.id)?;
@@ -92,7 +88,7 @@ pub(super) fn append_dataset(
                 .map_err(|error| format!("Dataset revision cannot advance: {error}"))
         })?;
     let dataset = dataset_from_draft(
-        app,
+        cx,
         draft,
         dataset_id.clone(),
         dataset_revision,
@@ -138,7 +134,7 @@ pub(super) fn append_dataset(
         .add_suite_revision(suite)
         .map_err(|error| format!("Dataset cannot be appended: {error}"))?;
     publish_correlation(
-        app,
+        cx,
         context,
         correlation,
         PublicationSelection {
@@ -156,18 +152,13 @@ pub(super) fn append_dataset(
 
 /// Append one metric definition by publishing a new immutable suite revision.
 pub(super) fn append_metric(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     draft: &CorrelationMetricDraft,
 ) -> Result<(), String> {
-    preflight_mutation(app)?;
-    let context = current_context(app)?;
-    require_dialog_source(app, &context.source)?;
-    let selected_suite_id = app
-        .state
-        .models
-        .model_correlation
-        .selected_suite_id
-        .as_deref();
+    preflight_mutation(cx)?;
+    let context = current_context(cx)?;
+    require_dialog_source(cx, &context.source)?;
+    let selected_suite_id = cx.state.model_correlation.selected_suite_id.as_deref();
     let base = required_current_suite(&context, selected_suite_id)?.clone();
     require_exact_suite_source(&base, &context.source)?;
 
@@ -209,7 +200,7 @@ pub(super) fn append_metric(
         .add_suite_revision(suite)
         .map_err(|error| format!("Metric cannot be appended: {error}"))?;
     publish_correlation(
-        app,
+        cx,
         context,
         correlation,
         PublicationSelection {
@@ -229,18 +220,13 @@ pub(super) fn append_metric(
 /// revision. A later decision for the same subject explicitly supersedes the
 /// immediately preceding event.
 pub(super) fn append_disposition(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     draft: &CorrelationOutlierDraft,
 ) -> Result<(), String> {
-    preflight_mutation(app)?;
-    let context = current_context(app)?;
-    require_dialog_source(app, &context.source)?;
-    let selected_suite_id = app
-        .state
-        .models
-        .model_correlation
-        .selected_suite_id
-        .as_deref();
+    preflight_mutation(cx)?;
+    let context = current_context(cx)?;
+    require_dialog_source(cx, &context.source)?;
+    let selected_suite_id = cx.state.model_correlation.selected_suite_id.as_deref();
     let base = required_current_suite(&context, selected_suite_id)?.clone();
     require_exact_suite_source(&base, &context.source)?;
 
@@ -306,7 +292,7 @@ pub(super) fn append_disposition(
         .add_suite_revision(suite)
         .map_err(|error| format!("Outlier disposition cannot be appended: {error}"))?;
     publish_correlation(
-        app,
+        cx,
         context,
         correlation,
         PublicationSelection {
@@ -324,18 +310,13 @@ pub(super) fn append_disposition(
 
 /// Evaluate the exact current suite and append immutable reviewer evidence.
 pub(super) fn append_review_evidence(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     draft: &CorrelationReviewDraft,
 ) -> Result<(), String> {
-    preflight_mutation(app)?;
-    let context = current_context(app)?;
-    require_dialog_source(app, &context.source)?;
-    let selected_suite_id = app
-        .state
-        .models
-        .model_correlation
-        .selected_suite_id
-        .as_deref();
+    preflight_mutation(cx)?;
+    let context = current_context(cx)?;
+    require_dialog_source(cx, &context.source)?;
+    let selected_suite_id = cx.state.model_correlation.selected_suite_id.as_deref();
     let suite = required_current_suite(&context, selected_suite_id)?.clone();
     require_exact_suite_source(&suite, &context.source)?;
 
@@ -395,7 +376,7 @@ pub(super) fn append_review_evidence(
         .add_evidence(evidence)
         .map_err(|error| format!("Correlation review cannot be added: {error}"))?;
     publish_correlation(
-        app,
+        cx,
         context,
         correlation,
         PublicationSelection {
@@ -411,29 +392,23 @@ pub(super) fn append_review_evidence(
     )
 }
 
-fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
-    if !app.state.platform.project_lifecycle.is_open() {
+fn preflight_mutation(cx: &Cx<'_, ModelsFeature>) -> Result<(), String> {
+    if !cx.platform.project_lifecycle.is_open() {
         return Err("Measurement correlation requires an open project".to_owned());
     }
-    if app.state.model.safe_mode.project_read_only() {
+    if cx.model.safe_mode.project_read_only() {
         return Err(
             "Measurement correlation cannot be changed while safe mode keeps the project read-only"
                 .to_owned(),
         );
     }
-    if app
-        .state
-        .models
-        .model_editor
-        .qualification_execution
-        .is_some()
-    {
+    if cx.state.model_editor.qualification_execution.is_some() {
         return Err(
             "Finish or cancel the active model qualification run before changing correlation records"
                 .to_owned(),
         );
     }
-    if let Some(draft) = app.state.models.model_editor.draft.as_ref()
+    if let Some(draft) = cx.state.model_editor.draft.as_ref()
         && draft.is_dirty()
     {
         return Err(format!(
@@ -444,22 +419,20 @@ fn preflight_mutation(app: &RSpiceApp) -> Result<(), String> {
     Ok(())
 }
 
-fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
-    let library_name = app
-        .state
+fn current_context(cx: &Cx<'_, ModelsFeature>) -> Result<CorrelationContext, String> {
+    let library_name = cx
         .model
         .model_library_manager
         .selected_library
         .clone()
         .ok_or_else(|| "Select a project-owned model library first".to_owned())?;
-    let requested_model = app
+    let requested_model = cx
         .state
-        .models
         .selected_model
         .clone()
         .ok_or_else(|| "Select a project-owned model family first".to_owned())?;
     let resolved = resolve_project_model_for_editor(
-        &app.state.model.model_library_manager,
+        &cx.model.model_library_manager,
         &library_name,
         &requested_model,
     )?;
@@ -471,8 +444,7 @@ fn current_context(app: &RSpiceApp) -> Result<CorrelationContext, String> {
         resolved.model_revision,
     )
     .map_err(|error| format!("Current model source identity is invalid: {error}"))?;
-    let correlation = app
-        .state
+    let correlation = cx
         .model
         .model_library_manager
         .get_library(&library_name)
@@ -554,7 +526,7 @@ fn required_current_suite<'a>(
 }
 
 fn dataset_from_draft(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     draft: &CorrelationDatasetDraft,
     id: String,
     revision: ObjectRevision,
@@ -571,7 +543,7 @@ fn dataset_from_draft(
         model_source,
         provenance,
     ) = if class.is_simulation() {
-        retained_simulation_dataset(app, draft, current_source)?
+        retained_simulation_dataset(cx, draft, current_source)?
     } else {
         (
             draft.csv.as_bytes().to_vec(),
@@ -614,7 +586,7 @@ type RetainedSimulationDataset = (
 );
 
 fn retained_simulation_dataset(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     draft: &CorrelationDatasetDraft,
     current_source: &ModelSourceEvidenceBinding,
 ) -> Result<RetainedSimulationDataset, String> {
@@ -623,8 +595,7 @@ fn retained_simulation_dataset(
         .trim()
         .parse::<RunId>()
         .map_err(|error| format!("Select a valid retained simulation run: {error}"))?;
-    let run = app
-        .state
+    let run = cx
         .model
         .simulation
         .retained
@@ -813,13 +784,13 @@ fn metric_from_draft(
 }
 
 fn publish_correlation(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     context: CorrelationContext,
     correlation: ModelCorrelationState,
     selection: PublicationSelection,
     description: String,
 ) -> Result<(), String> {
-    let mut candidate = app.state.model.model_library_manager.clone();
+    let mut candidate = cx.model.model_library_manager.clone();
     let commit = candidate.replace_project_model_correlation(
         &context.library_name,
         context.source_id,
@@ -830,25 +801,21 @@ fn publish_correlation(
         &correlation,
     )?;
     let committed_revision =
-        app.state
-            .model
+        cx.model
             .publish_project_model_candidate(candidate, commit, description)?;
 
     crate::workbench::models::workspace_state::select_library_or_prompt(
-        &mut app.state.model,
-        &mut app.state.workbench,
+        cx.model,
+        cx.wb,
         &context.library_name,
     );
-    app.state.models.selected_model = Some(context.model_name);
-    if let Some(editor_draft) = app.state.models.model_editor.draft.as_mut() {
+    cx.state.selected_model = Some(context.model_name);
+    if let Some(editor_draft) = cx.state.model_editor.draft.as_mut() {
         editor_draft.base_project_revision = committed_revision;
     }
-    app.state
-        .models
-        .model_editor
-        .invalidate_candidate_evidence();
+    cx.state.model_editor.invalidate_candidate_evidence();
 
-    let workspace = &mut app.state.models.model_correlation;
+    let workspace = &mut cx.state.model_correlation;
     workspace.selected_suite_id = Some(selection.suite_id);
     if let Some(dataset_id) = selection.dataset_id {
         workspace.selected_dataset_id = Some(dataset_id);
@@ -863,12 +830,11 @@ fn publish_correlation(
 }
 
 fn require_dialog_source(
-    app: &RSpiceApp,
+    cx: &Cx<'_, ModelsFeature>,
     current_source: &ModelSourceEvidenceBinding,
 ) -> Result<(), String> {
-    let opening_source = app
+    let opening_source = cx
         .state
-        .models
         .model_correlation
         .dialog_source
         .as_ref()
