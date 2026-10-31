@@ -24,7 +24,10 @@ use crate::state::pdk_config::{
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Button, Problem, problem_line};
-use crate::workbench::RSpiceApp;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::app::pdk_persistence;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::models::ModelsFeature;
 use rspice_simulation::pdk::import as pdk_import;
 
 const VIEW_STATE_ID: &str = "pdk-technology-admin-view-state";
@@ -160,33 +163,33 @@ struct RegistrySnapshot {
     technology_draft: Option<PdkTechnologyDraft>,
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+impl ModelsFeature {
+    /// Draw the PDK technology administration route's surface in the
+    /// feature's context.
+    pub(in crate::workbench) fn show_pdk_technology_admin(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ui: &mut Ui,
+    ) {
+        show(ui, cx);
+    }
+}
+
+fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     #[cfg(not(target_arch = "wasm32"))]
-    poll_native_package_imports(ui.ctx(), app);
+    poll_native_package_imports(ui.ctx(), cx);
     #[cfg(target_arch = "wasm32")]
-    poll_browser_package_imports(ui.ctx(), app);
+    poll_browser_package_imports(ui.ctx(), cx);
 
     let mut view = ui
         .ctx()
         .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
         .unwrap_or_default();
-    if view.technology_draft.is_none()
-        && app
-            .state
-            .models
-            .pdk_technology_authoring
-            .working_draft
-            .is_some()
+    if view.technology_draft.is_none() && cx.state.pdk_technology_authoring.working_draft.is_some()
     {
-        view.technology_draft = app
-            .state
-            .models
-            .pdk_technology_authoring
-            .working_draft
-            .clone();
-        view.technology_draft_dirty = app.state.models.pdk_technology_authoring.dirty;
+        view.technology_draft = cx.state.pdk_technology_authoring.working_draft.clone();
+        view.technology_draft_dirty = cx.state.pdk_technology_authoring.dirty;
     }
-    let snapshot = registry_snapshot(app);
+    let snapshot = registry_snapshot(cx);
     reconcile_selection(&mut view, &snapshot);
     reconcile_technology_draft(&mut view, &snapshot);
 
@@ -212,7 +215,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
             .layout(Layout::top_down(Align::Min)),
     );
     #[cfg(target_arch = "wasm32")]
-    let persistence_ready = app.browser_pdk_persistence_ready();
+    let persistence_ready = pdk_persistence::browser_pdk_persistence_ready();
     #[cfg(not(target_arch = "wasm32"))]
     let persistence_ready = true;
     root.set_clip_rect(rect);
@@ -221,7 +224,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     header(&mut root, &snapshot);
     metrics(&mut root, &snapshot);
     #[cfg(target_arch = "wasm32")]
-    browser_pdk_storage_status(&mut root, app);
+    browser_pdk_storage_status(&mut root, cx);
 
     let mut requested_action = None;
     ScrollArea::vertical()
@@ -271,19 +274,19 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.ctx()
         .data_mut(|data| data.insert_temp(egui::Id::new(VIEW_STATE_ID), view.clone()));
     if let Some(action) = requested_action {
-        apply_action(ui.ctx(), app, &mut view, action);
+        apply_action(ui.ctx(), cx, &mut view, action);
         ui.ctx()
             .data_mut(|data| data.insert_temp(egui::Id::new(VIEW_STATE_ID), view.clone()));
     }
-    app.state.models.pdk_technology_authoring.working_draft = view.technology_draft.clone();
-    app.state.models.pdk_technology_authoring.dirty = view.technology_draft_dirty;
+    cx.state.pdk_technology_authoring.working_draft = view.technology_draft.clone();
+    cx.state.pdk_technology_authoring.dirty = view.technology_draft_dirty;
 }
 
 #[cfg(target_arch = "wasm32")]
-fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
-    let ready = app.browser_pdk_persistence_ready();
-    let retryable = app.browser_pdk_persistence_retryable();
-    let degraded = app.browser_pdk_persistence_degraded();
+fn browser_pdk_storage_status(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
+    let ready = pdk_persistence::browser_pdk_persistence_ready();
+    let retryable = pdk_persistence::browser_pdk_persistence_retryable();
+    let degraded = pdk_persistence::browser_pdk_persistence_degraded();
     let tokens = Tokens::get(ui.ctx());
     // Storage that is ready needs no banner: the page works, which is what a
     // banner saying so would be telling the reader.
@@ -301,17 +304,21 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
         .inner_margin(egui::Margin::symmetric(12, 8))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
-                problem_line(ui, problem, &app.browser_pdk_persistence_status_message());
+                problem_line(
+                    ui,
+                    problem,
+                    &pdk_persistence::browser_pdk_persistence_status_message(),
+                );
                 if retryable
                     && Button::new("Retry storage recovery")
                         .accessible_label("Retry browser PDK storage recovery")
                         .show(ui)
                         .clicked()
                 {
-                    match app.retry_browser_pdk_persistence(ui.ctx()) {
-                        Ok(()) => app.state.prompt("Retrying browser PDK storage recovery."),
+                    match pdk_persistence::retry_browser_pdk_persistence(ui.ctx()) {
+                        Ok(()) => cx.wb.prompt("Retrying browser PDK storage recovery."),
                         Err(error) => {
-                            app.state.record(
+                            cx.model.record(
                                 LogSeverity::Error,
                                 LogSource::Studio,
                                 format!("Browser PDK storage recovery could not start: {error}"),
@@ -324,14 +331,14 @@ fn browser_pdk_storage_status(ui: &mut Ui, app: &mut RSpiceApp) {
         .response;
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::Status);
-        node.set_label(app.browser_pdk_persistence_status_message());
+        node.set_label(pdk_persistence::browser_pdk_persistence_status_message());
     });
 }
 
-fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
-    let project = &app.state.model.workspace.content;
-    let registry = &app.state.model.pdk_config.technology_registry;
-    let display_registry = &app.state.model.pdk_config.display_profile_registry;
+fn registry_snapshot(cx: &Cx<'_, ModelsFeature>) -> RegistrySnapshot {
+    let project = &cx.model.workspace.content;
+    let registry = &cx.model.pdk_config.technology_registry;
+    let display_registry = &cx.model.pdk_config.display_profile_registry;
     let runtime_display_profile_valid = display_registry.active_binding().is_none()
         || registry
             .active_package()
@@ -351,8 +358,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
                 pin.archive_digest(),
             )
         });
-    let project_callback_blocker = app
-        .state
+    let project_callback_blocker = cx
         .model
         .technology_inputs()
         .validate_project_technology_contract()
@@ -363,20 +369,8 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         audit: registry.audit().to_vec(),
         validation_errors: registry.validation_errors().to_vec(),
         installed_count: registry.archives().len(),
-        trust_keys: app
-            .state
-            .model
-            .pdk_config
-            .publisher_trust_store
-            .keys
-            .clone(),
-        trust_audit: app
-            .state
-            .model
-            .pdk_config
-            .publisher_trust_store
-            .audit()
-            .to_vec(),
+        trust_keys: cx.model.pdk_config.publisher_trust_store.keys.clone(),
+        trust_audit: cx.model.pdk_config.publisher_trust_store.audit().to_vec(),
         display_profiles: display_registry.revisions().to_vec(),
         active_display_profile: display_registry.active_binding().cloned(),
         display_audit: display_registry.audit().to_vec(),
@@ -390,7 +384,7 @@ fn registry_snapshot(app: &RSpiceApp) -> RegistrySnapshot {
         project_signed_package,
         project_callback_blocker,
         project_callback_receipts: project.pdk_callback_receipts().to_vec(),
-        technology_draft: app.state.model.pdk_config.technology_draft.clone(),
+        technology_draft: cx.model.pdk_config.technology_draft.clone(),
     }
 }
 
@@ -3954,18 +3948,18 @@ fn authority(view: &AdminViewState) -> PdkAdministrativeAuthority {
 
 fn apply_action(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     view: &mut AdminViewState,
     action: AdminAction,
 ) {
     if matches!(action, AdminAction::ChooseImport) {
-        request_package_import(ctx, app, view);
+        request_package_import(ctx, cx, view);
         return;
     }
     let result = match action {
         AdminAction::ChooseImport => unreachable!("handled before transaction dispatch"),
         AdminAction::Revalidate => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let trust_store = candidate.publisher_trust_store.clone();
             match candidate
                 .technology_registry
@@ -3973,7 +3967,7 @@ fn apply_action(
             {
                 Ok(count) => persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     format!("Revalidated {count} installed signed package revision(s)."),
@@ -3983,17 +3977,17 @@ fn apply_action(
                     let message = errors.join("; ");
                     // Persist no failed runtime cache: the current in-memory
                     // registry is still replaced so consumers fail closed.
-                    app.state.model.pdk_config.technology_registry = candidate.technology_registry;
+                    cx.model.pdk_config.technology_registry = candidate.technology_registry;
                     Err(message)
                 }
             }
         }
         AdminAction::SaveTechnologyDraft(draft) => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             candidate.technology_draft = Some(draft.clone());
             persist_candidate(
                 ctx,
-                app,
+                cx,
                 view,
                 candidate,
                 format!(
@@ -4006,11 +4000,11 @@ fn apply_action(
             )
         }
         AdminAction::DiscardTechnologyDraft => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             candidate.technology_draft = None;
             persist_candidate(
                 ctx,
-                app,
+                cx,
                 view,
                 candidate,
                 "Discarded the unsigned technology draft. Installed signed packages were unchanged."
@@ -4019,7 +4013,7 @@ fn apply_action(
             )
         }
         AdminAction::ExportTechnologyDraft(draft) => {
-            let registry = &app.state.model.pdk_config.technology_registry;
+            let registry = &cx.model.pdk_config.technology_registry;
             let package = registry
                 .validated_packages()
                 .iter()
@@ -4051,7 +4045,7 @@ fn apply_action(
             })
         }
         AdminAction::Activate { binding, rollback } => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let selected = candidate
                 .technology_registry
                 .validated_packages()
@@ -4085,7 +4079,7 @@ fn apply_action(
                 .map_err(|error| error.to_string())?;
                 persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     format!(
@@ -4104,7 +4098,7 @@ fn apply_action(
             })
         }
         AdminAction::ProvisionTrustKey(key) => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let receipt = candidate
                 .publisher_trust_store
                 .provision_key(key, &authority(view), view.reason.trim())
@@ -4133,7 +4127,7 @@ fn apply_action(
                 }
                 persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     message,
@@ -4148,7 +4142,7 @@ fn apply_action(
             publisher_id,
             key_id,
         } => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let receipt = candidate
                 .publisher_trust_store
                 .revoke_key(&publisher_id, &key_id, &authority(view), view.reason.trim())
@@ -4157,7 +4151,7 @@ fn apply_action(
                 let validation_errors = revalidate_after_trust_change(&mut candidate);
                 persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     format!(
@@ -4172,7 +4166,7 @@ fn apply_action(
             })
         }
         AdminAction::PublishDisplayProfile(draft) => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let package = candidate
                 .technology_registry
                 .validated_packages()
@@ -4195,7 +4189,7 @@ fn apply_action(
                 }
                 persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     format!(
@@ -4210,7 +4204,7 @@ fn apply_action(
             })
         }
         AdminAction::ActivateDisplayProfile { binding, rollback } => {
-            let mut candidate = app.state.model.pdk_config.clone();
+            let mut candidate = cx.model.pdk_config.clone();
             let package = candidate
                 .technology_registry
                 .validated_packages()
@@ -4248,7 +4242,7 @@ fn apply_action(
                 }
                 persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     view,
                     candidate,
                     format!(
@@ -4269,8 +4263,7 @@ fn apply_action(
                 )
             })
         }
-        AdminAction::RunProjectCallback { callback_id } => app
-            .state
+        AdminAction::RunProjectCallback { callback_id } => cx
             .model
             .execute_project_pdk_callback(&callback_id, &authority(view), view.reason.trim())
             .map(|receipt| {
@@ -4288,12 +4281,12 @@ fn apply_action(
 
     match result {
         Ok(Some(message)) => {
-            app.state
+            cx.model
                 .record(LogSeverity::Info, LogSource::Studio, message);
         }
         Ok(None) => {}
         Err(error) => {
-            app.state
+            cx.model
                 .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
@@ -4314,7 +4307,7 @@ fn revalidate_after_trust_change(
 
 fn persist_candidate(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ModelsFeature>,
     view: &mut AdminViewState,
     candidate: crate::state::pdk_config::PdkConfig,
     message: String,
@@ -4324,53 +4317,58 @@ fn persist_candidate(
     {
         let _ = ctx;
         crate::state::pdk_config::save(&candidate).map_err(|error| error.to_string())?;
-        app.state.model.pdk_config = candidate;
+        cx.model.pdk_config = candidate;
         apply_admin_commit_effect(view, effect);
         Ok(Some(message))
     }
     #[cfg(target_arch = "wasm32")]
     {
-        let _ = view;
-        app.start_browser_pdk_administration_publication(ctx, candidate, message, move |ctx| {
-            ctx.data_mut(|data| {
-                let id = egui::Id::new(VIEW_STATE_ID);
-                let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
-                match effect {
-                    AdminCommitEffect::None => {}
-                    AdminCommitEffect::ClearTrustDraft {
-                        publisher_id,
-                        key_id,
-                    } => {
-                        if view.trust_publisher_id.trim() == publisher_id
-                            && view.trust_key_id.trim() == key_id
-                        {
-                            view.trust_publisher_id.clear();
-                            view.trust_key_id.clear();
-                            view.trust_key_base64.clear();
+        let _ = (cx, view);
+        pdk_persistence::start_browser_pdk_administration_publication(
+            ctx,
+            candidate,
+            message,
+            move |ctx| {
+                ctx.data_mut(|data| {
+                    let id = egui::Id::new(VIEW_STATE_ID);
+                    let mut view = data.get_temp::<AdminViewState>(id).unwrap_or_default();
+                    match effect {
+                        AdminCommitEffect::None => {}
+                        AdminCommitEffect::ClearTrustDraft {
+                            publisher_id,
+                            key_id,
+                        } => {
+                            if view.trust_publisher_id.trim() == publisher_id
+                                && view.trust_key_id.trim() == key_id
+                            {
+                                view.trust_publisher_id.clear();
+                                view.trust_key_id.clear();
+                                view.trust_key_base64.clear();
+                            }
+                        }
+                        AdminCommitEffect::SelectDisplayProfile {
+                            profile_id,
+                            revision,
+                        } => {
+                            view.selected_display_profile = Some((profile_id, revision));
+                            view.display_draft_dirty = false;
+                        }
+                        AdminCommitEffect::TechnologyDraftSaved => {
+                            view.technology_draft_dirty = false;
+                            view.discard_technology_draft_armed = false;
+                            view.technology_draft_error = None;
+                        }
+                        AdminCommitEffect::TechnologyDraftDiscarded => {
+                            view.technology_draft = None;
+                            view.technology_draft_dirty = false;
+                            view.discard_technology_draft_armed = false;
+                            view.technology_draft_error = None;
                         }
                     }
-                    AdminCommitEffect::SelectDisplayProfile {
-                        profile_id,
-                        revision,
-                    } => {
-                        view.selected_display_profile = Some((profile_id, revision));
-                        view.display_draft_dirty = false;
-                    }
-                    AdminCommitEffect::TechnologyDraftSaved => {
-                        view.technology_draft_dirty = false;
-                        view.discard_technology_draft_armed = false;
-                        view.technology_draft_error = None;
-                    }
-                    AdminCommitEffect::TechnologyDraftDiscarded => {
-                        view.technology_draft = None;
-                        view.technology_draft_dirty = false;
-                        view.discard_technology_draft_armed = false;
-                        view.technology_draft_error = None;
-                    }
-                }
-                data.insert_temp(id, view);
-            });
-        })?;
+                    data.insert_temp(id, view);
+                });
+            },
+        )?;
         Ok(None)
     }
 }
@@ -4411,14 +4409,18 @@ fn apply_admin_commit_effect(view: &mut AdminViewState, effect: AdminCommitEffec
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut AdminViewState) {
+fn request_package_import(
+    ctx: &egui::Context,
+    cx: &mut Cx<'_, ModelsFeature>,
+    view: &mut AdminViewState,
+) {
     let Some(path) = rfd::FileDialog::new()
         .add_filter("Signed RSpice PDK package", &["rspdk", "json"])
         .pick_file()
     else {
         return;
     };
-    let base = app.state.model.pdk_config.clone();
+    let base = cx.model.pdk_config.clone();
     let authority = authority(view);
     let reason = view.reason.trim().to_owned();
     let repaint = ctx.clone();
@@ -4429,9 +4431,13 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
 }
 
 #[cfg(target_arch = "wasm32")]
-fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut AdminViewState) {
+fn request_package_import(
+    ctx: &egui::Context,
+    cx: &mut Cx<'_, ModelsFeature>,
+    view: &mut AdminViewState,
+) {
     let repaint = ctx.clone();
-    let base = app.state.model.pdk_config.clone();
+    let base = cx.model.pdk_config.clone();
     let authority = authority(view);
     let reason = view.reason.trim().to_owned();
     view.package_import_in_progress = true;
@@ -4474,18 +4480,18 @@ fn request_package_import(ctx: &egui::Context, app: &mut RSpiceApp, view: &mut A
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
+fn poll_native_package_imports(ctx: &egui::Context, cx: &mut Cx<'_, ModelsFeature>) {
     for completion in pdk_import::take_native_package_imports() {
         let mut view = ctx
             .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
             .unwrap_or_default();
         view.package_import_in_progress = false;
-        match completion.resolve(&app.state.model.pdk_config) {
+        match completion.resolve(&cx.model.pdk_config) {
             Ok(candidate) => {
                 view.selected = Some((candidate.package_id.clone(), candidate.revision.clone()));
                 let result = persist_candidate(
                     ctx,
-                    app,
+                    cx,
                     &mut view,
                     candidate.config,
                     format!(
@@ -4495,10 +4501,10 @@ fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                     AdminCommitEffect::None,
                 );
                 if let Err(error) = result {
-                    apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                    apply_action(ctx, cx, &mut view, AdminAction::ReportError(error));
                 }
             }
-            Err(error) => apply_action(ctx, app, &mut view, AdminAction::ReportError(error)),
+            Err(error) => apply_action(ctx, cx, &mut view, AdminAction::ReportError(error)),
         }
         ctx.data_mut(|data| {
             data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
@@ -4507,7 +4513,7 @@ fn poll_native_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
+fn poll_browser_package_imports(ctx: &egui::Context, cx: &mut Cx<'_, ModelsFeature>) {
     for completion in pdk_import::take_browser_package_imports() {
         match completion {
             Ok(Some(candidate)) => {
@@ -4515,7 +4521,7 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                     .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
                     .unwrap_or_default();
                 view.package_import_in_progress = false;
-                match candidate.resolve(&app.state.model.pdk_config) {
+                match candidate.resolve(&cx.model.pdk_config) {
                     Ok(candidate) => {
                         let pdk_import::PackageImportCandidate {
                             config,
@@ -4526,7 +4532,7 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                         view.selected = Some((package_id.clone(), revision.clone()));
                         if let Err(error) = persist_candidate(
                             ctx,
-                            app,
+                            cx,
                             &mut view,
                             config,
                             format!(
@@ -4534,12 +4540,10 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                             ),
                             AdminCommitEffect::None,
                         ) {
-                            apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                            apply_action(ctx, cx, &mut view, AdminAction::ReportError(error));
                         }
                     }
-                    Err(error) => {
-                        apply_action(ctx, app, &mut view, AdminAction::ReportError(error))
-                    }
+                    Err(error) => apply_action(ctx, cx, &mut view, AdminAction::ReportError(error)),
                 }
                 ctx.data_mut(|data| {
                     data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
@@ -4558,7 +4562,7 @@ fn poll_browser_package_imports(ctx: &egui::Context, app: &mut RSpiceApp) {
                     .data(|data| data.get_temp::<AdminViewState>(egui::Id::new(VIEW_STATE_ID)))
                     .unwrap_or_default();
                 view.package_import_in_progress = false;
-                apply_action(ctx, app, &mut view, AdminAction::ReportError(error));
+                apply_action(ctx, cx, &mut view, AdminAction::ReportError(error));
                 ctx.data_mut(|data| {
                     data.insert_temp(egui::Id::new(VIEW_STATE_ID), view);
                 });

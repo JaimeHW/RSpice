@@ -881,8 +881,14 @@ impl RSpiceApp {
                 #[cfg(target_arch = "wasm32")]
                 match prepare_pdk_configuration(&self.state, config) {
                     Ok((config, candidate, loaded)) => {
-                        if let Err(error) = self
-                            .start_browser_pdk_settings_publication(ctx, config, candidate, loaded)
+                        if let Err(error) =
+                            crate::workbench::app::pdk_persistence::start_browser_pdk_settings_publication(
+                                ctx,
+                                &self.state.model.pdk_config,
+                                config,
+                                candidate,
+                                loaded,
+                            )
                         {
                             emit_pdk_apply_messages(&mut self.state, Err(vec![error]));
                         }

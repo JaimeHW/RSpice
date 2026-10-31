@@ -16,8 +16,11 @@ use crate::state::pdk_config::{
     BrowserPdkStorageStatus, PdkConfig, start_browser_pdk_config_load,
     start_browser_pdk_config_save,
 };
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::design_history::publish_model_library_set_candidate;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::simulation::SimulationController;
+use rspice_app_runs::workbench::app_state::run_preflight::PreflightDialogState;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum BrowserPdkPhase {
@@ -91,6 +94,28 @@ thread_local! {
         const { std::cell::RefCell::new(VecDeque::new()) };
 }
 
+/// What a browser PDK storage completion writes as the frame takes it: the
+/// live PDK configuration, the model libraries and the log in the model, the
+/// toasts, and the run preflight a configuration change drops. Whether a
+/// project is open decides where settled model libraries go.
+pub(in crate::workbench) struct BrowserPdkParts<'a> {
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+    pub(in crate::workbench) platform: &'a PlatformState,
+    pub(in crate::workbench) preflight: &'a mut PreflightDialogState,
+    pub(in crate::workbench) run_controller: &'a mut SimulationController,
+}
+
+impl BrowserPdkParts<'_> {
+    /// Drop every authorization and presentation artifact derived from the
+    /// configuration a completion replaced: the run preflight and the run it
+    /// prepared.
+    fn invalidate_simulation_preflight(&mut self) {
+        self.preflight.invalidate();
+        self.run_controller.clear_prepared_run();
+    }
+}
+
 pub(super) fn initialize_browser_pdk_persistence(ctx: &Context) {
     start_restore(ctx);
 }
@@ -117,376 +142,374 @@ fn start_restore(ctx: &Context) {
     );
 }
 
-impl RSpiceApp {
-    pub(crate) fn start_browser_pdk_administration_publication(
-        &mut self,
-        ctx: &Context,
-        candidate: PdkConfig,
-        message: impl Into<String>,
-        after_commit: impl FnOnce(&Context) + 'static,
-    ) -> Result<(), String> {
-        start_publication(
-            ctx,
-            candidate,
-            BrowserPdkPublicationIntent::Administration {
-                message: message.into(),
-                after_commit: Some(Box::new(after_commit)),
-            },
-        )
-    }
+pub(crate) fn start_browser_pdk_administration_publication(
+    ctx: &Context,
+    candidate: PdkConfig,
+    message: impl Into<String>,
+    after_commit: impl FnOnce(&Context) + 'static,
+) -> Result<(), String> {
+    start_publication(
+        ctx,
+        candidate,
+        BrowserPdkPublicationIntent::Administration {
+            message: message.into(),
+            after_commit: Some(Box::new(after_commit)),
+        },
+    )
+}
 
-    pub(crate) fn start_browser_pdk_settings_publication(
-        &mut self,
-        ctx: &Context,
-        candidate: PdkConfig,
-        model_libraries: ModelLibraryManager,
-        loaded: usize,
-    ) -> Result<(), String> {
-        start_publication(
-            ctx,
-            candidate,
-            BrowserPdkPublicationIntent::Settings(Box::new(BrowserPdkSettingsIntent {
-                previous: self.state.model.pdk_config.clone(),
-                model_libraries,
-                loaded,
-            })),
-        )
-    }
+pub(crate) fn start_browser_pdk_settings_publication(
+    ctx: &Context,
+    previous: &PdkConfig,
+    candidate: PdkConfig,
+    model_libraries: ModelLibraryManager,
+    loaded: usize,
+) -> Result<(), String> {
+    start_publication(
+        ctx,
+        candidate,
+        BrowserPdkPublicationIntent::Settings(Box::new(BrowserPdkSettingsIntent {
+            previous: previous.clone(),
+            model_libraries,
+            loaded,
+        })),
+    )
+}
 
-    pub(crate) fn browser_pdk_persistence_ready(&self) -> bool {
-        BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Ready)
-    }
+pub(crate) fn browser_pdk_persistence_ready() -> bool {
+    BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Ready)
+}
 
-    pub(crate) fn browser_pdk_persistence_retryable(&self) -> bool {
-        BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed)
-    }
+pub(crate) fn browser_pdk_persistence_retryable() -> bool {
+    BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed)
+}
 
-    pub(crate) fn browser_pdk_persistence_degraded(&self) -> bool {
-        BROWSER_PDK_OWNER.with(|owner| {
-            let owner = owner.borrow();
-            owner.phase == BrowserPdkPhase::Ready
-                && owner.storage_status.durability != BrowserPdkStorageDurability::Persistent
-        })
-    }
+pub(crate) fn browser_pdk_persistence_degraded() -> bool {
+    BROWSER_PDK_OWNER.with(|owner| {
+        let owner = owner.borrow();
+        owner.phase == BrowserPdkPhase::Ready
+            && owner.storage_status.durability != BrowserPdkStorageDurability::Persistent
+    })
+}
 
-    pub(crate) fn browser_pdk_persistence_status_message(&self) -> String {
-        BROWSER_PDK_OWNER.with(|owner| {
-            let owner = owner.borrow();
-            match owner.phase {
-                BrowserPdkPhase::Dormant => {
-                    "Browser PDK storage has not been initialized.".to_owned()
-                }
-                BrowserPdkPhase::Loading => owner.last_error.as_ref().map_or_else(
-                    || "Loading and validating browser PDK storage…".to_owned(),
-                    |error| {
-                        format!(
-                            "Reloading authoritative browser PDK state after a storage failure: {error}"
-                        )
-                    },
-                ),
-                BrowserPdkPhase::Publishing => {
-                    "Publishing and reading back the browser PDK transaction…".to_owned()
-                }
-                BrowserPdkPhase::Failed => owner.last_error.as_ref().map_or_else(
-                    || "Browser PDK storage is unavailable.".to_owned(),
-                    |error| format!("Browser PDK storage is unavailable: {error}"),
-                ),
-                BrowserPdkPhase::Ready => storage_status_message(owner.storage_status),
+pub(crate) fn browser_pdk_persistence_status_message() -> String {
+    BROWSER_PDK_OWNER.with(|owner| {
+        let owner = owner.borrow();
+        match owner.phase {
+            BrowserPdkPhase::Dormant => "Browser PDK storage has not been initialized.".to_owned(),
+            BrowserPdkPhase::Loading => owner.last_error.as_ref().map_or_else(
+                || "Loading and validating browser PDK storage…".to_owned(),
+                |error| {
+                    format!(
+                        "Reloading authoritative browser PDK state after a storage failure: {error}"
+                    )
+                },
+            ),
+            BrowserPdkPhase::Publishing => {
+                "Publishing and reading back the browser PDK transaction…".to_owned()
             }
-        })
-    }
-
-    pub(crate) fn retry_browser_pdk_persistence(&mut self, ctx: &Context) -> Result<(), String> {
-        let retryable =
-            BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed);
-        if !retryable {
-            return Err("browser PDK storage is not in a retryable failed state".to_owned());
+            BrowserPdkPhase::Failed => owner.last_error.as_ref().map_or_else(
+                || "Browser PDK storage is unavailable.".to_owned(),
+                |error| format!("Browser PDK storage is unavailable: {error}"),
+            ),
+            BrowserPdkPhase::Ready => storage_status_message(owner.storage_status),
         }
-        start_restore(ctx);
-        Ok(())
+    })
+}
+
+pub(crate) fn retry_browser_pdk_persistence(ctx: &Context) -> Result<(), String> {
+    let retryable = BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed);
+    if !retryable {
+        return Err("browser PDK storage is not in a retryable failed state".to_owned());
+    }
+    start_restore(ctx);
+    Ok(())
+}
+
+pub(in crate::workbench) fn poll_browser_pdk_persistence(
+    parts: &mut BrowserPdkParts<'_>,
+    ctx: &Context,
+) {
+    let completions =
+        BROWSER_PDK_COMPLETIONS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
+    for completion in completions {
+        match completion {
+            BrowserPdkCompletion::Restore {
+                operation_generation,
+                result,
+            } => finish_browser_pdk_restore(parts, ctx, operation_generation, result),
+            BrowserPdkCompletion::Publication {
+                operation_generation,
+                candidate,
+                intent,
+                result,
+            } => finish_browser_pdk_publication(
+                parts,
+                ctx,
+                operation_generation,
+                candidate,
+                *intent,
+                result,
+            ),
+            BrowserPdkCompletion::RejectedSettingsRollback {
+                operation_generation,
+                publication_error,
+                result,
+            } => finish_rejected_browser_pdk_settings_rollback(
+                parts,
+                operation_generation,
+                &publication_error,
+                result,
+            ),
+        }
+    }
+}
+
+fn finish_browser_pdk_restore(
+    parts: &mut BrowserPdkParts<'_>,
+    ctx: &Context,
+    operation_generation: u64,
+    result: Result<BrowserPdkConfigRestore, String>,
+) {
+    let current = BROWSER_PDK_OWNER.with(|owner| {
+        let owner = owner.borrow();
+        owner.operation_generation == operation_generation
+            && owner.phase == BrowserPdkPhase::Loading
+    });
+    if !current {
+        return;
     }
 
-    pub(super) fn poll_browser_pdk_persistence(&mut self, ctx: &Context) {
-        let completions =
-            BROWSER_PDK_COMPLETIONS.with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
-        for completion in completions {
-            match completion {
-                BrowserPdkCompletion::Restore {
-                    operation_generation,
-                    result,
-                } => self.finish_browser_pdk_restore(ctx, operation_generation, result),
-                BrowserPdkCompletion::Publication {
-                    operation_generation,
-                    candidate,
-                    intent,
-                    result,
-                } => self.finish_browser_pdk_publication(
-                    ctx,
-                    operation_generation,
-                    candidate,
-                    *intent,
-                    result,
-                ),
-                BrowserPdkCompletion::RejectedSettingsRollback {
-                    operation_generation,
-                    publication_error,
-                    result,
-                } => self.finish_rejected_browser_pdk_settings_rollback(
-                    operation_generation,
-                    &publication_error,
-                    result,
-                ),
+    match result {
+        Ok(mut restored) => {
+            let storage_status = restored.storage_status;
+            let restored_saved_configuration = restored.receipt.is_some();
+            let trust_store = restored.config.publisher_trust_store.clone();
+            let validation = restored
+                .config
+                .technology_registry
+                .revalidate_installed(&trust_store);
+            let mut model_library = parts.model.model_library_manager.clone();
+            let model_load = model_library
+                .replace_from_pdk_config(Some(&parts.model.pdk_config), &mut restored.config);
+            parts.model.pdk_config = restored.config;
+            if model_load.is_ok() {
+                parts.model.model_library_manager = model_library;
             }
-        }
-    }
+            parts.invalidate_simulation_preflight();
+            BROWSER_PDK_OWNER.with(|owner| {
+                let mut owner = owner.borrow_mut();
+                owner.receipt = restored.receipt;
+                owner.storage_status = storage_status;
+                owner.last_error = None;
+                owner.phase = BrowserPdkPhase::Ready;
+            });
 
-    fn finish_browser_pdk_restore(
-        &mut self,
-        ctx: &Context,
-        operation_generation: u64,
-        result: Result<BrowserPdkConfigRestore, String>,
-    ) {
-        let current = BROWSER_PDK_OWNER.with(|owner| {
-            let owner = owner.borrow();
-            owner.operation_generation == operation_generation
-                && owner.phase == BrowserPdkPhase::Loading
-        });
-        if !current {
-            return;
-        }
-
-        match result {
-            Ok(mut restored) => {
-                let storage_status = restored.storage_status;
-                let restored_saved_configuration = restored.receipt.is_some();
-                let trust_store = restored.config.publisher_trust_store.clone();
-                let validation = restored
-                    .config
-                    .technology_registry
-                    .revalidate_installed(&trust_store);
-                let mut model_library = self.state.model.model_library_manager.clone();
-                let model_load = model_library.replace_from_pdk_config(
-                    Some(&self.state.model.pdk_config),
-                    &mut restored.config,
+            if restored_saved_configuration {
+                emit_browser_pdk_storage_warning(parts, ctx, storage_status);
+            }
+            if restored.migrated_legacy_record {
+                parts.model.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "PDK configuration moved from the browser's Web Storage to its IndexedDB \
+                     store.",
                 );
-                self.state.model.pdk_config = restored.config;
-                if model_load.is_ok() {
-                    self.state.model.model_library_manager = model_library;
-                }
-                self.invalidate_simulation_preflight();
-                BROWSER_PDK_OWNER.with(|owner| {
-                    let mut owner = owner.borrow_mut();
-                    owner.receipt = restored.receipt;
-                    owner.storage_status = storage_status;
-                    owner.last_error = None;
-                    owner.phase = BrowserPdkPhase::Ready;
-                });
-
-                if restored_saved_configuration {
-                    emit_browser_pdk_storage_warning(self, ctx, storage_status);
-                }
-                if restored.migrated_legacy_record {
-                    self.state.record(
-                        LogSeverity::Info,
+            }
+            if let Err(errors) = validation {
+                for error in errors {
+                    parts.model.record(
+                        LogSeverity::Error,
                         LogSource::Studio,
-                        "PDK configuration moved from the browser's Web Storage to its IndexedDB \
-                         store.",
+                        format!(
+                            "PDK technology restored from browser storage was not trusted: \
+                             {error}"
+                        ),
                     );
                 }
-                if let Err(errors) = validation {
-                    for error in errors {
-                        self.state.record(
-                            LogSeverity::Error,
-                            LogSource::Studio,
-                            format!(
-                                "PDK technology restored from browser storage was not trusted: \
-                                 {error}"
-                            ),
-                        );
-                    }
-                }
-                if let Err(errors) = model_load {
-                    for error in errors {
-                        self.state.record(
-                            LogSeverity::Error,
-                            LogSource::Studio,
-                            format!("PDK model library restore failed: {error}"),
-                        );
-                    }
+            }
+            if let Err(errors) = model_load {
+                for error in errors {
+                    parts.model.record(
+                        LogSeverity::Error,
+                        LogSource::Studio,
+                        format!("PDK model library restore failed: {error}"),
+                    );
                 }
             }
-            Err(error) => {
-                BROWSER_PDK_OWNER.with(|owner| {
-                    let mut owner = owner.borrow_mut();
-                    owner.phase = BrowserPdkPhase::Failed;
-                    owner.last_error = Some(error.clone());
-                });
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!(
-                        "The saved PDK configuration could not be restored from browser storage, \
-                         so no PDK was loaded: {error}"
-                    ),
-                );
-            }
+        }
+        Err(error) => {
+            BROWSER_PDK_OWNER.with(|owner| {
+                let mut owner = owner.borrow_mut();
+                owner.phase = BrowserPdkPhase::Failed;
+                owner.last_error = Some(error.clone());
+            });
+            parts.model.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "The saved PDK configuration could not be restored from browser storage, \
+                     so no PDK was loaded: {error}"
+                ),
+            );
         }
     }
+}
 
-    fn finish_browser_pdk_publication(
-        &mut self,
-        ctx: &Context,
-        operation_generation: u64,
-        candidate: PdkConfig,
-        intent: BrowserPdkPublicationIntent,
-        result: Result<BrowserPdkConfigReceipt, String>,
-    ) {
-        let current = BROWSER_PDK_OWNER.with(|owner| {
-            let owner = owner.borrow();
-            owner.operation_generation == operation_generation
-                && owner.phase == BrowserPdkPhase::Publishing
-        });
-        if !current {
-            return;
-        }
+fn finish_browser_pdk_publication(
+    parts: &mut BrowserPdkParts<'_>,
+    ctx: &Context,
+    operation_generation: u64,
+    candidate: PdkConfig,
+    intent: BrowserPdkPublicationIntent,
+    result: Result<BrowserPdkConfigReceipt, String>,
+) {
+    let current = BROWSER_PDK_OWNER.with(|owner| {
+        let owner = owner.borrow();
+        owner.operation_generation == operation_generation
+            && owner.phase == BrowserPdkPhase::Publishing
+    });
+    if !current {
+        return;
+    }
 
-        match result {
-            Ok(receipt) => {
-                let storage_status = receipt.storage_status;
-                match intent {
-                    BrowserPdkPublicationIntent::Administration {
-                        message,
-                        after_commit,
-                    } => {
-                        accept_browser_pdk_receipt(receipt);
-                        self.state.model.pdk_config = candidate;
-                        emit_browser_pdk_storage_warning(self, ctx, storage_status);
-                        if let Some(after_commit) = after_commit {
-                            after_commit(ctx);
-                        }
-                        self.state
-                            .record(LogSeverity::Info, LogSource::Studio, message);
+    match result {
+        Ok(receipt) => {
+            let storage_status = receipt.storage_status;
+            match intent {
+                BrowserPdkPublicationIntent::Administration {
+                    message,
+                    after_commit,
+                } => {
+                    accept_browser_pdk_receipt(receipt);
+                    parts.model.pdk_config = candidate;
+                    emit_browser_pdk_storage_warning(parts, ctx, storage_status);
+                    if let Some(after_commit) = after_commit {
+                        after_commit(ctx);
                     }
-                    BrowserPdkPublicationIntent::Settings(settings) => {
-                        let BrowserPdkSettingsIntent {
-                            previous,
+                    parts
+                        .model
+                        .record(LogSeverity::Info, LogSource::Studio, message);
+                }
+                BrowserPdkPublicationIntent::Settings(settings) => {
+                    let BrowserPdkSettingsIntent {
+                        previous,
+                        model_libraries,
+                        loaded,
+                    } = *settings;
+                    let publication = if parts.platform.project_lifecycle.is_open() {
+                        publish_model_library_set_candidate(
+                            parts.model,
                             model_libraries,
-                            loaded,
-                        } = *settings;
-                        let publication = if self.state.platform.project_lifecycle.is_open() {
-                            publish_model_library_set_candidate(
-                                &mut self.state.model,
-                                model_libraries,
-                                "apply configured PDK model sources",
-                            )
-                            .map(|_| ())
-                        } else {
-                            self.state.model.model_library_manager = model_libraries;
-                            Ok(())
-                        };
-                        if let Err(error) = publication {
-                            if let Err(rollback_error) = start_rejected_settings_rollback(
-                                ctx,
-                                operation_generation,
-                                receipt,
-                                previous,
-                                error.clone(),
-                            ) {
-                                fail_browser_pdk_owner(format!(
-                                    "{error}; browser storage rollback could not start: {rollback_error}"
-                                ));
-                                self.state.record(
-                                    LogSeverity::Error,
-                                    LogSource::Studio,
-                                    format!(
-                                        "PDK settings were saved to browser storage but the \
-                                         project could not take them, and the saved settings \
-                                         could not be rolled back: {error}; {rollback_error}"
-                                    ),
-                                );
-                            }
-                            return;
+                            "apply configured PDK model sources",
+                        )
+                        .map(|_| ())
+                    } else {
+                        parts.model.model_library_manager = model_libraries;
+                        Ok(())
+                    };
+                    if let Err(error) = publication {
+                        if let Err(rollback_error) = start_rejected_settings_rollback(
+                            ctx,
+                            operation_generation,
+                            receipt,
+                            previous,
+                            error.clone(),
+                        ) {
+                            fail_browser_pdk_owner(format!(
+                                "{error}; browser storage rollback could not start: {rollback_error}"
+                            ));
+                            parts.model.record(
+                                LogSeverity::Error,
+                                LogSource::Studio,
+                                format!(
+                                    "PDK settings were saved to browser storage but the \
+                                     project could not take them, and the saved settings \
+                                     could not be rolled back: {error}; {rollback_error}"
+                                ),
+                            );
                         }
-                        accept_browser_pdk_receipt(receipt);
-                        self.state.model.pdk_config = candidate;
-                        self.invalidate_simulation_preflight();
-                        emit_browser_pdk_storage_warning(self, ctx, storage_status);
-                        self.state.record(
-                            LogSeverity::Info,
-                            LogSource::Studio,
-                            format!(
-                                "PDK settings applied: {} loaded.",
-                                crate::ui::accessibility::counted(loaded, "library", "libraries")
-                            ),
-                        );
+                        return;
                     }
+                    accept_browser_pdk_receipt(receipt);
+                    parts.model.pdk_config = candidate;
+                    parts.invalidate_simulation_preflight();
+                    emit_browser_pdk_storage_warning(parts, ctx, storage_status);
+                    parts.model.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        format!(
+                            "PDK settings applied: {} loaded.",
+                            crate::ui::accessibility::counted(loaded, "library", "libraries")
+                        ),
+                    );
                 }
             }
-            Err(error) => {
-                BROWSER_PDK_OWNER.with(|owner| {
-                    let mut owner = owner.borrow_mut();
-                    owner.phase = BrowserPdkPhase::Failed;
-                    owner.last_error = Some(error.clone());
-                });
-                let _ = intent;
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!(
-                        "PDK change was not applied because saving it to browser storage failed: \
-                         {error}"
-                    ),
-                );
-                // Re-read the authoritative head after a conflict or storage
-                // failure. A candidate that did not commit is never retried
-                // implicitly and never becomes live state.
-                start_restore(ctx);
-            }
+        }
+        Err(error) => {
+            BROWSER_PDK_OWNER.with(|owner| {
+                let mut owner = owner.borrow_mut();
+                owner.phase = BrowserPdkPhase::Failed;
+                owner.last_error = Some(error.clone());
+            });
+            let _ = intent;
+            parts.model.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "PDK change was not applied because saving it to browser storage failed: \
+                     {error}"
+                ),
+            );
+            // Re-read the authoritative head after a conflict or storage
+            // failure. A candidate that did not commit is never retried
+            // implicitly and never becomes live state.
+            start_restore(ctx);
         }
     }
+}
 
-    fn finish_rejected_browser_pdk_settings_rollback(
-        &mut self,
-        operation_generation: u64,
-        publication_error: &str,
-        result: Result<BrowserPdkConfigReceipt, String>,
-    ) {
-        let current = BROWSER_PDK_OWNER.with(|owner| {
-            let owner = owner.borrow();
-            owner.operation_generation == operation_generation
-                && owner.phase == BrowserPdkPhase::Publishing
-        });
-        if !current {
-            return;
+fn finish_rejected_browser_pdk_settings_rollback(
+    parts: &mut BrowserPdkParts<'_>,
+    operation_generation: u64,
+    publication_error: &str,
+    result: Result<BrowserPdkConfigReceipt, String>,
+) {
+    let current = BROWSER_PDK_OWNER.with(|owner| {
+        let owner = owner.borrow();
+        owner.operation_generation == operation_generation
+            && owner.phase == BrowserPdkPhase::Publishing
+    });
+    if !current {
+        return;
+    }
+    match result {
+        Ok(receipt) => {
+            accept_browser_pdk_receipt(receipt);
+            parts.model.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "PDK settings were not applied because the project could not take them; \
+                     browser storage was rolled back: {publication_error}"
+                ),
+            );
         }
-        match result {
-            Ok(receipt) => {
-                accept_browser_pdk_receipt(receipt);
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!(
-                        "PDK settings were not applied because the project could not take them; \
-                         browser storage was rolled back: {publication_error}"
-                    ),
-                );
-            }
-            Err(rollback_error) => {
-                let failure = format!(
-                    "the project could not take them: {publication_error}; browser storage \
-                     rollback failed: {rollback_error}"
-                );
-                fail_browser_pdk_owner(failure.clone());
-                self.state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!(
-                        "PDK settings were not applied, and browser storage could not be rolled \
-                         back. The open session is unchanged; recover browser PDK storage before \
-                         continuing: {failure}"
-                    ),
-                );
-            }
+        Err(rollback_error) => {
+            let failure = format!(
+                "the project could not take them: {publication_error}; browser storage \
+                 rollback failed: {rollback_error}"
+            );
+            fail_browser_pdk_owner(failure.clone());
+            parts.model.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!(
+                    "PDK settings were not applied, and browser storage could not be rolled \
+                     back. The open session is unchanged; recover browser PDK storage before \
+                     continuing: {failure}"
+                ),
+            );
         }
     }
 }
@@ -510,14 +533,15 @@ fn fail_browser_pdk_owner(error: String) {
 }
 
 fn emit_browser_pdk_storage_warning(
-    app: &mut RSpiceApp,
+    parts: &mut BrowserPdkParts<'_>,
     ctx: &Context,
     storage_status: BrowserPdkStorageStatus,
 ) {
     if let Some(warning) = storage_durability_warning(storage_status) {
-        app.state
+        parts
+            .model
             .record(LogSeverity::Warning, LogSource::Studio, warning);
-        app.state
+        parts
             .workbench
             .toasts
             .warn_with_title(ctx, "Back up browser PDK data", warning);

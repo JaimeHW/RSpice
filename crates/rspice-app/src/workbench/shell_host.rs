@@ -78,8 +78,8 @@ impl Host for RSpiceApp {
             // from the workspace's page.
             Point::Surface(workspace) => {
                 use crate::workbench::surfaces::{
-                    automation, design, library_cellview_manager, models, netlist,
-                    pdk_technology_admin, project, simulate, stimulus, verify,
+                    automation, design, library_cellview_manager, models, netlist, project,
+                    simulate, stimulus, verify,
                 };
 
                 if app.state.workbench.current_route().surface_id()
@@ -103,7 +103,7 @@ impl Host for RSpiceApp {
                 if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::PdkTechnologyAdmin
                 {
-                    pdk_technology_admin::show(ui, app);
+                    ModelsFeature::show_pdk_technology_admin(&mut features::cx(app), ui);
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()

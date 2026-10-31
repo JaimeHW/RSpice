@@ -7,6 +7,8 @@
 //! registry rather than a dead end.
 
 use super::*;
+use crate::workbench::RSpiceApp;
+use crate::workbench::features;
 
 fn fixture_package() -> ValidatedPdkTechnologyPackage {
     let (bytes, trust, authority) = crate::state::pdk_config::signed_technology_test_fixture();
@@ -171,7 +173,7 @@ fn installed_revision_exposes_unsigned_authoring_entrypoint() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output
@@ -203,7 +205,7 @@ fn empty_surface_exposes_real_actions_and_honest_trust_boundary() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let nodes = output
@@ -247,7 +249,7 @@ fn phone_header_stacks_runtime_status_below_the_title_without_overlap() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let nodes = output
@@ -309,7 +311,7 @@ fn empty_registry_still_exposes_accessible_trust_root_provisioning() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output
@@ -369,7 +371,7 @@ fn display_profile_editor_is_accessible_at_phone_width_and_package_bound() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output
@@ -439,7 +441,7 @@ fn revision_comparison_fails_closed_at_phone_width_without_a_second_trusted_revi
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output
@@ -511,7 +513,7 @@ fn revision_comparison_table_is_complete_and_accessible_at_phone_width() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output
@@ -571,7 +573,7 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
 
     apply_action(
         &ctx,
-        &mut app,
+        &mut features::cx(&mut app),
         &mut view,
         AdminAction::RunProjectCallback {
             callback_id: "derive-device".to_owned(),
@@ -605,7 +607,7 @@ fn project_callback_workflow_executes_exact_pin_and_exposes_durable_receipt() {
             ..Default::default()
         },
         |ctx| {
-            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut app));
+            egui::CentralPanel::default().show(ctx, |ui| show(ui, &mut features::cx(&mut app)));
         },
     );
     let accessibility = output

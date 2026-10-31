@@ -87,7 +87,7 @@ pub(crate) use rspice_app_sheets::workbench::app::drawing_sheet_edit;
 #[cfg(target_arch = "wasm32")]
 mod pack_persistence;
 #[cfg(target_arch = "wasm32")]
-mod pdk_persistence;
+pub(in crate::workbench) mod pdk_persistence;
 mod schematic;
 
 #[cfg(target_arch = "wasm32")]

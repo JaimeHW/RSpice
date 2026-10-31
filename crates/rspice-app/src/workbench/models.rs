@@ -50,6 +50,31 @@ impl Feature for ModelsFeature {
     }
 }
 
+#[cfg(target_arch = "wasm32")]
+impl ModelsFeature {
+    /// Take what browser PDK storage settled since the last frame: a
+    /// restored or published configuration goes live and drops the run
+    /// preflight, and a failure is logged.
+    pub(in crate::workbench) fn poll_browser_pdk_persistence(
+        cx: &mut Cx<'_, ModelsFeature>,
+        ctx: &egui::Context,
+    ) {
+        use crate::workbench::app::pdk_persistence::{
+            BrowserPdkParts, poll_browser_pdk_persistence,
+        };
+        poll_browser_pdk_persistence(
+            &mut BrowserPdkParts {
+                model: cx.model,
+                workbench: cx.wb,
+                platform: cx.platform,
+                preflight: &mut cx.runs.preflight,
+                run_controller: cx.handles.run_controller,
+            },
+            ctx,
+        );
+    }
+}
+
 /// The Models workspace's navigator: its pages and the loaded model
 /// libraries.
 fn show_navigator(cx: &mut Cx<'_, ModelsFeature>, ui: &mut egui::Ui) {

@@ -13,6 +13,8 @@ use egui::{CentralPanel, Context, Frame};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::tokens::Tokens;
 use crate::workbench::cloud::CloudFeature;
+#[cfg(target_arch = "wasm32")]
+use crate::workbench::models::ModelsFeature;
 use crate::workbench::results::ResultsFeature;
 use crate::workbench::results::commands::ResultsCommand;
 
@@ -232,6 +234,13 @@ impl RSpiceApp {
     /// context.
     pub(crate) fn record_publish_receipt(&mut self) {
         CloudFeature::record_publish_receipt(&mut features::cx(self));
+    }
+
+    /// Have the models feature take what browser PDK storage settled since
+    /// the last frame, in its context.
+    #[cfg(target_arch = "wasm32")]
+    pub(in crate::workbench) fn poll_browser_pdk_persistence(&mut self, ctx: &Context) {
+        ModelsFeature::poll_browser_pdk_persistence(&mut features::cx(self), ctx);
     }
 }
 
