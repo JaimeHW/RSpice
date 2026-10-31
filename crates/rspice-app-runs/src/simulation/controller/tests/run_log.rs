@@ -160,6 +160,9 @@ fn a_run_writes_its_start_and_end_in_the_session_and_its_account_in_its_own_log(
 fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
     crate::diagnostics::engine_log::studio_logger_for_tests();
     let export_io = MockExportWorkflowIo::default();
+    // A second analysis keeps the batch running after the call that starts
+    // it: a one-analysis deck can finish inside that call on a fast host,
+    // before the test reads which run it is.
     let (mut state, mut controller) = start_manual_batch(
         "* dropped control command\n\
          V1 in 0 DC 1\n\
@@ -169,6 +172,7 @@ fn a_typed_decks_parse_warnings_are_warnings_in_its_runs_log() {
          .control\n\
          print v(in)\n\
          .endc\n\
+         .dc V1 0 1 0.5\n\
          .end\n",
     );
     let run_sequence = controller.current_run_id.expect("the deck has a run");
