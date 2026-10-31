@@ -34,6 +34,112 @@
     U+25CE-25CF, U+25FB-25FC, U+2605-2606, U+26A0-26A1, U+2715, U+2717, U+27C2,
     U+2B58;
 }
+/* The face the page and its figures letter their text in, as the product
+   paints and prints it, in the three weights they use. */
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-regular.ttf") format("truetype");
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-medium.ttf") format("truetype");
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-semibold.ttf") format("truetype");
+}
+/* Arabic, Hebrew and Thai join the family for the characters each letters
+   in the product's chain, and only those, so a reader fetches one only for
+   text in its script, and a bundle carries one only then. */
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-arabic-regular.ttf") format("truetype");
+  unicode-range: U+0600-0604, U+0606-061B, U+061E-06A1, U+06A3-06FF, U+0750-077F, U+08A0,
+    U+08A2-08AC, U+08B3, U+08E4-08FE, U+25CC, U+FB51, U+FB53-FB55, U+FB57-FB59,
+    U+FB5B-FB5D, U+FB5F-FB61, U+FB63-FB65, U+FB67-FB69, U+FB6B-FB6D,
+    U+FB6F-FB71, U+FB73-FB75, U+FB77-FB79, U+FB7B-FB7D, U+FB7F-FB81, U+FB83,
+    U+FB85, U+FB87, U+FB89, U+FB8B, U+FB8D, U+FB8F-FB91, U+FB93-FB95,
+    U+FB97-FB99, U+FB9B-FB9D, U+FB9F, U+FBA1, U+FBA5, U+FBA7-FBA9, U+FBAB-FBAD,
+    U+FBAF, U+FBB1-FBC1, U+FBD4-FBD6, U+FBD8, U+FBDA, U+FBDC, U+FBDF, U+FBE1,
+    U+FBE3, U+FBE5-FBE9, U+FBFD-FBFF, U+FC03-FC04, U+FC09-FC0A, U+FC0F-FC10,
+    U+FC13-FC14, U+FC31-FC32, U+FC35-FC36, U+FC3D-FC3E, U+FC42-FC44,
+    U+FC4F-FC50, U+FC59-FC5D, U+FC64-FC65, U+FC67-FC6B, U+FC6D-FC71,
+    U+FC73-FC77, U+FC79-FC7B, U+FC83-FC84, U+FC8A-FC8B, U+FC8D-FC92,
+    U+FC94-FC96, U+FCCC, U+FCD9, U+FCF2-FCF4, U+FCFB-FCFE, U+FD05-FD08,
+    U+FD0D-FD10, U+FD17-FD1A, U+FD21-FD24, U+FD29-FD2C, U+FD3C-FD3F,
+    U+FDF1-FDF2, U+FDF4, U+FDFA-FDFD, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-arabic-semibold.ttf") format("truetype");
+  unicode-range: U+0600-0604, U+0606-061B, U+061E-06A1, U+06A3-06FF, U+0750-077F, U+08A0,
+    U+08A2-08AC, U+08B3, U+08E4-08FE, U+25CC, U+FB51, U+FB53-FB55, U+FB57-FB59,
+    U+FB5B-FB5D, U+FB5F-FB61, U+FB63-FB65, U+FB67-FB69, U+FB6B-FB6D,
+    U+FB6F-FB71, U+FB73-FB75, U+FB77-FB79, U+FB7B-FB7D, U+FB7F-FB81, U+FB83,
+    U+FB85, U+FB87, U+FB89, U+FB8B, U+FB8D, U+FB8F-FB91, U+FB93-FB95,
+    U+FB97-FB99, U+FB9B-FB9D, U+FB9F, U+FBA1, U+FBA5, U+FBA7-FBA9, U+FBAB-FBAD,
+    U+FBAF, U+FBB1-FBC1, U+FBD4-FBD6, U+FBD8, U+FBDA, U+FBDC, U+FBDF, U+FBE1,
+    U+FBE3, U+FBE5-FBE9, U+FBFD-FBFF, U+FC03-FC04, U+FC09-FC0A, U+FC0F-FC10,
+    U+FC13-FC14, U+FC31-FC32, U+FC35-FC36, U+FC3D-FC3E, U+FC42-FC44,
+    U+FC4F-FC50, U+FC59-FC5D, U+FC64-FC65, U+FC67-FC6B, U+FC6D-FC71,
+    U+FC73-FC77, U+FC79-FC7B, U+FC83-FC84, U+FC8A-FC8B, U+FC8D-FC92,
+    U+FC94-FC96, U+FCCC, U+FCD9, U+FCF2-FCF4, U+FCFB-FCFE, U+FD05-FD08,
+    U+FD0D-FD10, U+FD17-FD1A, U+FD21-FD24, U+FD29-FD2C, U+FD3C-FD3F,
+    U+FDF1-FDF2, U+FDF4, U+FDFA-FDFD, U+FE70-FE74, U+FE76-FEFC;
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-hebrew-regular.ttf") format("truetype");
+  unicode-range: U+05B0-05BC, U+05BE-05BF, U+05C1-05C2, U+05D0-05EA, U+05F0-05F4,
+    U+FB1F-FB20, U+FB2A-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44,
+    U+FB46-FB4F;
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-hebrew-semibold.ttf") format("truetype");
+  unicode-range: U+05B0-05BC, U+05BE-05BF, U+05C1-05C2, U+05D0-05EA, U+05F0-05F4,
+    U+FB1F-FB20, U+FB2A-FB36, U+FB38-FB3C, U+FB3E, U+FB40-FB41, U+FB43-FB44,
+    U+FB46-FB4F;
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-thai-regular.ttf") format("truetype");
+  unicode-range: U+02D7, U+0331, U+034F, U+0E01-0E3A, U+0E40-0E5B, U+2060, U+2638,
+    U+EC00-EC0B, U+EC10-EC12;
+}
+@font-face {
+  font-family: "RSpice Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("fonts/ibm-plex-sans-thai-semibold.ttf") format("truetype");
+  unicode-range: U+02D7, U+0331, U+034F, U+0E01-0E3A, U+0E40-0E5B, U+2060, U+2638,
+    U+EC00-EC0B, U+EC10-EC12;
+}
 
 :root {
   color-scheme: light;
@@ -150,7 +256,7 @@ body {
   min-width: 280px;
   background: var(--page-bg);
   color: var(--text);
-  font: 15px/1.5 "IBM Plex Sans", "RSpice Symbols", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
+  font: 15px/1.5 "RSpice Plex Sans", "RSpice Symbols", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   text-rendering: optimizeLegibility;
 }
 button, input, select { font: inherit; }
@@ -225,11 +331,11 @@ h1 { grid-area: title; max-width: 30ch; margin: 0; font-size: clamp(1.65rem, 2.6
 .tabbar-wrap { position: sticky; z-index: 15; top: 0; min-width: 0; margin: 0; padding: 5px 0 9px; background: var(--paper); }
 .tabbar { display: flex; width: fit-content; max-width: 100%; gap: 2px; overflow-x: auto; padding: 4px; border-radius: 6px; background: var(--surface); scrollbar-width: none; }
 .tabbar::-webkit-scrollbar { display: none; }
-.tabbar a { position: relative; flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .72rem; border-radius: 3px; color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "RSpice Symbols", "Segoe UI", sans-serif; letter-spacing: .005em; text-decoration: none; }
+.tabbar a { position: relative; flex: 0 0 auto; min-height: 34px; display: inline-flex; align-items: center; gap: .5rem; padding: .4rem .72rem; border-radius: 3px; color: var(--muted); font: 600 .75rem/1.2 "RSpice Plex Sans", "RSpice Symbols", "Segoe UI", sans-serif; letter-spacing: .005em; text-decoration: none; }
 .tabbar a:hover { background: var(--surface-strong); color: var(--text); }
 .tabbar a[aria-current="page"] { background: var(--paper); color: var(--text); }
 .tabbar a[aria-current="page"]::before { width: 6px; height: 6px; flex: 0 0 auto; border-radius: 1px; background: var(--brand); content: ""; }
-.tab-count { color: var(--muted); font: 600 .75rem/1.2 "IBM Plex Sans", "RSpice Symbols", "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; opacity: .78; }
+.tab-count { color: var(--muted); font: 600 .75rem/1.2 "RSpice Plex Sans", "RSpice Symbols", "Segoe UI", sans-serif; font-variant-numeric: tabular-nums; opacity: .78; }
 .tabbar a[aria-current="page"] .tab-count { color: var(--muted); }
 
 .content { min-width: 0; padding: 0; }

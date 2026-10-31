@@ -339,10 +339,28 @@ pub fn render_bundle(
         )?)
     };
 
-    bundle.insert(
-        "index.html".to_string(),
-        page::document(snapshot, snapshot_sha256_hex, &bundle, emission.as_ref()).into_bytes(),
-    );
+    // The faces the page's own text is lettered in, with or without
+    // figures.
+    for (path, bytes) in page::TEXT_FONTS {
+        bundle.insert(path.to_string(), bytes.to_vec());
+    }
+    let document =
+        page::document(snapshot, snapshot_sha256_hex, &bundle, emission.as_ref()).into_bytes();
+    // A face for a script Plex Sans lacks travels only with a page whose
+    // text, its own or its figures', is written in it.
+    let characters = std::iter::once(document.as_slice())
+        .chain(
+            bundle
+                .iter()
+                .filter(|(path, _)| path.ends_with(".svg"))
+                .map(|(_, bytes)| bytes.as_slice()),
+        )
+        .flat_map(|bytes| String::from_utf8_lossy(bytes).chars().collect::<Vec<_>>())
+        .collect();
+    for (path, bytes) in page::script_fonts(&characters) {
+        bundle.insert(path.to_string(), bytes.to_vec());
+    }
+    bundle.insert("index.html".to_string(), document);
     Ok(bundle)
 }
 

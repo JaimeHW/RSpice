@@ -24,6 +24,11 @@ use crate::escape_html;
 /// whichever face of the vendor's name a reader has installed.
 pub(crate) const PUBLISHED_MONO_FAMILY: &str = "RSpice Plex Mono";
 
+/// The family a figure's other text names first: IBM Plex Sans, which the
+/// page ships for its own text (see [`crate::page::TEXT_FONTS`]), with the
+/// faces for the scripts Plex Sans lacks filed under the same name.
+pub(crate) const PUBLISHED_SANS_FAMILY: &str = "RSpice Plex Sans";
+
 /// The family every figure stack names right after its Plex face, or first
 /// where it has none: RSpice Symbols, which the page ships for the
 /// engineering symbols no Plex face carries. Ahead of the system faces, a
@@ -316,7 +321,7 @@ pub fn scene_svg(scene: &Scene, accessible_title: &str) -> String {
     let width_mm = fmt_f64(scene.width_um as f64 / 1000.0);
     let height_mm = fmt_f64(scene.height_um as f64 / 1000.0);
     let mut svg = format!(
-        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'{PUBLISHED_SYMBOLS_FAMILY}', 'Segoe UI', system-ui, sans-serif\">",
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {} {}\" width=\"{width_mm}mm\" height=\"{height_mm}mm\" role=\"img\" aria-label=\"{}\" fill=\"none\" stroke-linecap=\"round\" stroke-linejoin=\"round\" font-family=\"'{PUBLISHED_SANS_FAMILY}', '{PUBLISHED_SYMBOLS_FAMILY}', 'Segoe UI', system-ui, sans-serif\">",
         fmt_um(scene.width_um as i64),
         fmt_um(scene.height_um as i64),
         escape_html(accessible_title),

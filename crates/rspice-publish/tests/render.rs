@@ -9,7 +9,7 @@ use rspice_publication_contract::{
     SimulationProvenance, SimulationSetting, SimulationWarning, Specification, Validate as _,
     WarningSeverity,
 };
-use rspice_publish::{ViewerRuntime, render_bundle};
+use rspice_publish::{PAGE_STYLES, ViewerRuntime, render_bundle};
 use sha2::{Digest as _, Sha256};
 
 const RC_LOWPASS: &str =
@@ -211,11 +211,27 @@ const CLOUD_SERVED_EXTENSIONS: [&str; 11] = [
     "html", "cir", "css", "csv", "json", "js", "png", "svg", "wasm", "ttf", "txt",
 ];
 
+/// The RC low-pass publication, titled in Arabic, Hebrew and Thai, so its
+/// bundle carries a face for each.
+fn scripts_titled() -> PublicationSnapshot {
+    let mut value = snapshot(RC_LOWPASS);
+    value.metadata.title = "مرشح RC מסנן ตัวกรอง".to_owned();
+    value
+}
+
+/// Every file of every bundle, including the faces for the scripts Plex Sans
+/// lacks, has a path and a type the cloud serves. The cloud has served
+/// lowercase `.ttf` paths under `assets/fonts/`, and `font-src 'self'`, since
+/// RSpice-Cloud 149f04b, so a new face there needs no cloud change.
 #[test]
 fn every_bundle_path_is_one_the_cloud_render_worker_accepts() {
-    for golden in [RC_LOWPASS, MULTI_ANALYSIS] {
-        let bundle =
-            render_bundle(&snapshot(golden), "0".repeat(64).as_str(), &viewer()).expect("render");
+    let goldens = [
+        snapshot(RC_LOWPASS),
+        snapshot(MULTI_ANALYSIS),
+        scripts_titled(),
+    ];
+    for value in goldens {
+        let bundle = render_bundle(&value, "0".repeat(64).as_str(), &viewer()).expect("render");
         for path in bundle.keys() {
             // The worker's canonical path grammar: lowercase ASCII letters,
             // digits, `.`, `_`, `-` and `/`, opening on a letter or digit,
@@ -630,12 +646,16 @@ fn withheld_sections_yield_no_assets_at_all() {
     assert_eq!(
         bundle.keys().collect::<Vec<_>>(),
         vec![
+            "assets/fonts/ibm-plex-sans-medium.ttf",
+            "assets/fonts/ibm-plex-sans-regular.ttf",
+            "assets/fonts/ibm-plex-sans-semibold.ttf",
+            "assets/fonts/ofl-ibm-plex.txt",
             "assets/page.css",
             "assets/page.js",
             "figure-manifest.json",
             "index.html"
         ],
-        "a fully withheld publication carries only the semantic shell, with no viewer runtime"
+        "a fully withheld publication carries only the semantic shell and the faces it is          lettered in, with no viewer runtime"
     );
     assert!(
         !utf8(&bundle["index.html"]).contains("rspice-hydration")
@@ -644,4 +664,160 @@ fn withheld_sections_yield_no_assets_at_all() {
             && !bundle.contains_key("assets/viewer.wasm"),
         "a figureless page carries no hydration handshake or viewer runtime"
     );
+}
+
+const SCRIPT_FACES: [(&str, rspice_fonts::Role, rspice_fonts::Face, u16); 6] = [
+    (
+        "ibm-plex-sans-arabic-regular.ttf",
+        rspice_fonts::Role::Sans,
+        rspice_fonts::Face::SansArabicRegular,
+        400,
+    ),
+    (
+        "ibm-plex-sans-arabic-semibold.ttf",
+        rspice_fonts::Role::SansSemibold,
+        rspice_fonts::Face::SansArabicSemibold,
+        600,
+    ),
+    (
+        "ibm-plex-sans-hebrew-regular.ttf",
+        rspice_fonts::Role::Sans,
+        rspice_fonts::Face::SansHebrewRegular,
+        400,
+    ),
+    (
+        "ibm-plex-sans-hebrew-semibold.ttf",
+        rspice_fonts::Role::SansSemibold,
+        rspice_fonts::Face::SansHebrewSemibold,
+        600,
+    ),
+    (
+        "ibm-plex-sans-thai-regular.ttf",
+        rspice_fonts::Role::Sans,
+        rspice_fonts::Face::SansThaiRegular,
+        400,
+    ),
+    (
+        "ibm-plex-sans-thai-semibold.ttf",
+        rspice_fonts::Role::SansSemibold,
+        rspice_fonts::Face::SansThaiSemibold,
+        600,
+    ),
+];
+
+/// Every bundle letters its page in IBM Plex Sans, at the three weights
+/// the stylesheet declares, and carries a face for a script Plex Sans lacks
+/// only when its text is written in that script.
+#[test]
+fn a_bundle_carries_the_faces_its_text_is_lettered_in_and_no_others() {
+    let latin =
+        render_bundle(&snapshot(RC_LOWPASS), "0".repeat(64).as_str(), &viewer()).expect("render");
+    let styles = utf8(&latin["assets/page.css"]).replace("\r\n", "\n");
+    for (file, weight) in [
+        ("ibm-plex-sans-regular.ttf", 400),
+        ("ibm-plex-sans-medium.ttf", 500),
+        ("ibm-plex-sans-semibold.ttf", 600),
+    ] {
+        assert!(
+            styles.contains(&format!(
+                "font-family: \"RSpice Plex Sans\";\n  font-style: normal;\n  font-weight: {weight};\n  font-display: swap;\n  src: url(\"fonts/{file}\")"
+            )),
+            "page.css must declare {file} at weight {weight}"
+        );
+        assert_eq!(
+            weight_class(&latin[&format!("assets/fonts/{file}")]),
+            weight
+        );
+    }
+    assert!(latin.contains_key("assets/fonts/ofl-ibm-plex.txt"));
+    assert!(
+        !latin.keys().any(|path| path.contains("arabic")
+            || path.contains("hebrew")
+            || path.contains("thai")),
+        "a Latin page carries no script face"
+    );
+    assert!(
+        utf8(&latin["index.html"]).contains("font-family=\"'RSpice Plex Sans', 'RSpice Symbols', "),
+        "the figures letter in the face the page ships"
+    );
+
+    let mut arabic = snapshot(RC_LOWPASS);
+    arabic.metadata.title = "مرشح RC".to_owned();
+    let arabic = render_bundle(&arabic, "0".repeat(64).as_str(), &viewer()).expect("render");
+    let scripts =
+        render_bundle(&scripts_titled(), "0".repeat(64).as_str(), &viewer()).expect("render");
+    for (file, _, face, weight) in SCRIPT_FACES {
+        let path = format!("assets/fonts/{file}");
+        assert_eq!(
+            arabic.contains_key(&path),
+            file.contains("arabic"),
+            "{file}"
+        );
+        assert_eq!(
+            scripts.get(&path).map(Vec::as_slice),
+            Some(face.bytes()),
+            "{file}"
+        );
+        assert_eq!(weight_class(face.bytes()), weight, "{file}");
+    }
+}
+
+/// The characters a script face letters in the product's chain, as a CSS
+/// `unicode-range`: those it has and no face before it in `role`'s chain
+/// has.
+fn chain_range(role: rspice_fonts::Role, face: rspice_fonts::Face) -> Vec<String> {
+    let mut ranges: Vec<(u32, u32)> = Vec::new();
+    for point in (0..=0x10_FFFF_u32).filter(|&point| {
+        char::from_u32(point).is_some_and(|character| role.face_for(character) == Some(face))
+    }) {
+        match ranges.last_mut() {
+            Some((_, last)) if *last + 1 == point => *last = point,
+            _ => ranges.push((point, point)),
+        }
+    }
+    ranges
+        .into_iter()
+        .map(|(first, last)| {
+            if first == last {
+                format!("U+{first:04X}")
+            } else {
+                format!("U+{first:04X}-{last:04X}")
+            }
+        })
+        .collect()
+}
+
+/// Each script face is filed under "RSpice Plex Sans" for exactly the
+/// characters it letters in the product's chain: a page draws each from
+/// the face the canvas and print draw it from, and fetches the face only
+/// for text in its script.
+#[test]
+fn each_script_face_serves_the_characters_it_letters_in_the_product() {
+    let styles = PAGE_STYLES.replace("\r\n", "\n");
+    let mut wanted = Vec::new();
+    for (file, role, face, weight) in SCRIPT_FACES {
+        let at = styles
+            .find(&format!("src: url(\"fonts/{file}\")"))
+            .unwrap_or_else(|| panic!("page.css declares {file}"));
+        let rule = &styles[styles[..at].rfind("@font-face").unwrap()..];
+        let rule = &rule[..rule.find('}').unwrap()];
+        assert!(
+            rule.contains("font-family: \"RSpice Plex Sans\";"),
+            "{rule}"
+        );
+        assert!(rule.contains(&format!("font-weight: {weight};")), "{rule}");
+        let declared: Vec<String> = rule
+            .split("unicode-range:")
+            .nth(1)
+            .and_then(|range| range.split(';').next())
+            .unwrap_or_default()
+            .split(',')
+            .map(|item| item.trim().to_owned())
+            .collect();
+        let expected = chain_range(role, face);
+        if declared != expected {
+            wanted.push(format!("{file}={}", expected.join(", ")));
+        }
+    }
+    assert!(wanted.is_empty(), "@@{}@@", wanted.join("@@"));
 }

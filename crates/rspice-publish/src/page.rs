@@ -8,7 +8,9 @@
 
 use std::fmt::Write as _;
 
-use rspice_fonts::Face;
+use std::collections::BTreeSet;
+
+use rspice_fonts::{Face, Role};
 use rspice_publication_contract::{
     Figure, FigureContent, FigurePresentation, PublicationSection, PublicationSnapshot, Scene,
     WarningSeverity,
@@ -29,11 +31,11 @@ pub const PAGE_STYLES: &str = include_str!("assets/page.css");
 /// Progressive page chrome, separate from the figure hydration loader.
 pub(crate) const PAGE_SCRIPT: &str = include_str!("assets/page.js");
 /// The faces the stylesheet declares for figure lettering, at the bundle
-/// paths it names, with the licences they are distributed under: the IBM
+/// paths it names, with the licence they are distributed under: the IBM
 /// Plex Mono cuts, and RSpice Symbols for the symbols Plex lacks. A bundle
-/// with figures carries all five files; one without carries none. Bundle
+/// with figures carries all four files; one without carries none. Bundle
 /// paths are lowercase because the cloud render worker refuses any other.
-pub(crate) const PAGE_FONTS: [(&str, &[u8]); 5] = [
+pub(crate) const PAGE_FONTS: [(&str, &[u8]); 4] = [
     (
         "assets/fonts/ibm-plex-mono-regular.ttf",
         Face::MonoRegular.bytes(),
@@ -41,10 +43,6 @@ pub(crate) const PAGE_FONTS: [(&str, &[u8]); 5] = [
     (
         "assets/fonts/ibm-plex-mono-medium.ttf",
         Face::MonoMedium.bytes(),
-    ),
-    (
-        "assets/fonts/ofl-ibm-plex.txt",
-        Face::MonoRegular.licence().as_bytes(),
     ),
     (
         "assets/fonts/rspice-symbols-regular.ttf",
@@ -55,6 +53,83 @@ pub(crate) const PAGE_FONTS: [(&str, &[u8]); 5] = [
         Face::Symbols.licence().as_bytes(),
     ),
 ];
+
+/// The faces every page letters its own text in, as the product does: IBM
+/// Plex Sans in the three weights the page and its figures use, and the
+/// licence every Plex face is distributed under.
+pub(crate) const TEXT_FONTS: [(&str, &[u8]); 4] = [
+    (
+        "assets/fonts/ibm-plex-sans-regular.ttf",
+        Face::SansRegular.bytes(),
+    ),
+    (
+        "assets/fonts/ibm-plex-sans-medium.ttf",
+        Face::SansMedium.bytes(),
+    ),
+    (
+        "assets/fonts/ibm-plex-sans-semibold.ttf",
+        Face::SansSemibold.bytes(),
+    ),
+    (
+        "assets/fonts/ofl-ibm-plex.txt",
+        Face::SansRegular.licence().as_bytes(),
+    ),
+];
+
+/// The faces for the scripts IBM Plex Sans lacks, at their bundle paths.
+/// The stylesheet files each under "RSpice Plex Sans" for the characters
+/// it letters in the product's chain, so a reader fetches one only for a
+/// page with text in its script.
+#[cfg(not(target_arch = "wasm32"))]
+const SCRIPT_FONTS: [(Face, &str); 6] = [
+    (
+        Face::SansArabicRegular,
+        "assets/fonts/ibm-plex-sans-arabic-regular.ttf",
+    ),
+    (
+        Face::SansArabicSemibold,
+        "assets/fonts/ibm-plex-sans-arabic-semibold.ttf",
+    ),
+    (
+        Face::SansHebrewRegular,
+        "assets/fonts/ibm-plex-sans-hebrew-regular.ttf",
+    ),
+    (
+        Face::SansHebrewSemibold,
+        "assets/fonts/ibm-plex-sans-hebrew-semibold.ttf",
+    ),
+    (
+        Face::SansThaiRegular,
+        "assets/fonts/ibm-plex-sans-thai-regular.ttf",
+    ),
+    (
+        Face::SansThaiSemibold,
+        "assets/fonts/ibm-plex-sans-thai-semibold.ttf",
+    ),
+];
+
+/// A browser build embeds no face for those scripts.
+#[cfg(target_arch = "wasm32")]
+const SCRIPT_FONTS: [(Face, &str); 0] = [];
+
+/// The script faces a page whose text holds `characters` letters in, at
+/// their bundle paths: only those, so a bundle never carries a face its
+/// page cannot ask for.
+pub(crate) fn script_fonts(characters: &BTreeSet<char>) -> Vec<(&'static str, &'static [u8])> {
+    let used: BTreeSet<Face> = characters
+        .iter()
+        .flat_map(|&character| {
+            [Role::Sans, Role::SansSemibold]
+                .into_iter()
+                .filter_map(move |role| role.face_for(character))
+        })
+        .collect();
+    SCRIPT_FONTS
+        .into_iter()
+        .filter(|(face, _)| used.contains(face))
+        .map(|(face, path)| (path, face.bytes()))
+        .collect()
+}
 
 struct AssetLink {
     path: String,
