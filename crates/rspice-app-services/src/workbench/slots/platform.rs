@@ -1,7 +1,7 @@
 //! The platform services' runtime state: what opening, saving and recovering
 //! a project keeps between frames, the recovery catalog included.
 
-use crate::services::recent_files::RecentKind;
+use crate::services::recent_files::{RecentFile, RecentKind};
 use rspice_app_state::workbench::app_state::model::Model;
 
 /// What the platform services keep open between frames.
@@ -67,6 +67,38 @@ impl Default for PlatformState {
             browser_project_binding_receipt: None,
         }
     }
+}
+
+/// Record a file in the recent-files list (most recent first, deduped,
+/// capped at Projects and files ▸ Recent projects listed). A file already
+/// listed keeps its pin, owner and tags.
+pub fn remember_recent_file(
+    model: &Model,
+    platform: &mut PlatformState,
+    kind: RecentKind,
+    path: &std::path::Path,
+) {
+    let previous = platform
+        .recent_files
+        .iter()
+        .find(|recent| recent.path == path)
+        .cloned();
+    let entry = RecentFile {
+        kind,
+        path: path.to_path_buf(),
+        opened_at_unix_ms: crate::time_compat::unix_epoch()
+            .as_millis()
+            .try_into()
+            .unwrap_or(u64::MAX),
+        pinned: previous.as_ref().is_some_and(|recent| recent.pinned),
+        owner: previous.as_ref().and_then(|recent| recent.owner.clone()),
+        tags: previous.map_or_else(Vec::new, |recent| recent.tags),
+    };
+    platform
+        .recent_files
+        .retain(|recent| recent.path != entry.path);
+    platform.recent_files.insert(0, entry);
+    trim_recent_files(model, platform);
 }
 
 /// Drop the oldest recent projects beyond what Projects and files ▸ Recent

@@ -42,7 +42,7 @@ mod transaction;
 pub(crate) use rspice_app_results::workbench::app_state::viewer_capabilities;
 pub(crate) use rspice_app_state::workbench::app_state::waivers;
 
-use crate::services::recent_files::{RecentFile, RecentKind};
+use crate::services::recent_files::RecentKind;
 use crate::state::notices::NoticeKind;
 use crate::state::{RunEvent, RunEventSink};
 use crate::workbench::documents::result_document::{ResultsParts, ResultsReads};
@@ -51,6 +51,8 @@ use crate::workbench::slots::{
     RunsState, SettingsState, SheetsState, ShellState, SimulateState,
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
+use rspice_app_services::workbench::slots::platform::remember_recent_file;
+#[cfg(test)]
 use rspice_app_services::workbench::slots::platform::trim_recent_files;
 
 pub(crate) use design_checks::{DesignCheckStatus, model_design_view, model_location_anchor};
@@ -893,31 +895,9 @@ impl AppState {
         self.model.log_buffer.clear();
     }
 
-    /// Record a file in the recent-files list (most recent first, deduped,
-    /// capped at Projects and files ▸ Recent projects listed).
+    /// [`remember_recent_file`] for this session's platform state.
     pub(crate) fn remember_recent_file(&mut self, kind: RecentKind, path: &std::path::Path) {
-        let previous = self
-            .platform
-            .recent_files
-            .iter()
-            .find(|recent| recent.path == path)
-            .cloned();
-        let entry = RecentFile {
-            kind,
-            path: path.to_path_buf(),
-            opened_at_unix_ms: crate::time_compat::unix_epoch()
-                .as_millis()
-                .try_into()
-                .unwrap_or(u64::MAX),
-            pinned: previous.as_ref().is_some_and(|recent| recent.pinned),
-            owner: previous.as_ref().and_then(|recent| recent.owner.clone()),
-            tags: previous.map_or_else(Vec::new, |recent| recent.tags),
-        };
-        self.platform
-            .recent_files
-            .retain(|recent| recent.path != entry.path);
-        self.platform.recent_files.insert(0, entry);
-        trim_recent_files(&self.model, &mut self.platform);
+        remember_recent_file(&self.model, &mut self.platform, kind, path);
     }
 
     /// Where a paste should land, snapped to the schematic grid: under the
