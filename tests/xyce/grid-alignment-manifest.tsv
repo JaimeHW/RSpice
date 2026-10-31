@@ -68,6 +68,7 @@ Netlists/MINDUCTORS/NonLinInductor.cir	index_aligned
 Netlists/MINDUCTORS/cpldLMIs.cir	index_aligned
 Netlists/MINDUCTORS/cpldLMIs_ic.cir	index_aligned
 Netlists/MINDUCTORS/mutIndPrint2.cir	index_aligned
+Netlists/REDUND_REMOVE/gnd_subckt.cir	index_aligned
 Netlists/SUBCKT/subckt_a.cir	index_aligned
 Netlists/SUBCKT/subckt_a0.cir	index_aligned
 Netlists/SUBCKT/subckt_a1.cir	index_aligned
@@ -77,6 +78,7 @@ Netlists/SUBCKT/subckt_a2_dup.cir	index_aligned
 Netlists/SUBCKT/subckt_a3.cir	index_aligned
 Netlists/SUBCKT/subckt_a3_hs.cir	index_aligned
 Netlists/SUBCKT/subckt_a4.cir	index_aligned
+Netlists/SUBCKT/subckt_a4_ends_warning.cir	index_aligned
 Netlists/SUBCKT/subckt_a4_hs.cir	index_aligned
 Netlists/SUBCKT/subckt_a5.cir	index_aligned
 Netlists/SUBCKT/subckt_a5_hs.cir	index_aligned
