@@ -31,7 +31,7 @@ pub(super) fn with_cx<R>(
             Some(&*state.cloud),
             Some(&*state.hardcopy),
             Some(&*state.results),
-            &*state.simulate,
+            Some(&*state.simulate),
             &*state.code,
             Some(&*state.models),
         ),

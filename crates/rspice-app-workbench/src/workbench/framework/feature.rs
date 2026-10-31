@@ -228,7 +228,9 @@ pub struct Peers<'a> {
     /// `None` in the results feature's own context: a feature reads its own
     /// state, never itself as a peer.
     results: Option<&'a dyn ResultsPort>,
-    simulate: &'a dyn SimulatePort,
+    /// `None` in simulate's own context, as `results` is in the results
+    /// feature's.
+    simulate: Option<&'a dyn SimulatePort>,
     code: &'a dyn CodePort,
     /// `None` in the models feature's own context, as `results` is in the
     /// results feature's.
@@ -241,7 +243,7 @@ impl<'a> Peers<'a> {
         cloud: Option<&'a dyn CloudPort>,
         hardcopy: Option<&'a dyn HardcopyPort>,
         results: Option<&'a dyn ResultsPort>,
-        simulate: &'a dyn SimulatePort,
+        simulate: Option<&'a dyn SimulatePort>,
         code: &'a dyn CodePort,
         models: Option<&'a dyn ModelsPort>,
     ) -> Self {
@@ -284,9 +286,12 @@ impl<'a> Peers<'a> {
             .expect("the results feature reads its own state, never itself as a peer")
     }
 
-    /// What simulate shows.
+    /// What simulate shows. Simulate's own context holds no such peer,
+    /// because the feature reads its own state; its code asking for one is
+    /// a fault in that code.
     pub fn simulate(&self) -> &'a dyn SimulatePort {
         self.simulate
+            .expect("simulate reads its own state, never itself as a peer")
     }
 
     /// What code shows.
@@ -385,6 +390,9 @@ pub struct Reads<'a, F: Feature> {
     /// Whether a project is open, and whether an operation on it is still
     /// in progress.
     pub platform: &'a PlatformState,
+    /// What the run tier keeps between frames: the runs in flight and the
+    /// run preflight among them.
+    pub runs: &'a RunsState,
     /// What the results workspace shows.
     pub results: &'a dyn ResultsPort,
     /// Every command the application registers, the other features' too.
@@ -398,6 +406,7 @@ impl<'a, F: Feature> Reads<'a, F> {
         model: &'a Model,
         wb: &'a F::Session,
         platform: &'a PlatformState,
+        runs: &'a RunsState,
         results: &'a dyn ResultsPort,
         commands: &'static Registry,
     ) -> Self {
@@ -407,6 +416,7 @@ impl<'a, F: Feature> Reads<'a, F> {
             model,
             wb,
             platform,
+            runs,
             results,
             commands,
         }

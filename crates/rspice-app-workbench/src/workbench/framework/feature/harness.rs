@@ -331,7 +331,7 @@ where
                 Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&NullPorts),
-                &NullPorts,
+                Some(&NullPorts),
                 &NullPorts,
                 Some(&NullPorts),
             ),
@@ -348,6 +348,7 @@ where
             &self.model,
             &self.wb,
             &self.platform,
+            &self.runs,
             &NullPorts,
             self.commands,
         ))
