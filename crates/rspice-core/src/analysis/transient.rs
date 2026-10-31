@@ -89,6 +89,30 @@ pub fn resolve_transient_maximum_step(
     Ok(maximum_step)
 }
 
+/// Resolve the solver ceiling for a `.TRAN` request in `dialect`.
+///
+/// The fields are validated as [`resolve_transient_maximum_step`] does, and an
+/// explicit `TMAX` wins in every dialect. Xyce never bounds the step by
+/// `TSTEP`, which only seeds its first step: an omitted `TMAX` is a tenth of
+/// the analysis window (Xyce 7.10 `N_TIA_StepErrorControl.C`
+/// `setFromTIAParams` and `updateMaxTimeStep`).
+pub fn resolve_dialect_transient_maximum_step(
+    dialect: crate::SpiceDialect,
+    step: Value,
+    stop: Value,
+    start: Option<Value>,
+    explicit_maximum_step: Option<Value>,
+) -> Result<Value, TransientMaximumStepError> {
+    let maximum_step = resolve_transient_maximum_step(step, stop, start, explicit_maximum_step)?;
+    if dialect != crate::SpiceDialect::Xyce || explicit_maximum_step.is_some() {
+        return Ok(maximum_step);
+    }
+    // The validated window keeps a tenth of it finite; it can only underflow,
+    // and then the ngspice default it already exceeds is the safe answer.
+    let window = stop - start.unwrap_or(0.0);
+    Ok((0.1 * window).max(maximum_step))
+}
+
 #[cfg(test)]
 mod maximum_step_tests {
     use super::*;
@@ -174,6 +198,43 @@ mod maximum_step_tests {
             resolve_transient_maximum_step(1.0e-6, 1.0e-3, Some(0.0), Some(0.0)),
             Ok(1.0e-6)
         );
+    }
+
+    #[test]
+    fn xyce_default_maximum_is_a_tenth_of_the_window_not_the_print_step() {
+        let xyce = crate::SpiceDialect::Xyce;
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 0.8, None, None),
+            Ok(0.1 * 0.8)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 16.0e-3, Some(6.0e-3), None),
+            Ok(0.1 * (16.0e-3 - 6.0e-3))
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(xyce, 1.0e-6, 1.0e-3, None, Some(1.0e-6)),
+            Ok(1.0e-6)
+        );
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(
+                crate::SpiceDialect::Ngspice,
+                1.0e-6,
+                0.8,
+                None,
+                None
+            ),
+            Ok(1.0e-6)
+        );
+        // A .TRAN with no print step is legal; Xyce's ceiling is still a
+        // tenth of the window.
+        assert_eq!(
+            resolve_dialect_transient_maximum_step(xyce, 0.0, 1.0, None, None),
+            Ok(0.1)
+        );
+        assert!(matches!(
+            resolve_dialect_transient_maximum_step(xyce, -1.0e-6, 1.0, None, None),
+            Err(TransientMaximumStepError::InvalidPrintStep { .. })
+        ));
     }
 
     #[test]

@@ -36,7 +36,10 @@ mod seed;
 mod topology;
 
 pub use crate::{
-    analysis::transient::{TransientMaximumStepError, resolve_transient_maximum_step},
+    analysis::transient::{
+        TransientMaximumStepError, resolve_dialect_transient_maximum_step,
+        resolve_transient_maximum_step,
+    },
     identity::{AnalysisInstanceId, AnalysisKind, RunCoordinateId},
     signal_unit::sweep_axis_unit,
 };

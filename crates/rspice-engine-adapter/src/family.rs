@@ -326,8 +326,12 @@ pub(crate) fn run_directive(
             max_step,
             uic,
         } => {
-            let ceiling = rspice_core::execution::resolve_transient_maximum_step(
-                *step, *stop, *start, *max_step,
+            let ceiling = rspice_core::execution::resolve_dialect_transient_maximum_step(
+                engine.resolved_for_netlist(netlist).config().spice_dialect,
+                *step,
+                *stop,
+                *start,
+                *max_step,
             )
             .map_err(|error| DirectiveFailure::InvalidAnalysis(error.to_string()))?;
             let result = engine.run_tran_with_startup_mode_and_abort(

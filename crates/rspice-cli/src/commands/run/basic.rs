@@ -653,7 +653,8 @@ pub(super) fn run_transient(
     // --tran-stop overrides the deck's stop time so checkpoint segments can
     // share byte-identical source (the checkpoint fingerprint covers it).
     let tstop = ctx.args.tran_stop.unwrap_or(tstop);
-    let internal_max_step = rspice_core::execution::resolve_transient_maximum_step(
+    let internal_max_step = rspice_core::execution::resolve_dialect_transient_maximum_step(
+        ctx.engine.config().spice_dialect,
         tstep,
         tstop,
         Some(tstart),
