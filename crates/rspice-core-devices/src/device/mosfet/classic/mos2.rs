@@ -766,7 +766,9 @@ impl Mosfet {
         if lvds.value <= 1.0e-10 {
             let gds = if self.mos2_fast_surface_state_density != 0.0 && oxide_cap != 0.0 {
                 if lvgs.value <= von.value {
-                    beta1 * (von - vbin - gamasd * sarg)
+                    // mos2load.c:918: the weak-inversion conductance decays
+                    // below von like the subthreshold current does.
+                    beta1 * (von - vbin - gamasd * sarg) * (argg * (lvgs - von)).exp()
                 } else {
                     beta1 * (lvgs - vbin - gamasd * sarg)
                 }
@@ -1363,12 +1365,8 @@ mod tests {
         assert!(gmb.is_finite(), "gmb={gmb:e}");
     }
 
-    #[test]
-    fn level2_negative_lateral_diffusion_lengthens_the_channel() {
-        // MCNC 1.25 um NMOS card (LD = -0.168u), reverse-biased in weak
-        // inversion. ngspice-46 `show` at vgs=0, vds=-0.6, vbs=-5:
-        // id=-1.65272e-8, von=1.34079, vdsat=0.142814. Clamping LD to zero
-        // shortens Leff from 1.336u to 1u and gives id=-8.18e-8.
+    /// MCNC 1.25 um NMOS card (LD = -0.168u, NFS = 4.55e12).
+    fn mcnc_weak_inversion_nmos() -> Mosfet {
         let mut params = HashMap::new();
         for (name, value) in [
             ("LEVEL", 2.0),
@@ -1391,14 +1389,32 @@ mod tests {
         ] {
             params.insert(name.to_string(), value);
         }
-        let mos = Mosfet::new_nmos("mn3".to_string(), 1, 2, 3, 4)
+        Mosfet::new_nmos("mn3".to_string(), 1, 2, 3, 4)
             .with_params(&params)
-            .with_geometry(5.0e-6, 1.0e-6);
+            .with_geometry(5.0e-6, 1.0e-6)
+    }
 
-        let eval = mos.level2_evaluate(0.0, -0.6, -5.0);
+    #[test]
+    fn level2_negative_lateral_diffusion_lengthens_the_channel() {
+        // Reverse-biased in weak inversion. ngspice-46 `show` at vgs=0,
+        // vds=-0.6, vbs=-5: id=-1.65272e-8, von=1.34079, vdsat=0.142814.
+        // Clamping LD to zero shortens Leff from 1.336u to 1u and gives
+        // id=-8.18e-8.
+        let eval = mcnc_weak_inversion_nmos().level2_evaluate(0.0, -0.6, -5.0);
         assert_relative(eval.id, -1.65272e-8, 2.0e-3);
         assert_relative(eval.von, 1.34079, 1.0e-4);
         assert_relative(eval.vdsat, 0.142814, 1.0e-4);
+    }
+
+    #[test]
+    fn level2_zero_vds_weak_inversion_conductance_decays_below_von() {
+        // The MODEINITJCT seed bias, vgs=VTO, vds=0, vbs=-1: ngspice-46
+        // `show` gives gds=2.60101e-6 with von=1.1141. Dropping
+        // exp(argg*(vgs-von)) makes it 2.4e-5.
+        let (id, _, gm, gds, _, _) =
+            mcnc_weak_inversion_nmos().level2_operating_point(0.761, 0.0, -1.0);
+        assert_eq!((id, gm), (0.0, 0.0));
+        assert_relative(gds, 2.60101e-6, 2.0e-3);
     }
 
     fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
