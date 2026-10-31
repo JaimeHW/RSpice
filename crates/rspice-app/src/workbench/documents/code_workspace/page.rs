@@ -794,6 +794,7 @@ pub struct CodeWorkspaceRuntimeState {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt;
     // These cover the receipt -> runtime adapter, so they stay with the
     // receipt. What they assert about the runtime itself now comes from
     // the engine layer.
@@ -828,8 +829,7 @@ mod tests {
         )
         .unwrap();
         let receipt =
-            super::super::compile_project_bundle_receipt(project_id, &bundle, Some(module_name))
-                .unwrap();
+            compile_project_bundle_receipt(project_id, &bundle, Some(module_name)).unwrap();
         receipt
             .compilation
             .prepare_runtime_with_alias(project_id, &bundle, alias)
@@ -867,7 +867,7 @@ mod tests {
             .unwrap();
         let bundle = registry.bundle_for_owner(&owner).unwrap();
         assert_eq!(bundle.id(), stable_id);
-        let receipt = super::super::compile_project_bundle_receipt(project_id, bundle, None)
+        let receipt = compile_project_bundle_receipt(project_id, bundle, None)
             .expect("edited current bundle compiles");
 
         let runtime = receipt.compilation.prepare_runtime(project_id, bundle);

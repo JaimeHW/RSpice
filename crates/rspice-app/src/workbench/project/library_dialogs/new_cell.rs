@@ -220,7 +220,7 @@ fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
         crate::state::CellViewRef::new(&library, &name, crate::state::workspace::VERILOGA_VIEW);
     let seeded_veriloga = if cx.state.new_cell_create_veriloga {
         let mut candidate_sources = cx.model.workspace.content.project_sources.clone();
-        match crate::workbench::app::dialogs::library::new_veriloga_device::seed_veriloga_view(
+        match crate::workbench::app_state::model::seed_veriloga_view(
             cx.model,
             &mut candidate_libraries,
             &mut candidate_sources,

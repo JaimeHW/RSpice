@@ -6,8 +6,7 @@
 use std::sync::{Arc, Mutex, mpsc};
 
 use rspice_veriloga::{
-    RuntimeCompileReport, RuntimeTarget, RuntimeTargetMaturity, RuntimeTargetReadiness,
-    VirtualRuntimeCompilation,
+    RuntimeCompileReport, RuntimeTargetMaturity, RuntimeTargetReadiness, VirtualRuntimeCompilation,
 };
 use sha2::Digest as _;
 
@@ -18,13 +17,16 @@ use crate::state::{
 };
 use crate::workbench::RSpiceApp;
 
+use rspice_app_state::workbench::app_state::model::{
+    apply_compiled_interface, diagnostic_capacity_failure, receipt_from_report,
+    with_interface_outcome,
+};
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
     CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, VerilogACompileOutcome,
     VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview, VerilogAReplaceTarget,
 };
-use crate::state::VerilogACompileReceipt;
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 #[cfg(target_arch = "wasm32")]
@@ -1121,7 +1123,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     }
                     let receipt = match receipt_bundle.as_ref().map(ProjectSourceBundle::owner) {
                         Some(ProjectSourceOwner::CellView { reference }) => {
-                            let applied = super::veriloga_interface::apply_compiled_interface(
+                            let applied = apply_compiled_interface(
                                 &mut app.state.model.library_manager,
                                 &app.state.model.workspace.content.schematic_buffers,
                                 reference,
@@ -1141,11 +1143,8 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                                     ),
                                 );
                             }
-                            let receipt = super::veriloga_interface::with_interface_outcome(
-                                receipt,
-                                reference,
-                                applied.outcome,
-                            );
+                            let receipt =
+                                with_interface_outcome(receipt, reference, applied.outcome);
                             super::veriloga_interface::offer_placement(
                                 &mut app.state.code.code_workspace.veriloga,
                                 receipt,
@@ -1431,108 +1430,11 @@ pub(crate) fn compile_project_bundle_virtual_for_provenance(
     .map_err(|error| error.to_string())
 }
 
-pub(crate) fn compile_project_bundle_receipt(
-    project_id: crate::product::ProjectId,
-    bundle: &ProjectSourceBundle,
-    selected_module: Option<&str>,
-) -> Result<VerilogACompileReceipt, Vec<CodeEditorDiagnostic>> {
-    let token = VerilogASourceOperationToken::capture(project_id, bundle, selected_module);
-    match rspice_simulation::project_veriloga::receipt::compile_project_bundle_receipt(
-        project_id,
-        bundle,
-        selected_module,
-    ) {
-        Ok((compilation, diagnostics)) => receipt_projection(compilation, diagnostics)
-            .map_err(|error| vec![diagnostic_capacity_failure(token, error)]),
-        Err(diagnostics) => Err(diagnostics
-            .into_iter()
-            .map(|diagnostic| {
-                let diagnostic = CodeEditorDiagnostic::from(diagnostic);
-                let document_id = diagnostic
-                    .source_path
-                    .clone()
-                    .unwrap_or_else(|| token.bundle_id.to_string().into());
-                diagnostic.bind_validation(
-                    document_id,
-                    token.revision,
-                    token.closure_digest.to_string(),
-                )
-            })
-            .collect()),
-    }
-}
-
-fn receipt_from_report(
-    token: VerilogASourceOperationToken,
-    report: &RuntimeCompileReport,
-    bundle: Option<&ProjectSourceBundle>,
-    cells: Option<&[rspice_veriloga::ExternalCell]>,
-    delay_select: rspice_veriloga::canonical_ir::digital::DigitalDelaySelect,
-) -> Result<VerilogACompileReceipt, String> {
-    let (compilation, diagnostics) =
-        rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt::from_report_against(
-            token,
-            report,
-            bundle,
-            cells,
-            delay_select,
-        )?;
-    receipt_projection(compilation, diagnostics)
-}
-
-fn receipt_projection(
-    compilation: rspice_simulation::project_veriloga::receipt::ProjectCompileReceipt,
-    diagnostics: Vec<rspice_simulation::project_veriloga::diagnostics::ProjectCompileDiagnostic>,
-) -> Result<VerilogACompileReceipt, String> {
-    let token = compilation.token();
-    let report = compilation.report();
-    let diagnostics = diagnostics
-        .into_iter()
-        .map(|diagnostic| {
-            CodeEditorDiagnostic::from(diagnostic).bind_validation(
-                token.bundle_id.to_string(),
-                token.revision,
-                token.closure_digest.to_string(),
-            )
-        })
-        .collect();
-    let diagnostics = Arc::new(CodeDiagnosticCollection::try_new(diagnostics)?);
-    Ok(VerilogACompileReceipt {
-        bytecode_available: report.targets.is_available(RuntimeTarget::BytecodeVm),
-        diagnostics,
-        compilation,
-        interface: None,
-        placement: None,
-    })
-}
-
-fn diagnostic_capacity_failure(
-    token: VerilogASourceOperationToken,
-    detail: String,
-) -> CodeEditorDiagnostic {
-    CodeEditorDiagnostic::current(
-        "rspice.diagnostics",
-        "DIAGNOSTIC-CAPACITY",
-        CodeEditorSeverity::Error,
-        "Diagnostic collection exceeded the supported maximum",
-        detail,
-        None,
-        None,
-        None,
-        None,
-        None,
-    )
-    .bind_validation(
-        token.bundle_id.to_string(),
-        token.revision,
-        token.closure_digest.to_string(),
-    )
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{Cell, CellViewRef, Library, ProjectSourceDocument, View};
+    use rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt;
 
     #[test]
     fn editor_and_execution_share_the_project_macro_expansion_contract() {

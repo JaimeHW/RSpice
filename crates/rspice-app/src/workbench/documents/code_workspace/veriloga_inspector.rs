@@ -22,10 +22,11 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
+use rspice_app_state::workbench::app_state::model::compiled_parameters;
 use rspice_design::library::metadata::{CellParameter, ParameterValueType};
 
 use super::page::VerilogAWorkbenchState;
-use super::veriloga_interface::{VerilogACellSymbol, VerilogASymbolDrift, compiled_parameters};
+use super::veriloga_interface::{VerilogACellSymbol, VerilogASymbolDrift};
 use super::{CodeEditorDiagnostic, CodeEditorSeverity, SelectedVerilogASource};
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 use crate::state::{VerilogACompileReceipt, VerilogAInterfaceOutcome};

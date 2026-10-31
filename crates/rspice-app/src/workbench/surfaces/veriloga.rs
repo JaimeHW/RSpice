@@ -387,9 +387,9 @@ fn interface_strip(
     state: &mut crate::workbench::app_state::AppState,
     selected: &crate::workbench::documents::code_workspace::SelectedVerilogASource,
 ) {
+    use crate::workbench::app_state::model::interface_mismatch_detail;
     use crate::workbench::documents::code_workspace::{
-        VerilogAInterfaceFinding, interface_finding, interface_mismatch_detail, symbol_drift_text,
-        veriloga_receipt,
+        VerilogAInterfaceFinding, interface_finding, symbol_drift_text, veriloga_receipt,
     };
 
     let crate::state::ProjectSourceOwner::CellView { reference } = selected.bundle().owner() else {

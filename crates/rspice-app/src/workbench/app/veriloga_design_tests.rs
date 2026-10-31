@@ -373,7 +373,7 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
 
     // The worker answers while Design is still the workspace on screen.
     let selected = code_workspace::selected_veriloga_source(&app).unwrap();
-    let receipt = code_workspace::compile_project_bundle_receipt(
+    let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),

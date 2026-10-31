@@ -31,22 +31,17 @@ use egui::Context;
 use rspice_design::symbol::generated::{PortEntryError, parse_port_entry};
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::VerilogAPlacementHandoff;
 use crate::state::workspace::{
-    VERILOGA_LIBRARY_NAME, VERILOGA_VIEW, starter_veriloga_source, verilog_module_name,
-    verilog_port_declaration,
+    VERILOGA_LIBRARY_NAME, VERILOGA_VIEW, verilog_module_name, verilog_port_declaration,
 };
-use crate::state::{
-    Cell, CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
-    ProjectSourceLanguage, ProjectSourceOwner, ProjectSourceRegistry, View, ViewType,
-};
-use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
+use crate::state::{Cell, CellViewRef, PortDirection, PortSpec, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::model::seed_veriloga_view;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
-use crate::workbench::app_state::{AppState, Model};
-use crate::workbench::documents::code_workspace::{
-    apply_receipt_interface, compile_project_bundle_receipt, writable_libraries,
-};
+use crate::workbench::documents::code_workspace::writable_libraries;
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Draft for New Verilog-A device….
@@ -237,73 +232,6 @@ fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
             ),
         }),
     }
-}
-
-/// Give the cell at `reference` a `veriloga` view holding a starter module
-/// for `ports`, with the interface and the generated symbol that module's
-/// compile defines, in `libraries` and `sources`. Both are copies: the caller
-/// publishes them only once everything here has been made.
-///
-/// New Verilog-A device… and New Cell's Verilog-A view both take this one
-/// path, so a cell made either way is the cell its first compile would make.
-pub(in crate::workbench) fn seed_veriloga_view(
-    model: &Model,
-    libraries: &mut LibraryManager,
-    sources: &mut ProjectSourceRegistry,
-    reference: &CellViewRef,
-    ports: &[PortSpec],
-) -> Result<VerilogACompileReceipt, String> {
-    let module_name = verilog_module_name(&reference.cell);
-    let mut bundle = ProjectSourceBundle::try_new(
-        ProjectSourceOwner::cell_view(reference.clone()),
-        ProjectSourceLanguage::VerilogA,
-        format!("{module_name}.va"),
-        starter_veriloga_source(&module_name, ports),
-        [],
-        [],
-    )
-    .map_err(|error| format!("The Verilog-A source could not be created: {error}"))?;
-    let receipt = compile_project_bundle_receipt(
-        model.workspace.content.project.id(),
-        &bundle,
-        Some(&module_name),
-    )
-    .map_err(|diagnostics| {
-        let detail = diagnostics
-            .first()
-            .map(|diagnostic| format!("{}: {}", diagnostic.message, diagnostic.detail))
-            .unwrap_or_else(|| "the compiler returned no diagnostic".to_owned());
-        format!("The starter module did not compile: {detail}")
-    })?;
-    bundle.mark_validated().map_err(|error| {
-        format!("The compiled starter module could not keep its validation identity: {error}")
-    })?;
-
-    // The view, then the source it owns, then the interface its compile
-    // defines, which writes `veriloga.ports` and the generated symbol.
-    let mut view = View::new(&reference.view, ViewType::VerilogA);
-    view.metadata
-        .insert("veriloga.module".to_owned(), module_name);
-    libraries
-        .edit_library(&reference.library)
-        .ok_or_else(|| format!("Library '{}' not found", reference.library))?
-        .add_view(&reference.cell, view)
-        .ok_or_else(|| {
-            format!(
-                "Cell '{}' not found in library '{}'",
-                reference.cell, reference.library
-            )
-        })?;
-    sources
-        .insert_bundle(bundle)
-        .map_err(|error| format!("The Verilog-A source could not be retained: {error}"))?;
-    apply_receipt_interface(
-        libraries,
-        &model.workspace.content.schematic_buffers,
-        reference,
-        receipt,
-    )
-    .map_err(|reason| format!("The module's ports could not become the cell's: {reason}"))
 }
 
 impl RSpiceApp {

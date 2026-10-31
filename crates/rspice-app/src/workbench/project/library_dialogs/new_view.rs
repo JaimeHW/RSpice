@@ -488,7 +488,7 @@ fn create_veriloga_cell_view(
             return false;
         }
     };
-    let receipt = match crate::workbench::documents::code_workspace::compile_project_bundle_receipt(
+    let receipt = match crate::workbench::app_state::model::compile_project_bundle_receipt(
         cx.model.workspace.content.project.id(),
         &bundle,
         Some(&module_name),

@@ -1,7 +1,9 @@
 //! What New Verilog-A device… refuses, and what it makes when it does not.
 
 use super::*;
-use crate::state::{Library, SymbolDocument};
+use crate::state::{
+    Library, ProjectSourceBundle, ProjectSourceLanguage, ProjectSourceOwner, SymbolDocument, View,
+};
 use rspice_design::library::metadata::decode_source_view_ports;
 use rspice_design::symbol::generated::is_generated_symbol;
 

@@ -11,7 +11,7 @@ use crate::simulation::veriloga_tests::test_support::{
 
 #[test]
 fn unified_mixed_project_compilation_preserves_profile_and_backend_requirements() {
-    use crate::workbench::documents::code_workspace::compile_project_bundle_receipt;
+    use crate::workbench::app_state::model::compile_project_bundle_receipt;
     let mut profile = build_profile::VerilogABuildProfile::starter("project_controlled");
     profile.include_paths.push("models".to_owned());
     profile

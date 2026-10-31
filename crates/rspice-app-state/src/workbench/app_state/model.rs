@@ -26,6 +26,8 @@ mod source_drift;
 mod symbol_context;
 #[cfg(any(test, feature = "test-support"))]
 mod test_technology;
+mod veriloga_compile;
+mod veriloga_interface;
 mod veriloga_parameters;
 
 pub use definition_index::DefinitionRow;
@@ -36,6 +38,13 @@ pub use owned_source::{
 #[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
+pub use veriloga_compile::{
+    compile_project_bundle_receipt, diagnostic_capacity_failure, receipt_from_report,
+};
+pub use veriloga_interface::{
+    AppliedInterface, apply_compiled_interface, compiled_parameters, interface_mismatch_detail,
+    port_electrical_type, seed_veriloga_view, with_interface_outcome,
+};
 pub use veriloga_parameters::{
     cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,
     is_instance_multiplicity, states_compiled_parameters,

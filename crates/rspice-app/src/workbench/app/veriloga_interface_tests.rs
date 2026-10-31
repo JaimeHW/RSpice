@@ -92,7 +92,7 @@ fn conductance(module: &str, header: &str, declarations: &str) -> String {
 /// poll, exactly as a worker's answer is published.
 pub(super) fn compile_and_publish(app: &mut RSpiceApp) {
     let selected = code_workspace::selected_veriloga_source(app).expect("a Verilog-A view is open");
-    let receipt = code_workspace::compile_project_bundle_receipt(
+    let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
         app.state.model.workspace.content.project.id(),
         selected.bundle(),
         selected.selected_module(),

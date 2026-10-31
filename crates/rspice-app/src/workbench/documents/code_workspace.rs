@@ -72,11 +72,10 @@ pub(crate) use source_search::{
 pub(crate) use veriloga::complete_veriloga_file_pick;
 pub(crate) use veriloga::{
     SelectedVerilogASource, active_veriloga_file_path, commit_veriloga_source_replacement,
-    compile_project_bundle_receipt, compile_project_bundle_virtual_for_provenance,
-    import_dropped_veriloga_source, replace_selected_veriloga_file, request_veriloga_compile,
-    request_veriloga_source_replacement, selected_veriloga_editor_snapshot,
-    selected_veriloga_source, viewed_veriloga_header, writable_libraries,
-    write_veriloga_build_profile,
+    compile_project_bundle_virtual_for_provenance, import_dropped_veriloga_source,
+    replace_selected_veriloga_file, request_veriloga_compile, request_veriloga_source_replacement,
+    selected_veriloga_editor_snapshot, selected_veriloga_source, viewed_veriloga_header,
+    writable_libraries, write_veriloga_build_profile,
 };
 pub use veriloga::{consume_veriloga_compile_request, poll_veriloga_compile, poll_veriloga_import};
 pub(crate) use veriloga_inspector::{
@@ -84,9 +83,8 @@ pub(crate) use veriloga_inspector::{
     veriloga_diagnostics, veriloga_receipt,
 };
 pub(crate) use veriloga_interface::{
-    VerilogACellSymbol, VerilogAInterfaceFinding, apply_receipt_interface, interface_check_finding,
-    interface_finding, interface_mismatch_detail, reconciled_symbol, refresh_symbol_standing,
-    symbol_standing,
+    VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
+    reconciled_symbol, refresh_symbol_standing, symbol_standing,
 };
 
 /// The cell view whose Verilog-A source a deck's `.veriloga` locator names.
