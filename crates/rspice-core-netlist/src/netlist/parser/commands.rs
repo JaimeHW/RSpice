@@ -1770,6 +1770,7 @@ pub fn option_package_key_is_known(key_upper: &str) -> bool {
             | "NONLIN-CONTINUATION"
             | "LOCA"
             | "OUTPUT"
+            | "PARSER"
             | "RESTART"
             | "HBINT"
             | "LINSOL-HB"
@@ -8770,6 +8771,19 @@ mod tests {
         let ngspice =
             parse_in(deck, crate::config::SpiceDialect::Ngspice).expect("ngspice deck parses");
         assert_ne!(ngspice.params.get("p"), Some(1e4));
+    }
+
+    /// Xyce spells the geometry scale `.options parser scale=`; it is the
+    /// same factor as `.options scale`, with no "unknown key" warning.
+    #[test]
+    fn xyce_parser_scale_is_the_geometry_scale() {
+        let netlist = parse_in(
+            "parser scale\nV1 1 0 1\nR1 1 0 1k\n.options parser scale=1.0e-6\n.op\n.end\n",
+            crate::config::SpiceDialect::Xyce,
+        )
+        .expect("parser scale parses");
+        assert_eq!(netlist.options.scale, Some(1e-6));
+        assert!(netlist.diagnostics.is_empty(), "{:?}", netlist.diagnostics);
     }
 
     /// `numfreq=11,7` lists one count per tone, as `numfreq=11 numfreq2=7`.
