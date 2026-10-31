@@ -87,8 +87,7 @@ impl RSpiceApp {
                 );
                 if project_action
                     && self.state.models.model_editor_has_unsaved_changes()
-                    && let Err(error) =
-                        crate::workbench::documents::model_editor::save_open_candidate(self)
+                    && let Err(error) = self.save_open_model_candidate()
                 {
                     self.state.record(
                         LogSeverity::Error,
@@ -224,7 +223,7 @@ impl RSpiceApp {
         destination: crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination,
     ) {
         if self.state.models.model_editor_has_unsaved_changes()
-            && let Err(error) = crate::workbench::documents::model_editor::save_open_candidate(self)
+            && let Err(error) = self.save_open_model_candidate()
         {
             self.state.record(
                 LogSeverity::Error,

@@ -36,7 +36,6 @@ use crate::state::model_library::{
     QualificationVectorDispositionCause, QualificationVectorRequiredAction,
     ReleaseCandidateIdentity, RequiredDocumentation,
 };
-use crate::workbench::RSpiceApp;
 use sha2::{Digest as _, Sha256};
 
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};

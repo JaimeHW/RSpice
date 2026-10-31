@@ -251,7 +251,9 @@ impl DisplayCell {
 }
 
 pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    crate::workbench::documents::model_editor::advance_qualification_execution(app);
+    crate::workbench::documents::model_editor::advance_qualification_execution(
+        &mut app.state.model_editor_parts(),
+    );
     if app
         .state
         .models

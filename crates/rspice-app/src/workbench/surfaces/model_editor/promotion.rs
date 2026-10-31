@@ -210,7 +210,7 @@ pub(super) fn promotion_review_dialog(
         DialogChoice::Primary if promotable => {
             if let Some(candidate) = candidate.as_ref() {
                 crate::workbench::documents::model_editor::promote_open_candidate(
-                    app,
+                    &mut app.state.model_editor_parts(),
                     &candidate.identity.id,
                 );
             }

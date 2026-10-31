@@ -947,7 +947,7 @@ pub(super) fn execute_qualification_action(app: &mut RSpiceApp, action: Qualific
         }
         QualificationPageAction::RunSuite => {
             app.state.models.model_editor.active_section = ModelEditorSection::Tests;
-            model_editor::validate_open_candidate(app);
+            model_editor::validate_open_candidate(&mut app.state.model_editor_parts());
             let key = ModelsCommand::ModelRunQualificationTests.key();
             if app.command_key_enabled(key) {
                 app.execute_command_key(key);

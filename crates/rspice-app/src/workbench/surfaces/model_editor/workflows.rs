@@ -94,7 +94,7 @@ pub(super) fn save_revision_workflow(
     });
     match choice {
         DialogChoice::Primary if writable && dirty => {
-            match crate::workbench::documents::model_editor::save_open_candidate(app) {
+            match app.save_open_model_candidate() {
                 // The save records its own line.
                 Ok(_) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
@@ -189,7 +189,9 @@ pub(super) fn validation_review_workflow(
     };
     match choice {
         DialogChoice::Primary if !prepared => {
-            crate::workbench::documents::model_editor::validate_open_candidate(app);
+            crate::workbench::documents::model_editor::validate_open_candidate(
+                &mut app.state.model_editor_parts(),
+            );
             prepare_model_editor_workflow();
         }
         DialogChoice::Primary | DialogChoice::Secondary | DialogChoice::Cancelled => {
@@ -364,7 +366,9 @@ pub(super) fn qualification_run_workflow(
     });
     match choice {
         DialogChoice::Primary if runnable => {
-            match crate::workbench::documents::model_editor::start_qualification_execution(app) {
+            match crate::workbench::documents::model_editor::start_qualification_execution(
+                &mut app.state.model_editor_parts(),
+            ) {
                 Ok(()) => close_model_editor_workflow(),
                 Err(error) => set_model_editor_workflow_error(error),
             }

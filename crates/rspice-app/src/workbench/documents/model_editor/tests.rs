@@ -5,6 +5,7 @@
 //! happen entirely or not at all.
 
 use super::*;
+use crate::workbench::RSpiceApp;
 
 fn definition() -> ProjectModelDefinition {
     ProjectModelDefinition {
@@ -308,8 +309,9 @@ fn editing_one_model_preserves_a_qualified_sectioned_sibling_revision() {
         .qualification_authoring
         .model_section = "TT".to_owned();
     assert!(app.state.models.model_editor.commit_qualification_suite());
-    start_qualification_execution(&mut app).expect("start desktop qualification");
-    advance_qualification_execution(&mut app);
+    start_qualification_execution(&mut app.state.model_editor_parts())
+        .expect("start desktop qualification");
+    advance_qualification_execution(&mut app.state.model_editor_parts());
 
     let draft = app
         .state
@@ -932,7 +934,9 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
         .expect("parameter")
         .value = "0.51".to_owned();
 
-    let committed_project_revision = save_open_candidate(&mut app).expect("publish model revision");
+    let committed_project_revision = app
+        .save_open_model_candidate()
+        .expect("publish model revision");
     assert_eq!(
         committed_project_revision,
         starting_project_revision.next().expect("project revision")
@@ -969,7 +973,7 @@ fn save_controller_publishes_once_and_reopens_the_committed_revision() {
     assert!(app.state.models.model_editor.validation.is_some());
 
     assert!(
-        save_open_candidate(&mut app)
+        app.save_open_model_candidate()
             .expect_err("unchanged draft must not publish another revision")
             .contains("no semantic changes")
     );
@@ -1056,7 +1060,8 @@ fn sectioned_editor_publishes_metadata_only_revision_without_losing_execution_se
         .unwrap()
         .unit = "V".to_owned();
 
-    save_open_candidate(&mut app).expect("save metadata-only revision");
+    app.save_open_model_candidate()
+        .expect("save metadata-only revision");
     let library = app
         .state
         .model
@@ -1259,7 +1264,7 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
         "{:?}",
         app.state.models.model_editor.qualification_authoring.error
     );
-    assert!(start_qualification_execution(&mut app).is_ok());
+    assert!(start_qualification_execution(&mut app.state.model_editor_parts()).is_ok());
     assert!(
         app.state
             .models
@@ -1272,7 +1277,7 @@ fn cooperative_qualification_publishes_only_a_complete_platform_run() {
             .is_empty()
     );
 
-    advance_qualification_execution(&mut app);
+    advance_qualification_execution(&mut app.state.model_editor_parts());
     assert!(
         app.state
             .models
@@ -1318,7 +1323,12 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
     }
     assert!(app.state.models.model_editor.commit_qualification_suite());
 
-    start_qualification_vector_execution(&mut app, "dc-second", "second-vector").unwrap();
+    start_qualification_vector_execution(
+        &mut app.state.model_editor_parts(),
+        "dc-second",
+        "second-vector",
+    )
+    .unwrap();
     assert_eq!(
         app.state
             .models
@@ -1329,8 +1339,17 @@ fn selected_vector_rerun_executes_only_its_complete_suite() {
             .suite_ids,
         vec!["dc-second".to_owned()]
     );
-    assert!(cancel_qualification_execution(&mut app));
-    assert!(start_qualification_vector_execution(&mut app, "dc-second", "missing-vector").is_err());
+    assert!(cancel_qualification_execution(
+        &mut app.state.model_editor_parts()
+    ));
+    assert!(
+        start_qualification_vector_execution(
+            &mut app.state.model_editor_parts(),
+            "dc-second",
+            "missing-vector"
+        )
+        .is_err()
+    );
 }
 
 fn populate_complete_promotion_candidate(editor: &mut ModelEditorState) {
@@ -1386,8 +1405,8 @@ fn governed_candidate_creation_and_promotion_are_complete_and_atomic() {
         .expect("open editor");
     populate_operating_point_suite(&mut app.state.models.model_editor);
     assert!(app.state.models.model_editor.commit_qualification_suite());
-    assert!(start_qualification_execution(&mut app).is_ok());
-    advance_qualification_execution(&mut app);
+    assert!(start_qualification_execution(&mut app.state.model_editor_parts()).is_ok());
+    advance_qualification_execution(&mut app.state.model_editor_parts());
 
     let draft = app.state.models.model_editor.draft.as_mut().expect("draft");
     let desktop = draft.qualification.platform_runs[0].clone();

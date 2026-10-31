@@ -323,6 +323,25 @@ impl RSpiceApp {
         }
     }
 
+    /// Save the model editor's open candidate as one guarded project
+    /// revision, as the file actions do before they go on: a revision that
+    /// changes the model's definition drops the run's preflight and the run
+    /// it prepared.
+    pub(crate) fn save_open_model_candidate(
+        &mut self,
+    ) -> Result<crate::product::ObjectRevision, String> {
+        let state = &mut self.state;
+        crate::workbench::documents::model_editor::save_open_candidate(
+            &mut state.models.model_editor_parts(
+                &mut state.model,
+                &mut state.workbench,
+                &state.platform,
+            ),
+            &mut state.runs.preflight,
+            &mut self.simulation_controller,
+        )
+    }
+
     /// Drop every authorization and presentation artifact derived from a
     /// mutable simulation input. Call this at the same commit boundary as
     /// plan, PVT, solver-option, model, variable, output, or topology edits.

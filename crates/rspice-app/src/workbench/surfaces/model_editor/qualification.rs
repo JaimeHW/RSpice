@@ -350,7 +350,8 @@ fn qualification_plan_actions(
     {
         plan.action_error =
             crate::workbench::documents::model_editor::start_qualification_suite_execution(
-                app, &suite.id,
+                &mut app.state.model_editor_parts(),
+                &suite.id,
             )
             .err();
     }
@@ -363,7 +364,9 @@ fn qualification_plan_actions(
     {
         plan.action_error =
             crate::workbench::documents::model_editor::start_qualification_vector_execution(
-                app, &suite.id, &vector.id,
+                &mut app.state.model_editor_parts(),
+                &suite.id,
+                &vector.id,
             )
             .err();
     }
@@ -1260,7 +1263,9 @@ fn qualification_execution_status(ui: &mut Ui, app: &mut RSpiceApp) {
         node.set_label(accessible_status);
     });
     if cancel_clicked {
-        crate::workbench::documents::model_editor::cancel_qualification_execution(app);
+        crate::workbench::documents::model_editor::cancel_qualification_execution(
+            &mut app.state.model_editor_parts(),
+        );
     }
 }
 
