@@ -725,6 +725,10 @@ impl B3SoiFd {
 }
 
 impl NonlinearDevice for B3SoiFd {
+    fn reopen_operating_point(&mut self) {
+        self.reset_operating_point_history();
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         // b3soifdld.c:377 loads a marked instance at
         // `delTemp = vps = vbs = vgs = vds = ves = 0` on MODEINITJCT, in every

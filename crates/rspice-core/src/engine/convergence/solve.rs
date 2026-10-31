@@ -1507,8 +1507,8 @@ impl Engine {
         // it back. ngspice starts each operating-point aid afresh, zeroing the
         // node vector and the device state (cktop.c: dynamic_gmin, new_gmin,
         // gillespie_src), so the aids here restart from the direct Newton's
-        // own seed; GMIN and source stepping also return the B3SOI devices to
-        // their junction start.
+        // own seed; every aid also reopens the devices on their MODEINITJCT
+        // load.
         let mut fallback_seed = if circuit.has_b3soi_devices() {
             Self::sanitize_initial_guess(&startup_seed, solution.len())
         } else {
@@ -1569,7 +1569,6 @@ impl Engine {
             }
             let thermal_state = circuit.nonlinear_state_snapshot();
             circuit.set_b3soi_self_heating_startup_disabled(true);
-            circuit.reset_b3soi_operating_point_history();
             let mut electrical_seed = fallback_seed.clone();
             circuit.zero_b3soi_self_heating_temperature_guess(&mut electrical_seed);
             let node_count = circuit.num_nodes().min(electrical_seed.len());

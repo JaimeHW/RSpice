@@ -612,10 +612,25 @@ impl CircuitData {
         }
     }
 
-    pub(crate) fn reset_vbic_operating_point_history(&mut self) {
-        for dev in &mut self.bjts.devices {
-            dev.reset_vbic_operating_point_history();
+    /// Reopen every semiconductor on its MODEINITJCT load, as ngspice opens
+    /// each operating-point aid
+    /// ([`crate::device::NonlinearDevice::reopen_operating_point`]).
+    pub(crate) fn reopen_operating_point(&mut self) {
+        fn reopen<D: crate::device::NonlinearDevice>(devices: &mut [D]) {
+            devices.iter_mut().for_each(D::reopen_operating_point);
         }
+        reopen(&mut self.diodes.devices);
+        reopen(&mut self.bjts.devices);
+        reopen(&mut self.mosfets.devices);
+        reopen(&mut self.b3soi.devices);
+        reopen(&mut self.b3soi_fd.devices);
+        reopen(&mut self.b3soi_pd.devices);
+        reopen(&mut self.bsim3v3.devices);
+        reopen(&mut self.bsim4v8.devices);
+        reopen(&mut self.ekv26s.devices);
+        reopen(&mut self.ekv3s.devices);
+        reopen(&mut self.vdmoses.devices);
+        reopen(&mut self.jfets);
     }
 
     pub(crate) fn seed_b3soi_self_heating_temperature_guess(&self, solution: &mut [Value]) {

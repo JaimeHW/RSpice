@@ -2584,6 +2584,11 @@ impl Bjt {
 }
 
 impl NonlinearDevice for Bjt {
+    fn reopen_operating_point(&mut self) {
+        self.reset_legacy_operating_point_history();
+        self.reset_vbic_operating_point_history();
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         if self.mna_promoted {
             self.update_mna(voltages);
@@ -2814,16 +2819,12 @@ impl Bjt {
         }
     }
 
-    /// Forget a native VBIC's Newton and limiter history before an
-    /// operating-point aid starts afresh. ngspice's aids zero every device
-    /// state and reopen each instance on the MODEINITJCT load (cktop.c,
-    /// `dynamic_gmin` and `gillespie_src`); a VBIC that kept its history
-    /// would limit the aid's first iterate against wherever the failed
-    /// direct Newton left it, a thermal rise DEVlimitlog walks back only
-    /// 100 K per iterate. Model parameters and accepted transient charge
-    /// state are preserved.
-    #[doc(hidden)]
-    pub fn reset_vbic_operating_point_history(&mut self) {
+    /// Forget a native VBIC's Newton and limiter history, so the next load is
+    /// vbicload.c's MODEINITJCT load. A VBIC that kept its history would
+    /// limit an aid's first iterate against wherever the failed direct Newton
+    /// left it, a thermal rise DEVlimitlog walks back only 100 K per iterate.
+    /// Model parameters and accepted transient charge state are preserved.
+    fn reset_vbic_operating_point_history(&mut self) {
         if self.charge_model != BjtChargeModel::Vbic {
             return;
         }

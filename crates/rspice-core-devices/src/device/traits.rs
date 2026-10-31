@@ -73,6 +73,18 @@ pub trait NonlinearDevice {
 
     /// Check if the device has converged
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool;
+
+    /// Forget the operating point and the limiter history, so that the next
+    /// load is the instance's MODEINITJCT load again: its junction seed, or
+    /// zero bias for an `OFF` instance, with no previous iterate to limit
+    /// against.
+    ///
+    /// ngspice opens every operating-point aid on that load (cktop.c):
+    /// `dynamic_gmin`, `new_gmin` and `gillespie_src` set `CKTmode` to
+    /// `firstmode` and zero `CKTstate0`, and `spice3_gmin` and `spice3_src`
+    /// set the mode. A device with neither a limiter nor an operating-point
+    /// history keeps this default.
+    fn reopen_operating_point(&mut self) {}
 }
 
 /// Trait for devices with dynamic behavior (capacitors, inductors)

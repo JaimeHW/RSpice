@@ -855,6 +855,10 @@ impl B3SoiPd {
 }
 
 impl NonlinearDevice for B3SoiPd {
+    fn reopen_operating_point(&mut self) {
+        self.reset_operating_point_history();
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         if self.startup_seed_pending.get() && self.dc_mode.get() {
             self.converged_ref = self.bias;

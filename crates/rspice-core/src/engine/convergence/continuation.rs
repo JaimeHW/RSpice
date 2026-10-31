@@ -335,10 +335,9 @@ impl Engine {
         let size = circuit.matrix_size();
         let entry_state = circuit.nonlinear_state_snapshot();
 
-        if circuit.has_b3soi_devices() {
-            circuit.reset_b3soi_operating_point_history();
-        }
-        circuit.reset_vbic_operating_point_history();
+        // `gillespie_src` and `spice3_src` (cktop.c) open on the MODEINITJCT
+        // load.
+        circuit.reopen_operating_point();
         let zero_guess = vec![0.0; size];
         let mut solution = if circuit.has_b3soi_devices() {
             Self::sanitize_initial_guess(initial_guess, size)
@@ -507,6 +506,11 @@ impl Engine {
         let size = circuit.matrix_size();
         let mut solution = Self::sanitize_initial_guess(initial_guess, size);
         let mut anchor_solution = solution.clone();
+        // ngspice's pseudo-transient is OPtran (optran.c), whose source ramp
+        // (`opramptime`) zeroes `CKTstate0` and the node vector before its
+        // first NIiter, as `gillespie_src` does; this walk opens on the
+        // MODEINITJCT load as the other aids do.
+        circuit.reopen_operating_point();
 
         let mut pseudo = PseudoTransient::new();
         let mut damping_state = NewtonDampingState::default();
@@ -685,6 +689,9 @@ impl Engine {
     ) -> Result<Vec<Value>, SimulationError> {
         let size = circuit.matrix_size();
         let mut current_solution = Self::sanitize_initial_guess(initial_guess, size);
+        // A source homotopy from lambda = 0, which opens on the MODEINITJCT
+        // load as `gillespie_src` (cktop.c) does.
+        circuit.reopen_operating_point();
         let arc_newton_iters = self.continuation_iteration_budget(8, 16);
 
         let mut arc_cfg = ArcLengthConfig {
@@ -803,6 +810,10 @@ impl Engine {
         if !circuit.has_jfet_gate_generation_branches() {
             return Err(SimulationError::ConvergenceFailed(0));
         }
+        // A homotopy in the gate generation from zero, which opens on the
+        // MODEINITJCT load as `gillespie_src` (cktop.c) does from zero
+        // sources.
+        circuit.reopen_operating_point();
 
         const INITIAL_STEP: Value = 0.02;
         const MAX_STEP: Value = 0.2;
@@ -1021,10 +1032,9 @@ impl Engine {
             Self::apply_bsim4_internal_gate_initial_guess_correction(&mut solution, circuit);
             Self::apply_vbic_internal_initial_guess_correction(&mut solution, circuit);
         }
-        if circuit.has_b3soi_devices() {
-            circuit.reset_b3soi_operating_point_history();
-        }
-        circuit.reset_vbic_operating_point_history();
+        // `dynamic_gmin`, `new_gmin` and `spice3_gmin` (cktop.c) open on the
+        // MODEINITJCT load.
+        circuit.reopen_operating_point();
         let mut damping_state = NewtonDampingState::default();
         // Each stage takes the iterations `NIiter(ckt, ckt->CKTdcTrcvMaxIter)`
         // allows there; the factor adapts to ITL2 itself.
@@ -1476,6 +1486,111 @@ mod operating_point_rule_tests {
             stepped[0],
             direct[0]
         );
+    }
+
+    /// One instance of every family that reopens on its MODEINITJCT load.
+    /// Norton supplies drive them: with ideal voltage sources in their place,
+    /// pseudo-transient continuation does not solve this circuit's first
+    /// stage even from its operating point.
+    const REOPENED_FAMILIES: &str = "\
+* every aid opens on the MODEINITJCT load
+icc 0 vcc 5m
+rcc vcc 0 1k
+rb1 vcc b1 100k
+rc1 vcc c1 1k
+q1 c1 b1 0 qgp
+.model qgp npn (is=1e-15 bf=100 vaf=50)
+rb2 vcc b2 200k
+rc2 vcc c2 2k
+q2 c2 b2 0 qvbic
+.model qvbic npn level=4 is=1e-16 bf=100
+rd3 vcc d3 25k
+ig3 0 g3 1.2m
+rg3 g3 0 1k
+m3 d3 g3 0 0 nsoi w=4u l=1u
+.model nsoi nmos level=57
+.op
+.end
+";
+
+    /// ngspice opens every operating-point aid on the MODEINITJCT load
+    /// (cktop.c), so an aid that follows a failed direct Newton walks as it
+    /// would on a circuit no Newton has touched. Every device here is first
+    /// driven far from its operating point, as a failed direct Newton can
+    /// leave it, and each aid must then retrace the walk it takes on a
+    /// freshly built circuit, to the bit and to the iteration.
+    #[test]
+    fn every_aid_walks_as_on_a_fresh_circuit_whatever_the_direct_newton_left() {
+        let netlist = crate::netlist::Netlist::parse(REOPENED_FAMILIES).unwrap();
+        let circuit = |engine: &Engine| linked(engine, engine.build_circuit(&netlist).unwrap());
+        let engine = || {
+            Engine::new(SimulationConfig {
+                spice_dialect: crate::engine::SpiceDialect::Ngspice,
+                ..SimulationConfig::default()
+            })
+            .resolved_for_netlist(&netlist)
+        };
+        let seed = {
+            let engine = engine();
+            let (mut circuit, mut matrix) = circuit(&engine);
+            let zero = vec![0.0; circuit.matrix_size()];
+            engine
+                .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
+                .unwrap()
+        };
+        let mut walked_apart = Vec::new();
+        for aid in ["gmin", "source", "pseudo", "arc"] {
+            let walk = |left_far: bool| {
+                let engine = engine();
+                let (mut circuit, mut matrix) = circuit(&engine);
+                let size = circuit.matrix_size();
+                if left_far {
+                    for swing in [7.0, -4.0, 11.0] {
+                        let far: Vec<Value> = (0..size)
+                            .map(|i| swing * (1.0 + (i % 3) as Value) - (i % 2) as Value)
+                            .collect();
+                        circuit.update_nonlinear(&far);
+                    }
+                }
+                let op = match aid {
+                    "gmin" => engine.gmin_stepping_nonlinear_with_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &seed,
+                        &NoAbort,
+                    ),
+                    "source" => engine.source_stepping_nonlinear_with_guess_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &seed,
+                        &NoAbort,
+                    ),
+                    "pseudo" => engine.pseudo_transient_nonlinear_with_guess_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &seed,
+                        &NoAbort,
+                    ),
+                    _ => engine.arc_length_continuation_nonlinear_with_guess_and_abort(
+                        &mut circuit,
+                        &mut matrix,
+                        &seed,
+                        &NoAbort,
+                    ),
+                };
+                (
+                    op.map(|op| op.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
+                        .map_err(|error| error.to_string()),
+                    engine.convergence_quality().total_iterations,
+                )
+            };
+            let fresh = walk(false);
+            assert!(fresh.0.is_ok(), "{aid}: {:?}", fresh.0);
+            if walk(true) != fresh {
+                walked_apart.push(aid);
+            }
+        }
+        assert!(walked_apart.is_empty(), "walked apart: {walked_apart:?}");
     }
 
     /// ngspice's aids zero every device state and reopen on the MODEINITJCT
