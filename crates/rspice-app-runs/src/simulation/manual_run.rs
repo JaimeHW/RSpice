@@ -28,4 +28,7 @@ pub struct ManualRunHandoff {
     /// deck-to-run binding: the run's label, deck digest and revision are read
     /// back off that run's own receipt rather than copied here.
     pub last_run_id: Option<u64>,
+    /// A manual-deck run requested while the engine was busy, started once
+    /// it is free.
+    pub rerun_queued: bool,
 }

@@ -59,11 +59,10 @@ impl CodeState {
 
     /// The project's netlist source went back to its accepted revision: the
     /// netlist editor's session and the secondary documents it opened belong
-    /// to the source that was thrown away, and no rerun waits on it.
+    /// to the source that was thrown away.
     pub(crate) fn on_project_changed(&mut self) {
         self.netlist = Default::default();
         self.netlist_open_documents.clear();
-        self.netlist.rerun_queued = false;
     }
 }
 

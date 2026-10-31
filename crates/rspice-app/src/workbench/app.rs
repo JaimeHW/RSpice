@@ -1869,14 +1869,14 @@ mod tests {
             crate::state::SimulationRunIntent::ManualDeck
         );
         assert!(!state.model.simulation.execution.trigger_simulation);
-        assert!(state.code.netlist.rerun_queued);
+        assert!(state.runs.manual_run.rerun_queued);
 
         state.model.simulation.execution.active_execution = None;
-        state.code.netlist.rerun_queued = false;
+        state.runs.manual_run.rerun_queued = false;
         state.request_netlist_manual_deck_run();
 
         assert!(state.model.simulation.execution.trigger_simulation);
-        assert!(!state.code.netlist.rerun_queued);
+        assert!(!state.runs.manual_run.rerun_queued);
     }
 
     #[test]

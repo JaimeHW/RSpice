@@ -527,7 +527,7 @@ impl AppState {
     pub(crate) fn request_netlist_manual_deck_run(&mut self) {
         self.model.simulation.execution.run_intent = crate::state::SimulationRunIntent::ManualDeck;
         if self.model.simulation.execution.has_active_execution() {
-            self.code.netlist.rerun_queued = true;
+            self.runs.manual_run.rerun_queued = true;
         } else {
             self.model.simulation.execution.request_manual_deck_run();
         }
@@ -581,7 +581,7 @@ impl AppState {
 
     /// Request a run from the Simulate workspace run set.
     pub fn request_run_set_simulation(&mut self) {
-        self.code.netlist.rerun_queued = false;
+        self.runs.manual_run.rerun_queued = false;
         self.model.simulation.execution.request_simulate_run_set();
     }
 

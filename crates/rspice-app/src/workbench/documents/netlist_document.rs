@@ -2078,8 +2078,6 @@ pub struct NetlistDocumentState {
     /// Last non-empty editor selection expressed as an exact byte range in
     /// the visible source. Selection-scoped find never guesses from a line.
     pub selected_byte_range: Option<std::ops::Range<usize>>,
-    /// A re-run requested while the engine was busy.
-    pub rerun_queued: bool,
     /// Whether the completion popover was open last frame.
     pub completion_open: bool,
     /// Selected completion row.
@@ -2160,8 +2158,10 @@ impl NetlistDocumentState {
 
 /// Reconcile queued execution and diff state before rendering the document.
 pub fn prepare(state: &mut AppState) {
-    if state.code.netlist.rerun_queued && !state.model.simulation.execution.has_active_execution() {
-        state.code.netlist.rerun_queued = false;
+    if state.runs.manual_run.rerun_queued
+        && !state.model.simulation.execution.has_active_execution()
+    {
+        state.runs.manual_run.rerun_queued = false;
         if let Some(reason) = state.manual_deck_run_block_reason() {
             state.record(
                 crate::diagnostics::LogSeverity::Warning,
