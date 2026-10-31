@@ -15,6 +15,7 @@ pub(in crate::workbench) mod pdk_workflow;
 pub(crate) mod workspace_state;
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::ModelsPage;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::documents::model_editor::{
     ModelEditorParts, ModelEditorReads, create_editable_project_copy_and_open, open_project_model,
@@ -166,6 +167,20 @@ impl ModelsFeature {
             release: Some(Box::new(release)),
         });
         true
+    }
+
+    /// Show the catalog model `model` of `library` on the Models workspace's
+    /// catalog, saying on the status bar when the project no longer holds
+    /// the library.
+    pub(in crate::workbench) fn reveal_model(
+        cx: &mut Cx<'_, ModelsFeature>,
+        library: &str,
+        model: String,
+    ) {
+        workspace_state::select_library_or_prompt(cx.model, cx.wb, library);
+        cx.state.selected_model = Some(model);
+        cx.state.models_page = ModelsPage::Models;
+        cx.wb.activate(Workspace::Models);
     }
 }
 

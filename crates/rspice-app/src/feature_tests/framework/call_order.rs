@@ -560,10 +560,18 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "20",
-        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+        &[
+            "|app, RevealModel { library, model }|",
+            "crate::workbench::models::ModelsFeature::reveal_model(",
+            "&mut features::cx(app),",
+        ],
     ),
     (
         "21",
+        &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
+    ),
+    (
+        "22",
         &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
@@ -655,15 +663,25 @@ const MODELS_CONTRIBUTIONS: &[Step] = &[
 /// The shell's `contribute`, at the design docks that hand off into the
 /// Models workspace: each has what it raised answered once it has drawn,
 /// before the next point draws.
-const DESIGN_CONTRIBUTIONS: &[Step] = &[(
-    "navigator",
-    &["Workspace::Design => {\
-       design::show(ui, app);\
-       app.after_contribution();\
-       }\
-       Workspace::Results => {\
-       features::show_navigator::<ResultsFeature>(app, ui);"],
-)];
+const DESIGN_CONTRIBUTIONS: &[Step] = &[
+    (
+        "navigator",
+        &["Workspace::Design => {\
+           design::show(ui, app);\
+           app.after_contribution();\
+           }\
+           Workspace::Results => {\
+           features::show_navigator::<ResultsFeature>(app, ui);"],
+    ),
+    (
+        "workspace inspector",
+        &["Workspace::Design => {\
+           design::show(ui, app);\
+           app.after_contribution();\
+           }\
+           Workspace::Simulate => simulation::simulate(ui, app),"],
+    ),
+];
 
 /// `answer_result_requests`, step 11.31 of the frame: the export requests
 /// the result documents raised, then Export dataset…, drawn between the
@@ -1212,8 +1230,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        21,
-        "`after_contribution` answers exactly the twenty-one requests it lists"
+        22,
+        "`after_contribution` answers exactly the twenty-two requests it lists"
     );
 }
 

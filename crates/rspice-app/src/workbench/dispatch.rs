@@ -39,7 +39,7 @@ use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
     OpenProjectDialog, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
-    PromptAfterCommands, RevealExecutedDeck, SelectAnalysisInstance, SetFamilyFilter,
+    PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
     ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
@@ -354,6 +354,17 @@ impl RSpiceApp {
                 ) {
                     app.execute_command_key(ids::MODELS_CATALOG);
                 }
+            },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, RevealModel { library, model }| {
+                crate::workbench::models::ModelsFeature::reveal_model(
+                    &mut features::cx(app),
+                    &library,
+                    model,
+                );
             },
         );
         requests::drain(

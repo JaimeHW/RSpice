@@ -228,7 +228,12 @@ impl Host for RSpiceApp {
                     {
                         veriloga::show(ui, app);
                     }
-                    Workspace::Design => design::show(ui, app),
+                    // A hand-off the inspector raised into another
+                    // workspace is answered once it has drawn.
+                    Workspace::Design => {
+                        design::show(ui, app);
+                        app.after_contribution();
+                    }
                     Workspace::Simulate => simulation::simulate(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Results => {

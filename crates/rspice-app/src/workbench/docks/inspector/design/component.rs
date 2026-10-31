@@ -205,10 +205,10 @@ pub(super) fn identity_section(ui: &mut Ui, app: &mut RSpiceApp, component: &Com
                     }
                     match target {
                         ComponentModelSourceTarget::Catalog { library, model } => {
-                            app.state.select_model_library(library.as_str());
-                            app.state.models.selected_model = Some(model.clone());
-                            app.state.models.models_page = ModelsPage::Models;
-                            app.state.workbench.activate(Workspace::Models);
+                            app.state.workbench.outbox.push(RevealModel {
+                                library: library.clone(),
+                                model: model.clone(),
+                            });
                         }
                         ComponentModelSourceTarget::VerilogA(reference) => {
                             app.state.open_workspace_view(reference.clone());

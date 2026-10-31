@@ -508,6 +508,19 @@ impl Request for ConfirmPackAttach {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
+/// Show the catalog model `model` of `library` on the Models workspace's
+/// catalog. Raised by the schematic's component inspector, and taken
+/// straight after the call that raised it.
+#[derive(Clone, Debug)]
+pub struct RevealModel {
+    pub library: String,
+    pub model: String,
+}
+
+impl Request for RevealModel {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
 /// Focus the navigator's filter field the next time a navigator draws it.
 #[derive(Clone, Debug)]
 pub struct FocusNavigatorSearch;

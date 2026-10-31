@@ -19,7 +19,6 @@ use std::collections::{HashMap, HashSet};
 use egui::Ui;
 
 use crate::schematic::view::sheet_visibility::{self, SheetScope};
-use crate::state::ModelsPage;
 use crate::state::{
     AnalysisResultPayload, CellViewRef, Component, ComponentType, DisplayMode, PropertyDefinition,
     PropertyType, PropertyValue, SoaRuleVerdictEvidence,
@@ -37,6 +36,7 @@ use crate::workbench::design_system::{
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::{Host, InspectorScope, Point};
+use crate::workbench::framework::requests::RevealModel;
 use crate::workbench::state::{InlineEditField, VerificationPage, Workspace};
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_design::connectivity::extract_with_hierarchy as extract;
