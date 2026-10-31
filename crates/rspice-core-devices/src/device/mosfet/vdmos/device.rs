@@ -1073,6 +1073,10 @@ impl Vdmos {
             self.kp *= multiplier;
             self.cgs0 *= multiplier;
             self.cgd0 *= multiplier;
+            // ngspice scales the CGDMIN/CGDMAX law by M as well
+            // (`vdmosload.c`: `cgdmin = VDMOSm * VDMOScgdmin`).
+            self.ngspice_cgd_min *= multiplier;
+            self.ngspice_cgd_max *= multiplier;
             self.cds *= multiplier;
             self.cbs0 *= multiplier;
             self.cbd0 *= multiplier;
@@ -3515,6 +3519,31 @@ mod tests {
         assert_eq!(vdmos.d1_m, 0.5);
         assert_eq!(vdmos.d1_fc, 0.5);
         assert!(vdmos.d1_current_enabled);
+    }
+
+    #[test]
+    fn instance_multiplier_scales_the_ngspice_gate_capacitance_law() {
+        let mut params = HashMap::new();
+        params.insert("CGS".to_string(), 0.15e-12);
+        params.insert("CGDMIN".to_string(), 0.05e-12);
+        params.insert("CGDMAX".to_string(), 0.2e-12);
+        params.insert("A".to_string(), 1.2);
+        let single = Vdmos::new_pvdmos("m1".to_string(), 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&params, &[]);
+        let double = Vdmos::new_pvdmos("m2".to_string(), 1, 2, 3)
+            .with_params(&params)
+            .with_instance_params(&params, &[("M".to_string(), 2.0)]);
+
+        for vgd in [-5.0, -0.3, 0.0, 0.4, 5.0] {
+            let (cgs1, cgd1, _) = single.capacitances(vgd, 0.0);
+            let (cgs2, cgd2, _) = double.capacitances(vgd, 0.0);
+            assert!((cgs2 - 2.0 * cgs1).abs() < 1.0e-27, "cgs at vgd={vgd}");
+            assert!(
+                (cgd2 - 2.0 * cgd1).abs() < 1.0e-27,
+                "cgd at vgd={vgd}: {cgd2:e} vs 2 x {cgd1:e}"
+            );
+        }
     }
 
     #[test]
