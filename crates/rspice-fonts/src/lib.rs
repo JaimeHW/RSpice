@@ -35,6 +35,8 @@ pub mod bidi;
 #[cfg(feature = "egui")]
 mod egui_families;
 mod han;
+#[cfg(feature = "bidi")]
+pub mod print;
 #[cfg(all(feature = "system", not(target_arch = "wasm32")))]
 pub mod system;
 #[cfg(feature = "egui")]
@@ -451,23 +453,27 @@ impl Role {
     }
 
     fn letter_cluster(self, cluster: &str) -> (PrintFace, &str) {
+        match self.cluster_face(cluster) {
+            Some(face) => (face, cluster),
+            None => (PrintFace::Symbols, REPLACEMENT_TEXT),
+        }
+    }
+
+    /// The face print letters a grapheme cluster in, or `None` when it is
+    /// lettered as [`REPLACEMENT`]; see [`Self::runs`].
+    fn cluster_face(self, cluster: &str) -> Option<PrintFace> {
         let whole = self.print_faces().find(|face| {
             cluster
                 .chars()
                 .filter(|character| draws(*character))
                 .all(|character| face.face().covers(character))
         });
-        if let Some(face) = whole {
-            return (face, cluster);
-        }
-        let first = cluster
-            .chars()
-            .next()
-            .and_then(|first| self.print_faces().find(|face| face.face().covers(first)));
-        match first {
-            Some(face) => (face, cluster),
-            None => (PrintFace::Symbols, REPLACEMENT_TEXT),
-        }
+        whole.or_else(|| {
+            cluster
+                .chars()
+                .next()
+                .and_then(|first| self.print_faces().find(|face| face.face().covers(first)))
+        })
     }
 }
 

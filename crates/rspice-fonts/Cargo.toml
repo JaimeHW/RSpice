@@ -18,14 +18,16 @@ egui = ["dep:egui"]
 # A browser build has no font files to read, so it compiles nothing here.
 system = ["dep:fontdb"]
 # Right-to-left text in display order: bidi levels, the reordering of each
-# line and mirrored brackets. Only the crates that lay text out enable it.
+# line and mirrored brackets, and print's shaping. Only the crates that lay
+# text out enable it.
 bidi = ["dep:harfrust", "dep:unicode-bidi", "dep:unicode-bidi-mirroring"]
 
 [dependencies]
 egui = { version = "0.35.0", default-features = false, optional = true }
 skrifa = { version = "0.42.1", default-features = false, features = ["std"] }
 unicode-segmentation = "1.12"
-# The shaper epaint 0.35 links, asked how it will direct a run.
+# The shaper epaint 0.35 links: it sets print's runs, and tells the screen
+# how egui will direct one.
 harfrust = { version = "0.7.0", optional = true }
 unicode-bidi = { version = "0.3.18", optional = true }
 unicode-bidi-mirroring = { version = "0.4.0", optional = true }
