@@ -21,7 +21,13 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 sha2 = "0.10"
 thiserror.workspace = true
+# A title cell cuts its value only between grapheme clusters, counts an East
+# Asian wide character as two cells, and aligns a value to the direction its
+# paragraph is read in.
+unicode-bidi = "0.3.18"
 unicode-normalization.workspace = true
+unicode-segmentation = "1.12"
+unicode-width = "0.2.2"
 uuid = { version = "1", features = ["serde", "v4"] }
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
