@@ -1151,6 +1151,28 @@ impl Bsim3v3Device {
 }
 
 impl NonlinearDevice for Bsim3v3Device {
+    fn reopen_operating_point(&mut self) {
+        // b3ld.c's MODEINITJCT load: the first iterate passes unlimited, and
+        // an `OFF` instance opens at zero bias again.
+        let zero = Bsim3v3Bias {
+            vds: 0.0,
+            vgs: 0.0,
+            vbs: 0.0,
+        };
+        self.op = Bsim3v3Op::default();
+        self.bias = zero;
+        self.converged_ref = zero;
+        self.von_prev = 0.0;
+        self.has_history = false;
+        self.limit_anchor_valid.set(false);
+        self.last_update = None;
+        self.last_update_open.set(false);
+        self.last_limited.set(false);
+        self.initial_off_seed_pending = true;
+        self.initial_off_seed_evaluations = 0;
+        self.initial_off_seed_raw = None;
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         // The OFF startup state owns the device only until Newton produces a

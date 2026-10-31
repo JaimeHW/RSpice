@@ -1523,6 +1523,18 @@ d1 a 0 dmod
 .op
 .end
 ",
+        "\
+* BSIM3
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 2m
+rg1 g 0 1k
+rd1 vcc d 10k
+m1 d g 0 0 nb3 w=10u l=1u
+.model nb3 nmos level=8
+.op
+.end
+",
     ];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load
