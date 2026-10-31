@@ -25,7 +25,9 @@ use crate::workbench::framework::requests::ArmPartPlacement;
 use crate::workbench::models::ModelsFeature;
 use crate::workbench::models::workspace_state::ModelsOperationalState;
 
-use super::{ModelHubOutput, ModelHubRequest, execute, publish_model_hub_output};
+use crate::workbench::models::pdk_workflow::model_hub::{
+    ModelHubOutput, ModelHubRequest, emit_model_hub_errors, execute, publish_model_hub_output,
+};
 
 const PART: &str = "RSPICE_PROVING_DIV";
 const CAPABILITIES: [&str; 2] = ["subckt", "resistor"];
@@ -105,7 +107,7 @@ fn with_cx<R>(
 fn emit_errors(state: &mut AppState, errors: Vec<String>) {
     let mut model_hub = ModelHubService::unavailable("This test reports a failure it was handed.");
     with_cx(state, &mut model_hub, |cx| {
-        super::emit_model_hub_errors(cx, errors)
+        emit_model_hub_errors(cx, errors)
     });
 }
 

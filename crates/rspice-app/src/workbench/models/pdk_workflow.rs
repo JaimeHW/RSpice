@@ -1,6 +1,6 @@
 //! PDK setup workflow.
 
-mod model_hub;
+pub(crate) mod model_hub;
 
 pub(in crate::workbench) use model_hub::ModelHubRequest;
 #[cfg(not(target_arch = "wasm32"))]
@@ -719,10 +719,7 @@ impl ModelsFeature {
     /// It is called from the frame loop rather than from any one surface,
     /// because a hub install started from the component shelf must finish even
     /// if the user has since walked away from the Models workspace.
-    pub(in crate::workbench) fn pump_model_catalog_operations(
-        cx: &mut Cx<'_, ModelsFeature>,
-        ctx: &Context,
-    ) {
+    pub(crate) fn pump_model_catalog_operations(cx: &mut Cx<'_, ModelsFeature>, ctx: &Context) {
         #[cfg(not(target_arch = "wasm32"))]
         poll_native_model_imports(ctx, cx);
         #[cfg(target_arch = "wasm32")]

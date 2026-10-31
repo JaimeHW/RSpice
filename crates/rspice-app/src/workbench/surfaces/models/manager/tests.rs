@@ -8,6 +8,7 @@
 use super::*;
 use crate::state::model_library::ModelType;
 use crate::state::{Component, ComponentType, Point};
+use crate::workbench::models::tests::painted_text;
 
 mod binned_family;
 
@@ -372,37 +373,6 @@ fn a_consumer_label_splits_into_a_designator_and_a_location() {
     // something rather than emptying itself.
     assert_eq!(bindings::consumer_designator("U1"), "U1");
     assert_eq!(bindings::consumer_location("U1"), "");
-}
-
-/// Every string one frame painted, with the colour it was painted in.
-///
-/// The catalog's cells are painter text, so reading the shapes back is the
-/// only way to judge what a row says — and, for the status column, what it
-/// means by the tone it says it in.
-fn painted_text(output: &egui::FullOutput) -> Vec<(String, Color32)> {
-    fn walk(shape: &egui::epaint::Shape, out: &mut Vec<(String, Color32)>) {
-        match shape {
-            egui::epaint::Shape::Text(text) => out.push((
-                text.galley.text().to_owned(),
-                text.galley
-                    .job
-                    .sections
-                    .first()
-                    .map_or(Color32::TRANSPARENT, |section| section.format.color),
-            )),
-            egui::epaint::Shape::Vec(shapes) => {
-                for shape in shapes {
-                    walk(shape, out);
-                }
-            }
-            _ => {}
-        }
-    }
-    let mut found = Vec::new();
-    for clipped in &output.shapes {
-        walk(&clipped.shape, &mut found);
-    }
-    found
 }
 
 /// Paint one catalog row and read back what it drew.

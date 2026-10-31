@@ -526,22 +526,4 @@ fn render_model_browser_dialog(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Conte
 
 /// What the models feature's tests build from.
 #[cfg(test)]
-pub(crate) mod tests {
-    use crate::state::pdk_config::PdkConfig;
-    use crate::workbench::app_state::Model;
-    use crate::workbench::framework::feature::harness::FeatureHarness;
-    use crate::workbench::state::WorkbenchSession;
-    use rspice_app_state::workbench::workspace::restore_model_library_manager;
-
-    use super::ModelsFeature;
-
-    /// The models feature on its own, over what a new session starts with:
-    /// the model over the empty PDK configuration a test session reads, and a
-    /// new session's workbench.
-    pub(crate) fn harness() -> FeatureHarness<ModelsFeature> {
-        FeatureHarness::with_model(
-            Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
-            WorkbenchSession::default(),
-        )
-    }
-}
+pub(crate) mod tests;

@@ -16,9 +16,6 @@
 //! when the operation returns. That is what keeps the whole background path
 //! free of shared mutable application state.
 
-#[cfg(all(test, not(target_arch = "wasm32")))]
-mod tests;
-
 use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
@@ -35,7 +32,7 @@ use crate::workbench::models::workspace_state::ModelsOperationalState;
 /// same toast and receipt — because a pack install is a model-catalog change
 /// like any other and a second machine would have to relearn all of it.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(in crate::workbench) enum ModelHubRequest {
+pub(crate) enum ModelHubRequest {
     /// Fetch, prove, and cache the signed catalog snapshot.
     FetchSnapshot,
     /// Download, prove, and install one published release. `part` asks for one
@@ -178,21 +175,21 @@ impl ModelHubRequest {
 /// this machine holds. The part is present only when the operation was also
 /// asked to retain one into the project, which is the shelf's single gesture.
 #[derive(Debug)]
-pub(super) struct ModelHubOutput {
-    pub(super) receipt: String,
-    pub(super) part: Option<ModelHubPartOutput>,
+pub(crate) struct ModelHubOutput {
+    pub(crate) receipt: String,
+    pub(crate) part: Option<ModelHubPartOutput>,
 }
 
 #[derive(Debug)]
-pub(super) struct ModelHubPartOutput {
-    candidate: Box<crate::state::model_library::ModelLibraryManager>,
+pub(crate) struct ModelHubPartOutput {
+    pub(crate) candidate: Box<crate::state::model_library::ModelLibraryManager>,
     library_name: String,
-    part_id: String,
+    pub(crate) part_id: String,
     /// The symbol placement to arm afterwards, when the part arrived because
     /// somebody asked for one to place. Adoption has none: the part is already
     /// in the design, and arming it would offer a second copy of something the
     /// reader only asked to move forward a release.
-    placement: Option<crate::state::model_hub::PartPlacement>,
+    pub(crate) placement: Option<crate::state::model_hub::PartPlacement>,
 }
 
 /// Determinate transfer progress, shared between a worker and the frame loop.
@@ -272,7 +269,7 @@ pub(super) fn run_model_hub_operation(
 /// is called. What remains is the same sequence on every target, which is what
 /// makes the browser and the desktop provably the same pipeline rather than
 /// two implementations that happen to agree.
-pub(super) fn execute(
+pub(crate) fn execute(
     hub: &mut crate::state::model_hub::ModelHub,
     mut candidate: crate::state::model_library::ModelLibraryManager,
     request: &ModelHubRequest,
@@ -627,7 +624,7 @@ pub(super) async fn run_browser_model_hub_operation(
 /// last, and only if the revision was actually published. A failure at any
 /// step leaves the earlier ones standing — they describe real state — and says
 /// which step failed.
-pub(super) fn publish_model_hub_output(
+pub(crate) fn publish_model_hub_output(
     ctx: &Context,
     cx: &mut Cx<'_, ModelsFeature>,
     request: &ModelHubRequest,
@@ -713,7 +710,7 @@ fn apply_model_hub_receipt(cx: &mut Cx<'_, ModelsFeature>, receipt: String) {
 
 /// Records a failed hub operation. Nothing partial is left behind: every step
 /// that can fail either completed or changed nothing at all.
-pub(super) fn emit_model_hub_errors(cx: &mut Cx<'_, ModelsFeature>, errors: Vec<String>) {
+pub(crate) fn emit_model_hub_errors(cx: &mut Cx<'_, ModelsFeature>, errors: Vec<String>) {
     let first = errors
         .first()
         .cloned()
