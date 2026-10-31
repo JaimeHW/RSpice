@@ -45,6 +45,26 @@ impl NoGainVoltageBox {
             || !circuit.ekv26s.is_empty()
             || !circuit.ekv3s.is_empty()
             || circuit.bjts.devices.iter().any(|bjt| bjt.node_rth != 0)
+            // An inductor IC the operating point enforces is a current source.
+            || circuit.inductors.has_dc_initial_conditions()
+            // BSIM gate tunnelling splits the gate-to-channel current between
+            // source and drain by bias, and impact ionisation drives drain
+            // current into the body by vds alone: either can flow towards
+            // the higher potential, and with it a node can leave the rails
+            // (the gate-tunnelling logic of `bsim4_native` settles at -1.57 V
+            // under a 1 V supply).
+            || circuit.bsim4v8.devices.iter().any(|device| {
+                let core = &device.core;
+                core.model.igc_mod != 0
+                    || core.model.igb_mod != 0
+                    || core.size.alpha0 != 0.0
+                    || core.size.alpha1 != 0.0
+            })
+            || circuit
+                .bsim3v3
+                .devices
+                .iter()
+                .any(|device| device.core.size.alpha0 != 0.0 || device.core.size.alpha1 != 0.0)
         {
             return None;
         }
@@ -69,6 +89,18 @@ impl NoGainVoltageBox {
                 // A floating source fixes no potential, only a difference,
                 // and can stack on any other source in either direction.
                 _ => stacked += value.abs(),
+            }
+        }
+        // A capacitor IC the operating point enforces is a voltage source
+        // across the capacitor.
+        let capacitors = &circuit.capacitors;
+        for (branch, ic) in capacitors.ic_branch_indices.iter().zip(&capacitors.ic) {
+            if branch.is_some() {
+                let value = ic.unwrap_or(0.0);
+                if !value.is_finite() {
+                    return None;
+                }
+                stacked += value.abs();
             }
         }
         let mut unbounded = circuit.non_electrical_state_mask();
@@ -787,6 +819,29 @@ mod tests {
                 "gain\nV1 a 0 1\nR1 a 0 1k\nR2 c 0 1k\n{element}\n.op\n.end\n"
             ));
             assert_eq!(NoGainVoltageBox::of(&circuit), None, "{element}");
+        }
+    }
+
+    #[test]
+    fn bsim_gate_tunnelling_or_impact_ionisation_has_no_voltage_box() {
+        let deck = |card: &str| {
+            format!(
+                "bsim\nVd d 0 1\nVg g 0 1\nM1 d g 0 0 nm l=0.1u w=1u\n.model nm nmos {card}\n.op\n.end\n"
+            )
+        };
+        for card in [
+            "level=54 igcmod=1",
+            "level=54 igbmod=1",
+            "level=54 alpha0=1e-6",
+            "level=49 alpha0=1e-6",
+        ] {
+            assert_eq!(NoGainVoltageBox::of(&built(&deck(card))), None, "{card}");
+        }
+        for card in ["level=54", "level=49"] {
+            assert!(
+                NoGainVoltageBox::of(&built(&deck(card))).is_some(),
+                "{card}"
+            );
         }
     }
 
