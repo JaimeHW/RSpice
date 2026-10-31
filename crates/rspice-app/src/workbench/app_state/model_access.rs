@@ -10,7 +10,7 @@ use std::time::Duration;
 
 use rspice_design::drc::{DrcLocation, DrcResult, DrcSeverity};
 
-use super::design_checks::{CheckScope, DesignCheckStatus};
+use super::design_checks::DesignCheckStatus;
 use super::diagnostic_store::listing::{ListingInputs, ListingSource};
 #[cfg(test)]
 use super::diagnostic_store::{BatchStanding, DiagnosticBatch};
@@ -151,10 +151,11 @@ impl AppState {
             .simulation_root_design_check_status(self.slot_facts())
     }
 
+    #[cfg(test)]
     pub(in crate::workbench) fn current_design_check(
         &self,
         subject: &CellViewRef,
-        scope: CheckScope,
+        scope: super::design_checks::CheckScope,
     ) -> Option<&DrcResult> {
         self.model
             .current_design_check(subject, scope, self.slot_facts())

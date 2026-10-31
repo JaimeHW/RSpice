@@ -74,7 +74,13 @@ fn a_nominal_global_run_set_demands_no_technology() {
     let demand = state.technology_demand();
     assert!(demand.is_empty(), "{:?}", demand.reasons());
     assert_eq!(demand.block_reason(), None);
-    assert_eq!(state.technology_gate_block_reason(), Ok(()));
+    assert_eq!(
+        state
+            .model
+            .technology_inputs()
+            .technology_gate_block_reason(),
+        Ok(())
+    );
 }
 
 #[test]
@@ -115,6 +121,8 @@ fn a_non_typical_reference_process_demands_its_section() {
     let required = sole_reason(&demand).required();
     assert!(required.contains("SS process section"), "{required}");
     let blocked = state
+        .model
+        .technology_inputs()
         .technology_gate_block_reason()
         .expect_err("no technology is attached");
     assert_eq!(
@@ -145,6 +153,8 @@ fn an_enabled_corner_analysis_demands_the_plans_non_typical_sections_once() {
     };
     assert_eq!(sections, &[ProcessCorner::SS, ProcessCorner::FF]);
     let blocked = state
+        .model
+        .technology_inputs()
         .technology_gate_block_reason()
         .expect_err("no technology is attached");
     assert_eq!(
@@ -161,7 +171,13 @@ fn a_corner_without_a_process_axis_demands_nothing_at_a_typical_reference() {
     insert_corner(&mut state, CornerDialogState::default());
     let demand = state.technology_demand();
     assert!(demand.is_empty(), "{:?}", demand.reasons());
-    assert_eq!(state.technology_gate_block_reason(), Ok(()));
+    assert_eq!(
+        state
+            .model
+            .technology_inputs()
+            .technology_gate_block_reason(),
+        Ok(())
+    );
 }
 
 #[test]

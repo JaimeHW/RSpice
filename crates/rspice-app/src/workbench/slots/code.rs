@@ -107,4 +107,16 @@ impl CodePort for CodeState {
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt> {
         CodeState::veriloga_compilation(self)
     }
+
+    fn interface_check_finding(
+        &self,
+        sources: &crate::state::ProjectSourceRegistry,
+        libraries: &crate::state::LibraryManager,
+    ) -> Option<(crate::state::CellViewRef, String)> {
+        crate::workbench::documents::code_workspace::interface_check_finding(
+            &self.code_workspace.veriloga,
+            sources,
+            libraries,
+        )
+    }
 }

@@ -6,11 +6,11 @@ use crate::state::{
     Component, ComponentType, MODEL_BOUND_SYMBOL_METADATA_KEY, ModelBoundSymbolDefinition,
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
 };
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::{
     binds_model_card, cell_instance_identity_sheet, compiled_parameter_sheet,
     instance_multiplicity_definition, states_compiled_parameters,
 };
+use crate::workbench::app_state::{AppState, Model};
 use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
 /// Resolve the exact persistent parameter contract owned by a placed cell's
@@ -18,7 +18,7 @@ use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 /// unbound cells: they must not inherit whichever dynamic sheet was opened
 /// most recently.
 fn authoritative_cell_instance_sheet(
-    state: &AppState,
+    model: &Model,
     component: &Component,
 ) -> Result<Option<PropertySheet>, String> {
     if component.kind != ComponentType::CellInstance {
@@ -36,8 +36,7 @@ fn authoritative_cell_instance_sheet(
     if binding.is_generated_veriloga() {
         return generated_veriloga_property_sheet(binding).map(Some);
     }
-    let Some(cell) = state
-        .model
+    let Some(cell) = model
         .library_manager
         .get_library(&binding.library)
         .and_then(|library| library.get_cell(&binding.cell))
@@ -163,10 +162,28 @@ pub(crate) fn authoritative_component_property_sheet(
     component: &Component,
 ) -> Result<Option<PropertySheet>, String> {
     if component.kind == ComponentType::CellInstance {
-        authoritative_cell_instance_sheet(state, component)
+        authoritative_cell_instance_sheet(&state.model, component)
     } else {
         Ok(state.design.property_registry.get(component.kind).cloned())
     }
+}
+
+/// Resolve dynamic contracts without replacing the active editor's sheet.
+pub(crate) fn component_property_findings(
+    registry: &crate::properties::PropertyEditorSchema,
+    model: &Model,
+    component: &Component,
+) -> Vec<(String, String)> {
+    use crate::properties::property_bridge::validate_component_properties;
+
+    if component.kind != ComponentType::CellInstance {
+        return validate_component_properties(component, registry.get(component.kind));
+    }
+    let sheet = match authoritative_cell_instance_sheet(model, component) {
+        Ok(sheet) => sheet.unwrap_or_else(cell_instance_identity_sheet),
+        Err(error) => return vec![("schema".to_owned(), error)],
+    };
+    validate_component_properties(component, Some(&sheet))
 }
 
 fn builtin_xspice_property_sheet(
@@ -545,7 +562,7 @@ pub(crate) fn selected_object_properties_available(state: &AppState) -> bool {
             .find(|component| component.id == id)
             .is_some_and(|component| {
                 if component.kind == ComponentType::CellInstance {
-                    authoritative_cell_instance_sheet(state, component).is_ok()
+                    authoritative_cell_instance_sheet(&state.model, component).is_ok()
                 } else {
                     state.design.property_registry.get(component.kind).is_some()
                 }
@@ -666,7 +683,7 @@ pub(crate) fn open_property_editor(state: &mut AppState, component_id: u64) {
     };
     let component_type = component.kind;
     if component_type == ComponentType::CellInstance {
-        match authoritative_cell_instance_sheet(state, &component) {
+        match authoritative_cell_instance_sheet(&state.model, &component) {
             Ok(Some(sheet)) => {
                 if let Err(error) = state
                     .design

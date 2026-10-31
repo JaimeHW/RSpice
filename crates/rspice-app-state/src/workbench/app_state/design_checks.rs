@@ -309,6 +309,27 @@ impl Model {
         (self.run_design_check(subject, scope, facts), prompt)
     }
 
+    /// Check `subject` as far as `scope` reaches, unless a check of it that
+    /// reached exactly as far still describes the design, with what the
+    /// drawing sync had to say.
+    ///
+    /// For a workflow that decides from the checks rather than being one:
+    /// Check and Save and the run's preflight read the receipt this leaves
+    /// current, and the page lists what that check published, so none of
+    /// them can say something else about the same design.
+    pub fn ensure_design_check(
+        &mut self,
+        subject: CellViewRef,
+        scope: CheckScope,
+        facts: SlotFacts,
+    ) -> (Result<(), String>, Option<String>) {
+        if self.current_design_check(&subject, scope, facts).is_some() {
+            return (Ok(()), None);
+        }
+        let (outcome, prompt) = self.run_synced_design_check(subject, scope, facts);
+        (outcome.map(|_| ()), prompt)
+    }
+
     /// Check `subject` as far as `scope` reaches, and publish what it found.
     ///
     /// The model's part of a check: the drawing's annotation is brought into

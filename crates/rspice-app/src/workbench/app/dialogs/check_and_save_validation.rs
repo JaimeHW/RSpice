@@ -21,8 +21,13 @@ use rspice_design::drc::{DrcLocation, DrcSeverity, DrcViolation};
 use rspice_design::hierarchy::HierarchySource;
 use rspice_simulation::netlist_gen::generate_netlist_hierarchical;
 
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::design_checks::CheckScope;
+use crate::workbench::app_state::{AppState, Model, PlatformState, SlotFacts};
+use crate::workbench::framework::feature::{CodePort, DesignPort};
+use crate::workbench::lifecycle::project_lifecycle::{
+    LifecycleSource, LifecycleView, ResultPresentationSource,
+};
+use crate::workbench::state::{WorkbenchSession, Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -45,6 +50,49 @@ pub(crate) struct CheckAndSaveFinding {
     /// that holds it, so a coordinate carried over from another sheet would
     /// send the canvas to a spot in a document nobody asked to see.
     pub(crate) location: Option<DrcLocation>,
+}
+
+/// What a report is collected from: the model and the platform services'
+/// state, and what the model's design checks read of the features; the
+/// workspace in front and the result presentation, which the project's
+/// publication snapshot reads as the lifecycle does; and what design and code
+/// show.
+#[derive(Clone, Copy)]
+pub(crate) struct ValidationReads<'a> {
+    pub(crate) model: &'a Model,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) facts: SlotFacts,
+    pub(crate) workspace: Workspace,
+    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub(crate) design: &'a dyn DesignPort,
+    pub(crate) code: &'a dyn CodePort,
+}
+
+impl<'a> ValidationReads<'a> {
+    /// What a report reads, from the whole application state.
+    pub(crate) fn of(state: &'a AppState) -> Self {
+        let lifecycle = state.lifecycle_view();
+        Self {
+            model: lifecycle.model,
+            platform: lifecycle.platform,
+            facts: state.slot_facts(),
+            workspace: lifecycle.workspace,
+            presentation: lifecycle.presentation,
+            design: &*state.design,
+            code: &*state.code,
+        }
+    }
+}
+
+impl LifecycleSource for ValidationReads<'_> {
+    fn lifecycle_view(&self) -> LifecycleView<'_> {
+        LifecycleView {
+            model: self.model,
+            platform: self.platform,
+            workspace: self.workspace,
+            presentation: self.presentation,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -71,16 +119,16 @@ pub(crate) struct CheckAndSaveValidationReport {
 }
 
 impl CheckAndSaveValidationReport {
-    pub(crate) fn collect(state: &AppState) -> Result<Self, String> {
-        let effective_scope = effective_save_scope(&state.platform, SaveScope::ActiveDocument);
-        let active_view = state.model.workspace.content.active_schematic_reference();
-        let project_id = state.model.workspace.content.project.id().to_string();
-        let project_revision = state.model.workspace.content.project.revision().get();
-        let accepted_generation = accepted_generation(&state.platform);
+    pub(crate) fn collect(reads: &ValidationReads<'_>) -> Result<Self, String> {
+        let effective_scope = effective_save_scope(reads.platform, SaveScope::ActiveDocument);
+        let active_view = reads.model.workspace.content.active_schematic_reference();
+        let project_id = reads.model.workspace.content.project.id().to_string();
+        let project_revision = reads.model.workspace.content.project.revision().get();
+        let accepted_generation = accepted_generation(reads.platform);
         let mut findings = BTreeMap::<String, CheckAndSaveFinding>::new();
         let mut dependencies = BTreeMap::<String, ContentDigest>::new();
 
-        if !state.platform.project_lifecycle.is_open() {
+        if !reads.platform.project_lifecycle.is_open() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -89,7 +137,7 @@ impl CheckAndSaveValidationReport {
                 "No project is open.",
             );
         }
-        if state.model.safe_mode.project_read_only() {
+        if reads.model.safe_mode.project_read_only() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -98,7 +146,7 @@ impl CheckAndSaveValidationReport {
                 "Safe mode opened this project read-only.",
             );
         }
-        if state.model.schematic.session.read_only || state.active_view_read_only() {
+        if reads.model.schematic.session.read_only || reads.model.active_view_read_only() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -107,7 +155,7 @@ impl CheckAndSaveValidationReport {
                 "The active schematic or its owning library is read-only.",
             );
         }
-        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(&state.platform) {
+        if crate::workbench::lifecycle::project_lifecycle::operation_in_progress(reads.platform) {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -117,7 +165,7 @@ impl CheckAndSaveValidationReport {
             );
         }
 
-        if let Err(error) = state.model.workspace.content.project.validate() {
+        if let Err(error) = reads.model.workspace.content.project.validate() {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Blocker,
@@ -129,8 +177,12 @@ impl CheckAndSaveValidationReport {
         // A project need not have a technology; if it has one it must resolve
         // exactly, and if the plan needs one it must have one. The three states
         // carry different remedies, so each owns a distinct finding identity.
-        if let Err(error) = state.technology_gate_block_reason() {
-            let discriminator = if state
+        if let Err(error) = reads
+            .model
+            .technology_inputs()
+            .technology_gate_block_reason()
+        {
+            let discriminator = if reads
                 .model
                 .workspace
                 .content
@@ -139,7 +191,7 @@ impl CheckAndSaveValidationReport {
                 .is_none()
             {
                 "technology-required-by-plan"
-            } else if state
+            } else if reads
                 .model
                 .workspace
                 .content
@@ -159,7 +211,7 @@ impl CheckAndSaveValidationReport {
                 error,
             );
         }
-        match state.model.run_reference_model_cards() {
+        match reads.model.run_reference_model_cards() {
             Ok(cards) => {
                 dependencies.insert(
                     "models:reference-process-cards".to_owned(),
@@ -180,7 +232,7 @@ impl CheckAndSaveValidationReport {
         // What is about to be written: the persisted documents with the live
         // editor buffer over its own. Digests, revision journals, and symbol
         // contracts are statements about these; nothing hierarchy-derived is.
-        let mut buffers = state
+        let mut buffers = reads
             .model
             .workspace
             .content
@@ -188,11 +240,11 @@ impl CheckAndSaveValidationReport {
             .iter()
             .map(|(key, schematic)| (key.clone(), schematic))
             .collect::<std::collections::HashMap<_, _>>();
-        buffers.insert(active_view.key(), state.model.schematic.editor_ref().design);
-        let inspection = state.model.workspace.inspect_design_projection(
-            &state.model.library_manager,
+        buffers.insert(active_view.key(), reads.model.schematic.editor_ref().design);
+        let inspection = reads.model.workspace.inspect_design_projection(
+            &reads.model.library_manager,
             &active_view,
-            &state.model.schematic,
+            &reads.model.schematic,
         );
         let execution_projection = inspection
             .clone()
@@ -250,7 +302,7 @@ impl CheckAndSaveValidationReport {
         // Which document the canvas is showing decides which findings can
         // offer a place to go — see [`CheckAndSaveFinding::location`].
         let active_key = active_view.key();
-        let root_is_active = state
+        let root_is_active = reads
             .model
             .workspace
             .content
@@ -264,7 +316,7 @@ impl CheckAndSaveValidationReport {
         // design the project does not have.
         let configured_hierarchy = execution_projection.as_ref().ok().map(|projection| {
             HierarchySource::from_execution_projection(
-                state.model.library_manager.catalog(),
+                reads.model.library_manager.catalog(),
                 projection,
             )
         });
@@ -283,8 +335,8 @@ impl CheckAndSaveValidationReport {
         // refuses to resolve while an instance disagrees with it, so those
         // instances are found whether or not the projection resolved.
         let no_masters = std::collections::HashMap::new();
-        let stale_interface_instances = state.model.schematic.stale_instance_interfaces(
-            &state.model.library_manager,
+        let stale_interface_instances = reads.model.schematic.stale_instance_interfaces(
+            &reads.model.library_manager,
             execution_projection
                 .as_ref()
                 .map_or(&no_masters, |projection| projection.schematic_buffers()),
@@ -299,7 +351,7 @@ impl CheckAndSaveValidationReport {
                     "Instance '{instance}' no longer presents its master's interface; \
                      select it and run \"Update instance interface\"."
                 ),
-                state
+                reads
                     .model
                     .schematic
                     .document()
@@ -315,13 +367,10 @@ impl CheckAndSaveValidationReport {
         // A cell's schematic defines its ports, and a module that compiled to
         // different ones is refused by any run that binds it. Saving such a
         // project is legitimate work in progress, so it advises.
-        if let Some((reference, message)) =
-            crate::workbench::documents::code_workspace::interface_check_finding(
-                &state.code.code_workspace.veriloga,
-                &state.model.workspace.content.project_sources,
-                &state.model.library_manager,
-            )
-        {
+        if let Some((reference, message)) = reads.code.interface_check_finding(
+            &reads.model.workspace.content.project_sources,
+            &reads.model.library_manager,
+        ) {
             insert_finding(
                 &mut findings,
                 CheckAndSaveFindingLevel::Advisory,
@@ -333,7 +382,7 @@ impl CheckAndSaveValidationReport {
 
         let mut documents = match effective_scope {
             SaveScope::ActiveDocument => {
-                vec![(active_view.key(), state.model.schematic.editor_ref().design)]
+                vec![(active_view.key(), reads.model.schematic.editor_ref().design)]
             }
             SaveScope::AllDocuments => buffers
                 .iter()
@@ -341,13 +390,13 @@ impl CheckAndSaveValidationReport {
                 .collect::<Vec<_>>(),
         };
         documents.sort_by(|left, right| left.0.cmp(&right.0));
-        let root_schematic_key = state
+        let root_schematic_key = reads
             .model
             .workspace
             .content
             .simulation_root_reference()
             .key();
-        let plan = DesignCheckPlan::of(state);
+        let plan = DesignCheckPlan::of(reads.model, reads.platform);
         // Every defect is stated once. A document in scope states its own
         // findings, below, where they can point at the canvas. A walk through
         // a hierarchy — the configured root's, or an unplaced document's —
@@ -371,11 +420,11 @@ impl CheckAndSaveValidationReport {
                 // configuration and the waivers the page lists its findings
                 // under and the run gate judges the root under, so a
                 // validated save blocks on exactly what both say.
-                match plan
-                    .root
-                    .as_ref()
-                    .and_then(|root| state.current_design_check(root, CheckScope::Design))
-                {
+                match plan.root.as_ref().and_then(|root| {
+                    reads
+                        .model
+                        .current_design_check(root, CheckScope::Design, reads.facts)
+                }) {
                     Some(drc) => walked_findings.push(WalkedFindings {
                         key: projection.root().key(),
                         source: "configured-root checks",
@@ -420,7 +469,7 @@ impl CheckAndSaveValidationReport {
                         format!("Configured root: {warning}"),
                     );
                 }
-                let generated_source = state
+                let generated_source = reads
                     .model
                     .workspace
                     .content
@@ -428,9 +477,9 @@ impl CheckAndSaveValidationReport {
                 match rspice_simulation::netlist_preparation::dependencies::expand_generated_dependencies(
                     &generated_source,
                     root.current_file(),
-                    &state.include_search_chain(),
-                    state.model.model_library_manager.catalog(),
-                    state.model.model_library_manager.resolution_records(),
+                    &reads.model.include_search_chain(),
+                    reads.model.model_library_manager.catalog(),
+                    reads.model.model_library_manager.resolution_records(),
                 ) {
                     Ok((sealed_source, sealed_dependencies)) => {
                         dependencies.insert(
@@ -466,7 +515,7 @@ impl CheckAndSaveValidationReport {
             ),
         }
 
-        let symbol_resolver = SymbolResolver::new(&state.model.library_manager, &buffers);
+        let symbol_resolver = SymbolResolver::new(&reads.model.library_manager, &buffers);
         for (key, schematic) in &documents {
             if let Err(error) = schematic.document().validated_revisions.validate() {
                 insert_finding(
@@ -486,8 +535,11 @@ impl CheckAndSaveValidationReport {
                 .documents
                 .iter()
                 .find(|(reference, _)| reference.key().eq_ignore_ascii_case(key));
-            let checked =
-                planned.map(|(reference, scope)| state.current_design_check(reference, *scope));
+            let checked = planned.map(|(reference, scope)| {
+                reads
+                    .model
+                    .current_design_check(reference, *scope, reads.facts)
+            });
             if let Some(None) = checked {
                 insert_finding(
                     &mut findings,
@@ -532,7 +584,7 @@ impl CheckAndSaveValidationReport {
                 key,
                 schematic,
                 &symbol_resolver,
-                state,
+                reads,
                 key.eq_ignore_ascii_case(&active_key),
                 &mut findings,
             );
@@ -614,7 +666,7 @@ impl CheckAndSaveValidationReport {
             stated.extend(identities);
         }
 
-        match snapshot(state) {
+        match snapshot(reads) {
             Ok(project) => {
                 dependencies.insert(
                     "project:publication-snapshot".to_owned(),
@@ -631,11 +683,11 @@ impl CheckAndSaveValidationReport {
         }
         dependencies.insert(
             "project:descriptor".to_owned(),
-            digest_serializable(&state.model.workspace.content.project)?,
+            digest_serializable(&reads.model.workspace.content.project)?,
         );
         dependencies.insert(
             "project:libraries".to_owned(),
-            digest_serializable(&state.model.library_manager)?,
+            digest_serializable(&reads.model.library_manager)?,
         );
 
         let mut blockers = Vec::new();
@@ -683,10 +735,10 @@ impl CheckAndSaveValidationReport {
             project_id: &project_id,
             project_revision,
             accepted_generation,
-            design_execution_epoch: state.model.design_execution_epoch,
-            active_schematic_epoch: state.model.active_schematic_epoch,
-            active_topology_version: state.model.schematic.topology_version(),
-            library_revision: state.model.library_manager.revision(),
+            design_execution_epoch: reads.model.design_execution_epoch,
+            active_schematic_epoch: reads.model.active_schematic_epoch,
+            active_topology_version: reads.model.schematic.topology_version(),
+            library_revision: reads.model.library_manager.revision(),
             blockers: &blockers,
             advisories: &advisories,
             dependencies: &dependencies,
@@ -698,10 +750,10 @@ impl CheckAndSaveValidationReport {
             project_id,
             project_revision,
             accepted_generation,
-            design_execution_epoch: state.model.design_execution_epoch,
-            active_schematic_epoch: state.model.active_schematic_epoch,
-            active_topology_version: state.model.schematic.topology_version(),
-            library_revision: state.model.library_manager.revision(),
+            design_execution_epoch: reads.model.design_execution_epoch,
+            active_schematic_epoch: reads.model.active_schematic_epoch,
+            active_topology_version: reads.model.schematic.topology_version(),
+            library_revision: reads.model.library_manager.revision(),
             document_scope_label,
             stale_interface_instances,
             blockers,
@@ -711,28 +763,33 @@ impl CheckAndSaveValidationReport {
         })
     }
 
+    /// [`Self::collect`] in the whole application state.
+    pub(crate) fn collect_in(state: &AppState) -> Result<Self, String> {
+        Self::collect(&ValidationReads::of(state))
+    }
+
     /// The report the dialog opens on, its checks run first in a copy of
     /// `state`, so the state a test built is left as it was.
     #[cfg(test)]
     pub(crate) fn validate(state: &AppState) -> Result<Self, String> {
         let mut state = state.clone();
-        run_design_checks(&mut state);
-        Self::collect(&state)
+        run_design_checks_in(&mut state);
+        Self::collect_in(&state)
     }
 
     pub(crate) fn can_save(&self) -> bool {
         self.blockers.is_empty()
     }
 
-    pub(crate) fn source_is_current(&self, state: &AppState) -> bool {
-        self.project_id == state.model.workspace.content.project.id().to_string()
-            && self.project_revision == state.model.workspace.content.project.revision().get()
-            && self.accepted_generation == accepted_generation(&state.platform)
-            && self.design_execution_epoch == state.model.design_execution_epoch
-            && self.active_schematic_epoch == state.model.active_schematic_epoch
-            && self.active_topology_version == state.model.schematic.topology_version()
-            && self.library_revision == state.model.library_manager.revision()
-            && self.active_view == state.model.workspace.content.active_schematic_reference()
+    pub(crate) fn source_is_current(&self, reads: &ValidationReads<'_>) -> bool {
+        self.project_id == reads.model.workspace.content.project.id().to_string()
+            && self.project_revision == reads.model.workspace.content.project.revision().get()
+            && self.accepted_generation == accepted_generation(reads.platform)
+            && self.design_execution_epoch == reads.model.design_execution_epoch
+            && self.active_schematic_epoch == reads.model.active_schematic_epoch
+            && self.active_topology_version == reads.model.schematic.topology_version()
+            && self.library_revision == reads.model.library_manager.revision()
+            && self.active_view == reads.model.workspace.content.active_schematic_reference()
     }
 
     pub(crate) fn blockers(&self) -> &[CheckAndSaveFinding] {
@@ -779,28 +836,6 @@ impl CheckAndSaveValidationReport {
     }
 }
 
-/// Resolve dynamic contracts without replacing the active editor's sheet.
-fn component_property_findings(
-    state: &AppState,
-    component: &crate::state::Component,
-) -> Vec<(String, String)> {
-    use crate::properties::property_bridge::validate_component_properties;
-    use crate::workbench::app::actions::property_edit::authoritative_component_property_sheet;
-    use crate::workbench::app_state::model::cell_instance_identity_sheet;
-
-    if component.kind != crate::state::ComponentType::CellInstance {
-        return validate_component_properties(
-            component,
-            state.design.property_registry.get(component.kind),
-        );
-    }
-    let sheet = match authoritative_component_property_sheet(state, component) {
-        Ok(sheet) => sheet.unwrap_or_else(cell_instance_identity_sheet),
-        Err(error) => return vec![("schema".to_owned(), error)],
-    };
-    validate_component_properties(component, Some(&sheet))
-}
-
 /// Check one document's naming, parameter and pin contracts.
 ///
 /// `locatable` states whether this document is the one the canvas is showing.
@@ -810,7 +845,7 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
     document_key: &str,
     schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
     symbol_resolver: &SymbolResolver<'_, S>,
-    state: &AppState,
+    reads: &ValidationReads<'_>,
     locatable: bool,
     findings: &mut BTreeMap<String, CheckAndSaveFinding>,
 ) {
@@ -878,7 +913,9 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
 
         // The reference is the one property whose emptiness is the design
         // checks' finding rather than the schema's.
-        for (field, error) in component_property_findings(state, component)
+        for (field, error) in reads
+            .design
+            .component_property_findings(reads.model, component)
             .into_iter()
             .filter(|(field, _)| field != "name")
         {
@@ -901,8 +938,8 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
         // A value for a parameter the module no longer declares is refused by
         // the netlister; it is named here, with its repair, rather than left
         // to read as a deck error.
-        for (key, value) in state.model.undeclared_instance_parameters(component) {
-            let owner = if state.model.model_card_owns_parameter(component, &key) {
+        for (key, value) in reads.model.undeclared_instance_parameters(component) {
+            let owner = if reads.model.model_card_owns_parameter(component, &key) {
                 "its model card sets".to_owned()
             } else {
                 format!("{}/{} does not declare", binding.library, binding.cell)
@@ -1011,16 +1048,35 @@ struct WalkedFindings {
 /// re-derived at commit reads the evidence the reader reviewed. A check that
 /// cannot run leaves no current result, which the report states as a
 /// blocker of its own.
-pub(crate) fn run_design_checks(state: &mut AppState) {
-    let plan = DesignCheckPlan::of(state);
+pub(crate) fn run_design_checks(
+    model: &mut Model,
+    platform: &PlatformState,
+    facts: SlotFacts,
+    wb: &mut WorkbenchSession,
+) {
+    let plan = DesignCheckPlan::of(model, platform);
     for (subject, scope) in plan
         .root
         .map(|root| (root, CheckScope::Design))
         .into_iter()
         .chain(plan.documents)
     {
-        let _ = state.ensure_design_check(subject, scope);
+        let (_, prompt) = model.ensure_design_check(subject, scope, facts);
+        if let Some(prompt) = prompt {
+            wb.prompt(prompt);
+        }
     }
+}
+
+/// [`run_design_checks`] in the whole application state.
+pub(crate) fn run_design_checks_in(state: &mut AppState) {
+    let facts = state.slot_facts();
+    run_design_checks(
+        &mut state.model,
+        &state.platform,
+        facts,
+        &mut state.workbench,
+    );
 }
 
 /// The design checks a report decides from, and how far each reaches.
@@ -1044,12 +1100,12 @@ struct DesignCheckPlan {
 }
 
 impl DesignCheckPlan {
-    fn of(state: &AppState) -> Self {
-        let active_view = state.model.workspace.content.active_schematic_reference();
-        let inspection = state.model.workspace.inspect_design_projection(
-            &state.model.library_manager,
+    fn of(model: &Model, platform: &PlatformState) -> Self {
+        let active_view = model.workspace.content.active_schematic_reference();
+        let inspection = model.workspace.inspect_design_projection(
+            &model.library_manager,
             &active_view,
-            &state.model.schematic,
+            &model.schematic,
         );
         let execution = inspection
             .clone()
@@ -1060,7 +1116,7 @@ impl DesignCheckPlan {
                 documents: Vec::new(),
             };
         };
-        let root = state.model.workspace.content.simulation_root_reference();
+        let root = model.workspace.content.simulation_root_reference();
         let placed_by_root = inspection
             .hierarchy_resolution()
             .bindings
@@ -1068,10 +1124,9 @@ impl DesignCheckPlan {
             .filter(|binding| binding.status.is_resolved())
             .map(|binding| binding.reference.key().to_ascii_lowercase())
             .collect::<std::collections::HashSet<_>>();
-        let mut keys = match effective_save_scope(&state.platform, SaveScope::ActiveDocument) {
+        let mut keys = match effective_save_scope(platform, SaveScope::ActiveDocument) {
             SaveScope::ActiveDocument => vec![active_view.key()],
-            SaveScope::AllDocuments => state
-                .model
+            SaveScope::AllDocuments => model
                 .workspace
                 .content
                 .schematic_buffers
@@ -1276,18 +1331,18 @@ mod tests {
     #[test]
     fn validation_is_deterministic_and_stales_after_design_change() {
         let mut state = AppState::default();
-        run_design_checks(&mut state);
-        let first = CheckAndSaveValidationReport::collect(&state).expect("first report");
+        run_design_checks_in(&mut state);
+        let first = CheckAndSaveValidationReport::collect_in(&state).expect("first report");
         // As the commit re-derives it: the checks still describe the design.
-        run_design_checks(&mut state);
-        let second = CheckAndSaveValidationReport::collect(&state).expect("second report");
+        run_design_checks_in(&mut state);
+        let second = CheckAndSaveValidationReport::collect_in(&state).expect("second report");
         assert_eq!(first.receipt_digest(), second.receipt_digest());
 
         state
             .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
-        let unchecked = CheckAndSaveValidationReport::collect(&state).expect("unchecked report");
+        let unchecked = CheckAndSaveValidationReport::collect_in(&state).expect("unchecked report");
         assert!(
             unchecked
                 .blockers()
@@ -1296,8 +1351,8 @@ mod tests {
                     && finding.message.contains("configured simulation root")),
             "a design the checks no longer describe is not saved on their word"
         );
-        run_design_checks(&mut state);
-        let changed = CheckAndSaveValidationReport::collect(&state).expect("changed report");
+        run_design_checks_in(&mut state);
+        let changed = CheckAndSaveValidationReport::collect_in(&state).expect("changed report");
         assert_ne!(first.receipt_digest(), changed.receipt_digest());
     }
 
@@ -1325,8 +1380,8 @@ mod tests {
             .model
             .schematic
             .add_component(ComponentType::Resistor, Point::new(10, 10));
-        run_design_checks(&mut state);
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        run_design_checks_in(&mut state);
+        let report = CheckAndSaveValidationReport::collect_in(&state).expect("report");
         let root = state.model.workspace.content.simulation_root_reference();
         let published = state
             .model
@@ -1368,8 +1423,8 @@ mod tests {
                 .waive_finding(target, "accepted for this design")
                 .expect("the waiver is recorded");
         }
-        run_design_checks(&mut state);
-        let waived = CheckAndSaveValidationReport::collect(&state).expect("waived report");
+        run_design_checks_in(&mut state);
+        let waived = CheckAndSaveValidationReport::collect_in(&state).expect("waived report");
         assert_eq!(rule_blockers(&waived), errors.len() - targets.len());
         assert_eq!(
             waived
@@ -1972,8 +2027,8 @@ mod tests {
         state.open_workspace_view(reference.amp_schematic);
         draw_supply_source(&mut state);
 
-        run_design_checks(&mut state);
-        let report = CheckAndSaveValidationReport::collect(&state).expect("report");
+        run_design_checks_in(&mut state);
+        let report = CheckAndSaveValidationReport::collect_in(&state).expect("report");
         assert!(
             report
                 .blockers()

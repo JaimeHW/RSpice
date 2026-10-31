@@ -15,7 +15,7 @@ use crate::workbench::workflows::project_workflow::{
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveValidationReport, run_design_checks,
+    CheckAndSaveValidationReport, ValidationReads, run_design_checks_in,
 };
 use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
@@ -157,8 +157,8 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
         return;
     }
     state.sync_active_schematic_to_workspace();
-    run_design_checks(state);
-    match CheckAndSaveValidationReport::collect(state) {
+    run_design_checks_in(state);
+    match CheckAndSaveValidationReport::collect_in(state) {
         Ok(report) => {
             // One line for the check. The dialog lists every finding, and
             // Problems lists the design-check ones where they can be visited.
@@ -211,7 +211,7 @@ impl RSpiceApp {
             first_blocker: first_blocker.as_deref(),
             note_error: note_error.as_deref(),
             note_touched: dialog.revision_note_touched,
-            checks_current: report.source_is_current(&self.state),
+            checks_current: report.source_is_current(&ValidationReads::of(&self.state)),
         });
         let primary_enabled = !pending && report.can_save() && note_error.is_none();
         let checks = checks_summary(&report);
@@ -324,8 +324,8 @@ impl RSpiceApp {
             Ok(summary) => summary,
             Err(error) => error.to_string(),
         });
-        run_design_checks(&mut self.state);
-        match CheckAndSaveValidationReport::collect(&self.state) {
+        run_design_checks_in(&mut self.state);
+        match CheckAndSaveValidationReport::collect_in(&self.state) {
             Ok(report) => self.state.project.check_and_save.report = Some(report),
             Err(error) => {
                 self.state.project.check_and_save.validation_error = Some(error);
@@ -356,8 +356,8 @@ impl RSpiceApp {
         };
         // Checks nothing a check still describes, so an unchanged design is
         // re-derived from the evidence the reader reviewed.
-        run_design_checks(&mut self.state);
-        let fresh_report = match CheckAndSaveValidationReport::collect(&self.state) {
+        run_design_checks_in(&mut self.state);
+        let fresh_report = match CheckAndSaveValidationReport::collect_in(&self.state) {
             Ok(report) => report,
             Err(error) => {
                 self.state.project.check_and_save.validation_error = Some(format!(

@@ -15,6 +15,7 @@
 //! does once the prologue lets it through.
 
 use crate::state::command_catalog::CommandKey;
+use crate::state::{CellViewRef, Component, LibraryManager, ProjectSourceRegistry};
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::state::workbench_session::WorkbenchSession;
@@ -79,6 +80,14 @@ pub trait DesignPort {
     /// Where the pointer rests on the canvas, in the sheet's coordinates,
     /// while it rests there.
     fn canvas_hover(&self) -> Option<(f64, f64)>;
+    /// What is wrong with `component`'s property values under its exact
+    /// property contract, the one its library master states and not the
+    /// generic sheet of its kind: each property's name, and why.
+    fn component_property_findings(
+        &self,
+        model: &Model,
+        component: &Component,
+    ) -> Vec<(String, String)>;
 }
 
 /// What code shows that another feature reads.
@@ -96,6 +105,15 @@ pub trait CodePort {
     /// current. Read here while code's state holds the receipt; the read
     /// ends when the receipt moves to the model.
     fn veriloga_compilation(&self) -> Option<&ProjectCompileReceipt>;
+    /// The design check's finding for a retained Verilog-A compilation whose
+    /// module's ports differ from its cell's schematic, while the revision it
+    /// compiled is the one `sources` holds: the view of `libraries` it names,
+    /// and what to tell the reader.
+    fn interface_check_finding(
+        &self,
+        sources: &ProjectSourceRegistry,
+        libraries: &LibraryManager,
+    ) -> Option<(CellViewRef, String)>;
 }
 
 /// What the cloud shows that another feature reads.

@@ -35,22 +35,21 @@ impl AppState {
         rspice_app_runs::workbench::preflight::check_design(self)
     }
 
-    /// Check `subject` as far as `scope` reaches, unless a check of it that
-    /// reached exactly as far still describes the design.
+    /// [`Model::ensure_design_check`] with the slots' facts, stating what its
+    /// drawing sync had to say.
     ///
-    /// For a workflow that decides from the checks rather than being one:
-    /// Check and Save and the run's preflight read the receipt this leaves
-    /// current, and the page lists what that check published, so none of
-    /// them can say something else about the same design.
+    /// [`Model::ensure_design_check`]: crate::workbench::app_state::Model::ensure_design_check
     pub(in crate::workbench) fn ensure_design_check(
         &mut self,
         subject: CellViewRef,
         scope: CheckScope,
     ) -> Result<(), String> {
-        if self.current_design_check(&subject, scope).is_some() {
-            return Ok(());
+        let facts = self.slot_facts();
+        let (outcome, prompt) = self.model.ensure_design_check(subject, scope, facts);
+        if let Some(prompt) = prompt {
+            self.prompt(prompt);
         }
-        self.run_design_check(subject, scope).map(|_| ())
+        outcome
     }
 
     /// [`Model::run_active_design_checks`] with the slots' facts, stating

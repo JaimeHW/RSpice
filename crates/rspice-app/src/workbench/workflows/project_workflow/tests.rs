@@ -905,7 +905,13 @@ fn a_project_whose_plan_needs_no_technology_opens_without_a_blocked_run_warning(
         ProjectLoadOrigin::BrowserImport("no-technology.rspiceproj"),
     ));
 
-    assert!(state.technology_gate_block_reason().is_ok());
+    assert!(
+        state
+            .model
+            .technology_inputs()
+            .technology_gate_block_reason()
+            .is_ok()
+    );
     let blocked = state
         .model
         .log_buffer

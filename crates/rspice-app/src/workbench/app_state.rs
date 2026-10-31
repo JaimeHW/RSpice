@@ -135,13 +135,6 @@ impl AppState {
         );
     }
 
-    /// [`Model::technology_inputs`].
-    pub(crate) fn technology_inputs(
-        &self,
-    ) -> rspice_simulation::project_technology::ProjectTechnologyInputs<'_> {
-        self.model.technology_inputs()
-    }
-
     /// [`Model::include_search_chain`].
     pub(crate) fn include_search_chain(
         &self,
@@ -183,17 +176,7 @@ impl AppState {
     /// any netlist exists.
     #[cfg(test)]
     pub(crate) fn technology_demand(&self) -> rspice_simulation::preparation::TechnologyDemand {
-        self.technology_inputs().technology_demand()
-    }
-
-    /// The single technology gate: a project need not have a technology; if it
-    /// has one it must be valid; if the plan needs one it must have one.
-    ///
-    /// A present binding is resolved against the full contract, which already
-    /// yields the exact reattach message for a binding without receipts. An
-    /// absent binding blocks only what the plan actually demands.
-    pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
-        self.technology_inputs().technology_gate_block_reason()
+        self.model.technology_inputs().technology_demand()
     }
 
     /// Initialize authoritative physical content for an existing Layout view.

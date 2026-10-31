@@ -1971,6 +1971,14 @@ mod tests {
         fn canvas_hover(&self) -> Option<(f64, f64)> {
             None
         }
+
+        fn component_property_findings(
+            &self,
+            _model: &Model,
+            _component: &crate::state::Component,
+        ) -> Vec<(String, String)> {
+            Vec::new()
+        }
     }
 
     impl CodePort for NoReads {
@@ -1997,6 +2005,14 @@ mod tests {
         fn veriloga_compilation(
             &self,
         ) -> Option<&rspice_app_runs::simulation::ProjectCompileReceipt> {
+            None
+        }
+
+        fn interface_check_finding(
+            &self,
+            _sources: &crate::state::ProjectSourceRegistry,
+            _libraries: &crate::state::LibraryManager,
+        ) -> Option<(crate::state::CellViewRef, String)> {
             None
         }
     }

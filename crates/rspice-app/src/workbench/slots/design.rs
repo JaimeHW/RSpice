@@ -290,4 +290,16 @@ impl DesignPort for DesignState {
     fn canvas_hover(&self) -> Option<(f64, f64)> {
         self.canvas_hover
     }
+
+    fn component_property_findings(
+        &self,
+        model: &Model,
+        component: &crate::state::Component,
+    ) -> Vec<(String, String)> {
+        crate::workbench::app::actions::property_edit::component_property_findings(
+            &self.property_registry,
+            model,
+            component,
+        )
+    }
 }
