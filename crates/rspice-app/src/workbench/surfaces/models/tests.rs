@@ -4,11 +4,16 @@
 //! model receives no synthetic qualification evidence, and a configured
 //! correlation requires current approved evidence before it counts.
 
+use std::collections::{BTreeMap, BTreeSet};
+
 use egui::Rect;
 use rspice_model_library::correlation::{CorrelationDatasetImport, CorrelationSuiteInput};
 
 use super::*;
 use crate::state::ModelsPage;
+use crate::state::model_library::{
+    DeviceModel, ModelCorrelationState, ModelLibrary, ModelSourceEvidenceBinding,
+};
 use crate::workbench::features;
 use crate::workbench::state::ModelsCatalogScope;
 

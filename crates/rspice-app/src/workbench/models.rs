@@ -12,6 +12,7 @@ pub(in crate::workbench) mod pack_persistence;
 #[cfg(target_arch = "wasm32")]
 pub(in crate::workbench) mod pdk_persistence;
 pub(in crate::workbench) mod pdk_workflow;
+pub(in crate::workbench) mod qualification;
 pub(crate) mod workspace_state;
 
 use crate::diagnostics::{LogSeverity, LogSource};

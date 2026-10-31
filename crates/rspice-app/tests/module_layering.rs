@@ -777,6 +777,10 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "documents/code_workspace",
     "documents/model_editor",
     "documents/model_correlation",
+    // What the release gate concludes for each model, from the model library
+    // and the open candidate. The models slot answers another feature's
+    // question with it, so it ranks below the slot.
+    "models/qualification",
     "lifecycle/window_session",
     // The shortcut libraries' persistence and the artifacts they write.
     "shortcuts/library_persistence",

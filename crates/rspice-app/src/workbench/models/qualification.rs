@@ -1,14 +1,20 @@
-//! The qualification page: which models are qualified, and against what.
+//! Model qualification: which models are qualified, and against what.
 //!
 //! A model's gate is derived from the evidence that exists, per domain, and
 //! never from an aggregate — so a model qualified on one platform and not
-//! another reads as exactly that. Every blocked action states the reason it is
-//! blocked rather than being hidden, because "no button" and "not qualified"
-//! are different facts to an engineer looking for why.
+//! another reads as exactly that.
 
-use super::*;
+use std::collections::{BTreeMap, BTreeSet};
 
-use crate::state::model_library::{ModelSourceAuthority, QualificationVectorDispositionCause};
+use rspice_app_state::workbench::app_state::model::Model;
+use sha2::{Digest as _, Sha256};
+
+use crate::state::model_library::{
+    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
+    ModelSourceAuthority, ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform,
+    QualificationVectorDispositionCause, short_digest,
+};
+use crate::workbench::documents::model_editor::{self, ModelEditorState};
 
 /// A model's release verdict.
 ///
@@ -17,7 +23,7 @@ use crate::state::model_library::{ModelSourceAuthority, QualificationVectorDispo
 /// gate has not cleared, and the alternative — a second verdict enum on the
 /// reading side — is how two surfaces come to disagree about one model.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(in crate::workbench::surfaces) enum QualificationGate {
+pub(in crate::workbench) enum QualificationGate {
     Qualified,
     Review,
     Unqualified,
@@ -34,7 +40,7 @@ pub(in crate::workbench::surfaces) enum QualificationGate {
 }
 
 impl QualificationGate {
-    pub(in crate::workbench::surfaces) const fn label(self) -> &'static str {
+    pub(in crate::workbench) const fn label(self) -> &'static str {
         match self {
             Self::Qualified => "qualified",
             Self::Review => "review",
@@ -50,13 +56,13 @@ impl QualificationGate {
     /// many — are ratios over the governed population, and totalling the
     /// exempt models into their denominators is the same false alarm the
     /// per-model badge used to carry.
-    pub(in crate::workbench::surfaces) const fn is_gate_subject(self) -> bool {
+    pub(in crate::workbench) const fn is_gate_subject(self) -> bool {
         !matches!(self, Self::EngineOwned)
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
-pub(super) enum QualificationDomain {
+pub(in crate::workbench) enum QualificationDomain {
     Dc,
     Ac,
     Transient,
@@ -76,9 +82,10 @@ impl QualificationDomain {
     /// the analyses a vector may name are DC, AC/charge, transient and noise,
     /// and a temperature is a *condition* one of them is run at rather than an
     /// analysis of its own.
-    pub(super) const ALL: [Self; 4] = [Self::Dc, Self::Ac, Self::Transient, Self::Noise];
+    pub(in crate::workbench) const ALL: [Self; 4] =
+        [Self::Dc, Self::Ac, Self::Transient, Self::Noise];
 
-    pub(super) const fn label(self) -> &'static str {
+    pub(in crate::workbench) const fn label(self) -> &'static str {
         match self {
             Self::Dc => "DC operating curves",
             Self::Ac => "AC / charge",
@@ -92,7 +99,7 @@ impl QualificationDomain {
     /// Shorter than [`Self::label`] because a column heading has a column's
     /// width, and not an abbreviation because the heading is what says which
     /// analyses the cells under it were counted from.
-    pub(super) const fn column_label(self) -> &'static str {
+    pub(in crate::workbench) const fn column_label(self) -> &'static str {
         match self {
             Self::Dc => "DC",
             Self::Ac => "AC · charge",
@@ -114,30 +121,30 @@ impl QualificationDomain {
 }
 
 #[derive(Debug, Clone, Default)]
-pub(super) struct QualificationDomainAccumulator {
-    pub(super) vectors: usize,
-    pub(super) references: usize,
-    pub(super) quantities: BTreeSet<String>,
-    pub(super) tolerance_contracts: BTreeMap<(u64, u64), String>,
-    pub(super) evidenced_vectors: usize,
-    pub(super) passing_vectors: usize,
-    pub(super) open_dispositions: usize,
+pub(in crate::workbench) struct QualificationDomainAccumulator {
+    pub(in crate::workbench) vectors: usize,
+    pub(in crate::workbench) references: usize,
+    pub(in crate::workbench) quantities: BTreeSet<String>,
+    pub(in crate::workbench) tolerance_contracts: BTreeMap<(u64, u64), String>,
+    pub(in crate::workbench) evidenced_vectors: usize,
+    pub(in crate::workbench) passing_vectors: usize,
+    pub(in crate::workbench) open_dispositions: usize,
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct QualificationDomainSummary {
-    pub(super) domain: QualificationDomain,
-    pub(super) vectors: usize,
+pub(in crate::workbench) struct QualificationDomainSummary {
+    pub(in crate::workbench) domain: QualificationDomain,
+    pub(in crate::workbench) vectors: usize,
     /// Vectors in this domain that a retained evidence record actually
     /// describes. Carried as a count beside [`Self::passing_vectors`] rather
     /// than folded into the prose below it, because a matrix cell has to tell
     /// "ran and failed" from "never ran" and the two colour differently.
-    pub(super) evidenced_vectors: usize,
-    pub(super) passing_vectors: usize,
-    pub(super) open_dispositions: usize,
-    pub(super) reference_coverage: String,
-    pub(super) tolerance: String,
-    pub(super) disposition: String,
+    pub(in crate::workbench) evidenced_vectors: usize,
+    pub(in crate::workbench) passing_vectors: usize,
+    pub(in crate::workbench) open_dispositions: usize,
+    pub(in crate::workbench) reference_coverage: String,
+    pub(in crate::workbench) tolerance: String,
+    pub(in crate::workbench) disposition: String,
 }
 
 /// One model's qualification record, reduced to the facts a gate is made of.
@@ -148,20 +155,20 @@ pub(super) struct QualificationDomainSummary {
 /// so there is still exactly one derivation of every number on it.
 #[derive(Debug, Clone)]
 pub(crate) struct QualificationModelSummary {
-    pub(super) key: String,
+    pub(in crate::workbench) key: String,
     pub(crate) library: String,
     pub(crate) model: String,
-    pub(super) source_revision: String,
+    pub(in crate::workbench) source_revision: String,
     pub(crate) source_error: Option<String>,
-    pub(super) suites: usize,
+    pub(in crate::workbench) suites: usize,
     pub(crate) vectors: usize,
     pub(crate) evidenced_vectors: usize,
     pub(crate) passing_vectors: usize,
-    pub(super) references: usize,
-    pub(super) desktop_passing: usize,
-    pub(super) wasm_passing: usize,
-    pub(super) parity_suites: usize,
-    pub(super) evidence_digest: Option<String>,
+    pub(in crate::workbench) references: usize,
+    pub(in crate::workbench) desktop_passing: usize,
+    pub(in crate::workbench) wasm_passing: usize,
+    pub(in crate::workbench) parity_suites: usize,
+    pub(in crate::workbench) evidence_digest: Option<String>,
     pub(crate) open_dispositions: usize,
     /// The two causes an open disposition can have, counted apart.
     ///
@@ -170,14 +177,14 @@ pub(crate) struct QualificationModelSummary {
     /// fact this state holds, and the honest split of a pending count is the
     /// one the state does hold: a vector that ran and failed, against a vector
     /// whose evidence no longer describes the current source.
-    pub(super) open_failed: usize,
-    pub(super) open_stale: usize,
-    pub(super) releases: usize,
-    pub(super) comparison_available: bool,
-    pub(super) correlation_status: String,
-    pub(super) correlation_evidence_digest: Option<String>,
+    pub(in crate::workbench) open_failed: usize,
+    pub(in crate::workbench) open_stale: usize,
+    pub(in crate::workbench) releases: usize,
+    pub(in crate::workbench) comparison_available: bool,
+    pub(in crate::workbench) correlation_status: String,
+    pub(in crate::workbench) correlation_evidence_digest: Option<String>,
     pub(crate) gate: QualificationGate,
-    pub(super) domains: Vec<QualificationDomainSummary>,
+    pub(in crate::workbench) domains: Vec<QualificationDomainSummary>,
 }
 
 impl QualificationModelSummary {
@@ -188,21 +195,12 @@ impl QualificationModelSummary {
     /// first can happen: [`qualification_domain_summaries`] builds a row per
     /// domain a vector was actually counted into, so an absent domain is one
     /// the family never wrote a vector against.
-    pub(super) fn domain(
+    pub(in crate::workbench) fn domain(
         &self,
         domain: QualificationDomain,
     ) -> Option<&QualificationDomainSummary> {
         self.domains.iter().find(|summary| summary.domain == domain)
     }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum QualificationPageAction {
-    ReviewVectors,
-    ReviewReleaseBinding,
-    RunSuite,
-    CompareRelease,
-    OpenCorrelation,
 }
 
 pub(crate) fn qualification_summaries(
@@ -238,37 +236,20 @@ pub(crate) fn qualification_summaries(
 /// narrow projection of it, so a field added there does not silently become
 /// another surface's dependency.
 #[derive(Debug, Clone)]
-pub(in crate::workbench::surfaces) struct ModelGateFact {
-    pub(in crate::workbench::surfaces) library: String,
-    pub(in crate::workbench::surfaces) model: String,
-    pub(in crate::workbench::surfaces) vectors: usize,
-    pub(in crate::workbench::surfaces) evidenced_vectors: usize,
-    pub(in crate::workbench::surfaces) passing_vectors: usize,
-    pub(in crate::workbench::surfaces) open_dispositions: usize,
+pub(in crate::workbench) struct ModelGateFact {
+    pub(in crate::workbench) library: String,
+    pub(in crate::workbench) model: String,
+    pub(in crate::workbench) vectors: usize,
+    pub(in crate::workbench) evidenced_vectors: usize,
+    pub(in crate::workbench) passing_vectors: usize,
+    pub(in crate::workbench) open_dispositions: usize,
     /// This page could not read the model's gate at all, so its counts say
     /// nothing either way and a reader must not total them as passing.
-    pub(in crate::workbench::surfaces) unreadable: bool,
-    pub(in crate::workbench::surfaces) gate: QualificationGate,
+    pub(in crate::workbench) unreadable: bool,
+    pub(in crate::workbench) gate: QualificationGate,
 }
 
-/// Every model in the closure, projected to what a reading surface may know.
-pub(in crate::workbench::surfaces) fn model_gate_facts(app: &RSpiceApp) -> Vec<ModelGateFact> {
-    qualification_summaries(&app.state.model, &app.state.models.model_editor)
-        .into_iter()
-        .map(|summary| ModelGateFact {
-            library: summary.library,
-            model: summary.model,
-            vectors: summary.vectors,
-            evidenced_vectors: summary.evidenced_vectors,
-            passing_vectors: summary.passing_vectors,
-            open_dispositions: summary.open_dispositions,
-            unreadable: summary.source_error.is_some(),
-            gate: summary.gate,
-        })
-        .collect()
-}
-
-pub(super) fn qualification_model_summary(
+pub(in crate::workbench) fn qualification_model_summary(
     editor: &ModelEditorState,
     library: &ModelLibrary,
     model: &DeviceModel,
@@ -375,7 +356,7 @@ pub(super) fn qualification_model_summary(
     summary
 }
 
-pub(super) fn summarize_qualification_state(
+pub(in crate::workbench) fn summarize_qualification_state(
     key: String,
     library_name: &str,
     model: &DeviceModel,
@@ -565,7 +546,7 @@ pub(super) fn summarize_qualification_state(
     }
 }
 
-pub(super) fn apply_correlation_qualification_contract(
+pub(in crate::workbench) fn apply_correlation_qualification_contract(
     summary: &mut QualificationModelSummary,
     correlation: Option<&ModelCorrelationState>,
     source: Option<&ModelSourceEvidenceBinding>,
@@ -642,7 +623,7 @@ pub(super) fn apply_correlation_qualification_contract(
     }
 }
 
-pub(super) fn qualification_domain_summaries(
+pub(in crate::workbench) fn qualification_domain_summaries(
     accumulators: BTreeMap<QualificationDomain, QualificationDomainAccumulator>,
 ) -> Vec<QualificationDomainSummary> {
     accumulators
@@ -701,7 +682,10 @@ pub(super) fn qualification_domain_summaries(
         .collect()
 }
 
-pub(super) fn qualification_tolerance_key(absolute: f64, relative: f64) -> (u64, u64) {
+pub(in crate::workbench) fn qualification_tolerance_key(
+    absolute: f64,
+    relative: f64,
+) -> (u64, u64) {
     let canonical_bits = |value: f64| {
         if value == 0.0 {
             0.0_f64.to_bits()
@@ -712,7 +696,7 @@ pub(super) fn qualification_tolerance_key(absolute: f64, relative: f64) -> (u64,
     (canonical_bits(absolute), canonical_bits(relative))
 }
 
-pub(super) fn qualification_tolerance_label(absolute: f64, relative: f64) -> String {
+pub(in crate::workbench) fn qualification_tolerance_label(absolute: f64, relative: f64) -> String {
     match (absolute > 0.0, relative > 0.0) {
         (false, false) => "exact".to_owned(),
         (true, false) => format!("{absolute:.3e} absolute"),
@@ -721,7 +705,7 @@ pub(super) fn qualification_tolerance_label(absolute: f64, relative: f64) -> Str
     }
 }
 
-pub(super) fn qualification_evidence_contract_digest(
+pub(in crate::workbench) fn qualification_evidence_contract_digest(
     members: &mut Vec<(String, u64, crate::product::ContentDigest)>,
 ) -> Option<String> {
     if members.is_empty() {
@@ -758,205 +742,6 @@ pub(super) fn qualification_evidence_contract_digest(
     ))
 }
 
-/// The band the engine-owned families are listed under.
-pub(super) const ENGINE_OWNED_BAND: &str =
-    "Engine-owned · exempt from the source-owned release gate";
-
-/// One row of the qualification rail: a model, or the band above a group.
-pub(super) enum QualificationRailRow<'a> {
-    Band(&'static str),
-    Model(&'a QualificationModelSummary),
-}
-
-/// The rail's order: the gate's own subjects first, then what it exempts.
-///
-/// Interleaving the two — which is what sorting by library name alone does —
-/// leaves a reader scanning one flat list to tell "exempt" from "not yet
-/// qualified" by badge colour, on a page whose entire subject is which models
-/// a release may be signed against. The band says it once, in words, and the
-/// group under it inherits the statement.
-pub(super) fn qualification_rail_rows(
-    summaries: &[QualificationModelSummary],
-) -> Vec<QualificationRailRow<'_>> {
-    let (exempt, subject): (Vec<_>, Vec<_>) = summaries
-        .iter()
-        .partition(|summary| !summary.gate.is_gate_subject());
-    let mut rows = subject
-        .into_iter()
-        .map(QualificationRailRow::Model)
-        .collect::<Vec<_>>();
-    if !exempt.is_empty() {
-        rows.push(QualificationRailRow::Band(ENGINE_OWNED_BAND));
-        rows.extend(exempt.into_iter().map(QualificationRailRow::Model));
-    }
-    rows
-}
-
-pub(super) fn selected_qualification_summary<'a>(
-    cx: &Cx<'_, ModelsFeature>,
-    summaries: &'a [QualificationModelSummary],
-) -> Option<&'a QualificationModelSummary> {
-    let library = cx.model.model_library_manager.selected_library.as_deref()?;
-    let model = cx.state.selected_model.as_deref()?;
-    summaries.iter().find(|summary| {
-        summary.library.eq_ignore_ascii_case(library) && summary.model.eq_ignore_ascii_case(model)
-    })
-}
-
-pub(super) fn qualification_action_block_reason(
-    cx: &Cx<'_, ModelsFeature>,
-    selected: Option<&QualificationModelSummary>,
-    action: QualificationPageAction,
-) -> Option<String> {
-    let Some(selected) = selected else {
-        return Some("Select a model family first".to_owned());
-    };
-    if !cx.platform.project_lifecycle.is_open() {
-        return Some("Open a project before using model qualification".to_owned());
-    }
-    // Asked before the source-owned refusal below, which would otherwise
-    // report an engine-owned card as a project-owned revision the user failed
-    // to select. There is nothing here for them to fix; the way to bring one
-    // of these under the gate is to author a project copy of it.
-    if !selected.gate.is_gate_subject() {
-        return Some(
-            "Engine-owned models are exempt from the source-owned release gate — author a \
-             project copy to qualify one"
-                .to_owned(),
-        );
-    }
-    if selected.source_error.is_some() {
-        return Some("Select a project-owned model revision".to_owned());
-    }
-    if cx.state.model_editor.qualification_execution.is_some() {
-        return Some(
-            "Finish or cancel the active model qualification run before changing workflows"
-                .to_owned(),
-        );
-    }
-    if let Some(draft) = cx.state.model_editor.draft.as_ref() {
-        let same_model = draft.library_name.eq_ignore_ascii_case(&selected.library)
-            && draft.model_name.eq_ignore_ascii_case(&selected.model);
-        if draft.is_dirty() && !same_model {
-            return Some(format!(
-                "Save or discard unsaved model candidate '{}/{}' first",
-                draft.library_name, draft.model_name
-            ));
-        }
-        if same_model
-            && draft.definition_is_dirty()
-            && matches!(
-                action,
-                QualificationPageAction::RunSuite | QualificationPageAction::CompareRelease
-            )
-        {
-            return Some(
-                "Save the changed model definition before running or comparing qualification"
-                    .to_owned(),
-            );
-        }
-    }
-    match action {
-        QualificationPageAction::ReviewVectors
-        | QualificationPageAction::ReviewReleaseBinding
-        | QualificationPageAction::OpenCorrelation => None,
-        QualificationPageAction::RunSuite if cx.model.safe_mode.project_read_only() => {
-            Some("Qualification cannot run while the project is read-only".to_owned())
-        }
-        QualificationPageAction::RunSuite if selected.suites == 0 => {
-            Some("Author at least one executable qualification suite first".to_owned())
-        }
-        QualificationPageAction::RunSuite => None,
-        QualificationPageAction::CompareRelease if !selected.comparison_available => {
-            Some("The selected model has no approved release to compare".to_owned())
-        }
-        QualificationPageAction::CompareRelease => None,
-    }
-}
-
-pub(super) fn execute_qualification_action(
-    cx: &mut Cx<'_, ModelsFeature>,
-    action: QualificationPageAction,
-) {
-    let summaries = qualification_summaries(cx.model, &cx.state.model_editor);
-    let selected = selected_qualification_summary(cx, &summaries);
-    // The page disables a blocked action and names the blocker on hover.
-    if qualification_action_block_reason(cx, selected, action).is_some() {
-        return;
-    }
-    if action == QualificationPageAction::OpenCorrelation {
-        if let Err(error) = cx.wb.navigate(
-            SurfaceRoute::surface(SurfaceId::ModelCorrelation),
-            RouteTransitionSource::User,
-        ) {
-            cx.wb
-                .prompt(format!("Measurement correlation cannot be opened: {error}"));
-        }
-        return;
-    }
-    let Some(library) = cx.model.model_library_manager.selected_library.clone() else {
-        cx.wb
-            .prompt("Select a model family before opening qualification.");
-        return;
-    };
-    let Some(model) = cx.state.selected_model.clone() else {
-        cx.wb
-            .prompt("Select a model family before opening qualification.");
-        return;
-    };
-    if let Err(error) = model_editor::open_project_model(
-        &mut cx.state.model_editor_parts(cx.model, cx.wb, cx.platform),
-        &library,
-        &model,
-    ) {
-        cx.wb
-            .prompt(format!("Qualification cannot be opened: {error}"));
-        return;
-    }
-    if let Err(error) = cx.wb.navigate(
-        SurfaceRoute::surface(SurfaceId::ModelEditor),
-        RouteTransitionSource::User,
-    ) {
-        cx.wb
-            .prompt(format!("Qualification editor cannot be shown: {error}"));
-        return;
-    }
-
-    match action {
-        QualificationPageAction::ReviewVectors => {
-            cx.state.model_editor.active_section = ModelEditorSection::Tests;
-            cx.state.model_editor.qualification_plan_open = true;
-        }
-        QualificationPageAction::ReviewReleaseBinding => {
-            cx.state.model_editor.active_section = ModelEditorSection::Release;
-        }
-        QualificationPageAction::RunSuite => {
-            cx.state.model_editor.active_section = ModelEditorSection::Tests;
-            model_editor::validate_open_candidate(&mut cx.state.model_editor_parts(
-                cx.model,
-                cx.wb,
-                cx.platform,
-            ));
-            let command = ModelsCommand::ModelRunQualificationTests;
-            let availability = crate::workbench::models::command_availability(command, cx);
-            if availability.is_available() {
-                cx.execute(command.key());
-            } else if let CommandAvailability::Disabled(reason) = availability {
-                cx.wb.prompt(format!("Qualification cannot run: {reason}."));
-            }
-        }
-        QualificationPageAction::CompareRelease => {
-            cx.state.model_editor.active_section = ModelEditorSection::Release;
-            let command = ModelsCommand::ModelCompareRelease;
-            let availability = crate::workbench::models::command_availability(command, cx);
-            if availability.is_available() {
-                cx.execute(command.key());
-            } else if let CommandAvailability::Disabled(reason) = availability {
-                cx.wb.prompt(format!(
-                    "Approved-model comparison is unavailable: {reason}."
-                ));
-            }
-        }
-        QualificationPageAction::OpenCorrelation => {}
-    }
+fn model_key(library: &str, item: &str) -> String {
+    format!("{library}\u{1f}{item}")
 }

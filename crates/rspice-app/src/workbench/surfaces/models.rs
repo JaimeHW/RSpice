@@ -2,28 +2,23 @@
 //! the source-owned model qualification and release gate.
 
 mod manager;
-mod qualification;
+mod qualification_actions;
 
-use qualification::*;
-/// What the rest of the surfaces may read about model qualification. The glob
-/// above is this module's own working vocabulary and stays private to it.
-pub(super) use qualification::{ModelGateFact, QualificationGate, model_gate_facts};
+use crate::workbench::models::qualification::*;
+use qualification_actions::*;
 
-use std::collections::{BTreeMap, BTreeSet};
+/// What the rest of the surfaces may read about model qualification. The globs
+/// above are this module's own working vocabulary and stay private to it.
+pub(super) use crate::workbench::models::qualification::{ModelGateFact, QualificationGate};
+pub(super) use qualification_actions::model_gate_facts;
 
 use egui::Ui;
-use sha2::{Digest as _, Sha256};
 
 use crate::state::ModelBoundSymbolDefinition;
-use crate::state::model_library::{
-    DeviceModel, ModelCorrelationState, ModelLibrary, ModelQualificationState,
-    ModelSourceEvidenceBinding, QualificationAnalysis, QualificationPlatform, short_digest,
-};
 use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::Model;
 
 use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-use crate::workbench::documents::model_editor::{self, ModelEditorSection, ModelEditorState};
+use crate::workbench::documents::model_editor::{self, ModelEditorSection};
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::models::ModelsFeature;
@@ -47,10 +42,6 @@ fn symbol_parameter_form_label(definition: &ModelBoundSymbolDefinition) -> Strin
         [section] if !section.label.trim().is_empty() => section.label.trim().to_owned(),
         _ => format!("{} sections · {field_count} fields", sections.len()),
     }
-}
-
-fn model_key(library: &str, item: &str) -> String {
-    format!("{library}\u{1f}{item}")
 }
 
 #[cfg(test)]
