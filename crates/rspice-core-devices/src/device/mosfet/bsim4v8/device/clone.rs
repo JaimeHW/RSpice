@@ -43,7 +43,6 @@ impl Clone for Bsim4v8Device {
             initial_off_seed_evaluations: self.initial_off_seed_evaluations,
             initial_off_seed_raw: self.initial_off_seed_raw,
             eval_memo: self.eval_memo.clone(),
-            charges_consumed: self.charges_consumed.clone(),
         }
     }
 
@@ -80,8 +79,7 @@ impl Clone for Bsim4v8Device {
             initial_off_seed_pending,
             initial_off_seed_evaluations,
             initial_off_seed_raw,
-            eval_memo: _,
-            charges_consumed,
+            eval_memo,
         } = source;
         self.name.clone_from(name);
         self.node_drain_external = *node_drain_external;
@@ -114,8 +112,6 @@ impl Clone for Bsim4v8Device {
         self.initial_off_seed_pending = *initial_off_seed_pending;
         self.initial_off_seed_evaluations = *initial_off_seed_evaluations;
         self.initial_off_seed_raw = *initial_off_seed_raw;
-        // The records belong to the model data this instance held before.
-        self.eval_memo.clear();
-        self.charges_consumed.set(charges_consumed.get());
+        self.eval_memo.clone_from(eval_memo);
     }
 }

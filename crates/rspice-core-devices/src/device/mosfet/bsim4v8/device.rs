@@ -170,12 +170,9 @@ pub struct Bsim4v8Device {
     /// Raw branch voltages the last update saw while the `OFF` startup state
     /// was still pending; `self.bias` holds the startup state instead.
     initial_off_seed_raw: Option<Bsim4v8Bias>,
-    /// The most recent module evaluations, reused at identical inputs.
+    /// The most recent module evaluations, reused at identical inputs, and
+    /// whether the current iterate's charge state was requested.
     eval_memo: Bsim4v8EvalMemo,
-    /// A charge state was requested since the last `update`: the next update
-    /// runs the charge model with its DC evaluation, as b4ld.c's transient
-    /// load does, so the charge companion of that iterate reuses it.
-    charges_consumed: std::cell::Cell<bool>,
 }
 
 impl Bsim4v8Device {
@@ -239,7 +236,6 @@ impl Bsim4v8Device {
             initial_off_seed_evaluations: 0,
             initial_off_seed_raw: None,
             eval_memo: Bsim4v8EvalMemo::default(),
-            charges_consumed: std::cell::Cell::new(false),
         }
     }
 
@@ -568,7 +564,7 @@ impl Bsim4v8Device {
                 * (Self::node_voltage(v, self.node_gate_mid)
                     - Self::node_voltage(v, self.node_source))
         });
-        self.charges_consumed.set(true);
+        self.eval_memo.request_charges();
         let inputs = Bsim4v8EvalInputs::new(bias, junction_bias, gate_mid_vgs, self.gmin);
         if let Some(recorded) = self.eval_memo.charge(&inputs) {
             return recorded;
@@ -2130,7 +2126,7 @@ impl NonlinearDevice for Bsim4v8Device {
         if let Some(junction_bias) = junction_bias {
             self.junction_bias = junction_bias;
         }
-        let with_charges = self.charges_consumed.replace(false);
+        let with_charges = self.eval_memo.take_charge_request();
         self.op = self.eval_dc_with_charges(bias, junction_bias, with_charges);
         self.von_prev = self.op.von;
         self.has_history = true;
@@ -2403,7 +2399,7 @@ mod tests {
         // A clone starts with no recorded evaluation; this one also lacks
         // the charge request, so its update evaluates the DC model only.
         let mut fresh = device.clone();
-        fresh.charges_consumed.set(false);
+        fresh.eval_memo.take_charge_request();
         let iterate = [0.4, 0.9];
         device.update(&iterate);
         fresh.update(&iterate);

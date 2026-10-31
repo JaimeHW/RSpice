@@ -9,7 +9,8 @@
 //! repeated evaluation returns the recorded result, which is the same value
 //! bit for bit.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
+use std::fmt;
 
 use super::super::eval::{Bsim4v8Bias, Bsim4v8Charge, Bsim4v8JunctionBias, Bsim4v8Op};
 use crate::Value;
@@ -57,19 +58,42 @@ struct Bsim4v8EvalRecord {
 }
 
 /// The two most recent evaluations, newest first. A clone starts empty: the
-/// records are a cache, never state.
-#[derive(Debug, Default)]
-pub(super) struct Bsim4v8EvalMemo(RefCell<[Option<Box<Bsim4v8EvalRecord>>; 2]>);
+/// records are a cache, never state, so they print as nothing and a raw
+/// sample that records one leaves the instance's printed state unchanged.
+#[derive(Default)]
+pub(super) struct Bsim4v8EvalMemo {
+    records: RefCell<[Option<Box<Bsim4v8EvalRecord>>; 2]>,
+    /// A charge state was requested since the last `update`: the next update
+    /// runs the charge model with its DC evaluation, as b4ld.c's transient
+    /// load does, so the charge companion of that iterate reuses it.
+    charges_requested: Cell<bool>,
+}
 
 impl Clone for Bsim4v8EvalMemo {
     fn clone(&self) -> Self {
-        Self::default()
+        Self {
+            records: RefCell::default(),
+            charges_requested: Cell::new(self.charges_requested.get()),
+        }
+    }
+
+    /// The records belong to the model data this instance held before, so
+    /// they are forgotten, keeping their allocations; the request is copied.
+    fn clone_from(&mut self, source: &Self) {
+        self.clear();
+        self.charges_requested.set(source.charges_requested.get());
+    }
+}
+
+impl fmt::Debug for Bsim4v8EvalMemo {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Bsim4v8EvalMemo").finish_non_exhaustive()
     }
 }
 
 impl Bsim4v8EvalMemo {
     fn find<T>(&self, mut hit: impl FnMut(&Bsim4v8EvalRecord) -> Option<T>) -> Option<T> {
-        let records = self.0.borrow();
+        let records = self.records.borrow();
         records
             .iter()
             .flatten()
@@ -105,7 +129,7 @@ impl Bsim4v8EvalMemo {
 
     /// Record an evaluation as the newest, evicting the older record.
     pub(super) fn record(&self, inputs: Bsim4v8EvalInputs, op: &Bsim4v8Op, dc_output_vdsat: Value) {
-        let mut records = self.0.borrow_mut();
+        let mut records = self.records.borrow_mut();
         records.swap(0, 1);
         match &mut records[0] {
             Some(record) => {
@@ -127,8 +151,18 @@ impl Bsim4v8EvalMemo {
 
     /// Forget every record: the instance now holds other model data.
     pub(super) fn clear(&self) {
-        for record in self.0.borrow_mut().iter_mut().flatten() {
+        for record in self.records.borrow_mut().iter_mut().flatten() {
             record.valid = false;
         }
+    }
+
+    /// Note that a charge state was requested for the current iterate.
+    pub(super) fn request_charges(&self) {
+        self.charges_requested.set(true);
+    }
+
+    /// Whether a charge state was requested since the last call, clearing it.
+    pub(super) fn take_charge_request(&self) -> bool {
+        self.charges_requested.replace(false)
     }
 }
