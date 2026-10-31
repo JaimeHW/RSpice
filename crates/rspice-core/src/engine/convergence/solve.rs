@@ -8,8 +8,8 @@ use crate::engine::core::{StartupVoltageConstraint, StartupVoltageHints};
 /// How many deficient rows the prose names before it summarizes the rest.
 pub(in crate::engine::convergence) const SINGULAR_ROWS_SHOWN: usize = 8;
 
-/// The largest DC system whose uncertified sparse solve is retried in
-/// extended precision.
+/// The largest system whose Newton solve keeps the strict backward-error
+/// certificate; a DC solve that misses it is retried in extended precision.
 const EXTENDED_PRECISION_RETRY_UNKNOWNS: usize = 128;
 
 /// Whether a DC linear solve keeps the strict backward-error certificate.
@@ -175,8 +175,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Solve the linear system of one DC Newton iteration; see [`DcSolve`].
-    pub(in crate::engine::convergence) fn solve_dc_newton_iteration(
+    /// Solve the linear system of one DC or transient Newton iteration; see
+    /// [`DcSolve`]. A transient step whose solve is refused is cut and
+    /// retried, so its small systems keep the certificate as the DC ones do.
+    pub(in crate::engine) fn solve_dc_newton_iteration(
         matrix: &mut StaticMatrix,
         rhs: &[Value],
         solution: &mut Vec<Value>,
