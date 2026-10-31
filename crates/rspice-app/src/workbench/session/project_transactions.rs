@@ -572,6 +572,7 @@ impl AppState {
     }
 
     /// [`Model::prune_workspace_after_cell_deleted`], then what it left.
+    #[cfg(test)]
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         let pruned = self.model.prune_workspace_after_cell_deleted(library, cell);
         apply_workspace_pruned(self, pruned);
@@ -601,7 +602,7 @@ pub(in crate::workbench) fn apply_workspace_pruned(state: &mut AppState, pruned:
         prompt,
         restore_active_schematic,
         clear_execution_context,
-        void_veriloga_evidence,
+        void_veriloga_evidence: voided,
     } = pruned;
     if let Some(prompt) = prompt {
         state.prompt(prompt);
@@ -612,13 +613,24 @@ pub(in crate::workbench) fn apply_workspace_pruned(state: &mut AppState, pruned:
     if clear_execution_context {
         state.clear_design_execution_context();
     }
+    void_veriloga_evidence(state, &voided);
+}
+
+/// Drop the Verilog-A compile evidence, the receipt or the compile still
+/// waiting, that names one of `sources`: it no longer describes its source.
+pub(in crate::workbench) fn void_veriloga_evidence(
+    state: &mut AppState,
+    sources: &[crate::state::ProjectSourceId],
+) {
     let veriloga = &mut state.code.code_workspace.veriloga;
-    let names_a_moved_source = veriloga.receipt.as_ref().is_some_and(|receipt| {
-        void_veriloga_evidence.contains(&receipt.compilation.token().bundle_id)
-    }) || veriloga
-        .pending
+    let names_a_moved_source = veriloga
+        .receipt
         .as_ref()
-        .is_some_and(|pending| void_veriloga_evidence.contains(&pending.token.bundle_id));
+        .is_some_and(|receipt| sources.contains(&receipt.compilation.token().bundle_id))
+        || veriloga
+            .pending
+            .as_ref()
+            .is_some_and(|pending| sources.contains(&pending.token.bundle_id));
     if names_a_moved_source {
         *veriloga = Default::default();
     }

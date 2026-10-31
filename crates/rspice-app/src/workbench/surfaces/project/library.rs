@@ -879,7 +879,12 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             }
         }
         LibraryIntent::DeleteCell { library, cell } => {
-            if let Err(error) = app.state.open_library_cell_deletion_review(&library, &cell) {
+            let state = &mut app.state;
+            if let Err(error) =
+                state
+                    .project
+                    .open_library_cell_deletion_review(&state.model, &library, &cell)
+            {
                 app.state.prompt(error);
             }
         }
@@ -895,7 +900,9 @@ fn apply_library_intent(ctx: &Context, app: &mut RSpiceApp, intent: LibraryInten
             }
         }
         LibraryIntent::DeleteView(reference) => {
-            if let Err(error) = app.state.open_library_view_deletion_review(
+            let state = &mut app.state;
+            if let Err(error) = state.project.open_library_view_deletion_review(
+                &state.model,
                 &reference.library,
                 &reference.cell,
                 &reference.view,

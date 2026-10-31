@@ -10,7 +10,9 @@ use crate::workbench::app_state::session::veriloga_library::persist_global_veril
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
-use crate::workbench::session::project_transactions::apply_workspace_pruned;
+use crate::workbench::session::project_transactions::{
+    apply_workspace_pruned, void_veriloga_evidence,
+};
 
 pub(super) fn open_command_palette(state: &mut AppState) {
     let route = super::super::SurfaceRoute::surface(super::super::SurfaceId::CommandPalette);
@@ -347,9 +349,9 @@ pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: Ope
 /// Carry out what the project feature handed over, as the feature did in
 /// place: the Configurations command, opening the selected view where it is
 /// edited, using a configuration for runs, whose refusal the Configuration
-/// page states, and what a library catalog change or a created cell or view
-/// left outside the model, each with the revision it reserved, in the order
-/// the change once did it.
+/// page states, and what a library catalog change or a created or deleted
+/// cell or view left outside the model, each with the revision it reserved,
+/// in the order the change once did it.
 pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request: ProjectRequest) {
     match request {
         ProjectRequest::ConfigurationSets => Command::ConfigurationSets.execute(app),
@@ -427,6 +429,31 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             if let Some(receipt) = veriloga {
                 app.state.workbench.activate(Workspace::Design);
                 app.state.code.code_workspace.veriloga.receipt = Some(*receipt);
+            }
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, notice);
+            if persist_global_veriloga {
+                persist_global_veriloga_library(&mut app.state.model);
+            }
+        }
+        ProjectRequest::CellOrViewDeleted {
+            removed_sources,
+            pruned,
+            mutation,
+            remove_placements,
+            notice,
+            persist_global_veriloga,
+        } => {
+            void_veriloga_evidence(&mut app.state, &removed_sources);
+            apply_workspace_pruned(&mut app.state, pruned);
+            publish_reserved_revision(app, mutation);
+            if let Some(target) = remove_placements {
+                app.state.model.remove_deleted_master_placements(
+                    target.library(),
+                    target.cell(),
+                    target.view(),
+                    &target.display_path(),
+                );
             }
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);

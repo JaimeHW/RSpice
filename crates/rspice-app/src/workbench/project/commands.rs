@@ -18,11 +18,13 @@ use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{CellViewRef, PreparedProjectLibraryMutation, VerilogACompileReceipt, ViewType};
+use crate::state::{
+    CellViewRef, PreparedProjectLibraryMutation, ProjectSourceId, VerilogACompileReceipt, ViewType,
+};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{Drain, Request};
 use crate::workbench::project::configuration_state::ConfigurationSelection;
-use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectPage};
 
 /// One command of the project feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -257,10 +259,10 @@ impl ProjectCommand {
 /// whole application as the feature once did in place: the Configurations
 /// command of the shell's own table, opening the selected view in the
 /// workspace that edits it, using a configuration for runs, and what a
-/// library catalog change, or a created cell or view, left outside the
-/// model. Each place that raises one raises one, carrying everything it
-/// once did after that point, in order. Taken straight after the call
-/// that raised it.
+/// library catalog change, or a created or deleted cell or view, left
+/// outside the model. Each place that raises one raises one, carrying
+/// everything it once did after that point, in order. Taken straight after
+/// the call that raised it.
 #[derive(Clone, Debug)]
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
@@ -298,6 +300,20 @@ pub(crate) enum ProjectRequest {
         mutation: ReservedLibraryRevision,
         view: CellViewRef,
         veriloga: Option<Box<VerilogACompileReceipt>>,
+        notice: String,
+        persist_global_veriloga: bool,
+    },
+    /// What deleting a cell or a view left outside its catalog change, in
+    /// the order the deletion once did it: compile evidence naming a source
+    /// it removed is dropped, what the catalog change left is carried out,
+    /// then the revision it reserved is published, then the placements are
+    /// removed when the reader chose that, then its own line in the log,
+    /// and the user's Verilog-A library saved when the object was in it.
+    CellOrViewDeleted {
+        removed_sources: Vec<ProjectSourceId>,
+        pruned: WorkspacePruned,
+        mutation: ReservedLibraryRevision,
+        remove_placements: Option<Box<LibraryDeletionTarget>>,
         notice: String,
         persist_global_veriloga: bool,
     },

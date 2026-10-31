@@ -384,14 +384,20 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_veriloga_build_settings", "code"),
     ("ProjectFeature::process_copy_cell_dialog", "project"),
     ("ProjectFeature::process_rename_cell_dialog", "project"),
-    ("process_library_deletion_review_dialog", "project"),
+    (
+        "ProjectFeature::process_library_deletion_review_dialog",
+        "project",
+    ),
     ("process_plan_removal_review_dialog", "simulate"),
     ("process_plan_removal_refusal_dialog", "simulate"),
     (
         "app_state::services_access::process_autosave_restore_dialog",
         "services",
     ),
-    ("process_pending_library_deletions", "project"),
+    (
+        "ProjectFeature::process_pending_library_deletions",
+        "project",
+    ),
     ("process_exit_request", "shell"),
     ("show_route_overlays", "shell"),
 ];
@@ -403,7 +409,7 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
     "synchronize_route_owned_dialogs",
     "ProjectFeature::synchronize_design_management_route",
     "invalidate_simulation_preflight",
-    "process_pending_library_deletions",
+    "ProjectFeature::process_pending_library_deletions",
     "process_exit_request",
     "show_route_overlays",
 ];
@@ -1564,6 +1570,63 @@ fn the_new_view_dialog_draws_in_the_project_context_and_what_it_raises_is_answer
             .trim_end_matches('}')
             .ends_with("persist_global_veriloga_library(&mutapp.state.model);"),
         "a created view's Verilog-A library is saved last"
+    );
+}
+
+/// What deleting a cell or a view hands the shell is carried out in the
+/// order the deletion once did it: the compile evidence naming a source it
+/// removed dropped, what the catalog change left, the reserved revision, the
+/// placements removed when the reader chose that, the deletion's line in the
+/// log, then the Verilog-A library saved.
+const CELL_OR_VIEW_DELETED: &[Step] = &[(
+    "CellOrViewDeleted",
+    &[
+        "ProjectRequest::CellOrViewDeleted {",
+        "void_veriloga_evidence(&mut app.state, &removed_sources);",
+        "apply_workspace_pruned(&mut app.state, pruned);",
+        "publish_reserved_revision(app, mutation);",
+        "app.state.model.remove_deleted_master_placements(",
+        "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
+        "persist_global_veriloga_library(&mut app.state.model);",
+    ],
+)];
+
+/// The deletion review draws in the project feature's context and raises
+/// nothing. The staged deletion's step runs in that context too, and has
+/// what it raised answered straight after it, before the next step draws.
+#[test]
+fn the_library_deletion_steps_run_in_the_project_context_and_a_deletion_is_answered_as_it_returns()
+{
+    let order = without_whitespace(DIALOG_ORDER);
+    let spec = |key: &str| {
+        order
+            .split("DialogSpec{")
+            .find(|spec| spec.contains(&format!("DialogKey(\"{key}\")")))
+            .unwrap_or_else(|| panic!("the shell's dialog order draws `{key}`"))
+            .to_owned()
+    };
+    let review = spec("project.library_deletion_review");
+    assert!(
+        review.contains(&without_whitespace(
+            "ProjectFeature::process_library_deletion_review_dialog(&mut features::cx(app), ctx)"
+        )) && !review.contains("after_contribution"),
+        "the deletion review draws in the project feature's context and answers nothing"
+    );
+    assert!(
+        spec("project.pending_library_deletions").contains(&without_whitespace(
+            "render: |app, _| {
+                ProjectFeature::process_pending_library_deletions(&mut features::cx(app));
+                app.after_contribution();
+            },"
+        )),
+        "the staged deletion runs in the project feature's context, and what it raised is          answered straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        CELL_OR_VIEW_DELETED,
     );
 }
 

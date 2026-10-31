@@ -62,6 +62,100 @@ impl Model {
             })),
         );
     }
+
+    /// Take every placement of the deleted master `library`/`cell`, or of its
+    /// `view` alone, off the live sheet and every loaded drawing, as one
+    /// project step, and state in the Console how many drawings it reached.
+    /// `display_path` names the deleted object to the reader.
+    ///
+    /// Run after the deletion's revision is published, never before it:
+    /// publishing one retires the project design history, and this step is
+    /// the one that has to survive the deletion it was answered for.
+    pub fn remove_deleted_master_placements(
+        &mut self,
+        library: &str,
+        cell: &str,
+        view: Option<&str>,
+        display_path: &str,
+    ) {
+        let places_target = |component: &crate::state::Component| {
+            component.library_cell.as_ref().is_some_and(|binding| {
+                binding.library == library
+                    && binding.cell == cell
+                    && view.is_none_or(|view| binding.view == view)
+            })
+        };
+
+        let active = self.workspace.content.active_schematic_reference();
+        let active_key = active.key();
+        let mut edited = self
+            .workspace
+            .content
+            .schematic_buffers
+            .iter()
+            .filter(|(key, schematic)| {
+                key.as_str() != active_key
+                    && schematic.document().components.iter().any(&places_target)
+            })
+            .filter_map(|(key, _)| {
+                buffer_reference(key).map(|reference| {
+                    (
+                        reference,
+                        self.workspace
+                            .clone_schematic_editor(key)
+                            .expect("retained drawing"),
+                    )
+                })
+            })
+            .collect::<Vec<_>>();
+        if self
+            .schematic
+            .document()
+            .components
+            .iter()
+            .any(&places_target)
+        {
+            edited.push((active, self.schematic.clone()));
+        }
+        if edited.is_empty() {
+            return;
+        }
+
+        let drawings = edited.len();
+        let mut documents = Vec::with_capacity(drawings);
+        for (reference, before) in edited {
+            let mut after = before.clone();
+            after.remove_master_placements(library, cell, view);
+            let key = reference.key();
+            if key == active_key {
+                self.schematic = after.clone();
+            }
+            self.workspace.insert_schematic_editor(key, after.clone());
+            documents.push((reference, before, after));
+        }
+        self.record_instance_removal_transaction(
+            format!("remove placements of {display_path}"),
+            documents,
+        );
+        self.record(
+            crate::diagnostics::LogSeverity::Info,
+            crate::diagnostics::LogSource::Studio,
+            format!(
+                "Removed every placement of '{display_path}' from {drawings} {}.",
+                if drawings == 1 { "drawing" } else { "drawings" }
+            ),
+        );
+    }
+}
+
+/// The exact cell view a loaded schematic buffer belongs to.
+///
+/// A buffer key is `library/cell/view` and no name segment may contain a
+/// slash, so this split is the exact inverse of the key it reads.
+fn buffer_reference(key: &str) -> Option<CellViewRef> {
+    let mut segments = key.split('/');
+    let reference = CellViewRef::new(segments.next()?, segments.next()?, segments.next()?);
+    segments.next().is_none().then_some(reference)
 }
 
 impl InstanceRemovalRecord {

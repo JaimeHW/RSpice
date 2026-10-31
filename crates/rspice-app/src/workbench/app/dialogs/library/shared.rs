@@ -1,9 +1,6 @@
 //! Shared library-dialog helpers, including library/cell/view name
 //! validation.
 
-use super::RSpiceApp;
-use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
-
 pub(in crate::workbench) const LIBRARY_CATALOG_STALE_MESSAGE: &str =
     "The library catalog changed after this dialog opened. Cancel and reopen the operation.";
 
@@ -17,10 +14,4 @@ pub(in crate::workbench) fn validate_lcv_name(name: &str, field_label: &str) -> 
         ));
     }
     None
-}
-
-impl RSpiceApp {
-    pub(in crate::workbench::app) fn persist_global_veriloga_library_with_feedback(&mut self) {
-        persist_global_veriloga_library(&mut self.state.model);
-    }
 }

@@ -3,6 +3,7 @@
 //! what each commits through the model's library catalog.
 
 mod cell_ops;
+mod deletion;
 mod library_ops;
 mod new_cell;
 mod new_view;

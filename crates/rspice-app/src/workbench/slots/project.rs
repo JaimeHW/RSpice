@@ -114,7 +114,7 @@ pub(crate) struct ProjectState {
     pub(crate) pending_delete_view: Option<(String, String, String)>,
     /// Exact, revision-bound destructive review for deleting one cell or view.
     pub(crate) library_deletion_review:
-        crate::workbench::app::dialogs::library::pending_deletions::LibraryDeletionReviewState,
+        crate::workbench::project::workspace_state::LibraryDeletionReviewState,
 
     /// Reviewed identity for the project File > New is about to create.
     pub(crate) new_project:

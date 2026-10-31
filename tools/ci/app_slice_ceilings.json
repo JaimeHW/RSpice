@@ -2,7 +2,7 @@
   "feature->feature": {
     "design->code": 18,
     "design->results": 1,
-    "project->code": 4,
+    "project->code": 2,
     "project->design": 15,
     "simulate->design": 4
   },
@@ -10,7 +10,7 @@
   "whole-app": {
     "&RSpiceApp params outside shell": 210,
     "&mut RSpiceApp params outside shell": 395,
-    "impl AppState methods outside session": 143,
-    "impl RSpiceApp methods outside shell": 93
+    "impl AppState methods outside session": 139,
+    "impl RSpiceApp methods outside shell": 90
   }
 }

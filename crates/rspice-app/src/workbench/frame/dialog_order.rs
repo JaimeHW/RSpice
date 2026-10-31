@@ -457,7 +457,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.library_deletion_review"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.library_deletion_review.target.is_some()),
-        render: |app, ctx| app.process_library_deletion_review_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::process_library_deletion_review_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("simulate.plan_removal_review"),
@@ -488,7 +490,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.pending_library_deletions"),
         modality: Modality::None,
         is_open: None,
-        render: |app, _| app.process_pending_library_deletions(),
+        render: |app, _| {
+            ProjectFeature::process_pending_library_deletions(&mut features::cx(app));
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("shell.exit_request"),
