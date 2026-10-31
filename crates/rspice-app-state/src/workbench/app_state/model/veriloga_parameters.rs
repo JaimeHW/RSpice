@@ -16,100 +16,99 @@ use rspice_design::library::metadata::{
     RangeValue, cell_parameter_contract, declares_parameter_contract,
 };
 
+use super::Model;
 use crate::state::{
     Cell, Component, ComponentType, InstanceMultiplicity, MODEL_BOUND_SYMBOL_METADATA_KEY,
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, View, ViewType,
 };
-use crate::workbench::app_state::AppState;
 
 /// What an empty field of a parameter whose module derives its default from
 /// other parameters stands for.
-pub(crate) const COMPUTED_DEFAULT: &str = "computed";
+const COMPUTED_DEFAULT: &str = "computed";
 
 /// Whether `view` of `cell` is a Verilog-A view whose own compile states the
 /// parameters an instance takes. A cell that publishes a model-bound symbol
 /// presents that symbol's form instead.
-pub(super) fn states_compiled_parameters(cell: &Cell, view: &View) -> bool {
+pub fn states_compiled_parameters(cell: &Cell, view: &View) -> bool {
     view.view_type == ViewType::VerilogA
         && !cell.metadata.contains_key(MODEL_BOUND_SYMBOL_METADATA_KEY)
         && declares_parameter_contract(cell, Some(view))
 }
 
-/// The library view `component` is an instance of, when it is a project cell.
-fn bound_view<'a>(state: &'a AppState, component: &Component) -> Option<(&'a Cell, &'a View)> {
-    if component.kind != ComponentType::CellInstance {
-        return None;
+impl Model {
+    /// The library view `component` is an instance of, when it is a project
+    /// cell.
+    fn bound_view(&self, component: &Component) -> Option<(&Cell, &View)> {
+        if component.kind != ComponentType::CellInstance {
+            return None;
+        }
+        let binding = component
+            .library_cell
+            .as_ref()
+            .filter(|binding| !binding.is_executable_builtin())?;
+        let cell = self
+            .library_manager
+            .get_library(&binding.library)?
+            .get_cell(&binding.cell)?;
+        Some((cell, cell.get_view(&binding.view)?))
     }
-    let binding = component
-        .library_cell
-        .as_ref()
-        .filter(|binding| !binding.is_executable_builtin())?;
-    let cell = state
-        .model
-        .library_manager
-        .get_library(&binding.library)?
-        .get_cell(&binding.cell)?;
-    Some((cell, cell.get_view(&binding.view)?))
-}
 
-/// Whether `component` is an instance of a Verilog-A view, compiled or not.
-///
-/// Such an instance has no SPICE instance temperature: `temp` reaches it only
-/// as a parameter its module declares, which its own row then offers.
-pub(crate) fn instantiates_veriloga_view(state: &AppState, component: &Component) -> bool {
-    bound_view(state, component).is_some_and(|(_, view)| view.view_type == ViewType::VerilogA)
-}
+    /// Whether `component` is an instance of a Verilog-A view, compiled or not.
+    ///
+    /// Such an instance has no SPICE instance temperature: `temp` reaches it only
+    /// as a parameter its module declares, which its own row then offers.
+    pub fn instantiates_veriloga_view(&self, component: &Component) -> bool {
+        self.bound_view(component)
+            .is_some_and(|(_, view)| view.view_type == ViewType::VerilogA)
+    }
 
-/// Whether `component`'s property sheet is its module's compiled contract.
-pub(crate) fn has_compiled_parameter_sheet(state: &AppState, component: &Component) -> bool {
-    bound_view(state, component).is_some_and(|(cell, view)| states_compiled_parameters(cell, view))
-}
+    /// Whether `component`'s property sheet is its module's compiled contract.
+    pub fn has_compiled_parameter_sheet(&self, component: &Component) -> bool {
+        self.bound_view(component)
+            .is_some_and(|(cell, view)| states_compiled_parameters(cell, view))
+    }
 
-/// Values `component` sets for parameters its compiled module does not
-/// declare, as `(key, value)` in key order.
-///
-/// The netlister refuses each one, so none is ever emitted; the design check
-/// reports them and the inspector offers to remove them, so none is ever
-/// dropped without the reader seeing it either.
-pub(crate) fn undeclared_instance_parameters(
-    state: &AppState,
-    component: &Component,
-) -> Vec<(String, String)> {
-    let Some((cell, view)) =
-        bound_view(state, component).filter(|(cell, view)| states_compiled_parameters(cell, view))
-    else {
-        return Vec::new();
-    };
-    let Ok(contract) = cell_parameter_contract(cell, Some(view)) else {
-        return Vec::new();
-    };
-    // `m` written as text is refused by name as the instance's multiplicity,
-    // which is a different repair from this one.
-    let mut undeclared = crate::state::parse_params_string(&component.params)
-        .into_iter()
-        .filter(|(key, _)| {
-            !is_instance_multiplicity(component, key)
-                && !contract
-                    .iter()
-                    .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
-        })
-        .collect::<Vec<_>>();
-    undeclared.sort();
-    undeclared
-}
+    /// Values `component` sets for parameters its compiled module does not
+    /// declare, as `(key, value)` in key order.
+    ///
+    /// The netlister refuses each one, so none is ever emitted; the design check
+    /// reports them and the inspector offers to remove them, so none is ever
+    /// dropped without the reader seeing it either.
+    pub fn undeclared_instance_parameters(&self, component: &Component) -> Vec<(String, String)> {
+        let Some((cell, view)) = self
+            .bound_view(component)
+            .filter(|(cell, view)| states_compiled_parameters(cell, view))
+        else {
+            return Vec::new();
+        };
+        let Ok(contract) = cell_parameter_contract(cell, Some(view)) else {
+            return Vec::new();
+        };
+        // `m` written as text is refused by name as the instance's multiplicity,
+        // which is a different repair from this one.
+        let mut undeclared = crate::state::parse_params_string(&component.params)
+            .into_iter()
+            .filter(|(key, _)| {
+                !is_instance_multiplicity(component, key)
+                    && !contract
+                        .iter()
+                        .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
+            })
+            .collect::<Vec<_>>();
+        undeclared.sort();
+        undeclared
+    }
 
-impl AppState {
     /// Take the value instance `component_id` sets for `key`, a parameter its
     /// module no longer declares, off the instance as one undoable edit. A key
     /// the module still declares is refused here: that one is edited, not
     /// removed. Returns whether the design changed.
-    pub(crate) fn remove_undeclared_instance_parameter(
+    pub fn remove_undeclared_instance_parameter(
         &mut self,
         component_id: u64,
         key: &str,
     ) -> Result<bool, String> {
         let component = self
-            .model
             .schematic
             .document()
             .components
@@ -117,7 +116,8 @@ impl AppState {
             .find(|component| component.id == component_id)
             .cloned()
             .ok_or_else(|| "The selected instance no longer exists.".to_owned())?;
-        if !undeclared_instance_parameters(self, &component)
+        if !self
+            .undeclared_instance_parameters(&component)
             .iter()
             .any(|(undeclared, _)| undeclared.eq_ignore_ascii_case(key))
         {
@@ -126,17 +126,16 @@ impl AppState {
         let mut candidate = component.clone();
         candidate.params =
             crate::state::params_string::set_parameter_value(&component.params, key, "")?;
-        self.model
-            .edit_component_transaction(&component, candidate, &format!("remove {key}"))
+        self.edit_component_transaction(&component, candidate, &format!("remove {key}"))
     }
 }
 
 /// The property sheet of an instance of a compiled Verilog-A view: its
 /// identity, its multiplicity, which a module reads as `$mfactor`, and one
 /// typed field per module parameter.
-pub(super) fn compiled_parameter_sheet(cell: &Cell, view: &View) -> Result<PropertySheet, String> {
-    let mut sheet = super::property_edit::cell_instance_identity_sheet();
-    sheet.add(super::property_edit::instance_multiplicity_definition());
+pub fn compiled_parameter_sheet(cell: &Cell, view: &View) -> Result<PropertySheet, String> {
+    let mut sheet = cell_instance_identity_sheet();
+    sheet.add(instance_multiplicity_definition());
     for (index, parameter) in cell_parameter_contract(cell, Some(view))?
         .iter()
         .enumerate()
@@ -147,6 +146,43 @@ pub(super) fn compiled_parameter_sheet(cell: &Cell, view: &View) -> Result<Prope
         ));
     }
     Ok(sheet)
+}
+
+/// Identity-only contract for legacy, hierarchical, and review-only cell
+/// instances whose master does not publish an executable typed parameter
+/// form. The editor remains fully functional for the one property the
+/// instance itself owns and preserves every opaque master parameter without
+/// presenting guessed controls.
+pub fn cell_instance_identity_sheet() -> PropertySheet {
+    let mut sheet = PropertySheet::new();
+    sheet.add(
+        PropertyDefinition::new("name")
+            .with_display_name("Reference designator")
+            .with_description("Unique instance name emitted at the start of the netlist line.")
+            .with_type(PropertyType::String)
+            .with_default(PropertyValue::string(""))
+            .with_max_length(128)
+            .with_order(-10_000)
+            .with_category("Identity")
+            .required(),
+    );
+    sheet
+}
+
+/// The one editable control for `m`, typed so the engine's rule — finite and
+/// strictly positive — is enforced before the value can reach a deck.
+pub fn instance_multiplicity_definition() -> PropertyDefinition {
+    let mut definition = PropertyDefinition::new(InstanceMultiplicity::PARAMETER_NAME)
+        .with_display_name("Multiplicity (m)")
+        .with_description(
+            "Number of identical copies of the master this instance stands for, emitted as `m=` on the instance line.",
+        )
+        .with_type(PropertyType::Number)
+        .with_default(PropertyValue::number(1.0))
+        .with_order(-9_000)
+        .with_category("Identity");
+    definition.min_value = Some(f64::MIN_POSITIVE);
+    definition
 }
 
 /// One module parameter as a typed property. The key is the parameter's
@@ -282,7 +318,7 @@ fn parameter_description(parameter: &CellParameter, declaration: &ParameterDecla
 
 /// Whether `key` is the multiplicity a cell instance carries as a typed
 /// field rather than as parameter text.
-pub(crate) fn is_instance_multiplicity(component: &Component, key: &str) -> bool {
+pub fn is_instance_multiplicity(component: &Component, key: &str) -> bool {
     component.kind == ComponentType::CellInstance
         && key.eq_ignore_ascii_case(InstanceMultiplicity::PARAMETER_NAME)
 }

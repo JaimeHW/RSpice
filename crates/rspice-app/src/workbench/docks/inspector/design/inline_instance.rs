@@ -18,7 +18,7 @@ pub(super) fn field_value(component: &Component, field: &InlineEditField) -> Str
         InlineEditField::Parameters => component.params.clone(),
         // A cell instance's `m` is its typed multiplicity, never text.
         InlineEditField::Parameter(key)
-            if crate::workbench::app::is_instance_multiplicity(component, key) =>
+            if crate::workbench::app_state::model::is_instance_multiplicity(component, key) =>
         {
             component
                 .multiplicity
@@ -230,7 +230,7 @@ fn edited_component(
         // the plain 1 that means "stands for itself" is no multiplier at all,
         // as the component editor stores it.
         InlineEditField::Parameter(key)
-            if crate::workbench::app::is_instance_multiplicity(&component, key) =>
+            if crate::workbench::app_state::model::is_instance_multiplicity(&component, key) =>
         {
             component.multiplicity = if candidate.trim().is_empty() {
                 None

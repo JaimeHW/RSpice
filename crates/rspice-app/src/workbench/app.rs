@@ -201,10 +201,6 @@ pub(crate) use actions::property_edit::{
     selected_object_properties_available,
 };
 pub(crate) use actions::stimulus_placement::arm_placement_from_definition;
-pub(crate) use actions::veriloga_parameters::{
-    has_compiled_parameter_sheet, instantiates_veriloga_view, is_instance_multiplicity,
-    undeclared_instance_parameters,
-};
 
 pub(crate) use dialogs::find_replace::{find_replace_matches, open_find_replace};
 pub(crate) use dialogs::placement::net_label::{

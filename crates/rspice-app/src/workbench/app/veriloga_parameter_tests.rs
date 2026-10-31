@@ -449,7 +449,9 @@ fn a_parameter_the_module_dropped_is_found_refused_and_removable() {
     app.state.open_workspace_view(CellViewRef::default_top());
 
     assert_eq!(
-        crate::workbench::app::undeclared_instance_parameters(&app.state, &placed(&app.state, id)),
+        app.state
+            .model
+            .undeclared_instance_parameters(&placed(&app.state, id)),
         [("offset".to_owned(), "1m".to_owned())]
     );
     let report = super::dialogs::check_and_save_validation::CheckAndSaveValidationReport::validate(
@@ -472,7 +474,9 @@ fn a_parameter_the_module_dropped_is_found_refused_and_removable() {
     );
 
     assert_eq!(
-        app.state.remove_undeclared_instance_parameter(id, "offset"),
+        app.state
+            .model
+            .remove_undeclared_instance_parameter(id, "offset"),
         Ok(true)
     );
     assert_eq!(placed(&app.state, id).params, "gain=2m");

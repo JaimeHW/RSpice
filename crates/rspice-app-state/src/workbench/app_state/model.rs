@@ -26,6 +26,7 @@ mod source_drift;
 mod symbol_context;
 #[cfg(any(test, feature = "test-support"))]
 mod test_technology;
+mod veriloga_parameters;
 
 pub use definition_index::DefinitionRow;
 pub use library_catalog::{LibraryRemoval, WorkspacePruned};
@@ -35,6 +36,10 @@ pub use owned_source::{
 #[cfg(any(test, feature = "test-support"))]
 pub use source_drift::SOURCE_DRIFT_HASHES;
 pub use source_drift::{ModelSourceDrift, ModelSourceDriftFinding, ModelSourceDriftScope};
+pub use veriloga_parameters::{
+    cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,
+    is_instance_multiplicity, states_compiled_parameters,
+};
 
 use crate::state::notices::{Notice, NoticeKind, NoticeQueue};
 use crate::state::{SchematicState, SimulationState};

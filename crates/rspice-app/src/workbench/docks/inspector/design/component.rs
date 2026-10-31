@@ -680,7 +680,7 @@ pub(super) fn parameters_section(
     // state here, and only when the module is not the cell the Library cell
     // row already names. A model card and a library section are model-library
     // ideas, and the deck gives a module neither.
-    let runs_module = crate::workbench::app::instantiates_veriloga_view(&app.state, component);
+    let runs_module = app.state.model.instantiates_veriloga_view(component);
     let model_choices = evidence.model.as_deref().map_or_else(Vec::new, |model| {
         bound_model_choices(&app.state, component, model)
     });
@@ -856,6 +856,7 @@ pub(super) fn parameters_section(
     {
         match app
             .state
+            .model
             .remove_undeclared_instance_parameter(component.id, &key)
         {
             Ok(true) => app.invalidate_simulation_preflight(),
@@ -879,7 +880,7 @@ pub(super) const REMOVE_UNDECLARED_PARAMETER: &str = "Remove";
 /// Verilog-A view never does: a module reads `$temperature`, and takes `temp`
 /// only as a parameter it declares, which its own typed row then offers.
 pub(super) fn supports_instance_temperature(state: &AppState, component: &Component) -> bool {
-    if crate::workbench::app::instantiates_veriloga_view(state, component) {
+    if state.model.instantiates_veriloga_view(component) {
         return false;
     }
     component
@@ -943,7 +944,7 @@ pub(super) fn inline_parameter_contract(
     // parameter row.
     let temperature_row = supports_instance_temperature(state, component);
     let is_temperature = |key: &str| temperature_row && key.eq_ignore_ascii_case(TEMPERATURE_PARAM);
-    let compiled = crate::workbench::app::has_compiled_parameter_sheet(state, component);
+    let compiled = state.model.has_compiled_parameter_sheet(component);
     // A parameter the bound model's level does not read has no row, unless
     // the instance sets it anyway: then it is the instance's own value and
     // belongs on the panel whatever the card would do with it.

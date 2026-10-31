@@ -796,9 +796,8 @@ fn component_property_findings(
     component: &crate::state::Component,
 ) -> Vec<(String, String)> {
     use crate::properties::property_bridge::validate_component_properties;
-    use crate::workbench::app::actions::property_edit::{
-        authoritative_component_property_sheet, cell_instance_identity_sheet,
-    };
+    use crate::workbench::app::actions::property_edit::authoritative_component_property_sheet;
+    use crate::workbench::app_state::model::cell_instance_identity_sheet;
 
     if component.kind != crate::state::ComponentType::CellInstance {
         return validate_component_properties(
@@ -913,8 +912,7 @@ fn validate_component_contracts<S: AsRef<rspice_design::schematic::document::Sch
         // A value for a parameter the module no longer declares is refused by
         // the netlister; it is named here, with its repair, rather than left
         // to read as a deck error.
-        for (key, value) in crate::workbench::app::undeclared_instance_parameters(state, component)
-        {
+        for (key, value) in state.model.undeclared_instance_parameters(component) {
             insert_located_finding(
                 findings,
                 CheckAndSaveFindingLevel::Blocker,

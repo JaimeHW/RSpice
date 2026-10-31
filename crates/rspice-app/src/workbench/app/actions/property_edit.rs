@@ -7,6 +7,10 @@ use crate::state::{
     PropertyDefinition, PropertySheet, PropertyType, PropertyValue, SymbolSourceContract,
 };
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::model::{
+    cell_instance_identity_sheet, compiled_parameter_sheet, instance_multiplicity_definition,
+    states_compiled_parameters,
+};
 use rspice_core::xspice::{CodeModelRegistry, ParamSpec, ParamType};
 
 /// Resolve the exact persistent parameter contract owned by a placed cell's
@@ -40,10 +44,8 @@ fn authoritative_cell_instance_sheet(
     let bound_view = cell.get_view(&binding.view);
     // A Verilog-A view whose compile stated its module's parameters: one
     // typed field each, read from the contract the netlister binds.
-    if let Some(view) =
-        bound_view.filter(|view| super::veriloga_parameters::states_compiled_parameters(cell, view))
-    {
-        return super::veriloga_parameters::compiled_parameter_sheet(cell, view).map(Some);
+    if let Some(view) = bound_view.filter(|view| states_compiled_parameters(cell, view)) {
+        return compiled_parameter_sheet(cell, view).map(Some);
     }
 
     // Current publications keep the definition at cell scope. The view scan
@@ -148,22 +150,6 @@ fn cell_contract_property_sheet(
         sheet.add(definition);
     }
     Ok(sheet)
-}
-
-/// The one editable control for `m`, typed so the engine's rule — finite and
-/// strictly positive — is enforced before the value can reach a deck.
-pub(super) fn instance_multiplicity_definition() -> PropertyDefinition {
-    let mut definition = PropertyDefinition::new(crate::state::InstanceMultiplicity::PARAMETER_NAME)
-        .with_display_name("Multiplicity (m)")
-        .with_description(
-            "Number of identical copies of the master this instance stands for, emitted as `m=` on the instance line.",
-        )
-        .with_type(PropertyType::Number)
-        .with_default(PropertyValue::number(1.0))
-        .with_order(-9_000)
-        .with_category("Identity");
-    definition.min_value = Some(f64::MIN_POSITIVE);
-    definition
 }
 
 /// Exact property contract used by both the modal editor and inline
@@ -407,27 +393,6 @@ fn format_complex_vector(values: &[rspice_core::Complex64]) -> String {
             .collect::<Vec<_>>()
             .join(" ")
     )
-}
-
-/// Identity-only contract for legacy, hierarchical, and review-only cell
-/// instances whose master does not publish an executable typed parameter
-/// form. The editor remains fully functional for the one property the
-/// instance itself owns and preserves every opaque master parameter without
-/// presenting guessed controls.
-pub(in crate::workbench::app) fn cell_instance_identity_sheet() -> PropertySheet {
-    let mut sheet = PropertySheet::new();
-    sheet.add(
-        PropertyDefinition::new("name")
-            .with_display_name("Reference designator")
-            .with_description("Unique instance name emitted at the start of the netlist line.")
-            .with_type(PropertyType::String)
-            .with_default(PropertyValue::string(""))
-            .with_max_length(128)
-            .with_order(-10_000)
-            .with_category("Identity")
-            .required(),
-    );
-    sheet
 }
 
 /// Single authority for the schematic Object properties command. Availability

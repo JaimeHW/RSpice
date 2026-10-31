@@ -230,12 +230,14 @@ fn an_undeclared_parameter_value_is_flagged_and_removable() {
 
     assert!(
         app.state
+            .model
             .remove_undeclared_instance_parameter(component.id, "gain")
             .is_err(),
         "a declared parameter is edited, not removed"
     );
     assert_eq!(
         app.state
+            .model
             .remove_undeclared_instance_parameter(component.id, "offset"),
         Ok(true)
     );
