@@ -8138,6 +8138,7 @@ impl Engine {
                                         deferred_params,
                                         temperature_kelvin: self.config.temperature,
                                     },
+                                    level == 10,
                                 )?;
                                 continue;
                             }

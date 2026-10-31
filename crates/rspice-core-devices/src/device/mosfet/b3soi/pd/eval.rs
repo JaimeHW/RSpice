@@ -1255,9 +1255,10 @@ pub fn eval(
             ien_dif * (dexp_vbd_n_dvb * ehlid_factor + (exp_vbd_n - 1.0) * dehlid_factor_dvb);
         dibddif_dvd = -dibddif_dvb;
 
-        // Neutral-body recombination Ibs3/Ibd3 (suppressed when arfabjt~1).
+        // Neutral-body recombination Ibs3/Ibd3 (PD 2.2 suppresses it when
+        // arfabjt~1; BSIMSOI 3.1.1 and later do not).
         let t0a = 1.0 - p.arfabjt;
-        if t0a < 1e-2 {
+        if t0a < 1e-2 && !p.ibjt_length_continuous {
             ibs3 = 0.0;
             dibs3_dvb = 0.0;
             dibs3_dvd = 0.0;

@@ -372,11 +372,15 @@ impl Engine {
     /// nonideal tie (`bodyMod = 1`) whose body resistor is folded into the body
     /// stamping. The supported PD decks use `rbody = 1`, so 5-terminal `t4` is a
     /// nonideal tie.
+    ///
+    /// `bsimsoi3` marks a card that named BSIMSOI3 (Xyce `LEVEL=10`), whose
+    /// body-junction law has the 3.1.1 revision.
     pub(super) fn build_b3soi_pd(
         circuit: &mut CircuitData,
         element: &crate::netlist::Element,
         mos_type: crate::netlist::MosType,
         model: DeviceModelContext<'_>,
+        bsimsoi3: bool,
     ) -> Result<(), SimulationError> {
         let DeviceModelContext {
             model_key,
@@ -395,14 +399,15 @@ impl Engine {
         let tnom_c = params_map.get("TNOM").copied().unwrap_or(27.0);
         let tnom_k = crate::constants::celsius_to_kelvin(tnom_c);
 
-        let model = std::sync::Arc::new(
+        let mut model =
             B3SoiPdModel::try_from_params(params_map, is_pmos, tnom_k).map_err(|err| {
                 SimulationError::Circuit(format!(
                     "MOSFET '{}': native B3SOIPD model '{model_key}': {err}",
                     element.name
                 ))
-            })?,
-        );
+            })?;
+        model.ibjt_length_continuous = bsimsoi3;
+        let model = std::sync::Arc::new(model);
 
         let node_drain_external = circuit.get_or_create_node(&element.nodes[0]);
         let node_gate = circuit.get_or_create_node(&element.nodes[1]);

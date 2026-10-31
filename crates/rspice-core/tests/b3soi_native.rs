@@ -2903,3 +2903,34 @@ fn b3soifd_and_b3soidd_off_keyword_select_the_bistable_branch_too() {
         );
     }
 }
+
+#[test]
+fn xyce_level10_pd_body_junction_keeps_short_channel_neutral_body_recombination() {
+    // At L = 0.258u, 1 - arfabjt = 8.3e-3. BSIMSOI3 (Xyce 7.10, ngspice-46's
+    // B4SOI at level 10) keeps Ibs3/Ibd3 there: with the body 0.72 V forward
+    // of both junctions, I(vb) = 3.49681e-8 A in both. PD 2.2 zeroes the
+    // term below 1e-2 and leaves only recombination, 4.04e-11 A.
+    let deck = r#"* BSIMSOI3 floating-body junction at short L
+vs s 0 4
+vd d 0 4
+vg g 0 0
+ve e 0 0
+vb b 0 3.28
+m1 d g s e b p1 l=0.258u w=19.585u
+.model p1 pmos level=10 soimod=0
+.op
+.end
+"#;
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let result = engine().run_dc_op(&netlist).expect("op converges");
+    let branch = result
+        .branch_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("vb"))
+        .expect("vb branch");
+    let body_current = result.branch_currents[branch];
+    assert!(
+        (body_current - 3.49681e-8).abs() <= 1.0e-3 * 3.49681e-8,
+        "I(vb) = {body_current:e}, BSIMSOI3 3.49681e-8"
+    );
+}

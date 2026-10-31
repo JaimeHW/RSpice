@@ -57,6 +57,8 @@ pub struct B3SoiPdSized {
     pub ntrecr: Value,
     /// Recombination/diffusion length ratios + BJT alpha and Early voltage.
     pub arfabjt: Value,
+    /// See [`B3SoiPdModel::ibjt_length_continuous`].
+    pub ibjt_length_continuous: bool,
     pub lratio: Value,
     pub lratiodif: Value,
     pub vearly: Value,
@@ -195,6 +197,7 @@ impl B3SoiPdSized {
         let ln = if m.ln < 1e-15 { 1e-15 } else { m.ln };
         let t0 = -0.5 * p.leff * p.leff / (ln * ln);
         p.arfabjt = t0.exp();
+        p.ibjt_length_continuous = m.ibjt_length_continuous;
         let t0 = p.lbjt0 * (1.0 / p.leff + 1.0 / ln);
         p.lratio = t0.powf(m.nbjt);
         p.lratiodif = 1.0 + m.ldif0 * t0.powf(m.ndif);

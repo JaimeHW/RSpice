@@ -77,6 +77,12 @@ pub struct B3SoiPdModel {
     pub wlc: Value,
     pub wwc: Value,
     pub wwlc: Value,
+
+    /// BSIMSOI 3.1.1 removed PD 2.2's cutoff of the neutral-body
+    /// recombination Ibs3/Ibd3 once `1 - arfabjt < 1e-2` (its "Ibjt(L)
+    /// discontinuity" fix, kept by B4SOI). Set for a card that names
+    /// BSIMSOI3 (Xyce `LEVEL=10`), which this port stands in for.
+    pub ibjt_length_continuous: bool,
 }
 
 super::super::common::deref_core!(B3SoiPdModel => SoiModelCore);
@@ -179,6 +185,7 @@ impl B3SoiPdModel {
             wlc: val(p, "WLC", 0.0),
             wwc: val(p, "WWC", 0.0),
             wwlc: val(p, "WWLC", 0.0),
+            ibjt_length_continuous: false,
         };
 
         model.finish_setup("B3SOIPD", |vbsa, tsi| {
