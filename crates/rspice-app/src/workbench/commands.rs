@@ -19,7 +19,7 @@ use crate::workbench::{AppState, RSpiceApp};
 use rspice_schematic_editor::symbol_editor::commands::SymbolTransform;
 use rspice_schematic_editor::view::navigation::ZoomRequest;
 
-use super::state::{ConsoleChannel, ConsolePage, SpecificationEvidenceFilter, Workspace};
+use super::state::{ConsoleChannel, ConsolePage, Workspace};
 
 pub(crate) mod code_context;
 mod enablement;

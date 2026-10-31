@@ -280,14 +280,6 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
                     .clear();
             }
         }
-        Workspace::Simulate => {
-            // The studio's view state is what narrows its two registries.
-            // Everything else on these pages is the plan itself, which a
-            // view reset has no business touching.
-            app.state.simulate.saved_output_filter.clear();
-            app.state.simulate.specification_filter.clear();
-            app.state.simulate.specification_evidence_filter = SpecificationEvidenceFilter::All;
-        }
         // Which definition the library is reading, and the drafts open behind
         // it, are the whole of this workspace's view state; the definitions
         // themselves are the project and a view reset never touches them.
@@ -296,11 +288,8 @@ pub(crate) fn reset_active_view(app: &mut RSpiceApp) {
             app.state.design.stimulus_editor.clear();
             app.state.design.stimulus_browser.clear();
         }
-        Workspace::Results => {
+        Workspace::Simulate | Workspace::Results | Workspace::Verify => {
             app.route_command_key(ids::RESET_ACTIVE_VIEW);
-        }
-        Workspace::Verify => {
-            app.state.simulate.selected_specification = None;
         }
         Workspace::Models => {
             app.state.models.selected_model = None;

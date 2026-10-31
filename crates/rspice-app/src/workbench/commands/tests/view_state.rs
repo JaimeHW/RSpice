@@ -510,6 +510,19 @@ fn resetting_the_simulation_view_clears_the_narrowing_and_not_the_plan() {
 }
 
 #[test]
+fn resetting_the_verification_view_lets_go_of_the_specification_it_reads() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.activate(Workspace::Verify);
+    app.state.simulate.saved_output_filter = "db20".to_owned();
+    app.state.simulate.selected_specification = Some("bw(vout)".to_owned());
+
+    super::reset_active_view(&mut app);
+
+    assert_eq!(app.state.simulate.selected_specification, None);
+    assert_eq!(app.state.simulate.saved_output_filter, "db20");
+}
+
+#[test]
 fn resetting_one_view_leaves_every_other_workspace_navigator_filter_alone() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.activate(Workspace::Design);
