@@ -689,16 +689,27 @@ fn prepare_klu_input<'a>(
     }
 }
 
+/// `keep_nonzero_pivots` replays every nonzero stored pivot (a Newton solve,
+/// which measures the reused pivots' growth itself); otherwise a pivot small
+/// beside its column re-pivots.
 fn apply_klu_numeric_action(
     backend: &mut crate::KluSolver,
     values: &[Value],
     action: KluNumericAction,
     robustness: CircuitLuRobustness,
+    keep_nonzero_pivots: bool,
 ) -> Result<(), SolverError> {
+    let refactored = |backend: &mut crate::KluSolver| {
+        if keep_nonzero_pivots {
+            backend.refactor_keeping_nonzero_pivots(values)
+        } else {
+            backend.refactor(values)
+        }
+    };
     match action {
         KluNumericAction::Reuse => Ok(()),
         KluNumericAction::Factor => backend.factor(values),
-        KluNumericAction::Refactor => match backend.refactor(values) {
+        KluNumericAction::Refactor => match refactored(backend) {
             Ok(()) => Ok(()),
             Err(SolverError::PivotGrowth) if robustness == CircuitLuRobustness::Enhanced => {
                 backend.factor(values)
@@ -3072,6 +3083,7 @@ impl StaticMatrix {
             factor_values,
             action,
             solver_options.circuit_lu_robustness,
+            false,
         ) {
             klu_factored_values.clear();
             return if faithful { Err(error) } else { Ok(false) };
@@ -3346,7 +3358,9 @@ impl StaticMatrix {
 
     /// Solve the linear system of one Newton iteration.
     ///
-    /// The solve is [`Self::solve_into`]'s, except for a finite candidate that
+    /// The solve is [`Self::solve_into`]'s, except that Circuit LU keeps its
+    /// reused pivots while none is exactly zero, as a SPICE Newton iteration
+    /// keeps them, and except for a finite candidate that
     /// misses only the componentwise backward-error certificate after
     /// same-factor refinement: Circuit LU re-pivots once when the reused
     /// pivots show damaging growth, and the candidate then goes back to the
@@ -3858,6 +3872,7 @@ impl StaticMatrix {
             factor_values,
             action,
             solver_options.circuit_lu_robustness,
+            miss == CertificateMiss::ReturnToNewton,
         ) {
             // A numeric failure belongs to this changing Jacobian, not to the
             // frozen sparsity pattern: the next solve retries Circuit LU after
@@ -8108,6 +8123,48 @@ mod tests {
         assert!(misses.worst_componentwise > 0.0);
     }
 
+    /// A pivot a values-only refactor replays can become small beside an
+    /// earlier row's entry in its column while still being the one a fresh
+    /// factorization would choose. A Newton solve keeps it, as SPICE's
+    /// `spFactor` does; a linear solve still re-pivots.
+    #[test]
+    fn newton_solve_keeps_a_small_nonzero_reused_pivot() {
+        for newton in [true, false] {
+            let mut matrix = StaticMatrix::from_triplets_with_options(
+                2,
+                2,
+                &[(0, 0, 1.0), (1, 0, 1.0), (0, 1, 1.0), (1, 1, 2.0)],
+                SolverOptions {
+                    real_backend: RealSolverBackend::Klu,
+                    ..SolverOptions::default()
+                },
+            )
+            .unwrap();
+            let mut solution = Vec::new();
+            matrix.solve_into(&[2.0, 3.0], &mut solution).unwrap();
+            assert_eq!(matrix.klu.as_ref().unwrap().full_factorization_count(), 1);
+
+            // The second column's pivot is 0.9 beside its U entry 1e9.
+            matrix.clear_values();
+            for (row, col, value) in [(0, 0, 1.0), (1, 0, 1.0e-10), (0, 1, 1.0e9), (1, 1, 1.0)] {
+                matrix.add(row, col, value);
+            }
+            let rhs = [1.0 + 1.0e9, 1.0 + 1.0e-10];
+            if newton {
+                matrix.solve_newton_into(&rhs, &mut solution).unwrap();
+            } else {
+                matrix.solve_into(&rhs, &mut solution).unwrap();
+            }
+            assert_eq!(
+                matrix.klu.as_ref().unwrap().full_factorization_count(),
+                if newton { 1 } else { 2 },
+                "newton = {newton}"
+            );
+            assert!(real_backward_error(&matrix, &solution, &rhs).accepted());
+            assert_relative_solution(&solution, &[1.0, 1.0]);
+        }
+    }
+
     #[test]
     fn linear_solve_refuses_the_candidate_a_newton_solve_returns() {
         let (mut matrix, rhs) = matrix_with_uncertifiable_circuit_lu_factors();
@@ -8314,6 +8371,7 @@ mod tests {
                 &changed,
                 KluNumericAction::Refactor,
                 CircuitLuRobustness::BackendFaithful,
+                false,
             ),
             Err(SolverError::PivotGrowth)
         ));
@@ -8328,6 +8386,7 @@ mod tests {
             &changed,
             KluNumericAction::Refactor,
             CircuitLuRobustness::Enhanced,
+            false,
         )
         .unwrap();
         assert_eq!(backend.full_factorization_count(), 2);

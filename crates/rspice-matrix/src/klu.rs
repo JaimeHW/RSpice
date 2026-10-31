@@ -60,7 +60,9 @@ const PIVOT_TOL: Value = 1e-3;
 
 /// Refactor pivot-growth alarm. Reusing a stable pivot sequence is the KLU
 /// hot path; the solve-level backward-error check remains the final authority
-/// on accuracy and triggers the supernodal fallback when necessary.
+/// on accuracy and triggers the supernodal fallback when necessary. A Newton
+/// solve keeps every nonzero pivot instead; see
+/// [`KluSolver::refactor_keeping_nonzero_pivots`].
 const REFACTOR_PIVOT_TOL: Value = 1e-8;
 
 /// Reciprocal pivot growth below `sqrt(eps)` marks a pivot sequence that
@@ -1022,16 +1024,38 @@ impl KluSolver {
     /// Returns `PivotGrowth` when a stored pivot has become numerically
     /// inadequate — the caller refactors fully.
     pub fn refactor(&mut self, values: &[Value]) -> Result<(), SolverError> {
+        self.refactor_with_pivot_alarm(values, REFACTOR_PIVOT_TOL)
+    }
+
+    /// [`Self::refactor`] that keeps every nonzero stored pivot, however small
+    /// beside its column, as SPICE's values-only factorization does: Sparse
+    /// 1.3's `spFactor` refuses only an exactly zero pivot (ngspice-46
+    /// spfactor.c:370 and 404), and ngspice reorders only on that refusal
+    /// (niiter.c:198-205). The caller measures what the reused pivots do to
+    /// this system and re-pivots when they show damaging growth.
+    pub(crate) fn refactor_keeping_nonzero_pivots(
+        &mut self,
+        values: &[Value],
+    ) -> Result<(), SolverError> {
+        self.refactor_with_pivot_alarm(values, 0.0)
+    }
+
+    fn refactor_with_pivot_alarm(
+        &mut self,
+        values: &[Value],
+        relative_pivot_alarm: Value,
+    ) -> Result<(), SolverError> {
         if self.absolute_pivot_tolerance > 0.0 {
-            self.refactor_impl::<true>(values)
+            self.refactor_impl::<true>(values, relative_pivot_alarm)
         } else {
-            self.refactor_impl::<false>(values)
+            self.refactor_impl::<false>(values, relative_pivot_alarm)
         }
     }
 
     fn refactor_impl<const CHECK_ABSOLUTE_PIVOT: bool>(
         &mut self,
         values: &[Value],
+        relative_pivot_alarm: Value,
     ) -> Result<(), SolverError> {
         if !self.factored {
             return self.factor(values);
@@ -1139,7 +1163,7 @@ impl KluSolver {
                 self.factored = false;
                 return Err(SolverError::Overflow);
             }
-            if pivot == 0.0 || pivot.abs() < REFACTOR_PIVOT_TOL * col_max {
+            if pivot == 0.0 || pivot.abs() < relative_pivot_alarm * col_max {
                 self.factored = false;
                 return Err(SolverError::PivotGrowth);
             }
