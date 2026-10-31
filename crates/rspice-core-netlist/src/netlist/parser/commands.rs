@@ -3052,6 +3052,11 @@ pub(super) fn parse_meas_signal(
     if let Some(expression) = parse_measure_expression_operand(stream, line_num)? {
         return Ok(expression);
     }
+    if params.expression_dialect() != crate::config::ExpressionDialect::Xyce
+        && let Some(expression) = take_unbraced_measure_expression(stream, false)
+    {
+        return Ok(format!("{{{expression}}}"));
+    }
     if stream.consume(&TokenKind::AtSign) {
         // `expect_ident` accepts contiguous DEV-name punctuation, including
         // brackets. Here brackets delimit the parameter and must stay tokens.
@@ -3148,6 +3153,90 @@ fn measure_expression_operand_ahead(stream: &TokenStream) -> bool {
                 stream.peek_n(1).kind,
                 TokenKind::Expression(_) | TokenKind::StringLit(_)
             )
+}
+
+/// LTspice writes a `.MEAS` operand or PARAM expression without braces:
+/// `MAX v(1)*2`, `FIND -i(v1)*2 AT=2`, `PARAM p * 2`. The field runs, spaces
+/// included, to the next option (`NAME=`, or a bare AT, WHEN, TRIG or TARG),
+/// a top-level comma or `=`, or the end of the card. A waveform operand
+/// (`any_field` false) is an expression only when it has a top-level
+/// operator or opens with a sign, a parenthesis or a number, so a lone signal
+/// keeps its own parser and a `-` joining name fragments (`n-1`) stays part
+/// of a name, as an identifier reads it. Consumes and returns the field's
+/// source text; a field holding a braced, quoted or `@dev[param]` part is
+/// left to the other operand parsers.
+fn take_unbraced_measure_expression(stream: &mut TokenStream, any_field: bool) -> Option<String> {
+    let token_text = |token: &crate::netlist::lexer::Token| match &token.kind {
+        TokenKind::Ident(name) if token.lexeme.is_empty() => name.clone(),
+        TokenKind::Ident(_) | TokenKind::Number(_) if !token.lexeme.is_empty() => {
+            token.lexeme.clone()
+        }
+        kind => kind.to_string(),
+    };
+    let name_fragment =
+        |kind: &TokenKind| matches!(kind, TokenKind::Ident(_) | TokenKind::Number(_));
+    let mut text = String::new();
+    let mut count = 0usize;
+    let mut depth = 0usize;
+    let mut operator = false;
+    let mut previous_end = None;
+    loop {
+        let token = stream.peek_n(count);
+        let spaced = previous_end.is_some_and(|end| token.span.start != end);
+        match &token.kind {
+            TokenKind::Newline | TokenKind::Eof => break,
+            TokenKind::Expression(_)
+            | TokenKind::StringLit(_)
+            | TokenKind::AtSign
+            | TokenKind::LBracket
+            | TokenKind::RBracket => return None,
+            TokenKind::Comma | TokenKind::Equals if depth == 0 => break,
+            TokenKind::Ident(name)
+                if depth == 0
+                    && spaced
+                    && (matches!(stream.peek_n(count + 1).kind, TokenKind::Equals)
+                        || ["AT", "WHEN", "TRIG", "TARG"]
+                            .iter()
+                            .any(|keyword| name.eq_ignore_ascii_case(keyword))) =>
+            {
+                break;
+            }
+            TokenKind::LParen => depth += 1,
+            TokenKind::RParen => depth = depth.checked_sub(1)?,
+            TokenKind::Star | TokenKind::Slash | TokenKind::Plus | TokenKind::Other('^')
+                if depth == 0 =>
+            {
+                operator = true;
+            }
+            TokenKind::Minus if depth == 0 => {
+                let next = stream.peek_n(count + 1);
+                let joins_name = count > 0
+                    && !spaced
+                    && name_fragment(&stream.peek_n(count - 1).kind)
+                    && next.span.start == token.span.end
+                    && name_fragment(&next.kind);
+                operator |= !joins_name;
+            }
+            _ => {}
+        }
+        if spaced {
+            text.push(' ');
+        }
+        text.push_str(&token_text(token));
+        previous_end = Some(token.span.end);
+        count += 1;
+    }
+    let opens_expression = matches!(
+        stream.peek().kind,
+        TokenKind::Minus | TokenKind::Plus | TokenKind::LParen | TokenKind::Number(_)
+    );
+    if count == 0 || depth != 0 || !(any_field || operator || opens_expression) {
+        return None;
+    }
+    for _ in 0..count {
+        stream.advance();
+    }
+    Some(text)
 }
 
 fn parse_measure_expression_operand(
@@ -3350,13 +3439,17 @@ pub(super) fn parse_meas_command(
                     });
                 }
                 other => {
-                    return Err(ParseError::Syntax {
-                        line: line_num,
-                        message: format!(
-                            ".MEAS PARAM expects a quoted or braced expression, found {:?}",
-                            other
-                        ),
-                    });
+                    let other = other.clone();
+                    let Some(expression) = take_unbraced_measure_expression(stream, true) else {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(
+                                ".MEAS PARAM expects an expression, found {:?}",
+                                other
+                            ),
+                        });
+                    };
+                    crate::netlist::measure::MeasureExpression::expression(expression)
                 }
             };
             if measure_type_key == "EQN"
@@ -8708,6 +8801,64 @@ mod tests {
             netlist.measurements.as_slice(),
             [measurement] if measurement.analysis == "TRAN"
         ));
+    }
+
+    #[test]
+    fn ltspice_measures_read_unbraced_expressions() {
+        // LTspice 26.1.1 measures each of these, spaces and all.
+        use crate::netlist::measure::MeasureType;
+        let netlist = Netlist::parse(
+            "unbraced measures\n\
+             .param p=5\n\
+             v1 1 0 1\n\
+             r1 1 0 {p}\n\
+             .dc v1 1 2 1\n\
+             .meas dc m1 max p * 2\n\
+             .meas dc m2 param p*2+1\n\
+             .meas dc m3 max v(1)*2 from=1 to=1.5\n\
+             .meas dc m4 find -i(v1)*2 at=2\n\
+             .meas dc m5 param m3-1\n\
+             .meas dc m6 max v(1)\n\
+             .meas dc m7 avg n-1\n\
+             .end\n",
+        )
+        .expect("LTspice measure expressions parse");
+        let operands = netlist
+            .measurements
+            .iter()
+            .map(|statement| match &statement.measure_type {
+                MeasureType::Max { signal, .. } | MeasureType::Avg { signal, .. } => signal.clone(),
+                MeasureType::Find { signal, at, .. } => format!("{signal} at {at:?}"),
+                MeasureType::Param { expression } => format!("param {}", expression.text),
+                other => format!("{other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            operands,
+            [
+                "{p * 2}",
+                "param p*2+1",
+                "{v(1)*2}",
+                "{-i(v1)*2} at Some(2.0)",
+                "param m3-1",
+                "V(1)",
+                // A `-` joining name fragments stays part of the name.
+                "N-1",
+            ]
+        );
+        assert!(matches!(
+            &netlist.measurements[2].measure_type,
+            MeasureType::Max { from: Some(from), to: Some(to), .. } if *from == 1.0 && *to == 1.5
+        ));
+        // Xyce still requires the braces LTspice leaves out.
+        let xyce = Netlist::parse_with_options(
+            "unbraced measures\nv1 1 0 1\nr1 1 0 1\n.dc v1 1 2 1\n.meas dc m1 param 2*3\n.end\n",
+            crate::netlist::NetlistParseOptions {
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        );
+        assert!(xyce.is_err(), "{xyce:?}");
     }
 
     fn parse_in(deck: &str, dialect: crate::config::SpiceDialect) -> Result<Netlist, ParseError> {
