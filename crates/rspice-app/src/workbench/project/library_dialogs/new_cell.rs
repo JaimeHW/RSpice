@@ -1,25 +1,31 @@
 //! New Cell — small modal on the dialog primitive: target library, name,
 //! description, and the views to seed the cell with.
 
-use super::shared::{DialogActionOutcome, LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
-use super::{Context, RSpiceApp, VERILOGA_LIBRARY_NAME};
-use crate::diagnostics::{LogSeverity, LogSource};
+use egui::Context;
+
+use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, switch_row};
+use crate::workbench::app::dialogs::library::{
+    LIBRARY_CATALOG_STALE_MESSAGE, seeded_symbol_view, validate_lcv_name,
+};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::project::ProjectFeature;
+use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn process_new_cell_dialog(&mut self, ctx: &Context) {
-        if !self.state.project.new_cell_dialog {
+impl ProjectFeature {
+    /// Draw New Cell. What a created cell leaves outside its catalog change
+    /// goes to the shell, which carries it out as the dialog returns.
+    pub(in crate::workbench) fn process_new_cell_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        if !cx.state.new_cell_dialog {
             return;
         }
 
         let mut should_close = false;
         let mut should_create = false;
-        let mut persist_global_veriloga = false;
 
-        let lib_names: Vec<String> = self
-            .state
+        let lib_names: Vec<String> = cx
             .model
             .library_manager
             .libraries_sorted()
@@ -27,16 +33,16 @@ impl RSpiceApp {
             .filter(|lib| !lib.read_only)
             .map(|lib| lib.name.clone())
             .collect();
-        if self.state.project.new_cell_library.is_empty() && !lib_names.is_empty() {
-            self.state.project.new_cell_library = lib_names[0].clone();
+        if cx.state.new_cell_library.is_empty() && !lib_names.is_empty() {
+            cx.state.new_cell_library = lib_names[0].clone();
         }
-        let catalog_current = self.state.model.library_manager.revision()
-            == self.state.project.new_cell_library_revision;
+        let catalog_current =
+            cx.model.library_manager.revision() == cx.state.new_cell_library_revision;
         if !catalog_current {
-            self.state.project.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+            cx.state.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
         }
 
-        let dialogs = &mut self.state.project;
+        let dialogs = &mut *cx.state;
         let choice = Dialog::new("New cell", "Create")
             .description(
                 "Create a named cell in a writable library with the selected initial views.",
@@ -119,204 +125,168 @@ impl RSpiceApp {
         }
 
         if should_create {
-            let outcome = self.handle_new_cell_create_action();
-            should_close |= outcome.close;
-            persist_global_veriloga |= outcome.persist_global_veriloga;
-        }
-
-        if persist_global_veriloga {
-            self.persist_global_veriloga_library_with_feedback();
+            should_close |= create_new_cell(cx);
         }
 
         if should_close {
-            self.state.project.new_cell_dialog = false;
-            self.state.project.new_cell_name.clear();
-            self.state.project.new_cell_description.clear();
-            self.state.project.new_cell_error = None;
-            self.state.project.new_cell_create_schematic = true;
-            self.state.project.new_cell_create_symbol = false;
-            self.state.project.new_cell_create_testbench = false;
-            self.state.project.new_cell_create_veriloga = false;
+            cx.state.new_cell_dialog = false;
+            cx.state.new_cell_name.clear();
+            cx.state.new_cell_description.clear();
+            cx.state.new_cell_error = None;
+            cx.state.new_cell_create_schematic = true;
+            cx.state.new_cell_create_symbol = false;
+            cx.state.new_cell_create_testbench = false;
+            cx.state.new_cell_create_veriloga = false;
         }
     }
+}
 
-    pub(super) fn handle_new_cell_create_action(&mut self) -> DialogActionOutcome {
-        let mut outcome = DialogActionOutcome::default();
-        let name = self.state.project.new_cell_name.trim().to_string();
-        let library = self.state.project.new_cell_library.clone();
+/// Create the cell the dialog names, and whether it was created.
+///
+/// The cell and every view it starts with are made on copies of the
+/// catalog, so a refusal anywhere creates nothing; the catalog then takes
+/// the copies, and what the creation leaves outside it goes to the shell
+/// in today's order. A refusal is stated in the dialog.
+fn create_new_cell(cx: &mut Cx<'_, ProjectFeature>) -> bool {
+    let name = cx.state.new_cell_name.trim().to_string();
+    let library = cx.state.new_cell_library.clone();
 
-        if self.state.model.library_manager.revision()
-            != self.state.project.new_cell_library_revision
-        {
-            self.state.project.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
-            return outcome;
-        }
-        if let Some(error) = validate_lcv_name(&name, "Cell name") {
-            self.state.project.new_cell_error = Some(error);
-            return outcome;
-        }
-        if library.is_empty() {
-            self.state.project.new_cell_error = Some("Please select a library".to_string());
-            return outcome;
-        }
+    if cx.model.library_manager.revision() != cx.state.new_cell_library_revision {
+        cx.state.new_cell_error = Some(LIBRARY_CATALOG_STALE_MESSAGE.to_owned());
+        return false;
+    }
+    if let Some(error) = validate_lcv_name(&name, "Cell name") {
+        cx.state.new_cell_error = Some(error);
+        return false;
+    }
+    if library.is_empty() {
+        cx.state.new_cell_error = Some("Please select a library".to_string());
+        return false;
+    }
 
-        let Some(lib_ro) = self.state.model.library_manager.get_library(&library) else {
-            self.state.project.new_cell_error = Some(format!("Library '{}' not found", library));
-            return outcome;
-        };
-        if lib_ro.read_only {
-            self.state.project.new_cell_error = Some(format!(
-                "Library '{library}' is read only; create the cell in an editable library"
-            ));
-            return outcome;
-        }
-        let requested_identity = crate::state::canonical_cell_view_owner_key(&library, &name, "");
-        if lib_ro.cells.values().any(|cell| {
-            crate::state::canonical_cell_view_owner_key(&library, &cell.name, "")
-                == requested_identity
-        }) {
-            self.state.project.new_cell_error = Some(format!(
-                "Cell '{}' clashes with an existing cell in library '{}' (cell names ignore letter case)",
-                name, library
-            ));
-            return outcome;
-        }
+    let Some(lib_ro) = cx.model.library_manager.get_library(&library) else {
+        cx.state.new_cell_error = Some(format!("Library '{}' not found", library));
+        return false;
+    };
+    if lib_ro.read_only {
+        cx.state.new_cell_error = Some(format!(
+            "Library '{library}' is read only; create the cell in an editable library"
+        ));
+        return false;
+    }
+    let requested_identity = crate::state::canonical_cell_view_owner_key(&library, &name, "");
+    if lib_ro.cells.values().any(|cell| {
+        crate::state::canonical_cell_view_owner_key(&library, &cell.name, "") == requested_identity
+    }) {
+        cx.state.new_cell_error = Some(format!(
+            "Cell '{}' clashes with an existing cell in library '{}' (cell names ignore letter case)",
+            name, library
+        ));
+        return false;
+    }
 
-        use crate::state::{Cell, View, ViewType};
+    use crate::state::{Cell, View, ViewType};
 
-        let mut cell = Cell::new(&name);
-        cell.description = self.state.project.new_cell_description.clone();
+    let mut cell = Cell::new(&name);
+    cell.description = cx.state.new_cell_description.clone();
 
-        if self.state.project.new_cell_create_schematic {
-            cell.add_view(View::new("schematic", ViewType::Schematic));
-        }
-        if self.state.project.new_cell_create_symbol {
-            // A cell created here starts on an empty schematic, so its symbol
-            // starts empty too and grows with the interface the user draws.
-            match super::new_view_dialog::seeded_symbol_view("symbol", &[]) {
-                Ok(view) => cell.add_view(view),
-                Err(error) => {
-                    self.state.project.new_cell_error = Some(error);
-                    return outcome;
-                }
-            }
-        }
-        if self.state.project.new_cell_create_testbench {
-            cell.add_view(View::new("testbench", ViewType::Testbench));
-        }
-
-        // Every view is made on copies, the Verilog-A view's source and
-        // compiled interface included, so a refusal anywhere creates nothing.
-        let mut candidate_libraries = self.state.model.library_manager.clone();
-        let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
-            self.state.project.new_cell_error = Some(format!("Library '{}' not found", library));
-            return outcome;
-        };
-        candidate_library.add_cell(cell);
-        let veriloga =
-            crate::state::CellViewRef::new(&library, &name, crate::state::workspace::VERILOGA_VIEW);
-        let seeded_veriloga = if self.state.project.new_cell_create_veriloga {
-            let mut candidate_sources = self.state.model.workspace.content.project_sources.clone();
-            match super::new_veriloga_device::seed_veriloga_view(
-                &self.state,
-                &mut candidate_libraries,
-                &mut candidate_sources,
-                &veriloga,
-                &[],
-            ) {
-                Ok(receipt) => Some((candidate_sources, receipt)),
-                Err(error) => {
-                    self.state.project.new_cell_error = Some(error);
-                    return outcome;
-                }
-            }
-        } else {
-            None
-        };
-
-        let project_mutation = match self.state.model.preflight_project_library_mutation(
-            crate::state::ProjectLibraryMutation::CreateCell {
-                library: library.clone(),
-                cell: name.clone(),
-            },
-        ) {
-            Ok(prepared) => prepared,
+    if cx.state.new_cell_create_schematic {
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+    }
+    if cx.state.new_cell_create_symbol {
+        // A cell created here starts on an empty schematic, so its symbol
+        // starts empty too and grows with the interface the user draws.
+        match seeded_symbol_view("symbol", &[]) {
+            Ok(view) => cell.add_view(view),
             Err(error) => {
-                self.state.project.new_cell_error = Some(error);
-                return outcome;
+                cx.state.new_cell_error = Some(error);
+                return false;
             }
-        };
-        let seeded_schematic = self.state.new_schematic_document();
-        {
-            self.state.model.library_manager = candidate_libraries;
-            let receipt = seeded_veriloga.map(|(sources, receipt)| {
-                self.state.model.workspace.content.project_sources = sources;
-                self.state.model.workspace.content.project_sources_dirty = true;
-                receipt
-            });
-            for view_name in [
-                self.state
-                    .project
-                    .new_cell_create_schematic
-                    .then_some("schematic"),
-                self.state
-                    .project
-                    .new_cell_create_testbench
-                    .then_some("testbench"),
-            ]
-            .into_iter()
-            .flatten()
-            {
-                let reference = crate::state::CellViewRef::new(&library, &name, view_name);
-                self.state
-                    .model
-                    .workspace
-                    .insert_schematic_editor(reference.key(), seeded_schematic.clone());
-            }
-            self.state
-                .model
-                .publish_project_library_mutation(project_mutation);
-            self.state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
-                format!("Created cell '{name}' in library '{library}'."),
-            );
-            // A schematic defines the cell's ports, so it opens first; a
-            // Verilog-A view without one is the module to write next.
-            let view_to_open = if self.state.project.new_cell_create_schematic {
-                Some("schematic")
-            } else if receipt.is_some() {
-                Some(veriloga.view.as_str())
-            } else if self.state.project.new_cell_create_symbol {
-                Some("symbol")
-            } else if self.state.project.new_cell_create_testbench {
-                Some("testbench")
-            } else {
-                None
-            };
-            if let Some(view) = view_to_open {
-                self.state
-                    .open_workspace_view(crate::state::CellViewRef::new(
-                        library.clone(),
-                        name.clone(),
-                        view,
-                    ));
-            }
-            if let Some(receipt) = receipt
-                && self.state.model.workspace.content.active_view == veriloga
-            {
-                self.state
-                    .workbench
-                    .activate(crate::workbench::state::Workspace::Design);
-                self.state.code.code_workspace.veriloga.receipt = Some(receipt);
-            }
-            self.state.project.new_cell_error = None;
-            outcome.close = true;
-            outcome.persist_global_veriloga = library == VERILOGA_LIBRARY_NAME;
         }
-
-        outcome
     }
+    if cx.state.new_cell_create_testbench {
+        cell.add_view(View::new("testbench", ViewType::Testbench));
+    }
+
+    // Every view is made on copies, the Verilog-A view's source and
+    // compiled interface included, so a refusal anywhere creates nothing.
+    let mut candidate_libraries = cx.model.library_manager.clone();
+    let Some(mut candidate_library) = candidate_libraries.edit_library(&library) else {
+        cx.state.new_cell_error = Some(format!("Library '{}' not found", library));
+        return false;
+    };
+    candidate_library.add_cell(cell);
+    let veriloga =
+        crate::state::CellViewRef::new(&library, &name, crate::state::workspace::VERILOGA_VIEW);
+    let seeded_veriloga = if cx.state.new_cell_create_veriloga {
+        let mut candidate_sources = cx.model.workspace.content.project_sources.clone();
+        match crate::workbench::app::dialogs::library::new_veriloga_device::seed_veriloga_view(
+            cx.model,
+            &mut candidate_libraries,
+            &mut candidate_sources,
+            &veriloga,
+            &[],
+        ) {
+            Ok(receipt) => Some((candidate_sources, receipt)),
+            Err(error) => {
+                cx.state.new_cell_error = Some(error);
+                return false;
+            }
+        }
+    } else {
+        None
+    };
+
+    let project_mutation = match cx.model.preflight_project_library_mutation(
+        crate::state::ProjectLibraryMutation::CreateCell {
+            library: library.clone(),
+            cell: name.clone(),
+        },
+    ) {
+        Ok(prepared) => prepared,
+        Err(error) => {
+            cx.state.new_cell_error = Some(error);
+            return false;
+        }
+    };
+    cx.model.library_manager = candidate_libraries;
+    let receipt = seeded_veriloga.map(|(sources, receipt)| {
+        cx.model.workspace.content.project_sources = sources;
+        cx.model.workspace.content.project_sources_dirty = true;
+        receipt
+    });
+    let schematics = [
+        cx.state.new_cell_create_schematic.then_some("schematic"),
+        cx.state.new_cell_create_testbench.then_some("testbench"),
+    ]
+    .into_iter()
+    .flatten()
+    .map(|view| crate::state::CellViewRef::new(&library, &name, view))
+    .collect();
+    // A schematic defines the cell's ports, so it opens first; a Verilog-A
+    // view without one is the module to write next.
+    let view_to_open = if cx.state.new_cell_create_schematic {
+        Some("schematic")
+    } else if receipt.is_some() {
+        Some(veriloga.view.as_str())
+    } else if cx.state.new_cell_create_symbol {
+        Some("symbol")
+    } else if cx.state.new_cell_create_testbench {
+        Some("testbench")
+    } else {
+        None
+    };
+    let open = view_to_open.map(|view| crate::state::CellViewRef::new(&library, &name, view));
+    cx.wb.outbox.push(ProjectRequest::CellCreated {
+        schematics,
+        mutation: ReservedLibraryRevision::new(project_mutation),
+        notice: format!("Created cell '{name}' in library '{library}'."),
+        open,
+        veriloga: receipt.map(|receipt| Box::new((veriloga, receipt))),
+        persist_global_veriloga: library == VERILOGA_LIBRARY_NAME,
+    });
+    cx.state.new_cell_error = None;
+    true
 }
 
 #[cfg(test)]
@@ -327,6 +297,18 @@ mod tests {
         SymbolDocument,
     };
     use crate::workbench::ChoicePreference;
+    use crate::workbench::RSpiceApp;
+    use crate::workbench::project::library_dialogs::{published, shown};
+    use crate::workbench::project::tests::with_cx;
+
+    /// Create the cell the dialog names in the feature's context, with
+    /// what it raised answered as the dialog step answers it, and whether
+    /// it was created.
+    fn create(app: &mut RSpiceApp) -> bool {
+        let created = with_cx(app, create_new_cell);
+        app.after_contribution();
+        created
+    }
 
     fn cell_symbol_view(app: &RSpiceApp, library: &str, cell: &str) -> crate::state::View {
         app.state
@@ -363,9 +345,9 @@ mod tests {
         app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let project_revision_before = app.state.model.workspace.content.project.revision().get();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(outcome.close);
+        assert!(created);
         assert_eq!(
             app.state.model.workspace.content.project.revision().get(),
             project_revision_before + 1
@@ -419,9 +401,9 @@ mod tests {
         app.state.project.new_cell_create_symbol = true;
         app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(outcome.close);
+        assert!(created);
         assert_eq!(
             app.state.model.workspace.content.active_view,
             CellViewRef::new("tracking_test", "amp", "schematic")
@@ -488,9 +470,9 @@ mod tests {
         app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let project_revision_before = app.state.model.workspace.content.project.revision().get();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(outcome.close, "{:?}", app.state.project.new_cell_error);
+        assert!(created, "{:?}", app.state.project.new_cell_error);
         assert_eq!(
             app.state.model.workspace.content.project.revision().get(),
             project_revision_before + 1
@@ -548,9 +530,9 @@ mod tests {
         app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let buffers_before = app.state.model.workspace.content.schematic_buffers.len();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(!outcome.close);
+        assert!(!created);
         let library = app
             .state
             .model
@@ -583,9 +565,9 @@ mod tests {
         app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
         let revision_before = app.state.model.workspace.content.project.revision();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(!outcome.close);
+        assert!(!created);
         assert!(
             app.state
                 .model
@@ -622,9 +604,9 @@ mod tests {
             .add_library(Library::new("intervening_change"));
         let project_revision_before = app.state.model.workspace.content.project.revision();
 
-        let outcome = app.handle_new_cell_create_action();
+        let created = create(&mut app);
 
-        assert!(!outcome.close);
+        assert!(!created);
         assert!(
             app.state
                 .model
@@ -640,5 +622,120 @@ mod tests {
             app.state.project.new_cell_error.as_deref(),
             Some(LIBRARY_CATALOG_STALE_MESSAGE)
         );
+    }
+
+    /// A cell in a library of its own typed into New Cell, with a Verilog-A
+    /// view: with a schematic and a testbench, which open first, or alone,
+    /// when the module is what opens.
+    fn creating(veriloga_only: bool) -> RSpiceApp {
+        let mut app = RSpiceApp::test_instance();
+        app.state
+            .model
+            .library_manager
+            .add_library(Library::new("behavioral"));
+        let project = &mut app.state.project;
+        project.new_cell_library = "behavioral".to_owned();
+        project.new_cell_name = "comparator".to_owned();
+        project.new_cell_create_schematic = !veriloga_only;
+        project.new_cell_create_testbench = !veriloga_only;
+        project.new_cell_create_veriloga = true;
+        app.state.project.new_cell_library_revision = app.state.model.library_manager.revision();
+        app
+    }
+
+    /// Carry out what the creation handed over in the order the creation
+    /// once did it in place, with the new document it read before it
+    /// changed the catalog.
+    fn carry_out_in_place(app: &mut RSpiceApp, seeded: crate::state::SchematicState) {
+        let Some(ProjectRequest::CellCreated {
+            schematics,
+            mutation,
+            notice,
+            open,
+            veriloga,
+            persist_global_veriloga,
+        }) = app.state.workbench.outbox.take::<ProjectRequest>()
+        else {
+            panic!("the creation hands the shell what it left");
+        };
+        assert!(
+            !persist_global_veriloga,
+            "the cell is not the Verilog-A library's"
+        );
+        let state = &mut app.state;
+        for reference in schematics {
+            state
+                .model
+                .workspace
+                .insert_schematic_editor(reference.key(), seeded.clone());
+        }
+        state.model.publish_project_library_mutation(
+            mutation
+                .take()
+                .expect("the reserved revision is published once"),
+        );
+        state.record(
+            crate::diagnostics::LogSeverity::Info,
+            crate::diagnostics::LogSource::Studio,
+            notice,
+        );
+        if let Some(view) = open {
+            state.open_workspace_view(view);
+        }
+        if let Some((view, receipt)) = veriloga.map(|seeded| *seeded)
+            && state.model.workspace.content.active_view == view
+        {
+            state
+                .workbench
+                .activate(crate::workbench::state::Workspace::Design);
+            state.code.code_workspace.veriloga.receipt = Some(receipt);
+        }
+    }
+
+    /// Beside what [`shown`] holds, the workspace in front, whether the
+    /// Verilog-A receipt is kept, and the documents the creation seeded.
+    fn in_front(app: &RSpiceApp) -> (crate::workbench::state::Workspace, bool, Vec<String>) {
+        let mut buffers = app
+            .state
+            .model
+            .workspace
+            .content
+            .schematic_buffers
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        buffers.sort();
+        (
+            app.state.workbench.workspace,
+            app.state.code.code_workspace.veriloga.receipt.is_some(),
+            buffers,
+        )
+    }
+
+    /// A cell created in the feature's context, with what it left handed to
+    /// the shell, ends where the creation carried out in place did: the new
+    /// documents, then the revision, then the creation's line in the log,
+    /// then the view it opens, and the Verilog-A receipt kept only when the
+    /// module is the view open.
+    #[test]
+    fn a_created_cell_ends_where_the_creation_carried_out_in_place_did() {
+        for veriloga_only in [false, true] {
+            let mut in_place = creating(veriloga_only);
+            let seeded = in_place.state.new_schematic_document();
+            assert!(with_cx(&mut in_place, create_new_cell));
+            carry_out_in_place(&mut in_place, seeded);
+
+            let mut handed = creating(veriloga_only);
+            assert!(create(&mut handed));
+
+            assert_eq!(
+                shown(&handed),
+                shown(&in_place),
+                "Verilog-A only: {veriloga_only}"
+            );
+            assert_eq!(published(&handed), published(&in_place));
+            assert_eq!(in_front(&handed), in_front(&in_place));
+            assert_eq!(in_front(&handed).1, veriloga_only);
+        }
     }
 }

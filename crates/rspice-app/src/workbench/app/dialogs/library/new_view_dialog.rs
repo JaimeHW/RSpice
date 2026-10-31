@@ -637,7 +637,7 @@ impl RSpiceApp {
 /// [`GENERATED_SYMBOL_VIEW`] additionally carries the `generated` marker, so
 /// the schematic keeps the symbol in step as ports come and go until the
 /// first hand edit takes ownership by clearing the marker.
-pub(super) fn seeded_symbol_view(
+pub(in crate::workbench) fn seeded_symbol_view(
     view_name: &str,
     ports: &[crate::state::PortSpec],
 ) -> Result<crate::state::View, String> {

@@ -33,6 +33,7 @@ use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::app_state::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
 use crate::workbench::documents::code_workspace::{self, SelectedVerilogASource};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -416,7 +417,7 @@ impl ModuleRebind {
         }
         app.state.model.workspace.content.project_metadata_dirty = true;
         if self.reference.library == VERILOGA_LIBRARY_NAME {
-            app.persist_global_veriloga_library_with_feedback();
+            persist_global_veriloga_library(&mut app.state.model);
         }
         Some(VerilogAModuleBinding {
             view: self.reference,

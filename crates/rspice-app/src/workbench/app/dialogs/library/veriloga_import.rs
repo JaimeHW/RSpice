@@ -22,6 +22,7 @@ use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::MessageId;
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{VerilogAImportFormState, writable_libraries};
 
 /// Where each top module of the form's file lands in its library: the module,
@@ -301,7 +302,7 @@ impl RSpiceApp {
         self.state.model.publish_project_library_mutation(prepared);
         self.state.code.code_workspace.veriloga.import_form = None;
         if form.library == VERILOGA_LIBRARY_NAME {
-            self.persist_global_veriloga_library_with_feedback();
+            persist_global_veriloga_library(&mut self.state.model);
         }
         // A cell view is a Design document; the first module opens there.
         self.state.open_workspace_view(first.clone());

@@ -1,8 +1,8 @@
 //! Shared library-dialog helpers, including library/cell/view name
 //! validation.
 
-use super::{RSpiceApp, save_global_veriloga_library};
-use crate::diagnostics::{LogSeverity, LogSource};
+use super::RSpiceApp;
+use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
 pub(super) struct DialogActionOutcome {
@@ -27,15 +27,6 @@ pub(in crate::workbench) fn validate_lcv_name(name: &str, field_label: &str) -> 
 
 impl RSpiceApp {
     pub(in crate::workbench::app) fn persist_global_veriloga_library_with_feedback(&mut self) {
-        if let Err(err) = save_global_veriloga_library(
-            &self.state.model.library_manager,
-            &self.state.model.workspace,
-        ) {
-            self.state.record(
-                LogSeverity::Warning,
-                LogSource::Studio,
-                format!("The Verilog-A library could not be saved: {err}"),
-            );
-        }
+        persist_global_veriloga_library(&mut self.state.model);
     }
 }

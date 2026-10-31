@@ -42,7 +42,8 @@ use crate::state::{
 use crate::state::{VerilogACompileReceipt, VerilogAPlacementHandoff};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::documents::code_workspace::{
     apply_receipt_interface, compile_project_bundle_receipt, writable_libraries,
 };
@@ -245,8 +246,8 @@ fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
 ///
 /// New Verilog-A device… and New Cell's Verilog-A view both take this one
 /// path, so a cell made either way is the cell its first compile would make.
-pub(super) fn seed_veriloga_view(
-    state: &AppState,
+pub(in crate::workbench) fn seed_veriloga_view(
+    model: &Model,
     libraries: &mut LibraryManager,
     sources: &mut ProjectSourceRegistry,
     reference: &CellViewRef,
@@ -263,7 +264,7 @@ pub(super) fn seed_veriloga_view(
     )
     .map_err(|error| format!("The Verilog-A source could not be created: {error}"))?;
     let receipt = compile_project_bundle_receipt(
-        state.model.workspace.content.project.id(),
+        model.workspace.content.project.id(),
         &bundle,
         Some(&module_name),
     )
@@ -298,7 +299,7 @@ pub(super) fn seed_veriloga_view(
         .map_err(|error| format!("The Verilog-A source could not be retained: {error}"))?;
     apply_receipt_interface(
         libraries,
-        &state.model.workspace.content.schematic_buffers,
+        &model.workspace.content.schematic_buffers,
         reference,
         receipt,
     )
@@ -414,7 +415,7 @@ impl RSpiceApp {
             .add_cell(Cell::new(&cell));
         let mut sources = self.state.model.workspace.content.project_sources.clone();
         let receipt = seed_veriloga_view(
-            &self.state,
+            &self.state.model,
             &mut libraries,
             &mut sources,
             &reference,
@@ -441,7 +442,7 @@ impl RSpiceApp {
             schematic: form.origin,
         });
         if library == VERILOGA_LIBRARY_NAME {
-            self.persist_global_veriloga_library_with_feedback();
+            persist_global_veriloga_library(&mut self.state.model);
         }
         // The module is a view of the cell, so it opens as a Design document.
         self.state.open_workspace_view(reference.clone());

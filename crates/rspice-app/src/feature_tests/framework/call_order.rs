@@ -376,7 +376,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("features::render_dialog", "results"),
     ("render_shortcuts_help_dialog", "shell"),
     ("features::render_dialog", "models"),
-    ("process_new_cell_dialog", "project"),
+    ("ProjectFeature::process_new_cell_dialog", "project"),
     ("process_new_view_dialog", "project"),
     ("render_new_veriloga_device_form", "code"),
     ("render_veriloga_import_dialog", "code"),
@@ -1443,11 +1443,31 @@ fn the_docked_project_inspector_has_a_configuration_refused_for_runs_stated_in_t
     }
 }
 
-/// The project's cell dialogs draw in the feature's context. Rename Cell has
-/// what it raised answered straight after it draws, in the step that drew it;
-/// Copy Cell raises nothing.
+/// What creating a cell hands the shell is carried out in the order the
+/// creation once did it: the new documents, the reserved revision, the
+/// creation's line in the log, the view it opens, the Verilog-A receipt
+/// only once that view is the one open, and the Verilog-A library saved.
+const CELL_CREATED: &[Step] = &[(
+    "CellCreated",
+    &[
+        "ProjectRequest::CellCreated {",
+        "let seeded = app.state.new_schematic_document();",
+        ".insert_schematic_editor(reference.key(), seeded.clone());",
+        "publish_reserved_revision(app, mutation);",
+        "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
+        "app.state.open_workspace_view(view);",
+        "&& app.state.model.workspace.content.active_view == view",
+        "app.state.workbench.activate(Workspace::Design);",
+        "app.state.code.code_workspace.veriloga.receipt = Some(receipt);",
+        "persist_global_veriloga_library(&mut app.state.model);",
+    ],
+)];
+
+/// The project's cell dialogs draw in the feature's context. New Cell and
+/// Rename Cell have what they raised answered straight after they draw, in
+/// the step that drew them; Copy Cell raises nothing.
 #[test]
-fn the_cell_dialogs_draw_in_the_project_context_and_a_rename_is_answered_as_it_returns() {
+fn the_cell_dialogs_draw_in_the_project_context_and_what_they_raise_is_answered_as_they_return() {
     let order = without_whitespace(DIALOG_ORDER);
     let spec = |key: &str| {
         order
@@ -1471,6 +1491,23 @@ fn the_cell_dialogs_draw_in_the_project_context_and_a_rename_is_answered_as_it_r
             "render: |app, ctx| ProjectFeature::process_copy_cell_dialog(&mut features::cx(app), ctx),"
         )),
         "Copy Cell draws in the project feature's context and answers nothing"
+    );
+    assert!(
+        spec("project.new_cell").contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::process_new_cell_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "New Cell draws in the project feature's context, and what it raised is answered \
+         straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        CELL_CREATED,
     );
 }
 
@@ -1513,7 +1550,7 @@ const CATALOG_CHANGED: &[Step] = &[(
     &[
         "ProjectRequest::CatalogChanged {",
         "apply_workspace_pruned(&mut app.state, pruned);",
-        "app.state.model.publish_project_library_mutation(mutation);",
+        "publish_reserved_revision(app, mutation);",
         "app.state.record(LogSeverity::Info, LogSource::Studio, notice);",
     ],
 )];

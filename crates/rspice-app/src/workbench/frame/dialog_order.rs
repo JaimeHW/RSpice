@@ -400,7 +400,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.new_cell"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_cell_dialog),
-        render: |app, ctx| app.process_new_cell_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::process_new_cell_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("project.new_view"),

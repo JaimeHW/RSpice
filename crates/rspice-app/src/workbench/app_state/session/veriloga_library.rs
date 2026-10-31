@@ -16,6 +16,7 @@ use std::collections::BTreeSet;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
+use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::state::{
@@ -24,6 +25,7 @@ use crate::state::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::state::{LibraryManager, ProjectWorkspace};
+use crate::workbench::app_state::Model;
 
 #[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
@@ -95,6 +97,18 @@ pub(in crate::workbench) fn restore_global_veriloga_library(
             loaded,
         )
         .map_err(|error| format!("The Verilog-A library could not be restored: {error}"))
+    }
+}
+
+/// Save the user's Verilog-A library, stating in the log why it could not
+/// be saved.
+pub(in crate::workbench) fn persist_global_veriloga_library(model: &mut Model) {
+    if let Err(err) = save_global_veriloga_library(&model.library_manager, &model.workspace) {
+        model.record(
+            LogSeverity::Warning,
+            LogSource::Studio,
+            format!("The Verilog-A library could not be saved: {err}"),
+        );
     }
 }
 

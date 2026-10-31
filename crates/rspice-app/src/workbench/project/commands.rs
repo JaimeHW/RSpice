@@ -18,7 +18,7 @@ use rspice_app_state::workbench::app_state::model::WorkspacePruned;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
-use crate::state::{CellViewRef, PreparedProjectLibraryMutation, ViewType};
+use crate::state::{CellViewRef, PreparedProjectLibraryMutation, VerilogACompileReceipt, ViewType};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{Drain, Request};
 use crate::workbench::project::configuration_state::ConfigurationSelection;
@@ -260,7 +260,7 @@ impl ProjectCommand {
 /// library catalog change left outside the model. Each place that raises one
 /// raises one, carrying everything it once did after that point, in order.
 /// Taken straight after the call that raised it.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
@@ -272,6 +272,20 @@ pub(crate) enum ProjectRequest {
         pruned: WorkspacePruned,
         mutation: Option<ReservedLibraryRevision>,
         notice: String,
+    },
+    /// What creating a cell left outside its catalog change, in the order
+    /// the creation once did it: a new document in each view that draws a
+    /// schematic, the revision it reserved, its own line in the log, the
+    /// view it opens first, the Verilog-A view's compile receipt, kept with
+    /// the Design workspace in front when that view is the one open, and
+    /// the user's Verilog-A library saved when the cell went into it.
+    CellCreated {
+        schematics: Vec<CellViewRef>,
+        mutation: ReservedLibraryRevision,
+        notice: String,
+        open: Option<CellViewRef>,
+        veriloga: Option<Box<(CellViewRef, VerilogACompileReceipt)>>,
+        persist_global_veriloga: bool,
     },
 }
 
@@ -298,12 +312,3 @@ impl ReservedLibraryRevision {
         self.0.borrow_mut().take()
     }
 }
-
-/// Two requests carry the same reservation exactly when they share it.
-impl PartialEq for ReservedLibraryRevision {
-    fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
-    }
-}
-
-impl Eq for ReservedLibraryRevision {}

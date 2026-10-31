@@ -6,8 +6,9 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration_transaction,
 };
+use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
-use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::apply_workspace_pruned;
 
@@ -378,17 +379,54 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         } => {
             apply_workspace_pruned(&mut app.state, pruned);
             if let Some(mutation) = mutation {
-                let mutation = mutation.take();
-                debug_assert!(
-                    mutation.is_some(),
-                    "a deletion's reserved revision is published once, by the answer"
-                );
-                if let Some(mutation) = mutation {
-                    app.state.model.publish_project_library_mutation(mutation);
-                }
+                publish_reserved_revision(app, mutation);
             }
             app.state
                 .record(LogSeverity::Info, LogSource::Studio, notice);
         }
+        ProjectRequest::CellCreated {
+            schematics,
+            mutation,
+            notice,
+            open,
+            veriloga,
+            persist_global_veriloga,
+        } => {
+            let seeded = app.state.new_schematic_document();
+            for reference in schematics {
+                app.state
+                    .model
+                    .workspace
+                    .insert_schematic_editor(reference.key(), seeded.clone());
+            }
+            publish_reserved_revision(app, mutation);
+            app.state
+                .record(LogSeverity::Info, LogSource::Studio, notice);
+            if let Some(view) = open {
+                app.state.open_workspace_view(view);
+            }
+            if let Some((view, receipt)) = veriloga.map(|seeded| *seeded)
+                && app.state.model.workspace.content.active_view == view
+            {
+                app.state.workbench.activate(Workspace::Design);
+                app.state.code.code_workspace.veriloga.receipt = Some(receipt);
+            }
+            if persist_global_veriloga {
+                persist_global_veriloga_library(&mut app.state.model);
+            }
+        }
+    }
+}
+
+/// Publish the revision a catalog change reserved, once what the change
+/// left outside the model has been carried out.
+fn publish_reserved_revision(app: &mut RSpiceApp, mutation: ReservedLibraryRevision) {
+    let mutation = mutation.take();
+    debug_assert!(
+        mutation.is_some(),
+        "a reserved revision is published once, by the answer"
+    );
+    if let Some(mutation) = mutation {
+        app.state.model.publish_project_library_mutation(mutation);
     }
 }

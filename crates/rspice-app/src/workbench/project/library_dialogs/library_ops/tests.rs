@@ -2,7 +2,7 @@
 
 use super::*;
 use crate::state::{Cell, CellViewRef, Library, OpenCellView, SchematicState, View, ViewType};
-use crate::workbench::project::library_dialogs::shown;
+use crate::workbench::project::library_dialogs::{published, shown};
 use crate::workbench::project::tests::with_cx;
 use crate::workbench::{AppState, RSpiceApp};
 
@@ -273,29 +273,6 @@ fn deleting_the_active_library() -> (RSpiceApp, String) {
         .open_delete_library_review(&state.model, &library)
         .expect("the active library can be deleted");
     (app, library)
-}
-
-/// What the deletion published: the project's library receipts, the
-/// catalog's revision and the design's execution epoch.
-fn published(app: &RSpiceApp) -> (Vec<(crate::state::ProjectLibraryMutation, u64)>, u64, u64) {
-    let model = &app.state.model;
-    (
-        model
-            .workspace
-            .content
-            .project
-            .library_mutation_audit()
-            .iter()
-            .map(|receipt| {
-                (
-                    receipt.mutation().clone(),
-                    receipt.target_library_revision(),
-                )
-            })
-            .collect(),
-        model.library_manager.revision(),
-        model.design_execution_epoch,
-    )
 }
 
 /// A deletion carried out in the feature's context, with what it left and
