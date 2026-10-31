@@ -1990,6 +1990,7 @@ pub(super) fn mos_level_descriptor(level: i32) -> String {
         1031 => "LEVEL=1031 (PSP103 thermal)".to_string(),
         2000 => "LEVEL=2000 (MVS 2.0.0 ETSOI)".to_string(),
         2001 => "LEVEL=2001 (MVS 2.0.0 HEMT)".to_string(),
+        2002 => "LEVEL=2002 (MVSG 1.1.0)".to_string(),
         70450 => "LEVEL=70450 (B4SOI 4.5)".to_string(),
         70470 => "LEVEL=70470 (B4SOI 4.7)".to_string(),
         10240 => "LEVEL=10240 (L-UTSOI)".to_string(),

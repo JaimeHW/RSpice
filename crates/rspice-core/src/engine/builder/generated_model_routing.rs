@@ -603,7 +603,10 @@ fn generated_mos_target(
         Some(260) => Some(GeneratedTarget::new("ekv_va")),
         Some(70470) => Some(GeneratedTarget::new("bsimsoi__18c250bc")),
         Some(1000) => Some(GeneratedTarget::with_level_parameter("mosvar")),
-        Some(2002) => Some(GeneratedTarget::new("mvsg_cmc")),
+        // Xyce's LEVEL=2002 is MVSG 1.1.0 (mvsg_cmc_1.1.0.va, VERSION 1.00
+        // unless the card says otherwise); the built-in is MVSG 4.0.0, so only a
+        // card whose own VERSION is 4.x is run on it.
+        Some(2002) => card_version_in(model, 4.0..5.0).then_some(GeneratedTarget::new("mvsg_cmc")),
         Some(10240) => Some(GeneratedTarget::new("l_utsoi__832ce87d")),
         _ => None,
     })
@@ -2241,6 +2244,29 @@ mod release_routing_tests {
             !should_pass_model_param(by_version, "VERSION"),
             "the selecting VERSION is not a bsimcmg_va parameter"
         );
+    }
+
+    #[test]
+    fn xyce_mvsg_level_runs_on_the_4_0_built_in_only_for_a_4_x_card() {
+        for card in [
+            "NMOS LEVEL=2002",
+            "NMOS LEVEL=2002 VERSION=1.1",
+            "PMOS LEVEL=2002 VERSION=5",
+        ] {
+            assert!(
+                mos_model_target(card).is_none(),
+                "`{card}` is MVSG 1.1.0 or another release than the 4.0.0 built-in"
+            );
+        }
+        for card in [
+            "NMOS LEVEL=2002 VERSION=4",
+            "PMOS LEVEL=2002 VERSION=4.0",
+            "MVSG",
+        ] {
+            let target =
+                mos_model_target(card).unwrap_or_else(|| panic!("`{card}` selects MVSG 4.0.0"));
+            assert_eq!(target.model_name, "mvsg_cmc", "{card}");
+        }
     }
 
     #[test]
