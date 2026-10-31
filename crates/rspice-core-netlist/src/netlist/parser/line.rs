@@ -488,6 +488,7 @@ pub(super) fn process_line_with_abort(
                     pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
                     spef_includes,
                     origin,
+                    spice_dialect: state.spice_dialect,
                     deferred_body_params: Some(&mut frame.def.body_expr_params),
                 },
             )?;
@@ -568,6 +569,7 @@ pub(super) fn process_line_with_abort(
             pspice_chebyshev_source_count: &mut state.pspice_chebyshev_source_count,
             spef_includes: &mut state.spef_includes,
             origin,
+            spice_dialect: state.spice_dialect,
             deferred_body_params: None,
         },
     )?;
@@ -653,6 +655,7 @@ pub(super) fn parse_line(
         pspice_chebyshev_source_count,
         spef_includes,
         origin,
+        spice_dialect,
         deferred_body_params,
         model_bare_ident_deferrals,
         pending_xyce_diode_model_warnings,
@@ -725,6 +728,7 @@ pub(super) fn parse_line(
                     diagnostics,
                     spef_includes,
                     origin,
+                    spice_dialect,
                     defer_scoped_values: defer_simple_param_refs,
                     deferred_body_params,
                 },

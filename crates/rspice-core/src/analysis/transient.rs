@@ -22,7 +22,7 @@ use thiserror::Error;
 /// type without parsing a display string.
 #[derive(Debug, Clone, Copy, PartialEq, Error)]
 pub enum TransientMaximumStepError {
-    #[error("transient TSTEP must be finite and positive, got {step}")]
+    #[error("transient TSTEP must be finite and non-negative, got {step}")]
     InvalidPrintStep { step: Value },
     #[error("transient TSTOP must be finite and positive, got {stop}")]
     InvalidStopTime { stop: Value },
@@ -30,7 +30,7 @@ pub enum TransientMaximumStepError {
     InvalidStartTime { start: Value },
     #[error("transient TSTOP must be greater than TSTART, got TSTART={start}, TSTOP={stop}")]
     InvalidWindow { start: Value, stop: Value },
-    #[error("transient TMAX must be finite and positive, got {maximum_step}")]
+    #[error("transient TMAX must be finite and non-negative, got {maximum_step}")]
     InvalidExplicitMaximumStep { maximum_step: Value },
     #[error("transient default TMAX underflowed for TSTEP={step}, TSTART={start}, TSTOP={stop}")]
     UnrepresentableDefault {
@@ -42,18 +42,21 @@ pub enum TransientMaximumStepError {
 
 /// Resolve the solver ceiling for a SPICE `.TRAN` request.
 ///
-/// An omitted `TSTART` is zero. An explicit positive finite `TMAX` wins.
-/// Otherwise ngspice-compatible semantics use
-/// `min(TSTEP, (TSTOP - TSTART) / 50)`. Every authored field is validated even
-/// when `TMAX` is explicit, so an otherwise malformed directive cannot be
-/// made to look valid by supplying a ceiling.
+/// An omitted `TSTART` is zero. An explicit positive finite `TMAX` wins; a
+/// zero `TMAX` is an omitted one, as in ngspice (`traninit.c`), Xyce and
+/// LTspice. Otherwise ngspice-compatible semantics use
+/// `min(TSTEP, (TSTOP - TSTART) / 50)`, and a zero `TSTEP` (LTspice's and
+/// Xyce's "no print step") takes LTspice's and QSPICE's `TSTOP / 1024`. The
+/// ngspice dialect refuses a zero `TSTEP` when it parses the card. Every
+/// authored field is validated even when `TMAX` is explicit, so an otherwise
+/// malformed directive cannot be made to look valid by supplying a ceiling.
 pub fn resolve_transient_maximum_step(
     step: Value,
     stop: Value,
     start: Option<Value>,
     explicit_maximum_step: Option<Value>,
 ) -> Result<Value, TransientMaximumStepError> {
-    if !step.is_finite() || step <= 0.0 {
+    if !step.is_finite() || step < 0.0 {
         return Err(TransientMaximumStepError::InvalidPrintStep { step });
     }
     if !stop.is_finite() || stop <= 0.0 {
@@ -67,13 +70,19 @@ pub fn resolve_transient_maximum_step(
         return Err(TransientMaximumStepError::InvalidWindow { start, stop });
     }
     if let Some(maximum_step) = explicit_maximum_step {
-        if !maximum_step.is_finite() || maximum_step <= 0.0 {
+        if !maximum_step.is_finite() || maximum_step < 0.0 {
             return Err(TransientMaximumStepError::InvalidExplicitMaximumStep { maximum_step });
         }
-        return Ok(maximum_step);
+        if maximum_step > 0.0 {
+            return Ok(maximum_step);
+        }
     }
 
-    let maximum_step = step.min((stop - start) / 50.0);
+    let maximum_step = if step == 0.0 {
+        stop / 1024.0
+    } else {
+        step.min((stop - start) / 50.0)
+    };
     if !maximum_step.is_finite() || maximum_step <= 0.0 {
         return Err(TransientMaximumStepError::UnrepresentableDefault { step, start, stop });
     }
@@ -113,7 +122,7 @@ mod maximum_step_tests {
 
     #[test]
     fn every_invalid_authored_field_has_a_typed_error() {
-        for step in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for step in [-1.0, f64::NAN, f64::INFINITY] {
             assert!(matches!(
                 resolve_transient_maximum_step(step, 1.0, None, None),
                 Err(TransientMaximumStepError::InvalidPrintStep { .. })
@@ -137,12 +146,34 @@ mod maximum_step_tests {
                 Err(TransientMaximumStepError::InvalidWindow { .. })
             ));
         }
-        for maximum_step in [0.0, -1.0, f64::NAN, f64::INFINITY] {
+        for maximum_step in [-1.0, f64::NAN, f64::INFINITY] {
             assert!(matches!(
                 resolve_transient_maximum_step(0.1, 1.0, None, Some(maximum_step)),
                 Err(TransientMaximumStepError::InvalidExplicitMaximumStep { .. })
             ));
         }
+    }
+
+    /// LTspice and QSPICE cap the step at TSTOP/1024 whatever TSTEP says, and
+    /// a zero TMAX means none was given in every simulator that runs it.
+    #[test]
+    fn zero_print_step_or_zero_maximum_takes_the_default_ceiling() {
+        assert_eq!(
+            resolve_transient_maximum_step(0.0, 10.0e-3, None, None),
+            Ok(10.0e-3 / 1024.0)
+        );
+        assert_eq!(
+            resolve_transient_maximum_step(0.0, 10.0e-3, Some(5.0e-3), None),
+            Ok(10.0e-3 / 1024.0)
+        );
+        assert_eq!(
+            resolve_transient_maximum_step(0.0, 20.0e-6, Some(0.0), Some(0.1e-6)),
+            Ok(0.1e-6)
+        );
+        assert_eq!(
+            resolve_transient_maximum_step(1.0e-6, 1.0e-3, Some(0.0), Some(0.0)),
+            Ok(1.0e-6)
+        );
     }
 
     #[test]

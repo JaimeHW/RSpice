@@ -12,6 +12,7 @@ pub(in crate::netlist::parser) struct AnalysisCardContext<'a> {
     pub(super) params: &'a ParamContext,
     pub(super) max_analysis_points: usize,
     pub(super) origin: &'a NetlistSourceLocation,
+    pub(super) spice_dialect: crate::config::SpiceDialect,
     pub(super) lin_exists: bool,
     pub(super) current_noise: Option<TransientNoiseConfig>,
 }
@@ -215,6 +216,7 @@ impl ParsedAnalysisCard {
             params,
             max_analysis_points,
             origin,
+            spice_dialect,
             lin_exists,
             current_noise,
         } = context;
@@ -367,15 +369,38 @@ impl ParsedAnalysisCard {
                 analysis = Some(disto);
             }
             AnalysisHead::Tran => {
-                let step = expect_value(stream, line_num, params)?;
-                if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+                let first = expect_value(stream, line_num, params)?;
+                let lone_field = match &stream.peek().kind {
+                    TokenKind::Newline | TokenKind::Eof => true,
+                    TokenKind::Ident(word) => {
+                        word.eq_ignore_ascii_case("UIC")
+                            || matches!(stream.peek_n(1).kind, TokenKind::Equals)
+                    }
+                    _ => false,
+                };
+                // LTspice reads a lone field as `.tran 0 <Tstop>`; ngspice
+                // and Xyce refuse the card.
+                let (step, stop) = if !lone_field {
+                    (first, expect_value(stream, line_num, params)?)
+                } else if spice_dialect == crate::config::SpiceDialect::BestAvailable {
+                    (0.0, first)
+                } else {
                     return Err(ParseError::Syntax {
                     line: line_num,
                     message: ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
                         .to_string(),
                 });
+                };
+                // TSTEP=0 leaves the step to the simulator in LTspice and
+                // Xyce; ngspice refuses it (transetp.c).
+                if spice_dialect == crate::config::SpiceDialect::Ngspice
+                    && (step.is_nan() || step <= 0.0)
+                {
+                    return Err(ParseError::Syntax {
+                        line: line_num,
+                        message: "TSTEP is invalid, must be greater than zero.".to_string(),
+                    });
                 }
-                let stop = expect_value(stream, line_num, params)?;
                 // A `KEY=VALUE` tail is never a positional field, so the optional
                 // positionals stop at the first keyword pair rather than letting
                 // a keyword whose name also parses as a value be eaten as tstart.
@@ -647,6 +672,7 @@ mod tests {
                 params: &state.params,
                 max_analysis_points: state.max_analysis_points,
                 origin: &NetlistSourceLocation::in_memory(7),
+                spice_dialect: crate::config::SpiceDialect::BestAvailable,
                 lin_exists: state.lin_analysis.is_some(),
                 current_noise: state.options.transient_noise,
             },

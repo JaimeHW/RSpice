@@ -409,6 +409,8 @@ pub(super) struct ParseLineContext<'a> {
     pub(super) pspice_chebyshev_source_count: &'a mut usize,
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,
+    /// The compatibility dialect the deck is read in.
+    pub(super) spice_dialect: crate::config::SpiceDialect,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
     /// Sink for  parameters written as an unresolvable bare
     /// identifier, carrying the parameter name, the reference, and the line.
@@ -450,6 +452,8 @@ pub(super) struct ParseCommandContext<'a> {
     pub(super) diagnostics: &'a mut Vec<ParseDiagnostic>,
     pub(super) spef_includes: &'a mut Vec<String>,
     pub(super) origin: &'a NetlistSourceLocation,
+    /// The compatibility dialect the deck is read in.
+    pub(super) spice_dialect: crate::config::SpiceDialect,
     pub(super) defer_scoped_values: bool,
     pub(super) deferred_body_params: Option<&'a mut Vec<(String, String)>>,
     /// Sink for `.model` parameters written as an unresolvable bare

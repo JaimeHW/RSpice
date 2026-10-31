@@ -55,6 +55,7 @@ pub(super) fn parse_command(
         diagnostics,
         spef_includes,
         origin,
+        spice_dialect,
         defer_scoped_values,
         deferred_body_params,
         model_bare_ident_deferrals,
@@ -72,6 +73,7 @@ pub(super) fn parse_command(
             params,
             max_analysis_points,
             origin,
+            spice_dialect,
             lin_exists: lin_analysis.is_some(),
             current_noise: options.transient_noise,
         },
@@ -8627,28 +8629,90 @@ mod tests {
         ));
     }
 
-    #[test]
-    fn incomplete_tran_uses_the_xyce_ordered_diagnostics() {
-        let error = Netlist::parse(
-            "incomplete transient analysis\n\
-             R1 1 0 1\n\
-             .tran 1u\n\
-             .end\n",
+    fn parse_in(deck: &str, dialect: crate::config::SpiceDialect) -> Result<Netlist, ParseError> {
+        Netlist::parse_with_options(
+            deck,
+            crate::netlist::NetlistParseOptions {
+                spice_dialect: Some(dialect),
+                ..Default::default()
+            },
         )
-        .expect_err("a transient analysis without a stop time must fail");
-        assert!(matches!(
-            error,
-            ParseError::Syntax { line: 3, ref message }
-                if message == ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
-        ));
+    }
 
-        Netlist::parse(
-            "complete transient analysis\n\
-             R1 1 0 1\n\
-             .tran 1u 1m\n\
-             .end\n",
-        )
-        .expect("supplying the stop time repairs the analysis");
+    fn transient_fields(netlist: &Netlist) -> (f64, f64, Option<f64>, Option<f64>, bool) {
+        netlist
+            .analyses
+            .iter()
+            .find_map(|analysis| match analysis {
+                AnalysisCommand::Tran {
+                    step,
+                    stop,
+                    start,
+                    max_step,
+                    uic,
+                } => Some((*step, *stop, *start, *max_step, *uic)),
+                _ => None,
+            })
+            .expect("a transient analysis")
+    }
+
+    /// ngspice and Xyce refuse a card without a stop time; LTspice reads the
+    /// lone field as the stop time with no print step.
+    #[test]
+    fn a_lone_tran_field_is_the_ltspice_stop_time() {
+        for dialect in [
+            crate::config::SpiceDialect::Xyce,
+            crate::config::SpiceDialect::Ngspice,
+        ] {
+            let error = parse_in("lone field\nR1 1 0 1\n.tran 1u\n.end\n", dialect)
+                .expect_err("a transient analysis without a stop time must fail");
+            assert!(
+                matches!(
+                    error,
+                    ParseError::Syntax { line: 3, ref message }
+                        if message == ".TRAN line has an unexpected number of fields\nUnrecognized dot line will be ignored"
+                ),
+                "{dialect:?}: {error:?}"
+            );
+        }
+        for (card, expected) in [
+            (".tran 1u", (0.0, 1e-6, None, None, false)),
+            (".tran 1u uic", (0.0, 1e-6, None, None, true)),
+            (".tran 1u 1m", (1e-6, 1e-3, None, None, false)),
+        ] {
+            let deck = format!("lone field\nR1 1 0 1\n{card}\n.end\n");
+            let netlist = parse_in(&deck, crate::config::SpiceDialect::BestAvailable)
+                .unwrap_or_else(|error| panic!("{card}: {error}"));
+            assert_eq!(transient_fields(&netlist), expected, "{card}");
+        }
+    }
+
+    /// TSTEP=0 is LTspice's and Xyce's "no print step"; ngspice refuses it
+    /// with its own message (transetp.c).
+    #[test]
+    fn a_zero_tran_step_is_refused_only_in_the_ngspice_dialect() {
+        let deck = "zero step\nR1 1 0 1\n.tran 0 20u 0 0.1u\n.end\n";
+        for dialect in [
+            crate::config::SpiceDialect::BestAvailable,
+            crate::config::SpiceDialect::Xyce,
+        ] {
+            let netlist = parse_in(deck, dialect).expect("TSTEP=0 parses");
+            assert_eq!(
+                transient_fields(&netlist),
+                (0.0, 20e-6, Some(0.0), Some(0.1e-6), false),
+                "{dialect:?}"
+            );
+        }
+        let error = parse_in(deck, crate::config::SpiceDialect::Ngspice)
+            .expect_err("ngspice refuses TSTEP=0");
+        assert!(
+            matches!(
+                error,
+                ParseError::Syntax { line: 3, ref message }
+                    if message == "TSTEP is invalid, must be greater than zero."
+            ),
+            "{error:?}"
+        );
     }
 
     #[test]

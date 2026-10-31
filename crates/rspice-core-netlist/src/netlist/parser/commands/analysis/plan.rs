@@ -34,6 +34,7 @@ struct PendingCard {
     command: String,
     logical_line: String,
     max_analysis_points: usize,
+    spice_dialect: crate::config::SpiceDialect,
 }
 
 impl PendingCard {
@@ -48,6 +49,7 @@ impl PendingCard {
             command: command.to_owned(),
             logical_line: context.logical_line.to_owned(),
             max_analysis_points: context.max_analysis_points,
+            spice_dialect: context.spice_dialect,
         }
     }
 }
@@ -167,6 +169,7 @@ impl AnalysisCardPlan {
                                         params: bound,
                                         max_analysis_points: pending.max_analysis_points,
                                         origin: &entry.origin,
+                                        spice_dialect: pending.spice_dialect,
                                         lin_exists,
                                         current_noise,
                                     },
@@ -187,6 +190,7 @@ impl AnalysisCardPlan {
                                 params: &bound,
                                 max_analysis_points: pending.max_analysis_points,
                                 origin: &entry.origin,
+                                spice_dialect: pending.spice_dialect,
                                 lin_exists,
                                 current_noise,
                             },
