@@ -276,7 +276,13 @@ impl<'a> Lexer<'a> {
     /// `parse_spice_value` for numeric-looking identifiers, while node/model
     /// contexts need to preserve names like `1A` and `1N4148`.
     fn parse_number_or_ident(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
-        let chars: Vec<char> = input.chars().collect();
+        // Nothing below reads more than three characters past the sign and
+        // the leading digits, so only that prefix is collected. Collecting
+        // the whole remaining input for every number made a deck's lexing
+        // quadratic in the length of a long line, such as a Xyce time list.
+        let sign = usize::from(input.starts_with(['-', '+']));
+        let digits = input[sign..].bytes().take_while(u8::is_ascii_digit).count();
+        let chars: Vec<char> = input.chars().take(sign + digits + 3).collect();
         let mut i = 0;
 
         // Skip optional leading sign
@@ -435,23 +441,27 @@ impl<'a> Lexer<'a> {
     fn parse_number(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
         let mut end = 0;
         let mut _has_dot = false;
-        let chars: Vec<char> = input.chars().collect();
+        // The mantissa and exponent are ASCII, so they are scanned as bytes,
+        // and only the suffix after them is read as characters. Collecting
+        // the whole remaining input for every number made lexing quadratic in
+        // the length of a long line.
+        let bytes = input.as_bytes();
 
         // Optional leading sign
-        if end < chars.len() && (chars[end] == '-' || chars[end] == '+') {
+        if end < bytes.len() && (bytes[end] == b'-' || bytes[end] == b'+') {
             end += 1;
         }
 
         // Integer part
-        while end < chars.len() && chars[end].is_ascii_digit() {
+        while end < bytes.len() && bytes[end].is_ascii_digit() {
             end += 1;
         }
 
         // Decimal part
-        if end < chars.len() && chars[end] == '.' {
+        if end < bytes.len() && bytes[end] == b'.' {
             _has_dot = true;
             end += 1;
-            while end < chars.len() && chars[end].is_ascii_digit() {
+            while end < bytes.len() && bytes[end].is_ascii_digit() {
                 end += 1;
             }
         }
@@ -465,31 +475,29 @@ impl<'a> Lexer<'a> {
         // p=3), Xyce refuses both by design (its BUG_587 certification
         // deck), and so does Spectre.
         let mut fortran_exponent = false;
-        if end < chars.len() && matches!(chars[end], 'e' | 'E' | 'd' | 'D') {
+        if end < bytes.len() && matches!(bytes[end], b'e' | b'E' | b'd' | b'D') {
             let mut exp_end = end + 1;
-            if exp_end < chars.len() && (chars[exp_end] == '-' || chars[exp_end] == '+') {
+            if exp_end < bytes.len() && (bytes[exp_end] == b'-' || bytes[exp_end] == b'+') {
                 exp_end += 1;
             }
             let exp_start = exp_end;
-            while exp_end < chars.len() && chars[exp_end].is_ascii_digit() {
+            while exp_end < bytes.len() && bytes[exp_end].is_ascii_digit() {
                 exp_end += 1;
             }
             if exp_end > exp_start {
-                fortran_exponent = matches!(chars[end], 'd' | 'D');
+                fortran_exponent = matches!(bytes[end], b'd' | b'D');
                 end = exp_end;
-            } else if matches!(chars[end], 'e' | 'E')
+            } else if matches!(bytes[end], b'e' | b'E')
                 && !crate::spice_number::reading_numbers_as_ngspice()
             {
-                let malformed_bytes: usize = chars[..exp_end].iter().map(|c| c.len_utf8()).sum();
                 return Err(LexError::InvalidNumber(
-                    input[..malformed_bytes].to_string(),
+                    input[..exp_end].to_string(),
                     self.line,
                 ));
             }
         }
 
-        // Calculate byte position
-        let num_end_bytes: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
+        let num_end_bytes = end;
         let num_str = &input[..num_end_bytes];
 
         // Parse the numeric part. A Fortran exponent is spelled with `e` so
@@ -510,16 +518,15 @@ impl<'a> Lexer<'a> {
 
         // Check for SPICE suffix. Xyce/ngspice-style decks can append a scale
         // suffix after a valid exponent (`1e3k`, `1e6um`).
-        let (multiplier, suffix_len) = if end < chars.len() {
-            parse_spice_suffix(&chars[end..])
+        // No suffix is longer than three characters.
+        let suffix: Vec<char> = input[end..].chars().take(3).collect();
+        let (multiplier, suffix_len) = if end < bytes.len() {
+            parse_spice_suffix(&suffix)
         } else {
             (1.0, 0)
         };
 
-        let suffix_bytes: usize = chars[end..end + suffix_len]
-            .iter()
-            .map(|c| c.len_utf8())
-            .sum();
+        let suffix_bytes: usize = suffix[..suffix_len].iter().map(|c| c.len_utf8()).sum();
         let total_bytes = num_end_bytes + suffix_bytes;
 
         Ok((
@@ -578,34 +585,26 @@ impl<'a> Lexer<'a> {
 
     /// Parse a quoted string "..."
     fn parse_string(&self, input: &str) -> Result<(TokenKind, usize), LexError> {
-        let mut end = 1; // Skip opening quote
         let mut content = String::new();
-        let chars: Vec<char> = input.chars().collect();
-        let mut terminated = false;
+        // Read lazily up to the closing quote (skipping the opening one):
+        // collecting the whole remaining input for every string made lexing
+        // quadratic in the length of the deck.
+        let mut chars = input.char_indices().skip(1);
 
-        while end < chars.len() {
-            let c = chars[end];
+        while let Some((at, c)) = chars.next() {
             if c == '"' {
-                end += 1;
-                terminated = true;
-                break;
-            } else if c == '\\' && end + 1 < chars.len() {
+                return Ok((TokenKind::StringLit(content), at + 1));
+            } else if c == '\\'
+                && let Some((_, escaped)) = chars.next()
+            {
                 // Escape sequence
-                end += 1;
-                content.push(chars[end]);
-                end += 1;
+                content.push(escaped);
             } else {
                 content.push(c);
-                end += 1;
             }
         }
 
-        if !terminated {
-            return Err(LexError::UnterminatedString(self.line));
-        }
-
-        let byte_len: usize = chars[..end].iter().map(|c| c.len_utf8()).sum();
-        Ok((TokenKind::StringLit(content), byte_len))
+        Err(LexError::UnterminatedString(self.line))
     }
 }
 
@@ -1100,6 +1099,50 @@ mod tests {
     #[test]
     fn braced_expressions_keep_multibyte_content() {
         assert_eq!(expression_tokens("R1 a b {µ0*2}"), ["µ0*2"]);
+    }
+
+    #[test]
+    fn a_long_line_lexes_in_time_linear_in_its_length() {
+        // Xyce's ISSUE_740 deck lists 100000 OUTPUTTIMEPOINTS on one line.
+        // Every number and string used to collect the rest of the input, so
+        // a list of 20000 took most of a minute to lex.
+        let entries = 20_000;
+        let line = (0..entries)
+            .map(|index| match index % 4 {
+                0 => format!("{:.6e}", 2e-7 * index as f64),
+                1 => format!("-{index}"),
+                2 => format!("{index}.5ns"),
+                _ => format!("\"s\\\"{index}\""),
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+
+        let started = std::time::Instant::now();
+        let tokens = tokenize(&format!(".options output outputtimepoints={line}\n")).unwrap();
+        let elapsed = started.elapsed();
+
+        assert!(
+            elapsed < std::time::Duration::from_secs(3),
+            "lexing {entries} entries took {elapsed:?}"
+        );
+        let numbers: Vec<Value> = tokens
+            .iter()
+            .filter_map(|token| match token.kind {
+                TokenKind::Number(value) => Some(value),
+                _ => None,
+            })
+            .collect();
+        let strings: Vec<&str> = tokens
+            .iter()
+            .filter_map(|token| match &token.kind {
+                TokenKind::StringLit(text) => Some(text.as_str()),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(numbers.len(), entries * 3 / 4);
+        assert_eq!(&numbers[..3], &[0.0, -1.0, 2.5e-9]);
+        assert_eq!(strings.len(), entries / 4);
+        assert_eq!(strings[0], "s\"3");
     }
 
     #[test]
