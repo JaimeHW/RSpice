@@ -577,6 +577,14 @@ impl XyceTestRunner {
         };
         plan.comparison_mode =
             Self::select_static_tran_comparison_mode(&plan, &netlist, purpose, requires_wrapper)?;
+        if let Some(mode) = Self::xyce_verify_owned_tran_comparison_mode(
+            &deck.relative_path,
+            &plan,
+            purpose,
+            requires_wrapper,
+        )? {
+            plan.comparison_mode = mode;
+        }
         plan.validate_oracle_contract(purpose, requires_wrapper)?;
         let validation_purpose =
             if plan.steps.is_empty() && plan.comparison_mode.uses_integrated_rms_verifier() {

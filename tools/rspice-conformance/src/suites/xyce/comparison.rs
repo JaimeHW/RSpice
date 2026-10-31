@@ -585,6 +585,61 @@ impl XyceTestRunner {
         Ok(all_mismatches)
     }
 
+    /// The comparison a deck's own Xyce_Regression test makes, when that test
+    /// is `xyce_verify.pl <deck> <gold> <prn>` and the generic selector cannot
+    /// infer it from the deck's shape.
+    ///
+    /// `B4SOI_461/inverter_tr.cir` runs at `TEMP=25`, outside the standard
+    /// startup the selector admits, so it fell back to a pointwise check that
+    /// is stricter than Xyce's own: Xyce_Regression's
+    /// `Netlists/B4SOI_461/CMakeLists.txt` scores it with `xyce_verify.pl`
+    /// against the gold file. That verifier integrates the scaled difference
+    /// (`TestScripts/xyce_verify.pl:25-29`), with RELTOL 0.01 and ABSTOL /
+    /// ZEROTOL / ABSDIFFTOL 1e-12 (`:1134-1137`) and the deck's `*COMP`
+    /// overrides, and fails when the RMS percentage exceeds RELTOL*100
+    /// (`:1228-1240`).
+    pub(super) fn xyce_verify_owned_tran_comparison_mode(
+        relative_path: &str,
+        plan: &XyceStaticTranPlan,
+        purpose: XyceStaticTranPlanPurpose,
+        requires_wrapper: bool,
+    ) -> Result<Option<XyceStaticTranComparisonMode>, String> {
+        let owned = matches!(
+            Self::normalize_manifest_key(relative_path).as_str(),
+            "netlists/b4soi_461/inverter_tr.cir"
+        );
+        if !owned
+            || purpose != XyceStaticTranPlanPurpose::AbsoluteOracle
+            || requires_wrapper
+            || plan.contract != XyceStaticTranContract::PlainStatic
+            || plan.output_override
+            || plan.timeint_conststep
+            || !plan.steps.is_empty()
+            || plan.wrapper_tolerance.is_some()
+            || !plan.has_waveform_reference_file()
+            || !Self::source_has_comp_directive(&plan.source)
+        {
+            return Ok(None);
+        }
+        let tolerances = Self::xyce_verify_comp_tolerances(
+            &plan.source,
+            &plan.require_print("xyce_verify-owned deck")?.probes,
+        )?;
+        Ok(Some(
+            XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+                scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+                error_bounds: if tolerances
+                    .into_iter()
+                    .any(XyceVerifyTransientTolerance::has_nondefault_error_bounds)
+                {
+                    XyceVerifyCompErrorBounds::DeckOverrides
+                } else {
+                    XyceVerifyCompErrorBounds::Release710Default
+                },
+            },
+        ))
+    }
+
     pub(super) fn native_default_prn_tran_wrapper_tolerance(
         relative_path: &str,
     ) -> Option<XyceComparisonTolerance> {

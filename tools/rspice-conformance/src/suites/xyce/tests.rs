@@ -19097,6 +19097,33 @@ fn level9_default_output_accepts_plain_precisionless_print() {
 }
 
 #[test]
+fn b4soi_461_inverter_is_scored_by_its_xyce_verify_contract() {
+    // Xyce_Regression's Netlists/B4SOI_461/CMakeLists.txt checks this deck
+    // with xyce_verify.pl and the deck's `*comp v(out) offset=.2`; its
+    // TEMP=25 keeps it out of the shape-based selector.
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(Path::parent)
+        .expect("workspace root")
+        .join("tests/xyce");
+    let deck_path = root.join("Netlists/B4SOI_461/inverter_tr.cir");
+    let runner = XyceTestRunner::new(&root, XyceRunnerConfig::default());
+    let plan = runner
+        .static_tran_plan_for_path_with_purpose(
+            &deck_path,
+            XyceStaticTranPlanPurpose::AbsoluteOracle,
+        )
+        .expect("checked-in B4SOI_461 inverter plan qualifies");
+    assert_eq!(
+        plan.comparison_mode,
+        XyceStaticTranComparisonMode::Release710IntegratedRmsComp {
+            scientific_precision: XYCE_DEFAULT_PRN_SCIENTIFIC_PRECISION,
+            error_bounds: XyceVerifyCompErrorBounds::DeckOverrides,
+        }
+    );
+}
+
+#[test]
 fn level9_default_output_executes_checked_in_oneshot_oracle() {
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
