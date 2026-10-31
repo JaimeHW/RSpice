@@ -612,6 +612,12 @@ impl CircuitData {
         }
     }
 
+    pub(crate) fn reset_vbic_operating_point_history(&mut self) {
+        for dev in &mut self.bjts.devices {
+            dev.reset_vbic_operating_point_history();
+        }
+    }
+
     pub(crate) fn seed_b3soi_self_heating_temperature_guess(&self, solution: &mut [Value]) {
         for dev in &self.b3soi.devices {
             dev.seed_self_heating_temperature_from_power(solution);

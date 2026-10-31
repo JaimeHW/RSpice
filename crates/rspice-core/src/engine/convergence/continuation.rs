@@ -338,6 +338,7 @@ impl Engine {
         if circuit.has_b3soi_devices() {
             circuit.reset_b3soi_operating_point_history();
         }
+        circuit.reset_vbic_operating_point_history();
         let zero_guess = vec![0.0; size];
         let mut solution = if circuit.has_b3soi_devices() {
             Self::sanitize_initial_guess(initial_guess, size)
@@ -1023,6 +1024,7 @@ impl Engine {
         if circuit.has_b3soi_devices() {
             circuit.reset_b3soi_operating_point_history();
         }
+        circuit.reset_vbic_operating_point_history();
         let mut damping_state = NewtonDampingState::default();
         // Each stage takes the iterations `NIiter(ckt, ckt->CKTdcTrcvMaxIter)`
         // allows there; the factor adapts to ITL2 itself.
@@ -1474,6 +1476,67 @@ mod operating_point_rule_tests {
             stepped[0],
             direct[0]
         );
+    }
+
+    /// ngspice's aids zero every device state and reopen on the MODEINITJCT
+    /// load. A failed direct Newton of vbic99_tran left its self-heating
+    /// VBIC limited at a 39 kK rise after 1200 iterates, and every aid that
+    /// limited against it failed on its first stage.
+    #[test]
+    fn gmin_and_source_stepping_reopen_a_vbic_a_failed_direct_newton_left_hot() {
+        let netlist = crate::netlist::Netlist::parse(include_str!(
+            "../../../../../tests/paranoia/vbic/vbic99_tran.sp"
+        ))
+        .unwrap();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: crate::engine::SpiceDialect::Ngspice,
+            ..SimulationConfig::default()
+        })
+        .resolved_for_netlist(&netlist);
+        let built = engine.build_circuit(&netlist).unwrap();
+        let (mut circuit, mut matrix) = linked(&engine, built);
+        let size = circuit.matrix_size();
+        let collector = circuit.get_node_by_name("3").unwrap() - 1;
+        let thermal = circuit.bjts.devices[0].node_rth - 1;
+        let zero = vec![0.0; size];
+        let mut hot = zero.clone();
+        hot[thermal] = 4.0e4;
+
+        for aid in [
+            ContinuationAid::GminStepping,
+            ContinuationAid::SourceStepping,
+        ] {
+            // The direct Newton's MODEINITJCT load, then the device where its
+            // failed iterates left it.
+            circuit.prime_nonlinear_operating_point(&zero);
+            circuit.bjts.devices[0].update_static_linearization(&hot);
+            let op = match aid {
+                ContinuationAid::GminStepping => engine.gmin_stepping_nonlinear_with_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &zero,
+                    &NoAbort,
+                ),
+                _ => engine.source_stepping_nonlinear_with_guess_and_abort(
+                    &mut circuit,
+                    &mut matrix,
+                    &zero,
+                    &NoAbort,
+                ),
+            }
+            .unwrap_or_else(|error| panic!("{aid:?}: {error}"));
+            // ngspice-46: v(3) = 0.2220443, v(t) = 1.440860.
+            assert!(
+                (op[collector] - 0.22204).abs() < 1e-4,
+                "{aid:?} v(3) = {}",
+                op[collector]
+            );
+            assert!(
+                (op[thermal] - 1.4409).abs() < 1e-3,
+                "{aid:?} v(t) = {}",
+                op[thermal]
+            );
+        }
     }
 
     /// A current source draws more from a diode node than the diode's

@@ -2814,6 +2814,41 @@ impl Bjt {
         }
     }
 
+    /// Forget a native VBIC's Newton and limiter history before an
+    /// operating-point aid starts afresh. ngspice's aids zero every device
+    /// state and reopen each instance on the MODEINITJCT load (cktop.c,
+    /// `dynamic_gmin` and `gillespie_src`); a VBIC that kept its history
+    /// would limit the aid's first iterate against wherever the failed
+    /// direct Newton left it, a thermal rise DEVlimitlog walks back only
+    /// 100 K per iterate. Model parameters and accepted transient charge
+    /// state are preserved.
+    #[doc(hidden)]
+    pub fn reset_vbic_operating_point_history(&mut self) {
+        if self.charge_model != BjtChargeModel::Vbic {
+            return;
+        }
+        self.reduced_linearization_cache_valid.set(false);
+        self.previous_reduced_linearization_valid = false;
+        self.charge_snapshot_cache_valid.set(false);
+        self.vbe = 0.0;
+        self.vbc = 0.0;
+        self.vcx = 0.0;
+        self.vci = 0.0;
+        self.vbx = 0.0;
+        self.vbi = 0.0;
+        self.vei = 0.0;
+        self.vbp = 0.0;
+        self.vsi = 0.0;
+        self.vrth = 0.0;
+        self.vxf1 = 0.0;
+        self.vxf2 = 0.0;
+        self.mna_eval = None;
+        self.mna_limited_from.set(None);
+        self.mna_charge_cache_valid.set(false);
+        self.mna_dissipation_drops = None;
+        self.vbic_startup_load_pending = true;
+    }
+
     /// Re-linearize promoted native VBIC devices directly at a static
     /// residual/validation candidate.
     #[doc(hidden)]
