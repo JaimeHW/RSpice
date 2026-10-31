@@ -339,7 +339,11 @@ mod tests {
             egui::vec2(1440.0, 900.0),
             crate::ui::tokens::Mode::Light,
             3,
-            |ctx| with_cx(&mut app, |cx| ProjectFeature::process_new_cell_dialog(cx, ctx)),
+            |ctx| {
+                with_cx(&mut app, |cx| {
+                    ProjectFeature::process_new_cell_dialog(cx, ctx)
+                })
+            },
         );
         assert_eq!(painted.surface.width(), 420.0);
         assert!(painted.rect_of("VIEWS TO CREATE").is_none());
