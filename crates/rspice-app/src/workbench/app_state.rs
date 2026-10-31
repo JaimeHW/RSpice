@@ -185,14 +185,6 @@ impl AppState {
         self.model.library_folders()
     }
 
-    /// Resolve the project-owned technology contract against both mutable
-    /// execution catalogs. No simulation or governed save may infer authority
-    /// from a display label, an active registry package, or model paths alone.
-    pub(crate) fn validate_project_technology_contract(&self) -> Result<(), String> {
-        self.technology_inputs()
-            .validate_project_technology_contract()
-    }
-
     /// What the authored plan needs a project technology for, computed before
     /// any netlist exists.
     #[cfg(test)]
@@ -208,61 +200,6 @@ impl AppState {
     /// absent binding blocks only what the plan actually demands.
     pub(crate) fn technology_gate_block_reason(&self) -> Result<(), String> {
         self.technology_inputs().technology_gate_block_reason()
-    }
-
-    /// Resolve the exact signed project pin into the physical-layout unit and
-    /// stack authority a new or imported Layout document must retain.
-    pub(crate) fn exact_project_layout_technology_binding(
-        &self,
-    ) -> Result<crate::state::LayoutTechnologyBinding, String> {
-        let package = self.exact_project_pdk_package()?;
-        let manifest = package.manifest();
-        let database_unit =
-            crate::quantity::LayoutDatabaseUnit::from_metres(manifest.database_unit_meters)
-                .map_err(|error| format!("Signed project PDK database unit is invalid: {error}"))?;
-        crate::state::LayoutTechnologyBinding::try_new(
-            manifest.package_id.clone(),
-            manifest.revision.clone(),
-            package.manifest_digest(),
-            package.archive_digest(),
-            manifest.technology_name.clone(),
-            manifest.stack_name.clone(),
-            database_unit,
-        )
-        .map_err(|error| format!("Signed project PDK layout authority is invalid: {error}"))
-    }
-
-    /// Resolve only the currently validated package selected by the exact
-    /// signed project pin. Administrative activation is deliberately ignored.
-    pub(crate) fn exact_project_pdk_package(
-        &self,
-    ) -> Result<&crate::state::pdk_config::ValidatedPdkTechnologyPackage, String> {
-        self.validate_project_technology_contract()?;
-        let signed_pin = self
-            .model
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            .and_then(crate::state::ProjectTechnologyBinding::signed_package)
-            .expect("validated project technology has an exact signed package");
-        self.model
-            .pdk_config
-            .technology_registry
-            .validated_packages()
-            .iter()
-            .find(|package| {
-                let manifest = package.manifest();
-                manifest
-                    .package_id
-                    .eq_ignore_ascii_case(signed_pin.package_id())
-                    && manifest.revision == signed_pin.revision()
-                    && package.manifest_digest() == signed_pin.manifest_digest()
-                    && package.archive_digest() == signed_pin.archive_digest()
-            })
-            .ok_or_else(|| {
-                "The signed PDK package the project is pinned to is no longer available".to_owned()
-            })
     }
 
     /// Initialize authoritative physical content for an existing Layout view.
@@ -315,7 +252,7 @@ impl AppState {
                 owner.display_path()
             ));
         }
-        let technology = self.exact_project_layout_technology_binding()?;
+        let technology = self.model.exact_project_layout_technology_binding()?;
         let document = crate::state::PhysicalLayoutDocument::try_new(owner.clone(), technology)
             .map_err(|error| format!("Physical layout could not be initialized: {error}"))?;
         let revision = document.revision();
@@ -377,8 +314,9 @@ impl AppState {
                 view.view_type.display_name()
             ));
         }
-        let exact_technology = self.exact_project_layout_technology_binding()?;
+        let exact_technology = self.model.exact_project_layout_technology_binding()?;
         let allowed_layer_purposes = self
+            .model
             .exact_project_pdk_package()?
             .manifest()
             .layers
@@ -1329,6 +1267,7 @@ mod tests {
             .commit_physical_layout_document(imported)
             .expect("simulate an imported physical-layout document");
         let imported_error = state
+            .model
             .validate_project_technology_contract()
             .expect_err("project authority must reject imported package-foreign layers");
         assert!(

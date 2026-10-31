@@ -370,7 +370,7 @@ impl RSpiceApp {
     ) -> DialogActionOutcome {
         let mut outcome = DialogActionOutcome::default();
         let reference = crate::state::CellViewRef::new(library, cell, view_name);
-        let technology = match self.state.exact_project_layout_technology_binding() {
+        let technology = match self.state.model.exact_project_layout_technology_binding() {
             Ok(technology) => technology,
             Err(error) => {
                 self.state.project.new_view_error = Some(format!(

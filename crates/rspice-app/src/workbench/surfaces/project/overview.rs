@@ -2189,7 +2189,7 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
         .project
         .technology_binding();
     let contract_error =
-        binding.and_then(|_| app.state.validate_project_technology_contract().err());
+        binding.and_then(|_| app.state.model.validate_project_technology_contract().err());
     let source_contract_error = manager.libraries_sorted().into_iter().find_map(|library| {
         if !library.source_authority.has_execution_source() {
             return None;

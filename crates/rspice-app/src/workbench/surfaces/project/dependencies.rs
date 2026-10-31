@@ -248,7 +248,7 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
         .project
         .technology_binding()
         .cloned();
-    let contract = app.state.validate_project_technology_contract();
+    let contract = app.state.model.validate_project_technology_contract();
     let contract_ok = binding.is_some() && contract.is_ok();
     // A pinned binding is the ordinary binding, so the header names only the
     // one that has to be looked at.

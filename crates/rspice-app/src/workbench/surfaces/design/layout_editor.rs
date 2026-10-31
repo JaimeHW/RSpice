@@ -217,7 +217,7 @@ fn resolve_display_contract(
     app: &RSpiceApp,
     document: &PhysicalLayoutDocument,
 ) -> Result<ResolvedDisplayContract, String> {
-    let package = app.state.exact_project_pdk_package()?;
+    let package = app.state.model.exact_project_pdk_package()?;
     let technology = document.technology();
     if package.manifest_digest() != technology.manifest_digest()
         || package.archive_digest() != technology.archive_digest()
