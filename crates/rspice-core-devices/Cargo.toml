@@ -369,7 +369,7 @@ thiserror.workspace = true
 log.workspace = true
 num-complex.workspace = true
 # Exact rank decisions in the affine elimination of behavioral integrals.
-num-bigint = "0.4.8"
+num-bigint = "0.5.1"
 libm = "0.2"
 rspice-veriloga-runtime.workspace = true
 rspice-veriloga-models = { workspace = true, optional = true }
