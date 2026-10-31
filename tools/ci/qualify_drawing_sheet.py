@@ -375,7 +375,7 @@ def command_gates(
                 cargo_jobs,
                 "--lib",
             ),
-            59,
+            202,
         ),
         Gate(
             "ui-drawing-sheet",
