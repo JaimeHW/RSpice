@@ -324,8 +324,7 @@ pub(crate) fn process_autosave_restore_dialog(
             schematic,
             note,
         } => {
-            file_workflow::apply_loaded_schematic(
-                state,
+            state.apply_loaded_schematic(
                 *schematic,
                 file_workflow::SchematicLoadOrigin::PersistentPath(&path),
             );

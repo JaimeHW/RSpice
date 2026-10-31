@@ -10,7 +10,8 @@ use crate::io::FileWorkflowIo;
 #[cfg(not(target_arch = "wasm32"))]
 use crate::io::SchematicIoError;
 use crate::state::{SchematicState, ViewType};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
+use rspice_app_services::workbench::slots::platform::remember_recent_file;
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) enum SchematicLoadOrigin<'a> {
@@ -60,53 +61,6 @@ impl<'a> SchematicLoadOrigin<'a> {
     }
 }
 
-/// Reset the current schematic to a new empty document.
-#[cfg(test)]
-pub(crate) fn create_new_schematic(state: &mut AppState) {
-    let schematic = state.new_schematic_document();
-    replace_active_schematic_document(state, schematic);
-    state.clear_design_execution_context();
-    state.record(
-        LogSeverity::Info,
-        LogSource::Studio,
-        "Created a new schematic.",
-    );
-}
-
-fn replace_active_schematic_document(state: &mut AppState, mut schematic: SchematicState) {
-    // Loaded document data owns the grid pitch; the active device session owns
-    // snap targets and radius. Install both authorities before publishing the
-    // new active buffer, then mirror the derived pitch back into the session.
-    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
-    schematic.reconcile_grid_pitch_runtime();
-    state.model.schematic = schematic;
-    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
-    state.bump_active_schematic_epoch();
-    match state.model.workspace.content.active_view_type() {
-        ViewType::Schematic | ViewType::Testbench => {
-            state.sync_active_schematic_to_workspace();
-        }
-        _ => {
-            let reference = state.model.workspace.content.active_schematic_reference();
-            let dirty = state.model.schematic.session.is_dirty;
-            state
-                .model
-                .workspace
-                .insert_schematic_editor(reference.key(), state.model.schematic.clone());
-            if let Some(open_view) = state
-                .model
-                .workspace
-                .content
-                .open_views
-                .iter_mut()
-                .find(|open_view| open_view.reference == reference)
-            {
-                open_view.dirty = dirty;
-            }
-        }
-    }
-}
-
 /// Open a schematic, first offering any checkpoint that is eligible under its
 /// exact saved-source binding (native only; the web build has no checkpoint
 /// files).
@@ -141,7 +95,7 @@ pub(crate) fn load_schematic_bypassing_autosave(
 ) -> bool {
     match io.load_schematic(path) {
         Ok(schematic) => {
-            apply_loaded_schematic(state, schematic, SchematicLoadOrigin::PersistentPath(path))
+            state.apply_loaded_schematic(schematic, SchematicLoadOrigin::PersistentPath(path))
         }
         Err(e) => {
             state.record(
@@ -154,49 +108,57 @@ pub(crate) fn load_schematic_bypassing_autosave(
     }
 }
 
-pub(crate) fn apply_loaded_schematic(
+/// Add a schematic read from `origin` to the open project as a new cell
+/// view, recording how it went. Returns whether it was added.
+pub(crate) fn import_loaded_schematic(
     state: &mut AppState,
     schematic: SchematicState,
     origin: SchematicLoadOrigin<'_>,
 ) -> bool {
-    // Inside a project a schematic file is added to it, never poured over
-    // the cell view the user has open.
-    if state.platform.project_lifecycle.is_open() {
-        return match import_loaded_schematic_as_cell_view(state, schematic, origin) {
-            Ok(reference) => {
-                state.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    format!(
-                        "Imported {} as {}.",
-                        origin.display_label(),
-                        reference.display_path()
-                    ),
-                );
-                true
-            }
-            Err(error) => {
-                state.record(
-                    LogSeverity::Error,
-                    LogSource::Studio,
-                    format!("Schematic import failed: {error}"),
-                );
-                false
-            }
-        };
+    match import_loaded_schematic_as_cell_view(state, schematic, origin) {
+        Ok(reference) => {
+            state.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!(
+                    "Imported {} as {}.",
+                    origin.display_label(),
+                    reference.display_path()
+                ),
+            );
+            true
+        }
+        Err(error) => {
+            state.record(
+                LogSeverity::Error,
+                LogSource::Studio,
+                format!("Schematic import failed: {error}"),
+            );
+            false
+        }
     }
-    let schematic = prepare_loaded_schematic(state, schematic, origin);
-    replace_active_schematic_document(state, schematic);
-    state.clear_design_execution_context();
+}
+
+/// Remember the file a schematic replacing the drawing in front came from,
+/// and record that it was opened.
+pub(crate) fn settle_loaded_schematic(
+    model: &mut Model,
+    platform: &mut PlatformState,
+    origin: SchematicLoadOrigin<'_>,
+) {
     if let Some(path) = origin.recent_path() {
-        state.remember_recent_file(crate::services::recent_files::RecentKind::Schematic, path);
+        remember_recent_file(
+            model,
+            platform,
+            crate::services::recent_files::RecentKind::Schematic,
+            path,
+        );
     }
-    state.record(
+    model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!("{} {}.", origin.success_prefix(), origin.display_label()),
     );
-    true
 }
 
 /// Add a loaded schematic to the open project as a new cell, and open it.
@@ -288,21 +250,24 @@ fn unique_cell_name(library: &crate::state::Library, base: &str) -> String {
         .expect("an unbounded suffix range finds a free name")
 }
 
-fn prepare_loaded_schematic(
-    state: &mut AppState,
+/// Settle where a schematic replacing the drawing in front saves next: a
+/// file opened from disk saves back to it, and a browser import keeps its
+/// name as the next save's suggestion and no file binding.
+pub(crate) fn prepare_loaded_schematic(
+    platform: &mut PlatformState,
     schematic: SchematicState,
     origin: SchematicLoadOrigin<'_>,
 ) -> SchematicState {
     match origin {
         SchematicLoadOrigin::PersistentPath(_) => {
-            state.platform.browser_schematic_save_name = None;
+            platform.browser_schematic_save_name = None;
             schematic
         }
         #[cfg(any(test, target_arch = "wasm32"))]
         SchematicLoadOrigin::BrowserImport(name) => {
             let mut schematic = schematic;
             schematic.session.current_file = None;
-            state.platform.browser_schematic_save_name = Some(name.to_string());
+            platform.browser_schematic_save_name = Some(name.to_string());
             schematic
         }
     }
@@ -425,8 +390,7 @@ pub(crate) fn poll_browser_schematic_import(state: &mut AppState) -> bool {
     match completion.result {
         BrowserSchematicImportResult::Loaded(file) => {
             match crate::io::schematic_io::load_schematic_text(&file.contents, None) {
-                Ok(schematic) => apply_loaded_schematic(
-                    state,
+                Ok(schematic) => state.apply_loaded_schematic(
                     schematic,
                     SchematicLoadOrigin::BrowserImport(&file.name),
                 ),
@@ -619,59 +583,6 @@ mod tests {
     }
 
     #[test]
-    fn replacing_the_active_document_reconciles_document_pitch_and_session_snap_preferences() {
-        let mut state = AppState::default();
-        state.design.schematic_snap.snap_radius = 8;
-        state.design.schematic_snap.snap_to_grid = false;
-        state.design.schematic_snap.snap_to_wire_segments = false;
-        state.design.schematic_snap.grid_size = 999;
-        let mut loaded = SchematicState::default();
-        loaded.document_mut_for_test().document_policy.grid_pitch =
-            crate::state::SchematicGridPitch::Metric;
-        loaded.document_mut_for_test().grid_size = 123;
-        loaded.session.editor.snap_engine = crate::state::SnapEngine::default();
-
-        replace_active_schematic_document(&mut state, loaded);
-
-        let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
-        assert_eq!(
-            state.model.schematic.document().document_policy.grid_pitch,
-            crate::state::SchematicGridPitch::Metric
-        );
-        assert_eq!(state.model.schematic.document().grid_size, expected);
-        assert_eq!(
-            state.model.schematic.session.editor.snap_engine.grid_size,
-            expected
-        );
-        assert_eq!(
-            state.model.schematic.session.editor.snap_engine.snap_radius,
-            8
-        );
-        assert!(
-            !state
-                .model
-                .schematic
-                .session
-                .editor
-                .snap_engine
-                .snap_to_grid
-        );
-        assert!(
-            !state
-                .model
-                .schematic
-                .session
-                .editor
-                .snap_engine
-                .snap_to_wire_segments
-        );
-        assert_eq!(
-            state.design.schematic_snap,
-            state.model.schematic.session.editor.snap_engine
-        );
-    }
-
-    #[test]
     fn browser_import_applies_schematic_clears_runs_and_skips_recents() {
         let mut state = no_project_state();
         state.model.simulation.start_run();
@@ -679,8 +590,7 @@ mod tests {
 
         let schematic = SchematicState::default();
 
-        let imported = apply_loaded_schematic(
-            &mut state,
+        let imported = state.apply_loaded_schematic(
             schematic,
             SchematicLoadOrigin::BrowserImport("browser-filter.rsch"),
         );
@@ -702,8 +612,7 @@ mod tests {
         let mut schematic = SchematicState::default();
         schematic.session.current_file = Some(PathBuf::from("stale-native-path.rsch"));
 
-        let imported = apply_loaded_schematic(
-            &mut state,
+        let imported = state.apply_loaded_schematic(
             schematic,
             SchematicLoadOrigin::BrowserImport("browser-filter.rsch"),
         );
@@ -726,8 +635,7 @@ mod tests {
             save_dialog_default_names: Rc::clone(&defaults),
         };
 
-        let imported = apply_loaded_schematic(
-            &mut state,
+        let imported = state.apply_loaded_schematic(
             SchematicState::default(),
             SchematicLoadOrigin::BrowserImport("browser-filter.rsch"),
         );
@@ -820,7 +728,7 @@ mod tests {
         let mut state = AppState::default();
         seed_stale_design_execution_context(&mut state);
 
-        create_new_schematic(&mut state);
+        state.create_new_schematic();
 
         assert_design_execution_context_cleared(&state);
     }
@@ -832,7 +740,7 @@ mod tests {
         let symbol_key = state.model.workspace.content.active_key();
         install_stale_paired_schematic(&mut state, &schematic_reference);
 
-        create_new_schematic(&mut state);
+        state.create_new_schematic();
 
         let buffer = state
             .model
@@ -862,8 +770,7 @@ mod tests {
 
         let mut schematic = SchematicState::default();
         schematic.session.current_file = Some(PathBuf::from("fresh.rsch"));
-        let loaded = apply_loaded_schematic(
-            &mut state,
+        let loaded = state.apply_loaded_schematic(
             schematic,
             SchematicLoadOrigin::PersistentPath(Path::new("fresh.rsch")),
         );
@@ -895,11 +802,9 @@ mod tests {
         file.add_component(ComponentType::Capacitor, Point::new(40, 0));
         let path = Path::new("designs/RC low-pass.rsch");
 
-        assert!(apply_loaded_schematic(
-            &mut state,
-            file.clone(),
-            SchematicLoadOrigin::PersistentPath(path),
-        ));
+        assert!(
+            state.apply_loaded_schematic(file.clone(), SchematicLoadOrigin::PersistentPath(path),)
+        );
         let imported = CellViewRef::new(&active.library, "RC_low_pass", "schematic");
         assert_eq!(state.model.workspace.content.active_view, imported);
         assert_eq!(state.model.schematic.document().components.len(), 2);
@@ -915,11 +820,7 @@ mod tests {
             "nothing was replaced"
         );
 
-        assert!(apply_loaded_schematic(
-            &mut state,
-            file,
-            SchematicLoadOrigin::PersistentPath(path),
-        ));
+        assert!(state.apply_loaded_schematic(file, SchematicLoadOrigin::PersistentPath(path),));
         assert_eq!(
             state.model.workspace.content.active_view.cell,
             "RC_low_pass_2"
@@ -935,8 +836,7 @@ mod tests {
 
         let mut schematic = SchematicState::default();
         schematic.session.current_file = Some(PathBuf::from("fresh-symbol-context.rsch"));
-        let loaded = apply_loaded_schematic(
-            &mut state,
+        let loaded = state.apply_loaded_schematic(
             schematic,
             SchematicLoadOrigin::PersistentPath(Path::new("fresh-symbol-context.rsch")),
         );

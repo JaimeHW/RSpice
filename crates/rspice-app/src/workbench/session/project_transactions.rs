@@ -7,6 +7,9 @@
 //! same frame and the same order as if the feature had run it, and tells the
 //! feature how it went.
 
+#[cfg(test)]
+use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::{SchematicState, ViewType};
 use crate::workbench::RSpiceApp;
 use crate::workbench::app_state::AppState;
 #[cfg(doc)]
@@ -19,6 +22,7 @@ use crate::workbench::lifecycle::project_lifecycle::{
     ProjectCloseDestination, has_unsaved_changes,
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
+use crate::workbench::workflows::file_workflow::{self, SchematicLoadOrigin};
 use crate::workbench::workflows::project_workflow::{
     self, LiveProjectApply, NewProject, NewProjectParams, apply_live_project_snapshot,
     close_project_discard,
@@ -96,6 +100,81 @@ fn replace_with_new_project(
     );
     services_access::reset_for_new_project(state);
     Ok(model_restore_errors)
+}
+
+/// Replacing the drawing in front with a schematic file's, on the
+/// no-project screen: the project's phases over its own parts, with the
+/// shell's steps between them, in the order the replacement has always run.
+impl AppState {
+    /// Apply a schematic read from `origin`: inside a project it is added
+    /// as a new cell view, and otherwise its drawing replaces the one in
+    /// front. Returns whether it was applied.
+    pub(crate) fn apply_loaded_schematic(
+        &mut self,
+        schematic: SchematicState,
+        origin: SchematicLoadOrigin<'_>,
+    ) -> bool {
+        // Inside a project a schematic file is added to it, never poured over
+        // the cell view the user has open.
+        if self.platform.project_lifecycle.is_open() {
+            return file_workflow::import_loaded_schematic(self, schematic, origin);
+        }
+        let schematic =
+            file_workflow::prepare_loaded_schematic(&mut self.platform, schematic, origin);
+        replace_active_schematic_document(self, schematic);
+        self.clear_design_execution_context();
+        file_workflow::settle_loaded_schematic(&mut self.model, &mut self.platform, origin);
+        true
+    }
+
+    /// Reset the current schematic to a new empty document.
+    #[cfg(test)]
+    pub(crate) fn create_new_schematic(&mut self) {
+        let schematic = self.new_schematic_document();
+        replace_active_schematic_document(self, schematic);
+        self.clear_design_execution_context();
+        self.record(
+            LogSeverity::Info,
+            LogSource::Studio,
+            "Created a new schematic.",
+        );
+    }
+}
+
+/// Make `schematic` the drawing in front, under the session's snap settings,
+/// with the workspace's copy of it kept in step.
+fn replace_active_schematic_document(state: &mut AppState, mut schematic: SchematicState) {
+    // Loaded document data owns the grid pitch; the active device session owns
+    // snap targets and radius. Install both authorities before publishing the
+    // new active buffer, then mirror the derived pitch back into the session.
+    schematic.session.editor.snap_engine = state.design.schematic_snap.clone();
+    schematic.reconcile_grid_pitch_runtime();
+    state.model.schematic = schematic;
+    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
+    state.bump_active_schematic_epoch();
+    match state.model.workspace.content.active_view_type() {
+        ViewType::Schematic | ViewType::Testbench => {
+            state.sync_active_schematic_to_workspace();
+        }
+        _ => {
+            let reference = state.model.workspace.content.active_schematic_reference();
+            let dirty = state.model.schematic.session.is_dirty;
+            state
+                .model
+                .workspace
+                .insert_schematic_editor(reference.key(), state.model.schematic.clone());
+            if let Some(open_view) = state
+                .model
+                .workspace
+                .content
+                .open_views
+                .iter_mut()
+                .find(|open_view| open_view.reference == reference)
+            {
+                open_view.dirty = dirty;
+            }
+        }
+    }
 }
 
 impl RSpiceApp {
@@ -337,6 +416,59 @@ mod tests {
         );
     }
 
+    #[test]
+    fn replacing_the_active_document_reconciles_document_pitch_and_session_snap_preferences() {
+        let mut state = AppState::default();
+        state.design.schematic_snap.snap_radius = 8;
+        state.design.schematic_snap.snap_to_grid = false;
+        state.design.schematic_snap.snap_to_wire_segments = false;
+        state.design.schematic_snap.grid_size = 999;
+        let mut loaded = SchematicState::default();
+        loaded.document_mut_for_test().document_policy.grid_pitch =
+            crate::state::SchematicGridPitch::Metric;
+        loaded.document_mut_for_test().grid_size = 123;
+        loaded.session.editor.snap_engine = crate::state::SnapEngine::default();
+
+        replace_active_schematic_document(&mut state, loaded);
+
+        let expected = crate::state::SchematicGridPitch::Metric.canvas_grid_size();
+        assert_eq!(
+            state.model.schematic.document().document_policy.grid_pitch,
+            crate::state::SchematicGridPitch::Metric
+        );
+        assert_eq!(state.model.schematic.document().grid_size, expected);
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.grid_size,
+            expected
+        );
+        assert_eq!(
+            state.model.schematic.session.editor.snap_engine.snap_radius,
+            8
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_grid
+        );
+        assert!(
+            !state
+                .model
+                .schematic
+                .session
+                .editor
+                .snap_engine
+                .snap_to_wire_segments
+        );
+        assert_eq!(
+            state.design.schematic_snap,
+            state.model.schematic.session.editor.snap_engine
+        );
+    }
+
     /// Assert that the body of this module's function `name` runs `steps` in
     /// order, each first found after the one before it.
     fn assert_runs_in_order(name: &str, steps: &[&str]) {
@@ -387,6 +519,25 @@ mod tests {
                 "state.replace_project_execution_context(announcement)",
                 "project_workflow::settle_new_project(",
                 "services_access::reset_for_new_project(state)",
+            ],
+        );
+    }
+
+    /// A schematic file replaces the drawing in front in the order it always
+    /// has: inside a project it is imported instead; otherwise where it saves
+    /// next is settled, the editor takes its drawing, the execution context
+    /// is retired, and then the file is remembered and the open recorded.
+    #[test]
+    fn a_loaded_schematic_replaces_the_drawing_in_the_order_it_always_has() {
+        assert_runs_in_order(
+            "apply_loaded_schematic",
+            &[
+                "self.platform.project_lifecycle.is_open()",
+                "file_workflow::import_loaded_schematic(self, schematic, origin)",
+                "file_workflow::prepare_loaded_schematic(",
+                "replace_active_schematic_document(self, schematic)",
+                "self.clear_design_execution_context()",
+                "file_workflow::settle_loaded_schematic(",
             ],
         );
     }

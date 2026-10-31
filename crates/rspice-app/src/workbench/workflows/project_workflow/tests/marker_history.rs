@@ -258,7 +258,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         // drawing rather than replacing it, so the drawing is replaced here
         // by a new document in place.
         if replace_drawing {
-            crate::workbench::workflows::file_workflow::create_new_schematic(&mut state);
+            state.create_new_schematic();
         } else {
             state.results_parts().clear_simulation_results();
         }
