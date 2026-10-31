@@ -22,6 +22,10 @@ pub mod coverage;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod system;
 
+/// The regional form Han characters are lettered in, and how a person states
+/// which they prefer.
+pub use rspice_fonts::{HanPreference, HanVariant};
+
 /// Proportional UI family (regular weight).
 pub fn sans() -> FontFamily {
     FontFamily::Proportional

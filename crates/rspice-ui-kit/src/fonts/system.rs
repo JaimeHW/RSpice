@@ -69,6 +69,13 @@ pub fn set_document_language(ctx: &Context, language: Option<&str>) {
     ctx.with_plugin(|plugin: &mut SystemFontsPlugin| plugin.set_document_language(language));
 }
 
+/// Sets the Han form the person prefers, which chooses it where the open
+/// document's language does not, ahead of the operating system's languages.
+/// Costs nothing when it is unchanged.
+pub fn set_han_preference(ctx: &Context, preference: HanPreference) {
+    ctx.with_plugin(|plugin: &mut SystemFontsPlugin| plugin.set_han_preference(preference));
+}
+
 /// The installed faces that have joined `ctx`'s families, in chain order.
 #[must_use]
 pub fn joined_families(ctx: &Context) -> Vec<String> {
@@ -95,6 +102,7 @@ pub struct SystemFontsPlugin {
     fonts: SystemFonts,
     system_languages: Vec<String>,
     document_language: Option<String>,
+    preference: HanPreference,
     order: [HanVariant; 5],
     /// The faces that have joined, in chain order.
     joined: Vec<SystemFace>,
@@ -116,6 +124,7 @@ impl SystemFontsPlugin {
             fonts,
             system_languages,
             document_language: None,
+            preference: HanPreference::Auto,
             order,
             joined: Vec::new(),
             seen: HashSet::new(),
@@ -131,7 +140,26 @@ impl SystemFontsPlugin {
             return;
         }
         self.document_language = language.map(str::to_owned);
-        let order = han_order(language, HanPreference::Auto, &self.system_languages);
+        self.reorder();
+    }
+
+    fn set_han_preference(&mut self, preference: HanPreference) {
+        if self.preference == preference {
+            return;
+        }
+        self.preference = preference;
+        self.reorder();
+    }
+
+    /// Puts the CJK faces in the Han order the document's language, then the
+    /// person's preference, then the operating system's languages give, on
+    /// screen and in print, where that order changed.
+    fn reorder(&mut self) {
+        let order = han_order(
+            self.document_language.as_deref(),
+            self.preference,
+            &self.system_languages,
+        );
         if order == self.order {
             return;
         }

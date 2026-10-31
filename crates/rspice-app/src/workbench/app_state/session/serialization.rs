@@ -1451,6 +1451,26 @@ mod tests {
         assert!(restored.settings.browser_spoken_feedback);
     }
 
+    /// The Han form a person prefers comes back from the session eframe
+    /// stores, which is RON.
+    #[test]
+    fn the_han_form_round_trips_through_the_ron_session() {
+        use rspice_ui_kit::fonts::{HanPreference, HanVariant};
+
+        let mut state = AppState::default();
+        state
+            .model
+            .preferences
+            .set_choice(crate::workbench::ChoicePreference::HanForm, 4)
+            .expect("Japanese is one of the Han forms");
+        let ron = ron::to_string(&state).expect("eframe RON session serializes");
+        let restored = AppState::from_session_ron(&ron).expect("the RON session restores");
+        assert_eq!(
+            restored.model.preferences.han_preference(),
+            HanPreference::Prefer(HanVariant::Japanese)
+        );
+    }
+
     #[test]
     fn appearance_preferences_round_trip_through_the_application_session() {
         let mut state = AppState::default();

@@ -214,6 +214,37 @@ fn the_document_language_reorders_the_cjk_faces() {
     assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), rebuilds);
 }
 
+/// The person's preferred Han form orders the CJK faces in one rebuild, and
+/// the document's language still decides before it.
+#[test]
+fn the_han_preference_reorders_the_cjk_faces_after_the_document_language() {
+    // U+3001 IDEOGRAPHIC COMMA is in both faces; Simplified Chinese orders
+    // Japanese ahead of Korean.
+    let ctx = context(Source::files(vec![korean(), japanese()]));
+    settle(&ctx, "、");
+    assert_eq!(joined_families(&ctx), ["IBM Plex Sans JP"]);
+    let rebuilds = plugin(&ctx, |plugin| plugin.rebuilds);
+
+    set_han_preference(&ctx, HanPreference::Prefer(HanVariant::Korean));
+    settle(&ctx, "、");
+    assert_eq!(
+        joined_families(&ctx),
+        ["IBM Plex Sans KR", "IBM Plex Sans JP"]
+    );
+    assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), rebuilds + 1);
+
+    set_han_preference(&ctx, HanPreference::Prefer(HanVariant::Korean));
+    settle(&ctx, "、");
+    assert_eq!(plugin(&ctx, |plugin| plugin.rebuilds), rebuilds + 1);
+
+    set_document_language(&ctx, Some("ja"));
+    settle(&ctx, "、");
+    assert_eq!(
+        joined_families(&ctx),
+        ["IBM Plex Sans JP", "IBM Plex Sans KR"]
+    );
+}
+
 #[test]
 fn reinstalling_the_fonts_keeps_the_faces_that_joined() {
     let ctx = context(Source::files(vec![korean()]));

@@ -119,6 +119,29 @@ fn console(state: &AppState) -> Vec<(LogSeverity, String)> {
         .collect()
 }
 
+/// The Han form a person prefers is kept in the preferences file, so CJK
+/// text letters in it from the next start.
+#[test]
+fn the_han_form_comes_back_from_the_preferences_file() {
+    use rspice_ui_kit::fonts::{HanPreference, HanVariant};
+
+    let (path, store) = temp_store("han-form");
+    let mut first = AppState::default();
+    first
+        .model
+        .preferences
+        .set_choice(ChoicePreference::HanForm, 5)
+        .expect("Korean is one of the Han forms");
+    first
+        .preferences_file_parts()
+        .bind_preferences_file(store.clone());
+    assert_eq!(read_json(&path)[PREFERENCES]["choices"]["han-form"], 5);
+    assert_eq!(
+        bound(&store).model.preferences.han_preference(),
+        HanPreference::Prefer(HanVariant::Korean)
+    );
+}
+
 #[test]
 fn settings_round_trip_with_unknown_keys_and_domains_kept() {
     let (path, store) = temp_store("round-trip");

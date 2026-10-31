@@ -579,10 +579,14 @@ pub enum ChoicePreference {
     AcPhase,
     /// Reopen the last project at startup, or start with none.
     StartupProject,
+    /// The regional form Han characters are lettered in where the open
+    /// document's Language field does not say: Automatic, then Simplified
+    /// Chinese, Traditional Chinese, Hong Kong, Japanese and Korean.
+    HanForm,
 }
 
 impl ChoicePreference {
-    pub const ALL: [Self; 59] = [
+    pub const ALL: [Self; 60] = [
         Self::LegacyWorkspacePreset,
         Self::LegacyConsoleOnLaunch,
         Self::LegacySchematicGrid,
@@ -642,6 +646,7 @@ impl ChoicePreference {
         Self::AcFrequencyAxis,
         Self::AcPhase,
         Self::StartupProject,
+        Self::HanForm,
     ];
 
     pub const fn stable_id(self) -> &'static str {
@@ -705,6 +710,7 @@ impl ChoicePreference {
             Self::AcFrequencyAxis => "ac-frequency-axis",
             Self::AcPhase => "ac-phase",
             Self::StartupProject => "startup-project",
+            Self::HanForm => "han-form",
         }
     }
 
@@ -767,6 +773,7 @@ impl ChoicePreference {
             | Self::AcPhase
             | Self::StartupProject => 1,
             Self::CanvasZoomSpeed | Self::WaveTraceWidth => 2,
+            Self::HanForm => 5,
         }
     }
 
@@ -1455,6 +1462,25 @@ impl UserPreferences {
     #[must_use]
     pub fn interface_scale(&self) -> f32 {
         [1.0, 1.1, 1.25, 1.5][self.choice(ChoicePreference::InterfaceScale)]
+    }
+
+    /// The Han form the person prefers, which the open document's Language
+    /// field overrides and which, left Automatic, the operating system's
+    /// languages decide.
+    #[must_use]
+    pub fn han_preference(&self) -> rspice_ui_kit::fonts::HanPreference {
+        use rspice_ui_kit::fonts::{HanPreference, HanVariant};
+        const FORMS: [HanVariant; 5] = [
+            HanVariant::Simplified,
+            HanVariant::Traditional,
+            HanVariant::HongKong,
+            HanVariant::Japanese,
+            HanVariant::Korean,
+        ];
+        self.choice(ChoicePreference::HanForm)
+            .checked_sub(1)
+            .and_then(|form| FORMS.get(form))
+            .map_or(HanPreference::Auto, |form| HanPreference::Prefer(*form))
     }
 
     /// The smallest control a coarse pointer gets, in points.

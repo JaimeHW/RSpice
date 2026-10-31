@@ -1042,6 +1042,11 @@ impl eframe::App for RSpiceApp {
             &ctx,
             self.state.model.document_language(),
         );
+        #[cfg(not(target_arch = "wasm32"))]
+        rspice_ui_kit::fonts::system::set_han_preference(
+            &ctx,
+            self.state.model.preferences.han_preference(),
+        );
         self.poll_cloud_account(&ctx);
         self.record_publish_receipt();
         self.pump_live_session();

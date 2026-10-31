@@ -271,6 +271,27 @@ fn appearance(ui: &mut Ui, state: &mut PreferencesDialogs<'_>) {
         &["100%", "110%", "125%", "150%"],
         &["size", "font", "text", "dpi", "magnify"],
     );
+    // Which installed CJK face letters a Han character. A browser letters
+    // none until it fetches them, so the row is the desktop's.
+    #[cfg(not(target_arch = "wasm32"))]
+    keyword_choice_row(
+        ui,
+        state,
+        ChoicePreference::HanForm,
+        "Han characters",
+        "The regional form where a sheet's language does not set one.",
+        &[
+            "Automatic",
+            "Simplified Chinese",
+            "Traditional Chinese",
+            "Hong Kong",
+            "Japanese",
+            "Korean",
+        ],
+        &[
+            "CJK", "hanzi", "kanji", "hanja", "glyph", "font", "language",
+        ],
+    );
     searchable_row(
         ui,
         "Engineering canvas theme",
@@ -910,7 +931,11 @@ pub fn restore_defaults(
     match category {
         PreferenceCategory::Appearance => {
             state.workbench.theme = crate::ui::Theme::default();
-            preferences.restore_defaults(&[ChoicePreference::InterfaceScale], &[], &[]);
+            preferences.restore_defaults(
+                &[ChoicePreference::InterfaceScale, ChoicePreference::HanForm],
+                &[],
+                &[],
+            );
         }
         PreferenceCategory::Accessibility => {
             preferences.restore_defaults(
