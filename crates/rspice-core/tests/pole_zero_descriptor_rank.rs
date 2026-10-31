@@ -349,3 +349,111 @@ fn engine_keeps_exact_workspace_failure_typed() {
     // reservation is what exhausts the shared workspace allowance.
     assert_eq!(error.requested, 560);
 }
+
+fn assert_poles_match(actual: &[rspice_core::Complex64], expected: &[(f64, f64)], tolerance: f64) {
+    assert_eq!(actual.len(), expected.len(), "{actual:#?}");
+    for &(re, im) in expected {
+        let scale = re.hypot(im);
+        assert!(
+            actual
+                .iter()
+                .any(|root| (root.re - re).hypot(root.im - im) <= tolerance * scale),
+            "missing pole {re:e}{im:+e}j in {actual:#?}"
+        );
+    }
+}
+
+/// A BJT whose base, internal collector and internal emitter carry only
+/// junction and diffusion charge has a charge-free common mode. Rounding in
+/// the stamped charge sums must not turn it into a finite pole: ngspice-46
+/// finds three poles here, the dominant one at the 0.1 uF load.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn a_bjt_floating_charge_island_adds_no_spurious_pole() {
+    let netlist = Netlist::parse(
+        "GP CE stage
+Vcc 3 0 5
+Rc 2 3 1k
+Rb 3 1 200k
+I1 0 1 AC 1 DC 0
+Vmeas 4 2 DC 0
+Cshunt 4 0 .1u
+Q1 2 1 0 0 N1
+.pz 1 0 4 0 cur pol
+.MODEL N1 NPN IS=1e-16 BF=100 RC=60 RE=2 CJE=1e-13 CJC=2e-14 TF=10e-12 TR=100e-12 VAF=10
+.end
+",
+    )
+    .unwrap();
+    let result = Engine::default()
+        .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+        .unwrap();
+    assert_poles_match(
+        &result.poles,
+        &[(-1.20714e4, 0.0), (-6.85349e8, 0.0), (-1.27733e12, 0.0)],
+        1e-3,
+    );
+    assert!(result.is_stable(), "{result:?}");
+}
+
+/// The ngspice VBIC pole-zero case: its excess-phase pair and the load pole
+/// survive once the transistor's floating charge island is deflated.
+#[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
+#[cfg_attr(not(target_arch = "wasm32"), test)]
+fn vbic_common_emitter_poles_and_zeros_match_ngspice() {
+    let netlist = Netlist::parse(concat!(
+        "VBIC Pole Zero Test
+Vcc 3 0 5
+Rc 2 3 1k
+Rb 3 1 200k
+I1 0 1 AC 1 DC 0
+",
+        "Vmeas 4 2 DC 0
+Cshunt 4 0 .1u
+Q1 2 1 0 0 N1
+.pz 1 0 4 0 cur pz
+",
+        ".MODEL N1 NPN LEVEL=4
+",
+        "+ IS=1e-16 IBEI=1e-18 IBEN=5e-15 IBCI=2e-17 IBCN=5e-15 ISP=1e-15 RCX=10
+",
+        "+ RCI=60 RBX=10 RBI=40 RE=2 RS=20 RBP=40 VEF=10 VER=4 IKF=2e-3 ITF=8e-2
+",
+        "+ XTF=20 IKR=2e-4 IKP=2e-4 CJE=1e-13 CJC=2e-14 CJEP=1e-13 CJCP=4e-13 VO=2
+",
+        "+ GAMM=2e-11 HRCF=2 QCO=1e-12 AVC1=2 AVC2=15 TF=10e-12 TR=100e-12 TD=2e-11 RTH=300
+",
+        ".end
+",
+    ))
+    .unwrap();
+    let result = Engine::default()
+        .run_pz_from_card_with_abort(&netlist, &netlist.analyses[0], &NoAbort)
+        .unwrap();
+    // tests/ngspice/vbic/CEamp.out (ngspice-46 prints the same set).
+    assert_poles_match(
+        &result.poles,
+        &[
+            (-1.16914e12, 0.0),
+            (-5.42221e11, 0.0),
+            (-7.24619e10, 4.728303e10),
+            (-7.24619e10, -4.72830e10),
+            (-5.92006e10, 0.0),
+            (-1.05484e9, 0.0),
+            (-1.86198e4, 0.0),
+        ],
+        1e-3,
+    );
+    assert_poles_match(
+        &result.zeros,
+        &[
+            (-1.32050e12, 0.0),
+            (-2.99053e11, 0.0),
+            (-8.81718e10, 1.565009e11),
+            (-8.81718e10, -1.56501e11),
+            (-6.47546e10, 0.0),
+            (9.447173e10, 0.0),
+        ],
+        1e-3,
+    );
+}

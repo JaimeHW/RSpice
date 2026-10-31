@@ -10,6 +10,7 @@ use crate::{CircuitData, Netlist, Value};
 
 mod ac_nqs;
 mod descriptor;
+mod islands;
 mod reduction;
 #[cfg(feature = "veriloga")]
 mod veriloga;
@@ -59,6 +60,18 @@ impl Engine {
             .filter_map(|(index, &is_dynamic)| is_dynamic.then_some(index))
             .collect::<Vec<_>>();
         if dynamic.is_empty() {
+            return Ok(None);
+        }
+        // A floating charge island leaves C_dd singular up to rounding, which
+        // the state-space reduction cannot represent; the dense descriptor
+        // path deflates the island's common mode exactly.
+        let mut charge_entries = Vec::new();
+        c_descriptor.for_each_stored(|row, col, value| {
+            if value.im != 0.0 {
+                charge_entries.push((row, col, value.im));
+            }
+        });
+        if !islands::floating_charge_islands(n, &charge_entries).is_empty() {
             return Ok(None);
         }
         let algebraic = dynamic_mask

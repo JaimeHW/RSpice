@@ -74,6 +74,7 @@ impl LinearizedDescriptor<'_> {
         RationalDescriptor::stamp_all(&self.xspice, self.circuit, &mut g, &mut c);
         #[cfg(feature = "veriloga")]
         VerilogADescriptor::stamp_states(&self.veriloga, &mut g, &mut c);
+        super::islands::deflate_floating_charge_islands(&mut g, &mut c);
         Ok(PoleZeroAnalyzer::new(g, c).with_resource_limits(limits))
     }
 }
