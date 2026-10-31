@@ -4717,6 +4717,10 @@ pub struct SimulationOptions {
     pub linsol_hb_preconditioner: Option<XyceHbPreconditioner>,
     /// Explicit Xyce nonlinear continuation policy.
     pub nonlinear_continuation: Option<NonlinearContinuationMode>,
+    /// Xyce `.OPTIONS LOCA CONPARAM`: the parameters a natural-parameter
+    /// continuation steps, in order. `GSTEPPING` names Xyce's nodal GMIN
+    /// homotopy rather than a device parameter.
+    pub loca_continuation_parameters: Vec<String>,
     /// `.OPTIONS GMINSTEPPING`: allow the GMIN homotopy rung when the direct
     /// Newton solve fails.
     ///
@@ -5269,6 +5273,9 @@ impl SimulationOptions {
         }
         if other.nonlinear_continuation.is_some() {
             self.nonlinear_continuation = other.nonlinear_continuation;
+        }
+        if !other.loca_continuation_parameters.is_empty() {
+            self.loca_continuation_parameters = other.loca_continuation_parameters.clone();
         }
         if !other.hb_num_frequencies.is_empty() {
             self.hb_num_frequencies = other.hb_num_frequencies.clone();

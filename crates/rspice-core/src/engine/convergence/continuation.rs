@@ -93,16 +93,6 @@ impl SourceContinuationPolicy {
     }
 }
 
-pub(in crate::engine::convergence) fn explicit_source_continuation_policy(
-    mode: Option<crate::config::NonlinearContinuationMode>,
-) -> Option<SourceContinuationPolicy> {
-    matches!(
-        mode,
-        Some(crate::config::NonlinearContinuationMode::SimultaneousSourceStep)
-    )
-    .then_some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
-}
-
 impl Engine {
     pub(in crate::engine::convergence) fn build_descending_schedule(
         mut start: Value,
@@ -1322,8 +1312,7 @@ impl Engine {
 
 #[cfg(test)]
 mod source_continuation_policy_tests {
-    use super::{SourceContinuationPolicy, explicit_source_continuation_policy};
-    use crate::config::NonlinearContinuationMode;
+    use super::SourceContinuationPolicy;
 
     #[test]
     fn xyce_simultaneous_policy_matches_loca_defaults() {
@@ -1355,21 +1344,6 @@ mod source_continuation_policy_tests {
         assert_eq!(policy.step_after_failure(0.2), Some(0.1));
         assert_eq!(policy.step_after_failure(2.0e-4), Some(1.0e-4));
         assert_eq!(policy.step_after_failure(1.0e-4), None);
-    }
-
-    #[test]
-    fn only_explicit_simultaneous_source_step_selects_this_policy() {
-        assert_eq!(
-            explicit_source_continuation_policy(Some(
-                NonlinearContinuationMode::SimultaneousSourceStep
-            )),
-            Some(SourceContinuationPolicy::XYCE_SIMULTANEOUS)
-        );
-        assert_eq!(
-            explicit_source_continuation_policy(Some(NonlinearContinuationMode::Natural)),
-            None
-        );
-        assert_eq!(explicit_source_continuation_policy(None), None);
     }
 }
 

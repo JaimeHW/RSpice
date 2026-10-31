@@ -2542,6 +2542,7 @@ impl XyceTestRunner {
             nonlin_hb_maxstep,
             linsol_hb_preconditioner,
             nonlinear_continuation,
+            loca_continuation_parameters,
             gmin_stepping,
             source_stepping,
             pseudo_transient,
@@ -2645,6 +2646,7 @@ impl XyceTestRunner {
             && nonlin_hb_maxstep.is_none()
             && linsol_hb_preconditioner.is_none()
             && nonlinear_continuation.is_none()
+            && loca_continuation_parameters.is_empty()
             // The continuation rungs, damping, the factorization backend and
             // both step bounds are stated absent rather than ignored: this
             // predicate's whole claim is that the deck carries nothing but the

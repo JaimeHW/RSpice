@@ -155,6 +155,19 @@ pub fn resolve_simulation_config(
         if let Some(mode) = opts.nonlinear_continuation {
             nonlinear_continuation = Some(mode);
         }
+        // A natural-parameter continuation on `GSTEPPING` is the nodal GMIN
+        // homotopy Xyce's `CONTINUATION=GMIN` runs: N_NLS_NOX_Interface.C
+        // hands that parameter to the solver's GMIN augmentation, not to a
+        // device.
+        if nonlinear_continuation == Some(crate::config::NonlinearContinuationMode::Natural)
+            && !opts.loca_continuation_parameters.is_empty()
+            && opts
+                .loca_continuation_parameters
+                .iter()
+                .all(|name| name.eq_ignore_ascii_case("GSTEPPING"))
+        {
+            nonlinear_continuation = Some(crate::config::NonlinearContinuationMode::Gmin);
+        }
         // The continuation rungs and the damping strategy are written onto
         // `resolved` here rather than held in a local: they are exactly the
         // five fields a `convergence_preset` override is made of, and a local

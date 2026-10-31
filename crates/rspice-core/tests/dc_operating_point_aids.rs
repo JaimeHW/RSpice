@@ -102,3 +102,69 @@ fn the_direct_newton_fails_and_gmin_stepping_finds_the_operating_point_before_so
         "GMIN stepping answers before source stepping runs"
     );
 }
+
+/// A diode clamp the direct Newton solves on its own.
+const DIODE_CLAMP: &str = "diode clamp\n\
+    v1 in 0 5\n\
+    r1 in out 1k\n\
+    d1 out 0 dmod\n\
+    .model dmod d is=1e-14\n";
+
+/// Xyce's `.OPTIONS NONLIN CONTINUATION` names the homotopy that runs in
+/// place of its direct Newton solve, and every mode ends on the circuit as
+/// written. Each reaches the default solve's operating point here, through
+/// the aid the mode names; `MOS` has no rung of its own and solves as the
+/// default does.
+#[test]
+fn xyce_continuation_modes_reach_the_operating_point_through_the_aid_they_name() {
+    let solve = |options: &str| {
+        let deck = format!("{DIODE_CLAMP}{options}\n.op\n.end\n");
+        let netlist = Netlist::parse(&deck).expect("the deck parses");
+        let collector = NoticeCollector::new();
+        let _installed = collector.install();
+        let result = Engine::new(SimulationConfig::default())
+            .run_dc_op_with_abort(&netlist, &NoAbort)
+            .unwrap_or_else(|error| panic!("{options}: {error}"));
+        let aids: Vec<ContinuationAid> = collector
+            .take()
+            .into_iter()
+            .filter_map(|recorded| match recorded.notice {
+                EngineNotice::ConvergenceAid(aid) => Some(aid),
+                _ => None,
+            })
+            .collect();
+        (result.try_voltage_named("out").expect("V(out)"), aids)
+    };
+    let (reference, aids) = solve("");
+    assert!(aids.is_empty(), "the direct Newton answers: {aids:?}");
+    for (options, aid) in [
+        (
+            ".options nonlin continuation=gmin",
+            Some(ContinuationAid::GminStepping),
+        ),
+        (
+            ".options nonlin continuation=3",
+            Some(ContinuationAid::GminStepping),
+        ),
+        (
+            ".options nonlin continuation=1\n.options loca conparam=GSTEPPING",
+            Some(ContinuationAid::GminStepping),
+        ),
+        (
+            ".options nonlin continuation=pseudo",
+            Some(ContinuationAid::PseudoTransient),
+        ),
+        (
+            ".options nonlin continuation=sourcestep2",
+            Some(ContinuationAid::SourceStepping),
+        ),
+        (".options nonlin continuation=mos", None),
+    ] {
+        let (voltage, aids) = solve(options);
+        assert_eq!(aids, aid.into_iter().collect::<Vec<_>>(), "{options}");
+        assert!(
+            (voltage - reference).abs() <= 1e-6 * reference.abs() + 1e-9,
+            "{options}: V(out) = {voltage}, default solve {reference}"
+        );
+    }
+}

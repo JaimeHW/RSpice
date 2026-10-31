@@ -300,6 +300,16 @@ pub(in crate::netlist::parser) fn parse_options_command(
                         stream, line_num, params,
                     )?);
                 }
+                (Some("LOCA"), "CONPARAM") => {
+                    let TokenKind::Ident(name) = &stream.peek().kind else {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: "LOCA.CONPARAM expects a parameter name".to_string(),
+                        });
+                    };
+                    options.loca_continuation_parameters.push(name.clone());
+                    stream.advance();
+                }
                 (Some("HBINT"), key) if key.starts_with("NUMFREQ") => {
                     // Xyce lists one count per tone, `numfreq=11,7`, or
                     // spells them `numfreq=11 numfreq2=7`.

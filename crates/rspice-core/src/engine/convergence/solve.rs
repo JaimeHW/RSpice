@@ -1,6 +1,6 @@
 //! Linear, nonlinear, and transient operating-point solve entry points.
 
-use super::continuation::explicit_source_continuation_policy;
+use super::continuation::SourceContinuationPolicy;
 use super::*;
 use crate::SpiceDialect;
 use crate::engine::core::{StartupVoltageConstraint, StartupVoltageHints};
@@ -960,6 +960,71 @@ impl Engine {
         Ok(solution)
     }
 
+    /// Xyce's `NONLIN CONTINUATION` modes (N_NLS_NOX_Interface.C, `solve`):
+    /// the named homotopy runs first, in place of the direct Newton solve.
+    ///
+    /// - `SOURCESTEP` ramps every source together with Xyce's LOCA
+    ///   natural-parameter policy. `SOURCESTEP2` ramps them one at a time to
+    ///   the same full-strength circuit and takes the same walk here.
+    /// - `GMIN` (and a natural continuation on `GSTEPPING`) is the nodal
+    ///   GMIN homotopy, which ends on the circuit's own equations as
+    ///   RSpice's dynamic GMIN walk does.
+    /// - `PSEUDO` is pseudo-transient continuation closed by a Newton solve
+    ///   of the unmodified circuit.
+    /// - `MOS` deforms Xyce's MOSFET equations (gain, then nonlinearity)
+    ///   toward the same unmodified circuit, and `NATURAL` on a device
+    ///   parameter ends at that parameter's maximum; neither has its own
+    ///   rung here, so both solve the deck as written with the standard
+    ///   ladder.
+    ///
+    /// An aid that fails hands over to the standard solve instead of failing
+    /// the run: every rung answers only with the unmodified circuit's
+    /// operating point, so the order changes how it is found, not which
+    /// circuit is solved.
+    fn explicit_continuation_solve(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        seed: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        use crate::config::NonlinearContinuationMode as Mode;
+        let attempt = match self.config.convergence_config.nonlinear_continuation {
+            Some(Mode::SimultaneousSourceStep | Mode::SequentialSourceStep) => self
+                .source_stepping_nonlinear_with_policy_and_abort(
+                    circuit,
+                    matrix,
+                    seed,
+                    SourceContinuationPolicy::XYCE_SIMULTANEOUS,
+                    abort,
+                ),
+            Some(Mode::Gmin) => {
+                self.gmin_stepping_nonlinear_with_abort(circuit, matrix, seed, abort)
+            }
+            Some(Mode::PseudoTransient) => {
+                self.pseudo_transient_nonlinear_with_guess_and_abort(circuit, matrix, seed, abort)
+            }
+            Some(Mode::Standard | Mode::Natural | Mode::Mosfet) | None => return Ok(None),
+        };
+        match attempt {
+            Ok(solved) => Ok(Some(solved)),
+            Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+            Err(error) if Self::is_recoverable_startup_error(&error) => {
+                log::info!(
+                    "Requested nonlinear continuation failed ({error}); solving with the standard operating-point ladder."
+                );
+                self.prime_operating_point_seed(
+                    circuit,
+                    seed,
+                    0.0,
+                    crate::xspice::AnalysisType::DcOp,
+                );
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn solve_nonlinear_with_guess_unchecked(
         &self,
         circuit: &mut CircuitData,
@@ -994,22 +1059,8 @@ impl Engine {
         let startup_seed = solution.clone();
         self.prime_operating_point_seed(circuit, &solution, 0.0, crate::xspice::AnalysisType::DcOp);
 
-        // An explicit simultaneous source-step request defines the nonlinear
-        // solve path; it is not merely a fallback hint. Run its lambda=0..1
-        // continuation before attempting the physical-system Newton solve.
-        if let Some(policy) = explicit_source_continuation_policy(
-            self.config.convergence_config.nonlinear_continuation,
-        ) {
-            return self.source_stepping_nonlinear_with_policy_and_abort(
-                circuit, matrix, &solution, policy, abort,
-            );
-        }
-        if let Some(mode) = self.config.convergence_config.nonlinear_continuation
-            && mode != crate::config::NonlinearContinuationMode::Standard
-        {
-            return Err(SimulationError::Circuit(format!(
-                "nonlinear continuation mode {mode:?} is parsed but has no native solver implementation"
-            )));
+        if let Some(solved) = self.explicit_continuation_solve(circuit, matrix, &solution, abort)? {
+            return Ok(solved);
         }
         let mut rhs = vec![0.0; size];
         let mut raw_solution = Vec::with_capacity(size);
