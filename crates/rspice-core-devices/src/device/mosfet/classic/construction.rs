@@ -189,6 +189,7 @@ impl Mosfet {
             initial_condition: None,
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
+            update_open: false,
             indices: MosfetIndices::default(),
         }
     }

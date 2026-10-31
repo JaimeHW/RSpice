@@ -17,6 +17,40 @@ impl Mosfet {
         voltages: &[Value],
         constants: Option<&ClassicMosTransientConstants>,
     ) {
+        let (vgs, vds, vbs) = self.branch_voltages(voltages);
+        // One Newton iterate reaches `update` twice, after its solve and again
+        // before its stamp. mos1load.c limits each load once against
+        // CKTstate0, so the second pass of a limited iterate keeps the
+        // history the first pass started from and limits against it again
+        // (re-evaluating, as the junction GMIN may have moved in between)
+        // instead of compounding DEVfetlim/DEVlimvds/DEVpnjlim on its own
+        // output. A third update at the same raw voltages is the next
+        // iteration, which a solve that repeats them still has to advance.
+        let same_iterate =
+            std::mem::take(&mut self.update_open) && self.repeats_limited_iterate(vgs, vds, vbs);
+        if !same_iterate {
+            self.advance_iterate_history(constants);
+        }
+        self.update_from_history(vgs, vds, vbs, constants);
+        self.update_open = !same_iterate;
+    }
+
+    /// The iterate the last `update` limited is being updated again: the
+    /// same raw branch voltages, which limiting moved.
+    #[inline]
+    fn repeats_limited_iterate(&self, vgs: Value, vds: Value, vbs: Value) -> bool {
+        let raw = [vgs, vds, vbs].map(Value::to_bits);
+        let last_raw = [self.vgs, self.vds, self.vbs].map(Value::to_bits);
+        let last_eval = [self.eval_vgs, self.eval_vds, self.eval_vbs].map(Value::to_bits);
+        self.has_branch_history
+            && !(self.initial_off && self.initial_off_seed_pending)
+            && raw == last_raw
+            && last_eval != last_raw
+    }
+
+    /// Make the present state the previous iterate.
+    #[inline]
+    fn advance_iterate_history(&mut self, constants: Option<&ClassicMosTransientConstants>) {
         self.vgs_prev = self.vgs;
         self.vds_prev = self.vds;
         self.vbs_prev = self.vbs;
@@ -58,8 +92,16 @@ impl Mosfet {
                 );
             }
         }
+    }
 
-        let (vgs, vds, vbs) = self.branch_voltages(voltages);
+    #[inline]
+    fn update_from_history(
+        &mut self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        constants: Option<&ClassicMosTransientConstants>,
+    ) {
         // The OFF startup state owns the device only until Newton produces a
         // new iterate, exactly as MODEINITJCT gives way to MODEINITFLOAT after
         // ngspice's first load. The operating-point seed here is primed and
@@ -506,5 +548,49 @@ mod tests {
                 );
             }
         }
+    }
+
+    struct NoStamp;
+
+    impl MatrixStamper for NoStamp {
+        fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
+        fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    #[test]
+    fn an_iterate_updated_twice_is_limited_once() {
+        // Drain on node 1, gate on node 2, source and bulk grounded.
+        let mut mos = Mosfet::new_nmos("m1".into(), 1, 2, 0, 0);
+        mos.vto = 1.0;
+        mos.update(&[0.0, 0.0]);
+
+        // A 4 V gate step out of cutoff, which DEVfetlim holds at vto + 0.5.
+        let iterate = [0.05, 4.0];
+        let mut once = mos.clone();
+        once.update(&iterate);
+        let once = (once.eval_vgs, once.eval_vds, once.eval_vbs);
+        assert!(once.0 < 2.0, "the step is limited: {once:?}");
+
+        // The engine updates an iterate after its solve and again before it
+        // stamps it; both passes and the stamp see one limiting.
+        mos.update(&iterate);
+        mos.update(&iterate);
+        assert_tuple_bits_eq((mos.eval_vgs, mos.eval_vds, mos.eval_vbs), once, "updates");
+        let (vgs, vds, vbs) = mos.branch_voltages(&iterate);
+        assert_tuple_bits_eq(
+            mos.limited_branch_voltages_for_eval(vgs, vds, vbs),
+            once,
+            "stamp",
+        );
+
+        // A solve that returns the same voltages after the load is the next
+        // iteration, which limits again from where this one stopped.
+        mos.stamp_nonlinear(&iterate, &mut NoStamp, &mut []);
+        mos.update(&iterate);
+        assert!(
+            mos.eval_vgs > once.0,
+            "the next iteration advances: {}",
+            mos.eval_vgs
+        );
     }
 }

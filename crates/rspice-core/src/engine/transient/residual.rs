@@ -3548,8 +3548,15 @@ M1 d g 0 0 NM W=10u L=1u
             .expect("operating point converges");
         solution[circuit.get_node_by_name("g").expect("gate node") - 1] = 1.4;
         solution[circuit.get_node_by_name("d").expect("drain node") - 1] = 2.7;
-        circuit.update_nonlinear(&solution);
-        circuit.update_nonlinear(&solution);
+        // A MOSFET limits each Newton iterate once, so updating one iterate
+        // again leaves it limited; each later update is the next iterate and
+        // walks the limited bias on to the solution's.
+        for _ in 0..8 {
+            circuit.update_nonlinear(&solution);
+            if circuit.mosfets.last_update_all_is_physical() {
+                break;
+            }
+        }
         assert!(
             circuit.mosfets.last_update_all_is_physical(),
             "fixture must exercise exact physical-cache reuse"

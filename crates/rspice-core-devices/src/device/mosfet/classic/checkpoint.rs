@@ -171,6 +171,7 @@ impl Mosfet {
         self.linearization_cache_valid = state.flags[1];
         self.initial_off_seed_pending = state.flags[3];
         self.initial_off_seed_evaluations = state.seed_evaluations;
+        self.update_open = false;
         Ok(())
     }
 }

@@ -507,6 +507,9 @@ pub struct Mosfet {
     initial_off_seed_pending: bool,
     /// How many evaluations the `OFF` startup state has already served.
     initial_off_seed_evaluations: u8,
+    /// The last `update` began an iterate that no second `update` has seen
+    /// yet (see `update_impl`).
+    update_open: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -559,6 +562,7 @@ pub struct MosfetNonlinearState {
     linearization_cache_valid: bool,
     initial_off_seed_pending: bool,
     initial_off_seed_evaluations: u8,
+    update_open: bool,
 }
 
 impl Mosfet {
@@ -602,6 +606,7 @@ impl Mosfet {
             linearization_cache_valid: self.linearization_cache_valid,
             initial_off_seed_pending: self.initial_off_seed_pending,
             initial_off_seed_evaluations: self.initial_off_seed_evaluations,
+            update_open: self.update_open,
         }
     }
 
@@ -644,6 +649,7 @@ impl Mosfet {
         self.linearization_cache_valid = state.linearization_cache_valid;
         self.initial_off_seed_pending = state.initial_off_seed_pending;
         self.initial_off_seed_evaluations = state.initial_off_seed_evaluations;
+        self.update_open = state.update_open;
     }
 
     /// The deck marked this instance `OFF`, so its first Newton evaluation
@@ -722,7 +728,7 @@ mod layout_tests {
     fn classic_mos_hot_instance_layout_stays_compact() {
         let bytes = std::mem::size_of::<Mosfet>();
         assert!(
-            bytes <= 1_216,
+            bytes <= 1_224,
             "classic MOS hot instance regressed to {bytes} bytes; keep cold model-family payloads indirect"
         );
     }
