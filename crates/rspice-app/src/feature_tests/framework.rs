@@ -15,6 +15,7 @@ mod document_bar;
 mod drawers;
 mod inspector;
 mod measurement_rows;
+mod navigator;
 mod notification_center;
 mod shortcuts;
 mod shortcuts_category;

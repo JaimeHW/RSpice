@@ -10,6 +10,7 @@ mod document_edit;
 pub(super) mod histogram_publication;
 mod inspector;
 mod navigation;
+mod navigator_browser;
 mod op_inspector;
 mod persistent_document;
 mod result_import_adapters;

@@ -136,12 +136,6 @@ pub(crate) mod docks {
         pub(in crate::workbench) mod models;
         pub(in crate::workbench) mod netlist;
         pub(in crate::workbench) mod project;
-        #[cfg(test)]
-        pub(in crate::workbench) use rspice_app_results::workbench::docks::navigator::results;
-        #[cfg(test)]
-        use rspice_app_results::workbench::docks::navigator::results_actions;
-        #[cfg(test)]
-        use rspice_app_results::workbench::docks::navigator::results_rows;
         pub(in crate::workbench) mod simulate;
         pub(in crate::workbench) mod source_bundle;
         pub(in crate::workbench) mod stimulus;
