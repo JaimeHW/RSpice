@@ -29,7 +29,6 @@ use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, command_edits_schematic, file_action,
     open_project_dialog, run_project_file_action,
 };
-use crate::workbench::documents::text_editor_commands::SourceEditorRequest;
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
     CommandAvailability, CommandFlags, CommandSpec, ids,
@@ -40,7 +39,8 @@ use crate::workbench::framework::requests::{
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
     OpenProjectDialog, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
     PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
-    ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, SubcircuitSymbolSource,
+    ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, SourceEditorRequest,
+    SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;

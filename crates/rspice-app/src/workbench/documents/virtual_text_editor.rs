@@ -18,9 +18,11 @@ use crate::ui::widgets::{Problem, paint_problem_mark};
 
 use super::text_document_model::{TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
-    ByteSelection, EditorSyntax, EditorViewCommand, StandardCommand, StructuralCommand,
-    apply_structural_command, take_queued_caret_char_index, take_queued_standard_command,
-    take_queued_structural_command, take_queued_view_command,
+    ByteSelection, EditorSyntax, apply_structural_command, take_queued_caret_char_index,
+    take_queued_standard_command, take_queued_structural_command, take_queued_view_command,
+};
+use crate::workbench::framework::requests::{
+    EditorViewCommand, StandardCommand, StructuralCommand,
 };
 
 const ROW_OVERSCAN: usize = 4;

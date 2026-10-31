@@ -225,9 +225,7 @@ pub(crate) fn navigate_active_source(
     // The page hands this to the editor it draws next, which is the
     // definition's file.
     app.state.workbench.outbox.push(
-        crate::workbench::documents::text_editor_commands::SourceEditorRequest::RevealLine(
-            definition.line,
-        ),
+        crate::workbench::framework::requests::SourceEditorRequest::RevealLine(definition.line),
     );
     Ok(())
 }

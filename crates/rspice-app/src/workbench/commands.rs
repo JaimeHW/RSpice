@@ -131,8 +131,8 @@ impl Command {
     /// an edit of the schematic hidden behind it.
     pub(crate) const fn source_editor_request(
         self,
-    ) -> Option<crate::workbench::documents::text_editor_commands::SourceEditorRequest> {
-        use crate::workbench::documents::text_editor_commands::{
+    ) -> Option<crate::workbench::framework::requests::SourceEditorRequest> {
+        use crate::workbench::framework::requests::{
             EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
         };
         Some(match self {

@@ -723,3 +723,89 @@ mod tests {
         assert_eq!(outbox.peek::<Early>(), Some(&Early(9)));
     }
 }
+
+/// An Edit menu command as the focused source editor carries it out.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StandardCommand {
+    #[default]
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    /// What the Delete key does: the selection, or the character after the
+    /// caret.
+    Delete,
+    SelectAll,
+}
+
+impl StandardCommand {
+    pub const fn mutates_source(self) -> bool {
+        matches!(
+            self,
+            Self::Undo | Self::Redo | Self::Cut | Self::Paste | Self::Delete
+        )
+    }
+}
+
+/// A command on whole source lines, which every source language's editor
+/// applies alike.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum StructuralCommand {
+    #[default]
+    Indent,
+    Outdent,
+    ToggleComment,
+    DuplicateLine,
+    DeleteLine,
+    MoveLineUp,
+    MoveLineDown,
+    MatchBracket,
+}
+
+/// A command that folds or unfolds the source editor's view of its text.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum EditorViewCommand {
+    #[default]
+    FoldSelection,
+    UnfoldAtCaret,
+    FoldAll,
+    UnfoldAll,
+}
+
+impl StructuralCommand {
+    pub const fn mutates_source(self) -> bool {
+        !matches!(self, Self::MatchBracket)
+    }
+}
+
+/// What the application asks of the active source editor. Each one is
+/// exactly what its shortcut does with the editor focused.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SourceEditorRequest {
+    Standard(StandardCommand),
+    Structural(StructuralCommand),
+    View(EditorViewCommand),
+    GoToLine,
+    /// Format the whole document; the page that owns the editor applies it.
+    FormatDocument,
+    /// Put the caret at the start of a one-based line and scroll it into view.
+    RevealLine(usize),
+}
+
+impl SourceEditorRequest {
+    pub const fn mutates_source(self) -> bool {
+        match self {
+            Self::Standard(command) => command.mutates_source(),
+            Self::Structural(command) => command.mutates_source(),
+            Self::FormatDocument => true,
+            Self::View(_) | Self::GoToLine | Self::RevealLine(_) => false,
+        }
+    }
+}
+
+/// The menus, palette, shortcuts and language tools raise these; the page
+/// that draws the active source editor hands it over just before drawing it.
+impl Request for SourceEditorRequest {
+    const DRAIN: Drain = Drain::SourceEditor;
+}

@@ -24,9 +24,8 @@ use rspice_core::abort_signal::{AbortSignal, NoAbort};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-use crate::workbench::documents::text_editor_commands::{
-    EditorSyntax, StandardCommand, show_go_to_line,
-};
+use crate::workbench::documents::text_editor_commands::{EditorSyntax, show_go_to_line};
+use crate::workbench::framework::requests::StandardCommand;
 use crate::workbench::{AppState, MessageId};
 
 use super::{

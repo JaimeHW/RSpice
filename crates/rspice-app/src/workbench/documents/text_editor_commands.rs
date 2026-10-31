@@ -12,35 +12,16 @@ use egui::{Id, Key, KeyboardShortcut, Modifiers, Ui};
 // The workbench session records which source editor a page shows.
 pub(crate) use crate::workbench::state::ActiveSourceEditor;
 
+use crate::workbench::framework::requests::{
+    EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
+};
+
 #[derive(Debug, Clone, Default)]
 struct GoToLineState {
     open: bool,
     input: String,
     error: Option<String>,
     focus_input: bool,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum StandardCommand {
-    #[default]
-    Undo,
-    Redo,
-    Cut,
-    Copy,
-    Paste,
-    /// What the Delete key does: the selection, or the character after the
-    /// caret.
-    Delete,
-    SelectAll,
-}
-
-impl StandardCommand {
-    pub(crate) const fn mutates_source(self) -> bool {
-        matches!(
-            self,
-            Self::Undo | Self::Redo | Self::Cut | Self::Paste | Self::Delete
-        )
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,34 +47,6 @@ impl EditorSyntax {
             Self::VerilogA => "// ",
             Self::Python | Self::Yaml | Self::Toml => "# ",
         }
-    }
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum StructuralCommand {
-    #[default]
-    Indent,
-    Outdent,
-    ToggleComment,
-    DuplicateLine,
-    DeleteLine,
-    MoveLineUp,
-    MoveLineDown,
-    MatchBracket,
-}
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
-pub(crate) enum EditorViewCommand {
-    #[default]
-    FoldSelection,
-    UnfoldAtCaret,
-    FoldAll,
-    UnfoldAll,
-}
-
-impl StructuralCommand {
-    pub(crate) const fn mutates_source(self) -> bool {
-        !matches!(self, Self::MatchBracket)
     }
 }
 
@@ -222,38 +175,6 @@ pub(crate) fn take_queued_standard_command(
     context.data_mut(|data| {
         data.remove_temp::<StandardCommand>(editor_id.with("pending-standard-command"))
     })
-}
-
-/// What the application asks of the active source editor. Each one is
-/// exactly what its shortcut does with the editor focused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum SourceEditorRequest {
-    Standard(StandardCommand),
-    Structural(StructuralCommand),
-    View(EditorViewCommand),
-    GoToLine,
-    /// Format the whole document; the page that owns the editor applies it.
-    FormatDocument,
-    /// Put the caret at the start of a one-based line and scroll it into view.
-    RevealLine(usize),
-}
-
-impl SourceEditorRequest {
-    pub(crate) const fn mutates_source(self) -> bool {
-        match self {
-            Self::Standard(command) => command.mutates_source(),
-            Self::Structural(command) => command.mutates_source(),
-            Self::FormatDocument => true,
-            Self::View(_) | Self::GoToLine | Self::RevealLine(_) => false,
-        }
-    }
-}
-
-/// The menus, palette, shortcuts and language tools raise these; the page
-/// that draws the active source editor hands it over just before drawing it.
-impl crate::workbench::framework::requests::Request for SourceEditorRequest {
-    const DRAIN: crate::workbench::framework::requests::Drain =
-        crate::workbench::framework::requests::Drain::SourceEditor;
 }
 
 /// Hand `request` to the editor `editor_id`, which applies it the next time
