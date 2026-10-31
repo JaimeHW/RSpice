@@ -1488,12 +1488,12 @@ mod operating_point_rule_tests {
         );
     }
 
-    /// One instance of every family that reopens on its MODEINITJCT load.
+    /// One deck for each family that reopens on its MODEINITJCT load.
     /// Norton supplies drive them: with ideal voltage sources in their place,
-    /// pseudo-transient continuation does not solve this circuit's first
-    /// stage even from its operating point.
-    const REOPENED_FAMILIES: &str = "\
-* every aid opens on the MODEINITJCT load
+    /// pseudo-transient continuation does not solve the first stage of the
+    /// bipolar deck even from its operating point.
+    const REOPENED_FAMILIES: &[&str] = &["\
+* bipolar and SOI
 icc 0 vcc 5m
 rcc vcc 0 1k
 rb1 vcc b1 100k
@@ -1511,84 +1511,117 @@ m3 d3 g3 0 0 nsoi w=4u l=1u
 .model nsoi nmos level=57
 .op
 .end
-";
+"];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load
     /// (cktop.c), so an aid that follows a failed direct Newton walks as it
-    /// would on a circuit no Newton has touched. Every device here is first
-    /// driven far from its operating point, as a failed direct Newton can
-    /// leave it, and each aid must then retrace the walk it takes on a
+    /// would on a circuit no Newton has touched. Here three direct-Newton
+    /// loads first leave every device far from its operating point, and each
+    /// aid must then retrace, from the operating point, the walk it takes on a
     /// freshly built circuit, to the bit and to the iteration.
     #[test]
     fn every_aid_walks_as_on_a_fresh_circuit_whatever_the_direct_newton_left() {
-        let netlist = crate::netlist::Netlist::parse(REOPENED_FAMILIES).unwrap();
-        let circuit = |engine: &Engine| linked(engine, engine.build_circuit(&netlist).unwrap());
-        let engine = || {
-            Engine::new(SimulationConfig {
-                spice_dialect: crate::engine::SpiceDialect::Ngspice,
-                ..SimulationConfig::default()
-            })
-            .resolved_for_netlist(&netlist)
-        };
-        let seed = {
-            let engine = engine();
-            let (mut circuit, mut matrix) = circuit(&engine);
-            let zero = vec![0.0; circuit.matrix_size()];
-            engine
-                .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
-                .unwrap()
-        };
         let mut walked_apart = Vec::new();
-        for aid in ["gmin", "source", "pseudo", "arc"] {
-            let walk = |left_far: bool| {
+        for deck in REOPENED_FAMILIES {
+            let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+            let title = deck.lines().next().unwrap_or_default();
+            let circuit = |engine: &Engine| linked(engine, engine.build_circuit(&netlist).unwrap());
+            let engine = || {
+                Engine::new(SimulationConfig {
+                    spice_dialect: crate::engine::SpiceDialect::Ngspice,
+                    ..SimulationConfig::default()
+                })
+                .resolved_for_netlist(&netlist)
+            };
+            // The operating point, from whichever aid reaches it from zero.
+            let seed = {
                 let engine = engine();
                 let (mut circuit, mut matrix) = circuit(&engine);
-                let size = circuit.matrix_size();
-                if left_far {
-                    for swing in [7.0, -4.0, 11.0] {
-                        let far: Vec<Value> = (0..size)
-                            .map(|i| swing * (1.0 + (i % 3) as Value) - (i % 2) as Value)
-                            .collect();
-                        circuit.update_nonlinear(&far);
-                    }
-                }
-                let op = match aid {
-                    "gmin" => engine.gmin_stepping_nonlinear_with_abort(
-                        &mut circuit,
-                        &mut matrix,
-                        &seed,
-                        &NoAbort,
-                    ),
-                    "source" => engine.source_stepping_nonlinear_with_guess_and_abort(
-                        &mut circuit,
-                        &mut matrix,
-                        &seed,
-                        &NoAbort,
-                    ),
-                    "pseudo" => engine.pseudo_transient_nonlinear_with_guess_and_abort(
-                        &mut circuit,
-                        &mut matrix,
-                        &seed,
-                        &NoAbort,
-                    ),
-                    _ => engine.arc_length_continuation_nonlinear_with_guess_and_abort(
-                        &mut circuit,
-                        &mut matrix,
-                        &seed,
-                        &NoAbort,
-                    ),
-                };
-                (
-                    op.map(|op| op.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
-                        .map_err(|error| error.to_string()),
-                    engine.convergence_quality().total_iterations,
-                )
+                let zero = vec![0.0; circuit.matrix_size()];
+                engine
+                    .gmin_stepping_nonlinear_with_abort(&mut circuit, &mut matrix, &zero, &NoAbort)
+                    .or_else(|_| {
+                        engine.source_stepping_nonlinear_with_guess_and_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            &zero,
+                            &NoAbort,
+                        )
+                    })
+                    .unwrap_or_else(|error| panic!("{title}: {error}"))
             };
-            let fresh = walk(false);
-            assert!(fresh.0.is_ok(), "{aid}: {:?}", fresh.0);
-            if walk(true) != fresh {
-                walked_apart.push(aid);
+            let mut solved = 0;
+            for aid in ["gmin", "source", "pseudo", "arc"] {
+                let walk = |left_far: bool| {
+                    let engine = engine();
+                    let (mut circuit, mut matrix) = circuit(&engine);
+                    let size = circuit.matrix_size();
+                    if left_far {
+                        let mut rhs = vec![0.0; size];
+                        let mut correction_rhs = Vec::new();
+                        for swing in [7.0, -4.0, 11.0] {
+                            let far: Vec<Value> = (0..size)
+                                .map(|i| swing * (1.0 + (i % 3) as Value) - (i % 2) as Value)
+                                .collect();
+                            matrix.clear_values();
+                            rhs.fill(0.0);
+                            // A load that refuses to evaluate there still
+                            // leaves its devices where it reached them.
+                            let _ = engine.try_stamp_operating_point_newton_system(
+                                &mut circuit,
+                                &mut matrix,
+                                &mut rhs,
+                                OperatingPointProbe {
+                                    solution: &far,
+                                    time: 0.0,
+                                    analysis: crate::xspice::AnalysisType::DcOp,
+                                    junction_gmin: 0.0,
+                                },
+                                false,
+                                &mut correction_rhs,
+                            );
+                        }
+                    }
+                    let loads = engine.convergence_quality().total_iterations;
+                    let op = match aid {
+                        "gmin" => engine.gmin_stepping_nonlinear_with_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            &seed,
+                            &NoAbort,
+                        ),
+                        "source" => engine.source_stepping_nonlinear_with_guess_and_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            &seed,
+                            &NoAbort,
+                        ),
+                        "pseudo" => engine.pseudo_transient_nonlinear_with_guess_and_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            &seed,
+                            &NoAbort,
+                        ),
+                        _ => engine.arc_length_continuation_nonlinear_with_guess_and_abort(
+                            &mut circuit,
+                            &mut matrix,
+                            &seed,
+                            &NoAbort,
+                        ),
+                    };
+                    (
+                        op.map(|op| op.iter().map(|v| v.to_bits()).collect::<Vec<_>>())
+                            .map_err(|error| error.to_string()),
+                        engine.convergence_quality().total_iterations - loads,
+                    )
+                };
+                let fresh = walk(false);
+                solved += usize::from(fresh.0.is_ok());
+                if walk(true) != fresh {
+                    walked_apart.push((title, aid));
+                }
             }
+            assert!(solved > 0, "{title}: no aid solves the fresh circuit");
         }
         assert!(walked_apart.is_empty(), "walked apart: {walked_apart:?}");
     }
