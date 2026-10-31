@@ -1431,6 +1431,18 @@ impl EkvMosfet {
 }
 
 impl NonlinearDevice for EkvMosfet {
+    fn reopen_operating_point(&mut self) {
+        // Nothing here limits an iterate; the MODEINITJCT load reopens an
+        // `OFF` instance at zero bias and starts the convergence history
+        // afresh.
+        self.last_values = [0.0; NODE_COUNT];
+        self.converged_values = [0.0; NODE_COUNT];
+        self.has_history = false;
+        self.initial_off_seed_pending = true;
+        self.initial_off_seed_evaluations = 0;
+        self.initial_off_seed_raw = None;
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         self.converged_values = self.last_values;
         // The OFF startup state owns the device only until Newton produces a

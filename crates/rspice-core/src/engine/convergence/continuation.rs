@@ -1581,6 +1581,38 @@ m1 d g 0 vmod
 .op
 .end
 ",
+        "\
+* EKV and EKV3, off
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 2m
+rg1 g 0 1k
+rd1 vcc d1 10k
+m1 d1 g 0 0 nekv w=1u l=1u off
+.model nekv nmos level=260
+rd2 vcc d2 10k
+m2 d2 g 0 0 nmos150 w=150e-9 l=150e-9 nf=1 off
+.model nmos150 nmos level=301
++ sign=1 tg=-1 scale=1.0 xl=0.0 xw=0.0
++ cox=8.58e-3 gammag=18.4 aqma=0.0 aqmi=0.0 etaqm=0.75
++ vto=400.0e-3 phif=450.0e-3 gamma=300.0e-3 xj=30.0e-9 n0=1.025
++ kp=390.0e-6 e0=438.0e+6 e1=159.0e+6 eta=0.57 zc=1.0e-6 thc=0.0
++ pdits=2.58e-6 pditsd=0.91 pditsl=0.0 fprout=1.85e+6 ddits=0.1
++ avto=0.0 akp=0.0 agamma=0.0
++ ucrit=5.0e+6 delta=1.5 lambda=0.5 aclm=0.85
++ dl=-16.7e-9 dlc=-23.0e-9 wdl=0.0 ll=0.0 lln=1.0 dw=-45.3e-9 dwc=0.0 ldw=0.0
++ leta0=1.0e+6 leta=1.3 leta2=0.0 weta=1.0 ncs=0.5
++ etad=0.75 sigmad=1.0
++ lr=100e-9 qlr=580e-6 nlr=100.0e-3 flr=2
++ wr=80.0e-9 qwr=500.0e-6 nwr=12.0e-3
++ rlx=170.0e-6
++ lov=25.0e-9 gammaov=5.0 vfbov=0.0 kjf=150.0e-12 cjf=300.0e-3
++ kg=50.0e-6 xb=5.5 eb=21.0e+9 lovig=40.0e-12
++ tnom=30.0 tcv=600.0e-6 bex=-1.6 te0ex=-4.15 te1ex=0.0 teta=2.0e-3
++ ucex=1.2 tlambda=0.15 tcvl=0.0 tcvw=0.0 tcvwl=0.0
+.op
+.end
+",
     ];
 
     /// ngspice opens every operating-point aid on the MODEINITJCT load
