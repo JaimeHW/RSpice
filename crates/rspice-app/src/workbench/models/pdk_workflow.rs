@@ -284,11 +284,7 @@ fn prepare_pdk_configuration_candidate(
 /// A directory holding one model source file, for a PDK configuration to
 /// name.
 #[cfg(test)]
-pub(crate) fn configured_root(
-    label: &str,
-    file_name: &str,
-    model_name: &str,
-) -> std::path::PathBuf {
+pub fn configured_root(label: &str, file_name: &str, model_name: &str) -> std::path::PathBuf {
     let root = std::env::temp_dir().join(format!(
         "rspice-pdk-workflow-{label}-{}",
         uuid::Uuid::new_v4()
@@ -303,7 +299,7 @@ pub(crate) fn configured_root(
 }
 
 #[cfg(test)]
-pub(crate) fn apply_pdk_configuration_with_persistence(
+pub fn apply_pdk_configuration_with_persistence(
     model: &mut Model,
     platform: &PlatformState,
     config: crate::state::pdk_config::PdkConfig,
@@ -719,7 +715,7 @@ impl ModelsFeature {
     /// It is called from the frame loop rather than from any one surface,
     /// because a hub install started from the component shelf must finish even
     /// if the user has since walked away from the Models workspace.
-    pub(crate) fn pump_model_catalog_operations(cx: &mut Cx<'_, ModelsFeature>, ctx: &Context) {
+    pub fn pump_model_catalog_operations(cx: &mut Cx<'_, ModelsFeature>, ctx: &Context) {
         #[cfg(not(target_arch = "wasm32"))]
         poll_native_model_imports(ctx, cx);
         #[cfg(target_arch = "wasm32")]

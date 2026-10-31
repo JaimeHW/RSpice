@@ -25,7 +25,7 @@ mod commands;
 /// The models feature on its own, over what a new session starts with:
 /// the model over the empty PDK configuration a test session reads, and a
 /// new session's workbench.
-pub(crate) fn harness() -> FeatureHarness<ModelsFeature> {
+pub fn harness() -> FeatureHarness<ModelsFeature> {
     FeatureHarness::with_model(
         Model::session_start(PdkConfig::default(), None, restore_model_library_manager),
         WorkbenchSession::default(),
@@ -33,9 +33,7 @@ pub(crate) fn harness() -> FeatureHarness<ModelsFeature> {
 }
 
 /// The parts opening a model in the editor writes, over the harness.
-pub(crate) fn model_editor_parts(
-    harness: &mut FeatureHarness<ModelsFeature>,
-) -> ModelEditorParts<'_> {
+pub fn model_editor_parts(harness: &mut FeatureHarness<ModelsFeature>) -> ModelEditorParts<'_> {
     harness
         .state
         .model_editor_parts(&mut harness.model, &mut harness.wb, &harness.platform)
@@ -43,7 +41,7 @@ pub(crate) fn model_editor_parts(
 
 /// Save the model editor's open candidate as one guarded project revision,
 /// in the feature's context, as the Model Editor's own save does.
-pub(crate) fn save_open_model_candidate(
+pub fn save_open_model_candidate(
     harness: &mut FeatureHarness<ModelsFeature>,
 ) -> Result<ObjectRevision, String> {
     let cx = &mut harness.cx();
@@ -57,7 +55,7 @@ pub(crate) fn save_open_model_candidate(
 /// A kit holding two bins of `nch` and the card `nch_25`, and one NMOS
 /// instance per entry of `models`, `M1` onward, each naming that model, with
 /// the catalog on show.
-pub(crate) fn kit_project(project: &mut Model, state: &mut ModelsState, models: &[&str]) {
+pub fn kit_project(project: &mut Model, state: &mut ModelsState, models: &[&str]) {
     project.model_library_manager.clear();
     let mut kit = ModelLibrary::new("kit");
     for (name, line, length) in [
@@ -98,7 +96,7 @@ pub(crate) fn kit_project(project: &mut Model, state: &mut ModelsState, models: 
 /// The catalog's cells are painter text, so reading the shapes back is the
 /// only way to judge what a row says — and, for the status column, what it
 /// means by the tone it says it in.
-pub(crate) fn painted_text(output: &egui::FullOutput) -> Vec<(String, Color32)> {
+pub fn painted_text(output: &egui::FullOutput) -> Vec<(String, Color32)> {
     fn walk(shape: &egui::epaint::Shape, out: &mut Vec<(String, Color32)>) {
         match shape {
             egui::epaint::Shape::Text(text) => out.push((

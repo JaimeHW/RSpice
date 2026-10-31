@@ -67,7 +67,7 @@ pub(super) fn parse_non_negative(value: &str, label: &str) -> Result<f64, String
 /// parts alone, so the rules take them rather than the application state, and
 /// a feature's availability can answer them from what it reads.
 #[derive(Clone, Copy)]
-pub(crate) struct ModelEditorReads<'a> {
+pub struct ModelEditorReads<'a> {
     pub(crate) editor: &'a ModelEditorState,
     pub(crate) selected_model: &'a Option<String>,
     pub(crate) model: &'a Model,
@@ -82,7 +82,7 @@ pub(crate) struct ModelEditorReads<'a> {
 /// Opening a model or copying one into the project reads and writes those
 /// parts alone, so the operations take them rather than the application
 /// state, and a feature's command can run them in its context.
-pub(crate) struct ModelEditorParts<'a> {
+pub struct ModelEditorParts<'a> {
     pub(crate) editor: &'a mut ModelEditorState,
     pub(crate) selected_model: &'a mut Option<String>,
     pub(crate) model: &'a mut Model,

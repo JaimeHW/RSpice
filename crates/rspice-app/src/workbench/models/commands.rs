@@ -12,7 +12,7 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 
 /// One command of the models feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ModelsCommand {
+pub enum ModelsCommand {
     /// Open the Models workspace on one of its pages.
     Page(ModelsPage),
     ModelBrowser,
@@ -29,7 +29,7 @@ pub(crate) enum ModelsCommand {
 
 impl ModelsCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 16] = [
+    pub const ALL: [Self; 16] = [
         Self::Page(ModelsPage::Models),
         Self::Page(ModelsPage::Symbols),
         Self::Page(ModelsPage::Corners),
@@ -49,7 +49,7 @@ impl ModelsCommand {
     ];
 
     /// The key a shortcut profile names this command by.
-    pub(crate) const fn key(self) -> CommandKey {
+    pub const fn key(self) -> CommandKey {
         match self {
             Self::Page(ModelsPage::Models) => ids::MODELS_CATALOG,
             Self::Page(ModelsPage::Symbols) => CommandKey::new("symbols-cdf"),
@@ -72,7 +72,7 @@ impl ModelsCommand {
 
     /// The command `key` names; `None` for a key the feature does not
     /// declare.
-    pub(crate) fn from_key(key: CommandKey) -> Option<Self> {
+    pub fn from_key(key: CommandKey) -> Option<Self> {
         Self::ALL.into_iter().find(|command| command.key() == key)
     }
 
@@ -82,7 +82,7 @@ impl ModelsCommand {
     /// pages commit a pending inspector edit before they navigate, and the
     /// commands that write the project or its model libraries wait for a
     /// project operation in flight.
-    pub(crate) const fn declared_spec(self) -> CommandSpec {
+    pub const fn declared_spec(self) -> CommandSpec {
         let page = CommandFlags::PALETTE_VISIBLE
             .with(CommandFlags::REQUIRES_OPEN_PROJECT, true)
             .with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);

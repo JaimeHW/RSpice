@@ -6,7 +6,7 @@ use crate::workbench::state::WorkspaceDocumentId;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 
 /// The Models workspace's one document, its pinned root.
-pub(in crate::workbench) fn models_documents() -> Vec<WorkspaceDocument> {
+pub fn models_documents() -> Vec<WorkspaceDocument> {
     vec![WorkspaceDocument {
         id: WorkspaceDocumentId::Models,
         label: "Models & PDKs".to_owned(),

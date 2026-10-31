@@ -4,7 +4,7 @@
 
 /// What the models feature keeps between frames.
 #[derive(Debug, Clone, Default)]
-pub(crate) struct ModelsState {
+pub struct ModelsState {
     pub models_page: crate::state::ModelsPage,
     /// Models & PDKs catalog filters and stable presentation selections.
     /// Model, source, symbol, and PDK records remain in their owning domains.
@@ -18,11 +18,11 @@ pub(crate) struct ModelsState {
     /// Exact unsaved model candidate retained for device-local crash/session
     /// recovery. Its immutable base is reconstructed and authenticated before
     /// it is allowed back into the runtime editor.
-    pub(crate) model_editor_recovery:
+    pub model_editor_recovery:
         Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
     /// Application-owned recovery for unsigned PDK authoring edits that have
     /// not completed the explicit durable PDK configuration transaction.
-    pub(crate) pdk_technology_authoring:
+    pub pdk_technology_authoring:
         crate::workbench::models::workspace_state::PdkTechnologyAuthoringRecovery,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
@@ -31,17 +31,17 @@ pub(crate) struct ModelsState {
         crate::workbench::documents::model_correlation::ModelCorrelationWorkspaceState,
     /// PDK Settings dialog state. Boxed: it carries a whole PDK configuration
     /// working copy and its original.
-    pub(crate) pdk_settings_dialog:
+    pub pdk_settings_dialog:
         Box<crate::workbench::app_state::session::pdk_settings::PdkSettingsDialogState>,
     /// Standalone model browser state (for Tools menu access)
-    pub(crate) model_browser_state:
+    pub model_browser_state:
         rspice_app_workbench::workbench::app::dialogs::model_browser::ModelBrowserState,
 }
 
 impl ModelsState {
     /// What the model commands' selection rules read: this slot's editor and
     /// selection, the model and the platform state.
-    pub(crate) fn model_editor_reads<'a>(
+    pub fn model_editor_reads<'a>(
         &'a self,
         model: &'a rspice_app_state::workbench::app_state::model::Model,
         platform: &'a rspice_app_services::workbench::slots::platform::PlatformState,
@@ -56,7 +56,7 @@ impl ModelsState {
 
     /// What opening a model in the editor writes: this slot's editor and
     /// selection, the model and the session, beside the platform state.
-    pub(crate) fn model_editor_parts<'a>(
+    pub fn model_editor_parts<'a>(
         &'a mut self,
         model: &'a mut rspice_app_state::workbench::app_state::model::Model,
         workbench: &'a mut crate::workbench::state::WorkbenchSession,
@@ -71,7 +71,7 @@ impl ModelsState {
         }
     }
 
-    pub(crate) fn capture_authoring_recovery(&mut self) {
+    pub fn capture_authoring_recovery(&mut self) {
         self.model_editor_recovery = self
             .model_editor
             .draft
@@ -83,7 +83,7 @@ impl ModelsState {
     /// Reopen the model editor's unsaved draft a restored session carried,
     /// against the model libraries and project revision it restored with. A
     /// draft that no longer applies is dropped, with a warning saying why.
-    pub(crate) fn reopen_authoring_recovery(
+    pub fn reopen_authoring_recovery(
         &mut self,
         model: &mut rspice_app_state::workbench::app_state::model::Model,
     ) {
@@ -119,14 +119,14 @@ impl ModelsState {
         self.model_editor_has_unsaved_changes() || self.pdk_technology_authoring.dirty
     }
 
-    pub(crate) fn clear_project_model_editor(&mut self) {
+    pub fn clear_project_model_editor(&mut self) {
         self.model_editor = crate::workbench::documents::model_editor::ModelEditorState::default();
         self.model_editor_recovery = None;
     }
 
     /// The open project is being replaced or closed: the model editor and its
     /// recovery copy belong to the project going away.
-    pub(crate) fn on_project_changed(&mut self) {
+    pub fn on_project_changed(&mut self) {
         self.clear_project_model_editor();
     }
 }

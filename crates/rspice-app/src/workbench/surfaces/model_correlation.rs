@@ -570,10 +570,7 @@ impl CorrelationProjection {
 impl ModelsFeature {
     /// Draw the measurement correlation route's surface in the feature's
     /// context, with the correlation dialog it opens.
-    pub(in crate::workbench) fn show_model_correlation(
-        cx: &mut Cx<'_, ModelsFeature>,
-        ui: &mut Ui,
-    ) {
+    pub fn show_model_correlation(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
         show(ui, cx);
     }
 

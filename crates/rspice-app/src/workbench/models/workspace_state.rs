@@ -14,11 +14,7 @@ use rspice_app_state::workbench::app_state::model::Model;
 /// Select a model library, stating on the status bar the model library
 /// manager's refusal of a name the project no longer holds. The refusal is
 /// about the gesture, so it is prompted, never logged.
-pub(crate) fn select_library_or_prompt(
-    model: &mut Model,
-    workbench: &mut WorkbenchSession,
-    name: &str,
-) {
+pub fn select_library_or_prompt(model: &mut Model, workbench: &mut WorkbenchSession, name: &str) {
     if let Err(refusal) = model.model_library_manager.select_library(name) {
         workbench.prompt(refusal);
     }
@@ -676,7 +672,7 @@ pub struct PdkTechnologyAuthoringRecovery {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) working_draft: Option<crate::state::pdk_config::PdkTechnologyDraft>,
     #[serde(default)]
-    pub(crate) dirty: bool,
+    pub dirty: bool,
 }
 
 /// Corpus projection selected in the Models & PDKs catalog. This is

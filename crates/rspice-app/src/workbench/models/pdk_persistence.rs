@@ -116,7 +116,7 @@ impl BrowserPdkParts<'_> {
     }
 }
 
-pub(in crate::workbench) fn initialize_browser_pdk_persistence(ctx: &Context) {
+pub fn initialize_browser_pdk_persistence(ctx: &Context) {
     start_restore(ctx);
 }
 

@@ -254,7 +254,7 @@ impl DisplayCell {
 impl ModelsFeature {
     /// Draw the device-model editor route's surface in the feature's
     /// context, with the workflow and inspection dialogs it opens.
-    pub(in crate::workbench) fn show_model_editor(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
+    pub fn show_model_editor(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
         show(ui, cx);
     }
 }

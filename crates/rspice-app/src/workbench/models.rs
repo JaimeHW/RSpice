@@ -39,7 +39,7 @@ use model_editor_workflow::{
 use rspice_app_workbench::workbench::app::dialogs::model_browser::render_model_browser;
 
 /// The models feature.
-pub(crate) struct ModelsFeature;
+pub struct ModelsFeature;
 
 impl Feature for ModelsFeature {
     type State = ModelsState;
@@ -101,10 +101,7 @@ impl ModelsFeature {
     /// Take what browser PDK storage settled since the last frame: a
     /// restored or published configuration goes live and drops the run
     /// preflight, and a failure is logged.
-    pub(in crate::workbench) fn poll_browser_pdk_persistence(
-        cx: &mut Cx<'_, ModelsFeature>,
-        ctx: &egui::Context,
-    ) {
+    pub fn poll_browser_pdk_persistence(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Context) {
         use crate::workbench::models::pdk_persistence::{
             BrowserPdkParts, poll_browser_pdk_persistence,
         };
@@ -123,10 +120,7 @@ impl ModelsFeature {
     /// Take the model packs this browser kept, on the frame their restore
     /// lands: the hub's store takes them, and a pack that does not prove
     /// goes on the workspace's operation ladder.
-    pub(in crate::workbench) fn poll_browser_pack_restore(
-        cx: &mut Cx<'_, ModelsFeature>,
-        ctx: &egui::Context,
-    ) {
+    pub fn poll_browser_pack_restore(cx: &mut Cx<'_, ModelsFeature>, ctx: &egui::Context) {
         use crate::workbench::models::pack_persistence::{
             PackRestoreParts, poll_browser_pack_restore,
         };
@@ -146,7 +140,7 @@ impl ModelsFeature {
     /// `pack_id` `version` for its part `part_id`, or say on the status bar
     /// that the model hub no longer describes that release. Returns whether
     /// the confirmation is up, for the caller to show the catalog it sits on.
-    pub(in crate::workbench) fn confirm_pack_attach(
+    pub fn confirm_pack_attach(
         cx: &mut Cx<'_, ModelsFeature>,
         part_id: String,
         pack_id: String,
@@ -175,11 +169,7 @@ impl ModelsFeature {
     /// Show the catalog model `model` of `library` on the Models workspace's
     /// catalog, saying on the status bar when the project no longer holds
     /// the library.
-    pub(in crate::workbench) fn reveal_model(
-        cx: &mut Cx<'_, ModelsFeature>,
-        library: &str,
-        model: String,
-    ) {
+    pub fn reveal_model(cx: &mut Cx<'_, ModelsFeature>, library: &str, model: String) {
         workspace_state::select_library_or_prompt(cx.model, cx.wb, library);
         cx.state.selected_model = Some(model);
         cx.state.models_page = ModelsPage::Models;

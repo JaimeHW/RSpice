@@ -166,10 +166,7 @@ struct RegistrySnapshot {
 impl ModelsFeature {
     /// Draw the PDK technology administration route's surface in the
     /// feature's context.
-    pub(in crate::workbench) fn show_pdk_technology_admin(
-        cx: &mut Cx<'_, ModelsFeature>,
-        ui: &mut Ui,
-    ) {
+    pub fn show_pdk_technology_admin(cx: &mut Cx<'_, ModelsFeature>, ui: &mut Ui) {
         show(ui, cx);
     }
 }

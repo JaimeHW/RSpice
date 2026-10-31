@@ -7,7 +7,7 @@
 mod qualification_run;
 mod release_candidate;
 
-pub(crate) use qualification_run::*;
+pub use qualification_run::*;
 // Crate-private: `release_candidate` exposes only `pub(super)` helpers, which
 // the sibling modules reach through `use super::*`.
 use release_candidate::*;

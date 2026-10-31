@@ -24,11 +24,7 @@ const MODELS_TOOLBAR_COMMANDS: [(CommandKey, WorkbenchIcon, Option<&str>); 4] = 
     (ids::COMPILE_VERILOG_A, WorkbenchIcon::Netlist, None),
 ];
 
-pub(in crate::workbench) fn model_editor_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn model_editor_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     if let Some(origin) = app.workbench().previous_route() {
         let label = format!("Source: {}", origin.surface_id().label());
         if take_projected_tool_slot(ui, layout)
@@ -82,11 +78,7 @@ pub(in crate::workbench) fn model_editor_tools(
     );
 }
 
-pub(in crate::workbench) fn models_tools(
-    ui: &mut egui::Ui,
-    app: &mut impl WorkbenchHost,
-    layout: LayoutSpec,
-) {
+pub fn models_tools(ui: &mut egui::Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
     for (index, (key, icon, label)) in MODELS_TOOLBAR_COMMANDS.into_iter().enumerate() {
         if matches!(index, 1 | 3) {
             context_separator(ui, layout);
