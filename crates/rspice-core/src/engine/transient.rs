@@ -15105,7 +15105,9 @@ D1 D 0 DMOD
             AcceptedIntegrationRuntime::Exact(runtime) => {
                 assert!(runtime.accepted_interval_count > 0);
                 assert!(runtime.resume_blockers.is_empty());
-                assert!(runtime.trapgear.is_some());
+                // The Xyce dialect integrates with fixed OneStep trapezoidal,
+                // so no adaptive Trap/Gear controller state is captured.
+                assert!(runtime.trapgear.is_none());
             }
             phase => panic!("non-breakpoint checkpoint has unexpected runtime phase {phase:?}"),
         }
