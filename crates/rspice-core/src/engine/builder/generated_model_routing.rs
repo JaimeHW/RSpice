@@ -1387,8 +1387,24 @@ fn append_generated_mos_polarity_param(
     ));
 }
 
+/// The generated MOS modules an `NMOS`/`PMOS` card reaches by LEVEL whose
+/// `TYPE` is the channel polarity, +1 NMOS and -1 PMOS. The card's own type
+/// is then the polarity unless it sets TYPE itself; without this a PMOS card
+/// runs as the module's NMOS default. MOSVAR is not here: its TYPE is the
+/// substrate doping, -1 n-type by default, not the card's channel.
 fn needs_inferred_generated_mos_type(model_name: &str) -> bool {
-    match_normalized(model_name, &["EKV_VA", "BSIMSOI_VA", "BSIMCMG_VA"])
+    match_normalized(
+        model_name,
+        &[
+            "EKV_VA",
+            "BSIMSOI_VA",
+            "BSIMCMG_VA",
+            "PSP104VA",
+            "BSIMSOI__18C250BC",
+            "L_UTSOI__832CE87D",
+            "MVSG_CMC",
+        ],
+    )
 }
 
 fn append_generated_bjt_polarity_param(
@@ -2129,5 +2145,64 @@ mod tests {
                 "LEVEL={level} under {dialect:?} must not select a generated VBIC implementation"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod release_routing_tests {
+    use super::*;
+
+    fn mos_model(card: &str) -> Netlist {
+        Netlist::parse(&format!(
+            "generated MOS release routing\nM1 d g s b model\n.MODEL model {card}\n.END\n"
+        ))
+        .expect("release routing fixture parses")
+    }
+
+    #[test]
+    fn a_pmos_card_routed_by_level_runs_its_module_as_a_pmos() {
+        for (level, module) in [
+            ("104", "PSP104VA"),
+            ("70", "bsimsoi_va"),
+            ("70470", "bsimsoi__18c250bc"),
+            ("10240", "l_utsoi__832ce87d"),
+            ("2002 VERSION=4", "mvsg_cmc"),
+            ("260", "ekv_va"),
+        ] {
+            for (polarity, expected) in [("NMOS", 1.0), ("PMOS", -1.0)] {
+                let card = format!("{polarity} LEVEL={level}");
+                let netlist = mos_model(&card);
+                let model = find_model_def(&netlist, "model").expect("fixture model exists");
+                let target = generated_mos_target("model", Some(model))
+                    .expect("level classification succeeds")
+                    .unwrap_or_else(|| panic!("`{card}` selects a generated module"));
+                assert_eq!(target.model_name, module, "{card}");
+                let mut params = Vec::new();
+                append_generated_mos_polarity_param(target, Some(model), &mut params);
+                let inferred = params
+                    .iter()
+                    .find(|assignment| assignment.name.eq_ignore_ascii_case("TYPE"))
+                    .map(|assignment| assignment.value.clone());
+                assert!(
+                    matches!(inferred, Some(ParametricValue::Resolved(value)) if value == expected),
+                    "`{card}` on {module} must run with TYPE={expected}, got {inferred:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_card_that_sets_type_itself_keeps_it() {
+        let netlist = mos_model("PMOS LEVEL=70470 TYPE=1");
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        let target = generated_mos_target("model", Some(model))
+            .expect("level classification succeeds")
+            .expect("LEVEL=70470 selects BSIM-SOI 4.7.0");
+        let mut params = vec![BuiltinParameterAssignment::model_card(
+            "TYPE",
+            ParametricValue::Resolved(1.0),
+        )];
+        append_generated_mos_polarity_param(target, Some(model), &mut params);
+        assert_eq!(params.len(), 1, "an authored TYPE is never overridden");
     }
 }
