@@ -14,9 +14,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::project_workflow::{
-    NewProjectParams, create_new_project_with, save_project_as,
-};
+use crate::workbench::workflows::project_workflow::{NewProjectParams, save_project_as};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 
 /// The name column every row shares.
@@ -33,7 +31,7 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
         name: example.name.to_owned(),
         ..NewProjectParams::default()
     };
-    create_new_project_with(state, &params)?;
+    state.create_new_project_with(&params)?;
     load_example(example.name, &mut state.model.schematic);
     state.sync_active_schematic_to_workspace();
     Ok(())

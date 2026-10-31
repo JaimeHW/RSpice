@@ -20,7 +20,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
-use crate::workbench::workflows::project_workflow::{NewProjectParams, create_new_project_with};
+use crate::workbench::workflows::project_workflow::NewProjectParams;
 
 /// Draft identity for one New project transaction.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -120,7 +120,7 @@ impl RSpiceApp {
         match choice {
             DialogChoice::Primary => {
                 let params = self.state.project.new_project.params();
-                match create_new_project_with(&mut self.state, &params) {
+                match self.state.create_new_project_with(&params) {
                     Ok(()) => self.state.project.new_project = NewProjectDialogState::default(),
                     Err(error) => self.state.project.new_project.error = Some(error),
                 }

@@ -1911,15 +1911,13 @@ fn a_project_that_cannot_be_read_is_reported_when_it_is_opened() {
 fn a_named_new_project_seeds_every_owner_of_its_identity() {
     let mut state = AppState::default();
 
-    create_new_project_with(
-        &mut state,
-        &NewProjectParams {
+    state
+        .create_new_project_with(&NewProjectParams {
             name: "Precision Sensor AFE".to_owned(),
             root_library: "afe".to_owned(),
             top_cell: "core".to_owned(),
-        },
-    )
-    .expect("a validated identity creates a project");
+        })
+        .expect("a validated identity creates a project");
 
     let workspace = &state.model.workspace;
     assert_eq!(workspace.content.project.name(), "Precision Sensor AFE");
@@ -1983,15 +1981,13 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
     let mut state = AppState::default();
     let before = state.model.workspace.content.project.id();
 
-    let error = create_new_project_with(
-        &mut state,
-        &NewProjectParams {
+    let error = state
+        .create_new_project_with(&NewProjectParams {
             name: "Sensor bridge".to_owned(),
             root_library: "afe top".to_owned(),
             ..NewProjectParams::default()
-        },
-    )
-    .expect_err("a library segment with a space is refused");
+        })
+        .expect_err("a library segment with a space is refused");
 
     assert!(error.starts_with("Library"), "{error}");
     assert_eq!(state.model.workspace.content.project.id(), before);

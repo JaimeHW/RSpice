@@ -10,13 +10,14 @@ use std::path::Path;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::io::ProjectSnapshot;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
 #[cfg(not(target_arch = "wasm32"))]
 use crate::workbench::lifecycle::project_lifecycle::DestinationAuthority;
 use crate::workbench::lifecycle::project_lifecycle::ProjectCloseDestination;
 use crate::workbench::lifecycle::project_lifecycle::{
     PersistenceBinding, ProjectLifecycleError, SaveScope,
 };
+use crate::workbench::state::WorkbenchSession;
 use crate::workbench::workflows::file_workflow::file_name_string;
 #[cfg(not(target_arch = "wasm32"))]
 use rspice_project::ProjectIoError;
@@ -113,33 +114,26 @@ fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
 /// Replace the session with a blank default project.
 #[cfg(test)]
 pub(crate) fn create_new_project(state: &mut AppState) {
-    let _ = create_new_project_with(state, &NewProjectParams::default());
+    let _ = state.create_new_project_with(&NewProjectParams::default());
 }
 
-/// Replace the session with a new project under `params`.
-///
-/// Returns the exact refusal so a dialog can hold itself open beside the
-/// prompt rather than closing over a project that was never created.
-pub(crate) fn create_new_project_with(
-    state: &mut AppState,
-    params: &NewProjectParams,
-) -> Result<(), String> {
-    let announcement = format!(
+/// How a new project under `params` states itself when it replaces the open
+/// one.
+pub(crate) fn new_project_announcement(params: &NewProjectParams) -> String {
+    format!(
         "Created project {} (top cell {}/{}).",
         params.name, params.root_library, params.top_cell
-    );
-    let model_restore_errors = replace_with_new_project(state, params, announcement)?;
-    emit_session_model_restore_errors(state, "new project", model_restore_errors);
-    Ok(())
+    )
 }
 
-/// Replace the session with a new project for a netlist being opened as one.
+/// The project a netlist being opened as one is created as, with how the
+/// replacement states itself.
 ///
 /// The deck's file stem names the project when it is a valid project name.
 /// The replacement states itself as the netlist that was opened, which is
 /// what the reader asked for; a "Created project" line would describe a
 /// project they never asked for.
-pub(crate) fn create_netlist_project(state: &mut AppState, display_name: &str) {
+pub(crate) fn netlist_project(display_name: &str) -> (NewProjectParams, String) {
     const FALLBACK_NAME: &str = "Netlist Project";
     let mut params = NewProjectParams {
         name: std::path::Path::new(display_name)
@@ -154,33 +148,48 @@ pub(crate) fn create_netlist_project(state: &mut AppState, display_name: &str) {
         params.name = FALLBACK_NAME.to_owned();
     }
     let announcement = format!("Opened netlist project {} ({display_name}).", params.name);
-    if let Ok(model_restore_errors) = replace_with_new_project(state, &params, announcement) {
-        emit_session_model_restore_errors(state, "netlist project", model_restore_errors);
-    }
+    (params, announcement)
 }
 
-/// The replacement every creator shares; it returns the model catalog's
-/// restore errors for the caller to report after the announcement.
-fn replace_with_new_project(
-    state: &mut AppState,
+/// Refuse a new project while a run is in progress or `params` do not name a
+/// valid one, answering the gesture with the refusal.
+pub(crate) fn refuse_new_project(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     params: &NewProjectParams,
-    announcement: String,
-) -> Result<Vec<String>, String> {
-    if state.model.simulation.execution.has_active_execution() {
-        lifecycle_error(
-            state,
+) -> Result<(), String> {
+    if model.simulation.execution.has_active_execution() {
+        report_lifecycle_error(
+            model,
+            workbench,
             ProjectLifecycleError::ActiveRun,
             "New project blocked",
         );
         return Err(ProjectLifecycleError::ActiveRun.to_string());
     }
     if let Err(error) = params.validate() {
-        state.prompt(format!("New project not created: {error}"));
+        workbench.prompt(format!("New project not created: {error}"));
         return Err(error);
     }
-    let restored_model_catalog = crate::workbench::app_state::restore_session_model_library_manager(
-        &mut state.model.pdk_config,
-    );
+    Ok(())
+}
+
+/// A new project, built off to the side before it replaces the open one.
+pub(crate) struct NewProject {
+    pub(crate) library_manager: crate::state::LibraryManager,
+    pub(crate) workspace: crate::state::ProjectWorkspace,
+    pub(crate) model_library_manager: crate::state::model_library::ModelLibraryManager,
+    /// Why the session's PDK model catalog could not be restored, reported
+    /// once the replacement has stated itself.
+    pub(crate) model_restore_errors: Vec<String>,
+}
+
+/// Build the empty project `params` names: the session's PDK model catalog
+/// restored for it, its libraries and workspace, and its drawing-sheet
+/// default seeded from the reader's personal one.
+pub(crate) fn build_new_project(model: &mut Model, params: &NewProjectParams) -> NewProject {
+    let restored_model_catalog =
+        crate::workbench::app_state::restore_session_model_library_manager(&mut model.pdk_config);
     let (model_library_manager, model_restore_errors) = match restored_model_catalog {
         Ok((manager, _loaded)) => (manager, Vec::new()),
         Err(errors) => (
@@ -195,40 +204,61 @@ fn replace_with_new_project(
         &params.root_library,
         &params.top_cell,
     );
-    seed_new_project_drawing_sheet_default(state, &mut workspace);
-    let schematic = state.new_schematic_document();
-    workspace.save_active_schematic(&schematic);
+    seed_new_project_drawing_sheet_default(model, &mut workspace);
+    NewProject {
+        library_manager,
+        workspace,
+        model_library_manager,
+        model_restore_errors,
+    }
+}
 
-    state.model.library_manager = library_manager;
-    state.model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
-    state.model.workspace = workspace;
-    state.model.schematic = schematic;
-    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
-    state.bump_active_schematic_epoch();
-    state.replace_project_execution_context(announcement);
-    state.model.sim_setup = crate::workbench::app_state::SimSetupState::new_with_user_preferences(
-        &state.model.preferences,
-    );
+/// Make a replacement project's libraries and workspace the open ones, with
+/// `schematic` as the drawing in front, saved into the workspace, under
+/// fresh library edit locks.
+pub(crate) fn install_project_drawing(
+    model: &mut Model,
+    library_manager: crate::state::LibraryManager,
+    mut workspace: crate::state::ProjectWorkspace,
+    schematic: crate::state::SchematicState,
+) {
+    workspace.save_active_schematic(&schematic);
+    model.library_manager = library_manager;
+    model.library_edit_locks = crate::state::ProjectLibraryLockAuthority::default();
+    model.workspace = workspace;
+    model.schematic = schematic;
+}
+
+/// Give a new project the session's first plan, with the data that plan
+/// owns, and the model catalog it was built with. A new project has never
+/// been saved, so it has no browser save name.
+pub(crate) fn settle_new_project(
+    model: &mut Model,
+    platform: &mut PlatformState,
+    model_library_manager: crate::state::model_library::ModelLibraryManager,
+) {
+    model.sim_setup =
+        crate::workbench::app_state::SimSetupState::new_with_user_preferences(&model.preferences);
     // The new plan owns its variables, outputs and specifications, as the
     // session's first plan does. Without the payload every Run plan in a new
     // project was refused before it netlisted anything.
-    if let Ok(plan) = state.model.sim_setup.stable_analysis_plan() {
+    if let Ok(plan) = model.sim_setup.stable_analysis_plan() {
         let plan_id = plan.id();
-        state
-            .model
-            .workspace
-            .content
-            .migrate_active_plan_data(plan_id);
+        model.workspace.content.migrate_active_plan_data(plan_id);
     }
-    state.model.model_library_manager = model_library_manager;
-    state.platform.browser_project_save_name = None;
-    crate::workbench::app_state::services_access::reset_for_new_project(state);
-    Ok(model_restore_errors)
+    model.model_library_manager = model_library_manager;
+    platform.browser_project_save_name = None;
 }
 
-fn emit_session_model_restore_errors(state: &mut AppState, operation: &str, errors: Vec<String>) {
+/// Record why the session's PDK model catalog could not be restored for
+/// `operation`.
+pub(crate) fn emit_session_model_restore_errors(
+    model: &mut Model,
+    operation: &str,
+    errors: Vec<String>,
+) {
     for error in errors {
-        state.record(
+        model.record(
             LogSeverity::Warning,
             LogSource::Studio,
             format!(
@@ -240,10 +270,10 @@ fn emit_session_model_restore_errors(state: &mut AppState, operation: &str, erro
 }
 
 fn seed_new_project_drawing_sheet_default(
-    state: &AppState,
+    model: &Model,
     workspace: &mut crate::state::ProjectWorkspace,
 ) {
-    let personal = state.model.preferences.drawing_sheet_personal_preferences();
+    let personal = model.preferences.drawing_sheet_personal_preferences();
     let project_default = personal
         .default_format
         .try_update(|draft| {
@@ -1115,7 +1145,7 @@ pub(crate) fn close_project_discard(
     state.model.model_library_manager = model_library_manager;
     state.platform.browser_project_save_name = None;
     crate::workbench::app_state::services_access::mark_project_closed(state);
-    emit_session_model_restore_errors(state, "project close", model_restore_errors);
+    emit_session_model_restore_errors(&mut state.model, "project close", model_restore_errors);
     state.project.project_launcher_open = false;
     state
         .workbench
@@ -1774,11 +1804,22 @@ fn finish_browser_canonical_open(
 /// operation pending) answers the gesture; a project that could not be read
 /// or written is a failure the session records and tells the user about.
 fn lifecycle_error(state: &mut AppState, error: ProjectLifecycleError, context: &str) {
+    report_lifecycle_error(&mut state.model, &mut state.workbench, error, context);
+}
+
+/// [`lifecycle_error`] over the two parts it answers through: the model's
+/// log and notices, and the status bar.
+fn report_lifecycle_error(
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    error: ProjectLifecycleError,
+    context: &str,
+) {
     match error {
         ProjectLifecycleError::InvalidState(_) | ProjectLifecycleError::Persistence(_) => {
-            state.report_failure(context, error.to_string());
+            model.report_failure(context, error.to_string());
         }
-        _ => state.prompt(format!("{context}: {error}")),
+        _ => workbench.prompt(format!("{context}: {error}")),
     }
 }
 

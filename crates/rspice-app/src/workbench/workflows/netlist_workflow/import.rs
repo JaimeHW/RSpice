@@ -244,10 +244,7 @@ pub(super) fn apply_opened_netlist_project(
     // The candidate states the opened netlist when it is created, so the line
     // reaches the Console only if the candidate is committed.
     let mut candidate = state.clone();
-    crate::workbench::workflows::project_workflow::create_netlist_project(
-        &mut candidate,
-        display_name,
-    );
+    candidate.create_netlist_project(display_name);
     if let Err(failure) = install_imported_netlist(
         &mut candidate,
         source,

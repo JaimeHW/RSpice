@@ -12,6 +12,7 @@ use crate::workbench::app_state::AppState;
 #[cfg(doc)]
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::model::{LibraryRemoval, WorkspacePruned};
+use crate::workbench::app_state::services_access;
 use crate::workbench::documents::netlist_document::adopt_live_owned_source;
 use crate::workbench::framework::requests::{self, AdoptLiveOwnedSource};
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -19,8 +20,83 @@ use crate::workbench::lifecycle::project_lifecycle::{
 };
 use crate::workbench::live_session::{CloudHandles, DiscardMirror, LiveHost, MirrorApply};
 use crate::workbench::workflows::project_workflow::{
-    LiveProjectApply, apply_live_project_snapshot, close_project_discard,
+    self, LiveProjectApply, NewProject, NewProjectParams, apply_live_project_snapshot,
+    close_project_discard,
 };
+
+/// Replacing the open project with a new one: the project's phases over its
+/// own parts, with the shell's steps between them, in the order the
+/// replacement has always run.
+impl AppState {
+    /// Replace the session with a new project under `params`.
+    ///
+    /// Returns the exact refusal so a dialog can hold itself open beside the
+    /// prompt rather than closing over a project that was never created.
+    pub(crate) fn create_new_project_with(
+        &mut self,
+        params: &NewProjectParams,
+    ) -> Result<(), String> {
+        let announcement = project_workflow::new_project_announcement(params);
+        let model_restore_errors = replace_with_new_project(self, params, announcement)?;
+        project_workflow::emit_session_model_restore_errors(
+            &mut self.model,
+            "new project",
+            model_restore_errors,
+        );
+        Ok(())
+    }
+
+    /// Replace the session with a new project for a netlist being opened as
+    /// one, named and announced as [`project_workflow::netlist_project`] says.
+    pub(crate) fn create_netlist_project(&mut self, display_name: &str) {
+        let (params, announcement) = project_workflow::netlist_project(display_name);
+        if let Ok(model_restore_errors) = replace_with_new_project(self, &params, announcement) {
+            project_workflow::emit_session_model_restore_errors(
+                &mut self.model,
+                "netlist project",
+                model_restore_errors,
+            );
+        }
+    }
+}
+
+/// The replacement every creator shares. The new project is built off
+/// to the side and installed with the drawing the editor opens on; the
+/// editor takes that drawing, the previous project's execution context
+/// is retired under `announcement`, the new project takes the session's
+/// first plan, and the features let go of what they kept of the
+/// previous one. Returns the model catalog's restore errors for the
+/// caller to report after the announcement.
+fn replace_with_new_project(
+    state: &mut AppState,
+    params: &NewProjectParams,
+    announcement: String,
+) -> Result<Vec<String>, String> {
+    project_workflow::refuse_new_project(&mut state.model, &mut state.workbench, params)?;
+    let NewProject {
+        library_manager,
+        workspace,
+        model_library_manager,
+        model_restore_errors,
+    } = project_workflow::build_new_project(&mut state.model, params);
+    let schematic = state.new_schematic_document();
+    project_workflow::install_project_drawing(
+        &mut state.model,
+        library_manager,
+        workspace,
+        schematic,
+    );
+    state.design.schematic_snap = state.model.schematic.session.editor.snap_engine.clone();
+    state.bump_active_schematic_epoch();
+    state.replace_project_execution_context(announcement);
+    project_workflow::settle_new_project(
+        &mut state.model,
+        &mut state.platform,
+        model_library_manager,
+    );
+    services_access::reset_for_new_project(state);
+    Ok(model_restore_errors)
+}
 
 impl RSpiceApp {
     /// Run the live session for this frame, with the project transactions
@@ -57,7 +133,7 @@ impl AppState {
         new_name: &str,
     ) -> Result<usize, String> {
         let (remapped, pruned) = self.model.rename_library(library, new_name)?;
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
         Ok(remapped)
     }
 
@@ -69,7 +145,7 @@ impl AppState {
             pruned,
             mutation,
         } = self.model.delete_library(library)?;
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
         self.model.publish_project_library_mutation(mutation);
         Ok(cells)
     }
@@ -99,7 +175,7 @@ impl AppState {
         new_name: &str,
     ) -> Result<usize, String> {
         let (remapped, pruned) = self.model.rename_cell(library, cell, new_name)?;
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
         Ok(remapped)
     }
 
@@ -112,14 +188,14 @@ impl AppState {
         new_name: &str,
     ) -> Result<usize, String> {
         let (remapped, pruned) = self.model.rename_view(library, cell, view, new_name)?;
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
         Ok(remapped)
     }
 
     /// [`Model::prune_workspace_after_cell_deleted`], then what it left.
     pub(crate) fn prune_workspace_after_cell_deleted(&mut self, library: &str, cell: &str) {
         let pruned = self.model.prune_workspace_after_cell_deleted(library, cell);
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
     }
 
     /// [`Model::prune_workspace_after_view_deleted`], then what it left.
@@ -132,40 +208,40 @@ impl AppState {
         let pruned = self
             .model
             .prune_workspace_after_view_deleted(library, cell, view);
-        self.apply_workspace_pruned(pruned);
+        apply_workspace_pruned(self, pruned);
     }
+}
 
-    /// Carry out what a catalog change left outside the model, in the order
-    /// of [`WorkspacePruned`]'s fields: the drawing sync's prompt, the
-    /// editor's reload of the schematic now in front, the retirement of
-    /// everything run against the previous design, and the Verilog-A compile
-    /// evidence that names a source whose owner moved.
-    fn apply_workspace_pruned(&mut self, pruned: WorkspacePruned) {
-        let WorkspacePruned {
-            prompt,
-            restore_active_schematic,
-            clear_execution_context,
-            void_veriloga_evidence,
-        } = pruned;
-        if let Some(prompt) = prompt {
-            self.prompt(prompt);
-        }
-        if restore_active_schematic {
-            self.restore_active_schematic_from_workspace();
-        }
-        if clear_execution_context {
-            self.clear_design_execution_context();
-        }
-        let veriloga = &mut self.code.code_workspace.veriloga;
-        let names_a_moved_source = veriloga.receipt.as_ref().is_some_and(|receipt| {
-            void_veriloga_evidence.contains(&receipt.compilation.token().bundle_id)
-        }) || veriloga
-            .pending
-            .as_ref()
-            .is_some_and(|pending| void_veriloga_evidence.contains(&pending.token.bundle_id));
-        if names_a_moved_source {
-            *veriloga = Default::default();
-        }
+/// Carry out what a catalog change left outside the model, in the order
+/// of [`WorkspacePruned`]'s fields: the drawing sync's prompt, the
+/// editor's reload of the schematic now in front, the retirement of
+/// everything run against the previous design, and the Verilog-A compile
+/// evidence that names a source whose owner moved.
+fn apply_workspace_pruned(state: &mut AppState, pruned: WorkspacePruned) {
+    let WorkspacePruned {
+        prompt,
+        restore_active_schematic,
+        clear_execution_context,
+        void_veriloga_evidence,
+    } = pruned;
+    if let Some(prompt) = prompt {
+        state.prompt(prompt);
+    }
+    if restore_active_schematic {
+        state.restore_active_schematic_from_workspace();
+    }
+    if clear_execution_context {
+        state.clear_design_execution_context();
+    }
+    let veriloga = &mut state.code.code_workspace.veriloga;
+    let names_a_moved_source = veriloga.receipt.as_ref().is_some_and(|receipt| {
+        void_veriloga_evidence.contains(&receipt.compilation.token().bundle_id)
+    }) || veriloga
+        .pending
+        .as_ref()
+        .is_some_and(|pending| void_veriloga_evidence.contains(&pending.token.bundle_id));
+    if names_a_moved_source {
+        *veriloga = Default::default();
     }
 }
 
@@ -261,20 +337,58 @@ mod tests {
         );
     }
 
-    /// Assert that `steps` appear in this file in order after the definition
-    /// of `name`, each first found after the one before it.
+    /// Assert that the body of this module's function `name` runs `steps` in
+    /// order, each first found after the one before it.
     fn assert_runs_in_order(name: &str, steps: &[&str]) {
         const SOURCE: &str = include_str!("project_transactions.rs");
         let definition = format!("fn {name}(");
-        let mut at = SOURCE
+        let start = SOURCE
             .find(&definition)
-            .unwrap_or_else(|| panic!("`{definition}` is defined here"));
+            .unwrap_or_else(|| panic!("`{definition}` is defined here"))
+            + definition.len();
+        // The body ends where the next item begins.
+        let end = [
+            "\n    fn ",
+            "\n    pub(crate) fn ",
+            "\nfn ",
+            "\npub(crate) fn ",
+            "\nimpl ",
+        ]
+        .iter()
+        .filter_map(|next| SOURCE[start..].find(next))
+        .min()
+        .map_or(SOURCE.len(), |offset| start + offset);
+        let body = &SOURCE[start..end];
+        let mut at = 0;
         for step in steps {
-            let found = SOURCE[at..]
+            let found = body[at..]
                 .find(step)
                 .unwrap_or_else(|| panic!("`{name}` runs `{step}` after the steps before it"));
             at += found + step.len();
         }
+    }
+
+    /// A new project replaces the open one in the order it always has: the
+    /// refusals before anything changes, the project built off to the side,
+    /// the editor's drawing installed with it, the execution context retired
+    /// once the new project is in place, then its plan, then the features
+    /// let go of the previous one.
+    #[test]
+    fn a_new_project_replaces_the_open_one_in_the_order_it_always_has() {
+        assert_runs_in_order(
+            "replace_with_new_project",
+            &[
+                "project_workflow::refuse_new_project(",
+                "project_workflow::build_new_project(",
+                "state.new_schematic_document()",
+                "project_workflow::install_project_drawing(",
+                "state.design.schematic_snap =",
+                "state.bump_active_schematic_epoch()",
+                "state.replace_project_execution_context(announcement)",
+                "project_workflow::settle_new_project(",
+                "services_access::reset_for_new_project(state)",
+            ],
+        );
     }
 
     /// What a catalog change leaves outside the model runs in the order the
@@ -285,9 +399,9 @@ mod tests {
         assert_runs_in_order(
             "apply_workspace_pruned",
             &[
-                "self.prompt(prompt)",
-                "self.restore_active_schematic_from_workspace()",
-                "self.clear_design_execution_context()",
+                "state.prompt(prompt)",
+                "state.restore_active_schematic_from_workspace()",
+                "state.clear_design_execution_context()",
                 "*veriloga = Default::default()",
             ],
         );
@@ -301,7 +415,7 @@ mod tests {
             "delete_library",
             &[
                 "self.model.delete_library(library)?",
-                "self.apply_workspace_pruned(pruned)",
+                "apply_workspace_pruned(self, pruned)",
                 "self.model.publish_project_library_mutation(mutation)",
             ],
         );
