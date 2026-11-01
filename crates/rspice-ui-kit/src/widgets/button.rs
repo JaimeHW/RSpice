@@ -32,8 +32,13 @@ pub struct Button<'a> {
     min_height: f32,
     max_width: Option<f32>,
     square: bool,
+    menu: bool,
     accessible_label: Option<&'a str>,
 }
+
+/// The chevron a menu button paints after its label, and the gap before it.
+const MENU_CHEVRON: f32 = 11.0;
+const MENU_CHEVRON_GAP: f32 = 4.0;
 
 /// The gap a compact button leaves above and below itself inside its row, and
 /// what it takes off each side of its label against a standard button.
@@ -55,8 +60,16 @@ impl<'a> Button<'a> {
             min_height: 0.0,
             max_width: None,
             square: false,
+            menu: false,
             accessible_label: None,
         }
+    }
+
+    /// Mark the button as opening a menu: a painted chevron follows the label
+    /// (IBM Plex has no glyph for one).
+    pub fn menu(mut self) -> Self {
+        self.menu = true;
+        self
     }
 
     /// Shorten the control for a verb that lives inside a table row.
@@ -144,6 +157,17 @@ impl<'a> Button<'a> {
         self
     }
 
+    /// The width the leading icon and the menu chevron add to the label.
+    fn icon_width(&self) -> f32 {
+        let leading = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
+        let trailing = if self.menu {
+            MENU_CHEVRON_GAP + MENU_CHEVRON
+        } else {
+            0.0
+        };
+        leading + trailing
+    }
+
     /// What `compact` gives up here, which is nothing in a touch shell.
     fn compact_relief(&self, t: &Tokens, relief: f32) -> f32 {
         if self.compact && !t.metrics.is_touch() {
@@ -182,7 +206,7 @@ impl<'a> Button<'a> {
             },
         );
         let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
-        let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
+        let icon_w = self.icon_width();
         let padding = 20.0 - self.compact_relief(&t, COMPACT_PADDING_RELIEF);
         let unconstrained_width = (galley.size().x + icon_w + padding).max(self.min_width);
         let width = self
@@ -232,8 +256,7 @@ impl<'a> Button<'a> {
         let opacity = if self.enabled { 1.0 } else { 0.4 };
         let fg = fg.gamma_multiply(opacity);
         let (galley, width) = self.measure(ui, fg);
-        let icon_w = if self.icon.is_some() { 13.0 + 6.0 } else { 0.0 };
-        let content_width = galley.size().x + icon_w;
+        let content_width = galley.size().x + self.icon_width();
         // A compact button is sized from the row it sits in, not from the
         // control height: the row's last point is its rule, and what is left
         // takes an equal gap above and below, so the two are never a point
@@ -325,6 +348,14 @@ impl<'a> Button<'a> {
         }
         let text_y = rect.center().y - galley.size().y * 0.5;
         painter.galley(egui::pos2(x, text_y), galley.clone(), fg);
+        if self.menu {
+            let left = x + galley.size().x + MENU_CHEVRON_GAP;
+            let chevron = Rect::from_min_size(
+                egui::pos2(left, rect.center().y - MENU_CHEVRON * 0.5),
+                vec2(MENU_CHEVRON, MENU_CHEVRON),
+            );
+            Icon::ChevronDown.paint(painter, chevron, fg);
+        }
         if self.enabled {
             response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
         }
@@ -542,6 +573,43 @@ mod tests {
             walk(&clipped.shape, &mut painted);
         }
         painted
+    }
+
+    /// A menu button says so with a chevron painted after its label (IBM
+    /// Plex has no glyph for one), and is wider by exactly what that takes.
+    #[test]
+    fn a_menu_button_makes_room_for_its_chevron() {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let (mut plain, mut menu) = (Rect::NOTHING, Rect::NOTHING);
+        let output = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                plain = Button::new("More").show(ui).rect;
+                menu = Button::new("More").menu().show(ui).rect;
+            });
+        });
+        assert!(
+            (menu.width() - plain.width() - (MENU_CHEVRON_GAP + MENU_CHEVRON)).abs() < 0.01,
+            "a menu button is {} wide against {}",
+            menu.width(),
+            plain.width()
+        );
+        // The chevron is two strokes inside the menu button, past its label.
+        let strokes_in_menu = output
+            .shapes
+            .iter()
+            .filter(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Path(path) => path
+                    .points
+                    .iter()
+                    .all(|point| menu.contains(*point) && point.x > menu.center().x),
+                egui::epaint::Shape::LineSegment { points, .. } => points
+                    .iter()
+                    .all(|point| menu.contains(*point) && point.x > menu.center().x),
+                _ => false,
+            })
+            .count();
+        assert!(strokes_in_menu > 0, "the menu button paints no chevron");
     }
 
     #[test]
