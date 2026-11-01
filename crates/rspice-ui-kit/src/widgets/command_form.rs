@@ -151,6 +151,18 @@ impl<'u> FormRows<'u> {
 
     /// Open one row: the gap above it, then its label, then its control.
     fn row<R>(&mut self, label: &str, control: impl FnOnce(&mut Ui, f32) -> R) -> R {
+        self.row_trimmed(label, 0.0, control)
+    }
+
+    /// [`Self::row`], laid out `trim` shorter at its top. The label is still
+    /// centred where the whole row would centre it, so a control that does
+    /// the same keeps its words level with the label.
+    fn row_trimmed<R>(
+        &mut self,
+        label: &str,
+        trim: f32,
+        control: impl FnOnce(&mut Ui, f32) -> R,
+    ) -> R {
         if self.started {
             self.ui.add_space(ROW_GAP);
         }
@@ -171,15 +183,20 @@ impl<'u> FormRows<'u> {
                 .inner;
         }
         let label_col = self.label_col;
+        let laid_h = row_h - trim;
         self.ui
             .allocate_ui_with_layout(
-                vec2(full_width, row_h),
+                vec2(full_width, laid_h),
                 egui::Layout::left_to_right(egui::Align::Center),
                 |ui| {
                     ui.spacing_mut().item_spacing.x = LABEL_GAP;
                     let (label_rect, _) =
-                        ui.allocate_exact_size(vec2(label_col, row_h), egui::Sense::hover());
-                    paint_row_label(ui, label, label_rect);
+                        ui.allocate_exact_size(vec2(label_col, laid_h), egui::Sense::hover());
+                    let whole = Rect::from_min_size(
+                        pos2(label_rect.left(), label_rect.top() - trim),
+                        vec2(label_col, row_h),
+                    );
+                    paint_row_label(ui, label, whole);
                     let width = ui.available_width();
                     control(ui, width)
                 },
@@ -364,13 +381,18 @@ impl<'u> FormRows<'u> {
     }
 
     fn value_row(&mut self, label: &str, value: &str, font: egui::FontId) {
-        self.row(label, |ui, width| {
+        let trim = if self.started || self.stacked {
+            0.0
+        } else {
+            fact_trim(self.ui, &font)
+        };
+        self.row_trimmed(label, trim, |ui, width| {
             let t = Tokens::get(ui.ctx());
             let (rect, response) =
-                ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), egui::Sense::hover());
+                ui.allocate_exact_size(vec2(width, t.metrics.ctl_h - trim), egui::Sense::hover());
             let shown = middle_elided(ui, value, &font, t.color.text, width - VALUE_INSET);
             ui.painter().text(
-                egui::pos2(rect.left() + VALUE_INSET, rect.center().y),
+                egui::pos2(rect.left() + VALUE_INSET, rect.center().y - trim * 0.5),
                 egui::Align2::LEFT_CENTER,
                 shown,
                 font,
@@ -890,6 +912,22 @@ struct MarkLine {
     /// What the layout gave the line. The mark answers to this and no more,
     /// so a trimmed outer line never reaches into the gap to the next row.
     span: Rect,
+}
+
+/// The air a read-only fact gives up when it is a form's first row. A field's
+/// frame is its ink and meets its row's top, so the body's padding is the
+/// air over the form; a fact's ink is its words, centred in a row as tall as
+/// a field, and over the first row the air above them added to that padding.
+/// Given up, the words' ink starts at the row's top, where a field's frame
+/// would. Between rows a fact keeps its whole row, so the grid's rhythm is
+/// the same either way.
+fn fact_trim(ui: &Ui, font: &egui::FontId) -> f32 {
+    let row_h = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let galley =
+        ui.painter()
+            .layout_no_wrap("Ag".to_owned(), font.clone(), egui::Color32::PLACEHOLDER);
+    let ink_top = (row_h - galley.size().y) * 0.5 + galley.mesh_bounds.top();
+    ink_top.floor().max(0.0)
 }
 
 /// Lay out line `index` of a set of `lines` marks: `line_h` tall where it
@@ -1565,8 +1603,10 @@ mod tests {
                         into.push((rect.rect, false));
                     }
                 }
+                // Words are inked where their glyphs are, not across the
+                // line they are set on.
                 egui::Shape::Text(text) => {
-                    into.push((Rect::from_min_size(text.pos, text.galley.size()), false));
+                    into.push((text.galley.mesh_bounds.translate(text.pos.to_vec2()), false));
                 }
                 egui::Shape::Path(_) | egui::Shape::Circle(_) => {
                     into.push((shape.visual_bounding_rect(), false));
@@ -1655,6 +1695,37 @@ mod tests {
             (over - under).abs() <= 1.0,
             "checks last: {over} over the first row, {under} under the last"
         );
+    }
+
+    /// A read-only fact as the first row has the air over it that a field
+    /// has: its words start where a field's frame would, not half a row
+    /// lower, and the body's air over and under still match.
+    #[test]
+    fn a_fact_first_has_the_air_over_it_a_field_first_has() {
+        let air = |fact_first: bool| {
+            body_air(|ctx| {
+                let mut name = String::from("R1");
+                let _ = CommandForm::new("Rename", "Rename").show(ctx, |rows| {
+                    if fact_first {
+                        rows.value("Object", "Resistor R1");
+                    }
+                    let id = Id::new("command-form.fact-first.name");
+                    let field = rows.text("New name", id, &mut name, "");
+                    Some(field.id)
+                });
+            })
+        };
+        let (field_over, field_under) = air(false);
+        let (fact_over, fact_under) = air(true);
+        assert!(
+            (fact_over - field_over).abs() <= 1.5,
+            "{fact_over} over a fact, {field_over} over a field"
+        );
+        assert!(
+            (fact_over - fact_under).abs() <= 1.5,
+            "{fact_over} over the fact, {fact_under} under the last row"
+        );
+        assert!((field_over - field_under).abs() <= 1.0);
     }
 
     /// A field's line is one line whatever it says, so a field that becomes
