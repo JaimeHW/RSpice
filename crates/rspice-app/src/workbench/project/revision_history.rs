@@ -29,7 +29,9 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
 
 const TITLE: &str = "Project revision and audit history";
-const NOT_RETAINED: &str = "not retained";
+/// A fact the record's owner does not keep: left blank, as an empty cell,
+/// rather than stated in every row of a column that has nothing to say.
+const NOT_RETAINED: &str = "";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct ProjectAuditRow {
@@ -153,7 +155,7 @@ impl ProjectFeature {
             )
             .size(DialogSize::SimulationWorkflow)
             .initial_height(610.0)
-            .flush_body()
+            .overlay_scrollbar()
             .primary_on_enter(false)
             .initial_focus(DialogInitialFocus::BodyControl)
             .body_scroll_offset(&mut body_scroll_offset);
@@ -384,47 +386,50 @@ fn revision_history_body(
 ) -> HistoryAction {
     let t = Tokens::get(ui.ctx());
     let mut action = HistoryAction::None;
-    Frame::new()
-        .fill(t.color.bg_panel)
-        .inner_margin(egui::Margin::symmetric(10, 7))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let filter_options = ProjectRevisionArtifactFilter::ALL
-                    .iter()
-                    .map(|filter| filter.label().to_owned())
-                    .collect::<Vec<_>>();
-                if let Some(index) = select(
-                    ui,
-                    "project-revision-artifact-filter",
-                    "Project artifact filter",
-                    dialog.artifact_filter.label(),
-                    &filter_options,
-                    180.0,
-                ) {
-                    dialog.artifact_filter = ProjectRevisionArtifactFilter::ALL[index];
-                    dialog.selected.clear();
-                    dialog.comparison = None;
-                    dialog.restore_confirmation = false;
-                }
-                ui.add(
-                    TextEdit::singleline(&mut dialog.query)
-                        .desired_width((ui.available_width() - 150.0).max(180.0))
-                        .hint_text("Revision, actor, artifact, or message\u{2026}"),
-                );
-                if Button::new("Compare selected")
-                    .enabled(dialog.selected.len() == 2)
-                    .show(ui)
-                    .clicked()
-                {
-                    action = HistoryAction::Compare;
-                }
-            });
-        });
+    // The filter, the search and the comparison on one row, on the body's
+    // inset with everything under it. It was a band of the panel tone that
+    // stopped short of the dialog's right edge over a table that touched
+    // its left one.
+    ui.horizontal(|ui| {
+        let filter_options = ProjectRevisionArtifactFilter::ALL
+            .iter()
+            .map(|filter| filter.label().to_owned())
+            .collect::<Vec<_>>();
+        if let Some(index) = select(
+            ui,
+            "project-revision-artifact-filter",
+            "Project artifact filter",
+            dialog.artifact_filter.label(),
+            &filter_options,
+            180.0,
+        ) {
+            dialog.artifact_filter = ProjectRevisionArtifactFilter::ALL[index];
+            dialog.selected.clear();
+            dialog.comparison = None;
+            dialog.restore_confirmation = false;
+        }
+        // The search takes what the comparison leaves, so the row ends on
+        // the table's right edge.
+        let compare = Button::new("Compare selected").enabled(dialog.selected.len() == 2);
+        let compare_width = compare.measured_width(ui);
+        ui.add(
+            TextEdit::singleline(&mut dialog.query)
+                .desired_width(
+                    (ui.available_width() - compare_width - 2.0 * ui.spacing().item_spacing.x)
+                        .max(180.0),
+                )
+                .hint_text("Revision, actor, artifact, or message\u{2026}"),
+        );
+        if compare.show(ui).clicked() {
+            action = HistoryAction::Compare;
+        }
+    });
 
     let visible = visible_rows(rows, dialog);
     Frame::new()
         .fill(t.color.bg_inset)
         .stroke(Stroke::new(1.0, t.color.border_strong))
+        .inner_margin(egui::Margin::symmetric(8, 4))
         .show(ui, |ui| {
             if visible.is_empty() {
                 ui.add_space(24.0);
@@ -445,58 +450,75 @@ fn revision_history_body(
                 ui.add_space(24.0);
                 return;
             }
-            ScrollArea::both()
+            ScrollArea::vertical()
                 .id_salt("project-revision-history-table")
                 .max_height(286.0)
-                .auto_shrink([false, false])
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    ui.horizontal_top(|ui| {
-                        revision_graph(ui, &visible, &dialog.selected);
-                        Grid::new("project-revision-history-grid")
-                            .min_col_width(86.0)
-                            .striped(true)
-                            .show(ui, |ui| {
-                                table_heading(ui, "Revision");
-                                table_heading(ui, "Time");
-                                table_heading(ui, "Actor");
-                                table_heading(ui, "Change");
-                                table_heading(ui, "Affected records");
-                                table_heading(ui, "Status");
-                                ui.end_row();
-                                for row in &visible {
-                                    let row = *row;
-                                    let selected = dialog.selected.contains(&row.key);
-                                    let selection_glyph =
-                                        if selected { "\u{25c9} " } else { "\u{25cb} " };
-                                    let response = ui.selectable_label(
+                    let widths = column_widths(ui.available_width());
+                    Grid::new("project-revision-history-grid")
+                        .min_col_width(0.0)
+                        .spacing(egui::vec2(COLUMN_GAP, 4.0))
+                        .show(ui, |ui| {
+                            for (heading, width) in COLUMNS.iter().zip(widths) {
+                                table_heading(ui, heading, width);
+                            }
+                            ui.end_row();
+                            for row in &visible {
+                                let row = *row;
+                                let selected = dialog.selected.contains(&row.key);
+                                // The row is pressed to select it: one for
+                                // a restore, two for a comparison. Its fill
+                                // goes under the cells, which are laid out
+                                // first so the row's extent is known.
+                                let fill = ui.painter().add(egui::Shape::Noop);
+                                let cells = [
+                                    table_cell(ui, &row.revision, widths[0], true),
+                                    table_cell(ui, &row.time, widths[1], true),
+                                    table_cell(ui, &row.actor, widths[2], false),
+                                    table_cell(ui, &row.change, widths[3], false),
+                                    table_cell(ui, &row.affected_evidence, widths[4], false),
+                                    table_cell(ui, &row.status, widths[5], false),
+                                ];
+                                let extent = cells
+                                    .iter()
+                                    .fold(egui::Rect::NOTHING, |extent, cell| extent.union(*cell))
+                                    .expand2(egui::vec2(COLUMN_GAP * 0.5, 0.0));
+                                let response = ui
+                                    .interact(
+                                        extent,
+                                        ui.id().with(("revision-history-row", &row.key)),
+                                        egui::Sense::click(),
+                                    )
+                                    .on_hover_cursor(egui::CursorIcon::PointingHand);
+                                response.widget_info(|| {
+                                    egui::WidgetInfo::selected(
+                                        egui::WidgetType::SelectableLabel,
+                                        true,
                                         selected,
-                                        RichText::new(format!("{selection_glyph}{}", row.revision))
-                                            .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                                        format!("Revision {}", row.revision),
+                                    )
+                                });
+                                if response.clicked() {
+                                    action = HistoryAction::ToggleSelection(
+                                        row.key.clone(),
+                                        ui.input(|input| {
+                                            input.modifiers.ctrl || input.modifiers.command
+                                        }),
                                     );
-                                    if response.clicked() {
-                                        action = HistoryAction::ToggleSelection(
-                                            row.key.clone(),
-                                            ui.input(|input| {
-                                                input.modifiers.ctrl || input.modifiers.command
-                                            }),
-                                        );
-                                    }
-                                    ui.monospace(&row.time);
-                                    ui.label(&row.actor);
-                                    ui.label(&row.change);
-                                    ui.label(&row.affected_evidence);
-                                    // The column said the same word twice: in
-                                    // text, and in a tone picked by matching
-                                    // that text against a list of words.
-                                    ui.label(
-                                        RichText::new(&row.status)
-                                            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                                            .color(t.color.text_dim),
-                                    );
-                                    ui.end_row();
                                 }
-                            });
-                    });
+                                let tone = if selected {
+                                    t.color.bg_active
+                                } else if response.hovered() {
+                                    t.color.bg_hover
+                                } else {
+                                    egui::Color32::TRANSPARENT
+                                };
+                                ui.painter()
+                                    .set(fill, egui::Shape::rect_filled(extent, 0.0, tone));
+                                ui.end_row();
+                            }
+                        });
                 });
         });
 
@@ -529,18 +551,6 @@ fn revision_history_body(
         }
     });
 
-    ui.columns(2, |columns| {
-        revision_note_card(
-            &mut columns[0],
-            "Semantic comparison",
-            "Schematic records compare topology and project-portable policy. Other artifact families compare only metadata their durable owners retain.",
-        );
-        revision_note_card(
-            &mut columns[1],
-            "Results never change",
-            "Result manifests retain their original input revision and are never rewritten when the project moves forward.",
-        );
-    });
     action
 }
 
@@ -857,9 +867,9 @@ fn revision_comparison(ui: &mut Ui, comparison: &ProjectRevisionComparison) {
                 .num_columns(3)
                 .striped(true)
                 .show(ui, |ui| {
-                    table_heading(ui, "Field");
-                    table_heading(ui, "First");
-                    table_heading(ui, "Second");
+                    comparison_heading(ui, "Field");
+                    comparison_heading(ui, "First");
+                    comparison_heading(ui, "Second");
                     ui.end_row();
                     for (field, first, second) in &comparison.fields {
                         ui.label(*field);
@@ -872,78 +882,6 @@ fn revision_comparison(ui: &mut Ui, comparison: &ProjectRevisionComparison) {
     }
 }
 
-fn revision_graph(ui: &mut Ui, rows: &[&ProjectAuditRow], selected: &[String]) {
-    let t = Tokens::get(ui.ctx());
-    let row_height = 20.0;
-    let header_height = 22.0;
-    let height = (header_height + row_height * rows.len() as f32).max(48.0);
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(30.0, height), egui::Sense::hover());
-    response.on_hover_text("Revision graph");
-    if rows.is_empty() {
-        return;
-    }
-    let center_x = rect.center().x;
-    let first_y = rect.top() + header_height + row_height * 0.5;
-    for (index, row) in rows.iter().enumerate() {
-        let y = first_y + index as f32 * row_height;
-        if let Some(next) = rows.get(index + 1)
-            && graph_records_are_linked(row, next)
-        {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(center_x, y),
-                    egui::pos2(center_x, y + row_height),
-                ],
-                Stroke::new(1.0, t.color.border_strong),
-            );
-        }
-        // A node is accent only while it is the selected one.
-        let is_selected = selected.contains(&row.key);
-        let color = if is_selected {
-            t.color.accent
-        } else {
-            t.color.text_dim
-        };
-        if row.affected_evidence.contains("cloned from") {
-            ui.painter().line_segment(
-                [
-                    egui::pos2(center_x, y),
-                    egui::pos2(center_x + 8.0, y + row_height * 0.5),
-                ],
-                Stroke::new(1.0, t.color.border_strong),
-            );
-        }
-        ui.painter().circle_filled(
-            egui::pos2(center_x, y),
-            if is_selected { 4.5 } else { 3.5 },
-            color,
-        );
-    }
-}
-
-fn graph_records_are_linked(first: &ProjectAuditRow, second: &ProjectAuditRow) -> bool {
-    if first.kind != second.kind {
-        return false;
-    }
-    match first.kind {
-        ProjectAuditArtifactKind::Schematic => {
-            evidence_owner(&first.affected_evidence) == evidence_owner(&second.affected_evidence)
-        }
-        ProjectAuditArtifactKind::GovernedRecord => {
-            let first_annotation = first.change.starts_with("Committed annotation policy");
-            let second_annotation = second.change.starts_with("Committed annotation policy");
-            let first_hierarchy = first.change == "Hierarchy audit receipt";
-            let second_hierarchy = second.change == "Hierarchy audit receipt";
-            (first_annotation && second_annotation) || (first_hierarchy && second_hierarchy)
-        }
-        ProjectAuditArtifactKind::SimulationPlan | ProjectAuditArtifactKind::ModelOrPdk => false,
-    }
-}
-
-fn evidence_owner(value: &str) -> &str {
-    value.split(" \u{00b7} ").next().unwrap_or(value)
-}
-
 fn semantic_comparison(ui: &mut Ui, delta: &ValidatedRevisionSemanticDelta, label: Option<&str>) {
     section_header(ui, "Semantic comparison", label);
     if delta.is_empty() {
@@ -954,10 +892,10 @@ fn semantic_comparison(ui: &mut Ui, delta: &ValidatedRevisionSemanticDelta, labe
         .num_columns(4)
         .striped(true)
         .show(ui, |ui| {
-            table_heading(ui, "Domain");
-            table_heading(ui, "Added");
-            table_heading(ui, "Removed");
-            table_heading(ui, "Modified");
+            comparison_heading(ui, "Domain");
+            comparison_heading(ui, "Added");
+            comparison_heading(ui, "Removed");
+            comparison_heading(ui, "Modified");
             ui.end_row();
             delta_row(ui, "Components", delta.components);
             delta_row(ui, "Wires", delta.wires);
@@ -992,31 +930,78 @@ fn delta_row(ui: &mut Ui, label: &str, delta: ValidatedRevisionObjectDelta) {
     ui.end_row();
 }
 
-fn revision_note_card(ui: &mut Ui, title: &str, body: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .inner_margin(egui::Margin::same(10))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(title)
-                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.text),
-            );
-            ui.label(
-                RichText::new(body)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_dim),
-            );
-        });
+/// The history table's columns, in order.
+const COLUMNS: [&str; 6] = [
+    "Revision",
+    "Time",
+    "Actor",
+    "Change",
+    "Affected records",
+    "Status",
+];
+/// Each column's share of the table's width. Fixed rather than measured from
+/// the rows, so the table always fits the dialog: a measured grid ran its last
+/// columns off the right edge behind a horizontal scroll bar.
+const COLUMN_SHARES: [f32; 6] = [0.12, 0.11, 0.2, 0.24, 0.23, 0.1];
+/// Air between two columns.
+const COLUMN_GAP: f32 = 8.0;
+/// The height of one row of the table.
+const CELL_HEIGHT: f32 = 22.0;
+
+/// The width of each column across `width`.
+fn column_widths(width: f32) -> [f32; 6] {
+    let room = (width - COLUMN_GAP * (COLUMNS.len() - 1) as f32).max(COLUMNS.len() as f32);
+    COLUMN_SHARES.map(|share| (room * share).floor())
 }
 
-fn table_heading(ui: &mut Ui, label: &str) {
+/// A column's heading: sentence case, in the label face, as written.
+fn table_heading(ui: &mut Ui, label: &str, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let _ = cell(
+        ui,
+        width,
+        RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+            .color(t.color.text_dim),
+    );
+}
+
+/// A cell of `width` holding `text` from its left edge, elided to fit: the
+/// cell's rect, and the text's response.
+fn cell(ui: &mut Ui, width: f32, text: RichText) -> (egui::Rect, egui::Response) {
+    let placed = ui.allocate_ui_with_layout(
+        egui::vec2(width, CELL_HEIGHT),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(width);
+            ui.add(egui::Label::new(text).truncate())
+        },
+    );
+    (placed.response.rect, placed.inner)
+}
+
+/// One cell: its whole text when it fits, elided with the whole text on
+/// hover when it does not. Identifiers and times are set in mono. Returns
+/// the cell's rect.
+fn table_cell(ui: &mut Ui, text: &str, width: f32, mono: bool) -> egui::Rect {
+    let rich = if mono {
+        RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular))
+    } else {
+        RichText::new(text)
+    };
+    let (rect, response) = cell(ui, width, rich);
+    if !text.is_empty() {
+        response.on_hover_text(text);
+    }
+    rect
+}
+
+/// A comparison table's column heading, in the history table's face.
+fn comparison_heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
-        RichText::new(label.to_ascii_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
+        RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
             .color(t.color.text_dim),
     );
 }
@@ -1202,6 +1187,87 @@ mod tests {
         let visible = visible_rows(&rows, &dialog);
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].kind, ProjectAuditArtifactKind::SimulationPlan);
+    }
+
+    /// The table fits the width it is given, every column of it, with its
+    /// headings as written and nothing below it but the restore: it used to
+    /// run its last columns off the dialog behind a horizontal scroll bar,
+    /// head them in upper-case mono, fill unkept facts with `not retained`
+    /// and close on two cards explaining the engine.
+    #[test]
+    fn the_history_table_fits_its_width_and_says_nothing_it_does_not_know() {
+        const WIDTH: f32 = 736.0;
+        let long = "16 models \u{b7} 0 corners \u{b7} 0 pinned sources \u{b7} more evidence";
+        let rows = vec![ProjectAuditRow {
+            key: "model-library:one".to_owned(),
+            kind: ProjectAuditArtifactKind::ModelOrPdk,
+            revision: "built-in".to_owned(),
+            time: NOT_RETAINED.to_owned(),
+            actor: "signed application catalog".to_owned(),
+            change: "Model library \u{b7} RSpice Foundation".to_owned(),
+            affected_evidence: long.to_owned(),
+            status: "built-in".to_owned(),
+            schematic_revision: None,
+            restorable_schematic_revision: None,
+        }];
+        let mut dialog = ProjectRevisionHistoryDialogState {
+            open: true,
+            ..ProjectRevisionHistoryDialogState::default()
+        };
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(WIDTH, 600.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        egui::CentralPanel::default()
+                            .frame(egui::Frame::NONE)
+                            .show(ctx, |ui| {
+                                let _ = revision_history_body(ui, &rows, true, &mut dialog);
+                            });
+                    },
+                )
+                .shapes;
+        }
+        let texts = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        for heading in COLUMNS {
+            assert!(
+                texts.iter().any(|(text, _)| text == heading),
+                "{heading:?} is not a heading: {texts:?}"
+            );
+        }
+        for (text, rect) in &texts {
+            assert!(
+                rect.right() <= WIDTH + 0.5,
+                "{text:?} runs past the table's edge to {}",
+                rect.right()
+            );
+            for gone in [
+                "REVISION",
+                "not retained",
+                "Semantic comparison",
+                "Results never change",
+            ] {
+                assert!(!text.contains(gone), "{text:?} is still stated");
+            }
+        }
     }
 
     /// A restore in the project feature's context does what the application
