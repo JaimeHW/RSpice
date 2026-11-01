@@ -5,6 +5,7 @@
 
 use egui::Context;
 
+use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
 use crate::workbench::app::dialogs::{
@@ -168,5 +169,22 @@ impl DesignFeature {
             cx.model,
             ctx,
         );
+    }
+
+    /// Design review comments, signed with the name the cloud gives the
+    /// reviewer.
+    pub(in crate::workbench) fn render_design_review_comments_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        ReviewComments {
+            dialog: &mut cx.state.design_review_comments,
+            design_note: &mut cx.state.design_note,
+            model: cx.model,
+            workbench: cx.wb,
+            cloud: cx.peers.cloud(),
+            session: cx.peers.cloud_session(),
+        }
+        .render_design_review_comments_dialog(ctx);
     }
 }

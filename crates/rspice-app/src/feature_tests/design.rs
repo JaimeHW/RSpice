@@ -331,3 +331,11 @@ fn the_component_form_designer_opens_and_draws_in_the_frame() {
     assert!(draws_dialog(&mut app, "Open component form designer"));
     assert!(app.state.design.symbol_parameter_form.open);
 }
+
+#[test]
+fn design_review_comments_open_and_draw_in_the_frame() {
+    let mut app = design_app();
+    Command::ReviewComments.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Design review comments"));
+    assert!(app.state.design.design_review_comments.open);
+}

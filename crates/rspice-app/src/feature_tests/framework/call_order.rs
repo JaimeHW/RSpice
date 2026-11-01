@@ -340,7 +340,10 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("DesignFeature::render_descend_hierarchy_dialog", "design"),
     ("render_engineering_table_dialog", "design"),
     ("DesignFeature::render_pin_port_dialog", "design"),
-    ("render_design_review_comments_dialog", "design"),
+    (
+        "DesignFeature::render_design_review_comments_dialog",
+        "design",
+    ),
     ("DesignFeature::render_design_note_dialog", "design"),
     ("DesignFeature::render_documentation_shape_dialog", "design"),
     ("DesignFeature::render_array_selection_dialog", "design"),

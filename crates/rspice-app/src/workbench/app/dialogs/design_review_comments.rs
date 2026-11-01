@@ -17,9 +17,12 @@ use crate::ui::widgets::{
 };
 use crate::workbench::design_system::{elide_chars, section_header};
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
-use crate::workbench::framework::feature::CloudSessionPort;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app::dialogs::placement::design_note::DesignNoteDialogState;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::framework::feature::{CloudPort, CloudSessionPort};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
@@ -176,38 +179,44 @@ fn reply_id() -> egui::Id {
     egui::Id::new(("rspice.design-review", "reply"))
 }
 
-impl RSpiceApp {
+/// What Design review comments draws over and changes: its draft, the
+/// design note form a new comment opens, the model, the session, and the
+/// cloud's state and sessions that name the reviewer.
+pub(in crate::workbench) struct ReviewComments<'a> {
+    pub(in crate::workbench) dialog: &'a mut DesignReviewCommentsDialogState,
+    pub(in crate::workbench) design_note: &'a mut DesignNoteDialogState,
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) workbench: &'a mut WorkbenchSession,
+    pub(in crate::workbench) cloud: &'a dyn CloudPort,
+    pub(in crate::workbench) session: &'a dyn CloudSessionPort,
+}
+
+impl ReviewComments<'_> {
     pub(in crate::workbench) fn render_design_review_comments_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.design_review_comments.open {
+        if !self.dialog.open {
             return;
         }
-        self.state.design.design_review_comments.actor = self.review_actor();
+        self.dialog.actor = self.review_actor();
 
-        let current_revision = current_revision_identity(&self.state);
+        let current_revision = current_revision_identity(self.model);
         normalize_selected_thread(
-            &self.state.model.schematic.document().design_notes,
-            &mut self.state.design.design_review_comments,
+            &self.model.schematic.document().design_notes,
+            &mut *self.dialog,
             current_revision.as_deref(),
         );
-        let stale = review_authority_error(&self.state);
-        let write_allowed = !self.state.model.schematic.session.read_only
-            && !self.state.active_view_read_only()
-            && !self.state.model.safe_mode.project_read_only();
-        let selected = selected_review_note(&self.state).cloned();
+        let stale = review_authority_error(self.dialog, self.model);
+        let write_allowed = !self.model.schematic.session.read_only
+            && !self.model.active_view_read_only()
+            && !self.model.safe_mode.project_read_only();
+        let selected = selected_review_note(self.dialog, self.model).cloned();
         let reply_focus =
             (write_allowed && stale.is_none() && selected.is_some()).then_some(reply_id());
-        let evidence = evidence_candidates(&self.state);
+        let evidence = evidence_candidates(self.model);
         let primary_enabled = write_allowed
             && stale.is_none()
             && selected.is_some()
-            && !self
-                .state
-                .design
-                .design_review_comments
-                .reply
-                .trim()
-                .is_empty();
-        let mut body_scroll_offset = self.state.design.design_review_comments.body_scroll_offset;
+            && !self.dialog.reply.trim().is_empty();
+        let mut body_scroll_offset = self.dialog.body_scroll_offset;
         let mut dialog = Dialog::new(TITLE, PRIMARY)
             .description(
                 "Review comments attached to the active schematic, its validated revisions, and saved results.",
@@ -223,13 +232,7 @@ impl RSpiceApp {
             .primary_on_enter(false)
             .initial_focus(reply_focus.map_or(DialogInitialFocus::Container, DialogInitialFocus::Control))
             .body_scroll_offset(&mut body_scroll_offset);
-        let transaction_error = self
-            .state
-            .design
-            .design_review_comments
-            .error
-            .clone()
-            .or_else(|| stale.clone());
+        let transaction_error = self.dialog.error.clone().or_else(|| stale.clone());
         if !write_allowed {
             dialog = dialog.transaction_state(
                 DialogTransactionTone::Progress,
@@ -248,7 +251,7 @@ impl RSpiceApp {
             dialog = dialog.hint(NO_REPLY_WRITTEN);
         }
 
-        let notes = self.state.model.schematic.document().design_notes.clone();
+        let notes = self.model.schematic.document().design_notes.clone();
         let mut action = ReviewAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = review_body(
@@ -258,11 +261,11 @@ impl RSpiceApp {
                 &evidence,
                 current_revision.as_deref(),
                 write_allowed && stale.is_none(),
-                &mut self.state.design.design_review_comments,
+                &mut *self.dialog,
             );
             reply_focus
         });
-        self.state.design.design_review_comments.body_scroll_offset = body_scroll_offset;
+        self.dialog.body_scroll_offset = body_scroll_offset;
         self.handle_design_review_action(action);
 
         match choice {
@@ -270,7 +273,7 @@ impl RSpiceApp {
                 self.handle_design_review_action(ReviewAction::Reply);
             }
             DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.design_review_comments.close();
+                self.dialog.close();
             }
             DialogChoice::None | DialogChoice::Secondary => {}
         }
@@ -278,45 +281,43 @@ impl RSpiceApp {
 
     /// The name a reply, a resolution and "My assignments" use for the user.
     fn review_actor(&self) -> String {
-        self.cloud.review_actor(&*self.state.cloud)
+        self.session.review_actor(self.cloud)
     }
 
     fn handle_design_review_action(&mut self, action: ReviewAction) {
         match action {
             ReviewAction::None => {}
             ReviewAction::Select(id) => {
-                let dialog = &mut self.state.design.design_review_comments;
+                let dialog = &mut *self.dialog;
                 dialog.selected_note_id = Some(id);
                 dialog.reset_thread_draft();
             }
             ReviewAction::NewComment => {
-                self.state.design.design_review_comments.close();
-                let source = crate::workbench::app::schematic_editor_request_source(&self.state);
-                self.state.design.design_note.open(source);
+                self.dialog.close();
+                let source = crate::workbench::app::schematic_editor_request_source(&*self.model);
+                self.design_note.open(source);
                 // The note opens empty for the reviewer's own words; it was
                 // pre-filled with "Review comment" for them to select away.
-                self.state.design.design_note.kind = DesignNoteKind::ReviewNote;
+                self.design_note.kind = DesignNoteKind::ReviewNote;
             }
             ReviewAction::GoToAnchor(id, point) => {
-                self.state.design.design_review_comments.close();
-                self.state.workbench.workspace = crate::workbench::state::Workspace::Design;
-                self.state
-                    .model
+                self.dialog.close();
+                self.workbench.workspace = crate::workbench::state::Workspace::Design;
+                self.model
                     .schematic
                     .session
                     .editor
                     .selection
                     .select_only_design_note(id);
-                self.state.model.schematic.session.editor.center_request = Some(point);
+                self.model.schematic.session.editor.center_request = Some(point);
             }
             ReviewAction::ApplyAssignment(assignee) => {
                 self.apply_review_mutation(DesignReviewMutation::Assign { assignee });
             }
             ReviewAction::AttachEvidence(index) => {
-                let candidates = evidence_candidates(&self.state);
+                let candidates = evidence_candidates(self.model);
                 let Some(candidate) = candidates.get(index) else {
-                    self.state.design.design_review_comments.error =
-                        Some("The selected result no longer exists.".to_owned());
+                    self.dialog.error = Some("The selected result no longer exists.".to_owned());
                     return;
                 };
                 self.apply_review_mutation(DesignReviewMutation::AttachEvidence {
@@ -329,12 +330,12 @@ impl RSpiceApp {
                 let created_unix_ms = match checked_unix_time_ms() {
                     Ok(timestamp) => timestamp,
                     Err(error) => {
-                        self.state.design.design_review_comments.error =
+                        self.dialog.error =
                             Some(format!("Review update could not be timestamped: {error}"));
                         return;
                     }
                 };
-                let body = entered_text(&self.state.design.design_review_comments.reply);
+                let body = entered_text(&self.dialog.reply);
                 let author = self.review_actor();
                 self.apply_review_mutation(if matches!(action, ReviewAction::Resolve) {
                     DesignReviewMutation::Resolve {
@@ -356,38 +357,29 @@ impl RSpiceApp {
 
     fn apply_review_mutation(&mut self, mutation: DesignReviewMutation) {
         let result = (|| {
-            review_authority_error(&self.state).map_or(Ok(()), Err)?;
-            if self.state.model.safe_mode.project_read_only() {
+            review_authority_error(self.dialog, self.model).map_or(Ok(()), Err)?;
+            if self.model.safe_mode.project_read_only() {
                 return Err("The project is open read-only.".to_owned());
             }
             let id = self
-                .state
-                .design
-                .design_review_comments
+                .dialog
                 .selected_note_id
                 .ok_or_else(|| "Select a review thread.".to_owned())?;
-            let expected = self
-                .state
-                .design
-                .design_review_comments
-                .expected_design_notes
-                .clone();
-            self.state
-                .model
+            let expected = self.dialog.expected_design_notes.clone();
+            self.model
                 .schematic
                 .apply_design_review_mutation(id, &expected, mutation)
                 .map_err(|error| error.to_string())?;
-            self.state.sync_active_schematic_to_workspace();
+            sync_active_schematic(self.model, self.workbench);
             Ok::<(), String>(())
         })();
 
         match result {
             Ok(()) => {
-                let authority = SchematicEditAuthority::capture(&self.state);
-                let dialog = &mut self.state.design.design_review_comments;
+                let authority = SchematicEditAuthority::capture(&*self.model);
+                let dialog = &mut *self.dialog;
                 dialog.authority = Some(authority);
-                dialog.expected_design_notes =
-                    self.state.model.schematic.document().design_notes.clone();
+                dialog.expected_design_notes = self.model.schematic.document().design_notes.clone();
                 dialog.reply.clear();
                 dialog.assignment_editor_open = false;
                 dialog.assignment.clear();
@@ -396,25 +388,25 @@ impl RSpiceApp {
                 // The thread above now holds the update that was published.
                 dialog.error = None;
             }
-            Err(error) => self.state.design.design_review_comments.error = Some(error),
+            Err(error) => self.dialog.error = Some(error),
         }
     }
 }
 
-fn review_authority_error(state: &AppState) -> Option<String> {
-    state
-        .design
-        .design_review_comments
+fn review_authority_error(
+    dialog: &DesignReviewCommentsDialogState,
+    model: &Model,
+) -> Option<String> {
+    dialog
         .authority
         .as_ref()
         .ok_or_else(|| "Review authority is unavailable. Close and reopen the workflow.".to_owned())
-        .and_then(|authority| authority.validate(state, "Design review comments"))
+        .and_then(|authority| authority.validate(model, "Design review comments"))
         .err()
 }
 
-fn current_revision_identity(state: &AppState) -> Option<String> {
-    state
-        .model
+fn current_revision_identity(model: &Model) -> Option<String> {
+    model
         .schematic
         .document()
         .validated_revisions
@@ -440,10 +432,12 @@ fn normalize_selected_thread(
     }
 }
 
-fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
-    let id = state.design.design_review_comments.selected_note_id?;
-    state
-        .model
+fn selected_review_note<'a>(
+    dialog: &DesignReviewCommentsDialogState,
+    model: &'a Model,
+) -> Option<&'a DesignNote> {
+    let id = dialog.selected_note_id?;
+    model
         .schematic
         .document()
         .design_notes
@@ -451,9 +445,8 @@ fn selected_review_note(state: &AppState) -> Option<&DesignNote> {
         .find(|note| note.id == id && note.kind == DesignNoteKind::ReviewNote)
 }
 
-fn evidence_candidates(state: &AppState) -> Vec<EvidenceCandidate> {
-    state
-        .model
+fn evidence_candidates(model: &Model) -> Vec<EvidenceCandidate> {
+    model
         .simulation
         .retained
         .runs
@@ -1064,6 +1057,21 @@ fn relative_time(timestamp_ms: u64) -> String {
 mod tests {
     use super::*;
     use crate::state::DesignNote;
+    use crate::workbench::app::RSpiceApp;
+
+    /// Review comments over the application's parts, as the dialog's step
+    /// lends them.
+    fn comments(app: &mut RSpiceApp) -> ReviewComments<'_> {
+        let state = &mut app.state;
+        ReviewComments {
+            dialog: &mut state.design.design_review_comments,
+            design_note: &mut state.design.design_note,
+            model: &mut state.model,
+            workbench: &mut state.workbench,
+            cloud: &*state.cloud,
+            session: &app.cloud,
+        }
+    }
 
     #[test]
     fn review_age_reports_missing_time_and_clock_skew() {
@@ -1107,7 +1115,7 @@ mod tests {
                 Ok(std::time::Duration::MAX),
             ] {
                 crate::time_compat::with_unix_epoch(epoch, || {
-                    app.handle_design_review_action(action.clone())
+                    comments(&mut app).handle_design_review_action(action.clone())
                 });
                 assert_eq!(app.state.model.schematic.document().design_notes, notes);
                 assert_eq!(app.state.model.schematic.session.is_dirty, dirty);
@@ -1125,7 +1133,7 @@ mod tests {
                         .contains("timestamped")
                 );
             }
-            app.handle_design_review_action(action);
+            comments(&mut app).handle_design_review_action(action);
             assert!(app.state.design.design_review_comments.error.is_none());
             assert!(app.state.design.design_review_comments.reply.is_empty());
             assert_eq!(
@@ -1368,7 +1376,7 @@ mod tests {
         open_design_review_comments(&mut app.state);
         app.state.design.design_review_comments.reply = "Bias point checked.".to_owned();
 
-        app.handle_design_review_action(ReviewAction::Reply);
+        comments(&mut app).handle_design_review_action(ReviewAction::Reply);
 
         let review = app.state.model.schematic.document().design_notes[0]
             .review
@@ -1414,7 +1422,7 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ctx| app.render_design_review_comments_dialog(ctx),
+                |ctx| comments(&mut app).render_design_review_comments_dialog(ctx),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -1463,7 +1471,7 @@ mod tests {
                         )),
                         ..egui::RawInput::default()
                     },
-                    |ctx| app.render_design_review_comments_dialog(ctx),
+                    |ctx| comments(&mut app).render_design_review_comments_dialog(ctx),
                 )
                 .shapes;
         }

@@ -174,7 +174,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.design_review_comments"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.design_review_comments.open),
-        render: |app, ctx| app.render_design_review_comments_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_design_review_comments_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.design_note"),
