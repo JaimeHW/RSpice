@@ -1246,9 +1246,9 @@ mod tests {
     #[test]
     fn a_read_only_deck_is_found_in_but_offers_no_replace() {
         let mut app = RSpiceApp::test_instance();
-        app.state.ui.code_workspace.page =
+        app.state.code.code_workspace.page =
             crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
-        app.state.ui.netlist.find.open = true;
+        app.state.code.netlist.find.open = true;
         let names = find_dialog_names(&mut app);
         let says = |text: &str| names.iter().any(|name| name == text);
         assert!(says("Find in source"), "{names:?}");
