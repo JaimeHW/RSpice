@@ -142,7 +142,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::WindowManager.spec().id, "window-manager");
     assert_eq!(Command::HelpCenter.spec().id, "help-center");
     assert_eq!(Command::ReleaseNotes.spec().id, "release-notes");
-    assert_eq!(Command::MigrationGuide.spec().id, "migration-guide");
+
     assert_eq!(Command::SystemDiagnostics.spec().id, "system-diagnostics");
     assert_eq!(Command::SupportBundle.spec().id, "support-bundle");
     assert_eq!(Command::LegalPrivacy.spec().id, "legal-privacy-center");

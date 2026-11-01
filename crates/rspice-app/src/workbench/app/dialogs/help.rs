@@ -162,9 +162,7 @@ impl RSpiceApp {
         let mut action = None;
 
         let choice = Dialog::new(page.label(), "Close")
-            .description(
-                "Browse product guidance, release notes, migration requirements, and legal notices.",
-            )
+            .description("Browse product guidance, release notes and legal notices.")
             .size(DialogSize::Manager)
             .show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -184,7 +182,7 @@ impl RSpiceApp {
                 match page {
                     HelpCenterPage::Help => render_help_page(ui, &mut query, &mut action),
                     HelpCenterPage::ReleaseNotes => render_release_notes(ui),
-                    HelpCenterPage::MigrationGuide => render_migration_guide(ui),
+
                     HelpCenterPage::LegalPrivacy => render_legal_privacy(ui),
                     // Report a problem draws these; the strip above never
                     // offers them.
@@ -535,37 +533,6 @@ fn render_release_notes(ui: &mut egui::Ui) {
             ));
             ui.end_row();
         });
-}
-
-fn render_migration_guide(ui: &mut egui::Ui) {
-    section_heading(ui, "Supported file versions");
-    Grid::new("help.migration-contracts")
-        .num_columns(2)
-        .spacing([24.0, 7.0])
-        .show(ui, |ui| {
-            ui.label("Project descriptor");
-            ui.label(crate::state::PROJECT_DESCRIPTOR_SCHEMA_VERSION.to_string());
-            ui.end_row();
-            ui.label("Technology binding");
-            ui.label(crate::state::PROJECT_TECHNOLOGY_BINDING_SCHEMA_VERSION.to_string());
-            ui.end_row();
-            ui.label("Execution context");
-            ui.label(crate::io::PROJECT_EXECUTION_CONTEXT_SCHEMA_VERSION.to_string());
-            ui.end_row();
-            ui.label("Model-bound symbol");
-            ui.label(crate::state::MODEL_BOUND_SYMBOL_SCHEMA_VERSION.to_string());
-            ui.end_row();
-            ui.label("Project source registry");
-            ui.label(crate::state::PROJECT_SOURCE_REGISTRY_SCHEMA_VERSION.to_string());
-            ui.end_row();
-        });
-    ui.add_space(12.0);
-    section_heading(ui, "Migrating a project");
-    ui.label("1. Preserve the original project and all externally referenced model/source files.");
-    ui.label("2. Open a project copy; RSpice validates every supported schema before mutation.");
-    ui.label("3. Review migration diagnostics, source bindings, model revisions, and analysis dependencies.");
-    ui.label("4. Run schematic checks and simulation preflight against the migrated copy.");
-    ui.label("5. Save only after the accepted baseline and generated artifacts match the intended project.");
 }
 
 fn render_legal_privacy(ui: &mut egui::Ui) {

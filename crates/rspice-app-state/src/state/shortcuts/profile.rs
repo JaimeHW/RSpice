@@ -39,6 +39,9 @@ pub const RETIRED_COMMAND_IDS: &[&str] = &[
     // Opened the sheet size library, which Sheet defaults offers beside the
     // sizes it picks from.
     "sheet-preset-library",
+    // Opened a Help Center page of schema numbers and generic steps; a
+    // project of an older version is migrated when it opens.
+    "migration-guide",
 ];
 
 /// Persisted user shortcut profile. Command entries remain raw until they are

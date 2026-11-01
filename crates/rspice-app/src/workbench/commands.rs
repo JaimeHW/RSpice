@@ -242,7 +242,6 @@ impl Command {
             | Self::HelpCenter
             | Self::Examples
             | Self::ReleaseNotes
-            | Self::MigrationGuide
             | Self::SystemDiagnostics
             | Self::SupportBundle
             | Self::LegalPrivacy
@@ -1163,10 +1162,7 @@ impl Command {
                 &mut app.state,
                 crate::workbench::app::HelpCenterPage::ReleaseNotes,
             ),
-            Self::MigrationGuide => open_help_center(
-                &mut app.state,
-                crate::workbench::app::HelpCenterPage::MigrationGuide,
-            ),
+
             Self::SystemDiagnostics => open_help_center(
                 &mut app.state,
                 crate::workbench::app::HelpCenterPage::Diagnostics,

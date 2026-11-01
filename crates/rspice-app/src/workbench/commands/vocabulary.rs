@@ -232,7 +232,6 @@ pub enum Command {
     HelpCenter,
     Examples,
     ReleaseNotes,
-    MigrationGuide,
     SystemDiagnostics,
     SupportBundle,
     LegalPrivacy,
@@ -638,9 +637,7 @@ impl Command {
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
             Self::Examples => spec("examples", "Examples\u{2026}", "Help"),
             Self::ReleaseNotes => spec("release-notes", "Release notes", "Help"),
-            Self::MigrationGuide => {
-                spec("migration-guide", "Project migration guide\u{2026}", "Help")
-            }
+
             Self::SystemDiagnostics => {
                 spec("system-diagnostics", "Report a problem\u{2026}", "Help")
             }
@@ -861,7 +858,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::HelpCenter,
     Command::Examples,
     Command::ReleaseNotes,
-    Command::MigrationGuide,
     Command::SystemDiagnostics,
     Command::SupportBundle,
     Command::LegalPrivacy,
@@ -1169,7 +1165,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::HelpCenter.key(),
     Command::Examples.key(),
     Command::ReleaseNotes.key(),
-    Command::MigrationGuide.key(),
     Command::SystemDiagnostics.key(),
     Command::SupportBundle.key(),
     Command::LegalPrivacy.key(),
