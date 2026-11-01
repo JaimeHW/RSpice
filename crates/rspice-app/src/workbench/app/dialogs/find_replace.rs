@@ -261,7 +261,10 @@ pub(in crate::workbench) fn render_find_replace_dialog(
         Err(reason) => Err(reason.as_str()),
     };
     let form = &mut *dialog;
+    // Three options a row, in the same three columns on every row: what to
+    // look in, where, and how to match.
     let choice = CommandForm::new(TITLE, PRIMARY)
+        .option_columns()
         .describe(DESCRIPTION)
         .primary_enabled(count > 0)
         .status(status)
@@ -269,7 +272,7 @@ pub(in crate::workbench) fn render_find_replace_dialog(
             let find = Id::new(FIND_FIELD);
             rows.text("Find", find, &mut form.find, "text or pattern");
             rows.text("Replace", Id::new(REPLACE_FIELD), &mut form.replace, "");
-            rows.checks(
+            rows.check_columns(
                 "Look in",
                 &mut [
                     ("Instance names", &mut form.targets.instance_names),
@@ -277,12 +280,12 @@ pub(in crate::workbench) fn render_find_replace_dialog(
                     ("Values", &mut form.targets.values),
                 ],
             );
-            rows.segmented("Scope", "find-replace-scope", &SCOPES, &mut form.scope);
-            rows.checks(
+            rows.segmented_columns("Scope", "find-replace-scope", &SCOPES, &mut form.scope);
+            rows.check_columns(
                 "Match",
                 &mut [
                     ("Whole word", &mut form.options.whole_word),
-                    ("Case", &mut form.options.match_case),
+                    ("Match case", &mut form.options.match_case),
                     ("Regular expression", &mut form.options.regex),
                 ],
             );
@@ -362,6 +365,101 @@ mod tests {
         component.name = name.to_owned();
         component.value = value.to_owned();
         component
+    }
+
+    /// Each option row is one line, its checks in the columns the scope's
+    /// segments stand in, and every row of the form is one pitch from the
+    /// next.
+    #[test]
+    fn the_options_stand_on_one_grid() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        open_find_replace(&mut app.state);
+        let mut render = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| app.render_frame_dialogs(ui.ctx()),
+            )
+        };
+        let _ = render();
+        let nodes = render()
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes;
+        let rect = |label: &str| {
+            let bounds = nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| {
+                    node.label() == Some(label)
+                        && matches!(
+                            node.role(),
+                            egui::accesskit::Role::TextInput
+                                | egui::accesskit::Role::CheckBox
+                                | egui::accesskit::Role::RadioButton
+                        )
+                })
+                .and_then(|node| node.bounds())
+                .unwrap_or_else(|| panic!("{label} is not published with its bounds"));
+            egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            )
+        };
+        let rows = [
+            vec!["Find"],
+            vec!["Replace"],
+            vec!["Instance names", "Net labels", "Values"],
+            SCOPES.to_vec(),
+            vec!["Whole word", "Match case", "Regular expression"],
+        ];
+        let centres: Vec<f32> = rows
+            .iter()
+            .map(|row| {
+                let centre = rect(row[0]).center().y;
+                for item in row {
+                    assert!(
+                        (rect(item).center().y - centre).abs() <= 0.5,
+                        "{item} is not on the line {} is on",
+                        row[0]
+                    );
+                }
+                centre
+            })
+            .collect();
+        let pitch = centres[1] - centres[0];
+        for pair in centres.windows(2) {
+            assert!(
+                (pair[1] - pair[0] - pitch).abs() <= 0.5,
+                "the rows step {centres:?}, not one pitch"
+            );
+        }
+        for column in 0..3 {
+            let left = rect(SCOPES[column]).left();
+            for row in [&rows[2], &rows[4]] {
+                assert!(
+                    (rect(row[column]).left() - left).abs() <= 0.5,
+                    "{} does not start where {} does",
+                    row[column],
+                    SCOPES[column]
+                );
+            }
+        }
+        let (find, scope) = (rect("Find"), rect(SCOPES[2]));
+        assert!(
+            (scope.right() - find.right()).abs() <= 0.5,
+            "the scope does not span the field column"
+        );
     }
 
     /// A form nobody has typed into says what Replace all waits for, as a
