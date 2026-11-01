@@ -348,6 +348,92 @@ fn dialog_visible_text(
     (visible, clipped)
 }
 
+/// The operations on the selected plan are one row at the desktop size:
+/// Rename, Clone, and a More menu holding Compare, Export and Archive. At
+/// their own widths the five wrapped, Archive on a row of its own.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_selected_plans_operations_are_one_row_with_the_rare_ones_under_more() {
+    let (mut app, active, available, _) = app_with_every_lifecycle_state();
+    let draft = route_draft(&app, SimulationPlanManagerMode::Browse, active, available);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut frame = |events: Vec<egui::Event>| {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1440.0, 900.0))),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                plan_manager_dialog(ctx, &mut app, draft.clone());
+            },
+        )
+    };
+    let texts = |output: &egui::FullOutput| {
+        output
+            .shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) => Some((
+                    text.galley.job.text.clone(),
+                    text.pos + text.galley.rect.center().to_vec2(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut output = frame(Vec::new());
+    for _ in 0..2 {
+        output = frame(Vec::new());
+    }
+    let painted = texts(&output);
+    let row = ["Rename…", "Clone…", "More"]
+        .map(|label| {
+            painted
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("'{label}' is not painted: {painted:?}"))
+                .1
+        });
+    for (label, at) in ["Clone…", "More"].iter().zip(&row[1..]) {
+        assert!(
+            (at.y - row[0].y).abs() < 1.0,
+            "{label} is on another row ({} against {})",
+            at.y,
+            row[0].y
+        );
+    }
+    for rare in ["Compare…", "Export…", "Archive…"] {
+        assert!(
+            !painted.iter().any(|(text, _)| text == rare),
+            "{rare} is painted in the row"
+        );
+    }
+
+    let more = row[2];
+    frame(vec![egui::Event::PointerMoved(more)]);
+    frame(vec![egui::Event::PointerButton {
+        pos: more,
+        button: egui::PointerButton::Primary,
+        pressed: true,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    frame(vec![egui::Event::PointerButton {
+        pos: more,
+        button: egui::PointerButton::Primary,
+        pressed: false,
+        modifiers: egui::Modifiers::NONE,
+    }]);
+    let opened = texts(&frame(Vec::new()));
+    for rare in ["Compare…", "Export…", "Archive…"] {
+        assert!(
+            opened.iter().any(|(text, _)| text == rare),
+            "the More menu has no {rare}: {opened:?}"
+        );
+    }
+}
+
 /// A catalog with one plan of each lifecycle state, so a scope, a tone and a
 /// filter each have all three to distinguish. Returns the active, available and
 /// archived ids.
@@ -450,9 +536,7 @@ fn the_manager_fits_the_real_viewport_at_every_supported_width() {
         let owed = [
             "Rename…",
             "Clone…",
-            "Compare…",
-            "Export…",
-            "Archive…",
+            "More",
             "Selected plan",
             "Name",
             "Revision",
@@ -538,9 +622,7 @@ fn a_portrait_viewport_stacks_the_surface_and_still_fits() {
         for label in [
             "Rename…",
             "Clone…",
-            "Compare…",
-            "Export…",
-            "Archive…",
+            "More",
             "Selected plan",
             "Declared run set",
             "Modelled cost",
@@ -942,7 +1024,7 @@ fn import_is_a_toolbar_action_and_not_an_operation_on_the_selected_plan() {
         at("Import…") < at("Rename…"),
         "Import is painted inside the selected-plan action row"
     );
-    for kept in ["Rename…", "Clone…", "Compare…", "Export…", "Archive…"] {
+    for kept in ["Rename…", "Clone…", "More"] {
         assert!(
             at(kept) > at("Plan"),
             "'{kept}' is painted before the table, so it left the \

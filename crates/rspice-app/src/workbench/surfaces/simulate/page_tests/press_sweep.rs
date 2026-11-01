@@ -555,7 +555,7 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
     ("analysis catalogue · Save", 0),
     ("analysis catalogue · Results workspace", 0),
     ("analysis options · Operating point", 18),
-    ("plan manager", 12),
+    ("plan manager", 11),
     ("rename analysis", 4),
     ("run points", 12),
     ("design variable", 11),
@@ -607,7 +607,11 @@ const PRESSED_PER_SURFACE: &[(&str, usize)] = &[
 /// fell, Temperature is back to its seven, and the option fields each kind owns
 /// are pressed on that kind's form (354). The transient form's two new
 /// controls — checkpoint retention and import — are among them.
-const PRESSED_FLOOR: usize = 354;
+///
+/// The plan manager's Compare and Export then moved behind its More menu
+/// button, which is one control here; the sweep presses the button and not
+/// the menu's rows (353).
+const PRESSED_FLOOR: usize = 353;
 
 /// Controls that are wired to nothing.
 ///

@@ -666,27 +666,45 @@ fn plan_selection_actions(
                 {
                     *action = Some(PlanManagerAction::Clone);
                 }
-                if Button::new("Compare…").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::Compare);
-                }
-                if Button::new("Export…").show(ui).clicked() {
-                    *action = Some(PlanManagerAction::Export);
-                }
-                if selected.archived {
-                    if Button::new("Restore").show(ui).clicked() {
-                        *action = Some(PlanManagerAction::Restore);
-                    }
-                } else if Button::new("Archive…")
-                    .destructive(true)
-                    .enabled(!selected.active)
-                    .show(ui)
-                    .on_disabled_hover_text(ARCHIVE_REFUSED_ON_ACTIVE)
-                    .clicked()
-                {
-                    *action = Some(PlanManagerAction::Archive);
-                }
+                plan_more_actions(ui, selected, action);
             });
         });
+}
+
+/// The operations a plan rarely needs, behind one menu button: at their own
+/// widths beside Rename and Clone they did not fit the aside's one row at the
+/// desktop size, and Archive wrapped onto a row of its own.
+fn plan_more_actions(
+    ui: &mut Ui,
+    selected: &PlanCatalogRecord,
+    action: &mut Option<PlanManagerAction>,
+) {
+    let more = Button::new("More").menu().show(ui);
+    egui::Popup::menu(&more).show(|ui| {
+        ui.set_min_width(140.0);
+        if ui.button("Compare…").clicked() {
+            *action = Some(PlanManagerAction::Compare);
+            ui.close();
+        }
+        if ui.button("Export…").clicked() {
+            *action = Some(PlanManagerAction::Export);
+            ui.close();
+        }
+        ui.separator();
+        if selected.archived {
+            if ui.button("Restore").clicked() {
+                *action = Some(PlanManagerAction::Restore);
+                ui.close();
+            }
+        } else if ui
+            .add_enabled(!selected.active, egui::Button::new("Archive…"))
+            .on_disabled_hover_text(ARCHIVE_REFUSED_ON_ACTIVE)
+            .clicked()
+        {
+            *action = Some(PlanManagerAction::Archive);
+            ui.close();
+        }
+    });
 }
 
 /// How one detail row states its value.
