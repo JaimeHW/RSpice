@@ -950,7 +950,9 @@ mod tests {
         ));
         assert!(description.contains("Escape: Cancel active command"));
         assert!(description.contains("Shift+T: Place text or note"));
-        assert!(description.contains("S: Stretch selection"));
+        // Named as the Edit menu names it.
+        assert!(description.contains("S: Stretch"));
+        assert!(!description.contains("S: Stretch selection"));
         assert_eq!(
             canvas::selection_accessibility_status(&canvas_accessibility_view(&state)),
             "Selected instance unnamed, Resistor."

@@ -482,8 +482,8 @@ const CONTEXT_MENU: [&str; 8] = [
     "Go to definition",
     "Find references",
     "Rename symbol…",
-    "Cut selection",
-    "Copy selection",
+    "Cut",
+    "Copy",
     "Paste",
     "Toggle line comment",
     "Format document",
@@ -540,11 +540,11 @@ fn on_a_read_only_source_the_menu_disables_cut_and_paste() {
             .unwrap_or_else(|| panic!("the menu offers {label}"))
             .1
     };
-    assert!(!enabled("Cut selection"));
+    assert!(!enabled("Cut"));
     assert!(!enabled("Paste"));
     assert!(!enabled("Toggle line comment"));
     assert!(!enabled("Rename symbol…"));
-    assert!(enabled("Copy selection"), "reading stays possible");
+    assert!(enabled("Copy"), "reading stays possible");
     assert!(enabled("Go to definition"));
 }
 
