@@ -227,6 +227,7 @@ impl<'u> FormRows<'u> {
                     .id(id)
                     .font(egui::TextStyle::Monospace)
                     .hint_text(hint)
+                    .vertical_align(Align::Center)
                     .margin(egui::Margin::symmetric(8, 4)),
             );
             form::name_control(ui, &response, label);
@@ -314,6 +315,7 @@ impl<'u> FormRows<'u> {
                         .id(id.with(axis))
                         .font(egui::TextStyle::Monospace)
                         .hint_text(axis)
+                        .vertical_align(Align::Center)
                         .margin(egui::Margin::symmetric(8, 4)),
                 );
                 form::name_control(ui, &response, &format!("{label} {axis}"));
@@ -688,6 +690,7 @@ impl<'u> FormRows<'u> {
                                 .id(id)
                                 .font(egui::TextStyle::Monospace)
                                 .hint_text(hint)
+                                .vertical_align(Align::Center)
                                 .margin(egui::Margin::symmetric(8, 4)),
                         );
                         form::name_control(ui, &field, label);
@@ -2168,6 +2171,61 @@ mod tests {
                 .map(|section| section.format.color)
                 .collect::<Vec<_>>()
         );
+    }
+
+    /// A field taller than its line, as every field is under a finger, sets
+    /// its hint and its value on its middle, where its label reads, not
+    /// against its top inset.
+    #[test]
+    fn a_field_sets_its_hint_and_its_value_on_its_middle() {
+        let hint = "text or pattern";
+        for touch in [None, Some(44.0)] {
+            for typed in ["", "R1"] {
+                let ctx = Context::default();
+                crate::Theme::default().apply(&ctx);
+                crate::Theme::default().apply_responsive_metrics_with_target(&ctx, touch);
+                ctx.all_styles_mut(|style| style.animation_time = 0.0);
+                let input = || egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1024.0, 768.0),
+                    )),
+                    ..Default::default()
+                };
+                let (mut field, mut shapes) = (Rect::NOTHING, Vec::new());
+                for _ in 0..3 {
+                    shapes = ctx
+                        .run_ui(input(), |ctx| {
+                            let mut value = typed.to_owned();
+                            let _ = CommandForm::new("Find", "Find").show(ctx, |rows| {
+                                let id = Id::new("command-form.middle.find");
+                                field = rows.text("Find", id, &mut value, hint).rect;
+                                Some(id)
+                            });
+                        })
+                        .shapes;
+                }
+                let shown = if typed.is_empty() { hint } else { typed };
+                let mut line = None;
+                for clipped in &shapes {
+                    let mut stack = vec![&clipped.shape];
+                    while let Some(shape) = stack.pop() {
+                        match shape {
+                            egui::Shape::Vec(shapes) => stack.extend(shapes),
+                            egui::Shape::Text(text) if text.galley.job.text == shown => {
+                                line = Some(text.galley.rect.translate(text.pos.to_vec2()));
+                            }
+                            _ => {}
+                        }
+                    }
+                }
+                let line = line.expect("the field's text is painted");
+                assert!(
+                    (line.center().y - field.center().y).abs() <= 1.0,
+                    "{touch:?} {shown:?}: the line {line:?} is not on the middle of {field:?}"
+                );
+            }
+        }
     }
 
     /// A consequence is stated behind the warning mark in dim text, and a

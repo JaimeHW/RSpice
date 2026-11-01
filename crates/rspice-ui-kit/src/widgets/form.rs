@@ -41,6 +41,7 @@ pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> R
         vec2(width, t.metrics.ctl_h),
         TextEdit::singleline(value)
             .font(egui::TextStyle::Monospace)
+            .vertical_align(egui::Align::Center)
             .margin(egui::Margin::symmetric(8, 4)),
     );
     name_control(ui, &response, label);

@@ -111,6 +111,7 @@ impl<'u> CanvasEntryRows<'u> {
                 .id(id)
                 .font(egui::TextStyle::Monospace)
                 .hint_text(hint)
+                .vertical_align(Align::Center)
                 .margin(egui::Margin::symmetric(6, 4));
             if let Some(lay_out) = lay_out.as_mut() {
                 edit = edit.layouter(lay_out);
