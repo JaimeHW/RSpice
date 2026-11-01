@@ -385,32 +385,29 @@ fn retargeting_to_a_preset_keeps_the_records_presentation() {
     retargeted.validate().unwrap();
 }
 
+/// Every size chip in the catalog is one cell of one grid: the families line
+/// up and a family of six fills one row. Packing each row to its own chips
+/// gave ISO A, ANSI, ARCH and JIS B four different chip widths and stretched
+/// a lone ARCH E1 across the whole catalog.
 #[test]
-fn chip_rows_pack_within_the_row_and_stretch_never_drops_a_chip() {
-    let chips: Vec<ChipSpec> = (0..7)
-        .map(|index| ChipSpec {
-            strong: format!("chip {index}"),
-            dims: String::new(),
-            action: ChipAction::NewPreset,
-            selected: false,
-            natural_w: 120.0,
-        })
-        .collect();
-    let rows = pack_chip_rows(&chips, 400.0);
-    assert_eq!(rows.iter().map(Vec::len).sum::<usize>(), chips.len());
-    assert!(rows.iter().all(|row| {
-        let natural: f32 = row.len() as f32 * 120.0 + (row.len() - 1) as f32 * CHIP_GAP;
-        natural <= 400.0
-    }));
-    // A chip wider than the whole row still lands on its own row.
-    let wide = vec![ChipSpec {
-        strong: "wide".to_owned(),
-        dims: String::new(),
-        action: ChipAction::NewPreset,
-        selected: false,
-        natural_w: 900.0,
-    }];
-    assert_eq!(pack_chip_rows(&wide, 400.0).len(), 1);
+fn size_chips_share_one_grid_and_never_drop_a_chip() {
+    // Room for seven 110 pt chips, but the largest family has six.
+    let columns = catalog_columns(110.0, 6, 800.0);
+    assert_eq!(columns, 6);
+    let cell = catalog_cell_width(columns, 800.0);
+    assert!((cell * 6.0 + CHIP_GAP * 5.0 - 800.0).abs() < 0.01);
+    assert!(cell >= 110.0);
+    // A family of six is one row; a family of four is one row of four cells.
+    assert_eq!(pack_chip_rows(6, columns), vec![vec![0, 1, 2, 3, 4, 5]]);
+    assert_eq!(pack_chip_rows(4, columns), vec![vec![0, 1, 2, 3]]);
+    // A narrower catalog wraps onto the same columns and drops nothing.
+    let narrow = catalog_columns(110.0, 6, 400.0);
+    assert_eq!(narrow, 3);
+    let rows = pack_chip_rows(7, narrow);
+    assert_eq!(rows.iter().map(Vec::len).sum::<usize>(), 7);
+    assert!(rows.iter().all(|row| row.len() <= narrow));
+    // A chip wider than the catalog still gets a column of its own.
+    assert_eq!(catalog_columns(900.0, 6, 400.0), 1);
 }
 
 /// The defaults read as the rest of the application does: sentence-case

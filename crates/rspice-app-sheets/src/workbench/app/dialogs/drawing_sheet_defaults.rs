@@ -263,7 +263,9 @@ pub fn sheet_names(names: &[String]) -> String {
 // ── Fused-shell geometry ────────────────────────────────────────────────────
 
 const SHELL_ROW1_H: f32 = 84.0;
-const CHIP_H: f32 = 26.0;
+/// A size chip states its name over its dimensions, so a family of six fits
+/// one row of the catalog's grid.
+const CHIP_H: f32 = 38.0;
 pub const CHIP_GAP: f32 = 5.0;
 const SERIES_LABEL_H: f32 = 15.0;
 const SERIES_GAP: f32 = 6.0;
@@ -750,7 +752,7 @@ fn build_chip_series(
 
     let chip = |strong: String, dims: String, action: ChipAction, selected: bool| {
         let natural_w =
-            10.0 + measure(&strong_font, &strong) + 6.0 + measure(&dims_font, &dims) + 10.0;
+            10.0 + measure(&strong_font, &strong).max(measure(&dims_font, &dims)) + 10.0;
         ChipSpec {
             strong,
             dims,
@@ -837,33 +839,57 @@ fn build_chip_series(
     });
 
     let row_w = region_w - 2.0 * CATALOG_PAD_X;
+    let columns = series_columns(&series_list, row_w);
     for series in &mut series_list {
-        series.rows = pack_chip_rows(&series.chips, row_w);
+        series.rows = pack_chip_rows(series.chips.len(), columns);
     }
     series_list
 }
 
-pub fn pack_chip_rows(chips: &[ChipSpec], avail: f32) -> Vec<Vec<usize>> {
-    let mut rows: Vec<Vec<usize>> = Vec::new();
-    let mut row: Vec<usize> = Vec::new();
-    let mut used = 0.0;
-    for (index, spec) in chips.iter().enumerate() {
-        let width = spec.natural_w.min(avail);
-        if !row.is_empty() && used + CHIP_GAP + width > avail {
-            rows.push(std::mem::take(&mut row));
-            used = 0.0;
-        }
-        used += if row.is_empty() {
-            width
-        } else {
-            CHIP_GAP + width
-        };
-        row.push(index);
-    }
-    if !row.is_empty() {
-        rows.push(row);
-    }
-    rows
+/// How many equal columns the size catalog has: as many as the widest size
+/// chip allows, but no more than the largest standard family needs. Every
+/// chip in every family then has one width and the families line up, where
+/// packing each row to its own chips gave each family its own widths and a
+/// lone chip the whole row.
+pub fn catalog_columns(widest: f32, largest_family: usize, avail: f32) -> usize {
+    let fit = ((avail + CHIP_GAP) / (widest.min(avail) + CHIP_GAP)).floor() as usize;
+    fit.min(largest_family).max(1)
+}
+
+/// The width of one column of the size catalog.
+pub fn catalog_cell_width(columns: usize, avail: f32) -> f32 {
+    (avail - CHIP_GAP * columns.saturating_sub(1) as f32) / columns.max(1) as f32
+}
+
+/// A family's chips on the catalog's columns, in catalog order.
+pub fn pack_chip_rows(count: usize, columns: usize) -> Vec<Vec<usize>> {
+    (0..count)
+        .collect::<Vec<_>>()
+        .chunks(columns.max(1))
+        .map(<[usize]>::to_vec)
+        .collect()
+}
+
+fn series_columns(series_list: &[ChipSeries], row_w: f32) -> usize {
+    let sizes = || {
+        series_list
+            .iter()
+            .flat_map(|series| &series.chips)
+            .filter(|chip| chip.action != ChipAction::NewPreset)
+    };
+    let widest = sizes().map(|chip| chip.natural_w).fold(0.0, f32::max);
+    let largest_family = series_list
+        .iter()
+        .filter(|series| {
+            series
+                .chips
+                .iter()
+                .all(|chip| matches!(chip.action, ChipAction::Standard(_)))
+        })
+        .map(|series| series.chips.len())
+        .max()
+        .unwrap_or(1);
+    catalog_columns(widest, largest_family, row_w)
 }
 
 fn catalog_height(series_list: &[ChipSeries]) -> f32 {
@@ -888,6 +914,7 @@ fn catalog_region(
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel);
     let alpha = if enabled { 1.0 } else { 0.72 };
     let row_w = rect.width() - 2.0 * CATALOG_PAD_X;
+    let cell_w = catalog_cell_width(series_columns(series_list, row_w), row_w);
     let mut clicked: Option<ChipAction> = None;
     let mut y = rect.top() + CATALOG_PAD_TOP;
     for (series_index, series) in series_list.iter().enumerate() {
@@ -911,16 +938,16 @@ fn catalog_region(
         );
         y += SERIES_LABEL_H + 3.0;
         for row in &series.rows {
-            let natural: f32 = row
-                .iter()
-                .map(|&index| series.chips[index].natural_w.min(row_w))
-                .sum::<f32>()
-                + CHIP_GAP * (row.len().saturating_sub(1)) as f32;
-            let extra = ((row_w - natural) / row.len() as f32).max(0.0);
-            let mut x = rect.left() + CATALOG_PAD_X;
+            let left = rect.left() + CATALOG_PAD_X;
+            let mut x = left;
             for &index in row {
                 let spec = &series.chips[index];
-                let width = spec.natural_w.min(row_w) + extra;
+                // The add tile takes what is left of its row.
+                let width = if spec.action == ChipAction::NewPreset {
+                    left + row_w - x
+                } else {
+                    cell_w
+                };
                 let chip_rect = Rect::from_min_size(pos2(x, y), vec2(width, CHIP_H));
                 if chip_button(ui, chip_rect, spec, (series_index, index), enabled, alpha) {
                     clicked = Some(spec.action);
@@ -1027,26 +1054,23 @@ fn chip_button(
             strong_color,
         );
     } else {
-        let strong_w = measure(&strong_font, &spec.strong);
-        let dims_w = measure(&dims_font, &spec.dims);
-        let content_w = strong_w
-            + if spec.dims.is_empty() {
-                0.0
-            } else {
-                6.0 + dims_w
-            };
-        let start = (rect.center().x - content_w / 2.0).max(rect.left() + 6.0);
+        // The name over its dimensions, both centred in the chip.
+        let (strong_y, dims_y) = if spec.dims.is_empty() {
+            (rect.center().y, rect.center().y)
+        } else {
+            (rect.center().y - 7.0, rect.center().y + 8.0)
+        };
         painter.text(
-            pos2(start, rect.center().y),
-            Align2::LEFT_CENTER,
+            pos2(rect.center().x, strong_y),
+            Align2::CENTER_CENTER,
             &spec.strong,
             strong_font,
             strong_color,
         );
         if !spec.dims.is_empty() {
             painter.text(
-                pos2(start + strong_w + 6.0, rect.center().y),
-                Align2::LEFT_CENTER,
+                pos2(rect.center().x, dims_y),
+                Align2::CENTER_CENTER,
                 &spec.dims,
                 dims_font,
                 t.color.text_dim.gamma_multiply(alpha),
