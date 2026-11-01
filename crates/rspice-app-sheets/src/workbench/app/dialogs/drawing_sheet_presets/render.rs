@@ -122,15 +122,9 @@ pub(super) fn library_body(
     if let Some(notice) = authority_notice {
         warning_notice(ui, notice);
     }
-    let query = search.trim().to_lowercase();
     let filtered = presets
         .iter()
-        .filter(|preset| {
-            query.is_empty()
-                || preset.name.to_lowercase().contains(&query)
-                || scope_label(preset.scope).contains(&query)
-                || preset.id.to_lowercase().contains(&query)
-        })
+        .filter(|preset| matches_filter(preset, search))
         .collect::<Vec<_>>();
 
     if filtered.is_empty() {
@@ -147,8 +141,12 @@ pub(super) fn library_body(
                 "Change the filter to return to the library."
             },
         );
-    } else if ui.available_width() < LIBRARY_TABLE_MIN_WIDTH {
-        // Narrower than the table's own floor, the columns would scroll
+    } else if ui.available_width() + 0.5
+        < library_column_widths(ui, &filtered, usage)
+            .iter()
+            .sum::<f32>()
+    {
+        // Narrower than the table's own columns, the table would scroll
         // sideways and take every row's actions off the surface with them.
         for preset in &filtered {
             library_entry(
@@ -175,6 +173,16 @@ pub(super) fn library_body(
     action
 }
 
+/// Whether a preset answers the library's filter: by its name, its id, or
+/// its scope as the table writes it, in any case.
+fn matches_filter(preset: &DrawingSheetPreset, search: &str) -> bool {
+    let query = search.trim().to_lowercase();
+    query.is_empty()
+        || preset.name.to_lowercase().contains(&query)
+        || scope_label(preset.scope).to_lowercase().contains(&query)
+        || preset.id.to_lowercase().contains(&query)
+}
+
 fn library_notes_stack(available_width: f32) -> bool {
     available_width < 620.0
 }
@@ -198,9 +206,6 @@ const LIBRARY_COLUMNS: [&str; 6] = [
     "State",
     "Actions",
 ];
-
-/// The width below which the library drops the table for its list form.
-const LIBRARY_TABLE_MIN_WIDTH: f32 = 700.0;
 
 /// How wide the library's surface has to be to state its table and its toolbar
 /// without a band that no column reaches and without scrolling either.
@@ -272,8 +277,8 @@ fn library_table(
                             // as a seventh row of data.
                             library_band(ui, t);
                             ui.label(
-                                RichText::new(heading.to_uppercase())
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                RichText::new(heading)
+                                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                                     .color(t.color.text_dim),
                             );
                             // The heading's own trailing gutter, so the next
@@ -301,7 +306,7 @@ fn library_table(
                             });
                             cells.col(|ui| {
                                 library_cell(ui, t);
-                                ui.label(portrait_dimensions(preset));
+                                ui.label(cell_text(t, portrait_dimensions(preset)));
                             });
                             cells.col(|ui| {
                                 library_cell(ui, t);
@@ -309,14 +314,7 @@ fn library_table(
                             });
                             cells.col(|ui| {
                                 library_cell(ui, t);
-                                ui.label(if used_by == 0 {
-                                    "unused".to_owned()
-                                } else {
-                                    format!(
-                                        "{used_by} reference{}",
-                                        if used_by == 1 { "" } else { "s" }
-                                    )
-                                });
+                                ui.label(cell_text(t, references_label(used_by)));
                             });
                             cells.col(|ui| {
                                 library_cell(ui, t);
@@ -376,10 +374,9 @@ fn library_column_widths(
     usage: &BTreeMap<String, usize>,
 ) -> [f32; 6] {
     let gutters = f32::from(PAGE_INSET) * 2.0;
-    let heading = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let heading = theme::sans(tokens::FS_0, FontWeight::SemiBold);
     let name = theme::sans(tokens::FS_0, FontWeight::SemiBold);
-    let body = egui::TextStyle::Body.resolve(ui.style());
-    let mono = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let body = theme::sans(tokens::FS_0, FontWeight::Regular);
     let text = |ui: &mut Ui, font: &egui::FontId, value: &str| {
         ui.fonts_mut(|fonts| {
             fonts
@@ -390,29 +387,19 @@ fn library_column_widths(
     };
     let mut widths = [0.0_f32; 6];
     for (index, label) in LIBRARY_COLUMNS.iter().enumerate() {
-        widths[index] = text(ui, &heading, &label.to_uppercase());
+        widths[index] = text(ui, &heading, label);
     }
     for preset in presets {
         let used_by = usage
             .get(&usage_key(preset.scope, &preset.id))
             .copied()
             .unwrap_or(0);
-        let references = if used_by == 0 {
-            "unused".to_owned()
-        } else {
-            format!("{used_by} reference{}", if used_by == 1 { "" } else { "s" })
-        };
-        let state = if unavailable(preset) {
-            "unavailable"
-        } else {
-            "resolved"
-        };
         let cells = [
             text(ui, &name, &preset.name),
             text(ui, &body, &portrait_dimensions(preset)),
-            text(ui, &mono, &scope_label(preset.scope).to_uppercase()),
-            text(ui, &body, &references),
-            text(ui, &mono, state),
+            text(ui, &body, scope_label(preset.scope)),
+            text(ui, &body, &references_label(used_by)),
+            text(ui, &body, state_label(unavailable(preset))),
             0.0,
         ];
         for (column, cell) in widths.iter_mut().zip(cells) {
@@ -519,11 +506,7 @@ fn library_entry(
                 ui.spacing_mut().item_spacing.x = 8.0;
                 ui.label(portrait_dimensions(preset));
                 scope_badge(ui, preset.scope);
-                ui.weak(if used_by == 0 {
-                    "unused".to_owned()
-                } else {
-                    format!("{used_by} reference{}", if used_by == 1 { "" } else { "s" })
-                });
+                ui.weak(references_label(used_by));
             });
             ui.add_space(2.0);
             ui.horizontal_wrapped(|ui| {
@@ -715,8 +698,8 @@ fn page_band(ui: &mut Ui, label: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
-                RichText::new(label.to_uppercase())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                RichText::new(label)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                     .color(t.color.text_dim),
             );
         });
@@ -1364,8 +1347,8 @@ fn section_heading(ui: &mut Ui, label: &str) {
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             ui.label(
-                RichText::new(label.to_uppercase())
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                RichText::new(label)
+                    .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                     .color(t.color.text_dim),
             );
         });
@@ -1375,10 +1358,35 @@ fn section_heading(ui: &mut Ui, label: &str) {
 fn table_header(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     ui.label(
-        RichText::new(label.to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+        RichText::new(label)
+            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
             .color(t.color.text_dim),
     );
+}
+
+/// A table cell's words, in the table's one face.
+fn cell_text(t: &Tokens, text: String) -> RichText {
+    RichText::new(text)
+        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+        .color(t.color.text)
+}
+
+/// How many drawing sheets use a preset, in words.
+fn references_label(used_by: usize) -> String {
+    match used_by {
+        0 => "Unused".to_owned(),
+        1 => "1 reference".to_owned(),
+        _ => format!("{used_by} references"),
+    }
+}
+
+/// Whether a preset's sheet resolves, in words.
+fn state_label(unavailable: bool) -> &'static str {
+    if unavailable {
+        "Unavailable"
+    } else {
+        "Resolved"
+    }
 }
 
 fn field_label(ui: &mut Ui, label: &str) {
@@ -1413,22 +1421,22 @@ fn scope_badge(ui: &mut Ui, scope: DrawingSheetPresetScope) {
         DrawingSheetPresetScope::Organization => t.color.text_dim,
     };
     ui.label(
-        RichText::new(scope_label(scope).to_uppercase())
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+        RichText::new(scope_label(scope))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(color),
     );
 }
 
 fn state_badge(ui: &mut Ui, unavailable: bool) {
     let t = Tokens::get(ui.ctx());
-    let (label, color) = if unavailable {
-        ("unavailable", t.color.warn)
+    let color = if unavailable {
+        t.color.warn
     } else {
-        ("resolved", t.color.ok)
+        t.color.ok
     };
     ui.label(
-        RichText::new(label)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+        RichText::new(state_label(unavailable))
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
             .color(color),
     );
 }
@@ -1512,7 +1520,7 @@ mod tests {
 
     use super::{
         LIBRARY_COLUMNS, PAGE_INSET, custom_editor_stacks, library_column_widths,
-        library_notes_stack, library_verb_width,
+        library_notes_stack, library_verb_width, matches_filter,
     };
     use crate::state::{DrawingSheetPreset, DrawingSheetPresetScope};
 
@@ -1583,6 +1591,23 @@ mod tests {
             "the actions column is its four verbs plus its two insets: {} against {verbs}",
             narrow[5]
         );
+    }
+
+    #[test]
+    fn the_filter_finds_a_scope_as_it_is_typed() {
+        let project = preset("Lab panel");
+        let personal = DrawingSheetPreset {
+            scope: DrawingSheetPresetScope::User,
+            ..preset("Bench card")
+        };
+        for query in ["project", "Project", " PROJECT "] {
+            assert!(matches_filter(&project, query), "{query:?}");
+            assert!(!matches_filter(&personal, query), "{query:?}");
+        }
+        for query in ["personal", "Personal"] {
+            assert!(matches_filter(&personal, query), "{query:?}");
+            assert!(!matches_filter(&project, query), "{query:?}");
+        }
     }
 
     #[test]
