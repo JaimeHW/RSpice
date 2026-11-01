@@ -18,7 +18,7 @@
 use crate::product::{RunId, SimulationPlanId};
 use crate::simulation::plan::SimulationPlan;
 use crate::state::{SimulationPlanPayload, SpecEntry};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::{ReferencePvtPoint, SimulationPlanLineage};
 use rspice_simulation_contract::run_set::{
     ReferencePoint, RunSetForecast, RunSetState, format_bytes, format_duration_ms,
@@ -173,10 +173,9 @@ impl PlanCatalogRecord {
 /// identity alone, so it serves the stored payload of any plan, active or not,
 /// and a plan with no payload record contributes zero rather than borrowing a
 /// neighbour's counts.
-pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
+pub(super) fn plan_catalog_records(model: &Model) -> Vec<PlanCatalogRecord> {
     let result_count = |id: SimulationPlanId| {
-        app.state
-            .model
+        model
             .simulation
             .retained
             .runs
@@ -187,14 +186,14 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             })
             .count()
     };
-    let payload = |id: SimulationPlanId| app.state.model.workspace.content.plan_data(id);
-    let mut records = Vec::with_capacity(app.state.model.sim_setup.plan_count());
-    if let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() {
+    let payload = |id: SimulationPlanId| model.workspace.content.plan_data(id);
+    let mut records = Vec::with_capacity(model.sim_setup.plan_count());
+    if let Ok(plan) = model.sim_setup.stable_analysis_plan() {
         let id = plan.id();
         let enabled = enabled_instance_count(plan);
         records.push(PlanCatalogRecord {
             id,
-            name: app.state.model.sim_setup.active_plan_name().to_string(),
+            name: model.sim_setup.active_plan_name().to_string(),
             revision: plan.revision().get(),
             active: true,
             archived: false,
@@ -204,64 +203,55 @@ pub(super) fn plan_catalog_records(app: &RSpiceApp) -> Vec<PlanCatalogRecord> {
             tombstones: plan.tombstones().len(),
             forecast: forecast_for(
                 plan,
-                &app.state.model.sim_setup.run_set,
-                app.state.model.sim_setup.reference_pvt,
+                &model.sim_setup.run_set,
+                model.sim_setup.reference_pvt,
                 enabled,
             ),
-            run_set_roster: run_set_roster(&app.state.model.sim_setup.run_set),
-            model_bindings: app.state.model.sim_setup.model_bindings.len(),
-            reference_pvt: app.state.model.sim_setup.reference_pvt,
+            run_set_roster: run_set_roster(&model.sim_setup.run_set),
+            model_bindings: model.sim_setup.model_bindings.len(),
+            reference_pvt: model.sim_setup.reference_pvt,
             design_variables: payload(id).map_or(0, |payload| payload.design_variables.len()),
             variable_roster: payload(id).map_or_else(Vec::new, variable_roster),
             saved_outputs: payload(id).map_or(0, |payload| payload.saved_outputs.len()),
             specifications: payload(id).map_or(0, specification_count),
             specification_roster: payload(id).map_or_else(Vec::new, specification_roster),
             regression_baseline: payload(id).and_then(|payload| payload.regression_baseline_run),
-            lineage: app.state.model.sim_setup.active_plan_lineage(),
+            lineage: model.sim_setup.active_plan_lineage(),
             results: result_count(id),
         });
     }
-    records.extend(
-        app.state
-            .model
-            .sim_setup
-            .inactive_plans()
-            .iter()
-            .map(|stored| {
-                let id = stored.id();
-                let enabled = enabled_instance_count(stored.analysis_plan());
-                PlanCatalogRecord {
-                    id,
-                    name: stored.name().to_string(),
-                    revision: stored.revision().get(),
-                    active: false,
-                    archived: stored.archived(),
-                    analyses: stored.analysis_plan().instances().len(),
-                    enabled,
-                    analysis_roster: analysis_roster(stored.analysis_plan()),
-                    tombstones: stored.analysis_plan().tombstones().len(),
-                    forecast: forecast_for(
-                        stored.analysis_plan(),
-                        stored.run_set(),
-                        stored.reference_pvt(),
-                        enabled,
-                    ),
-                    run_set_roster: run_set_roster(stored.run_set()),
-                    model_bindings: stored.model_bindings().len(),
-                    reference_pvt: stored.reference_pvt(),
-                    design_variables: payload(id)
-                        .map_or(0, |payload| payload.design_variables.len()),
-                    variable_roster: payload(id).map_or_else(Vec::new, variable_roster),
-                    saved_outputs: payload(id).map_or(0, |payload| payload.saved_outputs.len()),
-                    specifications: payload(id).map_or(0, specification_count),
-                    specification_roster: payload(id).map_or_else(Vec::new, specification_roster),
-                    regression_baseline: payload(id)
-                        .and_then(|payload| payload.regression_baseline_run),
-                    lineage: stored.lineage(),
-                    results: result_count(id),
-                }
-            }),
-    );
+    records.extend(model.sim_setup.inactive_plans().iter().map(|stored| {
+        let id = stored.id();
+        let enabled = enabled_instance_count(stored.analysis_plan());
+        PlanCatalogRecord {
+            id,
+            name: stored.name().to_string(),
+            revision: stored.revision().get(),
+            active: false,
+            archived: stored.archived(),
+            analyses: stored.analysis_plan().instances().len(),
+            enabled,
+            analysis_roster: analysis_roster(stored.analysis_plan()),
+            tombstones: stored.analysis_plan().tombstones().len(),
+            forecast: forecast_for(
+                stored.analysis_plan(),
+                stored.run_set(),
+                stored.reference_pvt(),
+                enabled,
+            ),
+            run_set_roster: run_set_roster(stored.run_set()),
+            model_bindings: stored.model_bindings().len(),
+            reference_pvt: stored.reference_pvt(),
+            design_variables: payload(id).map_or(0, |payload| payload.design_variables.len()),
+            variable_roster: payload(id).map_or_else(Vec::new, variable_roster),
+            saved_outputs: payload(id).map_or(0, |payload| payload.saved_outputs.len()),
+            specifications: payload(id).map_or(0, specification_count),
+            specification_roster: payload(id).map_or_else(Vec::new, specification_roster),
+            regression_baseline: payload(id).and_then(|payload| payload.regression_baseline_run),
+            lineage: stored.lineage(),
+            results: result_count(id),
+        }
+    }));
     records
 }
 
@@ -496,6 +486,7 @@ fn run_set_roster(run_set: &RunSetState) -> Vec<PlanEntry> {
 mod tests {
     use super::*;
     use crate::product::ProcessCorner;
+    use crate::workbench::RSpiceApp;
     use rspice_simulation_contract::run_set::RunSetCompositionMode;
 
     /// A second plan retained inactive, so the projection has both kinds of
@@ -550,7 +541,7 @@ mod tests {
             .content
             .migrate_active_plan_data(id);
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let record = records.first().expect("the active plan is projected");
         let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
 
@@ -617,7 +608,7 @@ mod tests {
     fn an_inactive_plan_reports_its_own_stored_facts() {
         let (app, active_id, inactive_id) = app_with_an_inactive_plan();
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         assert_eq!(records.len(), 2, "both catalog entries are projected");
         let record = records
             .iter()
@@ -705,7 +696,7 @@ mod tests {
             .simulation_plan_payloads
             .retain(|record| record.plan_id != inactive_id);
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let active = records
             .iter()
             .find(|record| record.id == active_id)
@@ -746,7 +737,7 @@ mod tests {
             .expect("a physical reference corner");
         app.state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let active = records
             .iter()
             .find(|record| record.id == active_id)
@@ -774,7 +765,7 @@ mod tests {
             .expect("an inactive plan archives");
         app.state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let record = records
             .iter()
             .find(|record| record.id == inactive_id)
@@ -793,7 +784,7 @@ mod tests {
         setup.run_set.composition.maximum_depth = 0;
         app.state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let record = records.first().expect("the active plan is projected");
         assert!(
             record.forecast.is_none(),
@@ -809,7 +800,7 @@ mod tests {
     fn the_order_is_the_active_plan_then_the_catalog_order() {
         let (app, active_id, inactive_id) = app_with_an_inactive_plan();
 
-        let first = plan_catalog_records(&app);
+        let first = plan_catalog_records(&app.state.model);
         assert_eq!(first[0].id, active_id, "the active plan leads");
         assert!(first[0].active);
         assert_eq!(first[1].id, inactive_id);
@@ -830,7 +821,7 @@ mod tests {
 
         // Stable across frames: the projection reads state, never a clock, a
         // hash iteration order, or a frame counter.
-        let second = plan_catalog_records(&app);
+        let second = plan_catalog_records(&app.state.model);
         assert_eq!(
             first.iter().map(|record| record.id).collect::<Vec<_>>(),
             second.iter().map(|record| record.id).collect::<Vec<_>>()
@@ -840,7 +831,7 @@ mod tests {
     #[test]
     fn every_derived_quantity_is_the_forecasts_own_number() {
         let app = RSpiceApp::test_instance();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let record = records.first().expect("the active plan is projected");
         let forecast = record.forecast.expect("the default run set validates");
 
@@ -880,7 +871,7 @@ mod tests {
             plan.id()
         };
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let active = records.first().expect("the active plan is projected");
         assert_eq!(active.id, retired_from);
         assert_eq!(
@@ -905,7 +896,7 @@ mod tests {
             .expect("a fresh root plan is created");
         app.state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let stored = app
             .state
             .model

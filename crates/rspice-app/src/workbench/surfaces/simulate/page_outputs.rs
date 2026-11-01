@@ -202,8 +202,10 @@ fn registry(
             let (size, size_tone) = size_cell(output);
             // Which enabled analyses would write this output, from the
             // derivation the Add-output dialog previews it with.
-            let consumers =
-                super::workflows::saved_output_consumers_of(app, &output.compatible_analyses);
+            let consumers = super::workflows::saved_output_consumers_of(
+                &app.state.model,
+                &output.compatible_analyses,
+            );
             let shown = row_matches(
                 &query,
                 &[

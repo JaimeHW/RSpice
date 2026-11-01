@@ -721,62 +721,26 @@ impl AppState {
         }
     }
 
-    /// Announce a committed plan command on the lifecycle status line and
-    /// record it in the Console.
+    /// [`AnalysisLifecycleOutcome::announce_receipt`] for the application's
+    /// state.
     ///
-    /// One funnel for every announcing site, because a plan command's outcome
-    /// has two readers with different jobs: the status line states the latest
-    /// outcome, and the Console is the session's log of what was commanded,
-    /// which is where an operator reconstructs an hour of plan edits
-    /// afterwards. A receipt used to reach only the first of those, so a
-    /// committed plan edit left no durable record anywhere.
-    ///
-    /// [`crate::diagnostics::LogSource::Plan`] is what keeps the second reader
-    /// from becoming noise: the activity mirror never lifts a `Plan` entry, so
-    /// recording a receipt cannot turn a routine registry edit into a
-    /// notification.
-    ///
-    /// Recorded only when the outcome changes. Three announcing sites sit on
-    /// the render path and restate a standing refusal every frame, and the
-    /// price of not writing that refusal sixty times a second is that two
-    /// consecutive identical receipts leave one record.
+    /// [`AnalysisLifecycleOutcome::announce_receipt`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_receipt
     pub(crate) fn record_plan_receipt(&mut self, message: impl Into<String>) {
-        let message = message.into();
-        if self
-            .simulate
+        self.simulate
             .analysis_lifecycle_status
-            .record_receipt(message.as_str())
-        {
-            self.model.log_buffer.log(
-                crate::diagnostics::LogSeverity::Info,
-                crate::diagnostics::LogSource::Plan,
-                message,
-            );
-        }
+            .announce_receipt(&mut self.model.log_buffer, message);
     }
 
-    /// Announce a refused plan command, as [`Self::record_plan_receipt`] does,
-    /// at warning severity, and answer the gesture on the status bar.
+    /// [`AnalysisLifecycleOutcome::announce_refusal`] for the application's
+    /// state.
     ///
-    /// The lifecycle status line is drawn only on the Analyses route, and a
-    /// plan command can be refused from the plan manager in any workspace, so
-    /// the prompt is what answers the user wherever they are. It is issued
-    /// with the record, when the outcome changes, because a standing refusal
-    /// restated every frame would otherwise hold the prompt up forever.
+    /// [`AnalysisLifecycleOutcome::announce_refusal`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_refusal
     pub(crate) fn record_plan_refusal(&mut self, message: impl Into<String>) {
-        let message = message.into();
-        if self
-            .simulate
-            .analysis_lifecycle_status
-            .record_refusal(message.as_str())
-        {
-            self.prompt(message.clone());
-            self.model.log_buffer.log(
-                crate::diagnostics::LogSeverity::Warning,
-                crate::diagnostics::LogSource::Plan,
-                message,
-            );
-        }
+        self.simulate.analysis_lifecycle_status.announce_refusal(
+            &mut self.model.log_buffer,
+            &mut self.workbench,
+            message,
+        );
     }
 
     /// Select a model library, reporting a name the project no longer holds.

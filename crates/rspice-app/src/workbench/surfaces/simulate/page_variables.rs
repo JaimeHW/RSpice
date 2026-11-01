@@ -167,7 +167,7 @@ fn registry(
                 // declared and nothing about which of this plan's analyses
                 // actually read it.
                 let used_by = super::workflows::design_variable_consumers_scoped(
-                    app,
+                    &app.state.model,
                     match &variable.scope {
                         crate::state::DesignVariableScope::SelectedAnalysis { analysis_id } => {
                             Some(Some(*analysis_id))
@@ -314,7 +314,7 @@ fn removal_consequences(
     variable: &crate::state::DesignVariable,
 ) -> Option<Vec<PlanRemovalConsequence>> {
     let readers = super::workflows::design_variable_consumers_scoped(
-        app,
+        &app.state.model,
         match &variable.scope {
             DesignVariableScope::SelectedAnalysis { analysis_id } => Some(Some(*analysis_id)),
             _ => None,

@@ -249,7 +249,7 @@ pub(super) fn plan_manager_dialog(
     app: &mut RSpiceApp,
     mut draft: SimulationPlanManagerDraft,
 ) {
-    let records = plan_catalog_records(app);
+    let records = plan_catalog_records(&app.state.model);
     if !records
         .iter()
         .any(|record| record.id == draft.selected_plan_id)
@@ -960,7 +960,7 @@ fn handle_plan_manager_action(
             draft.mode = SimulationPlanManagerMode::Campaign;
             draft.validation_error = None;
             draft.campaign.member_ids.clear();
-            for record in plan_catalog_records(app)
+            for record in plan_catalog_records(&app.state.model)
                 .into_iter()
                 .filter(|record| !record.archived)
                 .take(2)
@@ -980,7 +980,8 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::Export) => {
-            match exchange::export_simulation_plan_package(app, draft.selected_plan_id) {
+            match exchange::export_simulation_plan_package(&app.state.model, draft.selected_plan_id)
+            {
                 Ok(json) => {
                     draft.exchange_text = json;
                     draft.mode = SimulationPlanManagerMode::Export;

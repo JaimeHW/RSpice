@@ -16,6 +16,7 @@
 //! *is*: its envelope, the plan it holds, and the boundary of the transaction.
 
 use super::*;
+use crate::workbench::app_state::Model;
 
 use crate::workbench::design_system::{property_row_input, property_row_wrapped};
 
@@ -679,18 +680,14 @@ fn poll_chosen_package(ctx: &egui::Context, draft: &mut SimulationPlanManagerDra
 fn poll_chosen_package(_ctx: &egui::Context, _draft: &mut SimulationPlanManagerDraft) {}
 
 pub(in crate::workbench::surfaces::simulate) fn export_simulation_plan_package(
-    app: &RSpiceApp,
+    model: &Model,
     id: SimulationPlanId,
 ) -> Result<String, String> {
-    let plan = app
-        .state
-        .model
+    let plan = model
         .sim_setup
         .export_plan(id)
         .map_err(|error| error.to_string())?;
-    let payload = app
-        .state
-        .model
+    let payload = model
         .workspace
         .content
         .plan_data(id)
@@ -780,7 +777,7 @@ mod tests {
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        export_simulation_plan_package(&app, id).expect("the fixture's plan exports")
+        export_simulation_plan_package(&app.state.model, id).expect("the fixture's plan exports")
     }
 
     /// An unknown field is refused rather than dropped. This is the behaviour
@@ -868,7 +865,7 @@ mod tests {
     #[test]
     fn the_proposed_file_name_is_derived_bounded_and_portable() {
         let app = RSpiceApp::test_instance();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let record = records.first().expect("the fixture projects a plan");
         let derived = package_file_name(Some(record));
         assert!(
@@ -909,7 +906,8 @@ mod tests {
             .stable_analysis_plan()
             .expect("the fixture has a stable plan")
             .id();
-        let json = export_simulation_plan_package(&app, id).expect("the fixture's plan exports");
+        let json = export_simulation_plan_package(&app.state.model, id)
+            .expect("the fixture's plan exports");
         let previewed = specification_count(
             &inspect_package(&json)
                 .expect("its own export is accepted")

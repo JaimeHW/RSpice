@@ -102,7 +102,7 @@ fn rendered_body(
     draft: &mut SimulationPlanManagerDraft,
     screen: Vec2,
 ) -> RenderedBody {
-    let records = plan_catalog_records(app);
+    let records = plan_catalog_records(&app.state.model);
     let body = measured_dialog_body_size(screen);
     let ctx = egui::Context::default();
     crate::ui::Theme::default().apply(&ctx);
@@ -204,7 +204,7 @@ pub(super) fn route_draft(
     active: SimulationPlanId,
     inactive: SimulationPlanId,
 ) -> SimulationPlanManagerDraft {
-    let records = plan_catalog_records(app);
+    let records = plan_catalog_records(&app.state.model);
     let name_of = |id: SimulationPlanId| {
         records
             .iter()
@@ -239,8 +239,9 @@ pub(super) fn route_draft(
         // The shell exports the package before it switches routes, so Export is
         // only ever entered with a real one already in the draft.
         SimulationPlanManagerMode::Export => {
-            draft.exchange_text = exchange::export_simulation_plan_package(app, active)
-                .expect("the active plan exports");
+            draft.exchange_text =
+                exchange::export_simulation_plan_package(&app.state.model, active)
+                    .expect("the active plan exports");
         }
         // The shell clears the field before importing and the reader pastes a
         // package into it. That paste is the route's one input and the only way
@@ -248,8 +249,9 @@ pub(super) fn route_draft(
         // than state invented for the gate.
         SimulationPlanManagerMode::Import => {
             draft.name = "Imported simulation plan".to_owned();
-            draft.exchange_text = exchange::export_simulation_plan_package(app, active)
-                .expect("the active plan exports");
+            draft.exchange_text =
+                exchange::export_simulation_plan_package(&app.state.model, active)
+                    .expect("the active plan exports");
         }
         // Two members: what the shell seeds, and the fewest
         // `prepare_and_start_campaign` will queue. It caps the other end at 64
@@ -833,7 +835,7 @@ fn every_row_announces_the_facts_its_cells_paint() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
     let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
     let rendered = rendered_body(&app, &mut draft, REAL_VIEWPORT);
-    let records = plan_catalog_records(&app);
+    let records = plan_catalog_records(&app.state.model);
 
     assert_eq!(
         rendered
@@ -892,7 +894,7 @@ fn every_row_announces_the_facts_its_cells_paint() {
 #[cfg(not(target_arch = "wasm32"))]
 fn the_narrowing_scopes_partition_the_catalog() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
-    let records = plan_catalog_records(&app);
+    let records = plan_catalog_records(&app.state.model);
     let admitted = |scope| {
         records
             .iter()
@@ -939,7 +941,7 @@ fn the_narrowing_scopes_partition_the_catalog() {
 #[cfg(not(target_arch = "wasm32"))]
 fn the_filter_matches_the_four_fields_its_placeholder_names() {
     let (app, _, _, _) = app_with_every_lifecycle_state();
-    let records = plan_catalog_records(&app);
+    let records = plan_catalog_records(&app.state.model);
     let record = records.first().expect("the active plan is projected");
 
     for field in [
@@ -980,7 +982,7 @@ fn the_filter_matches_the_four_fields_its_placeholder_names() {
 #[cfg(not(target_arch = "wasm32"))]
 fn every_lifecycle_state_is_stated_by_the_word_its_owner_publishes() {
     let (app, active, available, retired) = app_with_every_lifecycle_state();
-    let records = plan_catalog_records(&app);
+    let records = plan_catalog_records(&app.state.model);
     for (id, word) in [
         (active, "active"),
         (available, "available"),
@@ -1099,7 +1101,7 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
     lifecycle::commit_restore_plan(&mut app.state.model.sim_setup, retired)
         .expect("an archived plan restores");
     assert!(
-        plan_catalog_records(&app)
+        plan_catalog_records(&app.state.model)
             .iter()
             .all(|record| !record.archived),
         "restoring left the plan archived"
@@ -1131,7 +1133,7 @@ struct RenderedAside {
 /// painted does not count as a row.
 #[cfg(not(target_arch = "wasm32"))]
 fn rendered_aside(app: &RSpiceApp, plan_id: SimulationPlanId) -> RenderedAside {
-    let records = plan_catalog_records(app);
+    let records = plan_catalog_records(&app.state.model);
     let selected = records
         .iter()
         .find(|record| record.id == plan_id)
@@ -1402,7 +1404,7 @@ fn an_undeclarable_run_set_says_so_instead_of_reporting_zeros() {
 /// does not carry a second spelling of it.
 #[cfg(not(target_arch = "wasm32"))]
 fn plan_name_of(app: &RSpiceApp, plan_id: SimulationPlanId) -> String {
-    plan_catalog_records(app)
+    plan_catalog_records(&app.state.model)
         .iter()
         .find(|record| record.id == plan_id)
         .expect("the requested plan is projected")
@@ -1637,7 +1639,7 @@ fn a_comparison_diffs_the_two_plans_its_route_picked() {
         .create_plan("Corner characterization")
         .expect("a second fresh root plan is created");
     app.state.model.sim_setup = setup;
-    let records = plan_catalog_records(&app);
+    let records = plan_catalog_records(&app.state.model);
 
     let mut draft = SimulationPlanManagerDraft::new(first, "Lab characterization");
     let (base, target) = compare::compared_plans(&draft, &records);

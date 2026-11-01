@@ -72,6 +72,57 @@ impl AnalysisLifecycleOutcome {
         matches!(self.severity, AnalysisLifecycleSeverity::Refusal)
     }
 
+    /// Announce a committed plan command, and keep its receipt in `log` as a
+    /// plan entry when it is a new outcome.
+    ///
+    /// The Analyses route's status line reads the outcome, and the Console
+    /// reads the log afterwards. [`LogSource::Plan`] keeps the second from
+    /// becoming noise: the activity mirror never lifts a `Plan` entry, so a
+    /// receipt cannot turn a routine registry edit into a notification. A
+    /// standing refusal restated every frame is not a new outcome, so two
+    /// consecutive identical receipts leave one record.
+    ///
+    /// [`LogSource::Plan`]: crate::diagnostics::LogSource::Plan
+    pub fn announce_receipt(
+        &mut self,
+        log: &mut crate::diagnostics::LogBuffer,
+        message: impl Into<String>,
+    ) {
+        let message = message.into();
+        if self.record_receipt(message.as_str()) {
+            log.log(
+                crate::diagnostics::LogSeverity::Info,
+                crate::diagnostics::LogSource::Plan,
+                message,
+            );
+        }
+    }
+
+    /// Announce a refused plan command, as [`Self::announce_receipt`] does,
+    /// at warning severity, and answer the gesture on the status bar.
+    ///
+    /// The status line is drawn only on the Analyses route, and a plan
+    /// command can be refused from the plan manager in any workspace, so the
+    /// prompt is what answers the reader wherever they are. It is issued with
+    /// the record, when the outcome changes, because a standing refusal
+    /// restated every frame would otherwise hold the prompt up forever.
+    pub fn announce_refusal(
+        &mut self,
+        log: &mut crate::diagnostics::LogBuffer,
+        wb: &mut WorkbenchSession,
+        message: impl Into<String>,
+    ) {
+        let message = message.into();
+        if self.record_refusal(message.as_str()) {
+            wb.prompt(message.clone());
+            log.log(
+                crate::diagnostics::LogSeverity::Warning,
+                crate::diagnostics::LogSource::Plan,
+                message,
+            );
+        }
+    }
+
     /// Announce a committed change. Returns whether this is a new outcome, so
     /// that a reporter which also records it elsewhere records it once per
     /// event.

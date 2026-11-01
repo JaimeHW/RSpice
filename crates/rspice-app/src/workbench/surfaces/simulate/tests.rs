@@ -1306,7 +1306,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
         .plan_data(source_id)
         .expect("source payload")
         .clone();
-    let json = super::plan_manager::export_simulation_plan_package(&app, source_id)
+    let json = super::plan_manager::export_simulation_plan_package(&app.state.model, source_id)
         .expect("portable export");
 
     let (imported_id, _) = super::plan_manager::commit_import_simulation_plan(

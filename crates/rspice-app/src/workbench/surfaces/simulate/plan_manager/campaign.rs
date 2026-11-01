@@ -715,7 +715,7 @@ mod tests {
             .archive_plan(plans[2])
             .expect("an inactive plan archives");
         app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let second = record_of(&records, plans[1]).name.clone();
         let third = record_of(&records, plans[2]).name.clone();
         assert_ne!(second, third);
@@ -766,7 +766,7 @@ mod tests {
     #[test]
     fn the_combined_scope_is_the_sum_of_the_per_member_forecasts() {
         let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let members = [plans[0], plans[2]];
         let expected = members
             .iter()
@@ -801,7 +801,7 @@ mod tests {
         setup.run_set.composition.mode = RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
         app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         assert_eq!(record_of(&records, plans[0]).task_count(), None);
 
         let scope = campaign_scope(&plans[..2], &records);
@@ -870,7 +870,7 @@ mod tests {
     #[test]
     fn the_scope_is_painted_under_the_members_and_states_their_sum() {
         let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let mut draft = SimulationPlanManagerDraft::new(plans[0], records[0].name.clone());
         draft.mode = SimulationPlanManagerMode::Campaign;
         draft.campaign.member_ids = vec![plans[0], plans[1]];
@@ -928,7 +928,7 @@ mod tests {
     #[test]
     fn every_fact_the_notes_state_is_painted_whole_at_every_gated_viewport() {
         let (app, plans) = app_with_three_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let members = vec![plans[0], plans[1]];
         let scope = campaign_scope(&members, &records);
         let owed = [

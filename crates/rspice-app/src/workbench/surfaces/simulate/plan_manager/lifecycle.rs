@@ -379,7 +379,7 @@ mod tests {
     }
 
     fn record_for(app: &RSpiceApp, id: SimulationPlanId) -> PlanCatalogRecord {
-        plan_catalog_records(app)
+        plan_catalog_records(&app.state.model)
             .into_iter()
             .find(|record| record.id == id)
             .unwrap_or_else(|| panic!("plan {id} is projected"))

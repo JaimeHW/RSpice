@@ -688,7 +688,7 @@ mod tests {
             .migrate_inactive_plan_data(active);
         app.state.model.sim_setup = setup;
 
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let (base, target) = (record_of(&records, retained), record_of(&records, active));
         for domain in compared_domains(base, target) {
             assert!(
@@ -810,7 +810,7 @@ mod tests {
     fn every_domain_states_the_difference_its_owner_carries() {
         let (mut app, active, retained) = app_with_two_identical_plans();
         let changed_axis = diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
         let domains = compared_domains(base, target);
@@ -912,7 +912,7 @@ mod tests {
             .content
             .ensure_active_plan_data(active)
             .regression_baseline_run = Some(crate::product::RunId::new());
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let domains = compared_domains(record_of(&records, retained), record_of(&records, active));
         let specifications = domain(&domains, "Specifications and baselines");
 
@@ -936,7 +936,7 @@ mod tests {
     fn a_plan_compared_with_itself_reports_no_difference_in_any_domain() {
         let (mut app, active, _) = app_with_two_identical_plans();
         diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
 
         for record in &records {
             let domains = compared_domains(record, record);
@@ -978,7 +978,7 @@ mod tests {
     fn swapping_the_sides_inverts_added_and_removed() {
         let (mut app, active, retained) = app_with_two_identical_plans();
         diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
 
@@ -1029,7 +1029,7 @@ mod tests {
         let (mut app, active, _) = app_with_two_identical_plans();
         diverge_the_active_plan(&mut app, active);
 
-        for record in plan_catalog_records(&app) {
+        for record in plan_catalog_records(&app.state.model) {
             assert_eq!(
                 record.analysis_roster.len(),
                 record.analyses,
@@ -1069,7 +1069,7 @@ mod tests {
             rspice_simulation_contract::run_set::RunSetCompositionMode::Nested;
         setup.run_set.composition.maximum_depth = 0;
         app.state.model.sim_setup = setup;
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let domains = compared_domains(record_of(&records, retained), record_of(&records, active));
         let run_set = domain(&domains, "Run set and budgets");
 
@@ -1157,7 +1157,7 @@ mod tests {
     fn every_fact_the_comparison_states_is_painted_whole_at_every_gated_viewport() {
         let (mut app, active, retained) = app_with_two_identical_plans();
         diverge_the_active_plan(&mut app, active);
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let base = record_of(&records, retained);
         let target = record_of(&records, active);
         let domains = compared_domains(base, target);
@@ -1210,7 +1210,7 @@ mod tests {
     #[test]
     fn the_execution_domain_is_absent_and_the_surface_does_not_narrate_it() {
         let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         draft.comparison.base_plan_id = Some(retained);
@@ -1257,7 +1257,7 @@ mod tests {
     fn a_comparison_leaves_both_plans_exactly_as_they_were() {
         let (mut app, active, retained) = app_with_two_identical_plans();
         diverge_the_active_plan(&mut app, active);
-        let before = format!("{:?}", plan_catalog_records(&app));
+        let before = format!("{:?}", plan_catalog_records(&app.state.model));
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         draft.comparison.base_plan_id = Some(retained);
@@ -1278,7 +1278,7 @@ mod tests {
         }
 
         assert_eq!(
-            format!("{:?}", plan_catalog_records(&app)),
+            format!("{:?}", plan_catalog_records(&app.state.model)),
             before,
             "the comparison moved something in the catalog"
         );
@@ -1295,7 +1295,7 @@ mod tests {
     #[test]
     fn both_sides_are_pickable_and_a_pick_is_what_the_comparison_diffs() {
         let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
 
@@ -1421,7 +1421,7 @@ mod tests {
     #[test]
     fn a_compatibility_verdict_is_set_in_words_at_its_rows_size() {
         let (app, active, _) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         draft.mode = SimulationPlanManagerMode::Compare;
         let ctx = egui::Context::default();
@@ -1466,7 +1466,7 @@ mod tests {
     #[test]
     fn side_by_side_pickers_and_the_word_between_fill_their_row() {
         let (app, active, retained) = app_with_two_identical_plans();
-        let records = plan_catalog_records(&app);
+        let records = plan_catalog_records(&app.state.model);
         let (base, target) = (record_of(&records, retained), record_of(&records, active));
         let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
         let ctx = egui::Context::default();

@@ -6,6 +6,7 @@
 //! edits are shared across every analysis in the plan.
 
 use super::*;
+use crate::workbench::app_state::Model;
 
 use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
@@ -211,7 +212,7 @@ pub(super) fn clone_plan_dialog(
     app: &mut RSpiceApp,
     mut draft: ClonePlanDraft,
 ) {
-    draft.validation_error = validate_clone_plan_draft(app, &draft).err();
+    draft.validation_error = validate_clone_plan_draft(&app.state.model, &draft).err();
     let enabled = draft.validation_error.is_none();
     let source = simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.source_plan_id)
         .map_or_else(
@@ -591,10 +592,10 @@ pub(super) fn capture_group_dialog(
     app: &mut RSpiceApp,
     mut draft: CaptureGroupDraft,
 ) {
-    draft.validation_error = capture_group_from_draft(app, &draft).err();
+    draft.validation_error = capture_group_from_draft(&app.state.model, &draft).err();
     let enabled = draft.validation_error.is_none();
     let editing = draft.group.is_some();
-    let claimed = capture_group_claim_preview(app, &draft);
+    let claimed = capture_group_claim_preview(&app.state.model, &draft);
     let kind_options = SavedOutputKind::ALL
         .iter()
         .map(|kind| kind.label())
@@ -751,7 +752,7 @@ pub(super) fn capture_group_dialog(
 
 /// Build the candidate group the draft describes, or say why it is not one yet.
 fn capture_group_from_draft(
-    app: &RSpiceApp,
+    model: &Model,
     draft: &CaptureGroupDraft,
 ) -> Result<crate::state::CaptureGroup, String> {
     let name = crate::state::workspace::normalize_capture_group_name(&draft.name)?;
@@ -796,12 +797,12 @@ fn capture_group_from_draft(
     // commits is what it displayed.
     if let Some(id) = draft.group {
         group.id = id;
-        if let Some(existing) = existing_capture_group(app, id) {
+        if let Some(existing) = existing_capture_group(model, id) {
             group.members = existing.members.clone();
         }
     }
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    if let Some(payload) = app.state.model.workspace.content.plan_data(plan_id)
+    let plan_id = model.sim_setup.stable_analysis_plan()?.id();
+    if let Some(payload) = model.workspace.content.plan_data(plan_id)
         && let Some(holder) = payload.capture_groups.iter().find(|existing| {
             existing.id != group.id
                 && crate::state::workspace::capture_group_collation_key(&existing.name)
@@ -818,12 +819,11 @@ fn capture_group_from_draft(
 }
 
 fn existing_capture_group(
-    app: &RSpiceApp,
+    model: &Model,
     id: crate::product::CaptureGroupId,
 ) -> Option<&crate::state::CaptureGroup> {
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan().ok()?.id();
-    app.state
-        .model
+    let plan_id = model.sim_setup.stable_analysis_plan().ok()?.id();
+    model
         .workspace
         .content
         .plan_data(plan_id)?
@@ -839,26 +839,18 @@ fn existing_capture_group(
 /// cannot show and the reader did not ask about. It is stated as "match", not
 /// "claim": precedence still decides, and this dialog is not where it is
 /// resolved.
-fn capture_group_claim_preview(app: &RSpiceApp, draft: &CaptureGroupDraft) -> String {
-    let Ok(group) = capture_group_from_draft(app, draft) else {
+fn capture_group_claim_preview(model: &Model, draft: &CaptureGroupDraft) -> String {
+    let Ok(group) = capture_group_from_draft(model, draft) else {
         return "not yet a valid group".to_owned();
     };
     if group.rules.is_empty() {
         return "no rule · this group holds only the outputs it names".to_owned();
     }
     let rules = group.rules.len();
-    let Ok(plan_id) = app
-        .state
-        .model
-        .sim_setup
-        .stable_analysis_plan()
-        .map(|plan| plan.id())
-    else {
+    let Ok(plan_id) = model.sim_setup.stable_analysis_plan().map(|plan| plan.id()) else {
         return "no active plan".to_owned();
     };
-    let matched = app
-        .state
-        .model
+    let matched = model
         .workspace
         .content
         .plan_data(plan_id)
@@ -900,7 +892,7 @@ pub(super) fn commit_capture_group(
     app: &mut RSpiceApp,
     draft: &CaptureGroupDraft,
 ) -> Result<String, String> {
-    let group = capture_group_from_draft(app, draft)?;
+    let group = capture_group_from_draft(&app.state.model, draft)?;
     let name = group.name.clone();
     let editing = draft.group.is_some();
     let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
@@ -943,23 +935,14 @@ pub(super) fn commit_capture_group(
 }
 
 pub(super) fn validate_clone_plan_draft(
-    app: &RSpiceApp,
+    model: &Model,
     draft: &ClonePlanDraft,
 ) -> Result<(), String> {
     let name = crate::workbench::app_state::SimulationPlanName::new(draft.name.clone())
         .map_err(|error| error.to_string())?;
     let key = name.as_str().to_lowercase();
-    if app
-        .state
-        .model
-        .sim_setup
-        .active_plan_name()
-        .as_str()
-        .to_lowercase()
-        == key
-        || app
-            .state
-            .model
+    if model.sim_setup.active_plan_name().as_str().to_lowercase() == key
+        || model
             .sim_setup
             .inactive_plans()
             .iter()
@@ -971,7 +954,7 @@ pub(super) fn validate_clone_plan_draft(
         ));
     }
     let Some((_, _, executing, archived)) =
-        simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.source_plan_id)
+        simulation_plan_catalog_entry(&model.sim_setup, draft.source_plan_id)
     else {
         return Err(format!(
             "Source simulation plan {} no longer exists.",
@@ -993,7 +976,7 @@ pub(super) fn commit_clone_plan(
     app: &mut RSpiceApp,
     draft: &ClonePlanDraft,
 ) -> Result<String, String> {
-    validate_clone_plan_draft(app, draft)?;
+    validate_clone_plan_draft(&app.state.model, draft)?;
     let mut setup = app.state.model.sim_setup.clone();
     let mut workspace = app.state.model.workspace.clone();
     let current_plan_id = setup.stable_analysis_plan()?.id();
@@ -1477,7 +1460,7 @@ pub(super) fn unique_copy_name(base: &str, taken: impl Fn(&str) -> bool) -> Stri
 
 pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
     design_variable_consumers_scoped(
-        app,
+        &app.state.model,
         (draft.scope == 3).then_some(app.state.simulate.active_analysis_instance),
     )
 }
@@ -1490,10 +1473,10 @@ pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableD
 /// two answer the same question about the same plan, and a column deriving it
 /// separately would be free to disagree with the dialog that authored it.
 pub(super) fn design_variable_consumers_scoped(
-    app: &RSpiceApp,
+    model: &Model,
     narrowed_to: Option<Option<crate::product::AnalysisInstanceId>>,
 ) -> String {
-    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
     let selected_only = narrowed_to;
@@ -1519,7 +1502,7 @@ pub(super) fn design_variable_consumers_scoped(
 
 pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) -> String {
     match saved_output_compatibility(app, draft.compatible_analyses) {
-        Ok(compatibility) => saved_output_consumers_of(app, &compatibility),
+        Ok(compatibility) => saved_output_consumers_of(&app.state.model, &compatibility),
         // The draft names a scope this plan cannot supply -- an analysis-only
         // output with no analysis selected -- so nothing would write it.
         Err(_) => "no compatible enabled analyses".to_owned(),
@@ -1557,10 +1540,10 @@ fn saved_output_compatibility(
 /// column deriving it separately would be free to disagree with the dialog that
 /// authored the output.
 pub(super) fn saved_output_consumers_of(
-    app: &RSpiceApp,
+    model: &Model,
     compatibility: &SavedOutputCompatibility,
 ) -> String {
-    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
+    let Ok(plan) = model.sim_setup.stable_analysis_plan() else {
         return "plan unavailable".to_owned();
     };
     let labels = plan
