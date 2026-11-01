@@ -176,7 +176,7 @@ impl HardcopyCommand {
                 EXPORT_ACTIVE_VIEW,
             ),
             Self::ReportAuthoring => (
-                "Report page and datasheet editor\u{2026}",
+                "Report editor\u{2026}",
                 "Results",
                 LISTED_COMMAND,
                 ShortcutContext::Global,

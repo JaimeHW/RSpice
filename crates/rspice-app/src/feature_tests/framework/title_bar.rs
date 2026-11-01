@@ -1128,18 +1128,68 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
     assert_eq!(
         labels,
         [
-            "Open waveform viewer",
-            "Dataset and manifest browser…",
-            "Create result document…",
-            "Add result comparison…",
-            "Report page and datasheet editor…",
-            "Link A/B cursors",
-            "Calculator…",
-            "Expression and unit diagnostics…",
-            "Measurement library…",
+            // No result is selected, so View as offers no viewer and is
+            // left out rather than opening on nothing.
+            "Results browser",
+            "Waveforms",
+            "New result document…",
+            "Add pane…",
+            "Compare datasets…",
+            "Add measurement…",
             "Family slicing and pivot…",
-            "Plot document properties…",
+            "Link A/B cursors",
+            "Plot properties…",
+            "Calculator…",
+            "Expression diagnostics…",
+            "Report editor…",
+            "Clear result history",
         ]
+    );
+}
+
+/// A row offered only while it can run is left out, not greyed, while it
+/// cannot; a submenu whose rows are all left out is left out with them.
+#[test]
+fn offered_rows_and_empty_submenus_are_left_out() {
+    let app = RSpiceApp::test_instance();
+    let rows = menu_entries::resolve_menu_rows(
+        application_menu_entries(ApplicationMenu::Results),
+        &app,
+        crate::state::command_catalog::CommandPlatform::Desktop,
+        egui::os::OperatingSystem::Windows,
+    );
+    let view_as = rows
+        .iter()
+        .find_map(|row| match row {
+            menu_entries::MenuRow::Submenu {
+                label: "View as",
+                rows,
+            } => Some(rows),
+            _ => None,
+        })
+        .expect("Results holds View as");
+    assert!(!view_as.is_empty());
+    for row in view_as {
+        if let menu_entries::MenuRow::Command(row) = row {
+            assert_eq!(
+                row.availability,
+                CommandAvailability::Hidden,
+                "{}",
+                row.label
+            );
+        }
+    }
+    assert!(
+        menu_entries::visible_rows(&rows)
+            .iter()
+            .all(|row| !matches!(
+                row,
+                menu_entries::MenuRow::Submenu {
+                    label: "View as",
+                    ..
+                }
+            )),
+        "View as would open on nothing"
     );
 }
 
@@ -2607,18 +2657,45 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::Results,
         &[
-            "Open waveform viewer | waveforms |  | on",
-            "Dataset and manifest browser… | dataset-browser |  | off: no retained result dataset is available",
-            "Create result document… | create-result-document |  | off: no retained result dataset is available",
-            "Add result comparison… | compare-datasets |  | off: open an active result document",
-            "Report page and datasheet editor… | report-page-editor |  | on",
+            "Results browser | dataset-browser |  | off: no retained result dataset is available",
+            "Waveforms | waveforms |  | on",
+            "View as >",
+            "  DC sweep | result-dc-sweep |  | hidden",
+            "  Bode | result-bode |  | hidden",
+            "  Nyquist | result-nyquist |  | hidden",
+            "  Smith chart | result-smith |  | hidden",
+            "  Polar response | result-polar |  | hidden",
+            "  Pole-zero | result-pole-zero |  | hidden",
+            "  Transfer function | result-transfer-function |  | hidden",
+            "  Network matrix | result-network-matrix |  | hidden",
+            "  FFT | result-fft |  | hidden",
+            "  Harmonic balance tones | result-harmonic-balance |  | hidden",
+            "  Phase noise | result-phase-noise |  | hidden",
+            "  Noise contribution | result-noise |  | hidden",
+            "  Sensitivity contribution | result-sensitivity-contribution |  | hidden",
+            "  Eye diagram | result-eye |  | hidden",
+            "  Histogram | result-histogram |  | hidden",
+            "  Correlation scatter | result-scatter |  | hidden",
+            "  Box and violin | result-distribution |  | hidden",
+            "  Event history | result-events |  | hidden",
+            "  Safe operating area | result-safe-operating-area |  | hidden",
+            "  Optimization | result-optimization |  | hidden",
+            "  Specification results | result-specifications |  | hidden",
+            "  Sample table | result-table |  | hidden",
+            "  Dataset manifest | result-manifest |  | hidden",
+            "---",
+            "New result document… | create-result-document |  | off: no retained result dataset is available",
+            "Add pane… | visualization-add-pane |  | off: open an active result document",
+            "Compare datasets… | compare-datasets |  | off: open an active result document",
+            "Add measurement… | measurement-library |  | off: open a result in Results",
+            "Family slicing and pivot… | family-slicing |  | off: open a result in Results",
             "---",
             "Link A/B cursors | toggle-linked-cursors | Shift+C | off: open a result in Results | unchecked",
+            "Plot properties… | plot-properties |  | off: open a result in Results",
             "Calculator… | calculator |  | on",
-            "Expression and unit diagnostics… | expression-diagnostics |  | off: no result dataset is available",
-            "Measurement library… | measurement-library |  | off: open a result in Results",
-            "Family slicing and pivot… | family-slicing |  | off: open a result in Results",
-            "Plot document properties… | plot-properties |  | off: open a result in Results",
+            "Expression diagnostics… | expression-diagnostics |  | off: no result dataset is available",
+            "Report editor… | report-page-editor |  | on",
+            "Clear result history | clear-results |  | off: no result dataset is available",
         ],
     ),
     (

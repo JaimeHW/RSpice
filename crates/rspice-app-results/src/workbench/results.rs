@@ -477,7 +477,7 @@ impl CommandSet for ResultsCommand {
             }
             Self::AddVisualizationPane => available_or(
                 on_results_surface && add_pane_available(state),
-                "command is unavailable in this context",
+                "open an active result document",
             ),
             // Waves is the workspace's default sheet, and its empty state is
             // the workspace's landing, so this route stays actionable before a

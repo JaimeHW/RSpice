@@ -7,6 +7,7 @@ use crate::state::ModelsPage;
 use crate::state::SimulationPage;
 use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
+use crate::workbench::ResultViewer;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
 use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
@@ -511,24 +512,70 @@ const SETUP_MENU: &[MenuEntry] = &[
     ),
 ];
 
+/// Results: where results are read, what is built from them, then what is
+/// done on the plot in front.
 const RESULTS_MENU: &[MenuEntry] = &[
-    results(ResultsCommand::ResultViewer(
-        crate::workbench::ResultViewer::Waves,
-    )),
     results(ResultsCommand::DatasetManifestBrowser),
+    MenuEntry::command_as(viewer(ResultViewer::Waves), "Waveforms"),
+    MenuEntry::Submenu {
+        label: "View as",
+        entries: VIEW_AS_MENU,
+    },
+    Separator,
     results(ResultsCommand::CreateResultDocument),
+    results(ResultsCommand::AddVisualizationPane),
     results(ResultsCommand::CompareResultDatasets),
-    hardcopy(HardcopyCommand::ReportAuthoring),
+    results(ResultsCommand::MeasurementLibrary),
+    results(ResultsCommand::FamilySlicing),
     Separator,
     MenuEntry::command_as(
         ResultsCommand::ToggleLinkedCursors.key(),
         "Link A/B cursors",
     ),
+    results(ResultsCommand::VisualizationDocumentProperties),
     results(ResultsCommand::WaveformCalculator),
     results(ResultsCommand::ExpressionDiagnostics),
-    results(ResultsCommand::MeasurementLibrary),
-    results(ResultsCommand::FamilySlicing),
-    results(ResultsCommand::VisualizationDocumentProperties),
+    hardcopy(HardcopyCommand::ReportAuthoring),
+    results(ResultsCommand::ClearResults),
+];
+
+/// The key of the command that opens `viewer`.
+const fn viewer(viewer: ResultViewer) -> CommandKey {
+    ResultsCommand::ResultViewer(viewer).key()
+}
+
+/// The other viewers the selected result can be read in, each offered only
+/// while it fits that result. The operating-point table is Simulate's.
+const VIEW_AS_MENU: &[MenuEntry] = &[
+    MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep"),
+    MenuEntry::offered(viewer(ResultViewer::Bode), "Bode"),
+    MenuEntry::offered(viewer(ResultViewer::Nyquist), "Nyquist"),
+    MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart"),
+    MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response"),
+    MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero"),
+    MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function"),
+    MenuEntry::offered(viewer(ResultViewer::NetworkMatrix), "Network matrix"),
+    MenuEntry::offered(viewer(ResultViewer::Fft), "FFT"),
+    MenuEntry::offered(
+        viewer(ResultViewer::HarmonicBalance),
+        "Harmonic balance tones",
+    ),
+    MenuEntry::offered(viewer(ResultViewer::PhaseNoise), "Phase noise"),
+    MenuEntry::offered(viewer(ResultViewer::NoiseContrib), "Noise contribution"),
+    MenuEntry::offered(
+        viewer(ResultViewer::Contribution),
+        "Sensitivity contribution",
+    ),
+    MenuEntry::offered(viewer(ResultViewer::Eye), "Eye diagram"),
+    MenuEntry::offered(viewer(ResultViewer::Hist), "Histogram"),
+    MenuEntry::offered(viewer(ResultViewer::Scatter), "Correlation scatter"),
+    MenuEntry::offered(viewer(ResultViewer::BoxViolin), "Box and violin"),
+    MenuEntry::offered(viewer(ResultViewer::Events), "Event history"),
+    MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area"),
+    MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization"),
+    MenuEntry::offered(viewer(ResultViewer::Specs), "Specification results"),
+    MenuEntry::offered(viewer(ResultViewer::Table), "Sample table"),
+    MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest"),
 ];
 
 const VERIFY_MENU: &[MenuEntry] = &[

@@ -52,6 +52,8 @@ pub struct MenuCommand {
     palette_scope: Option<&'static str>,
     /// The row is one of a group of which exactly one is on.
     radio: bool,
+    /// The row is left out, rather than greyed, while it cannot run.
+    offered_only: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -127,6 +129,7 @@ impl MenuEntry {
             shortcut: None,
             palette_scope: None,
             radio: false,
+            offered_only: false,
         })
     }
 
@@ -138,6 +141,20 @@ impl MenuEntry {
             shortcut: None,
             palette_scope: None,
             radio: false,
+            offered_only: false,
+        })
+    }
+
+    /// The row of the command `key` names, under `label`, shown only while
+    /// the command can run: a choice among those that fit what is selected.
+    pub const fn offered(key: CommandKey, label: &'static str) -> Self {
+        Self::Command(MenuCommand {
+            command: key,
+            label: MenuLabel::Fixed(label),
+            shortcut: None,
+            palette_scope: None,
+            radio: false,
+            offered_only: true,
         })
     }
 
@@ -150,6 +167,7 @@ impl MenuEntry {
             shortcut: None,
             palette_scope: None,
             radio: true,
+            offered_only: false,
         })
     }
 }
@@ -162,6 +180,7 @@ pub const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntr
         shortcut: Some("Ctrl+K"),
         palette_scope: Some(scope),
         radio: false,
+        offered_only: false,
     })
 }
 
@@ -249,7 +268,12 @@ fn push_menu_rows(
                     MenuLabel::Fixed(label) => label.into(),
                 },
                 shortcut: shortcut_for_occurrence(app, platform, os, item.command, item.shortcut),
-                availability: app.availability(item.command),
+                availability: match app.availability(item.command) {
+                    CommandAvailability::Disabled(_) if item.offered_only => {
+                        CommandAvailability::Hidden
+                    }
+                    availability => availability,
+                },
                 checked: app.checked(item.command),
                 radio: item.radio,
                 icon: app.command_icon(item.command),
@@ -329,10 +353,10 @@ impl MenuChoice {
     }
 }
 
-/// The rows a reader sees, in order: hidden rows dropped, and a separator
-/// kept only between two groups that each show a row, so no rule leads or
-/// ends a menu and a group whose rows are all hidden leaves no second rule
-/// beside the first.
+/// The rows a reader sees, in order: hidden rows and submenus that would
+/// open on nothing dropped, and a separator kept only between two groups
+/// that each show a row, so no rule leads or ends a menu and a group whose
+/// rows are all hidden leaves no second rule beside the first.
 pub fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
     let mut visible = Vec::with_capacity(rows.len());
     let mut pending_rule = None;
@@ -344,6 +368,7 @@ pub fn visible_rows(rows: &[MenuRow]) -> Vec<&MenuRow> {
                 }
             }
             MenuRow::Command(command) if command.availability == CommandAvailability::Hidden => {}
+            MenuRow::Submenu { rows, .. } if visible_rows(rows).is_empty() => {}
             MenuRow::Command(_) | MenuRow::Submenu { .. } => {
                 if let Some(rule) = pending_rule.take() {
                     visible.push(rule);

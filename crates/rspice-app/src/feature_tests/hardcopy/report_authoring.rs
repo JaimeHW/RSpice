@@ -88,7 +88,7 @@ fn report_commands_open_for_review_and_gate_mutations_by_exact_authority() {
     let report = HardcopyCommand::ReportAuthoring.key();
     assert!(registry.order().contains(&report));
     assert_eq!(report.as_str(), "report-page-editor");
-    assert_eq!(registry.label(report), "Report page and datasheet editor…");
+    assert_eq!(registry.label(report), "Report editor…");
     for contextual_command in HardcopyCommand::REPORT_TOOLBAR {
         assert!(!registry.order().contains(&contextual_command.key()));
     }

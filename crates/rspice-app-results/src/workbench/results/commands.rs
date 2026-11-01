@@ -200,7 +200,7 @@ impl ResultsCommand {
                 TOGGLE_RESULTS_SPLIT,
             ),
             Self::DatasetManifestBrowser => (
-                "Dataset and manifest browser…",
+                "Results browser",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
@@ -235,7 +235,7 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::CreateResultDocument => (
-                "Create result document…",
+                "New result document…",
                 "Results",
                 PROJECT_TRANSACTION,
                 ShortcutContext::ResultsWorkspace,
@@ -249,21 +249,21 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::ExpressionDiagnostics => (
-                "Expression and unit diagnostics…",
+                "Expression diagnostics…",
                 "Results",
                 ANYWHERE,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
             Self::CompareResultDatasets => (
-                "Add result comparison…",
+                "Compare datasets…",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
                 NONE,
             ),
             Self::MeasurementLibrary => (
-                "Measurement library…",
+                "Add measurement…",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
@@ -298,7 +298,7 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::VisualizationDocumentProperties => (
-                "Plot document properties…",
+                "Plot properties…",
                 "Results",
                 PROJECT,
                 ShortcutContext::ResultsWorkspace,
