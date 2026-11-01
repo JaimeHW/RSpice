@@ -190,6 +190,8 @@ impl Mosfet {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             update_open: false,
+            junction_limited: false,
+            native_xyce_transient_convergence: false,
             indices: MosfetIndices::default(),
         }
     }
@@ -404,39 +406,31 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, Value, Value) {
-        self.limited_branch_voltages_for_eval_impl(vgs, vds, vbs, None)
+        let (vgs, vds, vbs, _) = self.limited_branch_voltages_checked(vgs, vds, vbs, None);
+        (vgs, vds, vbs)
     }
 
+    /// The limited branch voltages and whether pnjlim limited a bulk
+    /// junction (its `Check` output; fetlim and limvds never set it).
     #[inline]
-    pub(crate) fn limited_branch_voltages_for_transient_eval(
-        &self,
-        vgs: Value,
-        vds: Value,
-        vbs: Value,
-        constants: &ClassicMosTransientConstants,
-    ) -> (Value, Value, Value) {
-        self.limited_branch_voltages_for_eval_impl(vgs, vds, vbs, Some(constants))
-    }
-
-    #[inline]
-    fn limited_branch_voltages_for_eval_impl(
+    pub(in crate::device::mosfet::classic) fn limited_branch_voltages_checked(
         &self,
         vgs: Value,
         vds: Value,
         vbs: Value,
         constants: Option<&ClassicMosTransientConstants>,
-    ) -> (Value, Value, Value) {
+    ) -> (Value, Value, Value, bool) {
         // The startup state is an explicit device bias rather than the history
         // fed to fetlim/limvds; the next iterate is limited against it.
-        if let Some(startup) = self.pending_startup_bias() {
-            return startup;
+        if let Some((vgs, vds, vbs)) = self.pending_startup_bias() {
+            return (vgs, vds, vbs, false);
         }
         if !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
             || !self.eval_vbs_prev.is_finite()
         {
-            return (vgs, vds, vbs);
+            return (vgs, vds, vbs, false);
         }
 
         let p = self.polarity();
@@ -475,21 +469,27 @@ impl Mosfet {
         }
 
         let vt = self.body_junction_thermal_voltage();
+        // pnjlim sets `Check` exactly when its forward arm limits.
+        let forward_limited =
+            |vnew: Value, vold: Value, vcrit: Value| vnew > vcrit && (vnew - vold).abs() > 2.0 * vt;
+        let junction_limited;
         if vds_m >= 0.0 {
             let vcrit = constants
                 .map(|constants| constants.source_body_vcrit)
                 .unwrap_or_else(|| self.source_body_vcrit());
+            junction_limited = forward_limited(vbs_m, vold_vbs, vcrit);
             vbs_m = Self::dev_pnjlim(vbs_m, vold_vbs, vt, vcrit);
         } else {
             let vold_vbd = vold_vbs - vold_vds;
             let vcrit = constants
                 .map(|constants| constants.drain_body_vcrit)
                 .unwrap_or_else(|| self.drain_body_vcrit());
+            junction_limited = forward_limited(vbd_m, vold_vbd, vcrit);
             vbd_m = Self::dev_pnjlim(vbd_m, vold_vbd, vt, vcrit);
             vbs_m = vbd_m + vds_m;
         }
 
-        (p * vgs_m, p * vds_m, p * vbs_m)
+        (p * vgs_m, p * vds_m, p * vbs_m, junction_limited)
     }
 
     #[inline]

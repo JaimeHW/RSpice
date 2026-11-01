@@ -5346,6 +5346,9 @@ impl Engine {
         circuit
             .diodes
             .set_native_xyce_transient_convergence(native_xyce_transient_convergence);
+        circuit
+            .mosfets
+            .set_native_xyce_transient_convergence(native_xyce_transient_convergence);
         let startup_voltage_hints_active = resume.is_none()
             && !self
                 .collect_node_voltage_hints(netlist, &circuit)

@@ -512,6 +512,12 @@ pub struct Mosfet {
     /// The last `update` began an iterate that no second `update` has seen
     /// yet (see `update_impl`).
     update_open: bool,
+    /// The last `update` limited a bulk junction with pnjlim: Xyce's
+    /// `limitedFlag`, set from pnjlim's `Check` (N_DEV_MOSFET1/2/3.C).
+    junction_limited: bool,
+    /// Report Xyce's transient device-convergence status (no junction
+    /// limiting) instead of the SPICE current-prediction test.
+    native_xyce_transient_convergence: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -566,6 +572,7 @@ pub struct MosfetNonlinearState {
     initial_off_seed_evaluations: u8,
     operating_point_startup: Option<InitialFixHold>,
     update_open: bool,
+    junction_limited: bool,
 }
 
 /// Cold per-instance payloads of a classic MOSFET, allocated only while one is
@@ -670,6 +677,7 @@ impl Mosfet {
                 .operating_point_startup()
                 .map(OperatingPointStartup::hold),
             update_open: self.update_open,
+            junction_limited: self.junction_limited,
         }
     }
 
@@ -718,6 +726,18 @@ impl Mosfet {
                 .map(OperatingPointStartup::with_hold),
         );
         self.update_open = state.update_open;
+        self.junction_limited = state.junction_limited;
+    }
+
+    /// Select Xyce's native transient device-convergence status for this
+    /// run. The engine enables it only after the DC/startup solve, so the
+    /// operating point keeps the strict SPICE test. Only Xyce's levels 1-3
+    /// report `!limitedFlag` alone (N_DEV_MOSFET1.h:771-774); its level 6
+    /// also waits for a second Newton iterate, so it keeps the strict test.
+    #[doc(hidden)]
+    pub fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
+        self.native_xyce_transient_convergence =
+            enabled && matches!(self.level, 1..=3) && !self.uses_legacy_bsim();
     }
 
     /// The deck marked this instance `OFF`, so its first Newton evaluation

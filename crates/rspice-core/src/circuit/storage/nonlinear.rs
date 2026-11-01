@@ -378,6 +378,15 @@ impl Mosfets {
         self.last_update_all_is_physical = false;
     }
 
+    /// Select Xyce's native transient convergence status for every classic
+    /// MOS instance, as [`Diodes::set_native_xyce_transient_convergence`]
+    /// does for diodes.
+    pub(crate) fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
+        for mosfet in &mut self.devices {
+            mosfet.set_native_xyce_transient_convergence(enabled);
+        }
+    }
+
     pub(crate) fn len(&self) -> usize {
         self.devices.len()
     }

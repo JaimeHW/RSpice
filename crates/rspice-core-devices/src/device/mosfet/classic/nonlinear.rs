@@ -181,11 +181,9 @@ impl Mosfet {
         if self.pending_startup_bias().is_some() {
             self.advance_startup_state(vgs, vds, vbs, constants.is_some());
         }
-        let (eval_vgs, eval_vds, eval_vbs) = if let Some(constants) = constants {
-            self.limited_branch_voltages_for_transient_eval(vgs, vds, vbs, constants)
-        } else {
-            self.limited_branch_voltages_for_eval(vgs, vds, vbs)
-        };
+        let (eval_vgs, eval_vds, eval_vbs, junction_limited) =
+            self.limited_branch_voltages_checked(vgs, vds, vbs, constants);
+        self.junction_limited = junction_limited;
         if constants.is_some()
             && self.linearization_cache_valid
             && self.has_branch_history
@@ -343,6 +341,12 @@ impl NonlinearDevice for Mosfet {
         });
         if limited {
             return false;
+        }
+        // Past the limited-bias rule, Xyce's MOSFET `isConverged` is
+        // `!limitedFlag`: its transient Newton has no device current test,
+        // only the solver's norms.
+        if self.native_xyce_transient_convergence {
+            return !self.junction_limited;
         }
 
         let vgs_diff = (self.vgs - self.vgs_prev).abs();
