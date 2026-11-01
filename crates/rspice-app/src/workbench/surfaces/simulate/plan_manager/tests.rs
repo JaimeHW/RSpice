@@ -388,14 +388,13 @@ fn the_selected_plans_operations_are_one_row_with_the_rare_ones_under_more() {
         output = frame(Vec::new());
     }
     let painted = texts(&output);
-    let row = ["Rename…", "Clone…", "More"]
-        .map(|label| {
-            painted
-                .iter()
-                .find(|(text, _)| text == label)
-                .unwrap_or_else(|| panic!("'{label}' is not painted: {painted:?}"))
-                .1
-        });
+    let row = ["Rename…", "Clone…", "More"].map(|label| {
+        painted
+            .iter()
+            .find(|(text, _)| text == label)
+            .unwrap_or_else(|| panic!("'{label}' is not painted: {painted:?}"))
+            .1
+    });
     for (label, at) in ["Clone…", "More"].iter().zip(&row[1..]) {
         assert!(
             (at.y - row[0].y).abs() < 1.0,
