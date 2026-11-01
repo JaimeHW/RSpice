@@ -833,10 +833,22 @@ fn resolve_resistor_parameters(
                     }
                     reported_resistance = resistance;
                 }
-                SpiceDialect::BestAvailable | SpiceDialect::Xyce => {
-                    // Preserve RSpice's established default and Xyce behavior:
-                    // a value-less instance has a 1 kOhm base, and model R is
-                    // a multiplier applied to explicit values and RSH geometry.
+                SpiceDialect::BestAvailable => {
+                    // LTspice and QSPICE multiply an explicit value by model R
+                    // and build RSH geometry without it. A value-less card with
+                    // no geometry they refuse ("Missing resistance value"), and
+                    // ngspice then reads model R as the resistance. Follow them
+                    // where they decide and ngspice where they refuse.
+                    let instance_resistance = resistance;
+                    resistance = match instance_resistance {
+                        Some(value) => Some(value * model_resistance.unwrap_or(1.0)),
+                        None => geometry_resistance.or(model_resistance).or(Some(1000.0)),
+                    };
+                    reported_resistance = instance_resistance.or(resistance);
+                }
+                SpiceDialect::Xyce => {
+                    // Xyce: a value-less instance has a 1 kOhm base, and model R
+                    // is a multiplier applied to explicit values and RSH geometry.
                     if resistance.is_none() {
                         resistance = Some(geometry_resistance.unwrap_or(1000.0));
                     }
@@ -1525,8 +1537,8 @@ R3 a 0 rmod
     }
 
     #[test]
-    fn value_less_level1_modeled_resistor_multiplies_the_one_kilohm_default() {
-        let (model_r, _) = resolve_resistor_from_source(
+    fn xyce_value_less_level1_modeled_resistor_multiplies_the_one_kilohm_default() {
+        let model_r = resolve_xyce_resistor_from_source(
             r#"value-less modeled resistor
 R1 a 0 rmod
 .model rmod R R=2
@@ -1535,16 +1547,46 @@ R1 a 0 rmod
             "R1",
         );
         assert_eq!(model_r, 2000.0);
+    }
 
-        let (model_res_alias, _) = resolve_resistor_from_source(
-            r#"value-less modeled resistor with RES alias
-R2 a 0 rmod
-.model rmod R RES=0.5
-.end
-"#,
-            "R2",
-        );
-        assert_eq!(model_res_alias, 500.0);
+    /// The default dialect against the four reference simulators, as the
+    /// resistance each one reaches for the card (ngspice-46, Xyce 7.10,
+    /// LTspice 26.1.1, QSPICE):
+    ///
+    /// | card                                   | ngspice | Xyce | LTspice | QSPICE  |
+    /// |----------------------------------------|---------|------|---------|---------|
+    /// | `R1 a 0 rmod`, `R=2k`                  | 2k      | 2M   | refused | refused |
+    /// | `R1 a 0 rmod`, `RESISTANCE=2k`         | 2k      | 1k   | refused | refused |
+    /// | `R1 a 0 rmod 3k`, `R=2`                | 3k      | 6k   | 6k      | 6k      |
+    /// | `L=1000u W=1u`, `RSH=1 R=2`            | 1k      | 2k   | 1k      | 1k      |
+    /// | `3k L=1000u W=1u`, `RSH=1 R=2`         | 3k      | 6k   | 6k      | 6k      |
+    #[test]
+    fn default_model_r_follows_ltspice_and_qspice_and_ngspice_where_they_refuse() {
+        let cases = [
+            ("R1 a 0 rmod", "R=2k", 2_000.0, 2_000_000.0),
+            ("R1 a 0 rmod 3k", "R=2", 6_000.0, 6_000.0),
+            ("R1 a 0 rmod L=1000u W=1u", "RSH=1 R=2", 1_000.0, 2_000.0),
+            ("R1 a 0 rmod 3k L=1000u W=1u", "RSH=1 R=2", 6_000.0, 6_000.0),
+        ];
+        for (instance, model, default_expected, xyce_expected) in cases {
+            let source = format!("model R\n{instance}\n.model rmod R {model}\n.end\n");
+            let (default, _) = resolve_resistor_from_source(&source, "R1");
+            assert!(
+                (default - default_expected).abs() <= 1.0e-9 * default_expected,
+                "default R={default} for {instance} / {model}"
+            );
+            let xyce = resolve_xyce_resistor_from_source(&source, "R1");
+            assert!(
+                (xyce - xyce_expected).abs() <= 1.0e-9 * xyce_expected,
+                "Xyce R={xyce} for {instance} / {model}"
+            );
+        }
+
+        for (model, expected) in [("RESISTANCE=2k", 2_000.0), ("RES=0.5", 0.5)] {
+            let source = format!("model alias\nR1 a 0 rmod\n.model rmod R {model}\n.end\n");
+            let (default, _) = resolve_resistor_from_source(&source, "R1");
+            assert_eq!(default, expected, "default R for {model}");
+        }
     }
 
     #[test]
@@ -1591,16 +1633,15 @@ R4 a 0 rmod
     }
 
     #[test]
-    fn level1_geometry_keeps_model_r_multiplier_path() {
-        let (geometry, _) = resolve_resistor_from_source(
-            r#"modeled resistor geometry with multiplier
+    fn xyce_level1_geometry_keeps_model_r_multiplier_path() {
+        let source = r#"modeled resistor geometry with multiplier
 R1 a 0 rmod L=2 W=1
 .model rmod R RSH=100 R=2
 .end
-"#,
-            "R1",
-        );
-        assert_eq!(geometry, 400.0);
+"#;
+        assert_eq!(resolve_xyce_resistor_from_source(source, "R1"), 400.0);
+        let (default, _) = resolve_resistor_from_source(source, "R1");
+        assert_eq!(default, 200.0);
     }
 
     #[test]
