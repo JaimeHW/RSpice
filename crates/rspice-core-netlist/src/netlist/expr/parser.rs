@@ -260,6 +260,9 @@ impl<'a> ExprParser<'a> {
             BinOpKind::Mul | BinOpKind::Div => BinaryLevel::Multiplicative,
             _ => BinaryLevel::Comparison,
         };
+        if let Some(op) = self.word_operator() {
+            return Some((op, level(op)));
+        }
         let op = match self.advance()? {
             '|' => {
                 self.consume('|');
@@ -290,6 +293,39 @@ impl<'a> ExprParser<'a> {
             _ => return None,
         };
         Some((op, level(op)))
+    }
+
+    /// In a control expression only, ngspice's word operators (frontend/
+    /// parse.c:785 PPlex): `gt`, `lt`, `ge`, `le`, `ne`, `eq`, `and` and `or`
+    /// at the cursor, ended by an operator character, a blank or the end of
+    /// the text. Consumes the word it names.
+    fn word_operator(&mut self) -> Option<BinOpKind> {
+        if !self.control_vectors {
+            return None;
+        }
+        let rest = &self.input[self.pos..];
+        let (op, length) = [
+            ("gt", BinOpKind::Gt),
+            ("lt", BinOpKind::Lt),
+            ("ge", BinOpKind::Ge),
+            ("le", BinOpKind::Le),
+            ("ne", BinOpKind::Ne),
+            ("eq", BinOpKind::Eq),
+            ("or", BinOpKind::Or),
+            ("and", BinOpKind::And),
+        ]
+        .into_iter()
+        .find(|(word, _)| {
+            rest.get(..word.len())
+                .is_some_and(|head| head.eq_ignore_ascii_case(word))
+                && rest[word.len()..]
+                    .chars()
+                    .next()
+                    .is_none_or(is_word_operator_end)
+        })
+        .map(|(word, op)| (op, word.len()))?;
+        self.pos += length;
+        Some(op)
     }
 
     /// Parse power expressions (^ / **), left-associative like ngspice
@@ -381,6 +417,20 @@ impl<'a> ExprParser<'a> {
         Ok(operand)
     }
 
+    /// ngspice's `not` in a control expression (frontend/parse.c:817).
+    fn word_not(&mut self) -> bool {
+        let rest = &self.input[self.pos..];
+        let matched = self.control_vectors
+            && rest
+                .get(..3)
+                .is_some_and(|head| head.eq_ignore_ascii_case("not"))
+            && rest[3..].chars().next().is_none_or(is_word_operator_end);
+        if matched {
+            self.pos += 3;
+        }
+        matched
+    }
+
     /// Parse unary expressions (+, -, !)
     fn parse_unary(&mut self) -> Result<Expr, ExprError> {
         self.nested(Self::parse_unary_inner)
@@ -399,6 +449,15 @@ impl<'a> ExprParser<'a> {
         } else if self.consume('+') {
             self.skip_ws();
             self.parse_unary()
+        } else if self.word_not() {
+            // `not` binds looser than `+` and tighter than a comparison
+            // (frontend/parse-bison.y:89 `%left '~'`).
+            self.skip_ws();
+            let operand = self.parse_binary(BinaryLevel::Additive)?;
+            Ok(Expr::UnaryOp {
+                op: UnaryOpKind::Not,
+                operand: Box::new(operand),
+            })
         } else if self.consume('!') {
             // Check this isn't != operator (already consumed by parse_comparison)
             if !self.check('=') {
@@ -818,6 +877,12 @@ impl BinaryLevel {
 }
 
 /// Letters outside ASCII count, as in deck names (`.param α=1`, `{α*2}`).
+/// The characters that end an ngspice word operator (frontend/parse.c:772
+/// `specials`).
+fn is_word_operator_end(c: char) -> bool {
+    " \t%()-^+*,/|&<>~=".contains(c)
+}
+
 fn is_expr_ident_start(c: char) -> bool {
     c.is_alphabetic() || matches!(c, '_' | '`' | '@' | '#' | '$')
 }

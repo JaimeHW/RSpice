@@ -3008,6 +3008,40 @@ fn control_expressions_index_operands_and_other_expressions_do_not() {
     );
 }
 
+/// ngspice's control lexer reads `gt lt ge le ne eq and or not` as
+/// operators when an operator character, a blank or the end follows them
+/// (frontend/parse.c:785); other expressions keep them as names.
+#[test]
+fn control_expressions_read_ngspice_word_operators() {
+    let abort = crate::abort_signal::NoAbort;
+    let mut variables = ParamContext::new();
+    variables.set("A", 3.0);
+    variables.set("ORDER", 2.0);
+    let value = |source: &str| {
+        let expression = parse_control_expression_with_abort(source, &abort).unwrap();
+        evaluate_complex(&expression, &variables).unwrap().re
+    };
+    for (source, expected) in [
+        ("a eq 3", 1.0),
+        ("a EQ 2", 0.0),
+        ("a ne 2", 1.0),
+        ("a gt 2 and a lt 4", 1.0),
+        ("a ge 4 or a le 3", 1.0),
+        ("not(a eq 3)", 0.0),
+        ("not a eq 2", 0.0),
+        ("not a - 3", 1.0),
+        ("a eq(3)", 1.0),
+        ("order*2", 4.0),
+    ] {
+        assert_eq!(value(source), expected, "{source}");
+    }
+    assert!(parse_control_expression_with_abort("a eq", &abort).is_err());
+    assert_eq!(
+        parse_expression("a eq 3").unwrap_err(),
+        ExprError::TrailingInput("eq 3".into())
+    );
+}
+
 #[test]
 fn xyce_expressions_read_a_colon_inside_a_name_as_part_of_it() {
     // Xyce's lexer (ExpressionLexer.l ID) takes ':' into a name, so
