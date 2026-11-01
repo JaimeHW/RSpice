@@ -418,7 +418,7 @@ impl ControlSession<'_> {
         evaluator: &mut dyn ControlScalarEvaluator,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        let expression = self.substitute(expression, line, abort)?;
+        let expression = self.substitute(expression, line, evaluator, abort)?;
         let value = evaluator.evaluate_scalar(&expression, &self.variables, line, abort)?;
         finite(value, line)
     }
@@ -443,7 +443,7 @@ impl ControlSession<'_> {
             )?;
             match &instruction.op {
                 Op::Let { name, expression } => {
-                    let expression = self.substitute(expression, line, abort)?;
+                    let expression = self.substitute(expression, line, evaluator, abort)?;
                     let key = name.to_ascii_lowercase();
                     match evaluator.evaluate_let(name, &expression, &self.variables, line, abort)? {
                         Some(value) => {
@@ -530,7 +530,7 @@ impl ControlSession<'_> {
                         }
                         LoopKind::Foreach { variable, words } => {
                             let values = split_words(
-                                &self.substitute(words, line, abort)?,
+                                &self.substitute(words, line, evaluator, abort)?,
                                 line,
                                 self.program.limits.max_loop_values,
                             )?;
@@ -611,13 +611,13 @@ impl ControlSession<'_> {
                     self.pc = frame.end;
                 }
                 Op::Quit { argument } => {
-                    let argument = self.substitute(argument, line, abort)?;
+                    let argument = self.substitute(argument, line, evaluator, abort)?;
                     self.quit_status = Some(quit_status(&argument));
                     self.pc = self.program.instructions.len();
                     return Ok(None);
                 }
                 Op::Define { text } => {
-                    let text = self.substitute(text, line, abort)?;
+                    let text = self.substitute(text, line, evaluator, abort)?;
                     let (name, arguments, body) = definition(&text, line)?;
                     // Expressions call it through the parameters, as they
                     // call a deck's .func; a later definition replaces it.
@@ -628,7 +628,7 @@ impl ControlSession<'_> {
                     let command = ControlCommand {
                         line,
                         name: name.clone(),
-                        arguments: self.substitute(arguments, line, abort)?,
+                        arguments: self.substitute(arguments, line, evaluator, abort)?,
                     };
                     self.pc += 1;
                     return Ok(Some(command));
@@ -642,6 +642,7 @@ impl ControlSession<'_> {
         &self,
         text: &str,
         line: usize,
+        evaluator: &mut dyn ControlScalarEvaluator,
         abort: &dyn AbortSignal,
     ) -> Result<String, ControlError> {
         let mut output = String::new();
@@ -652,7 +653,19 @@ impl ControlSession<'_> {
                 continue;
             }
             let scalar = chars.next_if_eq(&'&').is_some();
-            let existence = !scalar && chars.next_if_eq(&'?').is_some();
+            if scalar {
+                let name = vector_reference(&mut chars);
+                let words = self.vector_words(&name, line, evaluator, abort)?;
+                check_limit(
+                    output.len().saturating_add(words.len()),
+                    self.program.limits.max_source_bytes,
+                    line,
+                    "expanded command bytes",
+                )?;
+                output.push_str(&words);
+                continue;
+            }
+            let existence = chars.next_if_eq(&'?').is_some();
             let mut name = String::new();
             while chars
                 .peek()
@@ -664,7 +677,7 @@ impl ControlSession<'_> {
             }
             require_identifier(&name, line)?;
             if !existence
-                && (scalar || !self.words.contains_key(&name))
+                && !self.words.contains_key(&name)
                 && self.vectors.contains(&name.to_ascii_lowercase())
             {
                 return Err(ControlError::new(
@@ -683,7 +696,7 @@ impl ControlSession<'_> {
                         '0'
                     },
                 );
-            } else if !scalar && let Some(value) = self.words.get(&name) {
+            } else if let Some(value) = self.words.get(&name) {
                 check_limit(
                     output.len().saturating_add(value.len()),
                     self.program.limits.max_source_bytes,
@@ -692,22 +705,7 @@ impl ControlSession<'_> {
                 )?;
                 output.push_str(value);
             } else {
-                let value = eval_expression_complex_with_abort(&name, &self.variables, abort)
-                    .map_err(|error| ControlError::evaluation(line, error))?;
-                if !value.re.is_finite() || !value.im.is_finite() {
-                    return Err(ControlError::new(
-                        line,
-                        ControlErrorKind::Expression,
-                        format!("variable '{name}' is nonfinite"),
-                    ));
-                }
-                if is_real(value) {
-                    output.push_str(&format!("{:.17e}", value.re));
-                } else {
-                    // Group the entire value so surrounding multiplication,
-                    // negation and powers keep the authored precedence.
-                    output.push_str(&format!("({:.17e}{:+.17e}j)", value.re, value.im));
-                }
+                output.push_str(&self.parameter_text(&name, line, abort)?);
             }
             check_limit(
                 output.len(),
@@ -724,6 +722,111 @@ impl ControlSession<'_> {
         )?;
         Ok(output)
     }
+
+    /// A scalar parameter as `$name` expands it.
+    fn parameter_text(
+        &self,
+        name: &str,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ControlError> {
+        let value = eval_expression_complex_with_abort(name, &self.variables, abort)
+            .map_err(|error| ControlError::evaluation(line, error))?;
+        if !value.re.is_finite() || !value.im.is_finite() {
+            return Err(ControlError::new(
+                line,
+                ControlErrorKind::Expression,
+                format!("variable '{name}' is nonfinite"),
+            ));
+        }
+        Ok(if is_real(value) {
+            format!("{:.17e}", value.re)
+        } else {
+            // Group the entire value so surrounding multiplication,
+            // negation and powers keep the authored precedence.
+            format!("({:.17e}{:+.17e}j)", value.re, value.im)
+        })
+    }
+
+    /// `$&name` reads a vector (frontend/options.c:132 `cp_enqvec_as_var`):
+    /// one `%G` word per element's real part, separated by spaces, as
+    /// variable.c `cp_varwl` renders the list. A scalar `let` stays a
+    /// session parameter and expands as `$name` does; the host answers for
+    /// every vector it keeps.
+    fn vector_words(
+        &self,
+        name: &str,
+        line: usize,
+        evaluator: &mut dyn ControlScalarEvaluator,
+        abort: &dyn AbortSignal,
+    ) -> Result<String, ControlError> {
+        if name.is_empty() {
+            return Err(syntax(line, "invalid variable name ''"));
+        }
+        let plain = require_identifier(name, line).is_ok();
+        let vector = !plain || self.vectors.contains(&name.to_ascii_lowercase());
+        let scalar = if vector {
+            None
+        } else {
+            match self.parameter_text(name, line, abort) {
+                Ok(text) => return Ok(text),
+                Err(error) if error.kind == ControlErrorKind::Expression => Some(error),
+                Err(error) => return Err(error),
+            }
+        };
+        if let Some(words) = evaluator.vector_words(name, &self.variables, line, abort)? {
+            return Ok(words.join(" "));
+        }
+        Err(scalar.unwrap_or_else(|| {
+            ControlError::new(
+                line,
+                ControlErrorKind::Expression,
+                format!("'$&{name}' names no vector in the current plot"),
+            )
+        }))
+    }
+}
+
+/// The text a `$&` reference spans, as ngspice `span_var_expr`
+/// (frontend/variable.c:802) measures it: name characters, ending after the
+/// parenthesis or bracket that closes the first group.
+fn vector_reference(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> String {
+    let mut name = String::new();
+    let (mut parentheses, mut brackets) = (0usize, 0usize);
+    while let Some(&character) = chars.peek() {
+        if !character.is_ascii_alphanumeric() && !"-_<#?@.()[]&".contains(character) {
+            break;
+        }
+        let closes = match character {
+            '[' => {
+                brackets += 1;
+                false
+            }
+            '(' => {
+                parentheses += 1;
+                false
+            }
+            ']' | ')' => {
+                let depth = if character == ']' {
+                    &mut brackets
+                } else {
+                    &mut parentheses
+                };
+                if *depth == 0 {
+                    break;
+                }
+                *depth -= 1;
+                *depth == 0
+            }
+            _ => false,
+        };
+        name.push(character);
+        chars.next();
+        if closes {
+            break;
+        }
+    }
+    name
 }
 
 fn control_body(text: &str) -> &str {

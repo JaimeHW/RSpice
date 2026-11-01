@@ -92,4 +92,18 @@ pub trait ControlScalarEvaluator {
         self.evaluate_scalar(expression, variables, line, abort)
             .map(Some)
     }
+
+    /// `$&name`: the words ngspice makes of the vector `name` (a `let`
+    /// vector, a dataset's vector or an expression naming one), one per
+    /// element, or `None` when the host keeps no such vector. Hosts without
+    /// vectors keep none.
+    fn vector_words(
+        &mut self,
+        _name: &str,
+        _variables: &ParamContext,
+        _line: usize,
+        _abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<String>>, ControlError> {
+        Ok(None)
+    }
 }

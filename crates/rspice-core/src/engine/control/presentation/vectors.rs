@@ -299,6 +299,40 @@ impl ControlCircuit {
             .filter(|vector| vector.value.samples.len() == length)
     }
 
+    /// `$&name`: the vector a `let` or dataset vector expression evaluates
+    /// to, as ngspice's words for it (frontend/options.c:132
+    /// `cp_enqvec_as_var`): each element's real part, printed `%G`.
+    pub(in crate::engine::control) fn expand_vector(
+        &self,
+        name: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<String>>, ControlError> {
+        let Ok(parsed) = parse_control_expression_with_abort(name, abort) else {
+            aborted(abort, line)?;
+            return Ok(None);
+        };
+        match self.evaluate_vector(&parsed, variables, line, abort) {
+            Ok(value) => Ok(Some(
+                value
+                    .samples
+                    .iter()
+                    .map(|sample| percent_g(sample.re))
+                    .collect(),
+            )),
+            Err(error)
+                if matches!(
+                    error.kind,
+                    ControlErrorKind::Expression | ControlErrorKind::Host
+                ) =>
+            {
+                Ok(None)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     /// A scalar `let` of a name drops the vector it would otherwise leave
     /// shadowing the new value.
     pub(in crate::engine::control) fn unbind_vector(&mut self, name: &str) {
@@ -883,6 +917,34 @@ fn sampled(
         scale: Some(selected.dataset.name.clone()),
         unit: selected.unit.clone(),
     })
+}
+
+/// C's `%G` (frontend/variable.c:53 `cp_varwl`): six significant digits,
+/// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
+fn percent_g(value: Value) -> String {
+    if value.is_nan() {
+        return "NAN".into();
+    }
+    if value.is_infinite() {
+        return if value < 0.0 { "-INF" } else { "INF" }.into();
+    }
+    let trim = |text: &str| -> String {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.').to_owned()
+        } else {
+            text.to_owned()
+        }
+    };
+    let text = format!("{value:.5e}");
+    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    if (-4..6).contains(&exponent) {
+        let decimals = (5 - exponent) as usize;
+        trim(&format!("{value:.decimals$}"))
+    } else {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{}E{sign}{:02}", trim(mantissa), exponent.unsigned_abs())
+    }
 }
 
 fn charge(budget: &mut usize, samples: usize, line: usize) -> Result<(), ControlError> {

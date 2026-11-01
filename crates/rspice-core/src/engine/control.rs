@@ -854,6 +854,16 @@ impl ControlScalarEvaluator for ControlCircuit {
             }
         }
     }
+
+    fn vector_words(
+        &mut self,
+        name: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<String>>, ControlError> {
+        self.expand_vector(name, variables, line, abort)
+    }
 }
 
 fn scalar(

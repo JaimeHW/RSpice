@@ -1230,3 +1230,46 @@ fn compose_and_setplot_new_build_vectors_as_ngspice_does() {
         assert!(error.contains(message), "{arguments}: {error}");
     }
 }
+
+fn texts(presented: &[ControlPresentation]) -> Vec<String> {
+    presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::Text(text) => Some(text.trim_end().to_owned()),
+            _ => None,
+        })
+        .collect()
+}
+
+/// ngspice `$&name` reads a vector (frontend/options.c:132
+/// `cp_enqvec_as_var`) and prints each element's real part `%G`, the list
+/// as separate words (variable.c:36 `cp_varwl`). ngspice-46 prints these
+/// lines for the same script; a scalar `let` still expands as `$name` does.
+#[test]
+fn dollar_ampersand_expands_a_vector_as_ngspice_words() {
+    let source = "dollar vectors\nV1 1 0 5\nR1 1 0 1k\n.control\nop\nlet foo = 5\n\
+        let w = vector(4) * 0.5\nlet big = 1234567 + vector(2)\n\
+        let tiny = vector(2) * 1.2345678e-5\necho \"v(1) = $&v(1)\"\necho $&w\necho $&big\n\
+        echo $&tiny\nforeach x $&w\necho x $x\nend\necho $&op1.w\necho $&foo\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "v(1) = 5",
+            "0 0.5 1 1.5",
+            "1.23457E+06 1.23457E+06",
+            "0 1.23457E-05",
+            "x 0",
+            "x 0.5",
+            "x 1",
+            "x 1.5",
+            "0 0.5 1 1.5",
+            &format!("{:.17e}", 5.0),
+        ]
+    );
+    let (_, error) = run_until_error(
+        "no vector\nV1 1 0 5\nR1 1 0 1k\n.control\nop\necho $&v(nowhere)\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("names no vector"));
+}
