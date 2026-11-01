@@ -152,7 +152,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.descend_hierarchy"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_descend_hierarchy_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_descend_hierarchy_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("design.engineering_table"),

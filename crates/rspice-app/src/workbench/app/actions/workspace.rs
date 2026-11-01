@@ -680,39 +680,12 @@ impl AppState {
         self.project_active_symbol_session();
     }
 
-    /// Return the exact schematic master of one hierarchy instance.
-    ///
-    /// A generic `CellInstance` can also bind a SPICE, symbol, or Verilog-A
-    /// view. Those bindings are valid design objects, but they are not
-    /// descendable hierarchy and must not enable the descend command.
+    /// [`hierarchy_master_for_component`] for the session's model.
     pub(crate) fn hierarchy_master_for_component(
         &self,
         component_id: u64,
     ) -> Option<(String, CellViewRef)> {
-        let component = self
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)?;
-        if component.kind != ComponentType::CellInstance {
-            return None;
-        }
-        let binding = component.library_cell.as_ref()?;
-        let reference = CellViewRef::new(
-            binding.library.clone(),
-            binding.cell.clone(),
-            binding.view.clone(),
-        );
-        let view_type = self
-            .model
-            .library_manager
-            .get_library(&reference.library)
-            .and_then(|library| library.get_cell(&reference.cell))
-            .and_then(|cell| cell.get_view(&reference.view))
-            .map(|view| view.view_type)?;
-        (view_type == ViewType::Schematic).then(|| (component.name.clone(), reference))
+        hierarchy_master_for_component(&self.model, component_id)
     }
 
     /// Return the exact project-owned Verilog-A source view bound to one
@@ -760,14 +733,9 @@ impl AppState {
         true
     }
 
+    /// [`selected_hierarchy_master`] for the session's model.
     pub(crate) fn selected_hierarchy_master(&self) -> Option<(String, CellViewRef)> {
-        self.model
-            .schematic
-            .session
-            .editor
-            .selection
-            .single_component()
-            .and_then(|component_id| self.hierarchy_master_for_component(component_id))
+        selected_hierarchy_master(&self.model)
     }
 
     /// The Verilog-A view one instance is bound to, whether or not that view
@@ -896,6 +864,50 @@ struct GeneratedInstanceLocation {
     instance: String,
     /// Whether the retained artifact predates the current project input.
     stale: bool,
+}
+
+/// The selected instance's name and the schematic master it descends into.
+pub(crate) fn selected_hierarchy_master(model: &Model) -> Option<(String, CellViewRef)> {
+    model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+        .and_then(|component_id| hierarchy_master_for_component(model, component_id))
+}
+
+/// Return the exact schematic master of one hierarchy instance.
+///
+/// A generic `CellInstance` can also bind a SPICE, symbol, or Verilog-A
+/// view. Those bindings are valid design objects, but they are not
+/// descendable hierarchy and must not enable the descend command.
+pub(crate) fn hierarchy_master_for_component(
+    model: &Model,
+    component_id: u64,
+) -> Option<(String, CellViewRef)> {
+    let component = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == component_id)?;
+    if component.kind != ComponentType::CellInstance {
+        return None;
+    }
+    let binding = component.library_cell.as_ref()?;
+    let reference = CellViewRef::new(
+        binding.library.clone(),
+        binding.cell.clone(),
+        binding.view.clone(),
+    );
+    let view_type = model
+        .library_manager
+        .get_library(&reference.library)
+        .and_then(|library| library.get_cell(&reference.cell))
+        .and_then(|cell| cell.get_view(&reference.view))
+        .map(|view| view.view_type)?;
+    (view_type == ViewType::Schematic).then(|| (component.name.clone(), reference))
 }
 
 /// Sync the active schematic into the workspace through

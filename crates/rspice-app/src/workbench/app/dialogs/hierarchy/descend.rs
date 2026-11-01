@@ -8,8 +8,12 @@ use egui::Context;
 
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::selected_hierarchy_master;
+use crate::workbench::app::actions::workspace::symbol_in_place::selected_symbol_in_place_target;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::framework::requests::{Drain, Request};
+use crate::workbench::state::WorkbenchSession;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) enum HierarchyDescendEditMode {
@@ -93,48 +97,50 @@ pub(crate) fn open_descend_hierarchy_dialog(state: &mut AppState) -> bool {
     true
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_descend_hierarchy_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.descend_hierarchy.open {
-            return;
-        }
+/// Draw Descend into hierarchy over its draft and the model it reads. A
+/// checked choice goes to the shell as [`DescendHierarchy`]; a refused one
+/// stays on the form with its reason.
+pub(in crate::workbench) fn render_descend_hierarchy_dialog(
+    dialog: &mut DescendHierarchyDialogState,
+    model: &Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
+        return;
+    }
 
-        let target = self
-            .state
-            .design
-            .descend_hierarchy
-            .reference
-            .as_ref()
-            .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view));
-        let instance = self.state.design.descend_hierarchy.instance_name.clone();
-        let occurrence_path = descend_target_path(&self.state.model.workspace, &instance);
-        let error = self.state.design.descend_hierarchy.validation_error.clone();
-        let draft = &mut self.state.design.descend_hierarchy;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .describe(DESCRIPTION)
-            // Wide enough for "Unsaved parent changes" on one line.
-            .label_column(136.0)
-            .status(error.as_deref().map_or(Ok(None), Err))
-            .show(ctx, |rows| {
-                Some(descend_rows(
-                    rows,
-                    draft,
-                    &occurrence_path,
-                    target.as_deref(),
-                ))
-            });
+    let target = dialog
+        .reference
+        .as_ref()
+        .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view));
+    let instance = dialog.instance_name.clone();
+    let occurrence_path = descend_target_path(&model.workspace, &instance);
+    let error = dialog.validation_error.clone();
+    let draft = &mut *dialog;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .describe(DESCRIPTION)
+        // Wide enough for "Unsaved parent changes" on one line.
+        .label_column(136.0)
+        .status(error.as_deref().map_or(Ok(None), Err))
+        .show(ctx, |rows| {
+            Some(descend_rows(
+                rows,
+                draft,
+                &occurrence_path,
+                target.as_deref(),
+            ))
+        });
 
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) = commit_descend_context(&mut self.state) {
-                    self.state.design.descend_hierarchy.validation_error = Some(error);
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.descend_hierarchy.close();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
+    match choice {
+        DialogChoice::Primary => match descend_request(dialog, model) {
+            Ok(request) => workbench.outbox.push(request),
+            Err(error) => dialog.validation_error = Some(error),
+        },
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            dialog.close();
         }
+        DialogChoice::Secondary | DialogChoice::None => {}
     }
 }
 
@@ -152,32 +158,52 @@ fn descend_target_path(workspace: &crate::state::ProjectWorkspace, instance: &st
         .map_or_else(|error| error.to_string(), |path| path.to_string())
 }
 
-fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
-    let draft = state.design.descend_hierarchy.clone();
+/// Descend into hierarchy's checked choice. Raised by the dialog's step and
+/// taken straight after it, so the shell carries it out in the frame the
+/// reader chose it, as the dialog once did in place.
+#[derive(Debug, Clone)]
+pub(crate) enum DescendHierarchy {
+    /// Edit the selected instance's symbol on this sheet.
+    EditSymbolInPlace,
+    /// Open the selected instance's master as the reader chose.
+    Open {
+        edit_mode: HierarchyDescendEditMode,
+        instance: String,
+        reference: crate::state::CellViewRef,
+    },
+}
+
+impl Request for DescendHierarchy {
+    const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// Check the draft against the model as it stands: the choice to carry out,
+/// or why it is refused.
+fn descend_request(
+    draft: &DescendHierarchyDialogState,
+    model: &Model,
+) -> Result<DescendHierarchy, String> {
     let authority = draft
         .authority
         .as_ref()
         .ok_or_else(|| "The hierarchy edit authority is missing.".to_owned())?;
-    authority.validate(state, "Descend into hierarchy")?;
+    authority.validate(model, "Descend into hierarchy")?;
     // The symbol is edited on this sheet rather than descended into, so the
     // instance it is edited at is the whole target.
     if draft.edit_mode == HierarchyDescendEditMode::EditSymbolInPlace {
-        if let Err(refusal) = state.selected_symbol_in_place_target() {
+        if let Err(refusal) = selected_symbol_in_place_target(model) {
             return Err(format!(
                 "Edit symbol in place is unavailable: {}.",
                 refusal.reason()
             ));
         }
-        state.design.descend_hierarchy.close();
-        state.edit_selected_symbol_in_place();
-        return Ok(());
+        return Ok(DescendHierarchy::EditSymbolInPlace);
     }
     let reference = draft
         .reference
         .clone()
         .ok_or_else(|| "The selected hierarchy master no longer resolves.".to_owned())?;
-    let current = state
-        .selected_hierarchy_master()
+    let current = selected_hierarchy_master(model)
         .ok_or_else(|| "The selected hierarchy master no longer resolves.".to_owned())?;
     if current.0 != draft.instance_name || current.1 != reference {
         return Err(
@@ -185,27 +211,51 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
                 .to_owned(),
         );
     }
+    Ok(DescendHierarchy::Open {
+        edit_mode: draft.edit_mode,
+        instance: draft.instance_name.clone(),
+        reference,
+    })
+}
 
-    match draft.edit_mode {
-        HierarchyDescendEditMode::EditInPlace => {
-            state.descend_into_instance(Some(draft.instance_name), reference);
+/// Carry out a checked Descend into hierarchy choice over the whole session,
+/// as the dialog once did in place.
+///
+/// The shell answers it for now, because opening a view, descending and
+/// editing a symbol in place still reach the whole session. Design carries it
+/// out itself once those sit on its own parts.
+pub(crate) fn answer_descend_hierarchy(state: &mut AppState, request: DescendHierarchy) {
+    match request {
+        DescendHierarchy::EditSymbolInPlace => {
+            state.design.descend_hierarchy.close();
+            state.edit_selected_symbol_in_place();
         }
-        HierarchyDescendEditMode::OpenIsolated => {
-            state.open_workspace_view(reference);
+        DescendHierarchy::Open {
+            edit_mode,
+            instance,
+            reference,
+        } => {
+            match edit_mode {
+                HierarchyDescendEditMode::EditInPlace => {
+                    state.descend_into_instance(Some(instance), reference);
+                }
+                HierarchyDescendEditMode::OpenIsolated => {
+                    state.open_workspace_view(reference);
+                }
+                HierarchyDescendEditMode::ReadOnlyReference => {
+                    state.open_workspace_view(reference);
+                    state
+                        .model
+                        .workspace
+                        .content
+                        .set_active_read_only_reference(true);
+                }
+                HierarchyDescendEditMode::EditSymbolInPlace => {}
+            }
+            state.design.descend_hierarchy.close();
+            state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
         }
-        HierarchyDescendEditMode::ReadOnlyReference => {
-            state.open_workspace_view(reference);
-            state
-                .model
-                .workspace
-                .content
-                .set_active_read_only_reference(true);
-        }
-        HierarchyDescendEditMode::EditSymbolInPlace => {}
     }
-    state.design.descend_hierarchy.close();
-    state.prompt("Descended into the instance; the parent's unsaved changes are kept.");
-    Ok(())
 }
 
 /// The form: what is opened, how, and what becomes of the parent's unsaved
@@ -269,6 +319,15 @@ mod tests {
         ViewType,
     };
     use crate::workbench::TogglePreference;
+    use crate::workbench::app::RSpiceApp;
+
+    /// Apply the choice as the dialog's step and the shell's answer do,
+    /// straight after one another.
+    fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
+        let request = descend_request(&state.design.descend_hierarchy, &state.model)?;
+        answer_descend_hierarchy(state, request);
+        Ok(())
+    }
 
     fn hierarchy_state() -> (AppState, CellViewRef, CellViewRef) {
         let mut state = AppState::default();
@@ -328,7 +387,15 @@ mod tests {
                         )),
                         ..Default::default()
                     },
-                    |ui| app.render_descend_hierarchy_dialog(ui.ctx()),
+                    |ui| {
+                        let state = &mut app.state;
+                        render_descend_hierarchy_dialog(
+                            &mut state.design.descend_hierarchy,
+                            &state.model,
+                            &mut state.workbench,
+                            ui.ctx(),
+                        );
+                    },
                 )
                 .shapes;
         }

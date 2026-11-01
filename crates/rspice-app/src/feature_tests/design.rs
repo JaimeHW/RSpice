@@ -5,7 +5,10 @@
 use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
 
-use crate::state::{ComponentType, Point};
+use crate::state::{
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, View,
+    ViewType,
+};
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::state::Workspace;
@@ -186,4 +189,100 @@ fn display_options_open_and_draw_in_the_frame() {
     Command::VisibilityOptions.execute(&mut app);
     assert!(draws_dialog(&mut app, "Display options"));
     assert!(app.state.design.schematic_visibility_dialog.open);
+}
+
+/// An instance of a schematic cell placed on the open schematic and
+/// selected; the master it descends into.
+fn selected_hierarchy_instance(app: &mut RSpiceApp) -> CellViewRef {
+    let mut cell = Cell::new("afe_core");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    let mut library = Library::new("hierarchy_test");
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    let mut instance =
+        Component::new(91, ComponentType::CellInstance, Point::new(100, 100)).with_library_cell(
+            LibraryCellInstance::new("hierarchy_test", "afe_core", "schematic"),
+        );
+    instance.name = "XAFE".to_owned();
+    let schematic = &mut app.state.model.schematic;
+    schematic.document_mut_for_test().components.push(instance);
+    schematic.session.editor.selection.select_only_component(91);
+    CellViewRef::new("hierarchy_test", "afe_core", "schematic")
+}
+
+#[test]
+fn descend_into_hierarchy_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    selected_hierarchy_instance(&mut app);
+    Command::DescendHierarchy.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Descend into hierarchy"));
+    assert!(app.state.design.descend_hierarchy.open);
+}
+
+/// Descend into hierarchy's step has what it raised answered straight after
+/// it draws, so nothing runs between the reader's choice and the shell
+/// carrying it out.
+#[test]
+fn the_descend_step_has_its_choice_answered_straight_after_it_draws() {
+    let squeeze = |text: &str| text.split_whitespace().collect::<String>();
+    let order = squeeze(include_str!("../workbench/frame/dialog_order.rs"));
+    let spec = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"design.descend_hierarchy\")"))
+        .expect("the shell's dialog order draws Descend into hierarchy");
+    assert!(spec.contains(&squeeze(
+        "render: |app, ctx| {
+            DesignFeature::render_descend_hierarchy_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },"
+    )));
+}
+
+/// A descent chosen in a frame is carried out in that frame: the master
+/// opens, the dialog closes and the status bar says so.
+#[test]
+fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
+    let mut app = design_app();
+    let child = selected_hierarchy_instance(&mut app);
+    Command::DescendHierarchy.execute(&mut app);
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut run = |app: &mut RSpiceApp, time: f64, events: Vec<egui::Event>| {
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(pos2(0.0, 0.0), vec2(1440.0, 900.0))),
+                time: Some(time),
+                focused: true,
+                events,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(app, ui, &mut frame),
+        );
+    };
+    run(&mut app, 0.1, Vec::new());
+    run(&mut app, 0.2, Vec::new());
+    assert!(app.state.design.descend_hierarchy.open);
+    assert_ne!(app.state.model.workspace.content.active_view, child);
+    // The form's first control takes the caret, and a focused control keeps
+    // Enter for itself; with nothing focused, Enter is the primary.
+    ctx.memory_mut(|memory| {
+        if let Some(id) = memory.focused() {
+            memory.surrender_focus(id);
+        }
+    });
+    let enter = egui::Event::Key {
+        key: egui::Key::Enter,
+        physical_key: Some(egui::Key::Enter),
+        pressed: true,
+        repeat: false,
+        modifiers: egui::Modifiers::NONE,
+    };
+    run(&mut app, 0.3, vec![enter]);
+    assert_eq!(app.state.model.workspace.content.active_view, child);
+    assert!(!app.state.design.descend_hierarchy.open);
+    assert_eq!(
+        app.state.prompt_text(),
+        Some("Descended into the instance; the parent's unsaved changes are kept.")
+    );
 }

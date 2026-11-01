@@ -337,7 +337,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "DesignFeature::render_schematic_visibility_dialog",
         "design",
     ),
-    ("render_descend_hierarchy_dialog", "design"),
+    ("DesignFeature::render_descend_hierarchy_dialog", "design"),
     ("render_engineering_table_dialog", "design"),
     ("DesignFeature::render_pin_port_dialog", "design"),
     ("render_design_review_comments_dialog", "design"),
@@ -591,10 +591,14 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     ),
     (
         "21",
-        &["|app, request: ProjectRequest| answer_project_request(app, request)"],
+        &["|app, request: DescendHierarchy| answer_descend_hierarchy(&mut app.state, request)"],
     ),
     (
         "22",
+        &["|app, request: ProjectRequest| answer_project_request(app, request)"],
+    ),
+    (
+        "23",
         &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
     ),
 ];
@@ -1355,8 +1359,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        22,
-        "`after_contribution` answers exactly the twenty-two requests it lists"
+        23,
+        "`after_contribution` answers exactly the twenty-three requests it lists"
     );
 }
 

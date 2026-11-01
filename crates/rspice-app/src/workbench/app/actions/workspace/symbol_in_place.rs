@@ -9,7 +9,7 @@
 mod tests;
 
 use crate::state::{CellViewRef, ComponentType, ViewType};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 use rspice_schematic_editor::symbol_editor::placement::SymbolPlacement;
 
 /// A symbol edited in place on the schematic that places one of its
@@ -114,99 +114,103 @@ impl SymbolInPlaceRefusal {
     }
 }
 
+/// The selected instance and the symbol view it would be edited in place
+/// through, or why it cannot be.
+pub(crate) fn selected_symbol_in_place_target(
+    model: &Model,
+) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
+    if !matches!(
+        model.workspace.content.active_view_type(),
+        ViewType::Schematic | ViewType::Testbench
+    ) {
+        return Err(SymbolInPlaceRefusal::NotSchematic);
+    }
+    let id = model
+        .schematic
+        .session
+        .editor
+        .selection
+        .single_component()
+        .ok_or(SymbolInPlaceRefusal::NoInstance)?;
+    symbol_in_place_target(model, id).map(|symbol| (id, symbol))
+}
+
+/// The symbol view one instance on the active schematic draws, when
+/// that view can be edited.
+fn symbol_in_place_target(
+    model: &Model,
+    component_id: u64,
+) -> Result<CellViewRef, SymbolInPlaceRefusal> {
+    use SymbolInPlaceRefusal as Refusal;
+    let component = model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == component_id)
+        .ok_or(Refusal::NoInstance)?;
+    if component.kind != ComponentType::CellInstance {
+        return Err(Refusal::BuiltInSymbol);
+    }
+    let binding = component
+        .library_cell
+        .as_ref()
+        .ok_or(Refusal::CellNotLoaded)?;
+    if binding.builtin_xspice.is_some() {
+        return Err(Refusal::BuiltInXspiceSymbol);
+    }
+    let library = model
+        .library_manager
+        .get_library(&binding.library)
+        .ok_or(Refusal::CellNotLoaded)?;
+    let cell = library
+        .get_cell(&binding.cell)
+        .ok_or(Refusal::CellNotLoaded)?;
+    // The view the canvas resolves the instance's artwork from.
+    let symbol = cell
+        .get_view(&binding.view)
+        .filter(|view| view.view_type == ViewType::Symbol)
+        .or_else(|| {
+            cell.get_view("symbol")
+                .filter(|view| view.view_type == ViewType::Symbol)
+        })
+        .or_else(|| {
+            cell.views_sorted()
+                .into_iter()
+                .find(|view| view.view_type == ViewType::Symbol)
+        });
+    let Some(symbol) = symbol else {
+        let bound_to_module = cell
+            .get_view(&binding.view)
+            .is_some_and(|view| view.view_type == ViewType::VerilogA);
+        return Err(if bound_to_module {
+            Refusal::ModuleWithoutSymbol
+        } else {
+            Refusal::NoSymbolView
+        });
+    };
+    if model.safe_mode.project_read_only() {
+        return Err(Refusal::SafeMode);
+    }
+    if library.read_only {
+        return Err(Refusal::ReadOnlyLibrary);
+    }
+    if crate::state::SymbolDocument::load_from_view(symbol).is_err() {
+        return Err(Refusal::UnloadableSymbol);
+    }
+    Ok(CellViewRef::new(
+        &binding.library,
+        &binding.cell,
+        &symbol.name,
+    ))
+}
+
 impl AppState {
-    /// The selected instance and the symbol view it would be edited in place
-    /// through, or why it cannot be.
+    /// [`selected_symbol_in_place_target`] for the session's model.
     pub(crate) fn selected_symbol_in_place_target(
         &self,
     ) -> Result<(u64, CellViewRef), SymbolInPlaceRefusal> {
-        if !matches!(
-            self.model.workspace.content.active_view_type(),
-            ViewType::Schematic | ViewType::Testbench
-        ) {
-            return Err(SymbolInPlaceRefusal::NotSchematic);
-        }
-        let id = self
-            .model
-            .schematic
-            .session
-            .editor
-            .selection
-            .single_component()
-            .ok_or(SymbolInPlaceRefusal::NoInstance)?;
-        self.symbol_in_place_target(id).map(|symbol| (id, symbol))
-    }
-
-    /// The symbol view one instance on the active schematic draws, when
-    /// that view can be edited.
-    pub(crate) fn symbol_in_place_target(
-        &self,
-        component_id: u64,
-    ) -> Result<CellViewRef, SymbolInPlaceRefusal> {
-        use SymbolInPlaceRefusal as Refusal;
-        let component = self
-            .model
-            .schematic
-            .document()
-            .components
-            .iter()
-            .find(|component| component.id == component_id)
-            .ok_or(Refusal::NoInstance)?;
-        if component.kind != ComponentType::CellInstance {
-            return Err(Refusal::BuiltInSymbol);
-        }
-        let binding = component
-            .library_cell
-            .as_ref()
-            .ok_or(Refusal::CellNotLoaded)?;
-        if binding.builtin_xspice.is_some() {
-            return Err(Refusal::BuiltInXspiceSymbol);
-        }
-        let library = self
-            .model
-            .library_manager
-            .get_library(&binding.library)
-            .ok_or(Refusal::CellNotLoaded)?;
-        let cell = library
-            .get_cell(&binding.cell)
-            .ok_or(Refusal::CellNotLoaded)?;
-        // The view the canvas resolves the instance's artwork from.
-        let symbol = cell
-            .get_view(&binding.view)
-            .filter(|view| view.view_type == ViewType::Symbol)
-            .or_else(|| {
-                cell.get_view("symbol")
-                    .filter(|view| view.view_type == ViewType::Symbol)
-            })
-            .or_else(|| {
-                cell.views_sorted()
-                    .into_iter()
-                    .find(|view| view.view_type == ViewType::Symbol)
-            });
-        let Some(symbol) = symbol else {
-            let bound_to_module = cell
-                .get_view(&binding.view)
-                .is_some_and(|view| view.view_type == ViewType::VerilogA);
-            return Err(if bound_to_module {
-                Refusal::ModuleWithoutSymbol
-            } else {
-                Refusal::NoSymbolView
-            });
-        };
-        if self.model.safe_mode.project_read_only() {
-            return Err(Refusal::SafeMode);
-        }
-        if library.read_only {
-            return Err(Refusal::ReadOnlyLibrary);
-        }
-        if crate::state::SymbolDocument::load_from_view(symbol).is_err() {
-            return Err(Refusal::UnloadableSymbol);
-        }
-        Ok(CellViewRef::new(
-            &binding.library,
-            &binding.cell,
-            &symbol.name,
-        ))
+        selected_symbol_in_place_target(&self.model)
     }
 
     /// The in-place session the open document belongs to.

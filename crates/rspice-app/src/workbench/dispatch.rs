@@ -21,6 +21,9 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::HardcopyWorkflow;
+use crate::workbench::app::dialogs::hierarchy::descend::{
+    DescendHierarchy, answer_descend_hierarchy,
+};
 use crate::workbench::app_state::PlatformState;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
@@ -187,8 +190,8 @@ impl RSpiceApp {
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
-    /// live session's mirror, and last what the project feature hands over
-    /// and the project's file commands.
+    /// live session's mirror, the descent Descend into hierarchy checked, and
+    /// last what the project feature hands over and the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -410,6 +413,11 @@ impl RSpiceApp {
                     model,
                 );
             },
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |app, request: DescendHierarchy| answer_descend_hierarchy(&mut app.state, request),
         );
         requests::drain(
             self,

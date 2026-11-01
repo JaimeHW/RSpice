@@ -5,6 +5,7 @@
 
 use egui::Context;
 
+use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
 use crate::workbench::app::dialogs::{find_replace, object_properties, placement};
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
@@ -138,5 +139,19 @@ impl DesignFeature {
     ) {
         cx.state
             .render_schematic_visibility_dialog(cx.model, cx.wb, ctx);
+    }
+
+    /// Descend into hierarchy. A checked choice goes to the shell, which
+    /// answers it straight after the dialog's step draws.
+    pub(in crate::workbench) fn render_descend_hierarchy_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        descend::render_descend_hierarchy_dialog(
+            &mut cx.state.descend_hierarchy,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
     }
 }
