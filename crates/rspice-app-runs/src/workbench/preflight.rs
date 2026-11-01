@@ -70,6 +70,30 @@ pub fn invalidate(
     controller.clear_prepared_run();
 }
 
+/// Check Design: the configured design, walked from the simulation root,
+/// with every schematic of the project's own libraries it never reaches.
+pub fn check_design(host: &mut impl RunHost) -> Result<rspice_design::drc::DrcResult, String> {
+    let root = host.model().workspace.content.simulation_root_reference();
+    run_design_check(host, root, CheckScope::Design)
+}
+
+/// Check `subject` as far as `scope` reaches with the slots' facts, stating
+/// what syncing the open drawing into the workspace had to say.
+pub fn run_design_check(
+    host: &mut impl RunHost,
+    subject: crate::state::CellViewRef,
+    scope: CheckScope,
+) -> Result<rspice_design::drc::DrcResult, String> {
+    let facts = host.slot_facts();
+    let (outcome, prompt) = host
+        .model_mut()
+        .run_synced_design_check(subject, scope, facts);
+    if let Some(prompt) = prompt {
+        host.prompt(prompt);
+    }
+    outcome
+}
+
 pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
     if queue {
         let execution = &state.model().simulation.execution;

@@ -21,7 +21,11 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
     };
     match workflow {
         SimulationWorkflowDialog::PlanManager(draft) => {
-            super::plan_manager::plan_manager_dialog(ctx, app, draft);
+            super::plan_manager::plan_manager_dialog(
+                ctx,
+                &mut crate::workbench::features::cx(app),
+                draft,
+            );
         }
         SimulationWorkflowDialog::ClonePlan(draft) => clone_plan_dialog(ctx, app, draft),
         SimulationWorkflowDialog::DesignVariable(draft) => design_variable_dialog(ctx, app, draft),

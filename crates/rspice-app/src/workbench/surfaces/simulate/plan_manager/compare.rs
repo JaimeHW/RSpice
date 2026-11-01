@@ -1272,7 +1272,11 @@ mod tests {
                     ..Default::default()
                 },
                 |ctx| {
-                    plan_manager_dialog(ctx, &mut app, draft.clone());
+                    plan_manager_dialog(
+                        ctx,
+                        &mut crate::workbench::features::cx(&mut app),
+                        draft.clone(),
+                    );
                 },
             );
         }

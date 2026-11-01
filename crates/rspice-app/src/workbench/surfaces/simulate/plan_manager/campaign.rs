@@ -39,6 +39,9 @@
 //! second and wrong answer beside the authoritative one.
 
 use super::*;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
+use rspice_app_runs::simulation::RunHost;
 
 /// The dialog's accessible description, and nothing painted.
 ///
@@ -477,20 +480,19 @@ fn declared_refusal(name: &str, member_ids: &[SimulationPlanId]) -> Option<Strin
 }
 
 pub(super) fn commit_simulation_campaign(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     name: &str,
     member_ids: &[SimulationPlanId],
 ) -> Result<String, String> {
-    if app.state.model.simulation.execution.has_active_execution()
-        || app.state.model.simulation.execution.trigger_simulation
+    if cx.model.simulation.execution.has_active_execution()
+        || cx.model.simulation.execution.trigger_simulation
     {
         return Err("A simulation is already running or waiting to start".to_owned());
     }
-    app.state.sync_active_schematic_to_workspace();
-    crate::workbench::menu_bar::check_design(&mut app.state);
-    let receipt =
-        app.simulation_controller
-            .prepare_and_start_campaign(&mut app.state, name, member_ids)?;
+    let (mut host, controller) = crate::workbench::simulate::run_host(cx);
+    host.sync_active_schematic_to_workspace();
+    crate::workbench::menu_bar::check_design(&mut host);
+    let receipt = controller.prepare_and_start_campaign(&mut host, name, member_ids)?;
     Ok(format!(
         "Campaign {} queued {} plans as {} tasks.",
         receipt.campaign_id, receipt.member_count, receipt.task_count
@@ -613,36 +615,56 @@ mod tests {
     fn the_limits_this_route_prints_are_the_ones_the_controller_enforces() {
         let (mut app, plans) = app_with_three_plans();
 
-        let one = commit_simulation_campaign(&mut app, "Nightly", &plans[..1])
-            .expect_err("one plan is not a campaign");
+        let one = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &plans[..1],
+        )
+        .expect_err("one plan is not a campaign");
         assert!(
             one.contains("at least two distinct plans"),
             "below the floor the controller said: {one}"
         );
         // Distinctness, not length: the controller deduplicates before it
         // counts, so the same plan twice is still one member.
-        let repeated = commit_simulation_campaign(&mut app, "Nightly", &[plans[0], plans[0]])
-            .expect_err("the same plan twice is one distinct member");
+        let repeated = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &[plans[0], plans[0]],
+        )
+        .expect_err("the same plan twice is one distinct member");
         assert!(repeated.contains("at least two distinct plans"));
 
         let over = (0..=MAX_CAMPAIGN_MEMBERS)
             .map(|_| SimulationPlanId::new())
             .collect::<Vec<_>>();
         assert_eq!(over.len(), MAX_CAMPAIGN_MEMBERS + 1);
-        let too_many = commit_simulation_campaign(&mut app, "Nightly", &over)
-            .expect_err("one over the cap is refused");
+        let too_many = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &over,
+        )
+        .expect_err("one over the cap is refused");
         assert!(
             too_many.contains(&MAX_CAMPAIGN_MEMBERS.to_string()),
             "the member cap moved away from {MAX_CAMPAIGN_MEMBERS}: {too_many}"
         );
 
-        let unnamed = commit_simulation_campaign(&mut app, "   ", &plans[..2])
-            .expect_err("a blank name is refused");
+        let unnamed = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "   ",
+            &plans[..2],
+        )
+        .expect_err("a blank name is refused");
         assert!(unnamed.contains("must not be empty"), "{unnamed}");
 
         let long = "n".repeat(MAX_CAMPAIGN_NAME_CHARS + 1);
-        let too_long = commit_simulation_campaign(&mut app, &long, &plans[..2])
-            .expect_err("a name past the cap is refused");
+        let too_long = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            &long,
+            &plans[..2],
+        )
+        .expect_err("a name past the cap is refused");
         assert!(
             too_long.contains(&MAX_CAMPAIGN_NAME_CHARS.to_string()),
             "the name cap moved away from {MAX_CAMPAIGN_NAME_CHARS}: {too_long}"
@@ -684,8 +706,12 @@ mod tests {
 
         // And where it says nothing blocks, the transaction gets past every
         // draft-level check: what stops this fixture is the design itself.
-        let error = commit_simulation_campaign(&mut app, "Nightly", &plans[..2])
-            .expect_err("the fixture's empty design cannot be prepared");
+        let error = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &plans[..2],
+        )
+        .expect_err("the fixture's empty design cannot be prepared");
         for draft_refusal in [
             "at least two distinct plans",
             "must not be empty",
@@ -720,10 +746,18 @@ mod tests {
         let third = record_of(&records, plans[2]).name.clone();
         assert_ne!(second, third);
 
-        let forward = commit_simulation_campaign(&mut app, "Nightly", &[plans[1], plans[2]])
-            .expect_err("an archived member is refused");
-        let reverse = commit_simulation_campaign(&mut app, "Nightly", &[plans[2], plans[1]])
-            .expect_err("an archived member is refused");
+        let forward = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &[plans[1], plans[2]],
+        )
+        .expect_err("an archived member is refused");
+        let reverse = commit_simulation_campaign(
+            &mut crate::workbench::features::cx(&mut app),
+            "Nightly",
+            &[plans[2], plans[1]],
+        )
+        .expect_err("an archived member is refused");
 
         assert!(
             forward.contains(&second) && !forward.contains(&third),

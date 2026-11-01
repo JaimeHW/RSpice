@@ -17,6 +17,7 @@ use crate::workbench::state::{
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::SimulateCommand;
+pub(in crate::workbench) use run_host::run_host;
 
 /// The simulate feature.
 pub(crate) struct SimulateFeature;

@@ -2,6 +2,7 @@
 //! `crate::workbench::chrome::title_bar`.
 
 use crate::workbench::app_state::AppState;
+use rspice_app_runs::simulation::RunHost;
 use rspice_design::drc::DrcResult;
 
 /// Check the open cellview's own findings.
@@ -18,23 +19,24 @@ pub(crate) fn check_cellview(state: &mut AppState) {
 }
 
 /// Check the whole design from the simulation root, under its configuration.
-pub(crate) fn check_design(state: &mut AppState) {
-    let checked = state.check_design();
-    report(state, "Design checks", checked);
+pub(crate) fn check_design(host: &mut impl RunHost) {
+    let checked = rspice_app_runs::workbench::preflight::check_design(host);
+    report(host, "Design checks", checked);
 }
 
-fn report(state: &mut AppState, check: &str, checked: Result<DrcResult, String>) {
+fn report(host: &mut impl RunHost, check: &str, checked: Result<DrcResult, String>) {
     let result = match checked {
         Ok(result) => result,
         Err(error) => {
-            state.report_failure(format!("{check} could not run"), error);
+            host.model_mut()
+                .report_failure(format!("{check} could not run"), error);
             return;
         }
     };
     let summary = result.summary();
     let errors = summary.critical + summary.errors;
     let advisories = summary.warnings + summary.info;
-    state.model.record_check_outcome(
+    host.model_mut().record_check_outcome(
         &result,
         format!(
             "{check}: {errors} error{}, {advisories} advisor{}. See Problems.",
@@ -46,7 +48,7 @@ fn report(state: &mut AppState, check: &str, checked: Result<DrcResult, String>)
     // that blocks a run does. Nothing is toasted: the reader asked, and the
     // Problems page is the answer.
     if !result.passed() {
-        state.show_problem_findings();
+        host.show_problem_findings();
     }
 }
 

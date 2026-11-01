@@ -17,6 +17,8 @@
 
 use super::*;
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 
 use crate::workbench::design_system::{property_row_input, property_row_wrapped};
 
@@ -703,7 +705,7 @@ pub(in crate::workbench::surfaces::simulate) fn export_simulation_plan_package(
 }
 
 pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     json: &str,
     name: &str,
 ) -> Result<(SimulationPlanId, String), String> {
@@ -715,14 +717,13 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
     let mut package = inspect_package(json)?;
     package.plan.name = crate::workbench::app_state::SimulationPlanName::new(name.to_owned())
         .map_err(|error| error.to_string())?;
-    app.state
-        .model
+    cx.model
         .model_library_manager
         .validate_simulation_plan_bindings(&package.plan.model_bindings)
         .map_err(|error| format!("Imported model bindings require review: {error}"))?;
 
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     let outcome = setup
@@ -740,7 +741,7 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
         .content
         .validate_simulation_configuration()
         .map_err(|error| error.to_string())?;
-    crate::io::capture_execution_context(&setup, &app.state.model.model_library_manager)?;
+    crate::io::capture_execution_context(&setup, &cx.model.model_library_manager)?;
 
     let first_instance = setup
         .stable_analysis_plan()?
@@ -749,10 +750,10 @@ pub(in crate::workbench::surfaces::simulate) fn commit_import_simulation_plan(
         .map(|instance| instance.id());
     let id = outcome.cloned_plan_id;
     let imported_name = setup.active_plan_name().to_string();
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.state.simulate.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    cx.state.active_analysis_instance = first_instance;
+    invalidate_preflight(cx);
     Ok((
         id,
         format!(
@@ -843,8 +844,12 @@ mod tests {
         let future = serde_json::to_string(&value).expect("the future package serializes");
 
         let previewed = inspect_package(&future).expect_err("the preview refuses it");
-        let committed = commit_import_simulation_plan(&mut app, &future, "Imported plan")
-            .expect_err("the commit refuses it");
+        let committed = commit_import_simulation_plan(
+            &mut crate::workbench::features::cx(&mut app),
+            &future,
+            "Imported plan",
+        )
+        .expect_err("the commit refuses it");
         assert_eq!(previewed, committed);
     }
 
@@ -855,8 +860,12 @@ mod tests {
     #[test]
     fn an_empty_draft_is_refused_before_anything_is_parsed() {
         let mut app = RSpiceApp::test_instance();
-        let error = commit_import_simulation_plan(&mut app, "   ", "Imported plan")
-            .expect_err("an empty draft is refused");
+        let error = commit_import_simulation_plan(
+            &mut crate::workbench::features::cx(&mut app),
+            "   ",
+            "Imported plan",
+        )
+        .expect_err("an empty draft is refused");
         assert!(error.contains("Choose"), "{error}");
     }
 
@@ -914,9 +923,12 @@ mod tests {
                 .payload,
         );
 
-        let (imported_id, _) =
-            commit_import_simulation_plan(&mut app, &json, "Imported specification count")
-                .expect("the fixture's own package imports");
+        let (imported_id, _) = commit_import_simulation_plan(
+            &mut crate::workbench::features::cx(&mut app),
+            &json,
+            "Imported specification count",
+        )
+        .expect("the fixture's own package imports");
         let owned = app
             .state
             .model

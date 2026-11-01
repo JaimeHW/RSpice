@@ -321,7 +321,11 @@ fn dialog_visible_text(
                 ..Default::default()
             },
             |ctx| {
-                plan_manager_dialog(ctx, &mut app, draft.clone());
+                plan_manager_dialog(
+                    ctx,
+                    &mut crate::workbench::features::cx(&mut app),
+                    draft.clone(),
+                );
             },
         )
     };
@@ -368,7 +372,11 @@ fn the_selected_plans_operations_are_one_row_with_the_rare_ones_under_more() {
                 ..Default::default()
             },
             |ctx| {
-                plan_manager_dialog(ctx, &mut app, draft.clone());
+                plan_manager_dialog(
+                    ctx,
+                    &mut crate::workbench::features::cx(&mut app),
+                    draft.clone(),
+                );
             },
         )
     };
@@ -1078,8 +1086,12 @@ fn the_aside_states_the_lifecycle_and_the_operations_keep_the_identity() {
         .stable_analysis_plan()
         .expect("stable plan")
         .revision();
-    lifecycle::commit_rename_plan(&mut app, active, "Corner characterization v2")
-        .expect("the active plan renames");
+    lifecycle::commit_rename_plan(
+        &mut crate::workbench::features::cx(&mut app),
+        active,
+        "Corner characterization v2",
+    )
+    .expect("the active plan renames");
     let after = app
         .state
         .model
@@ -1492,7 +1504,7 @@ fn a_created_plan_inherits_exactly_what_its_route_committed() {
     app.state.model.sim_setup = setup;
 
     create::commit_create_plan(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         "Inheriting plan",
         &crate::workbench::state::NewSimulationPlanDraft {
             reference_pvt: rspice_simulation_contract::run_set::ReferencePoint {
@@ -1579,7 +1591,7 @@ fn a_created_plan_that_inherits_nothing_keeps_the_catalog_defaults() {
     app.state.model.sim_setup = setup;
 
     create::commit_create_plan(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         "Default root plan",
         &crate::workbench::state::NewSimulationPlanDraft::default(),
     )
@@ -1726,7 +1738,13 @@ fn route_speech(screen: Vec2, mode: SimulationPlanManagerMode) -> RouteSpeech {
                 screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
                 ..Default::default()
             },
-            |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+            |ctx| {
+                plan_manager_dialog(
+                    ctx,
+                    &mut crate::workbench::features::cx(&mut app),
+                    draft.clone(),
+                )
+            },
         )
     };
     let _ = pass();
@@ -2034,7 +2052,13 @@ fn only_a_table_whose_rows_select_announces_a_selectable_row() {
                     events: events(),
                     ..Default::default()
                 },
-                |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+                |ctx| {
+                    plan_manager_dialog(
+                        ctx,
+                        &mut crate::workbench::features::cx(&mut app),
+                        draft.clone(),
+                    )
+                },
             )
         };
         let _ = pass();
@@ -2174,7 +2198,12 @@ fn a_plan_edit_is_answered_on_the_status_bar_not_toasted() {
 
     let mut rename = route_draft(&app, SimulationPlanManagerMode::Rename, active, available);
     rename.name = "Corner characterization v2".to_owned();
-    handle_plan_manager_action(&ctx, &mut app, rename, Some(PlanManagerAction::ApplyRename));
+    handle_plan_manager_action(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        rename,
+        Some(PlanManagerAction::ApplyRename),
+    );
     assert!(
         app.state
             .prompt_text()
@@ -2184,7 +2213,12 @@ fn a_plan_edit_is_answered_on_the_status_bar_not_toasted() {
     );
 
     let browse = route_draft(&app, SimulationPlanManagerMode::Browse, active, available);
-    handle_plan_manager_action(&ctx, &mut app, browse, Some(PlanManagerAction::CopyExport));
+    handle_plan_manager_action(
+        &ctx,
+        &mut crate::workbench::features::cx(&mut app),
+        browse,
+        Some(PlanManagerAction::CopyExport),
+    );
     app.state.drain_notices(&ctx);
     assert_eq!(
         app.state.prompt_text(),

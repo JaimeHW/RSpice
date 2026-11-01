@@ -30,9 +30,9 @@ impl AppState {
 
     /// Check Design: the configured design, walked from the simulation root,
     /// with every schematic of the project's own libraries it never reaches.
+    #[cfg(test)]
     pub(crate) fn check_design(&mut self) -> Result<DrcResult, String> {
-        let root = self.model.workspace.content.simulation_root_reference();
-        self.run_design_check(root, CheckScope::Design)
+        rspice_app_runs::workbench::preflight::check_design(self)
     }
 
     /// Check `subject` as far as `scope` reaches, unless a check of it that
@@ -72,11 +72,6 @@ impl AppState {
         subject: CellViewRef,
         scope: CheckScope,
     ) -> Result<DrcResult, String> {
-        let facts = self.slot_facts();
-        let (outcome, prompt) = self.model.run_synced_design_check(subject, scope, facts);
-        if let Some(prompt) = prompt {
-            self.prompt(prompt);
-        }
-        outcome
+        rspice_app_runs::workbench::preflight::run_design_check(self, subject, scope)
     }
 }

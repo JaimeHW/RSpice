@@ -23,6 +23,8 @@ use super::kit::concept_banner;
 use super::*;
 
 use crate::workbench::design_system::property_row_input;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 
 /// The route's dialog. See the shell's child-dialog signature contract.
 pub(super) fn dialog(
@@ -175,17 +177,17 @@ fn archive_subject_group(ui: &mut Ui, selected: &PlanCatalogRecord) {
 /// Open a plan: the setup and the plan-owned workspace payload move together,
 /// on a copy installed only once the whole switch validates.
 pub(super) fn commit_activate_plan(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     id: SimulationPlanId,
 ) -> Result<String, String> {
-    if app.state.model.sim_setup.stable_analysis_plan()?.id() == id {
+    if cx.model.sim_setup.stable_analysis_plan()?.id() == id {
         return Ok(format!(
             "'{}' remains the active editable plan.",
-            app.state.model.sim_setup.active_plan_name()
+            cx.model.sim_setup.active_plan_name()
         ));
     }
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     workspace.content.migrate_inactive_plan_data(id);
@@ -201,10 +203,10 @@ pub(super) fn commit_activate_plan(
         .first()
         .map(|instance| instance.id());
     let name = setup.active_plan_name().to_string();
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.state.simulate.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    cx.state.active_analysis_instance = first_instance;
+    invalidate_preflight(cx);
     Ok(format!(
         "Opened '{name}' with its own analyses and settings."
     ))
@@ -216,11 +218,11 @@ pub(super) fn commit_activate_plan(
 /// draft, so the message states what the transaction left behind instead of what
 /// it was asked for.
 pub(super) fn commit_rename_plan(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     id: SimulationPlanId,
     name: &str,
 ) -> Result<String, String> {
-    let mut setup = app.state.model.sim_setup.clone();
+    let mut setup = cx.model.sim_setup.clone();
     setup
         .rename_plan(id, name)
         .map_err(|error| error.to_string())?;
@@ -236,8 +238,8 @@ pub(super) fn commit_rename_plan(
             )
         },
     );
-    app.state.model.sim_setup = setup;
-    app.invalidate_simulation_preflight();
+    cx.model.sim_setup = setup;
+    invalidate_preflight(cx);
     Ok(message)
 }
 
@@ -395,8 +397,12 @@ mod tests {
             "the fixture's run must reference the plan, or this proves nothing"
         );
 
-        commit_rename_plan(&mut app, retained, "  Retained sweep · release  ")
-            .expect("a retained plan renames");
+        commit_rename_plan(
+            &mut crate::workbench::features::cx(&mut app),
+            retained,
+            "  Retained sweep · release  ",
+        )
+        .expect("a retained plan renames");
 
         let after = record_for(&app, retained);
         assert_eq!(

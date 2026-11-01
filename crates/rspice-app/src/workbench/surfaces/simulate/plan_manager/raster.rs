@@ -78,7 +78,11 @@ fn raster(mode: SimulationPlanManagerMode, screen: Vec2) -> Canvas {
     // parameter in the crate, test-only files included, and a render harness is
     // not a reason for that ceiling to move.
     crate::ui::raster::render(screen, |ui, _| {
-        super::plan_manager_dialog(ui, &mut app, draft.clone());
+        super::plan_manager_dialog(
+            ui,
+            &mut crate::workbench::features::cx(&mut app),
+            draft.clone(),
+        );
     })
 }
 

@@ -1310,7 +1310,7 @@ fn plan_manager_export_import_remaps_all_local_identities() {
         .expect("portable export");
 
     let (imported_id, _) = super::plan_manager::commit_import_simulation_plan(
-        &mut app,
+        &mut crate::workbench::features::cx(&mut app),
         &json,
         "Imported independent characterization",
     )

@@ -44,6 +44,8 @@ use super::kit::concept_banner;
 use super::*;
 
 use crate::product::ProcessCorner;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use crate::workbench::state::NewSimulationPlanDraft;
 use rspice_simulation_contract::run_set::ReferencePoint;
 
@@ -429,12 +431,12 @@ fn created_plan_columns(ui: &Ui, cells: &[(&'static str, String); 4]) -> Vec<Tab
 /// only point at which "the active plan" is a definite thing: the manager stays
 /// open across frames, and the plan under it can be switched in between.
 pub(super) fn commit_create_plan(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     name: &str,
     new_plan: &NewSimulationPlanDraft,
 ) -> Result<(SimulationPlanId, String), String> {
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let current_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_id);
     // Read before the transaction, because `create_plan` retires the active plan
@@ -445,12 +447,11 @@ pub(super) fn commit_create_plan(
         options: setup.options.clone(),
         save_policy: setup.save_policy,
     };
-    let preferred_options = crate::workbench::app_state::SimSetupState::preferred_solver_options(
-        &app.state.model.preferences,
-    );
+    let preferred_options =
+        crate::workbench::app_state::SimSetupState::preferred_solver_options(&cx.model.preferences);
     let id = setup.create_plan(name).map_err(|error| error.to_string())?;
     // Kept unless the retention policy is inherited, which replaces it below.
-    setup.save_policy.retained_dataset_limit = app.state.model.preferences.runs_kept();
+    setup.save_policy.retained_dataset_limit = cx.model.preferences.runs_kept();
     apply_new_plan_configuration(&mut setup, new_plan, inherited, preferred_options)?;
     workspace.content.migrate_inactive_plan_data(id);
     workspace.content.sync_legacy_specs_projection(id);
@@ -464,10 +465,10 @@ pub(super) fn commit_create_plan(
         .first()
         .map(|instance| instance.id());
     let name = setup.active_plan_name().to_string();
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.state.simulate.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    cx.state.active_analysis_instance = first_instance;
+    invalidate_preflight(cx);
     Ok((
         id,
         format!("Created and activated fresh root plan '{name}' with identity {id}."),
@@ -656,7 +657,7 @@ mod tests {
             .id();
 
         let (created, _) = commit_create_plan(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             "Skew characterization",
             &draft_with(false, false, false),
         )
@@ -711,13 +712,13 @@ mod tests {
         let inherited_bindings = app.state.model.sim_setup.model_bindings.clone();
 
         let (created, _) = commit_create_plan(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             "Stored characterization",
             &draft_with(true, true, true),
         )
         .expect("the create transaction commits");
         commit_create_plan(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             "Successor plan",
             &NewSimulationPlanDraft::default(),
         )
@@ -773,7 +774,7 @@ mod tests {
             let mut app = app_with_a_distinctive_active_plan();
             let source = app.state.model.sim_setup.clone();
             commit_create_plan(
-                &mut app,
+                &mut crate::workbench::features::cx(&mut app),
                 "Selective plan",
                 &draft_with(model, options, policy),
             )
@@ -831,8 +832,12 @@ mod tests {
             .preferences
             .set_choice(crate::workbench::ChoicePreference::DefaultSolverPreset, 2)
             .expect("accurate is a solver preset");
-        commit_create_plan(&mut app, "Accurate plan", &draft_with(false, false, false))
-            .expect("the create transaction commits");
+        commit_create_plan(
+            &mut crate::workbench::features::cx(&mut app),
+            "Accurate plan",
+            &draft_with(false, false, false),
+        )
+        .expect("the create transaction commits");
         let setup = &app.state.model.sim_setup;
         assert_eq!(setup.options.reltol, SimulationOptions::accurate().reltol);
         assert_ne!(setup.options.reltol, SimulationOptions::default().reltol);
@@ -875,7 +880,7 @@ mod tests {
         );
 
         let (created, _) = commit_create_plan(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             "Uncontaminated plan",
             &draft_with(true, true, true),
         )
@@ -1045,7 +1050,13 @@ mod tests {
                     screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
                     ..Default::default()
                 },
-                |ctx| plan_manager_dialog(ctx, &mut app, draft.clone()),
+                |ctx| {
+                    plan_manager_dialog(
+                        ctx,
+                        &mut crate::workbench::features::cx(&mut app),
+                        draft.clone(),
+                    )
+                },
             )
         };
         let _ = pass();

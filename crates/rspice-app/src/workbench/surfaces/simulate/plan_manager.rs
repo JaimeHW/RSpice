@@ -26,6 +26,8 @@ use records::{PlanCatalogRecord, plan_catalog_records};
 use crate::quantity::QuantityPresentationPolicy;
 use crate::ui::accessibility::plural_suffix;
 use crate::workbench::app_state::ReferencePvtPoint;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::SimulationPlanScope;
 
 /// The dialog's own copy, in one place because the tests reconstruct the dialog
@@ -246,10 +248,10 @@ pub(super) use exchange::{commit_import_simulation_plan, export_simulation_plan_
 /// without any of them opening this file.
 pub(super) fn plan_manager_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: SimulationPlanManagerDraft,
 ) {
-    let records = plan_catalog_records(&app.state.model);
+    let records = plan_catalog_records(cx.model);
     if !records
         .iter()
         .any(|record| record.id == draft.selected_plan_id)
@@ -264,7 +266,7 @@ pub(super) fn plan_manager_dialog(
             ctx,
             &mut draft,
             &records,
-            app.state.model.preferences.quantity_presentation_policy(),
+            cx.model.preferences.quantity_presentation_policy(),
         ),
         SimulationPlanManagerMode::Create => create::dialog(ctx, &mut draft, &records),
         SimulationPlanManagerMode::Rename | SimulationPlanManagerMode::ConfirmArchive => {
@@ -276,7 +278,7 @@ pub(super) fn plan_manager_dialog(
         }
         SimulationPlanManagerMode::Campaign => campaign::dialog(ctx, &mut draft, &records),
     };
-    handle_plan_manager_action(ctx, app, draft, action);
+    handle_plan_manager_action(ctx, cx, draft, action);
 }
 
 /// The browse surface: the records table, its actions, and the selected plan.
@@ -931,20 +933,20 @@ fn lineage_label(selected: &PlanCatalogRecord) -> String {
 ///   fourth parameter for one lane is five lanes' signature change.
 fn handle_plan_manager_action(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: SimulationPlanManagerDraft,
     action: Option<PlanManagerAction>,
 ) {
     let result = match action {
         Some(PlanManagerAction::Close) => {
-            app.state.simulate.simulation_workflow = None;
+            cx.state.simulation_workflow = None;
             return;
         }
         Some(PlanManagerAction::OpenSelected) => {
-            match lifecycle::commit_activate_plan(app, draft.selected_plan_id) {
+            match lifecycle::commit_activate_plan(cx, draft.selected_plan_id) {
                 Ok(message) => {
-                    app.state.simulate.simulation_workflow = None;
-                    app.state.prompt(message);
+                    cx.state.simulation_workflow = None;
+                    cx.wb.prompt(message);
                     return;
                 }
                 Err(error) => Some(Err(error)),
@@ -960,7 +962,7 @@ fn handle_plan_manager_action(
             draft.mode = SimulationPlanManagerMode::Campaign;
             draft.validation_error = None;
             draft.campaign.member_ids.clear();
-            for record in plan_catalog_records(&app.state.model)
+            for record in plan_catalog_records(cx.model)
                 .into_iter()
                 .filter(|record| !record.archived)
                 .take(2)
@@ -980,8 +982,7 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::Export) => {
-            match exchange::export_simulation_plan_package(&app.state.model, draft.selected_plan_id)
-            {
+            match exchange::export_simulation_plan_package(cx.model, draft.selected_plan_id) {
                 Ok(json) => {
                     draft.exchange_text = json;
                     draft.mode = SimulationPlanManagerMode::Export;
@@ -1000,12 +1001,12 @@ fn handle_plan_manager_action(
         }
         Some(PlanManagerAction::CopyExport) => {
             ctx.copy_text(draft.exchange_text.clone());
-            app.state
+            cx.wb
                 .prompt("Portable plan JSON was copied to the clipboard.");
             None
         }
         Some(PlanManagerAction::ApplyImport) => Some(
-            exchange::commit_import_simulation_plan(app, &draft.exchange_text, &draft.name).map(
+            exchange::commit_import_simulation_plan(cx, &draft.exchange_text, &draft.name).map(
                 |(id, message)| {
                     draft.selected_plan_id = id;
                     draft.mode = SimulationPlanManagerMode::Browse;
@@ -1015,13 +1016,13 @@ fn handle_plan_manager_action(
         ),
         Some(PlanManagerAction::ApplyCampaign) => {
             match campaign::commit_simulation_campaign(
-                app,
+                cx,
                 &draft.campaign.name,
                 &draft.campaign.member_ids,
             ) {
                 Ok(message) => {
-                    app.state.simulate.simulation_workflow = None;
-                    app.state.prompt(message);
+                    cx.state.simulation_workflow = None;
+                    cx.wb.prompt(message);
                     return;
                 }
                 Err(error) => Some(Err(error)),
@@ -1038,33 +1039,32 @@ fn handle_plan_manager_action(
             None
         }
         Some(PlanManagerAction::Clone) => {
-            let name =
-                simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.selected_plan_id)
-                    .map(|entry| entry.0)
-                    .unwrap_or_else(|| "Simulation plan".to_owned());
-            app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
+            let name = simulation_plan_catalog_entry(&cx.model.sim_setup, draft.selected_plan_id)
+                .map(|entry| entry.0)
+                .unwrap_or_else(|| "Simulation plan".to_owned());
+            cx.state.simulation_workflow = Some(SimulationWorkflowDialog::ClonePlan(
                 ClonePlanDraft::for_source(draft.selected_plan_id, &name),
             ));
             return;
         }
         Some(PlanManagerAction::ApplyCreate) => Some(
-            create::commit_create_plan(app, &draft.name, &draft.new_plan).map(|(id, message)| {
+            create::commit_create_plan(cx, &draft.name, &draft.new_plan).map(|(id, message)| {
                 draft.selected_plan_id = id;
                 draft.mode = SimulationPlanManagerMode::Browse;
                 message
             }),
         ),
         Some(PlanManagerAction::ApplyRename) => Some(lifecycle::commit_rename_plan(
-            app,
+            cx,
             draft.selected_plan_id,
             &draft.name,
         )),
         Some(PlanManagerAction::ConfirmArchive) => Some(lifecycle::commit_archive_plan(
-            &mut app.state.model.sim_setup,
+            &mut cx.model.sim_setup,
             draft.selected_plan_id,
         )),
         Some(PlanManagerAction::Restore) => Some(lifecycle::commit_restore_plan(
-            &mut app.state.model.sim_setup,
+            &mut cx.model.sim_setup,
             draft.selected_plan_id,
         )),
         None => None,
@@ -1074,12 +1074,12 @@ fn handle_plan_manager_action(
         Some(Ok(message)) => {
             draft.mode = SimulationPlanManagerMode::Browse;
             draft.validation_error = None;
-            app.state.prompt(message);
+            cx.wb.prompt(message);
         }
         None => {}
         Some(Err(error)) => draft.validation_error = Some(error),
     }
-    app.state.simulate.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
+    cx.state.simulation_workflow = Some(SimulationWorkflowDialog::PlanManager(draft));
 }
 
 #[cfg(test)]
