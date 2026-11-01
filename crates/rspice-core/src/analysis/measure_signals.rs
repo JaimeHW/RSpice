@@ -1661,6 +1661,67 @@ struct WildcardVoltageNode {
     display_name: String,
 }
 
+/// The Xyce `V()` wildcard an output operand names, if it is one.
+///
+/// Xyce expands any `V()` operand that holds a `*` or `?` against the
+/// circuit's external node names, `*` matching any run of characters and
+/// `?` exactly one (N_IO_OutputMgr.C:2960-2969, getVWildcardList;
+/// makeRegexFromString, N_IO_WildcardSupport.C:41-68). A pattern that
+/// matches no node yields no column.
+fn voltage_wildcard(kind: &OutputOperandKind) -> Option<&str> {
+    match kind {
+        OutputOperandKind::Probe(SaveSignal::Voltage(node)) if node.contains(['*', '?']) => {
+            Some(node)
+        }
+        _ => None,
+    }
+}
+
+/// The wildcard nodes `pattern` selects, in the result's node order.
+fn wildcard_voltage_matches<'a>(
+    pattern: &str,
+    nodes: &'a [WildcardVoltageNode],
+) -> impl Iterator<Item = &'a WildcardVoltageNode> {
+    let pattern = canonical_symbol(pattern);
+    nodes
+        .iter()
+        .filter(move |node| pattern == "*" || xyce_wildcard_matches(&pattern, &node.display_name))
+}
+
+/// Whether `candidate` matches a Xyce output wildcard, where `*` stands for
+/// any run of characters and `?` for exactly one (N_IO_WildcardSupport.C:66-68).
+fn xyce_wildcard_matches(pattern: &str, candidate: &str) -> bool {
+    let candidate = candidate.chars().collect::<Vec<_>>();
+    // `reachable[i]` is true when the pattern read so far can end just
+    // before `candidate[i]`; the trailing slot is the full match.
+    let mut reachable = vec![false; candidate.len() + 1];
+    if let Some(first) = reachable.first_mut() {
+        *first = true;
+    }
+    for token in pattern.chars() {
+        let mut next = vec![false; candidate.len() + 1];
+        if token == '*' {
+            let mut active = false;
+            for (slot, reached) in next.iter_mut().zip(&reachable) {
+                active |= *reached;
+                *slot = active;
+            }
+        } else {
+            for ((reached, expected), slot) in reachable
+                .iter()
+                .zip(&candidate)
+                .zip(next.iter_mut().skip(1))
+            {
+                if *reached && (token == '?' || token == *expected) {
+                    *slot = true;
+                }
+            }
+        }
+        reachable = next;
+    }
+    reachable.last().copied().unwrap_or(false)
+}
+
 /// What a real output projection knows about the result's node namespace.
 ///
 /// The three travel together because `V(*)` needs all of them at once: the
@@ -1762,13 +1823,11 @@ fn preflight_real_output_requests(
             ));
         }
         for (operand_index, kind) in request.operand_kinds().iter().enumerate() {
-            let OutputOperandKind::Probe(signal) = kind else {
+            let OutputOperandKind::Probe(_) = kind else {
                 column_count = column_count.saturating_add(1);
                 continue;
             };
-            if expand_complete_voltage_wildcard
-                && matches!(signal, SaveSignal::Voltage(node) if node == "*")
-            {
+            if expand_complete_voltage_wildcard && let Some(pattern) = voltage_wildcard(kind) {
                 if wildcard_voltage_nodes.is_none() {
                     let Some(metadata) = node_metadata else {
                         return Err(output_request_error(
@@ -1806,8 +1865,11 @@ fn preflight_real_output_requests(
                         )?,
                     );
                 }
-                column_count = column_count
-                    .saturating_add(wildcard_voltage_nodes.as_ref().map_or(0, Vec::len));
+                column_count = column_count.saturating_add(
+                    wildcard_voltage_nodes
+                        .as_deref()
+                        .map_or(0, |nodes| wildcard_voltage_matches(pattern, nodes).count()),
+                );
             } else {
                 column_count = column_count.saturating_add(1);
             }
@@ -2521,9 +2583,9 @@ fn evaluate_real_output_requests(
                 return Err(OutputProjectionError::Aborted);
             }
             if projection.expand_complete_voltage_wildcard
-                && matches!(kind, OutputOperandKind::Probe(SaveSignal::Voltage(node)) if node == "*")
+                && let Some(pattern) = voltage_wildcard(kind)
             {
-                for node in &projection.wildcard_voltage_nodes {
+                for node in wildcard_voltage_matches(pattern, &projection.wildcard_voltage_nodes) {
                     if abort.is_aborted() {
                         return Err(OutputProjectionError::Aborted);
                     }
@@ -7668,7 +7730,7 @@ mod tests {
     }
 
     #[test]
-    fn xyce_complete_voltage_wildcard_counts_columns_without_claiming_partial_patterns() {
+    fn xyce_complete_voltage_wildcard_counts_columns_and_keeps_differential_patterns_closed() {
         let netlist = xyce_netlist(
             "bounded voltage wildcard\n\
              V1 a 0 0\n\
@@ -7694,22 +7756,20 @@ mod tests {
             })
         ));
 
-        for unsupported in ["V(a*)", "V(*,a)"] {
-            let unsupported_netlist = xyce_netlist(&format!(
-                "future voltage wildcard\nV1 a 0 0\n.TRAN 1 3\n.PRINT TRAN {unsupported}\n.END\n"
-            ));
-            let error = evaluate_tran_output_requests(&unsupported_netlist, &result)
-                .expect_err("unimplemented pattern must remain fail-closed at projection");
-            assert!(matches!(
-                error,
-                OutputProjectionError::Operand {
-                    analysis: OutputAnalysisKind::Tran,
-                    operand_index: 0,
-                    detail,
-                    ..
-                } if detail.contains("unavailable")
-            ));
-        }
+        let differential = xyce_netlist(
+            "differential voltage wildcard\nV1 a 0 0\n.TRAN 1 3\n.PRINT TRAN V(*,a)\n.END\n",
+        );
+        let error = evaluate_tran_output_requests(&differential, &result)
+            .expect_err("a differential wildcard must remain fail-closed at projection");
+        assert!(matches!(
+            error,
+            OutputProjectionError::Operand {
+                analysis: OutputAnalysisKind::Tran,
+                operand_index: 0,
+                detail,
+                ..
+            } if detail.contains("unavailable")
+        ));
 
         let ngspice =
             Netlist::parse("ngspice literal star\nV1 a 0 0\n.TRAN 1 3\n.PRINT TRAN V(*)\n.END\n")
@@ -7779,6 +7839,50 @@ mod tests {
         );
         assert_eq!(projected[0].values, vec![1.0, 10.0]);
         assert_eq!(projected[1].values, vec![2.0, 20.0]);
+    }
+
+    #[test]
+    fn xyce_voltage_patterns_expand_across_hierarchy_in_node_order() {
+        // Xyce 7.10 prints V(X*4?) as V(X1:4A) V(X1:4B) V(X2:4A) V(X2:4B), in
+        // its own set order, and V(*B) as the two 4B nodes: `*` spans the
+        // subcircuit separator and `?` matches one character.
+        let netlist = xyce_netlist(
+            "voltage patterns\n\
+             V1 1 0 1\n\
+             R1 1 0 1k\n\
+             X1 1 sub\n\
+             X2 1 sub\n\
+             .SUBCKT sub a\n\
+             R1 a 4a 1k\n\
+             R2 4a 4b 1k\n\
+             R3 4b 0 1k\n\
+             .ENDS\n\
+             .DC V1 1 1 1\n\
+             .PRINT DC V(1) V(X*4?) V(*B) V(Q*)\n\
+             .END\n",
+        );
+        let mut point = SimulationResult::new(5, 0);
+        point.node_names = ["0", "1", "x1.4a", "x1.4b", "x2.4a", "x2.4b"]
+            .map(str::to_string)
+            .to_vec();
+        point.node_voltages = vec![0.0, 1.0, 0.5, 0.25, 0.75, 0.375];
+        let projected = evaluate_dc_output_requests(&netlist, &[(1.0, point)])
+            .expect("Xyce voltage patterns expand");
+        assert_eq!(
+            projected
+                .iter()
+                .map(|column| (column.name.as_str(), column.values[0]))
+                .collect::<Vec<_>>(),
+            [
+                ("V(1)", 1.0),
+                ("V(X1:4A)", 0.5),
+                ("V(X1:4B)", 0.25),
+                ("V(X2:4A)", 0.75),
+                ("V(X2:4B)", 0.375),
+                ("V(X1:4B)", 0.25),
+                ("V(X2:4B)", 0.375),
+            ]
+        );
     }
 
     #[test]
