@@ -399,7 +399,6 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
     let input_id = editor_id.with("go-to-line-input");
     let choice = CommandForm::new("Go to line", "Go")
         .primary_enabled(target.is_some())
-        .status_fixed_at_open()
         .show(ui.ctx(), |rows| {
             rows.text("Line", input_id, &mut state.input, "");
             rows.field_line(
