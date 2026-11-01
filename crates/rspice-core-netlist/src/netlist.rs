@@ -37,6 +37,7 @@ mod model_resolution;
 pub mod multi_run;
 mod mutual_inductor;
 mod output_symbols;
+mod output_wildcards;
 pub mod param_scope;
 mod parser;
 pub use parser::simulation_options_with_overrides;

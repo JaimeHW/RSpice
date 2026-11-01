@@ -286,6 +286,12 @@ impl ParseState {
         }
         apply_temp_directive_to_options(&mut netlist);
         apply_step_data_rule(&mut netlist, &step_card_lines)?;
+        if self.spice_dialect == crate::config::SpiceDialect::Xyce {
+            super::super::output_wildcards::expand_xyce_device_wildcards_with_abort(
+                &mut netlist,
+                abort,
+            )?;
+        }
         let ground_policy = netlist.ground_policy();
         netlist.saves.apply_ground_policy(ground_policy);
         for measurement in &mut netlist.measurements {
