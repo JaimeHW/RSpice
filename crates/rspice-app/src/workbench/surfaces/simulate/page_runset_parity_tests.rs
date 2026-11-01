@@ -585,7 +585,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
     scope_to_points(&mut app.state, AnalysisKind::Pss, &[1, 2]);
 
     let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload = super::workload::PlanWorkload::resolve_with(&app, &participation)
+    let workload = super::workload::PlanWorkload::resolve_with(&app.state.model, &participation)
         .expect("the split plan prices");
     let per_point: Vec<usize> = participation
         .point_keys

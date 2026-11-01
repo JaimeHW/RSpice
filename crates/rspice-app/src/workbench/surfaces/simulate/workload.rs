@@ -221,13 +221,13 @@ impl PlanWorkload {
     /// [`rspice_simulation_contract::run_set::participating_point_keys`] applied to the
     /// same expansion, which is the one call [`Self::resolve_for`] makes too.
     pub(super) fn resolve_with(
-        app: &RSpiceApp,
+        model: &Model,
         participation: &PlanParticipation,
     ) -> Result<Self, String> {
         Self::priced(
-            app.state.model.sim_setup.enabled_analysis_instances(),
-            &app.state.model.sim_setup.run_set,
-            app.state.model.sim_setup.reference_pvt,
+            model.sim_setup.enabled_analysis_instances(),
+            &model.sim_setup.run_set,
+            model.sim_setup.reference_pvt,
             &ResolvedParticipation::Reported(participation),
         )
     }

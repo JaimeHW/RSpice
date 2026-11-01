@@ -48,8 +48,10 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, mono_input,
     paint_problem_mark, select,
 };
-use crate::workbench::app_state::SimSetupState;
+use crate::workbench::app_state::{Model, SimSetupState};
 use crate::workbench::framework::command_registry::ids;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::{
     AnalysisRunPointsDraft, ClonePlanDraft, DesignVariableDraft, RenameAnalysisDraft,
     SavedOutputDraft, SimulationPlanManagerDraft, SimulationPlanManagerMode,
@@ -397,7 +399,7 @@ pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut
     checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
     transient_checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
     simulation_workflow_dialog(ctx, &mut crate::workbench::features::cx(app));
-    analysis_catalog(ctx, app);
+    analysis_catalog(ctx, &mut crate::workbench::features::cx(app));
 }
 
 /// Host the analysis catalogue, and act on the kind it chose.
@@ -410,25 +412,25 @@ pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut
 /// nothing can be said about what is already configured. Refusing to open
 /// would be the worse answer: the reader pressed a control, and an insert
 /// against a broken plan refuses in its own words rather than in silence.
-fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app.state.model.sim_setup.session.palette_open {
+fn analysis_catalog(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+    if !cx.model.sim_setup.session.palette_open {
         return;
     }
-    let participation = participation::PlanParticipation::resolve(&app.state.model);
-    let rows = analysis_stack_rows(app, &participation).unwrap_or_default();
-    let Some(kind) = analysis_catalog_window(ctx, &mut app.state.model.sim_setup, &rows) else {
+    let participation = participation::PlanParticipation::resolve(cx.model);
+    let rows = analysis_stack_rows(cx.model, &participation).unwrap_or_default();
+    let Some(kind) = analysis_catalog_window(ctx, &mut cx.model.sim_setup, &rows) else {
         return;
     };
-    let Some(id) = insert_analysis_instance(app, kind) else {
+    let Some(id) = insert_analysis_instance(cx, kind) else {
         return;
     };
     // Whoever adds an analysis means to configure it, and the catalogue can be
     // opened from anywhere. Carrying the reader to the one route that edits the
     // new instance is the same move `page_excitations::reveal` makes towards
     // Design: the insert alone would leave a receipt on a page nobody is on.
-    app.state.simulate.active_analysis_instance = Some(id);
-    app.state.simulate.simulation_page = SimulationPage::Analyses;
-    app.state.workbench.activate(Workspace::Simulate);
+    cx.state.active_analysis_instance = Some(id);
+    cx.state.simulation_page = SimulationPage::Analyses;
+    cx.wb.activate(Workspace::Simulate);
 }
 
 /// The Analyses route with the stack and the editor side by side.
@@ -554,7 +556,7 @@ fn ordered_instance_stack(
     app: &mut RSpiceApp,
     participation: &participation::PlanParticipation,
 ) {
-    let rows = match analysis_stack_rows(app, participation) {
+    let rows = match analysis_stack_rows(&app.state.model, participation) {
         Ok(rows) => rows,
         Err(error) => {
             flat_notice(ui, |ui| {
@@ -1036,11 +1038,11 @@ impl InstanceRunState {
 /// moment a task is skipped for a failed prerequisite, and a chip that shifts
 /// one row down is worse than no chip: it attributes a failure to an analysis
 /// that never ran.
-fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunState)> {
-    let Some(PriorPlanRun { index, .. }) = prior_plan_run(app) else {
+fn instance_run_states(model: &Model) -> Vec<(AnalysisInstanceId, InstanceRunState)> {
+    let Some(PriorPlanRun { index, .. }) = prior_plan_run(model) else {
         return Vec::new();
     };
-    let Some(run) = app.state.model.simulation.retained.runs.get(index) else {
+    let Some(run) = model.simulation.retained.runs.get(index) else {
         return Vec::new();
     };
     let Some(receipt) = run.prepared_receipt() else {
@@ -1066,19 +1068,19 @@ fn instance_run_states(app: &RSpiceApp) -> Vec<(AnalysisInstanceId, InstanceRunS
 }
 
 fn analysis_stack_rows(
-    app: &RSpiceApp,
+    model: &Model,
     participation: &participation::PlanParticipation,
 ) -> Result<Vec<AnalysisStackRow>, String> {
-    let setup = &app.state.model.sim_setup;
+    let setup = &model.sim_setup;
     let plan = setup.stable_analysis_plan()?;
     let issues = plan.validation_issues();
-    let run_states = instance_run_states(app);
+    let run_states = instance_run_states(model);
     // Resolved once for the whole rail rather than once per row: the projection
     // prices every enabled instance in a single pass, and asking it per row
     // would expand the declared space as many times as there are analyses.
     // Priced against the participation the route already resolved, so the rail
     // costs no expansion of its own.
-    let workload = workload::PlanWorkload::resolve_with(app, participation).ok();
+    let workload = workload::PlanWorkload::resolve_with(model, participation).ok();
     Ok(plan
         .instances()
         .iter()
@@ -1147,15 +1149,13 @@ impl PriorPlanRun {
 /// land in that run: "immutable" is a claim about a sealed dataset, and the
 /// run an execution still owns is not one. The hop stays live — Results shows
 /// the partials as they arrive — and only the wording changes.
-fn prior_plan_run(app: &RSpiceApp) -> Option<PriorPlanRun> {
-    let plan_id = app
-        .state
-        .model
+fn prior_plan_run(model: &Model) -> Option<PriorPlanRun> {
+    let plan_id = model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())?;
-    let simulation = &app.state.model.simulation;
+    let simulation = &model.simulation;
     let index = simulation.retained.runs.iter().position(|run| {
         !run.analyses.is_empty()
             && run
@@ -1191,7 +1191,7 @@ fn plan_heading(ui: &mut Ui, app: &mut RSpiceApp, surface_width: f32) {
     // The heading is the plan's name. What the plan holds is the rail's, and
     // its last run is the hop's: the hop's label and its own availability read
     // the one derivation, so they cannot disagree.
-    let prior = prior_plan_run(app);
+    let prior = prior_plan_run(&app.state.model);
     let plan_available = app.state.model.sim_setup.stable_analysis_plan().is_ok();
 
     // The split toggle sits beside the hop because both answer "and now show
@@ -1401,7 +1401,7 @@ fn split_button(ui: &mut Ui, label: &str, enabled: bool, reason: Option<&str>) -
 }
 
 fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state);
+    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
     let cache_id = egui::Id::new("simulation-envelope-source-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1411,28 +1411,28 @@ fn envelope_source_catalog(ui: &Ui, app: &RSpiceApp) -> EnvelopeSourceCatalog {
         return cached;
     }
 
-    let catalog = build_envelope_source_catalog_with_digest(&app.state, source_digest);
+    let catalog = build_envelope_source_catalog_with_digest(&app.state.model, source_digest);
     ui.ctx()
         .data_mut(|data| data.insert_temp(cache_id, catalog.clone()));
     catalog
 }
 
-fn build_envelope_source_catalog(app: &AppState) -> EnvelopeSourceCatalog {
-    build_envelope_source_catalog_with_digest(app, envelope_source_catalog_input_digest(app))
+fn build_envelope_source_catalog(model: &Model) -> EnvelopeSourceCatalog {
+    build_envelope_source_catalog_with_digest(model, envelope_source_catalog_input_digest(model))
 }
 
-fn envelope_source_catalog_input_digest(app: &AppState) -> ContentDigest {
-    crate::simulation::controller::prepared_run::design_inspection_input_digest(&app.model)
+fn envelope_source_catalog_input_digest(model: &Model) -> ContentDigest {
+    crate::simulation::controller::prepared_run::design_inspection_input_digest(model)
 }
 
 fn build_envelope_source_catalog_with_digest(
-    app: &AppState,
+    model: &Model,
     source_digest: ContentDigest,
 ) -> EnvelopeSourceCatalog {
     let catalog = (|| -> Result<(Vec<String>, String), String> {
         let source =
             crate::simulation::controller::SimulationController::prepare_design_netlist_for_inspection(
-                &app.model,
+                model,
             )
             .map_err(|error| error.to_string())?;
         let netlist = rspice_core::Netlist::parse(&source).map_err(|error| error.to_string())?;
@@ -1478,7 +1478,7 @@ impl NoiseDomainCatalog {
 /// the same cheap digest the periodic-source catalog uses and rebuilt only
 /// when the design behind it changes.
 fn noise_domain_catalog(ui: &Ui, app: &RSpiceApp) -> NoiseDomainCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state);
+    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
     let cache_id = egui::Id::new("simulation-noise-domain-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1548,7 +1548,7 @@ struct TfInferenceCatalog {
 /// same cheap digest the noise and periodic-source catalogs use and rebuilt
 /// only when the design behind it changes.
 fn tf_inference_catalog(ui: &Ui, app: &RSpiceApp) -> TfInferenceCatalog {
-    let source_digest = envelope_source_catalog_input_digest(&app.state);
+    let source_digest = envelope_source_catalog_input_digest(&app.state.model);
     let cache_id = egui::Id::new("simulation-tf-inference-catalog");
     if let Some(cached) = ui
         .ctx()
@@ -1608,7 +1608,7 @@ fn analysis_editor(
     // The summary used to find its own, over a predicate that accepted a run
     // holding nothing — so a started run made the card claim a retained
     // immutable dataset while the hop beside it stayed disabled.
-    let prior_run = prior_plan_run(app);
+    let prior_run = prior_plan_run(&app.state.model);
     let prior_datasets = prior_run.map_or_else(
         || "No prior datasets".to_owned(),
         PriorPlanRun::contract_summary,

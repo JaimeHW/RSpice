@@ -423,7 +423,8 @@ fn a_refused_instance_is_stated_as_refused_rather_than_counted_two_ways() {
         .expect("the plan stores the participation it cannot yet resolve");
 
     let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload = PlanWorkload::resolve_with(&app, &participation).expect("the fixture prices");
+    let workload =
+        PlanWorkload::resolve_with(&app.state.model, &participation).expect("the fixture prices");
     let refused = participation.refused();
     assert_eq!(
         refused.len(),

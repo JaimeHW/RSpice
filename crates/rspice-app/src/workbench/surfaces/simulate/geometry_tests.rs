@@ -746,8 +746,11 @@ fn an_analysis_made_active_below_the_stacks_view_is_scrolled_into_it() {
             })
             .expect("the plan holds an analysis")
     };
-    let inserted = super::insert_analysis_instance(&mut route.app, last_kind)
-        .expect("a second instance of the kind inserts");
+    let inserted = super::insert_analysis_instance(
+        &mut crate::workbench::features::cx(&mut route.app),
+        last_kind,
+    )
+    .expect("a second instance of the kind inserts");
     route.app.state.simulate.active_analysis_instance = Some(inserted);
 
     let after = route.settle(Vec::new());

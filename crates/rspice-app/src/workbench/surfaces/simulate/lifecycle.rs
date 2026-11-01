@@ -280,15 +280,15 @@ pub(super) type InsertAnalysisResult = Result<
 /// `None` is every refusal, each of which has already stated itself: a plan
 /// that does not resolve, an insert the plan rejected.
 pub(super) fn insert_analysis_instance(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     kind: AnalysisKind,
 ) -> Option<AnalysisInstanceId> {
-    app.state.model.sim_setup.session.palette_open = false;
-    app.state.model.sim_setup.session.palette_query.clear();
-    app.state.model.sim_setup.session.palette_active = 0;
-    app.state.model.sim_setup.session.palette_scroll_to_active = false;
-    let repair_context = build_envelope_source_catalog(&app.state).dependency_repair_context();
-    let result: InsertAnalysisResult = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+    cx.model.sim_setup.session.palette_open = false;
+    cx.model.sim_setup.session.palette_query.clear();
+    cx.model.sim_setup.session.palette_active = 0;
+    cx.model.sim_setup.session.palette_scroll_to_active = false;
+    let repair_context = build_envelope_source_catalog(cx.model).dependency_repair_context();
+    let result: InsertAnalysisResult = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => match plan.insert(kind) {
             Ok((id, insert_receipt)) => {
                 let has_prerequisites = !plan.required_prerequisite_roles(id).is_empty();
@@ -304,13 +304,15 @@ pub(super) fn insert_analysis_instance(
     };
     match result {
         Ok((id, insert_receipt, bind_receipt)) => {
-            refresh_analysis_projections(app);
-            app.state.simulate.active_analysis_instance = Some(id);
+            refresh_analysis_projections_in(cx);
+            cx.state.active_analysis_instance = Some(id);
             match bind_receipt {
-                None => record_receipt(&mut app.state, &insert_receipt),
+                None => crate::workbench::simulate::record_plan_receipt(
+                    cx,
+                    receipt_line(&insert_receipt),
+                ),
                 Some(Ok(bind_receipt)) => {
-                    let issue = app
-                        .state
+                    let issue = cx
                         .model
                         .sim_setup
                         .stable_analysis_plan()
@@ -325,26 +327,35 @@ pub(super) fn insert_analysis_instance(
                         || "Dependencies are explicitly bound.".to_owned(),
                         |issue| format!("Preflight remains blocked: {issue}"),
                     );
-                    app.state.record_plan_receipt(format!(
-                        "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
-                        insert_receipt.sequence(),
-                        bind_receipt.sequence(),
-                        insert_receipt.detail(),
-                        bind_receipt.detail(),
-                    ));
+                    crate::workbench::simulate::record_plan_receipt(
+                        cx,
+                        format!(
+                            "Receipts #{} and #{} committed for instance {id}. {} {} {readiness}",
+                            insert_receipt.sequence(),
+                            bind_receipt.sequence(),
+                            insert_receipt.detail(),
+                            bind_receipt.detail(),
+                        ),
+                    );
                 }
                 Some(Err(error)) => {
-                    app.state.record_plan_refusal(format!(
-                        "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked.",
-                        insert_receipt.sequence(),
-                        insert_receipt.detail(),
-                    ));
+                    crate::workbench::simulate::record_plan_refusal(
+                        cx,
+                        format!(
+                            "Receipt #{} committed for instance {id}. {} Automatic dependency binding was rejected fail-closed: {error}. The inserted instance remains selected and preflight blocked.",
+                            insert_receipt.sequence(),
+                            insert_receipt.detail(),
+                        ),
+                    );
                 }
             }
             Some(id)
         }
         Err(error) => {
-            record_failure(&mut app.state, "Add analysis", &error);
+            crate::workbench::simulate::record_plan_refusal(
+                cx,
+                failure_line("Add analysis", &error),
+            );
             None
         }
     }
@@ -387,7 +398,7 @@ pub(super) fn apply_analysis_action(
         }
         AnalysisAction::BindDependencies => {
             let repair_context =
-                build_envelope_source_catalog(&app.state).dependency_repair_context();
+                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
             let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .auto_bind_dependencies_with_context(id, &repair_context)
@@ -422,7 +433,7 @@ pub(super) fn apply_analysis_action(
         }
         AnalysisAction::RepairDependencies => {
             let repair_context =
-                build_envelope_source_catalog(&app.state).dependency_repair_context();
+                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
             let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .repair_dependencies_with_context(id, &repair_context)
@@ -467,7 +478,7 @@ pub(super) fn apply_analysis_action(
                 ..Default::default()
             };
             let repair_context =
-                build_envelope_source_catalog(&app.state).dependency_repair_context();
+                build_envelope_source_catalog(&app.state.model).dependency_repair_context();
             let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
                 Ok(plan) => plan
                     .prepare_prerequisite_for_configuration(
@@ -512,7 +523,7 @@ pub(super) fn apply_analysis_action(
 }
 
 pub(super) fn validate_analysis_instance(app: &mut AppState, id: AnalysisInstanceId) {
-    let envelope_sources = build_envelope_source_catalog(app);
+    let envelope_sources = build_envelope_source_catalog(&app.model);
     let result = (|| {
         let plan = app.model.sim_setup.stable_analysis_plan()?;
         let instance = plan

@@ -131,7 +131,8 @@ impl RunSetFrame {
             .unwrap_or_default();
         let participation =
             super::participation::PlanParticipation::from_points(&app.state.model, &retained);
-        let workload = super::workload::PlanWorkload::resolve_with(app, &participation);
+        let workload =
+            super::workload::PlanWorkload::resolve_with(&app.state.model, &participation);
         let validation = plan_run_set_validation_from(app, &workload);
         let composed = composed.map(|points| {
             points
@@ -718,7 +719,10 @@ fn variation_strip(ui: &mut Ui, app: &mut RSpiceApp) {
         // with its prerequisites bound and its receipt recorded rather than as
         // a second way of adding an analysis that behaves almost the same. It
         // names what it added; this page has no use for that, having asked.
-        let _ = super::lifecycle::insert_analysis_instance(app, AnalysisKind::MonteCarlo);
+        let _ = super::lifecycle::insert_analysis_instance(
+            &mut crate::workbench::features::cx(app),
+            AnalysisKind::MonteCarlo,
+        );
     }
 }
 
@@ -2013,7 +2017,8 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
 #[cfg(test)]
 pub(super) fn worst_point_task_cost(app: &RSpiceApp) -> Option<usize> {
     let participation = super::participation::PlanParticipation::resolve(&app.state.model);
-    let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok()?;
+    let workload =
+        super::workload::PlanWorkload::resolve_with(&app.state.model, &participation).ok()?;
     worst_point_task_cost_of(&participation, &workload)
 }
 

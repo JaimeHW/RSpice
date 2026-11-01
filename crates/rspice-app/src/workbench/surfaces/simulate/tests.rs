@@ -56,8 +56,11 @@ fn run_set_workload_counts_analysis_owned_temperature_points_and_assembly() {
     let before = page_runset::exact_plan_task_count(&app)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(&mut app, AnalysisKind::Temperature)
-        .expect("a temperature controller inserts");
+    insert_analysis_instance(
+        &mut crate::workbench::features::cx(&mut app),
+        AnalysisKind::Temperature,
+    )
+    .expect("a temperature controller inserts");
 
     let tasks = page_runset::exact_plan_task_count(&app)
         .expect("workload is valid")
@@ -74,7 +77,11 @@ fn run_set_workload_counts_generated_pss_spectrum_task() {
     let before = page_runset::exact_plan_task_count(&app)
         .unwrap()
         .expect("baseline workload");
-    insert_analysis_instance(&mut app, AnalysisKind::Pss).expect("a PSS instance inserts");
+    insert_analysis_instance(
+        &mut crate::workbench::features::cx(&mut app),
+        AnalysisKind::Pss,
+    )
+    .expect("a PSS instance inserts");
     name_every_pss_tone(
         app.state
             .model
@@ -142,7 +149,7 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
     app.state.model.simulation.source.netlist_content =
         "stale document\nVSTALE stale 0 PULSE(0 1 0 1n 1n 1u 2u)\n.end\n".to_owned();
 
-    let catalog = build_envelope_source_catalog(&app.state);
+    let catalog = build_envelope_source_catalog(&app.state.model);
 
     assert_eq!(catalog.diagnostic, None);
     assert!(catalog.names.iter().any(|name| name == "VIN"));
@@ -152,18 +159,24 @@ fn dependency_source_catalog_uses_the_configured_design_not_the_open_netlist_doc
 #[test]
 fn dependency_source_cache_ignores_document_switches_and_tracks_design_commits() {
     let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app.state);
+    let original = envelope_source_catalog_input_digest(&app.state.model);
     app.state.model.simulation.source.netlist_content = "unrelated editor document".to_owned();
-    assert_eq!(envelope_source_catalog_input_digest(&app.state), original);
+    assert_eq!(
+        envelope_source_catalog_input_digest(&app.state.model),
+        original
+    );
 
     app.state.model.design_execution_epoch = app.state.model.design_execution_epoch.wrapping_add(1);
-    assert_ne!(envelope_source_catalog_input_digest(&app.state), original);
+    assert_ne!(
+        envelope_source_catalog_input_digest(&app.state.model),
+        original
+    );
 
     let mut app = RSpiceApp::test_instance();
-    let original = envelope_source_catalog_input_digest(&app.state);
+    let original = envelope_source_catalog_input_digest(&app.state.model);
     app.state.model.sim_setup.options.reltol *= 0.5;
     assert_ne!(
-        envelope_source_catalog_input_digest(&app.state),
+        envelope_source_catalog_input_digest(&app.state.model),
         original,
         "prepared-source option changes invalidate the catalog"
     );
@@ -802,7 +815,7 @@ fn disabled_dependents_can_prepare_required_prerequisites_in_one_action() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.simulate.active_analysis_instance = Some(ac);
-    let sources = build_envelope_source_catalog(&app.state);
+    let sources = build_envelope_source_catalog(&app.state.model);
 
     let selected = selected_analysis(&app, &sources)
         .expect("selection resolves")
@@ -842,7 +855,7 @@ fn phase_noise_guides_autonomous_pss_authoring_when_it_cannot_be_inferred() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.sim_setup.analysis_plan = Some(plan);
     app.state.simulate.active_analysis_instance = Some(pnoise);
-    let sources = build_envelope_source_catalog(&app.state);
+    let sources = build_envelope_source_catalog(&app.state.model);
 
     let selected = selected_analysis(&app, &sources)
         .expect("selection resolves")
