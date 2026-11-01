@@ -34,7 +34,9 @@ use crate::state::{ProjectSourceLanguage, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
-use crate::workbench::app_state::{VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding};
+use crate::workbench::app_state::{
+    Model, PlatformState, VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding,
+};
 use crate::workbench::documents::code_workspace::{self, SelectedVerilogASource};
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -249,12 +251,10 @@ fn symbol_refusal(name: &str, messages: &MessageCatalog) -> Option<String> {
 
 /// Whether Build settings has a profile to show: a Verilog-A view in front,
 /// with its source.
-pub(crate) fn veriloga_build_settings_available(app: &RSpiceApp) -> bool {
-    app.state.platform.project_lifecycle.is_open()
-        && app.state.model.workspace.content.active_view_type() == ViewType::VerilogA
-        && app
-            .state
-            .model
+pub(crate) fn veriloga_build_settings_available(model: &Model, platform: &PlatformState) -> bool {
+    platform.project_lifecycle.is_open()
+        && model.workspace.content.active_view_type() == ViewType::VerilogA
+        && model
             .workspace
             .active_source_bundle(ProjectSourceLanguage::VerilogA)
             .is_some()

@@ -912,11 +912,15 @@ impl Command {
                 "the project is open read-only"
             }
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
-                super::foreign_import_refusal(&app.state)
+                super::foreign_import_refusal(&app.state.model, &app.state.platform)
                     .unwrap_or("command is unavailable in this context")
             }
             Self::NewVerilogADevice => "no library can be written",
-            Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
+            Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(
+                &app.state.model,
+                &app.state.code.code_workspace,
+                &app.state.platform,
+            ),
             Self::CancelVerilogACompile => "no Verilog-A compile is running",
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"

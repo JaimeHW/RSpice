@@ -818,7 +818,7 @@ impl AppState {
     /// question, so a disabled row, a disabled palette entry and the refusal
     /// the action itself would report cannot word the same block differently.
     pub(crate) fn selected_instance_netlist_block(&self) -> Option<&'static str> {
-        selected_instance_generated_line(self).err()
+        self.model.selected_instance_generated_line().err()
     }
 
     /// Open the generated deck at the selected instance's card, the way
@@ -829,7 +829,7 @@ impl AppState {
     /// was found. The schematic selection is deliberately left alone: the netlist
     /// navigator's reveal reads it to bring the round trip back.
     pub(crate) fn show_selected_instance_in_netlist(&mut self) {
-        let Ok(location) = selected_instance_generated_line(self) else {
+        let Ok(location) = self.model.selected_instance_generated_line() else {
             return;
         };
         crate::workbench::documents::netlist_document::open_generated_primary(self);
@@ -852,18 +852,6 @@ impl AppState {
         );
         self.prompt(announced);
     }
-}
-
-/// Where one selected schematic instance appears in the retained generated
-/// deck, and whether that deck still matches the project it came from.
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct GeneratedInstanceLocation {
-    /// One-based generated line carrying the instance's own card.
-    line: usize,
-    /// Emitted SPICE identity written on that line.
-    instance: String,
-    /// Whether the retained artifact predates the current project input.
-    stale: bool,
 }
 
 /// The selected instance's name and the schematic master it descends into.
@@ -919,65 +907,6 @@ pub(crate) fn sync_active_schematic(model: &mut Model, workbench: &mut Workbench
     if let Some(prompt) = model.sync_active_schematic_to_workspace() {
         workbench.prompt(prompt);
     }
-}
-
-/// Locate the selected schematic instance in the retained generated deck.
-///
-/// The error is the exact reason the jump is unavailable, worded for the
-/// disabled control that reports it, so availability and execution can never
-/// disagree about why. A stale artifact still resolves — it is what the
-/// project last generated — and the caller says so rather than refusing.
-fn selected_instance_generated_line(
-    state: &AppState,
-) -> Result<GeneratedInstanceLocation, &'static str> {
-    const NO_DECK: &str = "no generated netlist yet — open the Netlist workspace to generate one";
-
-    let component_id = state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .single_component()
-        .ok_or("select one instance")?;
-    if state
-        .model
-        .netlist_artifacts
-        .generated_source
-        .trim()
-        .is_empty()
-    {
-        return Err(NO_DECK);
-    }
-    let artifact = state
-        .model
-        .netlist_artifacts
-        .generated_document
-        .as_ref()
-        .and_then(crate::state::NetlistDocument::generated_artifact)
-        .ok_or(NO_DECK)?;
-    let identity = crate::state::GeneratedSourceMapEntry::component_identity_for(
-        &state.model.workspace.content.active_view.key(),
-        component_id,
-    );
-    let line = artifact
-        .generated_lines_for_component(&identity)
-        .first()
-        .copied()
-        .ok_or("no netlist line for this instance")?;
-    Ok(GeneratedInstanceLocation {
-        line,
-        instance: artifact
-            .source_map_entry(line)
-            .and_then(crate::state::GeneratedSourceMapEntry::instance_identity)
-            .unwrap_or_default()
-            .to_owned(),
-        stale: state.model.netlist_artifacts.generated_input_digest
-            != state
-                .model
-                .netlist_artifacts
-                .current_generation_input_digest,
-    })
 }
 
 impl RSpiceApp {

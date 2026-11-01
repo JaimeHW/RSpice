@@ -25,14 +25,18 @@ use crate::ui::widgets::{
     DialogTransactionTone, Problem, band_header, paint_problem_mark,
 };
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState};
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
     PANEL_INSET, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
     property_row_height, property_row_input, property_row_problem, property_row_wrapped,
     section_block_gap, subsection_header,
 };
-use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
+use crate::workbench::documents::code_workspace::{
+    self, CodeSourceFileAction, CodeWorkspaceRuntimeState,
+};
+use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
+use crate::workbench::state::Workspace;
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Side of a leading problem mark on an include row, and the advance from its
@@ -49,7 +53,7 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
         if !state.platform.project_lifecycle.is_open() {
             return Err("Open a project before managing its top decks.".to_owned());
         }
-        if let Some(refusal) = generated_deck_refusal(state) {
+        if let Some(refusal) = generated_deck_refusal(&state.model, &state.code.netlist) {
             return Err(refusal.to_owned());
         }
         state.code.code_workspace.source_document_dialog = true;
@@ -87,27 +91,32 @@ pub(crate) fn begin_new_top_deck(state: &mut AppState) -> Result<(), String> {
 }
 
 /// Whether the lifecycle dialog can be opened for the visible page.
-pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
-    match visible_language(state) {
+pub(crate) fn source_document_dialog_is_available(
+    workspace: Workspace,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    platform: &PlatformState,
+) -> bool {
+    match visible_language_in(workspace, model, code) {
         None => {
-            state.platform.project_lifecycle.is_open() && generated_deck_refusal(state).is_none()
+            platform.project_lifecycle.is_open() && generated_deck_refusal(model, netlist).is_none()
         }
-        Some(language) => state
-            .model
-            .workspace
-            .active_source_bundle(language)
-            .is_some(),
+        Some(language) => model.workspace.active_source_bundle(language).is_some(),
     }
 }
 
 /// Why the netlist page has no source document to manage: the deck on it is
 /// generated from the schematic and read-only, and the project owns no deck
 /// or include of its own. The page's Create source makes one.
-pub(crate) fn generated_deck_refusal(state: &AppState) -> Option<&'static str> {
-    let content = &state.model.workspace.content;
+pub(crate) fn generated_deck_refusal(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> Option<&'static str> {
+    let content = &model.workspace.content;
     let owned = content.netlist_descriptor.is_some()
         || !content.retained_netlist_decks.is_empty()
-        || crate::workbench::documents::netlist_document::active_dependency(state).is_some();
+        || netlist_document::active_dependency_in(model, netlist).is_some();
     (!owned).then_some("The generated netlist is read-only. Create a source deck to manage one.")
 }
 
@@ -115,11 +124,21 @@ pub(crate) fn generated_deck_refusal(state: &AppState) -> Option<&'static str> {
 /// view open in Design, else the Netlist workspace's page, where `None` is the
 /// deck.
 fn visible_language(state: &AppState) -> Option<ProjectSourceLanguage> {
-    code_workspace::active_source_language(
+    visible_language_in(
         state.workbench.workspace,
-        &state.model.workspace,
-        state.code.code_workspace.page,
+        &state.model,
+        &state.code.code_workspace,
     )
+}
+
+/// [`visible_language`], over the workspace in front, the model and the Code
+/// workspace's runtime state.
+fn visible_language_in(
+    workspace: Workspace,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+) -> Option<ProjectSourceLanguage> {
+    code_workspace::active_source_language(workspace, &model.workspace, code.page)
 }
 
 /// What the dialog states about the visible document.

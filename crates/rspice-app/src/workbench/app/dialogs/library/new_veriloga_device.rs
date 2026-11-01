@@ -39,9 +39,9 @@ use crate::state::workspace::{
 use crate::state::{Cell, CellViewRef, PortDirection, PortSpec, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::model::seed_veriloga_view;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
+use crate::workbench::app_state::{AppState, Model};
 use crate::workbench::documents::code_workspace::writable_libraries;
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -63,8 +63,16 @@ pub(crate) struct NewVerilogADeviceFormState {
 /// Open New Verilog-A device… on the library holding the active design,
 /// remembering the schematic it was opened from.
 pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
-    let libraries = writable_libraries(&state.model.library_manager);
-    let active = &state.model.workspace.content.active_view;
+    open_new_veriloga_device_form_in(&state.model, &mut state.code.new_veriloga_device);
+}
+
+/// [`open_new_veriloga_device_form`], over the model and the form alone.
+pub(crate) fn open_new_veriloga_device_form_in(
+    model: &Model,
+    form: &mut NewVerilogADeviceFormState,
+) {
+    let libraries = writable_libraries(&model.library_manager);
+    let active = &model.workspace.content.active_view;
     let library = libraries
         .iter()
         .find(|name| **name == active.library)
@@ -72,11 +80,11 @@ pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
         .cloned()
         .unwrap_or_default();
     let origin = matches!(
-        state.model.workspace.content.active_view_type(),
+        model.workspace.content.active_view_type(),
         ViewType::Schematic | ViewType::Testbench
     )
     .then(|| active.clone());
-    state.code.new_veriloga_device = NewVerilogADeviceFormState {
+    *form = NewVerilogADeviceFormState {
         open: true,
         library,
         origin,
@@ -87,7 +95,12 @@ pub(crate) fn open_new_veriloga_device_form(state: &mut AppState) {
 /// Whether New Verilog-A device… can make anything at all: it needs a
 /// library it can write.
 pub(crate) fn new_veriloga_device_available(state: &AppState) -> bool {
-    !writable_libraries(&state.model.library_manager).is_empty()
+    new_veriloga_device_available_in(&state.model)
+}
+
+/// [`new_veriloga_device_available`], read from the model alone.
+pub(crate) fn new_veriloga_device_available_in(model: &Model) -> bool {
+    !writable_libraries(&model.library_manager).is_empty()
 }
 
 /// What the typed draft is, measured against the live catalog.

@@ -245,7 +245,13 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     // The generated deck is read-only and the project owns no other:
     // there is nothing to manage, and the refusal says so.
-    assert!(!source_document_dialog_is_available(&app.state));
+    assert!(!source_document_dialog_is_available(
+        app.state.workbench.workspace,
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.code.netlist,
+        &app.state.platform,
+    ));
     let refusal = open_source_document_dialog(&mut app.state).unwrap_err();
     assert!(refusal.contains("read-only"), "{refusal}");
     assert!(!app.state.code.code_workspace.source_document_dialog);
@@ -257,7 +263,13 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     .unwrap();
     crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(&mut app.state)
         .unwrap();
-    assert!(source_document_dialog_is_available(&app.state));
+    assert!(source_document_dialog_is_available(
+        app.state.workbench.workspace,
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.code.netlist,
+        &app.state.platform,
+    ));
     open_source_document_dialog(&mut app.state).unwrap();
     assert!(app.state.code.code_workspace.source_document_dialog);
     let facts = netlist_lifecycle_facts(&app).unwrap();

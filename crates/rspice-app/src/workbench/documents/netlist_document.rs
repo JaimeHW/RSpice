@@ -14,7 +14,7 @@ use crate::state::netlist_diagnostics::NetlistDiagnosticCollection;
 use crate::state::same_include_graph;
 use crate::workbench::AppState;
 use rspice_app_state::workbench::app_state::model::{
-    prune_owned_include_authority, replace_root_document_preserving_dependencies,
+    Model, prune_owned_include_authority, replace_root_document_preserving_dependencies,
 };
 
 const MAX_OPEN_NETLIST_SECONDARY_DOCUMENTS: usize = 128;
@@ -721,11 +721,19 @@ fn canonical_root_document(
     state: &AppState,
     root: ActiveNetlistDocument,
 ) -> Option<&crate::state::NetlistDocument> {
+    canonical_root_document_in(&state.model, &state.code.netlist, root)
+}
+
+/// [`canonical_root_document`], over the model and the netlist editor's
+/// state.
+fn canonical_root_document_in<'a>(
+    model: &'a Model,
+    netlist: &'a NetlistDocumentState,
+    root: ActiveNetlistDocument,
+) -> Option<&'a crate::state::NetlistDocument> {
     match root {
-        ActiveNetlistDocument::Generated => {
-            state.model.netlist_artifacts.generated_document.as_ref()
-        }
-        ActiveNetlistDocument::OwnedSource => state.code.netlist.owned_document.as_ref(),
+        ActiveNetlistDocument::Generated => model.netlist_artifacts.generated_document.as_ref(),
+        ActiveNetlistDocument::OwnedSource => netlist.owned_document.as_ref(),
         ActiveNetlistDocument::GeneratedDiff | ActiveNetlistDocument::RunSnapshot => None,
     }
 }
@@ -734,9 +742,17 @@ fn canonical_root_document(
 /// document. The dependency source remains canonical inside its root
 /// `NetlistDocument`; this function never synthesizes a second source store.
 pub fn active_dependency(state: &AppState) -> Option<&crate::state::DependencyMetadata> {
-    let identity = state.code.netlist.active_dependency_identity.as_deref()?;
-    let root = state.code.netlist.active_dependency_root?;
-    canonical_root_document(state, root)?
+    active_dependency_in(&state.model, &state.code.netlist)
+}
+
+/// [`active_dependency`], over the model and the netlist editor's state.
+pub(crate) fn active_dependency_in<'a>(
+    model: &'a Model,
+    netlist: &'a NetlistDocumentState,
+) -> Option<&'a crate::state::DependencyMetadata> {
+    let identity = netlist.active_dependency_identity.as_deref()?;
+    let root = netlist.active_dependency_root?;
+    canonical_root_document_in(model, netlist, root)?
         .dependencies()
         .iter()
         .find(|dependency| dependency.locator().logical_identity() == identity)

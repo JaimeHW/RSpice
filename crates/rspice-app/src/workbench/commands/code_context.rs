@@ -10,7 +10,8 @@
 use crate::product::{ContentDigest, ProjectId};
 use crate::state::command_catalog::CommandPlatform;
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
-use crate::workbench::documents::code_workspace::CodeWorkspacePage;
+use crate::workbench::app_state::{Model, PlatformState};
+use crate::workbench::documents::code_workspace::{CodeWorkspacePage, CodeWorkspaceRuntimeState};
 use crate::workbench::{RSpiceApp, state::Workspace};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,9 +66,11 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
     match app.state.workbench.workspace {
         Workspace::Netlist => match app.state.code.code_workspace.page {
             CodeWorkspacePage::Netlist => resolve_netlist(app),
-            CodeWorkspacePage::Automation => {
-                resolve_project_source(app, ProjectSourceLanguage::RSpiceAutomation)
-            }
+            CodeWorkspacePage::Automation => resolve_project_source(
+                &app.state.model,
+                &app.state.code.code_workspace,
+                ProjectSourceLanguage::RSpiceAutomation,
+            ),
         },
         workspace
             if crate::workbench::documents::code_workspace::design_hosts_veriloga(
@@ -75,7 +78,11 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
                 &app.state.model.workspace,
             ) =>
         {
-            resolve_project_source(app, ProjectSourceLanguage::VerilogA)
+            resolve_project_source(
+                &app.state.model,
+                &app.state.code.code_workspace,
+                ProjectSourceLanguage::VerilogA,
+            )
         }
         _ => None,
     }
@@ -88,19 +95,25 @@ pub(crate) fn resolve(app: &RSpiceApp) -> Option<CodeCommandContext> {
 /// menu included — and the command takes the reader to it. With no Verilog-A
 /// view active there is nothing to compile.
 #[must_use]
-pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandContext> {
-    if app.state.model.safe_mode.project_read_only()
-        || !app.state.platform.project_lifecycle.is_open()
-        || app.state.model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
-        || app.state.code.code_workspace.veriloga.pending.is_some()
+pub(crate) fn resolve_veriloga_compile(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+) -> Option<CodeCommandContext> {
+    if model.safe_mode.project_read_only()
+        || !platform.project_lifecycle.is_open()
+        || model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA
+        || code.veriloga.pending.is_some()
     {
         return None;
     }
-    let context = resolve_project_source(app, ProjectSourceLanguage::VerilogA)?;
+    let context = resolve_project_source(model, code, ProjectSourceLanguage::VerilogA)?;
     let selected =
-        crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot(app).ok()?;
-    app.state
-        .model
+        crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot_in(
+            model, code,
+        )
+        .ok()?;
+    model
         .workspace
         .content
         .project_sources
@@ -112,16 +125,18 @@ pub(crate) fn resolve_veriloga_compile(app: &RSpiceApp) -> Option<CodeCommandCon
 /// Why [`resolve_veriloga_compile`] finds nothing to compile, checked in its
 /// own order, so a grey Compile row names the reason the compile would have
 /// been refused.
-pub(crate) fn veriloga_compile_refusal(app: &RSpiceApp) -> &'static str {
-    if app.state.model.safe_mode.project_read_only() {
+pub(crate) fn veriloga_compile_refusal(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+) -> &'static str {
+    if model.safe_mode.project_read_only() {
         "the project is open read-only"
-    } else if !app.state.platform.project_lifecycle.is_open() {
+    } else if !platform.project_lifecycle.is_open() {
         "no project is open"
-    } else if app.state.model.workspace.content.active_view_type()
-        != crate::state::ViewType::VerilogA
-    {
+    } else if model.workspace.content.active_view_type() != crate::state::ViewType::VerilogA {
         "open a Verilog-A cell view in Design"
-    } else if app.state.code.code_workspace.veriloga.pending.is_some() {
+    } else if code.veriloga.pending.is_some() {
         "a Verilog-A compile is already running"
     } else {
         "the Verilog-A cell view has no source to compile"
@@ -327,27 +342,28 @@ fn resolve_netlist(app: &RSpiceApp) -> Option<CodeCommandContext> {
 }
 
 fn resolve_project_source(
-    app: &RSpiceApp,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
     language: ProjectSourceLanguage,
 ) -> Option<CodeCommandContext> {
-    let state = &app.state;
     let selected_veriloga = (language == ProjectSourceLanguage::VerilogA)
         .then(|| {
-            crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot(app).ok()
+            crate::workbench::documents::code_workspace::selected_veriloga_editor_snapshot_in(
+                model, code,
+            )
+            .ok()
         })
         .flatten()
         .filter(|selected| !selected.selection_was_invalid());
     let bundle = match language {
-        ProjectSourceLanguage::VerilogA => state
-            .model
+        ProjectSourceLanguage::VerilogA => model
             .workspace
             .content
             .project_sources
             .get_bundle(selected_veriloga.as_ref()?.bundle_id())?,
         ProjectSourceLanguage::RSpiceAutomation => {
             let owner = ProjectSourceOwner::code_workspace(language);
-            state
-                .model
+            model
                 .workspace
                 .content
                 .project_sources
@@ -356,19 +372,11 @@ fn resolve_project_source(
     };
     let selected_path = match language {
         ProjectSourceLanguage::VerilogA => selected_veriloga.as_ref()?.active_path().to_owned(),
-        ProjectSourceLanguage::RSpiceAutomation => {
-            match state
-                .code
-                .code_workspace
-                .automation
-                .selected_file
-                .as_deref()
-            {
-                Some(path) if bundle.contains_file(path) => path.to_owned(),
-                Some(_) => return None,
-                None => bundle.root().logical_path().to_owned(),
-            }
-        }
+        ProjectSourceLanguage::RSpiceAutomation => match code.automation.selected_file.as_deref() {
+            Some(path) if bundle.contains_file(path) => path.to_owned(),
+            Some(_) => return None,
+            None => bundle.root().logical_path().to_owned(),
+        },
     };
     let source = bundle.file_content(&selected_path)?;
     let document_identity = bundle.document_id(&selected_path)?.to_string();
@@ -382,17 +390,17 @@ fn resolve_project_source(
         CodeDocumentOwnership::ProjectOwned
     };
     let busy = match language {
-        ProjectSourceLanguage::VerilogA => state.code.code_workspace.veriloga.pending.is_some(),
+        ProjectSourceLanguage::VerilogA => code.veriloga.pending.is_some(),
         ProjectSourceLanguage::RSpiceAutomation => {
-            let automation = &state.code.code_workspace.automation;
+            let automation = &code.automation;
             automation.pending_runtime_validation.is_some()
                 || automation.runtime_execution.is_some()
                 || automation.execution.is_active()
         }
     };
-    let project_writable = !state.model.safe_mode.project_read_only();
+    let project_writable = !model.safe_mode.project_read_only();
     Some(CodeCommandContext {
-        project_id: state.model.workspace.content.project.id(),
+        project_id: model.workspace.content.project.id(),
         document_kind: match language {
             ProjectSourceLanguage::VerilogA => CodeDocumentKind::VerilogA,
             ProjectSourceLanguage::RSpiceAutomation => CodeDocumentKind::Automation,

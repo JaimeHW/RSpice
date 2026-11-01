@@ -35,7 +35,7 @@ impl Command {
                 !state.model.simulation.execution.has_active_execution()
             }
             Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
-                super::foreign_import_refusal(state).is_none()
+                super::foreign_import_refusal(&state.model, &state.platform).is_none()
             }
             Self::ImportNetlist => {
                 state.platform.project_lifecycle.is_open()
@@ -463,7 +463,13 @@ impl Command {
             // page: it manages a project source bundle, which the deck is not.
             Self::ManageSourceDocument => {
                 code_document_is_visible(state)
-                    && crate::workbench::app::source_document_dialog_is_available(state)
+                    && crate::workbench::app::source_document_dialog_is_available(
+                        state.workbench.workspace,
+                        &state.model,
+                        &state.code.code_workspace,
+                        &state.code.netlist,
+                        &state.platform,
+                    )
             }
             // With a source editor on screen these were answered above.
             Self::ToggleLineComment
@@ -497,14 +503,22 @@ impl Command {
             // selected source, an empty root, a compile already running, or a
             // read-only project -- and then the surface refused the request it
             // had just been handed.
-            Self::CompileVerilogA => code_context::resolve_veriloga_compile(app).is_some(),
+            Self::CompileVerilogA => code_context::resolve_veriloga_compile(
+                &state.model,
+                &state.code.code_workspace,
+                &state.platform,
+            )
+            .is_some(),
             Self::CancelVerilogACompile => {
                 app.state.code.code_workspace.veriloga.pending.is_some()
             }
             // Build settings opens on a read-only project too, to be read;
             // its Save is what that refuses.
             Self::VerilogABuildSettings => {
-                crate::workbench::app::veriloga_build_settings_available(app)
+                crate::workbench::app::veriloga_build_settings_available(
+                    &state.model,
+                    &state.platform,
+                )
             }
             Self::VerilogAOpenSymbol => crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol(&state.model),
             Self::CompareGeneratedRevisions => {

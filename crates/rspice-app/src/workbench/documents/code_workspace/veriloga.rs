@@ -19,6 +19,7 @@ use crate::state::{
 use crate::workbench::{MessageId, RSpiceApp};
 use rspice_app_workbench::workbench::state::WorkbenchSession;
 
+use rspice_app_state::workbench::app_state::model::Model;
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, diagnostic_capacity_failure, receipt_from_report,
     with_interface_outcome,
@@ -26,7 +27,8 @@ use rspice_app_state::workbench::app_state::model::{
 use rspice_simulation::project_veriloga::VerilogASourceOperationToken;
 
 use super::{
-    CodeEditorDiagnostic, CodeEditorSeverity, PendingVerilogACompile, VerilogACompileOutcome,
+    CodeEditorDiagnostic, CodeEditorSeverity, CodeWorkspaceRuntimeState, PendingVerilogACompile,
+    VerilogACompileOutcome,
 };
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
@@ -98,10 +100,13 @@ impl SelectedVerilogASource {
 }
 
 pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilogASource, String> {
+    selected_veriloga_source_in(&app.state.model)
+}
+
+/// [`selected_veriloga_source`], read from the model alone.
+pub(crate) fn selected_veriloga_source_in(model: &Model) -> Result<SelectedVerilogASource, String> {
     let no_view = || "Open a Verilog-A cell view to work on its source.".to_owned();
-    let owner = app
-        .state
-        .model
+    let owner = model
         .workspace
         .active_source_owner(ProjectSourceLanguage::VerilogA)
         .ok_or_else(no_view)?;
@@ -111,17 +116,15 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
     // A view that names no module yet is still its author's to edit: a source
     // migrated before it parsed has no module to name until it does.
     let selected_module = match crate::state::workspace::project_veriloga_binding_for_view(
-        &app.state.model.workspace,
-        &app.state.model.library_manager,
+        &model.workspace,
+        &model.library_manager,
         reference,
     ) {
         Ok(binding) => Some(binding.selected_module().to_owned()),
-        Err(_) if view_names_no_module(app, reference) => None,
+        Err(_) if view_names_no_module(model, reference) => None,
         Err(error) => return Err(error),
     };
-    let bundle = app
-        .state
-        .model
+    let bundle = model
         .workspace
         .content
         .project_sources
@@ -144,9 +147,8 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
 }
 
 /// Whether the Verilog-A view at `reference` exists and states no module.
-fn view_names_no_module(app: &RSpiceApp, reference: &crate::state::CellViewRef) -> bool {
-    app.state
-        .model
+fn view_names_no_module(model: &Model, reference: &crate::state::CellViewRef) -> bool {
+    model
         .library_manager
         .get_library(&reference.library)
         .and_then(|library| library.get_cell(&reference.cell))
@@ -164,14 +166,17 @@ fn view_names_no_module(app: &RSpiceApp, reference: &crate::state::CellViewRef) 
 pub(crate) fn selected_veriloga_editor_snapshot(
     app: &RSpiceApp,
 ) -> Result<SelectedVerilogAEditorSnapshot, String> {
-    let selected = selected_veriloga_source(app)?;
-    let explicit = app
-        .state
-        .code
-        .code_workspace
-        .veriloga
-        .selected_file
-        .as_ref();
+    selected_veriloga_editor_snapshot_in(&app.state.model, &app.state.code.code_workspace)
+}
+
+/// [`selected_veriloga_editor_snapshot`], read from the model and the Code
+/// workspace's runtime state alone.
+pub(crate) fn selected_veriloga_editor_snapshot_in(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+) -> Result<SelectedVerilogAEditorSnapshot, String> {
+    let selected = selected_veriloga_source_in(model)?;
+    let explicit = code.veriloga.selected_file.as_ref();
     let selection_was_invalid = explicit.is_some_and(|selection| {
         selection.bundle_id != selected.bundle().id()
             || !selected.bundle().contains_file(&selection.logical_path)

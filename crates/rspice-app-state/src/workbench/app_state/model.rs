@@ -14,6 +14,7 @@ mod drawing_sheet;
 mod drawing_sheet_overflow;
 mod drawing_sheet_presets;
 mod export_name;
+mod generated_instance;
 mod library_catalog;
 mod owned_source;
 mod project_technology;
@@ -31,6 +32,7 @@ mod veriloga_interface;
 mod veriloga_parameters;
 
 pub use definition_index::DefinitionRow;
+pub use generated_instance::GeneratedInstanceLocation;
 pub use library_catalog::{LibraryRemoval, WorkspacePruned};
 pub use owned_source::{
     LiveOwnedSource, prune_owned_include_authority, replace_root_document_preserving_dependencies,
