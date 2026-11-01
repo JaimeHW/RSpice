@@ -31,6 +31,7 @@ use crate::ui::widgets::{
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in;
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::features;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::commands::ProjectRequest;
 use crate::workbench::project::{ProjectFeature, slot_facts};
@@ -158,7 +159,7 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
         ProjectPage::Overview => overview::overview(ui, app),
         ProjectPage::Library => library::library(ui, app),
         ProjectPage::Recovery => recovery(ui, app),
-        ProjectPage::Configuration => configuration::configuration(ui, app),
+        ProjectPage::Configuration => configuration::configuration(ui, &mut features::cx(app)),
         page => {
             ScrollArea::vertical()
                 .id_salt(("workbench.project.surface", page))

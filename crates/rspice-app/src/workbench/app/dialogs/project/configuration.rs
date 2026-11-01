@@ -12,7 +12,6 @@ use crate::state::{
     ConfigurationCloneScope, ConfigurationSetCatalog, ConfigurationSetDefinition,
     ConfigurationSetError, ConfigurationSetId,
 };
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::Model;
 use crate::workbench::project::configuration_state::{
     ConfigurationPageState, ConfigurationSelection, plain_refusal,
@@ -65,24 +64,10 @@ impl Prepared {
     }
 }
 
-/// Commit `transaction`, then drop every run preparation the old catalog
-/// authorised. The error is the refusal, in words a reader can act on; the
-/// catalog is untouched when there is one.
-pub(in crate::workbench) fn commit_configuration_transaction(
-    app: &mut RSpiceApp,
-    transaction: ConfigurationTransaction,
-) -> Result<(), String> {
-    commit_configuration(
-        &mut app.state.project.configuration,
-        &mut app.state.model,
-        &mut app.state.runs,
-        &mut app.simulation_controller,
-        transaction,
-    )
-}
-
-/// [`commit_configuration_transaction`] over what it reads and writes: the
-/// Configuration page, the model, and the run tier a committed change voids.
+/// Commit `transaction` over what it reads and writes, the Configuration
+/// page, the model and the run tier a committed change voids, then drop every
+/// run preparation the old catalog authorised. The error is the refusal, in
+/// words a reader can act on; the catalog is untouched when there is one.
 pub(in crate::workbench) fn commit_configuration(
     page: &mut ConfigurationPageState,
     model: &mut Model,
@@ -400,6 +385,20 @@ pub(in crate::workbench) fn validate_candidate_configuration(
 mod tests {
     use super::*;
     use crate::state::ConfigurationSetId;
+    use crate::workbench::app::RSpiceApp;
+
+    fn commit_configuration_transaction(
+        app: &mut RSpiceApp,
+        transaction: ConfigurationTransaction,
+    ) -> Result<(), String> {
+        commit_configuration(
+            &mut app.state.project.configuration,
+            &mut app.state.model,
+            &mut app.state.runs,
+            &mut app.simulation_controller,
+            transaction,
+        )
+    }
 
     #[test]
     fn using_a_deleted_configuration_for_runs_is_refused_and_changes_nothing() {

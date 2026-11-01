@@ -1476,8 +1476,15 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
         "fn show_inspector(",
         &[
             "Some(ProjectInspectorAction::UseForRuns(target)) => {",
+            "ProjectFeature::commit_configuration(cx, ConfigurationTransaction::UseForRuns(target))",
+        ],
+    ),
+    (
+        "ProjectFeature::commit_configuration",
+        PROJECT,
+        "fn commit_configuration(",
+        &[
             "let refusal = commit_configuration(",
-            "ConfigurationTransaction::UseForRuns(target),",
             "cx.state.configuration.refusal = refusal;",
         ],
     ),
@@ -1486,7 +1493,7 @@ const CONFIGURATION_REFUSAL: &[(&str, &str, &str, &[&str])] = &[
         CONFIGURATION_PAGE,
         "pub(super) fn configuration(",
         &[
-            "if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {\
+            "if let Some(refusal) = cx.state.configuration.refusal.as_deref() {\
              refusal_strip(ui, refusal);",
         ],
     ),

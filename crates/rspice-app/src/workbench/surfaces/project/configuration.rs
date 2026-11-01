@@ -15,13 +15,10 @@ mod tests;
 
 use super::*;
 
-use crate::workbench::app::dialogs::project::configuration::{
-    ConfigurationTransaction, commit_configuration_transaction,
-};
+use crate::workbench::app::dialogs::project::configuration::ConfigurationTransaction;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{
     ConfigurationDialogRequest, configuration_actions_menu, open_configuration_dialog,
 };
-use crate::workbench::app_state::AppState;
 use crate::workbench::project::configuration_state::{
     ConfigurationResolution, ConfigurationSelection, used_for_runs,
 };
@@ -38,58 +35,50 @@ enum ToolbarIntent {
     Open(ConfigurationDialogRequest),
 }
 
-pub(super) fn configuration(ui: &mut Ui, app: &mut RSpiceApp) {
-    let state = &mut app.state;
-    let resolution = state.project.configuration.resolution(
-        &state.model.workspace,
-        &state.model.library_manager,
-        &state.model.workspace.content.active_view,
-        &state.model.schematic,
+pub(super) fn configuration(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    let resolution = cx.state.configuration.resolution(
+        &cx.model.workspace,
+        &cx.model.library_manager,
+        &cx.model.workspace.content.active_view,
+        &cx.model.schematic,
     );
-    let selection = state
-        .project
+    let selection = cx
+        .state
         .configuration
-        .selection(&state.model.workspace.content.configuration_sets);
-    match toolbar(ui, &app.state, selection, &resolution) {
+        .selection(&cx.model.workspace.content.configuration_sets);
+    match toolbar(ui, cx, selection, &resolution) {
         Some(ToolbarIntent::UseForRuns(target)) => {
-            let refusal =
-                commit_configuration_transaction(app, ConfigurationTransaction::UseForRuns(target))
-                    .err();
-            app.state.project.configuration.refusal = refusal;
+            ProjectFeature::commit_configuration(cx, ConfigurationTransaction::UseForRuns(target))
         }
         Some(ToolbarIntent::Apply) => {
-            let refusal =
-                commit_configuration_transaction(app, ConfigurationTransaction::Apply).err();
-            app.state.project.configuration.refusal = refusal;
+            ProjectFeature::commit_configuration(cx, ConfigurationTransaction::Apply)
         }
-        Some(ToolbarIntent::Revert) => app.state.project.configuration.revert(),
-        Some(ToolbarIntent::Open(request)) => open_configuration_dialog(
-            &mut app.state.project.configuration_dialog,
-            &app.state.model,
-            request,
-        ),
+        Some(ToolbarIntent::Revert) => cx.state.configuration.revert(),
+        Some(ToolbarIntent::Open(request)) => {
+            open_configuration_dialog(&mut cx.state.configuration_dialog, cx.model, request)
+        }
         None => {}
     }
-    if let Some(refusal) = app.state.project.configuration.refusal.as_deref() {
+    if let Some(refusal) = cx.state.configuration.refusal.as_deref() {
         refusal_strip(ui, refusal);
     }
-    grid::global_bindings(ui, &mut app.state, selection, &resolution);
-    instances::tables(ui, &mut app.state, selection, &resolution);
+    grid::global_bindings(ui, cx, selection, &resolution);
+    instances::tables(ui, cx, selection, &resolution);
 }
 
 /// The page's one-row band: the configuration in front of the reader,
 /// whether runs use it, its edits, and how much of the design it binds.
 fn toolbar(
     ui: &mut Ui,
-    state: &AppState,
+    cx: &Cx<'_, ProjectFeature>,
     selection: ConfigurationSelection,
     resolution: &ConfigurationResolution,
 ) -> Option<ToolbarIntent> {
     let t = Tokens::get(ui.ctx());
-    let catalog = &state.model.workspace.content.configuration_sets;
-    let page = &state.project.configuration;
-    let name = selection_name(state, selection);
-    let write_allowed = !state.model.safe_mode.project_read_only();
+    let catalog = &cx.model.workspace.content.configuration_sets;
+    let page = &cx.state.configuration;
+    let name = selection_name(cx, selection);
+    let write_allowed = !cx.model.safe_mode.project_read_only();
     let dirty = page.is_dirty(catalog);
     let status = binding_status(resolution);
     let mut intent = None;
@@ -177,10 +166,10 @@ fn toolbar(
 }
 
 /// The name the band and the prompts give `selection`.
-fn selection_name(state: &AppState, selection: ConfigurationSelection) -> String {
+fn selection_name(cx: &Cx<'_, ProjectFeature>, selection: ConfigurationSelection) -> String {
     match selection {
         ConfigurationSelection::Default => "Default".to_owned(),
-        ConfigurationSelection::Configuration(id) => state
+        ConfigurationSelection::Configuration(id) => cx
             .model
             .workspace
             .content

@@ -87,6 +87,24 @@ impl ProjectFeature {
         }
     }
 
+    /// Commit `transaction` over the Configuration page, the model and the
+    /// run tier a committed change voids, and keep its refusal, if any, for
+    /// the page to state.
+    pub(in crate::workbench) fn commit_configuration(
+        cx: &mut Cx<'_, Self>,
+        transaction: ConfigurationTransaction,
+    ) {
+        let refusal = commit_configuration(
+            &mut cx.state.configuration,
+            cx.model,
+            cx.runs,
+            cx.handles.run_controller,
+            transaction,
+        )
+        .err();
+        cx.state.configuration.refusal = refusal;
+    }
+
     /// Draw the configuration dialogs over what the feature's context lends
     /// them. Going on leaving the project once its configuration edits are
     /// settled is asked of the shell, which carries it out as they return.
@@ -225,15 +243,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
     match action {
         Some(ProjectInspectorAction::Execute(key)) => cx.execute(key),
         Some(ProjectInspectorAction::UseForRuns(target)) => {
-            let refusal = commit_configuration(
-                &mut cx.state.configuration,
-                cx.model,
-                cx.runs,
-                cx.handles.run_controller,
-                ConfigurationTransaction::UseForRuns(target),
-            )
-            .err();
-            cx.state.configuration.refusal = refusal;
+            ProjectFeature::commit_configuration(cx, ConfigurationTransaction::UseForRuns(target))
         }
         Some(ProjectInspectorAction::Shell(request)) => cx.wb.outbox.push(request),
         None => {}

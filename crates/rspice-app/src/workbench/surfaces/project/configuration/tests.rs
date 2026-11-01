@@ -52,7 +52,7 @@ fn frame(app: &mut RSpiceApp, width: f32) -> Frame {
             ..Default::default()
         },
         |ui| {
-            egui::CentralPanel::default().show(ui, |ui| configuration(ui, app));
+            egui::CentralPanel::default().show(ui, |ui| configuration(ui, &mut features::cx(app)));
         },
     );
     let announced = output

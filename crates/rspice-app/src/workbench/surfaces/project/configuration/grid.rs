@@ -36,27 +36,27 @@ enum GridEdit {
 
 pub(super) fn global_bindings(
     ui: &mut Ui,
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     selection: ConfigurationSelection,
     resolution: &ConfigurationResolution,
 ) {
     let ConfigurationSelection::Configuration(id) = selection else {
         section_header(ui, "Global bindings", "built in");
-        default_grid(ui, state);
+        default_grid(ui, cx);
         problems(ui, resolution, None);
         return;
     };
     section_header(ui, "Global bindings", "");
-    let catalog = &state.model.workspace.content.configuration_sets;
-    let Some(definition) = state.project.configuration.definition(catalog, id) else {
+    let catalog = &cx.model.workspace.content.configuration_sets;
+    let Some(definition) = cx.state.configuration.definition(catalog, id) else {
         return;
     };
-    let write_allowed = !state.model.safe_mode.project_read_only();
+    let write_allowed = !cx.model.safe_mode.project_read_only();
     let edit = configuration_grid(ui, definition, resolution, write_allowed);
     problems(ui, resolution, Some(definition));
     if let Some(edit) = edit {
-        state.project.configuration.edit(
-            &state.model.workspace.content.configuration_sets,
+        cx.state.configuration.edit(
+            &cx.model.workspace.content.configuration_sets,
             id,
             |definition| apply(definition, edit),
         );
@@ -190,8 +190,8 @@ fn value(ui: &mut Ui, text: &str, mono: bool) {
 }
 
 /// The built-in Default, stated row for row in the same grid.
-fn default_grid(ui: &mut Ui, state: &AppState) {
-    let project = &state.model.workspace.content.project;
+fn default_grid(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>) {
+    let project = &cx.model.workspace.content.project;
     let top = format!("{}/{}/schematic", project.root_library, project.top_cell);
     let order = default_view_search_order("schematic", false);
     let mut words = vec!["the instance's own view".to_owned()];

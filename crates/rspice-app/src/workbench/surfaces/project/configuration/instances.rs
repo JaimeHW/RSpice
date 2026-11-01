@@ -67,23 +67,23 @@ fn rule_label(rule: HierarchyBindingRule) -> &'static str {
 
 pub(super) fn tables(
     ui: &mut Ui,
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     selection: ConfigurationSelection,
     resolution: &ConfigurationResolution,
 ) {
-    let visible = state.project.configuration.visible_instances();
-    let catalog = &state.model.workspace.content.configuration_sets;
+    let visible = cx.state.configuration.visible_instances();
+    let catalog = &cx.model.workspace.content.configuration_sets;
     let id = match selection {
         ConfigurationSelection::Configuration(id) => Some(id),
         ConfigurationSelection::Default => None,
     };
-    let definition = id.and_then(|id| state.project.configuration.definition(catalog, id));
-    let editable = definition.is_some() && !state.model.safe_mode.project_read_only();
-    let page = &state.project.configuration;
+    let definition = id.and_then(|id| cx.state.configuration.definition(catalog, id));
+    let editable = definition.is_some() && !cx.model.safe_mode.project_read_only();
+    let page = &cx.state.configuration;
     let tab = page.tab;
     let mut edit = tab_header(ui, resolution, definition, tab, editable);
     let Ok(hierarchy) = &resolution.hierarchy else {
-        apply_table_edit(state, id, edit);
+        apply_table_edit(cx, id, edit);
         return;
     };
     if tab == ConfigurationTab::Cells {
@@ -91,13 +91,13 @@ pub(super) fn tables(
             ui,
             &resolution.cells,
             definition,
-            &state.model.library_manager,
+            &cx.model.library_manager,
             page.row.as_ref(),
             editable,
         ) {
             edit = Some(cell_edit);
         }
-        apply_table_edit(state, id, edit);
+        apply_table_edit(cx, id, edit);
         return;
     }
     if let Some(definition) = definition
@@ -112,7 +112,7 @@ pub(super) fn tables(
             rows: &resolution.instances,
             visible: &visible,
             definition,
-            libraries: &state.model.library_manager,
+            libraries: &cx.model.library_manager,
             selected: page.row.as_ref(),
             collapsed: &|path| page.is_collapsed(path),
             editable,
@@ -120,11 +120,11 @@ pub(super) fn tables(
     ) {
         edit = Some(table_edit);
     }
-    apply_table_edit(state, id, edit);
+    apply_table_edit(cx, id, edit);
 }
 
 fn apply_table_edit(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     id: Option<crate::state::ConfigurationSetId>,
     edit: Option<TableEdit>,
 ) {
@@ -133,28 +133,28 @@ fn apply_table_edit(
     };
     match edit {
         TableEdit::Tab(tab) => {
-            state.project.configuration.tab = tab;
-            state.project.configuration.row = None;
+            cx.state.configuration.tab = tab;
+            cx.state.configuration.row = None;
         }
-        TableEdit::Select(row) => state.project.configuration.row = Some(row),
+        TableEdit::Select(row) => cx.state.configuration.row = Some(row),
         TableEdit::CellView {
             library,
             cell,
             view,
         } => {
             if let Some(id) = id {
-                state.project.configuration.edit(
-                    &state.model.workspace.content.configuration_sets,
+                cx.state.configuration.edit(
+                    &cx.model.workspace.content.configuration_sets,
                     id,
                     |definition| set_cell_view(definition, &library, &cell, view.as_deref()),
                 );
             }
         }
-        TableEdit::Toggle(path) => state.project.configuration.toggle_collapsed(&path),
+        TableEdit::Toggle(path) => cx.state.configuration.toggle_collapsed(&path),
         TableEdit::View { path, view } => {
             if let Some(id) = id {
-                state.project.configuration.edit(
-                    &state.model.workspace.content.configuration_sets,
+                cx.state.configuration.edit(
+                    &cx.model.workspace.content.configuration_sets,
                     id,
                     |definition| set_instance_view(definition, &path, view.as_deref()),
                 );
@@ -163,12 +163,12 @@ fn apply_table_edit(
         TableEdit::AddPattern => {
             if let Some(id) = id {
                 let mut added = None;
-                state.project.configuration.edit(
-                    &state.model.workspace.content.configuration_sets,
+                cx.state.configuration.edit(
+                    &cx.model.workspace.content.configuration_sets,
                     id,
                     |definition| added = Some(add_pattern_binding(definition)),
                 );
-                state.project.configuration.row = added.map(ConfigurationRow::Pattern);
+                cx.state.configuration.row = added.map(ConfigurationRow::Pattern);
             }
         }
     }
