@@ -279,9 +279,9 @@ fn consolidate_with_nothing_detached_refuses_before_running() {
     open_window_workflow(&mut app, WindowWorkflow::ConsolidateWindows);
     let texts = window_dialog_texts(&ctx, &mut app);
     assert!(
-        texts
-            .iter()
-            .any(|text| text == "No detached window is open to consolidate."),
+        texts.iter().any(|text| text == "No window is detached."),
         "no refusal in the footer: {texts:?}"
     );
+    // The body states the fact the refusal is about rather than standing empty.
+    assert!(texts.iter().any(|text| text == "None"), "{texts:?}");
 }

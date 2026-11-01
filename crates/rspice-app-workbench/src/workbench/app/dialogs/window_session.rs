@@ -923,12 +923,8 @@ fn window_list_refusal(
     selected: bool,
 ) -> Option<&'static str> {
     match workflow {
-        WindowWorkflow::ConsolidateWindows if !detached => {
-            Some("No detached window is open to consolidate.")
-        }
-        WindowWorkflow::MonitorRecovery if !detached => {
-            Some("No other application window is open.")
-        }
+        WindowWorkflow::ConsolidateWindows if !detached => Some("No window is detached."),
+        WindowWorkflow::MonitorRecovery if !detached => Some("No other window is open."),
         WindowWorkflow::MonitorRecovery if !selected => Some("Select a window to recover."),
         _ => None,
     }
@@ -1005,7 +1001,9 @@ fn show_window_list_workflow(
                     rows.value("Windows", &titles);
                     rows.value("Documents", &documents.to_string());
                 }
-                _ => {}
+                // Nothing to act on: the form still states it, and the footer
+                // says why the primary is off.
+                _ => rows.value("Windows", "None"),
             }
             None
         })
