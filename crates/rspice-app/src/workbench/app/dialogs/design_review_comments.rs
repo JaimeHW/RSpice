@@ -293,8 +293,9 @@ impl RSpiceApp {
                 self.state.design.design_review_comments.close();
                 let source = crate::workbench::app::schematic_editor_request_source(&self.state);
                 self.state.design.design_note.open(source);
+                // The note opens empty for the reviewer's own words; it was
+                // pre-filled with "Review comment" for them to select away.
                 self.state.design.design_note.kind = DesignNoteKind::ReviewNote;
-                self.state.design.design_note.text = "Review comment".to_owned();
             }
             ReviewAction::GoToAnchor(id, point) => {
                 self.state.design.design_review_comments.close();
