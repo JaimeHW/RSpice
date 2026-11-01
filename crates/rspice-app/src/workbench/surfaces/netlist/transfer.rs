@@ -234,15 +234,16 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
     }
     let messages = app.state.workbench.messages();
     let netlist = &app.state.model.netlist_artifacts;
+    // Each refusal is one line beside Cancel and Export… in the footer.
     let refusal = if netlist.generation_error.is_some() {
-        Some("The netlist could not be generated. Fix its problems, then export.".to_owned())
+        Some("Fix the netlist's problems, then export.".to_owned())
     } else if netlist.generated_document.is_none() {
         Some("No netlist has been generated yet.".to_owned())
     } else if !current {
-        Some("The netlist changed since it was generated. Regenerate it, then export.".to_owned())
+        Some("The netlist changed: regenerate it first.".to_owned())
     } else if dialog.bundle_dependencies && !dependencies_sealed {
         Some(format!(
-            "Resolve the deck's {} before exporting it.",
+            "Resolve the {} first.",
             files_phrase(dependency_count)
         ))
     } else {
@@ -326,8 +327,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
                 dialog.open = false;
                 dialog.error = None;
             } else {
-                dialog.error =
-                    Some("Export did not complete; review the application log.".to_owned());
+                dialog.error = Some("Export failed: see the application log.".to_owned());
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => dialog.open = false,
@@ -647,6 +647,50 @@ mod tests {
         assert!(says("Cancel"));
         for jargon in ["sealed", "integrity", "snapshot", "dependency members"] {
             assert!(!says(jargon), "the dialog says {jargon:?}");
+        }
+    }
+
+    /// A refusal is one line in the footer beside Cancel and Export…: the
+    /// netlist that could not be generated used to say so in two.
+    #[test]
+    fn every_refusal_is_one_footer_line() {
+        let refusals = [
+            (
+                "Fix the netlist's problems, then export.",
+                Some("unresolved model"),
+                None,
+            ),
+            ("No netlist has been generated yet.", None, None),
+            (
+                "Export failed: see the application log.",
+                None,
+                Some("Export failed: see the application log."),
+            ),
+        ];
+        for (refusal, generation_error, export_error) in refusals {
+            let mut app = RSpiceApp::test_instance();
+            app.state.code.netlist.export_dialog.open = true;
+            app.state.code.netlist.export_dialog.error = export_error.map(str::to_owned);
+            app.state.model.netlist_artifacts.generation_error =
+                generation_error.map(str::to_owned);
+            let painted = crate::ui::widgets::painted_runs::painted_runs(
+                egui::vec2(1440.0, 900.0),
+                crate::ui::tokens::Mode::Light,
+                3,
+                |ctx| export_generated_dialog_window(ctx, &mut app),
+            );
+            let line = painted
+                .rect_of("Dialect")
+                .expect("the Dialect row")
+                .height();
+            let rect = painted
+                .rect_of(refusal)
+                .unwrap_or_else(|| panic!("{refusal} is painted"));
+            assert!(
+                rect.height() < 1.5 * line,
+                "{refusal:?} is {} tall, a line is {line}",
+                rect.height()
+            );
         }
     }
 }
