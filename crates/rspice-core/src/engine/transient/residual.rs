@@ -4103,6 +4103,169 @@ M1 d g 0 0 NM W=10u L=1u
         );
     }
 
+    #[test]
+    fn xyce_damped_status_assembly_is_the_next_newton_assembly() {
+        // DampedNewton refreshes the devices at each solved candidate and
+        // assembles there for its status test. The next direction solve
+        // takes that assembly instead of stamping the unchanged state again,
+        // which holds while restamping a classic-MOS or diode network is
+        // exactly idempotent.
+        const MOS_DECK: &str = "\
+Xyce damped status assembly, classic MOS
+VDD vdd 0 5
+VIN g 0 DC 0 PULSE(0 2 1n 100p 100p 4n 10n)
+R1 vdd d 2k
+C1 d 0 2p
+M1 d g 0 0 NM W=10u L=1u
+.MODEL NM NMOS LEVEL=2 VTO=0.7 KP=100u NSUB=1e16 TOX=50n VMAX=1e5 CGSO=2e-10 CGDO=1e-10
+.END
+";
+        const DIODE_DECK: &str = "\
+Xyce damped status assembly, diode
+VIN a 0 DC 0 PULSE(0 2 1n 100p 100p 4n 10n)
+R1 a d 1k
+C1 d 0 2p
+D1 d 0 DM
+.MODEL DM D IS=1e-14 CJO=1p
+.END
+";
+        for (deck, perturbed) in [
+            (MOS_DECK, [("g", 1.4), ("d", 2.7)]),
+            (DIODE_DECK, [("a", 1.3), ("d", 0.62)]),
+        ] {
+            for xyce_one_step_order2 in [false, true] {
+                check_status_assembly_reuse(deck, &perturbed, xyce_one_step_order2);
+            }
+        }
+    }
+
+    fn check_status_assembly_reuse(
+        deck: &str,
+        perturbed: &[(&str, Value)],
+        xyce_one_step_order2: bool,
+    ) {
+        let netlist = Netlist::parse(deck).expect("deck parses");
+        let mut engine = Engine::default().resolved_for_netlist(&netlist);
+        engine.config.spice_dialect = SpiceDialect::Xyce;
+        let mut circuit = engine.build_circuit(&netlist).expect("circuit builds");
+        assert!(
+            circuit.has_cacheable_classic_mos_transient_base()
+                || circuit.has_cacheable_diode_transient_base()
+        );
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+
+        let dt = 2.0e-10;
+        let time = 1.3e-9;
+        circuit.voltage_sources.set_transient_context(dt, 20.0e-9);
+        circuit.current_sources.set_transient_context(dt, 20.0e-9);
+        let mut solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("operating point converges");
+        let tline_dc_refs = Engine::initialize_tline_history(&mut circuit, &solution, 0.0);
+        let coupled_tline_refs =
+            Engine::initialize_coupled_tline_history(&mut circuit, &solution, 0.0);
+        let bjt_history =
+            Engine::initialize_bjt_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias)
+                .unwrap();
+        let jfet_history =
+            Engine::initialize_jfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let diode_history =
+            Engine::initialize_diode_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let mosfet_history =
+            Engine::initialize_mosfet_history(&circuit, &solution, ReactiveHistorySeed::SolvedBias);
+        let vdmos_history = Engine::initialize_vdmos_history(&circuit, &solution);
+        let b3soi_history = Engine::initialize_b3soi_history(&circuit, &solution);
+        let bsim3_history = Engine::initialize_bsim3_history(&circuit, &solution);
+        let bsim4_history = Engine::initialize_bsim4_history(&circuit, &solution);
+        let ekv26_history = Engine::initialize_ekv26_history(&circuit, &solution);
+        let mosfet_companion_slots = Engine::link_mosfet_companion_slots(&circuit, &matrix);
+        let vdmos_companion_slots = Engine::link_vdmos_companion_slots(&circuit, &matrix);
+        let coeff = CompanionCoefficients::backward_euler();
+        let ctx = TransientSystemContext {
+            #[cfg(feature = "veriloga")]
+            abort: &crate::abort_signal::NoAbort,
+            bjt_phase: Default::default(),
+            source_time_side: SourceTimeSide::Published,
+            coeff: &coeff,
+            xyce_one_step: true,
+            xyce_one_step_order2,
+            xyce_static_history: None,
+            bsim4_trnqs_coeff: &coeff,
+            bjt_history: &bjt_history,
+            jfet_history: &jfet_history,
+            diode_history: &diode_history,
+            diode_attempt_cache: None,
+            mosfet_history: &mosfet_history,
+            mosfet_companion_slots: &mosfet_companion_slots,
+            vdmos_history: &vdmos_history,
+            vdmos_companion_slots: &vdmos_companion_slots,
+            b3soi_history: &b3soi_history,
+            b3soi_zero_first_transient_charge_derivative: false,
+            bsim3_history: &bsim3_history,
+            bsim4_history: &bsim4_history,
+            ekv26_history: &ekv26_history,
+            suppress_gate_charge: false,
+            baseline_diag_gmin: engine.config.convergence_config.gmin_target.max(0.0),
+            tline_dc_refs: &tline_dc_refs,
+            coupled_tline_refs: &coupled_tline_refs,
+            analysis_initial_step: false,
+            analysis_final_step: false,
+        };
+        // A candidate far enough from the operating point that the junction
+        // limiters engage, so the refreshed state is a limited linearization.
+        for &(node, value) in perturbed {
+            solution[circuit.get_node_by_name(node).expect("perturbed node") - 1] = value;
+        }
+        let mut rhs = vec![0.0; circuit.matrix_size()];
+        let mut vbic_snapshot_cache = Vec::new();
+        let bits = |values: &[Value]| {
+            values
+                .iter()
+                .map(|value| value.to_bits())
+                .collect::<Vec<_>>()
+        };
+        let mut stamp = |circuit: &mut crate::circuit::CircuitData,
+                         matrix: &mut crate::solver::StaticMatrix,
+                         rhs: &mut Vec<Value>,
+                         refresh_nonlinear: bool,
+                         core_evaluation: CoreEvaluation| {
+            engine
+                .stamp_transient_system(
+                    circuit,
+                    matrix,
+                    rhs,
+                    &solution,
+                    time,
+                    dt,
+                    &ctx,
+                    &mut vbic_snapshot_cache,
+                    refresh_nonlinear,
+                    core_evaluation,
+                    0.0,
+                    None,
+                )
+                .expect("assembly succeeds");
+            (bits(matrix.values_mut()), bits(rhs))
+        };
+
+        let status = stamp(
+            &mut circuit,
+            &mut matrix,
+            &mut rhs,
+            true,
+            CoreEvaluation::NewCandidate,
+        );
+        let newton = stamp(
+            &mut circuit,
+            &mut matrix,
+            &mut rhs,
+            false,
+            CoreEvaluation::ReuseCandidate,
+        );
+        assert_eq!(status, newton, "order2={xyce_one_step_order2}");
+    }
+
     /// The vbic_excess_phase_oracle testbench: the full diffamp N1 card
     /// (Kull epi resistance, avalanche, parasitic transistor, TD=2e-11)
     /// in a stable common-emitter stage. Exercises the promoted VBIC

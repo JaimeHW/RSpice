@@ -7100,6 +7100,14 @@ impl Engine {
                 xyce_return_codes,
             )
         });
+        // DampedNewton loads the residual and Jacobian once per candidate and
+        // solves its next direction from that same load. Over a classic-MOS or
+        // diode network of ordinary RC companions the assembly is a pure
+        // function of the candidate and the device state its load left, so
+        // the post-solve status assembly is that load.
+        let xyce_damped_status_load_is_newton_load = uses_xyce_damped_solver
+            && (circuit.has_cacheable_classic_mos_transient_base()
+                || circuit.has_cacheable_diode_transient_base());
         if let Some(restored_runtime) = restored_accepted_integration_runtime {
             let (
                 restored_lte_warmup_skips,
@@ -8897,6 +8905,7 @@ impl Engine {
                 );
             }
             let mut nonlinear_state_matches_new_solution = false;
+            let mut system_matches_new_solution = false;
             let mut had_solver_candidate = false;
             // Whether THIS attempt is the one that refused a trial, as opposed
             // to an earlier attempt at the same timepoint whose diagnostic the
@@ -9060,7 +9069,10 @@ impl Engine {
                     analysis_initial_step,
                     analysis_final_step,
                 };
-                if let Some(cache) = classic_mos_stamp_cache.as_ref() {
+                if std::mem::take(&mut system_matches_new_solution) {
+                    // The status assembly of the previous pass already holds
+                    // this candidate's Jacobian and RHS.
+                } else if let Some(cache) = classic_mos_stamp_cache.as_ref() {
                     let refresh_classic_mos_nonlinear = !nonlinear_state_matches_new_solution;
                     let reuse_classic_mos_terms = reuse_sequential_classic_mos_newton_terms
                         && mosfet_companion_terms_valid
@@ -9730,6 +9742,7 @@ impl Engine {
                                 damped_status::XyceDampedDecision::Accepted { .. }
                                 | damped_status::XyceDampedDecision::Continue => {}
                             }
+                            system_matches_new_solution = xyce_damped_status_load_is_newton_load;
                             total_postsolve_nanos += postsolve_phase_start.elapsed().as_nanos();
                             continue;
                         }
