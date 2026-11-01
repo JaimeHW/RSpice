@@ -158,7 +158,7 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
     let panel = ui.scope(|ui| match page {
         ProjectPage::Overview => overview::overview(ui, app),
         ProjectPage::Library => library::library(ui, app),
-        ProjectPage::Recovery => recovery(ui, app),
+        ProjectPage::Recovery => recovery(ui, &mut features::cx(app)),
         ProjectPage::Configuration => configuration::configuration(ui, &mut features::cx(app)),
         page => {
             ScrollArea::vertical()
@@ -1168,6 +1168,20 @@ mod tests {
         click_announced(&ctx, &mut app, settled, "Model paths\u{2026}");
 
         assert!(features::dialog_open(&app.state, pdk_settings));
+    }
+
+    /// Revision history… on the Recovery page is answered as the page
+    /// returns, inside the stage's step of the frame: the dialog is open
+    /// before the frame draws its dialogs, so it shows in the frame it was
+    /// asked for in.
+    #[test]
+    fn revision_history_opens_before_the_frame_draws_its_dialogs() {
+        let (ctx, mut app, settled) = settled_on(ProjectPage::Recovery);
+        assert!(!app.state.project.project_revision_history.open);
+
+        click_announced(&ctx, &mut app, settled, "Revision history\u{2026}");
+
+        assert!(app.state.project.project_revision_history.open);
     }
 
     /// Of the steps every command passes through, the configuration chip

@@ -7,12 +7,12 @@
 
 use super::page::{self, BODY_TOP, CARD_GAP, HEADER_TOP, STACK_BREAKPOINT, paint_elided};
 use super::*;
-use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::{property_row_path, property_row_problem};
 use crate::workbench::lifecycle::project_checkpoint::{
     MAX_RETAINED_CHECKPOINTS, ProjectCheckpointSummary,
 };
 use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::lifecycle_view;
 use rspice_simulation_contract::run_set::format_bytes;
 
 /// The one sentence the page opens with: what a checkpoint is, and the
@@ -58,8 +58,8 @@ struct RecoverySnapshot {
 }
 
 impl RecoverySnapshot {
-    fn capture(state: &AppState) -> Self {
-        let recovery = &state.project.project_checkpoint_recovery;
+    fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
+        let recovery = &cx.state.project_checkpoint_recovery;
         #[cfg(target_arch = "wasm32")]
         let loading = recovery.loading && !recovery.initialized;
         #[cfg(not(target_arch = "wasm32"))]
@@ -74,8 +74,8 @@ impl RecoverySnapshot {
             error: recovery.error.clone(),
             loading,
             creating: manual_checkpoint_pending(),
-            selected: state.project.project_checkpoint_selection.clone(),
-            location: storage_location(state),
+            selected: cx.state.project_checkpoint_selection.clone(),
+            location: storage_location(cx),
             stored_bytes: recovery
                 .checkpoints
                 .iter()
@@ -108,13 +108,13 @@ impl RecoverySnapshot {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-fn storage_location(state: &AppState) -> String {
-    crate::workbench::lifecycle::project_checkpoint::storage_location(&state.model)
+fn storage_location(cx: &Cx<'_, ProjectFeature>) -> String {
+    crate::workbench::lifecycle::project_checkpoint::storage_location(cx.model)
         .map_or_else(|error| error, |path| path.display().to_string())
 }
 
 #[cfg(target_arch = "wasm32")]
-fn storage_location(_state: &AppState) -> String {
+fn storage_location(_cx: &Cx<'_, ProjectFeature>) -> String {
     "This browser's site storage".to_owned()
 }
 
@@ -128,21 +128,21 @@ enum RecoveryIntent {
 }
 
 impl RecoveryIntent {
-    fn execute(self, ctx: &Context, app: &mut RSpiceApp) {
+    fn execute(self, ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
-            Self::Create => create_manual_checkpoint(ctx, &mut app.state),
-            Self::RevisionHistory => app.execute_command_key(ProjectCommand::RevisionHistory.key()),
-            Self::Reload => app.state.project.project_checkpoint_recovery.invalidate(),
-            Self::Select(id) => app.state.project.project_checkpoint_selection = Some(id),
+            Self::Create => create_manual_checkpoint(ctx, cx),
+            Self::RevisionHistory => cx.execute(ProjectCommand::RevisionHistory.key()),
+            Self::Reload => cx.state.project_checkpoint_recovery.invalidate(),
+            Self::Select(id) => cx.state.project_checkpoint_selection = Some(id),
             Self::Compare(checkpoint) => {
-                app.state.project.project_checkpoint_selection =
+                cx.state.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
-                compare_project_checkpoint(&mut app.state, &checkpoint);
+                compare_project_checkpoint(cx, &checkpoint);
             }
             Self::Restore(checkpoint) => {
-                app.state.project.project_checkpoint_selection =
+                cx.state.project_checkpoint_selection =
                     Some(checkpoint.checkpoint_id().to_string());
-                export_project_checkpoint_copy(ctx, &mut app.state, checkpoint);
+                export_project_checkpoint_copy(ctx, cx, checkpoint);
             }
         }
     }
@@ -154,11 +154,11 @@ fn keep_first(slot: &mut Option<RecoveryIntent>, candidate: Option<RecoveryInten
     }
 }
 
-pub(super) fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn recovery(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     #[cfg(target_arch = "wasm32")]
-    poll_browser_manual_checkpoint(&mut app.state);
-    ensure_project_recovery_catalog(ui.ctx(), &mut app.state);
-    let snapshot = RecoverySnapshot::capture(&app.state);
+    poll_browser_manual_checkpoint(cx);
+    ensure_project_recovery_catalog(ui.ctx(), cx);
+    let snapshot = RecoverySnapshot::capture(cx);
     let mut intent = None;
     page::show(
         ui,
@@ -193,7 +193,7 @@ pub(super) fn recovery(ui: &mut Ui, app: &mut RSpiceApp) {
         },
     );
     if let Some(intent) = intent {
-        intent.execute(&ui.ctx().clone(), app);
+        intent.execute(&ui.ctx().clone(), cx);
     }
 }
 
@@ -658,28 +658,22 @@ fn utc_stamp(created_unix_ms: u64) -> String {
     crate::time_compat::utc_stamp(created_unix_ms)
 }
 
-pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppState) {
+pub(super) fn ensure_project_recovery_catalog(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = ctx;
-    let project_id = state.model.workspace.content.project.id().to_string();
-    if state
-        .project
-        .project_checkpoint_recovery
-        .project_id
-        .as_deref()
-        != Some(project_id.as_str())
-    {
-        state.project.project_checkpoint_recovery = Default::default();
-        state.project.project_checkpoint_recovery.project_id = Some(project_id.clone());
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    if cx.state.project_checkpoint_recovery.project_id.as_deref() != Some(project_id.as_str()) {
+        cx.state.project_checkpoint_recovery = Default::default();
+        cx.state.project_checkpoint_recovery.project_id = Some(project_id.clone());
     }
-    if state.project.project_checkpoint_recovery.initialized {
+    if cx.state.project_checkpoint_recovery.initialized {
         return;
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
-        let result = crate::workbench::lifecycle::project_checkpoint::list(&state.model);
-        let recovery = &mut state.project.project_checkpoint_recovery;
+        let result = crate::workbench::lifecycle::project_checkpoint::list(cx.model);
+        let recovery = &mut cx.state.project_checkpoint_recovery;
         recovery.initialized = true;
         match result {
             Ok(catalog) => {
@@ -693,13 +687,13 @@ pub(super) fn ensure_project_recovery_catalog(ctx: &Context, state: &mut AppStat
 
     #[cfg(target_arch = "wasm32")]
     {
-        if state.project.project_checkpoint_recovery.loading {
+        if cx.state.project_checkpoint_recovery.loading {
             return;
         }
-        state.project.project_checkpoint_recovery.loading = true;
+        cx.state.project_checkpoint_recovery.loading = true;
         let queued_project_id = project_id;
         let repaint = ctx.clone();
-        crate::workbench::lifecycle::project_checkpoint::start_list(&state.model, move |result| {
+        crate::workbench::lifecycle::project_checkpoint::start_list(cx.model, move |result| {
             BROWSER_RECOVERY_CATALOG_COMPLETIONS.with(|queue| {
                 queue
                     .borrow_mut()
@@ -728,18 +722,23 @@ fn checkpoint_age(created_unix_ms: u64, now_unix_ms: Option<u64>) -> String {
 /// Answer a compare on the status bar: the reader asked and is looking. Only
 /// a compare that could not be made is toasted.
 fn compare_project_checkpoint(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
-    match crate::workbench::lifecycle::project_checkpoint::matches_current_state(checkpoint, state)
-    {
-        Ok(true) => state.prompt("The current project is identical to this checkpoint."),
-        Ok(false) => state.prompt(format!(
+    let compared = crate::workbench::lifecycle::project_checkpoint::matches_current_state(
+        checkpoint,
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
+    );
+    match compared {
+        Ok(true) => cx
+            .wb
+            .prompt("The current project is identical to this checkpoint."),
+        Ok(false) => cx.wb.prompt(format!(
             "The current project differs from checkpoint {} (revision {}).",
             short_identity(&checkpoint.checkpoint_id().to_string()),
             checkpoint.project_revision()
         )),
-        Err(error) => state.report_failure("Could not compare", error),
+        Err(error) => cx.model.report_failure("Could not compare", error),
     }
 }
 
@@ -756,26 +755,28 @@ fn manual_checkpoint_pending() -> bool {
 /// Create a checkpoint the reader asked for. The Console line is its record;
 /// a failure also reaches the notice centre through the activity mirror.
 #[cfg(not(target_arch = "wasm32"))]
-fn create_manual_checkpoint(_: &Context, state: &mut AppState) {
-    match crate::workbench::lifecycle::project_checkpoint::create(
-        state,
+fn create_manual_checkpoint(_: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let created = crate::workbench::lifecycle::project_checkpoint::create(
+        &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
-    ) {
+    );
+    match created {
         Ok(checkpoint) => {
-            state.project.project_checkpoint_recovery.initialized = false;
-            record_manual_checkpoint(state, &checkpoint);
+            cx.state.project_checkpoint_recovery.initialized = false;
+            record_manual_checkpoint(cx, &checkpoint);
         }
         Err(error) => {
-            state.record(LogSeverity::Error, LogSource::Studio, error);
+            cx.model
+                .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
 }
 
 fn record_manual_checkpoint(
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
-    state.record(
+    cx.model.record(
         LogSeverity::Info,
         LogSource::Studio,
         format!(
@@ -787,12 +788,12 @@ fn record_manual_checkpoint(
 }
 
 #[cfg(target_arch = "wasm32")]
-fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
-    let project_id = state.model.workspace.content.project.id().to_string();
+fn create_manual_checkpoint(ctx: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let project_id = cx.model.workspace.content.project.id().to_string();
     let repaint = ctx.clone();
     BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(true));
-    if let Err(error) = crate::workbench::lifecycle::project_checkpoint::start_create(
-        state,
+    let started = crate::workbench::lifecycle::project_checkpoint::start_create(
+        &lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::Manual,
         move |result| {
             BROWSER_MANUAL_CHECKPOINT_COMPLETIONS.with(|queue| {
@@ -802,15 +803,17 @@ fn create_manual_checkpoint(ctx: &Context, state: &mut AppState) {
             });
             repaint.request_repaint();
         },
-    ) {
+    );
+    if let Err(error) = started {
         BROWSER_MANUAL_CHECKPOINT_PENDING.with(|pending| pending.set(false));
-        state.record(LogSeverity::Error, LogSource::Studio, error);
+        cx.model
+            .record(LogSeverity::Error, LogSource::Studio, error);
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-fn poll_browser_manual_checkpoint(state: &mut AppState) {
-    let current_project_id = state.model.workspace.content.project.id().to_string();
+fn poll_browser_manual_checkpoint(cx: &mut Cx<'_, ProjectFeature>) {
+    let current_project_id = cx.model.workspace.content.project.id().to_string();
     let completions = BROWSER_MANUAL_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     if completions.is_empty() {
@@ -823,11 +826,12 @@ fn poll_browser_manual_checkpoint(state: &mut AppState) {
         }
         match completion.result {
             Ok(checkpoint) => {
-                state.project.project_checkpoint_recovery.initialized = false;
-                record_manual_checkpoint(state, &checkpoint);
+                cx.state.project_checkpoint_recovery.initialized = false;
+                record_manual_checkpoint(cx, &checkpoint);
             }
             Err(error) => {
-                state.record(LogSeverity::Error, LogSource::Studio, error);
+                cx.model
+                    .record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
     }
@@ -857,7 +861,7 @@ pub(super) fn recovery_copy_filename(
 #[cfg(not(target_arch = "wasm32"))]
 pub(super) fn export_project_checkpoint_copy(
     _: &Context,
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     let filename = recovery_copy_filename(&checkpoint);
@@ -873,14 +877,15 @@ pub(super) fn export_project_checkpoint_copy(
         &destination,
     ) {
         Ok(()) => {
-            state.record(
+            cx.model.record(
                 LogSeverity::Info,
                 LogSource::Studio,
                 format!("Saved a recovery copy to {}.", destination.display()),
             );
         }
         Err(error) => {
-            state.record(LogSeverity::Error, LogSource::Studio, error);
+            cx.model
+                .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
 }
@@ -888,11 +893,11 @@ pub(super) fn export_project_checkpoint_copy(
 #[cfg(target_arch = "wasm32")]
 pub(super) fn export_project_checkpoint_copy(
     ctx: &Context,
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     checkpoint: crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) {
     let filename = recovery_copy_filename(&checkpoint);
-    let project_id = state.model.workspace.content.project.id().to_string();
+    let project_id = cx.model.workspace.content.project.id().to_string();
     let queued_filename = filename.clone();
     let repaint = ctx.clone();
     crate::workbench::lifecycle::project_checkpoint::start_recovery_copy_bytes(

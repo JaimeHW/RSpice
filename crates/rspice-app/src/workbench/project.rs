@@ -36,7 +36,9 @@ use crate::workbench::framework::feature::{
     Reads,
 };
 use crate::workbench::framework::requests::{FocusProjectLauncherSearch, ProjectFileAction};
-use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, has_unsaved_changes};
+use crate::workbench::lifecycle::project_lifecycle::{
+    LifecycleParts, LifecycleView, has_unsaved_changes,
+};
 use crate::workbench::slots::ProjectState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
@@ -188,6 +190,39 @@ pub(in crate::workbench) fn slot_facts(runs: &RunsState, peers: &Peers<'_>) -> S
     }
 }
 
+/// The project as the lifecycle reads it, from the parts of the project
+/// feature's context it reads: the model, the platform state, the workspace
+/// in front and the results workspace's saved presentation.
+pub(in crate::workbench) fn lifecycle_view<'a>(
+    model: &'a Model,
+    platform: &'a PlatformState,
+    wb: &WorkbenchSession,
+    peers: &'a Peers<'_>,
+) -> LifecycleView<'a> {
+    LifecycleView {
+        model,
+        platform,
+        workspace: wb.workspace,
+        presentation: peers.results().saved_presentation(),
+    }
+}
+
+/// The project where the lifecycle changes it, from the same parts as
+/// [`lifecycle_view`], the model and the platform state lent mutably.
+pub(in crate::workbench) fn lifecycle_parts<'a>(
+    model: &'a mut Model,
+    platform: &'a mut PlatformState,
+    wb: &WorkbenchSession,
+    peers: &'a Peers<'_>,
+) -> LifecycleParts<'a> {
+    LifecycleParts {
+        model,
+        platform,
+        workspace: wb.workspace,
+        presentation: peers.results().saved_presentation(),
+    }
+}
+
 /// The Project workspace's navigator: the rail of the page in front, over
 /// the feature's state, the model and the navigator's filter.
 fn show_navigator(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
@@ -232,12 +267,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
                 .and_then(builtin_veriloga_model),
             model,
             facts: slot_facts(cx.runs, &cx.peers),
-            lifecycle: LifecycleView {
-                model,
-                platform: cx.platform,
-                workspace: cx.wb.workspace,
-                presentation: cx.peers.results().saved_presentation(),
-            },
+            lifecycle: lifecycle_view(model, cx.platform, cx.wb, &cx.peers),
         },
     );
     match action {
