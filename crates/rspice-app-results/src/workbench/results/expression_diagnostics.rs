@@ -61,6 +61,9 @@ pub(super) fn show(cx: &mut Cx<'_, ResultsFeature>, ctx: &Context) {
         DialogSize::Manager
     };
     let choice = Dialog::new(TITLE, "Close")
+        .description(
+            "The expressions saved with the active dataset, their units and whether each evaluates.",
+        )
         .size(size)
         .show(ctx, |ui| body(ui, &rows));
     if matches!(
