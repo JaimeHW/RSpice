@@ -360,13 +360,13 @@ fn two_step_dimensions_wrap_the_complete_dc_sweep_in_xyce_order() {
 }
 
 #[test]
-fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
+fn step_temp_and_data_cards_vary_in_card_order_across_cli_coordinate_namespaces() {
     let dir = test_dir("canonical_axis_order");
     let deck = dir.join("canonical_axis_order.sp");
     let output_path = dir.join("operating_point.csv");
     std::fs::write(
         &deck,
-        "* DeckPlan orders DATA, numeric STEP, then TEMP\n\
+        "* DeckPlan keeps the STEP, TEMP and DATA cards in card order\n\
          .param rleft=1k rright=1k\n\
          V1 in 0 1\n\
          R1 in out {rleft}\n\
@@ -400,9 +400,9 @@ fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
     );
     assert!(!output_path.exists(), "base path must remain unused");
 
-    // DATA is canonical axis 0 and therefore varies fastest, even though its
-    // card appeared after the numeric STEP and TEMP cards in source order.
-    let expected = [0.5, 0.25, 2.0 / 3.0, 0.4, 0.5, 0.25, 2.0 / 3.0, 0.4];
+    // Xyce, LTspice and QSPICE vary the first card fastest: the numeric STEP
+    // card first, then the TEMP card, and the DATA card last.
+    let expected = [0.5, 2.0 / 3.0, 0.5, 2.0 / 3.0, 0.25, 0.4, 0.25, 0.4];
     for (index, expected_vout) in expected.into_iter().enumerate() {
         let path = step_output(&output_path, index + 1);
         let csv = std::fs::read_to_string(&path)
@@ -410,7 +410,7 @@ fn canonical_data_step_temp_order_drives_cli_coordinate_namespaces() {
         let vout = scalar_csv_value(&csv, "V(OUT)");
         assert!(
             (vout - expected_vout).abs() < 1.0e-9,
-            "coordinate {} is not in canonical DATA→STEP→TEMP order: {csv}",
+            "coordinate {} is not in STEP→TEMP→DATA card order: {csv}",
             index + 1
         );
     }

@@ -487,47 +487,32 @@ fn contains_textual_alter(
     Ok(false)
 }
 
+/// The deck's `.STEP` and `.TEMP` cards in card order, the order
+/// [`DeckPlan::from_netlist`](super::DeckPlan::from_netlist) gives its axes.
 fn canonical_step_commands(
     netlist: &Netlist,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<StepCommand>, MaterializedRunError> {
-    let mut data_count = 0usize;
-    let mut step_count = 0usize;
-    let mut temperature_count = 0usize;
+    let mut count = 0usize;
     for command in &netlist.analyses {
         ensure_not_aborted(abort)?;
-        let count = match command {
-            AnalysisCommand::Step(step) if matches!(&step.sweep, StepSweep::Data { .. }) => {
-                &mut data_count
-            }
-            AnalysisCommand::Step(step) if step.target == StepTarget::Temp => {
-                &mut temperature_count
-            }
-            AnalysisCommand::Step(_) => &mut step_count,
-            AnalysisCommand::Temp { .. } => &mut temperature_count,
-            _ => continue,
-        };
-        *count = count
-            .checked_add(1)
-            .ok_or(MaterializedRunError::Allocation {
-                object: "materializer command counts",
-            })?;
+        if matches!(
+            command,
+            AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+        ) {
+            count = count
+                .checked_add(1)
+                .ok_or(MaterializedRunError::Allocation {
+                    object: "materializer command counts",
+                })?;
+        }
     }
-    let mut data = try_vec_with_capacity(data_count, "DATA materializer commands")?;
-    let mut step = try_vec_with_capacity(step_count, "STEP materializer commands")?;
-    let mut temperature =
-        try_vec_with_capacity(temperature_count, "temperature materializer commands")?;
+    let mut ordered = try_vec_with_capacity(count, "ordered materializer commands")?;
     for command in &netlist.analyses {
         ensure_not_aborted(abort)?;
         match command {
-            AnalysisCommand::Step(command) if matches!(&command.sweep, StepSweep::Data { .. }) => {
-                data.push(command.clone());
-            }
-            AnalysisCommand::Step(command) if command.target == StepTarget::Temp => {
-                temperature.push(command.clone());
-            }
-            AnalysisCommand::Step(command) => step.push(command.clone()),
-            AnalysisCommand::Temp { temperatures } => temperature.push(StepCommand {
+            AnalysisCommand::Step(command) => ordered.push(command.clone()),
+            AnalysisCommand::Temp { temperatures } => ordered.push(StepCommand {
                 target: StepTarget::Temp,
                 name: "TEMP".to_string(),
                 param_name: None,
@@ -536,16 +521,6 @@ fn canonical_step_commands(
             _ => {}
         }
     }
-    let total = data_count
-        .checked_add(step_count)
-        .and_then(|count| count.checked_add(temperature_count))
-        .ok_or(MaterializedRunError::Allocation {
-            object: "ordered materializer commands",
-        })?;
-    let mut ordered = try_vec_with_capacity(total, "ordered materializer commands")?;
-    ordered.extend(data);
-    ordered.extend(step);
-    ordered.extend(temperature);
     Ok(ordered)
 }
 

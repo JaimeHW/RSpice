@@ -653,9 +653,8 @@ struct CoordinateResourceEstimate {
 impl DeckPlan {
     /// Build the complete target-neutral plan for a parsed deck.
     ///
-    /// DATA rows are placed first, numeric `.STEP` dimensions remain in their
-    /// authored relative order, and temperature dimensions are placed last.
-    /// Physical analyses retain their authored order and per-kind ordinals.
+    /// Run axes keep their card order, so the first `.STEP`, `.STEP DATA` or
+    /// `.TEMP` card varies fastest. Physical analyses retain their authored order and per-kind ordinals.
     /// Textual ALTER expansion and coordinate-dependent topology/schema
     /// materialization happen in later planning stages and are intentionally
     /// not inferred here.
@@ -672,42 +671,27 @@ impl DeckPlan {
         limits: &ResourceLimits,
         abort: &dyn AbortSignal,
     ) -> Result<Self, DeckPlanError> {
-        use crate::netlist::{AnalysisCommand, StepSweep, StepTarget};
+        use crate::netlist::{AnalysisCommand, StepSweep};
 
         if abort.is_aborted() {
             return Err(DeckPlanError::Aborted);
         }
 
-        let data_axis_count = netlist
+        let meta_axis_count = netlist
             .analyses
             .iter()
             .filter(|command| {
-                matches!(command, AnalysisCommand::Step(step) if matches!(&step.sweep, StepSweep::Data { .. }))
+                matches!(
+                    command,
+                    AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
+                )
             })
             .count();
-        let step_axis_count = netlist
-            .analyses
-            .iter()
-            .filter(|command| {
-                matches!(command, AnalysisCommand::Step(step) if !matches!(&step.sweep, StepSweep::Data { .. }) && step.target != StepTarget::Temp)
-            })
-            .count();
-        let temperature_axis_count = netlist
-            .analyses
-            .iter()
-            .filter(|command| {
-                matches!(command, AnalysisCommand::Temp { .. })
-                    || matches!(command, AnalysisCommand::Step(step) if !matches!(&step.sweep, StepSweep::Data { .. }) && step.target == StepTarget::Temp)
-            })
-            .count();
-        let meta_axis_count = data_axis_count
-            .checked_add(step_axis_count)
-            .and_then(|count| count.checked_add(temperature_axis_count))
-            .ok_or(DeckPlanError::CoordinateCountOverflow)?;
-        let mut data_axes = try_vec_with_capacity(data_axis_count, "DATA run axes")?;
-        let mut step_axes = try_vec_with_capacity(step_axis_count, "STEP run axes")?;
-        let mut temperature_axes =
-            try_vec_with_capacity(temperature_axis_count, "temperature run axes")?;
+        // Xyce, LTspice and QSPICE all vary the first `.STEP` card fastest,
+        // a `.STEP TEMP` card included, and LTspice and QSPICE step a `.TEMP`
+        // list at its card position as well. The axes therefore keep their
+        // card order, and the first axis varies fastest.
+        let mut axes = try_vec_with_capacity(meta_axis_count, "ordered run axes")?;
         let mut analyses = try_vec_with_capacity(
             netlist.analyses.len().saturating_sub(meta_axis_count),
             "authored analysis requests",
@@ -727,20 +711,13 @@ impl DeckPlan {
                 return Err(DeckPlanError::Aborted);
             }
             match command {
-                AnalysisCommand::Step(step) => match &step.sweep {
+                AnalysisCommand::Step(step) => axes.push(match &step.sweep {
                     StepSweep::Data { table_name } => {
-                        data_axes.push(data_axis_from_table(netlist, table_name, limits, abort)?)
+                        data_axis_from_table(netlist, table_name, limits, abort)?
                     }
-                    _ => {
-                        let axis = RunAxis::from_step_command(step, limits, abort)?;
-                        if axis.kind == AxisKind::Temperature {
-                            temperature_axes.push(axis);
-                        } else {
-                            step_axes.push(axis);
-                        }
-                    }
-                },
-                AnalysisCommand::Temp { temperatures } => temperature_axes.push(RunAxis::new(
+                    _ => RunAxis::from_step_command(step, limits, abort)?,
+                }),
+                AnalysisCommand::Temp { temperatures } => axes.push(RunAxis::new(
                     AxisKind::Temperature,
                     "temperature",
                     try_copy_numeric_axis_values(temperatures, "temperature", abort)?,
@@ -840,10 +817,6 @@ impl DeckPlan {
             return Err(DeckPlanError::Aborted);
         }
 
-        let mut axes = try_vec_with_capacity(meta_axis_count, "ordered run axes")?;
-        axes.extend(data_axes);
-        axes.extend(step_axes);
-        axes.extend(temperature_axes);
         let mut plan = Self::new(axes, analyses)?;
         plan.post_processes = plan_post_processes(netlist, &plan.analyses, abort)?;
         plan.preflight_coordinates(limits)?;
@@ -859,17 +832,7 @@ impl DeckPlan {
     ) -> Result<Self, DeckPlanError> {
         let mut axis_ids = BTreeSet::new();
         let mut binding_owners = std::collections::BTreeMap::<String, AxisKind>::new();
-        let mut previous_axis_kind = None;
         for axis in &axes {
-            if let Some(previous) = previous_axis_kind
-                && axis.kind < previous
-            {
-                return Err(DeckPlanError::AxisOrder {
-                    previous,
-                    current: axis.kind,
-                });
-            }
-            previous_axis_kind = Some(axis.kind);
             if !axis_ids.insert(axis.identity()) {
                 return Err(DeckPlanError::DuplicateAxis {
                     kind: axis.kind,
@@ -1259,10 +1222,6 @@ pub enum DeckPlanError {
         first: AxisKind,
         second: AxisKind,
     },
-    AxisOrder {
-        previous: AxisKind,
-        current: AxisKind,
-    },
     ExplicitImplicitOp,
     /// A periodic small-signal or envelope card names an upstream periodic
     /// large-signal analysis the deck does not author before it.
@@ -1357,10 +1316,6 @@ impl fmt::Display for DeckPlanError {
             } => write!(
                 formatter,
                 "run binding '{binding}' is owned by both {first:?} and {second:?} axes"
-            ),
-            Self::AxisOrder { previous, current } => write!(
-                formatter,
-                "run axes are out of semantic order: {current:?} cannot follow {previous:?}"
             ),
             Self::ExplicitImplicitOp => formatter.write_str(
                 "implicit operating point is planner-owned and cannot be authored explicitly",
@@ -2355,7 +2310,7 @@ mod tests {
     }
 
     #[test]
-    fn data_step_numeric_step_and_temp_use_canonical_axis_order() {
+    fn data_step_numeric_step_and_temp_keep_card_order() {
         let netlist = crate::Netlist::parse(
             "axis ordering\n\
              .step param gain list 1 2\n\
@@ -2375,7 +2330,7 @@ mod tests {
 
         assert_eq!(
             plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
-            [AxisKind::Data, AxisKind::Step, AxisKind::Temperature]
+            [AxisKind::Step, AxisKind::Temperature, AxisKind::Data]
         );
         let coordinates = plan
             .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
@@ -2387,13 +2342,24 @@ mod tests {
                 .iter()
                 .map(AxisAssignment::kind)
                 .collect::<Vec<_>>(),
-            [AxisKind::Data, AxisKind::Step, AxisKind::Temperature]
+            [AxisKind::Step, AxisKind::Temperature, AxisKind::Data]
         );
-        assert_eq!(numeric_values(&plan.axes()[2]), [-40.0, 125.0]);
+        assert_eq!(numeric_values(&plan.axes()[1]), [-40.0, 125.0]);
+        // The first card's axis varies fastest and the last card's slowest.
+        let indices = |coordinate: &RunCoordinate| {
+            coordinate
+                .assignments()
+                .iter()
+                .map(AxisAssignment::value_index)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(indices(&coordinates[1]), [1, 0, 0]);
+        assert_eq!(indices(&coordinates[2]), [0, 1, 0]);
+        assert_eq!(indices(&coordinates[4]), [0, 0, 1]);
     }
 
     #[test]
-    fn canonical_temp_step_plan_is_cartesian_and_preserves_analysis_ordinals() {
+    fn temp_then_step_plan_varies_the_temp_card_fastest_and_preserves_analysis_ordinals() {
         let netlist = crate::Netlist::parse(
             "TEMP by STEP\n\
              .param resistance=1k\n\
@@ -2410,9 +2376,11 @@ mod tests {
         let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
             .expect("TEMP and STEP compose");
 
+        // LTspice and QSPICE step a `.TEMP` list at its card position: this
+        // `.temp` card comes first, so temperature varies fastest.
         assert_eq!(
             plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
-            [AxisKind::Step, AxisKind::Temperature]
+            [AxisKind::Temperature, AxisKind::Step]
         );
         assert_eq!(
             plan.analyses()
@@ -2429,13 +2397,67 @@ mod tests {
         assert_eq!(coordinates[0].assignments()[1].value_index(), 0);
         assert_eq!(coordinates[1].assignments()[0].value_index(), 1);
         assert_eq!(coordinates[1].assignments()[1].value_index(), 0);
-        assert_eq!(coordinates[2].assignments()[0].value_index(), 0);
-        assert_eq!(coordinates[2].assignments()[1].value_index(), 1);
+        assert_eq!(coordinates[2].assignments()[0].value_index(), 2);
+        assert_eq!(coordinates[2].assignments()[1].value_index(), 0);
+        assert_eq!(coordinates[3].assignments()[0].value_index(), 0);
+        assert_eq!(coordinates[3].assignments()[1].value_index(), 1);
         assert_eq!(
             coordinates,
             plan.coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
                 .expect("coordinate IDs are deterministic")
         );
+    }
+
+    #[test]
+    fn a_first_step_temp_card_varies_fastest_and_a_last_one_slowest() {
+        // LTspice and QSPICE log `.step temp=25 a=1`, `.step temp=26 a=1`,
+        // `.step temp=25 a=2`, ... for the first deck, and Xyce's `.prn` steps
+        // agree; with the cards swapped, `a` varies fastest instead.
+        let value_indices = |coordinates: &[RunCoordinate], kind| {
+            coordinates
+                .iter()
+                .map(|coordinate| {
+                    let assignment = coordinate
+                        .assignments()
+                        .iter()
+                        .find(|assignment| assignment.kind() == kind)
+                        .expect("assignment of the requested kind");
+                    assignment.value_index()
+                })
+                .collect::<Vec<_>>()
+        };
+        for (cards, temperature_indices, parameter_indices) in [
+            (
+                ".step temp list 25 26\n.step param a list 1 2 3\n",
+                [0, 1, 0, 1, 0, 1],
+                [0, 0, 1, 1, 2, 2],
+            ),
+            (
+                ".step param a list 1 2 3\n.step temp list 25 26\n",
+                [0, 0, 0, 1, 1, 1],
+                [0, 1, 2, 0, 1, 2],
+            ),
+        ] {
+            let netlist = crate::Netlist::parse(&format!(
+                "step order\n.param a=1\nV1 1 0 {{a}}\nR1 1 0 1k\n{cards}.op\n.end\n"
+            ))
+            .expect("step order deck parses");
+            let plan = DeckPlan::from_netlist(&netlist, &ResourceLimits::default())
+                .expect("step order plan");
+            let coordinates = plan
+                .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
+                .expect("step order coordinates");
+            assert_eq!(
+                value_indices(&coordinates, AxisKind::Temperature),
+                temperature_indices,
+                "{cards}"
+            );
+            assert_eq!(
+                value_indices(&coordinates, AxisKind::Step),
+                parameter_indices,
+                "{cards}"
+            );
+        }
     }
 
     #[test]
