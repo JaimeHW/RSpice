@@ -2,6 +2,7 @@
 
 use egui::{Align, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2};
 
+use super::SymbolParameterFormDialogState;
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
     CellViewRef, ParameterInheritance, PropertyType, SymbolParameterConstraints,
@@ -13,7 +14,7 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 use super::import_workflow::{setting_row, table_header};
 use super::state::ParameterFormPhase;
@@ -25,194 +26,172 @@ const DISCARD_TITLE: &str = "Discard unsaved symbol changes?";
 const DISCARD_DETAIL: &str =
     "The isolated draft will be removed. The project library has not been changed.";
 
-impl RSpiceApp {
-    pub(super) fn render_symbol_parameter_form_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.symbol_parameter_form.open {
-            return;
-        }
-        let phase = self.state.design.symbol_parameter_form.phase;
-        let discard_confirm = self.state.design.symbol_parameter_form.discard_confirm;
-        let diagnostics = self
-            .state
-            .design
-            .symbol_parameter_form
-            .draft_form
-            .as_ref()
-            .map(SymbolParameterForm::validate_diagnostics)
-            .unwrap_or_else(|| {
-                vec![crate::state::SymbolFormDiagnostic {
-                    section_key: "form".to_owned(),
-                    field_key: None,
-                    message: "typed form draft is unavailable".to_owned(),
-                }]
-            });
-        let error = self
-            .state
-            .design
-            .symbol_parameter_form
-            .validation_error
-            .clone();
-        let (title, primary, size, height) = match phase {
-            ParameterFormPhase::Review => (
-                FORM_REVIEW_TITLE,
-                "Open form designer",
-                DialogSize::SimulationWorkflow,
-                420.0,
-            ),
-            ParameterFormPhase::Designer => (
-                FORM_DESIGNER_TITLE,
-                "Save form revision",
-                DialogSize::WideWorkflow,
-                720.0,
-            ),
-        };
-        let mut dialog = Dialog::new(title, primary)
-            .description("Edit typed engineering parameters, defaults, constraints, inheritance, visibility and device help as one versioned symbol contract.")
-            .size(size)
-            .initial_height(height)
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
-            .primary_enabled(phase == ParameterFormPhase::Review || diagnostics.is_empty());
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Some(error) = error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Parameter form was not saved",
-                error,
-            );
-        } else if let Some(finding) = diagnostics.first() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Parameter form validation",
-                &finding.message,
-            );
-        }
-
-        let mut changed = false;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let id = match phase {
-                ParameterFormPhase::Review => form_review_body(
-                    ui,
-                    &mut self.state.design.symbol_parameter_form,
-                    &self.state.model.library_manager,
-                ),
-                ParameterFormPhase::Designer => form_designer_body(
-                    ui,
-                    &mut self.state.design.symbol_parameter_form,
-                    &diagnostics,
-                    &mut changed,
-                ),
-            };
-            Some(id)
+pub(super) fn render_symbol_parameter_form_dialog(
+    parameter_form: &mut SymbolParameterFormDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !parameter_form.open {
+        return;
+    }
+    let phase = parameter_form.phase;
+    let discard_confirm = parameter_form.discard_confirm;
+    let diagnostics = parameter_form
+        .draft_form
+        .as_ref()
+        .map(SymbolParameterForm::validate_diagnostics)
+        .unwrap_or_else(|| {
+            vec![crate::state::SymbolFormDiagnostic {
+                section_key: "form".to_owned(),
+                field_key: None,
+                message: "typed form draft is unavailable".to_owned(),
+            }]
         });
-        if changed {
-            self.state.design.symbol_parameter_form.dirty = true;
-            self.state.design.symbol_parameter_form.discard_confirm = false;
-            self.state.design.symbol_parameter_form.validation_error = None;
-        }
-        match response.choice {
-            DialogChoice::Primary if phase == ParameterFormPhase::Review => {
-                self.state.design.symbol_parameter_form.phase = ParameterFormPhase::Designer;
-            }
-            DialogChoice::Primary => self.commit_symbol_parameter_form(),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if self.state.design.symbol_parameter_form.dirty
-                    && !self.state.design.symbol_parameter_form.discard_confirm
-                {
-                    self.state.design.symbol_parameter_form.discard_confirm = true;
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                } else {
-                    self.state.design.symbol_parameter_form.close_and_discard();
-                }
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
-        }
+    let error = parameter_form.validation_error.clone();
+    let (title, primary, size, height) = match phase {
+        ParameterFormPhase::Review => (
+            FORM_REVIEW_TITLE,
+            "Open form designer",
+            DialogSize::SimulationWorkflow,
+            420.0,
+        ),
+        ParameterFormPhase::Designer => (
+            FORM_DESIGNER_TITLE,
+            "Save form revision",
+            DialogSize::WideWorkflow,
+            720.0,
+        ),
+    };
+    let mut dialog = Dialog::new(title, primary)
+        .description("Edit typed engineering parameters, defaults, constraints, inheritance, visibility and device help as one versioned symbol contract.")
+        .size(size)
+        .initial_height(height)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
+        .primary_enabled(phase == ParameterFormPhase::Review || diagnostics.is_empty());
+    if discard_confirm {
+        dialog =
+            dialog.transaction_state(DialogTransactionTone::Error, DISCARD_TITLE, DISCARD_DETAIL);
+    } else if let Some(error) = error.as_deref() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Parameter form was not saved",
+            error,
+        );
+    } else if let Some(finding) = diagnostics.first() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Parameter form validation",
+            &finding.message,
+        );
     }
 
-    fn commit_symbol_parameter_form(&mut self) {
-        self.state.design.symbol_parameter_form.validation_error = None;
-        let Some(target) = self.state.design.symbol_parameter_form.target.clone() else {
-            self.state.design.symbol_parameter_form.validation_error =
-                Some("The target symbol is unavailable.".to_owned());
-            return;
+    let mut changed = false;
+    let mut response = dialog.show_transaction(ctx, |ui| {
+        let id = match phase {
+            ParameterFormPhase::Review => {
+                form_review_body(ui, &mut *parameter_form, &model.library_manager)
+            }
+            ParameterFormPhase::Designer => {
+                form_designer_body(ui, &mut *parameter_form, &diagnostics, &mut changed)
+            }
         };
-        let Some(original) = self
-            .state
-            .design
-            .symbol_parameter_form
-            .original_definition
-            .clone()
-        else {
-            self.state.design.symbol_parameter_form.validation_error =
-                Some("The original symbol definition is unavailable.".to_owned());
-            return;
-        };
-        let Some(draft) = self.state.design.symbol_parameter_form.draft_form.clone() else {
-            self.state.design.symbol_parameter_form.validation_error =
-                Some("The parameter form draft is unavailable.".to_owned());
-            return;
-        };
-        let result = (|| {
-            let current_view = self
-                .state
-                .model
-                .library_manager
-                .get_library(&target.library)
-                .and_then(|library| library.get_cell(&target.cell))
-                .and_then(|cell| cell.get_view(&target.view))
-                .ok_or_else(|| "The target symbol view no longer exists.".to_owned())?;
-            let current = crate::state::load_model_bound_symbol(current_view)
-                .map_err(|error| error.to_string())?
-                .ok_or_else(|| "The target symbol no longer has a typed definition.".to_owned())?;
-            if current
+        Some(id)
+    });
+    if changed {
+        parameter_form.dirty = true;
+        parameter_form.discard_confirm = false;
+        parameter_form.validation_error = None;
+    }
+    match response.choice {
+        DialogChoice::Primary if phase == ParameterFormPhase::Review => {
+            parameter_form.phase = ParameterFormPhase::Designer;
+        }
+        DialogChoice::Primary => commit_symbol_parameter_form(parameter_form, model),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            if parameter_form.dirty && !parameter_form.discard_confirm {
+                parameter_form.discard_confirm = true;
+                response.retain_cancel_focus(DialogInitialFocus::Ghost);
+            } else {
+                parameter_form.close_and_discard();
+            }
+        }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+fn commit_symbol_parameter_form(
+    parameter_form: &mut SymbolParameterFormDialogState,
+    model: &mut Model,
+) {
+    parameter_form.validation_error = None;
+    let Some(target) = parameter_form.target.clone() else {
+        parameter_form.validation_error = Some("The target symbol is unavailable.".to_owned());
+        return;
+    };
+    let Some(original) = parameter_form.original_definition.clone() else {
+        parameter_form.validation_error =
+            Some("The original symbol definition is unavailable.".to_owned());
+        return;
+    };
+    let Some(draft) = parameter_form.draft_form.clone() else {
+        parameter_form.validation_error =
+            Some("The parameter form draft is unavailable.".to_owned());
+        return;
+    };
+    let result = (|| {
+        let current_view = model
+            .library_manager
+            .get_library(&target.library)
+            .and_then(|library| library.get_cell(&target.cell))
+            .and_then(|cell| cell.get_view(&target.view))
+            .ok_or_else(|| "The target symbol view no longer exists.".to_owned())?;
+        let current = crate::state::load_model_bound_symbol(current_view)
+            .map_err(|error| error.to_string())?
+            .ok_or_else(|| "The target symbol no longer has a typed definition.".to_owned())?;
+        if current
+            .validation_digest()
+            .map_err(|error| error.to_string())?
+            != original
                 .validation_digest()
                 .map_err(|error| error.to_string())?
-                != original
-                    .validation_digest()
-                    .map_err(|error| error.to_string())?
-            {
-                return Err(
-                    "The symbol definition changed after the form designer opened. Reopen it before saving."
-                        .to_owned(),
-                );
-            }
-            let replacement = original
-                .replace_parameter_form(draft)
-                .map_err(|error| error.to_string())?;
-            let mut candidate = self.state.model.library_manager.clone();
-            candidate
-                .edit_library(&target.library)
-                .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?
-                .construct_symbol(&replacement)
-                .map_err(|error| error.to_string())?;
-            publish_symbol_definition_candidate(
-                &mut self.state.model,
-                candidate,
-                &target.library,
-                &target.cell,
-                format!("save parameter form for '{}'/{}", target.cell, target.view),
-            )?;
-            Ok::<u64, String>(replacement.parameter_form.revision)
-        })();
-        match result {
-            Ok(revision) => {
-                self.state.record(
-                    LogSeverity::Info,
-                    LogSource::Studio,
-                    format!(
-                        "Saved the parameter form of {}/{} at revision {revision}.",
-                        target.library, target.cell
-                    ),
-                );
-                self.state.design.symbol_parameter_form.close_and_discard();
-            }
-            Err(error) => self.state.design.symbol_parameter_form.validation_error = Some(error),
+        {
+            return Err(
+                "The symbol definition changed after the form designer opened. Reopen it before saving."
+                    .to_owned(),
+            );
         }
+        let replacement = original
+            .replace_parameter_form(draft)
+            .map_err(|error| error.to_string())?;
+        let mut candidate = model.library_manager.clone();
+        candidate
+            .edit_library(&target.library)
+            .ok_or_else(|| format!("Library '{}' no longer exists.", target.library))?
+            .construct_symbol(&replacement)
+            .map_err(|error| error.to_string())?;
+        publish_symbol_definition_candidate(
+            &mut *model,
+            candidate,
+            &target.library,
+            &target.cell,
+            format!("save parameter form for '{}'/{}", target.cell, target.view),
+        )?;
+        Ok::<u64, String>(replacement.parameter_form.revision)
+    })();
+    match result {
+        Ok(revision) => {
+            model.record(
+                LogSeverity::Info,
+                LogSource::Studio,
+                format!(
+                    "Saved the parameter form of {}/{} at revision {revision}.",
+                    target.library, target.cell
+                ),
+            );
+            parameter_form.close_and_discard();
+        }
+        Err(error) => parameter_form.validation_error = Some(error),
     }
 }
 

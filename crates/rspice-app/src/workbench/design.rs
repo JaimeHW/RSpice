@@ -7,7 +7,9 @@ use egui::Context;
 
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
-use crate::workbench::app::dialogs::{find_replace, object_properties, placement};
+use crate::workbench::app::dialogs::{
+    find_replace, object_properties, placement, symbol_definition,
+};
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
 use crate::workbench::slots::DesignState;
 use crate::workbench::state::WorkbenchSession;
@@ -151,6 +153,19 @@ impl DesignFeature {
             &mut cx.state.descend_hierarchy,
             cx.model,
             cx.wb,
+            ctx,
+        );
+    }
+
+    /// Import symbol definition, then the symbol's parameter form.
+    pub(in crate::workbench) fn render_symbol_definition_dialogs(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        symbol_definition::render_symbol_definition_dialogs(
+            &mut cx.state.symbol_import,
+            &mut cx.state.symbol_parameter_form,
+            cx.model,
             ctx,
         );
     }

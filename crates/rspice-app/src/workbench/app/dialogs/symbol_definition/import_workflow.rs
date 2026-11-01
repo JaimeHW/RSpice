@@ -12,9 +12,10 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
 };
 
+use super::SymbolImportDialogState;
 use super::source_picker;
 use super::state::SymbolImportBindingChoice;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::publish_symbol_definition_candidate;
 
 const IMPORT_TITLE: &str = "Import symbol definition";
@@ -22,164 +23,149 @@ const DISCARD_TITLE: &str = "Discard unsaved symbol changes?";
 const DISCARD_DETAIL: &str =
     "The isolated draft will be removed. The project library has not been changed.";
 
-impl RSpiceApp {
-    pub(super) fn render_symbol_import_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.symbol_import.open {
-            return;
-        }
-        suggest_target_name(&mut self.state.design.symbol_import);
-        let binding_options = bound_symbol_references(&self.state);
-        let writable_libraries = self
-            .state
-            .model
-            .library_manager
-            .libraries_sorted()
-            .into_iter()
-            .filter(|library| !library.read_only)
-            .map(|library| library.name.clone())
-            .collect::<Vec<_>>();
-        if self.state.design.symbol_import.binding_source.is_none() {
-            self.state.design.symbol_import.binding_source = binding_options.first().cloned();
-        }
-        let preview = import_candidate(&self.state).map_err(|error| error.to_string());
-        let discard_confirm = self.state.design.symbol_import.discard_confirm;
-        let validation_error = self
-            .state
-            .design
-            .symbol_import
-            .validation_error
-            .as_deref()
-            .or(self.state.design.symbol_import.source_error.as_deref())
-            .map(str::to_owned)
-            .or_else(|| {
-                (!self.state.design.symbol_import.source_text.is_empty())
-                    .then(|| preview.as_ref().err().cloned())
-                    .flatten()
-            });
-        let primary_enabled = preview.is_ok();
-        let mut dialog = Dialog::new(IMPORT_TITLE, "Import into project library")
-            .description("Import validated RSpice JSON, SVG, EDIF, or LTspice symbol geometry with an explicit electrical contract or as a review-only graphic.")
-            .size(DialogSize::SimulationWorkflow)
-            .initial_height(468.0)
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
-            .primary_enabled(primary_enabled);
-        if discard_confirm {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                DISCARD_TITLE,
-                DISCARD_DETAIL,
-            );
-        } else if let Some(error) = validation_error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Symbol definition is not ready",
-                error,
-            );
-        }
-
-        let mut browse = false;
-        let mut changed = false;
-        let mut response = dialog.show_transaction(ctx, |ui| {
-            let first = import_body(
-                ui,
-                &mut self.state.design.symbol_import,
-                &writable_libraries,
-                &binding_options,
-                preview.as_ref().ok(),
-                &mut browse,
-                &mut changed,
-            );
-            Some(first)
+pub(super) fn render_symbol_import_dialog(
+    symbol_import: &mut SymbolImportDialogState,
+    model: &mut Model,
+    ctx: &Context,
+) {
+    if !symbol_import.open {
+        return;
+    }
+    suggest_target_name(&mut *symbol_import);
+    let binding_options = bound_symbol_references(model);
+    let writable_libraries = model
+        .library_manager
+        .libraries_sorted()
+        .into_iter()
+        .filter(|library| !library.read_only)
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    if symbol_import.binding_source.is_none() {
+        symbol_import.binding_source = binding_options.first().cloned();
+    }
+    let preview = import_candidate(symbol_import, model).map_err(|error| error.to_string());
+    let discard_confirm = symbol_import.discard_confirm;
+    let validation_error = symbol_import
+        .validation_error
+        .as_deref()
+        .or(symbol_import.source_error.as_deref())
+        .map(str::to_owned)
+        .or_else(|| {
+            (!symbol_import.source_text.is_empty())
+                .then(|| preview.as_ref().err().cloned())
+                .flatten()
         });
-        if browse {
-            source_picker::pick_symbol_source(&mut self.state.design.symbol_import);
-        }
-        if changed {
-            self.state.design.symbol_import.dirty = true;
-            self.state.design.symbol_import.discard_confirm = false;
-            self.state.design.symbol_import.validation_error = None;
-        }
-        match response.choice {
-            DialogChoice::Primary => self.commit_symbol_import(),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if self.state.design.symbol_import.dirty
-                    && !self.state.design.symbol_import.discard_confirm
-                {
-                    self.state.design.symbol_import.discard_confirm = true;
-                    response.retain_cancel_focus(DialogInitialFocus::Ghost);
-                } else {
-                    self.state.design.symbol_import.close_and_discard();
-                }
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
-        }
+    let primary_enabled = preview.is_ok();
+    let mut dialog = Dialog::new(IMPORT_TITLE, "Import into project library")
+        .description("Import validated RSpice JSON, SVG, EDIF, or LTspice symbol geometry with an explicit electrical contract or as a review-only graphic.")
+        .size(DialogSize::SimulationWorkflow)
+        .initial_height(468.0)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .ghost(if discard_confirm { "Discard changes" } else { "Cancel" })
+        .primary_enabled(primary_enabled);
+    if discard_confirm {
+        dialog =
+            dialog.transaction_state(DialogTransactionTone::Error, DISCARD_TITLE, DISCARD_DETAIL);
+    } else if let Some(error) = validation_error.as_deref() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            "Symbol definition is not ready",
+            error,
+        );
     }
 
-    fn commit_symbol_import(&mut self) {
-        self.state.design.symbol_import.validation_error = None;
-        let imported = match import_candidate(&self.state) {
-            Ok(imported) => imported,
-            Err(error) => {
-                self.state.design.symbol_import.validation_error = Some(error.to_string());
-                return;
+    let mut browse = false;
+    let mut changed = false;
+    let mut response = dialog.show_transaction(ctx, |ui| {
+        let first = import_body(
+            ui,
+            &mut *symbol_import,
+            &writable_libraries,
+            &binding_options,
+            preview.as_ref().ok(),
+            &mut browse,
+            &mut changed,
+        );
+        Some(first)
+    });
+    if browse {
+        source_picker::pick_symbol_source(&mut *symbol_import);
+    }
+    if changed {
+        symbol_import.dirty = true;
+        symbol_import.discard_confirm = false;
+        symbol_import.validation_error = None;
+    }
+    match response.choice {
+        DialogChoice::Primary => commit_symbol_import(symbol_import, model),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            if symbol_import.dirty && !symbol_import.discard_confirm {
+                symbol_import.discard_confirm = true;
+                response.retain_cancel_focus(DialogInitialFocus::Ghost);
+            } else {
+                symbol_import.close_and_discard();
             }
-        };
-        let library_name = self.state.design.symbol_import.target_library.clone();
-        let cell_name = self
-            .state
-            .design
-            .symbol_import
-            .target_name
-            .trim()
-            .to_owned();
-        let mut candidate = self.state.model.library_manager.clone();
-        let result = (|| {
-            candidate
-                .edit_library(&library_name)
-                .ok_or_else(|| format!("Target library '{library_name}' no longer exists."))?
-                .construct_symbol(&imported.definition)
-                .map_err(|error| error.to_string())?;
-            publish_symbol_definition_candidate(
-                &mut self.state.model,
-                candidate,
-                &library_name,
-                &cell_name,
-                format!("import symbol definition '{cell_name}'"),
-            )?;
-            Ok::<(), String>(())
-        })();
-        match result {
-            Ok(()) => {
-                self.state
-                    .model
-                    .library_manager
-                    .select_view(&library_name, &cell_name, "symbol");
-                let format = imported.report.format_label();
-                if imported
-                    .definition
-                    .source
-                    .is_explicitly_unbound_for_review()
-                {
-                    self.state.record(
-                        LogSeverity::Warning,
-                        LogSource::Studio,
-                        format!(
-                            "Imported symbol {cell_name} from {format} as graphics only; it \
-                             cannot be placed or netlisted until its pins are bound."
-                        ),
-                    );
-                } else {
-                    self.state.record(
-                        LogSeverity::Info,
-                        LogSource::Studio,
-                        format!("Imported symbol {cell_name} from {format}."),
-                    );
-                }
-                self.state.design.symbol_import.close_and_discard();
-            }
-            Err(error) => self.state.design.symbol_import.validation_error = Some(error),
         }
+        DialogChoice::Secondary | DialogChoice::None => {}
+    }
+}
+
+fn commit_symbol_import(symbol_import: &mut SymbolImportDialogState, model: &mut Model) {
+    symbol_import.validation_error = None;
+    let imported = match import_candidate(symbol_import, model) {
+        Ok(imported) => imported,
+        Err(error) => {
+            symbol_import.validation_error = Some(error.to_string());
+            return;
+        }
+    };
+    let library_name = symbol_import.target_library.clone();
+    let cell_name = symbol_import.target_name.trim().to_owned();
+    let mut candidate = model.library_manager.clone();
+    let result = (|| {
+        candidate
+            .edit_library(&library_name)
+            .ok_or_else(|| format!("Target library '{library_name}' no longer exists."))?
+            .construct_symbol(&imported.definition)
+            .map_err(|error| error.to_string())?;
+        publish_symbol_definition_candidate(
+            &mut *model,
+            candidate,
+            &library_name,
+            &cell_name,
+            format!("import symbol definition '{cell_name}'"),
+        )?;
+        Ok::<(), String>(())
+    })();
+    match result {
+        Ok(()) => {
+            model
+                .library_manager
+                .select_view(&library_name, &cell_name, "symbol");
+            let format = imported.report.format_label();
+            if imported
+                .definition
+                .source
+                .is_explicitly_unbound_for_review()
+            {
+                model.record(
+                    LogSeverity::Warning,
+                    LogSource::Studio,
+                    format!(
+                        "Imported symbol {cell_name} from {format} as graphics only; it \
+                         cannot be placed or netlisted until its pins are bound."
+                    ),
+                );
+            } else {
+                model.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    format!("Imported symbol {cell_name} from {format}."),
+                );
+            }
+            symbol_import.close_and_discard();
+        }
+        Err(error) => symbol_import.validation_error = Some(error),
     }
 }
 
@@ -376,9 +362,9 @@ fn check_table(ui: &mut Ui, preview: Option<&SymbolDefinitionImport>) {
         });
 }
 fn import_candidate(
-    state: &crate::workbench::app_state::AppState,
+    draft: &SymbolImportDialogState,
+    model: &Model,
 ) -> Result<SymbolDefinitionImport, String> {
-    let draft = &state.design.symbol_import;
     if draft.source_text.is_empty() {
         return Err("Choose a symbol definition source.".to_owned());
     }
@@ -386,8 +372,7 @@ fn import_candidate(
     if target_name.is_empty() {
         return Err("Target name is required.".to_owned());
     }
-    if state
-        .model
+    if model
         .library_manager
         .get_library(&draft.target_library)
         .and_then(|library| library.get_cell(target_name))
@@ -408,8 +393,7 @@ fn import_candidate(
                     "Bound SVG, EDIF and LTspice geometry require an existing explicit pin/model/netlist contract."
                         .to_owned()
                 })?;
-                let view = state
-                    .model
+                let view = model
                     .library_manager
                     .get_library(&reference.library)
                     .and_then(|library| library.get_cell(&reference.cell))
@@ -432,7 +416,7 @@ fn import_candidate(
                 .map_err(|error| error.to_string())?;
                 Some(
                     super::super::create_model_bound_symbol::symbol_attribute_definition(
-                        state,
+                        model,
                         &graphic,
                         &draft.target_library,
                         target_name,
@@ -471,9 +455,9 @@ fn source_looks_like_json(name: &str, source: &str) -> bool {
     }) || source.trim_start().starts_with('{')
 }
 
-fn bound_symbol_references(state: &crate::workbench::app_state::AppState) -> Vec<CellViewRef> {
+fn bound_symbol_references(model: &Model) -> Vec<CellViewRef> {
     let mut references = Vec::new();
-    for library in state.model.library_manager.libraries_sorted() {
+    for library in model.library_manager.libraries_sorted() {
         for cell in library.cells_sorted() {
             for view in cell.views_sorted() {
                 if view.view_type == crate::state::ViewType::Symbol
@@ -586,7 +570,8 @@ mod tests {
         app.design.symbol_import.target_name = "review_graphic".to_owned();
         app.design.symbol_import.binding_choice = SymbolImportBindingChoice::UnboundForReview;
 
-        let imported = import_candidate(&app).expect("review-only SVG import");
+        let imported = import_candidate(&app.design.symbol_import, &app.model)
+            .expect("review-only SVG import");
 
         assert!(
             imported
@@ -626,7 +611,7 @@ mod tests {
             .add_cell(crate::state::Cell::new("existing"));
 
         assert!(
-            import_candidate(&app)
+            import_candidate(&app.design.symbol_import, &app.model)
                 .expect_err("overwrite must fail closed")
                 .contains("already exists")
         );
@@ -695,7 +680,8 @@ mod tests {
             app.model.workspace.content.active_view.library.clone();
         app.design.symbol_import.target_name = "testamp".to_owned();
 
-        let imported = import_candidate(&app).expect("the symbol binds the model it names");
+        let imported = import_candidate(&app.design.symbol_import, &app.model)
+            .expect("the symbol binds the model it names");
         let SymbolSourceContract::Model { model, ports } = &imported.definition.source else {
             panic!("a model contract, not {:?}", imported.definition.source);
         };
@@ -712,7 +698,8 @@ mod tests {
         app.design
             .symbol_import
             .accept_source("missing.asy".to_owned(), asy.replace("TESTAMP", "MISSING"));
-        let unresolved = import_candidate(&app).expect_err("an unimported model is named");
+        let unresolved = import_candidate(&app.design.symbol_import, &app.model)
+            .expect_err("an unimported model is named");
         assert!(
             unresolved.contains("MISSING") && unresolved.contains("testamp.lib"),
             "{unresolved}"

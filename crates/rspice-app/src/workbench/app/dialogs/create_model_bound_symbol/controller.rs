@@ -13,7 +13,7 @@ use rspice_design_model::port::PinRole;
 
 use super::state::*;
 use crate::workbench::app_state::{
-    AppState, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
+    AppState, Model, SymbolDefinitionFixtureDelta, publish_symbol_definition_candidate_with_fixture,
 };
 
 pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
@@ -482,7 +482,7 @@ fn default_cell_name(model: &str) -> String {
 /// model library imported from that file when several hold the name; and
 /// the symbol's pin names, in `SpiceOrder`, are the terminals it binds.
 pub(crate) fn symbol_attribute_definition(
-    state: &AppState,
+    model: &Model,
     graphic: &rspice_model_library::symbol::ImportedGraphicSource,
     target_library: &str,
     cell: &str,
@@ -512,7 +512,7 @@ pub(crate) fn symbol_attribute_definition(
                 .is_some_and(|name| name.to_string_lossy().eq_ignore_ascii_case(file))
         })
     };
-    let libraries = || state.model.model_library_manager.catalog().libraries();
+    let libraries = || model.model_library_manager.catalog().libraries();
     let unresolved = || {
         let kind = if subcircuit { "subcircuit" } else { "model" };
         match &model_file {
@@ -643,25 +643,24 @@ pub(crate) fn symbol_attribute_definition(
         pins,
         template: CreateSymbolTemplate::RectangularIc,
         pin_contract_reviewed: true,
-        expected_library_revision: state.model.library_manager.revision(),
+        expected_library_revision: model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
     };
-    build_symbol_definition(state, &draft)
+    build_symbol_definition(model, &draft)
 }
 
 pub(super) fn build_create_symbol_definition(
     state: &AppState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
-    build_symbol_definition(state, &state.design.create_model_bound_symbol)
+    build_symbol_definition(&state.model, &state.design.create_model_bound_symbol)
 }
 
 fn build_symbol_definition(
-    state: &AppState,
+    model: &Model,
     draft: &CreateModelBoundSymbolDialogState,
 ) -> Result<ModelBoundSymbolDefinition, String> {
     let (library_name, cell_name) = parse_target(&draft.target)?;
-    let library = state
-        .model
+    let library = model
         .library_manager
         .get_library(library_name)
         .ok_or_else(|| format!("Library '{library_name}' no longer exists."))?;
@@ -687,7 +686,7 @@ fn build_symbol_definition(
         || {
             let material = format!(
                 "rspice:model-bound-symbol:{}:{library_name}/{cell_name}",
-                state.model.workspace.content.project.id()
+                model.workspace.content.project.id()
             );
             uuid::Uuid::new_v5(&uuid::Uuid::NAMESPACE_OID, material.as_bytes()).to_string()
         },

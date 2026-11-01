@@ -6,8 +6,8 @@ use egui::accesskit::{Node, Role};
 use egui::{Context, Rect, pos2, vec2};
 
 use crate::state::{
-    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance, Point, View,
-    ViewType,
+    Cell, CellViewRef, Component, ComponentType, Library, LibraryCellInstance,
+    ModelBoundSymbolDefinition, Point, SymbolDefinitionImport, View, ViewType,
 };
 use crate::workbench::RSpiceApp;
 use crate::workbench::commands::vocabulary::Command;
@@ -285,4 +285,49 @@ fn a_descent_is_carried_out_in_the_frame_it_is_chosen() {
         app.state.prompt_text(),
         Some("Descended into the instance; the parent's unsaved changes are kept.")
     );
+}
+
+#[test]
+fn import_symbol_definition_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    crate::workbench::app::open_symbol_import_dialog(&mut app.state);
+    assert!(draws_dialog(&mut app, "Import symbol definition"));
+    assert!(app.state.design.symbol_import.open);
+}
+
+#[test]
+fn the_component_form_designer_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    let library_name = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view
+        .library
+        .clone();
+    let template = ModelBoundSymbolDefinition::review_only(&library_name, "review_form");
+    let imported = SymbolDefinitionImport::from_bytes(
+        br#"<svg><rect x="0" y="0" width="40" height="20"/></svg>"#,
+        "review.svg",
+        Some(template),
+    )
+    .expect("typed review definition");
+    let library = app
+        .state
+        .model
+        .library_manager
+        .get_library_mut(&library_name)
+        .expect("project library");
+    crate::state::prepare_symbol_construction(&imported.definition, library)
+        .expect("construction plan")
+        .commit(library)
+        .expect("commit definition");
+    app.state
+        .model
+        .library_manager
+        .select_view(&library_name, "review_form", "symbol");
+    crate::workbench::app::open_symbol_parameter_form_dialog(&mut app.state);
+    assert!(draws_dialog(&mut app, "Open component form designer"));
+    assert!(app.state.design.symbol_parameter_form.open);
 }

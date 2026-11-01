@@ -12,6 +12,7 @@ mod render;
 mod source_picker;
 mod state;
 
+pub(in crate::workbench) use render::render_symbol_definition_dialogs;
 pub(crate) use state::{SymbolImportDialogState, SymbolParameterFormDialogState};
 
 use crate::state::{CellViewRef, ViewType};

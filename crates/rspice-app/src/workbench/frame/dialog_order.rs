@@ -290,7 +290,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         is_open: Some(|state| {
             state.design.symbol_import.open || state.design.symbol_parameter_form.open
         }),
-        render: |app, ctx| app.render_symbol_definition_dialogs(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_symbol_definition_dialogs(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("project.configuration"),
