@@ -424,6 +424,107 @@ mod tests {
         x(right) - x(left)
     }
 
+    /// Every text a freshly opened resistor's editor, opened on `R1`, paints,
+    /// with where it paints it.
+    fn resistor_editor_texts() -> Vec<(String, egui::Rect)> {
+        let kind = ComponentType::Resistor;
+        let catalog = PropertyCatalog::new();
+        let sheet = catalog.get(kind).expect("catalog sheet").clone();
+        let component = Component::new(1, kind, Point::origin());
+        let mut draft = ComponentPropertyDraft::default();
+        draft.reset(
+            kind,
+            &sheet,
+            collect_properties_with_sheet(&component, Some(&sheet)),
+        );
+        let context = ComponentEditorContext {
+            subtitle: "Resistor".to_owned(),
+            ..ComponentEditorContext::default()
+        };
+        let ctx = egui::Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        let mut frame = || {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    render_component_property_dialog(
+                        ui.ctx(),
+                        &mut draft,
+                        ComponentPropertyDialogView {
+                            component_name: Some("R1"),
+                            context: &context,
+                            sheet: &sheet,
+                            advisories: &[],
+                            session_error: None,
+                            model_browser_open: false,
+                            show_source_preview: false,
+                            quantity_policy: QuantityPresentationPolicy::default(),
+                            number_locale: UiNumberLocale::default(),
+                        },
+                        &mut NoServices,
+                    );
+                },
+            )
+        };
+        for _ in 0..3 {
+            drop(frame());
+        }
+        frame()
+            .shapes
+            .into_iter()
+            .filter_map(|clipped| match clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    /// The editor is titled for the instance, the title and the form share
+    /// one left edge, and a unit is stated after its value, inside the well,
+    /// not on the label's line. It used to open with no title bar, an
+    /// `Instance` band in its place, units pinned to the right of each label
+    /// and a flag drawn as a text well reading `yes`.
+    #[test]
+    fn the_editor_is_titled_for_the_instance_and_states_units_in_the_well() {
+        let texts = resistor_editor_texts();
+        let at = |wanted: &str| {
+            texts
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{wanted:?} was not painted: {texts:?}"))
+        };
+        let title = at("R1 properties");
+        let name = at("Name");
+        assert!(
+            (title.left() - name.left()).abs() < 0.5,
+            "the title starts at {} and the form at {}",
+            title.left(),
+            name.left()
+        );
+        let caption = at("Resistance *");
+        let unit = at("Ω");
+        assert!(
+            unit.top() >= caption.bottom(),
+            "the unit {unit:?} sits on the caption's line {caption:?}"
+        );
+        for gone in ["Instance", "yes", "Parameters"] {
+            assert!(
+                texts.iter().all(|(text, _)| text != gone),
+                "{gone:?} is still painted"
+            );
+        }
+    }
+
     /// Scroll a source's editor to its advanced head, as a reader has to, and
     /// press it. Returns whether the section is open afterwards, and whether
     /// its last field is on screen.
