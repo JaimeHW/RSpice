@@ -193,7 +193,7 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
         .open(selected_library, selected_signed_package);
 }
 
-pub(super) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
+pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.project.technology_attachment.open {
         return;
     }

@@ -368,6 +368,13 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             };
             Command::OpenWorkspace(workspace).execute(app);
         }
+        ProjectRequest::OpenRootAndCheck(root) => {
+            app.state.open_workspace_view(root);
+            Command::OpenWorkspace(Workspace::Design).execute(app);
+            if Command::CheckDesign.is_enabled(app) {
+                Command::CheckDesign.execute(app);
+            }
+        }
         ProjectRequest::CatalogChanged {
             pruned,
             mutation,

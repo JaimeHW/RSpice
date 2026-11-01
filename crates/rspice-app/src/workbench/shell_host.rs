@@ -109,7 +109,36 @@ impl Host for RSpiceApp {
                     return;
                 }
                 match workspace {
-                    Workspace::Project => project::show(ui, app),
+                    // The shell calls the project feature's surface by name
+                    // until the feature registers it: the chrome, then the
+                    // page in front, in the one fill the open project's
+                    // workspace paints, each with what it raised answered as
+                    // it returns, so the page draws what the chrome asked for
+                    // in the same frame.
+                    Workspace::Project => {
+                        let ctx = ui.ctx().clone();
+                        #[cfg(target_arch = "wasm32")]
+                        project::poll_browser_completions(&ctx, app);
+                        if app.state.platform.project_lifecycle.is_open() {
+                            let fill = crate::ui::tokens::Tokens::get(&ctx).color.bg_app;
+                            egui::Frame::new().fill(fill).show(ui, |ui| {
+                                // The application's central panel zeroes item
+                                // spacing before handing a surface the frame; a
+                                // page that inherits it instead of asserting it
+                                // grows a four-pixel seam of background under
+                                // every band the moment it is drawn anywhere
+                                // else, which is where these pages get reviewed.
+                                ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);
+                                project::chrome(&mut features::cx(app), ui);
+                                app.after_contribution();
+                                project::page(ui, app);
+                                app.after_contribution();
+                            });
+                        } else {
+                            project::show_landing(ui, app);
+                        }
+                        project::show_technology_attachment_dialog(&ctx, app);
+                    }
                     Workspace::Design => design::show(ui, app),
                     Workspace::Simulate => simulate::show(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),

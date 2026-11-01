@@ -500,27 +500,7 @@ impl AppState {
     /// invariants, but it is not a user-visible schematic and must never be
     /// advertised or checked as one.
     pub(crate) fn is_netlist_first_without_schematic(&self) -> bool {
-        let netlist_first_deck_owns_the_project = self
-            .model
-            .workspace
-            .content
-            .netlist_document
-            .as_ref()
-            .is_some_and(|document| document.generated_artifact().is_none());
-        if !netlist_first_deck_owns_the_project
-            || schematic_has_authored_content(&self.model.schematic)
-        {
-            return false;
-        }
-
-        self.model.workspace.content.schematic_buffers.len() <= 1
-            && self
-                .model
-                .workspace
-                .content
-                .schematic_buffers
-                .values()
-                .all(|schematic| !schematic_has_authored_content(schematic))
+        self.model.is_netlist_first_without_schematic()
     }
 
     /// [`request_run_set`](rspice_app_runs::workbench::slots::runs::request_run_set)
@@ -748,23 +728,6 @@ impl AppState {
     pub(crate) fn schematic_edit_in_progress(&self) -> bool {
         self.design.schematic_edit_in_progress(&self.model)
     }
-}
-
-fn schematic_has_authored_content(
-    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
-) -> bool {
-    let schematic = schematic.as_ref();
-    !schematic.components.is_empty()
-        || !schematic.wires.is_empty()
-        || !schematic.buses.is_empty()
-        || !schematic.bus_taps.is_empty()
-        || !schematic.design_notes.is_empty()
-        || !schematic.documentation_shapes.is_empty()
-        || !schematic.probes.is_empty()
-        || !schematic.net_labels.is_empty()
-        || !schematic.junctions.is_empty()
-        || !schematic.connections.is_empty()
-        || !schematic.validated_revisions.is_empty()
 }
 
 #[cfg(test)]

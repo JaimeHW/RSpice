@@ -304,6 +304,9 @@ impl ProjectCommand {
 pub(crate) enum ProjectRequest {
     ConfigurationSets,
     OpenView(CellViewRef, ViewType),
+    /// Open the project's root schematic in Design, then check it when the
+    /// check can run there.
+    OpenRootAndCheck(CellViewRef),
     /// What a catalog change left outside the model, then the revision a
     /// deletion reserved, then the change's own line in the log, in the
     /// order the change once wrote them.

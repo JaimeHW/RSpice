@@ -20,6 +20,7 @@ use egui::{
 };
 
 use crate::diagnostics::{LogSeverity, LogSource};
+use crate::state::command_catalog::CommandKey;
 use crate::state::{ProjectTechnologyBinding, model_library::ModelLibraryManager};
 use crate::ui::accessibility::plural_suffix;
 use crate::ui::theme::{self, FontWeight};
@@ -28,7 +29,11 @@ use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark, problem_line, select,
 };
 use crate::workbench::RSpiceApp;
+use crate::workbench::app::dialogs::project::configuration_dialogs::show_configuration_page_in;
 use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::project::{ProjectFeature, slot_facts};
 
 use super::super::commands::vocabulary::Command;
 use super::super::design_system::{WorkbenchIcon, elide_text, property_card, property_row};
@@ -36,7 +41,8 @@ use super::super::framework::command_registry::ids;
 use super::super::state::Workspace;
 use crate::workbench::project::workspace_state::ProjectPage;
 use recovery::recovery;
-use technology::{open_technology_attachment_dialog, show_technology_attachment_dialog};
+use technology::open_technology_attachment_dialog;
+pub(in crate::workbench) use technology::show_technology_attachment_dialog;
 #[cfg(target_arch = "wasm32")]
 use technology::{poll_browser_recovery_completions, poll_browser_technology_checkpoint};
 
@@ -127,59 +133,51 @@ thread_local! {
         const { std::cell::RefCell::new(std::collections::VecDeque::new()) };
 }
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let ctx = ui.ctx().clone();
-    #[cfg(target_arch = "wasm32")]
-    {
-        poll_browser_technology_checkpoint(&ctx, app);
-        poll_browser_recovery_completions(&ctx, app);
-    }
-    // This workspace is a live route with no project behind it whenever a
-    // project is closed, the launcher is dismissed with nothing open, a recovery
-    // review declines to reopen, or a live session is waiting for the host's
-    // snapshot.
-    // Every section below projects an open project's state, so showing them here
-    // would dress the bootstrap placeholder up as the reader's own work.
-    if !app.state.platform.project_lifecycle.is_open() {
-        landing::show(ui, app);
-        show_technology_attachment_dialog(&ctx, app);
-        return;
-    }
-    let tokens = Tokens::get(ui.ctx());
-    egui::Frame::new().fill(tokens.color.bg_app).show(ui, |ui| {
-        // The application's central panel zeroes item spacing before handing a
-        // surface the frame; a page that inherits it instead of asserting it
-        // grows a four-pixel seam of background under every band the moment it
-        // is drawn anywhere else, which is where these pages get reviewed.
-        ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-        project_chrome(ui, app);
-        let page = app.state.project.project_page;
-        let panel = ui.scope(|ui| match page {
-            ProjectPage::Overview => overview::overview(ui, app),
-            ProjectPage::Library => library::library(ui, app),
-            ProjectPage::Recovery => recovery(ui, app),
-            ProjectPage::Configuration => configuration::configuration(ui, app),
-            page => {
-                ScrollArea::vertical()
-                    .id_salt(("workbench.project.surface", page))
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| match page {
-                        ProjectPage::Dependencies => dependencies::dependencies(ui, app),
-                        ProjectPage::Overview
-                        | ProjectPage::Library
-                        | ProjectPage::Configuration
-                        | ProjectPage::Recovery => {
-                            unreachable!("page owns its scroll contract")
-                        }
-                    });
-            }
-        });
-        ui.ctx().accesskit_node_builder(panel.response.id, |node| {
-            node.set_role(egui::accesskit::Role::TabPanel);
-            node.set_label(format!("Project {}", page.label()));
-        });
+/// Take what the browser finished writing or reading for this workspace
+/// before it draws.
+#[cfg(target_arch = "wasm32")]
+pub(in crate::workbench) fn poll_browser_completions(ctx: &Context, app: &mut RSpiceApp) {
+    poll_browser_technology_checkpoint(ctx, app);
+    poll_browser_recovery_completions(ctx, app);
+}
+
+/// The workspace with no project behind it, which it is whenever a project
+/// is closed, the launcher is dismissed with nothing open, a recovery review
+/// declines to reopen, or a live session is waiting for the host's snapshot.
+/// Every section of the open workspace projects an open project's state, so
+/// showing them here would dress the bootstrap placeholder up as the reader's
+/// own work.
+pub(in crate::workbench) fn show_landing(ui: &mut Ui, app: &mut RSpiceApp) {
+    landing::show(ui, app);
+}
+
+/// The open project's page in front, as the panel the chrome's tabs control.
+pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
+    let page = app.state.project.project_page;
+    let panel = ui.scope(|ui| match page {
+        ProjectPage::Overview => overview::overview(ui, app),
+        ProjectPage::Library => library::library(ui, app),
+        ProjectPage::Recovery => recovery(ui, app),
+        ProjectPage::Configuration => configuration::configuration(ui, app),
+        page => {
+            ScrollArea::vertical()
+                .id_salt(("workbench.project.surface", page))
+                .auto_shrink([false, false])
+                .show(ui, |ui| match page {
+                    ProjectPage::Dependencies => dependencies::dependencies(ui, app),
+                    ProjectPage::Overview
+                    | ProjectPage::Library
+                    | ProjectPage::Configuration
+                    | ProjectPage::Recovery => {
+                        unreachable!("page owns its scroll contract")
+                    }
+                });
+        }
     });
-    show_technology_attachment_dialog(&ctx, app);
+    ui.ctx().accesskit_node_builder(panel.response.id, |node| {
+        node.set_role(egui::accesskit::Role::TabPanel);
+        node.set_label(format!("Project {}", page.label()));
+    });
 }
 
 /// Reuse the exact project-owned Library/Cell/View browser from a specialist
@@ -188,8 +186,21 @@ pub(super) fn show_library_browser(ui: &mut Ui, app: &mut RSpiceApp) {
     library::library(ui, app);
 }
 
-fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
+/// What the reader asked of the chrome, raised once it has drawn: a command,
+/// or what only the shell carries out.
+enum ChromeRaise {
+    Execute(CommandKey),
+    Shell(ProjectRequest),
+}
+
+/// The open project's chrome: the section tabs, the revision, and the health
+/// chips and actions of the page in front, in the project feature's context.
+/// The tabs and the configuration chip change the page where they are drawn;
+/// what else the reader asked of it is raised once it has drawn and answered
+/// before the page below it draws, in the same frame.
+pub(in crate::workbench) fn chrome(cx: &mut Cx<'_, ProjectFeature>, ui: &mut Ui) {
     let tokens = Tokens::get(ui.ctx());
+    let mut raised = None;
     let shown = egui::Frame::new()
         .fill(tokens.color.bg_panel)
         .inner_margin(Margin {
@@ -200,13 +211,13 @@ fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .show(ui, |ui| {
             let inline = ui.available_width()
-                >= project_tabs_desired_width(ui) + project_context_desired_width(app) + 10.0;
+                >= project_tabs_desired_width(ui) + project_context_desired_width(cx) + 10.0;
             if inline {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 10.0;
-                    project_tabs(ui, app);
+                    project_tabs(ui, cx);
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        project_context_cluster(ui, app);
+                        project_context_cluster(ui, cx, &mut raised);
                     });
                 });
             } else {
@@ -214,11 +225,11 @@ fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
                     .id_salt("workbench.project.tabs.compact")
                     .auto_shrink([false, true])
                     .show(ui, |ui| {
-                        project_tabs(ui, app);
+                        project_tabs(ui, cx);
                     });
                 ui.horizontal(|ui| {
                     ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                        project_context_cluster(ui, app);
+                        project_context_cluster(ui, cx, &mut raised);
                     });
                 });
             }
@@ -228,28 +239,37 @@ fn project_chrome(ui: &mut Ui, app: &mut RSpiceApp) {
         shown.response.rect.bottom(),
         Stroke::new(1.0, tokens.color.border),
     );
+    match raised {
+        Some(ChromeRaise::Execute(key)) => cx.execute(key),
+        Some(ChromeRaise::Shell(request)) => cx.wb.outbox.push(request),
+        None => {}
+    }
 }
 
-fn project_context_cluster(ui: &mut Ui, app: &mut RSpiceApp) {
+fn project_context_cluster(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    raised: &mut Option<ChromeRaise>,
+) {
     let tokens = Tokens::get(ui.ctx());
-    let desired = project_context_desired_width(app);
+    let desired = project_context_desired_width(cx);
     let width = ui.available_width().min(desired).max(1.0);
     ui.allocate_ui_with_layout(
         vec2(width, PROJECT_TAB_HEIGHT),
         Layout::left_to_right(Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
-            project_revision_label(ui, app, &tokens);
-            if app.state.project.project_page != ProjectPage::Overview {
-                project_health_chips(ui, app);
-                project_page_actions(ui, app);
+            project_revision_label(ui, cx, &tokens);
+            if cx.state.project_page != ProjectPage::Overview {
+                project_health_chips(ui, cx, raised);
+                project_page_actions(ui, cx, raised);
             }
         },
     );
 }
 
-fn project_context_desired_width(app: &RSpiceApp) -> f32 {
-    if app.state.project.project_page == ProjectPage::Overview {
+fn project_context_desired_width(cx: &Cx<'_, ProjectFeature>) -> f32 {
+    if cx.state.project_page == ProjectPage::Overview {
         160.0
     } else {
         610.0
@@ -272,17 +292,16 @@ fn project_tabs_desired_width(ui: &Ui) -> f32 {
     labels + 2.0 * (ProjectPage::ALL.len().saturating_sub(1) as f32)
 }
 
-fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
+fn project_tabs(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let tokens = Tokens::get(ui.ctx());
     let font = theme::sans(tokens::FS_1, FontWeight::Medium);
     let tab_ids = ProjectPage::ALL.map(|page| ui.id().with(("project-section-tab", page)));
     // Edits to a configuration survive leaving its page, so its tab carries
     // the unsaved mark a document tab does until they are applied.
-    let configuration_dirty = app
+    let configuration_dirty = cx
         .state
-        .project
         .configuration
-        .is_dirty(&app.state.model.workspace.content.configuration_sets);
+        .is_dirty(&cx.model.workspace.content.configuration_sets);
     let shown = ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 2.0;
         for (index, page) in ProjectPage::ALL.into_iter().enumerate() {
@@ -296,7 +315,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
             let (_, rect) =
                 ui.allocate_space(vec2(text_width + 20.0 + mark_width, PROJECT_TAB_HEIGHT));
             let response = ui.interact(rect, tab_ids[index], Sense::click());
-            let selected = app.state.project.project_page == page;
+            let selected = cx.state.project_page == page;
             response.widget_info(|| {
                 WidgetInfo::selected(
                     WidgetType::SelectableLabel,
@@ -350,7 +369,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
             }
             theme::paint_focus_ring(ui, &response, rect);
             if response.clicked() {
-                app.state.project.project_page = page;
+                cx.state.project_page = page;
             }
             if response.has_focus() {
                 let target = ui.input_mut(|input| {
@@ -367,7 +386,7 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
                     }
                 });
                 if let Some(target) = target {
-                    app.state.project.project_page = ProjectPage::ALL[target];
+                    cx.state.project_page = ProjectPage::ALL[target];
                     ui.memory_mut(|memory| memory.request_focus(tab_ids[target]));
                 }
             }
@@ -380,11 +399,11 @@ fn project_tabs(ui: &mut Ui, app: &mut RSpiceApp) {
     });
 }
 
-fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
+fn project_revision_label(ui: &mut Ui, cx: &Cx<'_, ProjectFeature>, tokens: &Tokens) {
     ui.label(
         egui::RichText::new(format!(
             "main @ r{}",
-            app.state.model.workspace.content.project.revision().get()
+            cx.model.workspace.content.project.revision().get()
         ))
         .font(theme::mono(tokens::FS_0, FontWeight::Medium))
         .color(tokens.color.text_faint),
@@ -392,10 +411,13 @@ fn project_revision_label(ui: &mut Ui, app: &RSpiceApp, tokens: &Tokens) {
     .on_hover_text("Current mutable project input revision");
 }
 
-fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
-    if app.state.is_netlist_first_without_schematic() {
-        let (label, description, problem) = app
-            .state
+fn project_health_chips(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    raised: &mut Option<ChromeRaise>,
+) {
+    if cx.model.is_netlist_first_without_schematic() {
+        let (label, description, problem) = cx
             .model.workspace
             .content.netlist_document
             .as_ref()
@@ -433,18 +455,15 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             );
         if project_status_chip(ui, "project-source", &label, &description, problem, true).clicked()
         {
-            Command::OpenWorkspace(Workspace::Netlist).execute(app);
+            *raised = Some(ChromeRaise::Execute(
+                Command::OpenWorkspace(Workspace::Netlist).key(),
+            ));
         }
     } else {
-        let root = app
-            .state
+        let root = cx.model.workspace.content.simulation_root_reference();
+        let (checks_label, checks_description, checks_problem) = match cx
             .model
-            .workspace
-            .content
-            .simulation_root_reference();
-        let (checks_label, checks_description, checks_problem) = match app
-            .state
-            .simulation_root_design_check_status()
+            .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
         {
             DesignCheckStatus::Current(receipt) => {
                 let summary = receipt.result.summary();
@@ -484,21 +503,11 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
         )
         .clicked()
         {
-            app.state.open_workspace_view(root);
-            Command::OpenWorkspace(Workspace::Design).execute(app);
-            if Command::CheckDesign.is_enabled(app) {
-                Command::CheckDesign.execute(app);
-            }
+            *raised = Some(ChromeRaise::Shell(ProjectRequest::OpenRootAndCheck(root)));
         }
     }
 
-    let active_configuration = app
-        .state
-        .model
-        .workspace
-        .content
-        .configuration_sets
-        .active();
+    let active_configuration = cx.model.workspace.content.configuration_sets.active();
     let configuration =
         active_configuration.map_or("Default", |configuration| configuration.name());
     // A configuration's name is a name, not a state, and Default is what a
@@ -513,19 +522,18 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
     )
     .clicked()
     {
-        Command::ConfigurationSets.execute(app);
+        // The Configurations command, carried out where the chip is drawn so
+        // the band's action after it reads the page it opens. Of the steps
+        // every command passes through, only these two guards act on it.
+        let command = Command::ConfigurationSets;
+        if !command.held_by_project_operation(cx.platform)
+            && !command.lacks_open_project(cx.platform)
+        {
+            show_configuration_page_in(cx.platform, cx.wb, &mut cx.state.project_page);
+        }
     }
 
-    if let Some((index, run)) = app
-        .state
-        .model
-        .simulation
-        .retained
-        .runs
-        .iter()
-        .enumerate()
-        .next()
-    {
+    if let Some((index, run)) = cx.model.simulation.retained.runs.iter().enumerate().next() {
         let has_dataset = !run.analyses.is_empty();
         // A run that completed with data is the ordinary run, so the chip
         // names only the two cases that are not.
@@ -560,10 +568,12 @@ fn project_health_chips(ui: &mut Ui, app: &mut RSpiceApp) {
             // project is the deck, not Simulate.
             let destination = overview::run_destination(
                 has_dataset,
-                app.state.is_netlist_first_without_schematic(),
+                cx.model.is_netlist_first_without_schematic(),
             );
-            if app.state.model.simulation.select_run(index) {
-                Command::OpenWorkspace(destination).execute(app);
+            if cx.model.simulation.select_run(index) {
+                *raised = Some(ChromeRaise::Execute(
+                    Command::OpenWorkspace(destination).key(),
+                ));
             }
         }
     } else {
@@ -657,12 +667,16 @@ fn project_status_chip(
     response.on_hover_text(accessible_label)
 }
 
-fn project_page_actions(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.project.project_page {
+fn project_page_actions(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    raised: &mut Option<ChromeRaise>,
+) {
+    match cx.state.project_page {
         ProjectPage::Overview => {}
         ProjectPage::Library => {
             if Button::new("Attach library\u{2026}").show(ui).clicked() {
-                app.execute_command_key(ids::PDK_SETTINGS);
+                *raised = Some(ChromeRaise::Execute(ids::PDK_SETTINGS));
             }
         }
         // The Configuration page's own band carries its actions.
@@ -926,9 +940,15 @@ fn muted(ui: &mut Ui, text: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::framework::host::{Host, Point};
     use crate::workbench::surfaces::project::library_publication::{
         commit_project_library_publication, prepare_project_library_publication,
     };
+
+    /// The Project workspace as the shell draws it on the stage.
+    fn show(ui: &mut Ui, app: &mut RSpiceApp) {
+        app.contribute(Point::Surface(Workspace::Project), ui);
+    }
 
     fn assert_close(actual: f32, expected: f32) {
         assert!((actual - expected).abs() <= 0.001, "{actual} != {expected}");
@@ -1026,6 +1046,177 @@ mod tests {
         for page in ProjectPage::ALL {
             assert!(open.contains(page.label()), "{}", page.label());
         }
+    }
+
+    /// One pass of the Project workspace as the shell draws it, with the
+    /// AccessKit tree it published.
+    fn project_frame(
+        ctx: &egui::Context,
+        app: &mut RSpiceApp,
+        events: Vec<egui::Event>,
+    ) -> egui::FullOutput {
+        ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| show(ui, app));
+            },
+        )
+    }
+
+    /// The configuration chip opens the Configuration page in the frame it
+    /// was clicked in: the band beside it drops the Library page's action and
+    /// the page below it is the Configuration page.
+    #[test]
+    fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.project.project_page = ProjectPage::Library;
+        let mut settled = project_frame(&ctx, &mut app, Vec::new());
+        for _ in 0..2 {
+            settled = project_frame(&ctx, &mut app, Vec::new());
+        }
+        assert!(painted_text(&settled).contains("Attach library\u{2026}"));
+        let nodes = settled
+            .platform_output
+            .accesskit_update
+            .expect("the settled frame publishes its tree")
+            .nodes;
+        let chip = nodes
+            .iter()
+            .find_map(|(_, node)| {
+                (node.label()? == "Configuration used for runs: Default").then_some(node.bounds()?)
+            })
+            .expect("the Library page's chrome offers the configuration chip");
+        let at = pos2(
+            ((chip.x0 + chip.x1) / 2.0) as f32,
+            ((chip.y0 + chip.y1) / 2.0) as f32,
+        );
+        let click = vec![
+            egui::Event::PointerMoved(at),
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: true,
+                modifiers: Modifiers::default(),
+            },
+            egui::Event::PointerButton {
+                pos: at,
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: Modifiers::default(),
+            },
+        ];
+
+        let clicked = project_frame(&ctx, &mut app, click);
+
+        assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
+        let painted = painted_text(&clicked);
+        assert!(!painted.contains("Attach library\u{2026}"), "{painted}");
+        let panels = clicked
+            .platform_output
+            .accesskit_update
+            .expect("the clicked frame publishes its tree")
+            .nodes
+            .into_iter()
+            .filter(|(_, node)| node.role() == egui::accesskit::Role::TabPanel)
+            .filter_map(|(_, node)| node.label().map(str::to_owned))
+            .collect::<Vec<_>>();
+        assert_eq!(panels, ["Project Configuration"]);
+    }
+
+    /// Of the steps every command passes through, the configuration chip
+    /// takes only the two guards that can refuse the Configurations command:
+    /// the command is not handed to a source editor, edits no schematic,
+    /// commits no inspector edit and is not repeated.
+    #[test]
+    fn the_configuration_chip_passes_the_guards_the_command_does() {
+        let command = Command::ConfigurationSets;
+        assert!(command.requires_open_project());
+        assert!(command.blocked_by_project_operation());
+        assert!(command.source_editor_request().is_none());
+        assert!(!crate::workbench::commands::command_edits_schematic(
+            command
+        ));
+        assert!(!command.commits_inspector_edit());
+        assert!(!command.repeatable());
+    }
+
+    /// The open workspace's chrome and page share the one fill the shell
+    /// paints behind them: a single shape fills the whole stage with the
+    /// application background, and no pixel of the stage shows what lies
+    /// beneath it.
+    #[test]
+    fn the_chrome_and_the_page_share_one_fill_across_the_stage() {
+        const BENEATH: Color32 = Color32::from_rgb(255, 0, 255);
+        let size = egui::vec2(1440.0, 900.0);
+        let stage = Rect::from_min_size(egui::Pos2::ZERO, size);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let bg_app = Tokens::get(&ctx).color.bg_app;
+        let mut app = RSpiceApp::test_instance();
+        app.state.project.project_page = ProjectPage::Library;
+        let mut output = None;
+        for _ in 0..3 {
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(stage),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE.fill(BENEATH))
+                        .show(ctx, |ui| show(ui, &mut app));
+                },
+            ));
+        }
+        fn stage_fills(shape: &egui::epaint::Shape, stage: Rect, fill: Color32, found: &mut usize) {
+            match shape {
+                egui::epaint::Shape::Rect(rect)
+                    if rect.fill == fill && rect.rect.contains_rect(stage) =>
+                {
+                    *found += 1;
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    for shape in shapes {
+                        stage_fills(shape, stage, fill, found);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut fills = 0;
+        for clipped in &output.expect("three passes ran").shapes {
+            stage_fills(&clipped.shape, stage, bg_app, &mut fills);
+        }
+        assert_eq!(
+            fills, 1,
+            "one shape fills the stage with the application background"
+        );
+
+        let canvas = crate::ui::raster::render(size, |ui, _| {
+            egui::CentralPanel::default()
+                .frame(egui::Frame::NONE.fill(BENEATH))
+                .show(ui, |ui| show(ui, &mut app));
+        });
+        let sampled = canvas.pixels_in(stage).collect::<Vec<_>>();
+        assert_eq!(sampled.len(), canvas.width() * canvas.height());
+        assert!(
+            sampled.iter().all(|pixel| *pixel != BENEATH),
+            "the stage shows through the fill"
+        );
+        assert!(
+            sampled.contains(&bg_app),
+            "the fill itself is seen between the panels"
+        );
     }
 
     #[test]

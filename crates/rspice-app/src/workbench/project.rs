@@ -32,7 +32,8 @@ use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspe
 use crate::workbench::docks::navigator::project::ProjectNavigator;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Peers,
+    Reads,
 };
 use crate::workbench::framework::requests::{FocusProjectLauncherSearch, ProjectFileAction};
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, has_unsaved_changes};
@@ -42,6 +43,7 @@ use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::ProjectCommand;
 use library_dialogs::new_view_target;
 use revision_history::open_project_revision_history;
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
 
 /// The project feature.
@@ -152,13 +154,19 @@ fn check_and_save_parts<'c>(cx: &'c mut Cx<'_, ProjectFeature>) -> CheckAndSaveP
         model: &mut *cx.model,
         platform: &*cx.platform,
         wb: &mut *cx.wb,
-        facts: SlotFacts {
-            preflight_report_retained: cx.runs.preflight.report.is_some(),
-            review_markers: cx.peers.design().review_markers(),
-        },
+        facts: slot_facts(cx.runs, &cx.peers),
         presentation: cx.peers.results().saved_presentation(),
         design: cx.peers.design(),
         code: cx.peers.code(),
+    }
+}
+
+/// What the design checks read of the run tier and design, as the project
+/// feature's context lends them.
+pub(in crate::workbench) fn slot_facts(runs: &RunsState, peers: &Peers<'_>) -> SlotFacts {
+    SlotFacts {
+        preflight_report_retained: runs.preflight.report.is_some(),
+        review_markers: peers.design().review_markers(),
     }
 }
 
@@ -205,10 +213,7 @@ fn show_inspector(cx: &mut Cx<'_, ProjectFeature>, ui: &mut egui::Ui) {
                 .as_deref()
                 .and_then(builtin_veriloga_model),
             model,
-            facts: SlotFacts {
-                preflight_report_retained: cx.runs.preflight.report.is_some(),
-                review_markers: cx.peers.design().review_markers(),
-            },
+            facts: slot_facts(cx.runs, &cx.peers),
             lifecycle: LifecycleView {
                 model,
                 platform: cx.platform,

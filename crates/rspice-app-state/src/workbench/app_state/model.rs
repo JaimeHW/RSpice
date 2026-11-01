@@ -229,6 +229,49 @@ impl Model {
             log_id,
         });
     }
+
+    /// Whether this project is intentionally owned by an authored or imported
+    /// netlist-first SPICE deck and has no schematic-derived baseline.
+    ///
+    /// A pristine bootstrap buffer remains present for legacy document/save
+    /// invariants, but it is not a user-visible schematic and must never be
+    /// advertised or checked as one.
+    pub fn is_netlist_first_without_schematic(&self) -> bool {
+        let netlist_first_deck_owns_the_project = self
+            .workspace
+            .content
+            .netlist_document
+            .as_ref()
+            .is_some_and(|document| document.generated_artifact().is_none());
+        if !netlist_first_deck_owns_the_project || schematic_has_authored_content(&self.schematic) {
+            return false;
+        }
+
+        self.workspace.content.schematic_buffers.len() <= 1
+            && self
+                .workspace
+                .content
+                .schematic_buffers
+                .values()
+                .all(|schematic| !schematic_has_authored_content(schematic))
+    }
+}
+
+fn schematic_has_authored_content(
+    schematic: &impl AsRef<rspice_design::schematic::document::SchematicDocument>,
+) -> bool {
+    let schematic = schematic.as_ref();
+    !schematic.components.is_empty()
+        || !schematic.wires.is_empty()
+        || !schematic.buses.is_empty()
+        || !schematic.bus_taps.is_empty()
+        || !schematic.design_notes.is_empty()
+        || !schematic.documentation_shapes.is_empty()
+        || !schematic.probes.is_empty()
+        || !schematic.net_labels.is_empty()
+        || !schematic.junctions.is_empty()
+        || !schematic.connections.is_empty()
+        || !schematic.validated_revisions.is_empty()
 }
 
 /// What model code reads of the features' state.

@@ -745,12 +745,30 @@ const SIMULATE_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
-/// The shell's `contribute`, at the project feature's points: the navigator
-/// and the inspector draw in the feature's context and the toolbars over the
-/// workbench host. The inspector has what it raised answered once it has
-/// drawn, before the next point draws; the navigator and the toolbars raise
-/// nothing, so they answer nothing where they draw.
+/// The shell's `contribute`, at the project feature's points: the open
+/// workspace's chrome, the navigator and the inspector draw in the feature's
+/// context and the toolbars over the workbench host. The chrome has what it
+/// raised answered before the page in front draws, in the one fill the two
+/// share, and the page has its own answered as it returns; the inspector has
+/// what it raised answered once it has drawn, before the next point draws.
+/// The navigator and the toolbars raise nothing, so they answer nothing
+/// where they draw.
 const PROJECT_CONTRIBUTIONS: &[Step] = &[
+    (
+        "workspace surface",
+        &[
+            "Workspace::Project => {",
+            "egui::Frame::new().fill(fill).show(ui, |ui| {",
+            "ui.spacing_mut().item_spacing = egui::vec2(0.0, 0.0);\
+           project::chrome(&mut features::cx(app), ui);\
+           app.after_contribution();\
+           project::page(ui, app);\
+           app.after_contribution();\
+           });",
+            "project::show_technology_attachment_dialog(&ctx, app);\
+           }",
+        ],
+    ),
     (
         "navigator",
         &[
@@ -1418,7 +1436,7 @@ fn a_simulate_surface_or_dock_has_the_command_it_raised_answered_once_it_draws()
 }
 
 #[test]
-fn of_the_project_contributions_only_the_inspector_answers_what_it_raised_once_it_draws() {
+fn of_the_project_contributions_the_chrome_the_page_and_the_inspector_answer_what_they_raised() {
     assert_runs_in_order(
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
