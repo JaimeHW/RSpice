@@ -1273,3 +1273,37 @@ fn dollar_ampersand_expands_a_vector_as_ngspice_words() {
     );
     assert!(error.unwrap().contains("names no vector"));
 }
+
+/// ngspice `x[i]` and `x[lo,hi]` (frontend/evaluate.c:697 `op_ind`): a bound
+/// rounds to the nearest integer and is clamped into the vector, `hi < lo`
+/// runs backwards, and indexing a scalar fails. ngspice-46 echoes
+/// `4 2 4 6 6 4 2 8 0 4 -16` and `6` for the same script.
+#[test]
+fn indexing_selects_elements_and_ranges_as_ngspice_does() {
+    let source = "index vectors\nV1 in 0 PULSE(0 1 0 1u 1u 1 2)\nR1 in out 1k\nC1 out 0 1n\n\
+        .control\nlet w = vector(5) * 2\nlet a = w[2]\nlet b = w[1,3]\nlet c = w[3,1]\n\
+        let d = w[7]\nlet e = w[-2]\nlet f = w[1.6]\nlet g = -w[2]^2\n\
+        echo $&a $&b $&c $&d $&e $&f $&g\nlet n = 2\nlet h = w[n+1]\necho $&h\n\
+        tran 0.1u 1u\nlet t = time[3]\nlet vo = v(out)[2,4]\nprint t vo time v(out)\n\
+        .endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["4 2 4 6 6 4 2 8 0 4 -16", "6"]);
+    let traces = printed(presented.last().unwrap());
+    let (t, vo, time, vout) = (&traces[0], &traces[1], &traces[2], &traces[3]);
+    assert_eq!(t.y.samples, [time.y.samples[3]]);
+    assert_eq!(vo.y.samples, vout.y.samples[2..=4]);
+    // An indexed vector has no scale: it prints against its element index.
+    assert_ne!(vo.x.expression, "time");
+
+    let (_, error) = run_until_error(
+        "scalar index\nV1 1 0 5\nR1 1 0 1k\n.control\nlet a = vector(1)\nlet s = a[0]\n\
+         .endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("indexing a scalar"));
+    // ngspice's `$&` reads a vector by name only: `$&w[2]` is no vector.
+    let (_, error) = run_until_error(
+        "no index\nV1 1 0 5\nR1 1 0 1k\n.control\nlet w = vector(3)\necho $&w[2]\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("names no vector"));
+}

@@ -2945,6 +2945,69 @@ fn control_quoted_vectors_preserve_regular_strings_and_ternary_separators() {
     ));
 }
 
+/// ngspice indexes a control vector as `x[i]` or `x[lo,hi]`, binding tighter
+/// than `^` (frontend/parse-bison.y:93). Only control expressions read
+/// brackets so; any other expression parses `a[1]` as before.
+#[test]
+fn control_expressions_index_operands_and_other_expressions_do_not() {
+    let abort = crate::abort_signal::NoAbort;
+    let parse = |source: &str| {
+        format!(
+            "{:?}",
+            parse_control_expression_with_abort(source, &abort).unwrap()
+        )
+    };
+    let index = |args: Vec<Expr>| {
+        format!(
+            "{:?}",
+            Expr::FnCall {
+                name: "[]".into(),
+                args
+            }
+        )
+    };
+    let x = || Expr::Param("X".into());
+    assert_eq!(parse("x[2]"), index(vec![x(), Expr::Number(2.0)]));
+    assert_eq!(
+        parse("x[1, n]"),
+        index(vec![x(), Expr::Number(1.0), Expr::Param("N".into())])
+    );
+    let indexed = Expr::FnCall {
+        name: "[]".into(),
+        args: vec![x(), Expr::Number(1.0)],
+    };
+    let squared = Expr::BinOp {
+        op: BinOpKind::Pow,
+        left: Box::new(indexed),
+        right: Box::new(Expr::Number(2.0)),
+    };
+    assert_eq!(
+        parse("-x[1]^2"),
+        format!(
+            "{:?}",
+            Expr::UnaryOp {
+                op: UnaryOpKind::Neg,
+                operand: Box::new(squared),
+            }
+        )
+    );
+    let probe = parse_control_expression_with_abort("v(out)", &abort).unwrap();
+    assert_eq!(parse("v(out)[3]"), index(vec![probe, Expr::Number(3.0)]));
+    assert_eq!(
+        parse("@m1[gm]"),
+        format!("{:?}", Expr::Param("@M1[GM]".into()))
+    );
+    assert!(parse_control_expression_with_abort("x[1", &abort).is_err());
+    assert_eq!(
+        parse_expression("a[1]").unwrap_err(),
+        ExprError::TrailingInput("[1]".into())
+    );
+    assert_eq!(
+        parse_expression("2*a[b]").unwrap_err(),
+        ExprError::TrailingInput("[b]".into())
+    );
+}
+
 #[test]
 fn xyce_expressions_read_a_colon_inside_a_name_as_part_of_it() {
     // Xyce's lexer (ExpressionLexer.l ID) takes ':' into a name, so

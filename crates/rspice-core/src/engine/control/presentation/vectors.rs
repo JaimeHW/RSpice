@@ -309,6 +309,11 @@ impl ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<String>>, ControlError> {
+        // ngspice looks the name up (vectors.c `vec_get`); it does not
+        // evaluate an index, so `$&w[2]` names no vector.
+        if name.contains('[') && !name.starts_with('@') {
+            return Ok(None);
+        }
         let Ok(parsed) = parse_control_expression_with_abort(name, abort) else {
             aborted(abort, line)?;
             return Ok(None);
@@ -478,6 +483,11 @@ impl ControlCircuit {
                     charge(budget, value.samples.len(), line)?;
                     return Ok(leaf(expression, value, leaves));
                 }
+                if name == "[]" {
+                    let value = self.index_vector(args, budget, variables, line, abort)?;
+                    charge(budget, value.samples.len(), line)?;
+                    return Ok(leaf(expression, value, leaves));
+                }
                 if is_probe(name) {
                     let probe = name.rsplit('.').next().unwrap_or(name);
                     if matches!(probe, "V" | "N") && args.len() == 2 {
@@ -567,6 +577,56 @@ impl ControlCircuit {
             }
         };
         Ok(shape)
+    }
+
+    /// `x[i]` and `x[lo,hi]` (frontend/evaluate.c:697 `op_ind`): a bound
+    /// rounds to the nearest integer and is clamped into the vector (ngspice
+    /// warns and clamps), a range with `hi < lo` runs backwards, and the
+    /// result has no scale. A complex index `x[lo+hi*j]` is a range too.
+    fn index_vector(
+        &self,
+        args: &[Expr],
+        budget: &mut usize,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<VectorValue, ControlError> {
+        let [operand, bounds @ ..] = args else {
+            return Err(command_error(line, "an index needs a vector"));
+        };
+        let vector = self.vector_value(operand, budget, variables, line, abort)?;
+        if vector.samples.len() <= 1 {
+            return Err(command_error(line, "indexing a scalar"));
+        }
+        let mut bound = |expression: &Expr| -> Result<(ComplexValue, bool), ControlError> {
+            let value = self.vector_value(expression, budget, variables, line, abort)?;
+            match value.samples.as_slice() {
+                [sample] => Ok((*sample, value.complex)),
+                _ => Err(command_error(line, "an index must be of length 1")),
+            }
+        };
+        let (low, high) = match bounds {
+            [index] => match bound(index)? {
+                (value, true) => (value.re, value.im),
+                (value, false) => (value.re, value.re),
+            },
+            [low, high] => (bound(low)?.0.re, bound(high)?.0.re),
+            _ => return Err(command_error(line, "an index takes one or two bounds")),
+        };
+        let last = (vector.samples.len() - 1) as Value;
+        let clamp = |value: Value| (value + 0.5).floor().clamp(0.0, last) as usize;
+        let (low, high) = (clamp(low), clamp(high));
+        let samples = if low <= high {
+            vector.samples[low..=high].to_vec()
+        } else {
+            vector.samples[high..=low].iter().rev().copied().collect()
+        };
+        Ok(VectorValue {
+            samples,
+            complex: vector.complex,
+            scale: None,
+            unit: vector.unit,
+        })
     }
 
     /// One print or plot trace of an expression that names a `let` vector.
@@ -682,7 +742,8 @@ const MAX_INLINED_NODES: usize = 1 << 16;
 fn needs_vector_functions(expression: &Expr, variables: &ParamContext) -> bool {
     match expression {
         Expr::FnCall { name, args } => {
-            variables.has_function(name)
+            name == "[]"
+                || variables.has_function(name)
                 || functions::is_vector_function(name)
                 || builtin_function(name, args.len()).is_some()
                 || args

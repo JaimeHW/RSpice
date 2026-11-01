@@ -297,7 +297,8 @@ impl<'a> ExprParser<'a> {
     /// to the immediate operand only and the chain keeps folding left, so
     /// `2^-3^2` = `(2^-3)^2`.
     fn parse_power(&mut self) -> Result<Expr, ExprError> {
-        let mut base = self.parse_primary()?;
+        let primary = self.parse_primary()?;
+        let mut base = self.parse_index(primary)?;
 
         loop {
             self.skip_ws();
@@ -348,8 +349,36 @@ impl<'a> ExprParser<'a> {
         } else if self.consume('+') {
             self.parse_power_exponent()
         } else {
-            self.parse_primary()
+            let primary = self.parse_primary()?;
+            self.parse_index(primary)
         }
+    }
+
+    /// In a control expression only, `x[i]` or `x[lo,hi]` written directly
+    /// after an operand indexes it, binding tighter than `^` (ngspice
+    /// frontend/parse-bison.y:93 `%left '[' ']'`). The call `[]` takes the
+    /// operand and then the bound or bounds.
+    #[inline(never)]
+    fn parse_index(&mut self, mut operand: Expr) -> Result<Expr, ExprError> {
+        if !self.control_vectors {
+            return Ok(operand);
+        }
+        while self.consume('[') {
+            let mut args = vec![operand, self.parse_ternary()?];
+            self.skip_ws();
+            if self.consume(',') {
+                args.push(self.parse_ternary()?);
+                self.skip_ws();
+            }
+            if !self.consume(']') {
+                return Err(ExprError::UnexpectedChar(self.peek().unwrap_or('\0')));
+            }
+            operand = Self::checked_expr(Expr::FnCall {
+                name: "[]".into(),
+                args,
+            })?;
+        }
+        Ok(operand)
     }
 
     /// Parse unary expressions (+, -, !)
