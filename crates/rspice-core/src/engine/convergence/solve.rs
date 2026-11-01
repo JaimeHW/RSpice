@@ -1025,6 +1025,26 @@ impl Engine {
         }
     }
 
+    /// Whether the configured DC solve opens with exactly the direct Newton
+    /// its aid-free twin runs: no Xyce continuation mode replaces that Newton
+    /// with an aid, and the limit-cycle tracker, which only an aided solve
+    /// keeps, does not watch a system this size.
+    pub(in crate::engine) fn configured_dc_solve_opens_with_the_direct_newton(
+        &self,
+        circuit: &CircuitData,
+    ) -> bool {
+        use crate::config::NonlinearContinuationMode as Mode;
+        let config = &self.config.convergence_config;
+        let aids_enabled = config.source_stepping
+            || config.pseudo_transient
+            || config.gmin_stepping
+            || config.arc_length;
+        matches!(
+            config.nonlinear_continuation,
+            None | Some(Mode::Standard | Mode::Natural | Mode::Mosfet)
+        ) && !(aids_enabled && circuit.matrix_size() <= Self::DC_LIMIT_CYCLE_MAX_TRACKED_VALUES)
+    }
+
     fn solve_nonlinear_with_guess_unchecked(
         &self,
         circuit: &mut CircuitData,

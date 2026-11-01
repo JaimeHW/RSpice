@@ -484,6 +484,8 @@ impl Engine {
         matrix: &mut crate::solver::StaticMatrix,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        #[cfg(test)]
+        tests::STANDALONE_DIRECT_DC_SOLVES.with(|solves| solves.set(solves.get() + 1));
         let mut direct_cfg = self.config.clone();
         direct_cfg.convergence_config.gmin_stepping = false;
         direct_cfg.convergence_config.source_stepping = false;
@@ -681,30 +683,38 @@ impl Engine {
             }
         }
 
-        if circuit.has_b3soi_devices() {
-            circuit.reset_b3soi_operating_point_history();
-        }
-        match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
-            Ok(solution) => {
-                let (solution, mode) = self.transient_startup_from_dc_solution(
-                    circuit,
-                    matrix,
-                    solution,
-                    abort,
-                    InitialSolutionMode::DcOperatingPoint,
-                )?;
-                return Ok((solution, mode, None));
+        // The configured aids open with this same direct Newton from the same
+        // seed, and answer as it does when it converges; run alone first, it
+        // would only be repeated.
+        let configured_aids_follow = Self::should_try_configured_dc_startup_aids(circuit);
+        if !(configured_aids_follow
+            && self.configured_dc_solve_opens_with_the_direct_newton(circuit))
+        {
+            if circuit.has_b3soi_devices() {
+                circuit.reset_b3soi_operating_point_history();
             }
-            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
-            Err(direct_dc_err) => {
-                log::warn!(
-                    "Direct transient-start DC operating point failed: {}. Trying bounded startup recovery aids.",
-                    direct_dc_err
-                );
+            match self.solve_direct_dc_startup_with_abort(netlist, circuit, matrix, abort) {
+                Ok(solution) => {
+                    let (solution, mode) = self.transient_startup_from_dc_solution(
+                        circuit,
+                        matrix,
+                        solution,
+                        abort,
+                        InitialSolutionMode::DcOperatingPoint,
+                    )?;
+                    return Ok((solution, mode, None));
+                }
+                Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+                Err(direct_dc_err) => {
+                    log::warn!(
+                        "Direct transient-start DC operating point failed: {}. Trying bounded startup recovery aids.",
+                        direct_dc_err
+                    );
+                }
             }
         }
 
-        if Self::should_try_configured_dc_startup_aids(circuit) {
+        if configured_aids_follow {
             if circuit.has_b3soi_devices() {
                 circuit.reset_b3soi_operating_point_history();
             }
@@ -1128,6 +1138,59 @@ impl Engine {
 mod tests {
     use super::*;
     use crate::engine::SimulationConfig;
+
+    thread_local! {
+        pub(super) static STANDALONE_DIRECT_DC_SOLVES: std::cell::Cell<usize> =
+            const { std::cell::Cell::new(0) };
+    }
+
+    /// `stacks` copies of a 1 mA source into twenty diode-connected level-1
+    /// NMOS in series, whose direct Newton fails from cut-off devices and
+    /// whose GMIN walk finds the operating point (`dc_operating_point_aids`).
+    fn nmos_stacks(stacks: usize) -> Netlist {
+        let mut deck = String::from(
+            "NMOS stacks\n.model nch nmos level=1 vto=0.7 kp=110u lambda=0.04 gamma=0.4 phi=0.7\n",
+        );
+        for stack in 0..stacks {
+            deck.push_str(&format!("I{stack} 0 s{stack}n0 1m\n"));
+            for device in 0..20 {
+                let below = if device == 19 {
+                    "0".to_owned()
+                } else {
+                    format!("s{stack}n{}", device + 1)
+                };
+                deck.push_str(&format!(
+                    "M{stack}x{device} s{stack}n{device} s{stack}n{device} {below} 0 nch w=10u l=1u\n"
+                ));
+            }
+        }
+        deck.push_str(".tran 1n 1n\n.end\n");
+        Netlist::parse(&deck).expect("deck parses")
+    }
+
+    /// The configured DC aids open with the direct Newton the startup used to
+    /// run alone first. Above the limit-cycle tracker's size the two are the
+    /// same iteration, so a failing startup runs it once; below it the aided
+    /// Newton can stop early on a cycle, and the plain one still runs first.
+    #[test]
+    fn a_failing_transient_startup_runs_the_direct_dc_newton_once() {
+        for (stacks, standalone) in [(60, 0), (1, 1)] {
+            STANDALONE_DIRECT_DC_SOLVES.with(|solves| solves.set(0));
+            let result = Engine::default()
+                .run_tran(&nmos_stacks(stacks), 1e-9, 1e-9)
+                .expect("the startup aids find the operating point");
+            let top = result.voltage_at(result.node_index_named("s0n0").expect("s0n0"), 0);
+            assert!(
+                (top - 73.328).abs() < 0.1,
+                "{stacks} stacks: V(s0n0) = {top}"
+            );
+            assert_eq!(
+                STANDALONE_DIRECT_DC_SOLVES.with(std::cell::Cell::get),
+                standalone,
+                "{stacks} stacks"
+            );
+        }
+    }
 
     fn assert_close(lhs: Value, rhs: Value) {
         let scale = lhs.abs().max(rhs.abs()).max(1.0);
