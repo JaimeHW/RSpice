@@ -672,6 +672,83 @@ fn a_raised_touch_target_sizes_the_close_control_and_footer_actions() {
     assert_eq!(close_bounds.y1 - close_bounds.y0, 48.0);
 }
 
+/// A card laid out by a theme in touch mode, on a screen wide enough for the
+/// desktop card and with no touch screen reported (a tablet's touch layout,
+/// chosen in the shell): its header and footer are sized for the finger-sized
+/// controls the theme gives them. The footer's band spans the card from edge
+/// to edge, as the header's does, and ends inside the card.
+#[test]
+fn a_touch_card_footer_spans_the_card_and_ends_inside_it() {
+    let ctx = Context::default();
+    crate::Theme::default().apply(&ctx);
+    crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+    ctx.all_styles_mut(|style| style.animation_time = 0.0);
+    let input = || egui::RawInput {
+        screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, vec2(1024.0, 768.0))),
+        ..Default::default()
+    };
+    let mut output = None;
+    for _ in 0..4 {
+        output = Some(ctx.run_ui(input(), |ctx| {
+            let _ = Dialog::new(TEST_TITLE, "Rename")
+                .size(DialogSize::CommandForm)
+                .ghost("Cancel")
+                .hint("Type a new name.")
+                .show(ctx, |ui| {
+                    ui.label("Dialog body");
+                });
+        }));
+    }
+    let output = output.expect("four passes ran");
+    let c = Tokens::get(&ctx).color;
+    let rects: Vec<egui::epaint::RectShape> = painted_shapes(&output.shapes)
+        .into_iter()
+        .filter_map(|shape| match shape {
+            egui::Shape::Rect(rect) => Some(rect),
+            _ => None,
+        })
+        .collect();
+    let surface = rects
+        .iter()
+        .filter(|rect| rect.stroke.color == c.border_strong && rect.stroke.width > 0.0)
+        .map(|rect| rect.rect)
+        .max_by(|a, b| a.width().total_cmp(&b.width()))
+        .expect("the card's frame");
+    // The header's and the footer's fills: the panel tone, from the card's
+    // left edge.
+    let bands: Vec<Rect> = rects
+        .iter()
+        .filter(|rect| {
+            rect.fill == c.bg_panel
+                && (rect.rect.left() - surface.left()).abs() <= SURFACE_BORDER_WIDTH + 0.5
+        })
+        .map(|rect| rect.rect)
+        .collect();
+    assert!(bands.len() >= 2, "a header and a footer band: {bands:?}");
+    let header = bands
+        .iter()
+        .copied()
+        .min_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the header band");
+    let footer = bands
+        .iter()
+        .copied()
+        .max_by(|a, b| a.top().total_cmp(&b.top()))
+        .expect("the footer band");
+    assert!(
+        (footer.right() - header.right()).abs() < 0.5,
+        "footer {footer:?} ends where the header {header:?} does"
+    );
+    assert!(
+        surface.right() - footer.right() <= SURFACE_BORDER_WIDTH + 0.5,
+        "footer {footer:?} reaches the card's right edge {surface:?}"
+    );
+    assert!(
+        footer.bottom() <= surface.bottom() + 0.5,
+        "footer {footer:?} ends inside the card {surface:?}"
+    );
+}
+
 #[test]
 fn capability_review_desktop_close_control_uses_mockup_icon_button_target() {
     let ctx = Context::default();

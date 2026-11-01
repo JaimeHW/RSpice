@@ -1195,9 +1195,15 @@ impl<'a> Dialog<'a> {
         let fill_surface_height = layout.fills_surface_height(self.fixed_height);
         // The side of a finger-sized control, when this dialog is laid out for
         // one: the theme's own touch target, so a raised Accessibility target
-        // reaches the close button and the footer actions too.
+        // reaches the close button and the footer actions too. A theme in
+        // touch mode already sizes every button for a finger; a header and
+        // footer laid out for a pointer then held a 44-point close control in
+        // a row measured for a 28-point one, and 44-point actions in a footer
+        // measured for 29-point ones, so the surface grew past its footer's
+        // right edge and the footer hung below the surface.
         let large_targets = ((layout.narrow && self.size != DialogSize::ComponentEditor)
             || (self.size == DialogSize::AnalysisCatalog && screen.width() <= 820.0)
+            || t.metrics.is_touch()
             || ctx.input(|input| input.has_touch_screen()))
         .then(|| t.metrics.touch_target());
         let hide_close_only_footer = self.size == DialogSize::CapabilityReview;
