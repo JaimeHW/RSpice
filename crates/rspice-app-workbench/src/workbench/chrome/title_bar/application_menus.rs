@@ -34,6 +34,47 @@ impl ApplicationMenu {
             Self::Help => "Help",
         }
     }
+
+    /// The letter that opens the menu with Alt on Windows and Linux, and
+    /// alone while the bar has the focus: each menu's own.
+    pub const fn access_key(self) -> char {
+        match self {
+            Self::File => 'F',
+            Self::Edit => 'E',
+            Self::View => 'V',
+            Self::Design => 'D',
+            Self::Simulate => 'S',
+            Self::Results => 'R',
+            Self::Verify => 'Y',
+            Self::Tools => 'T',
+            Self::Window => 'W',
+            Self::Help => 'H',
+        }
+    }
+}
+
+/// Whether the menus answer access keys: on the Windows and Linux desktop.
+/// The browser keeps Alt and a letter for its own menus, and a macOS menu
+/// has none.
+pub fn access_keys_apply(
+    platform: crate::state::command_catalog::CommandPlatform,
+    os: egui::os::OperatingSystem,
+) -> bool {
+    platform == crate::state::command_catalog::CommandPlatform::Desktop
+        && os != egui::os::OperatingSystem::Mac
+}
+
+/// Where `label` underlines its access key `key`: the first letter that is
+/// `key` and starts a word ("Save &as"), else the first that is `key` at
+/// all ("E&xit"), ignoring case. A char index, or `None` when the label has
+/// no such letter.
+pub fn access_key_index(label: &str, key: char) -> Option<usize> {
+    let matches = |character: char| character.to_lowercase().eq(key.to_lowercase());
+    let characters: Vec<char> = label.chars().collect();
+    let starts_word = |index: usize| index == 0 || !characters[index - 1].is_alphanumeric();
+    (0..characters.len())
+        .find(|&index| matches(characters[index]) && starts_word(index))
+        .or_else(|| characters.iter().position(|&character| matches(character)))
 }
 
 pub const ALL_MENUS: [ApplicationMenu; 10] = [
@@ -84,8 +125,11 @@ pub fn source_editor_context_menu(
         begin_menu_render(ui.ctx(), popup_id);
         let choice = menu_entries::show_menu_rows(ui, &rows);
         let render_state = finish_menu_render(ui.ctx());
-        handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);
-        choice
+        let typed = handle_popup_keyboard(ui.ctx(), popup_id, response, &render_state.rows);
+        if typed.is_some() {
+            ui.close();
+        }
+        choice.or(typed)
     });
     if let Some(choice) = shown.and_then(|shown| shown.inner) {
         choice.run(app);

@@ -30,7 +30,7 @@ pub(super) enum MenuRowLead {
 }
 
 /// One menu row's paint: its hover fill, leading mark, label and trailing
-/// mark.
+/// mark. The label underlines `access` while the access keys show.
 pub(super) fn paint_menu_row(
     ui: &Ui,
     rect: Rect,
@@ -38,6 +38,7 @@ pub(super) fn paint_menu_row(
     enabled: bool,
     lead: MenuRowLead,
     label: &str,
+    access: Option<char>,
     trailing: MenuRowTrailing<'_>,
 ) {
     let t = Tokens::get(ui.ctx());
@@ -102,18 +103,18 @@ pub(super) fn paint_menu_row(
     // wider metrics than the bundled face. The measured ellipsis provides a
     // readable ending; the clip is the final invariant that prevents a long
     // localized label from ever painting through the shortcut column.
-    ui.painter()
-        .with_clip_rect(egui::Rect::from_min_max(
+    paint_access_label(
+        &ui.painter().with_clip_rect(egui::Rect::from_min_max(
             egui::pos2(label_left, rect.top()),
             egui::pos2(label_right, rect.bottom()),
-        ))
-        .text(
-            egui::Pos2::new(label_left, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            painted_label,
-            label_font,
-            ink,
-        );
+        )),
+        egui::Pos2::new(label_left, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        painted_label,
+        label_font,
+        ink,
+        access.filter(|_| access_cues_shown(ui.ctx())),
+    );
     match trailing {
         MenuRowTrailing::Shortcut("") => {}
         MenuRowTrailing::Shortcut(shortcut) => {
@@ -138,4 +139,35 @@ pub(super) fn paint_menu_row(
             faint,
         ),
     }
+}
+
+/// Paint `text` at `anchor`, underlining the letter `access` names (see
+/// [`application_menus::access_key_index`]) when it is given. The underline
+/// is a rule drawn under the glyph, not a combining mark, so it needs
+/// nothing of the font.
+pub(super) fn paint_access_label(
+    painter: &egui::Painter,
+    anchor: egui::Pos2,
+    align: egui::Align2,
+    text: String,
+    font: egui::FontId,
+    ink: egui::Color32,
+    access: Option<char>,
+) {
+    let index = access.and_then(|key| application_menus::access_key_index(&text, key));
+    let galley = painter.layout_no_wrap(text, font, ink);
+    let origin = align.anchor_size(anchor, galley.size()).min;
+    if let Some(index) = index
+        && let Some(row) = galley.rows.first()
+        && let Some(glyph) = row.glyphs.get(index)
+    {
+        let left = origin.x + row.pos.x + glyph.pos.x;
+        let baseline = origin.y + row.pos.y + glyph.pos.y;
+        painter.hline(
+            left..=left + glyph.advance_width,
+            (baseline + 2.0).round() - 0.5,
+            egui::Stroke::new(1.0, ink),
+        );
+    }
+    painter.galley(origin, galley, ink);
 }

@@ -94,52 +94,47 @@ pub(in crate::workbench) const fn application_menu_entries(
 
 /// File makes, opens, closes, keeps, brings in and sends out: the project,
 /// its cells and the documents open on them.
+///
+/// Its 23 rows have 21 letters among their labels to give as access keys:
+/// Save all (which has its key) and Live session (shown only to a signed-in
+/// account) go without.
 const FILE_MENU: &[MenuEntry] = &[
-    project(ProjectCommand::NewProject),
-    project(ProjectCommand::NewCell),
-    project(ProjectCommand::NewView),
-    command(Command::NewVerilogADevice),
+    project(ProjectCommand::NewProject).access('N'),
+    project(ProjectCommand::NewCell).access('W'),
+    project(ProjectCommand::NewView).access('V'),
+    command(Command::NewVerilogADevice).access('G'),
     Separator,
     // A schematic file is opened as a document of its own only on the start
     // screen; inside a project it is imported as a new cell view.
     MenuEntry::Only(
         MenuContext::NoProject,
-        &[project(ProjectCommand::OpenSchematic)],
+        &[project(ProjectCommand::OpenSchematic).access('M')],
     ),
-    project(ProjectCommand::OpenProject),
-    command(Command::OpenNetlist),
-    MenuEntry::Submenu {
-        label: "Open recent",
-        entries: OPEN_RECENT_MENU,
-    },
+    project(ProjectCommand::OpenProject).access('O'),
+    command(Command::OpenNetlist).access('T'),
+    MenuEntry::submenu("Open recent", OPEN_RECENT_MENU).access('R'),
     Separator,
-    command(Command::CloseActiveDocument),
-    command(Command::CloseOtherDocuments),
-    command(Command::CloseAllDocuments),
-    project(ProjectCommand::CloseProject),
+    command(Command::CloseActiveDocument).access('C'),
+    command(Command::CloseOtherDocuments).access('H'),
+    command(Command::CloseAllDocuments).access('L'),
+    project(ProjectCommand::CloseProject).access('J'),
     Separator,
-    project(ProjectCommand::Save),
-    project(ProjectCommand::SaveAs),
+    project(ProjectCommand::Save).access('S'),
+    project(ProjectCommand::SaveAs).access('A'),
     project(ProjectCommand::SaveAll),
-    command(Command::RevertActiveDocument),
-    project(ProjectCommand::RevisionHistory),
+    command(Command::RevertActiveDocument).access('D'),
+    project(ProjectCommand::RevisionHistory).access('Y'),
     Separator,
-    MenuEntry::Submenu {
-        label: "Import",
-        entries: IMPORT_MENU,
-    },
-    MenuEntry::Submenu {
-        label: "Export",
-        entries: EXPORT_MENU,
-    },
+    MenuEntry::submenu("Import", IMPORT_MENU).access('I'),
+    MenuEntry::submenu("Export", EXPORT_MENU).access('E'),
     Separator,
-    cloud(CloudCommand::PublishToWeb),
+    cloud(CloudCommand::PublishToWeb).access('B'),
     cloud(CloudCommand::LiveSession),
     Separator,
-    hardcopy(HardcopyCommand::PrintHardcopy),
+    hardcopy(HardcopyCommand::PrintHardcopy).access('P'),
     MenuEntry::Only(
         MenuContext::ExitInFileMenu,
-        &[Separator, command(Command::Exit)],
+        &[Separator, command(Command::Exit).access('X')],
     ),
 ];
 
@@ -151,22 +146,25 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(
         ProjectCommand::ProjectLauncher.key(),
         "All projects\u{2026}",
-    ),
+    )
+    .access('A'),
 ];
 
 const IMPORT_MENU: &[MenuEntry] = &[
-    command_as(Command::ImportNetlist, "SPICE deck\u{2026}"),
-    command_as(Command::ImportVerilogA, "Verilog-A\u{2026}"),
+    command_as(Command::ImportNetlist, "SPICE deck\u{2026}").access('S'),
+    command_as(Command::ImportVerilogA, "Verilog-A\u{2026}").access('V'),
     MenuEntry::command_as(
         ResultsCommand::ImportResultDataset.key(),
         "Result dataset\u{2026}",
-    ),
+    )
+    .access('R'),
     MenuEntry::Only(
         MenuContext::ProjectOpen,
         &[MenuEntry::command_as(
             ProjectCommand::OpenSchematic.key(),
             "Schematic into new cell view\u{2026}",
-        )],
+        )
+        .access('C')],
     ),
 ];
 
@@ -174,46 +172,57 @@ const EXPORT_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(
         HardcopyCommand::ExportActiveView.key(),
         "Image or PDF\u{2026}",
-    ),
+    )
+    .access('I'),
     command_as(
         Command::ExportNetlist(crate::io::NetlistFormat::Spice),
         "SPICE netlist\u{2026}",
-    ),
+    )
+    .access('S'),
     command_as(
         Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
         "Spectre netlist\u{2026}",
-    ),
-    MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}"),
+    )
+    .access('N'),
+    MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}").access('D'),
 ];
 
 /// Edit acts on what the page shows: with a source editor as the document,
-/// on its text; otherwise on the drawing's selection.
+/// on its text; otherwise on the drawing's selection. With the drawing's,
+/// 22 rows have 20 letters to give as access keys: Deselect all and the
+/// Select submenu go without.
 const EDIT_MENU: &[MenuEntry] = &[
-    command(Command::Undo),
-    command(Command::Redo),
-    MenuEntry::Only(MenuContext::Drawing, &[command(Command::RepeatLastCommand)]),
+    command(Command::Undo).access('U'),
+    command(Command::Redo).access('R'),
+    MenuEntry::Only(
+        MenuContext::Drawing,
+        &[command(Command::RepeatLastCommand).access('L')],
+    ),
     Separator,
-    command(Command::Cut),
-    command(Command::Copy),
+    command(Command::Cut).access('T'),
+    command(Command::Copy).access('C'),
     // A picture of the selection or the view, for a document or a message.
     MenuEntry::Only(
         MenuContext::Drawing,
-        &[hardcopy(HardcopyCommand::CopyAsImage)],
+        &[hardcopy(HardcopyCommand::CopyAsImage).access('G')],
     ),
-    command(Command::Paste),
+    command(Command::Paste).access('P'),
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
-            command(Command::DuplicateLine),
-            command(Command::DeleteLine),
+            command(Command::DuplicateLine).access('L'),
+            command(Command::DeleteLine).access('D'),
         ],
     ),
     MenuEntry::Only(
         MenuContext::Drawing,
-        &[command(Command::Duplicate), command(Command::Delete)],
+        &[
+            command(Command::Duplicate).access('E'),
+            command(Command::Delete).access('D'),
+        ],
     ),
     Separator,
-    command(Command::SelectAll),
+    command(Command::SelectAll).access('A'),
     MenuEntry::Only(
         MenuContext::Drawing,
         &[
@@ -222,10 +231,7 @@ const EDIT_MENU: &[MenuEntry] = &[
             // schematic's.
             MenuEntry::Only(
                 MenuContext::NotSymbolView,
-                &[MenuEntry::Submenu {
-                    label: "Select",
-                    entries: SELECT_MENU,
-                }],
+                &[MenuEntry::submenu("Select", SELECT_MENU)],
             ),
         ],
     ),
@@ -233,32 +239,32 @@ const EDIT_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::SourceEditor,
         &[
-            command(Command::ToggleLineComment),
-            command(Command::FormatDocument),
-            command(Command::GoToLine),
+            command(Command::ToggleLineComment).access('M'),
+            command(Command::FormatDocument).access('O'),
+            command(Command::GoToLine).access('G'),
             Separator,
-            command(Command::FindCodeDocument),
+            command(Command::FindCodeDocument).access('F'),
         ],
     ),
     // What is done to the selection, then to one object, then finding one.
     MenuEntry::Only(
         MenuContext::Drawing,
         &[
-            command(Command::MoveSelection),
-            command(Command::StretchSelection),
-            command(Command::ArraySelection),
-            command(Command::ReplaceInstance),
-            command(Command::SelectionBulkEdit),
+            command(Command::MoveSelection).access('V'),
+            command(Command::StretchSelection).access('H'),
+            command(Command::ArraySelection).access('Y'),
+            command(Command::ReplaceInstance).access('S'),
+            command(Command::SelectionBulkEdit).access('B'),
             Separator,
-            command(Command::RenameSelection),
-            command(Command::ObjectProperties),
+            command(Command::RenameSelection).access('M'),
+            command(Command::ObjectProperties).access('O'),
             Separator,
-            command(Command::FindInDesign),
-            command(Command::FindReplace),
+            command(Command::FindInDesign).access('F'),
+            command(Command::FindReplace).access('I'),
         ],
     ),
     Separator,
-    settings(SettingsCommand::Preferences),
+    settings(SettingsCommand::Preferences).access('N'),
 ];
 
 /// Every object of one kind on the active sheet, in place of the selection.
@@ -266,51 +272,47 @@ const SELECT_MENU: &[MenuEntry] = &[
     command_as(
         Command::SelectOfKind(SchematicObjectKind::Instances),
         "Instances",
-    ),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Wires), "Wires"),
+    )
+    .access('I'),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Wires), "Wires").access('W'),
     command_as(
         Command::SelectOfKind(SchematicObjectKind::NetLabels),
         "Net labels",
-    ),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Pins), "Pins"),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Text), "Text"),
-    command_as(Command::SelectOfKind(SchematicObjectKind::Shapes), "Shapes"),
+    )
+    .access('N'),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Pins), "Pins").access('P'),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Text), "Text").access('T'),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Shapes), "Shapes").access('S'),
 ];
 
 /// View: how near, what is drawn over the drawing, which panels stand
 /// around it, and how much of the screen it takes.
 const VIEW_MENU: &[MenuEntry] = &[
-    command(Command::ZoomIn),
-    command(Command::ZoomOut),
-    command(Command::ZoomOneToOne),
-    command(Command::ZoomFit),
-    command(Command::FitSchematicContent),
-    command(Command::ZoomToSelection),
-    command(Command::ZoomBox),
-    command(Command::ZoomPrevious),
+    command(Command::ZoomIn).access('I'),
+    command(Command::ZoomOut).access('O'),
+    command(Command::ZoomOneToOne).access('Z'),
+    command(Command::ZoomFit).access('S'),
+    command(Command::FitSchematicContent).access('F'),
+    command(Command::ZoomToSelection).access('T'),
+    command(Command::ZoomBox).access('B'),
+    command(Command::ZoomPrevious).access('V'),
     Separator,
-    MenuEntry::Submenu {
-        label: "Grid",
-        entries: GRID_MENU,
-    },
-    command(Command::VisibilityOptions),
+    MenuEntry::submenu("Grid", GRID_MENU).access('G'),
+    command(Command::VisibilityOptions).access('D'),
     Separator,
-    command_as(Command::ToggleNavigator, "Navigator"),
-    command_as(Command::ToggleInspector, "Inspector"),
-    command_as(Command::ToggleConsole, "Console"),
-    results(ResultsCommand::ToggleResultsSplit),
-    command_as(Command::OpenProblems, "Problems"),
+    command_as(Command::ToggleNavigator, "Navigator").access('N'),
+    command_as(Command::ToggleInspector, "Inspector").access('E'),
+    command_as(Command::ToggleConsole, "Console").access('C'),
+    results(ResultsCommand::ToggleResultsSplit).access('R'),
+    command_as(Command::OpenProblems, "Problems").access('P'),
     Separator,
     // Folding, offered while a source editor is the document on screen.
     MenuEntry::Only(
         MenuContext::SourceEditor,
-        &[MenuEntry::Submenu {
-            label: "Folding",
-            entries: FOLDING_MENU,
-        }],
+        &[MenuEntry::submenu("Folding", FOLDING_MENU).access('L')],
     ),
-    command_as(Command::ToggleFocusMode, "Focus mode"),
-    command_as(Command::ToggleFullScreen, "Full screen"),
+    command_as(Command::ToggleFocusMode, "Focus mode").access('M'),
+    command_as(Command::ToggleFullScreen, "Full screen").access('U'),
 ];
 
 /// The grid's styles, one of which is drawn; G steps through them.
@@ -318,96 +320,87 @@ const GRID_MENU: &[MenuEntry] = &[
     MenuEntry::radio(
         Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
         "Dots",
-    ),
+    )
+    .access('D'),
     MenuEntry::radio(
         Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
         "Lines",
-    ),
+    )
+    .access('L'),
     MenuEntry::radio(
         Command::SetGridStyle(crate::state::GridStyle::Off).key(),
         "Off",
-    ),
+    )
+    .access('O'),
     Separator,
-    command_as(Command::GridSnapRouting, "Grid, snap and routing\u{2026}"),
+    command_as(Command::GridSnapRouting, "Grid, snap and routing\u{2026}").access('G'),
 ];
 
 const FOLDING_MENU: &[MenuEntry] = &[
-    command(Command::FoldSelection),
-    command(Command::UnfoldAtCaret),
-    command(Command::FoldAll),
-    command(Command::UnfoldAll),
+    command(Command::FoldSelection).access('F'),
+    command(Command::UnfoldAtCaret).access('C'),
+    command(Command::FoldAll).access('A'),
+    command(Command::UnfoldAll).access('U'),
 ];
 
 /// Design: move through the hierarchy, place, arrange and lay out sheets,
 /// manage the design, then check it. A symbol view places its own shapes,
 /// and a Verilog-A view compiles.
 const DESIGN_MENU: &[MenuEntry] = &[
-    command(Command::DescendHierarchyDirect),
-    command(Command::DescendHierarchy),
-    command(Command::AscendHierarchy),
+    command(Command::DescendHierarchyDirect).access('D'),
+    command(Command::DescendHierarchy).access('W'),
+    command(Command::AscendHierarchy).access('U'),
     // Inside a symbol edited in place, the way back out stands where the
-    // way in did.
+    // way in did, on the same letter.
     MenuEntry::Only(
         MenuContext::NotSymbolView,
-        &[command(Command::EditSymbolInPlace)],
+        &[command(Command::EditSymbolInPlace).access('E')],
     ),
     MenuEntry::Only(
         MenuContext::SymbolView,
-        &[command(Command::ExitSymbolInPlace)],
+        &[command(Command::ExitSymbolInPlace).access('E')],
     ),
-    command(Command::CreateHierarchy),
-    project(ProjectCommand::CreateSymbol),
+    command(Command::CreateHierarchy).access('H'),
+    project(ProjectCommand::CreateSymbol).access('F'),
     Separator,
     MenuEntry::Only(
         MenuContext::NotSymbolView,
-        &[MenuEntry::Submenu {
-            label: "Place",
-            entries: PLACE_MENU,
-        }],
+        &[MenuEntry::submenu("Place", PLACE_MENU).access('P')],
     ),
     MenuEntry::Only(
         MenuContext::SymbolView,
-        &[MenuEntry::Submenu {
-            label: "Place",
-            entries: SYMBOL_PLACE_MENU,
-        }],
+        &[MenuEntry::submenu("Place", SYMBOL_PLACE_MENU).access('P')],
     ),
-    MenuEntry::Submenu {
-        label: "Arrange",
-        entries: ARRANGE_MENU,
-    },
-    MenuEntry::Submenu {
-        label: "Sheet",
-        entries: SHEET_MENU,
-    },
+    MenuEntry::submenu("Arrange", ARRANGE_MENU).access('A'),
+    MenuEntry::submenu("Sheet", SHEET_MENU).access('S'),
     Separator,
-    project(ProjectCommand::Variants),
-    project(ProjectCommand::Annotate),
-    command(Command::ConnectivityManager),
-    command(Command::HighlightNet),
-    command(Command::ReviewComments),
-    command(Command::EngineeringTableView),
+    project(ProjectCommand::Variants).access('N'),
+    project(ProjectCommand::Annotate).access('O'),
+    command(Command::ConnectivityManager).access('Y'),
+    command(Command::HighlightNet).access('T'),
+    command(Command::ReviewComments).access('R'),
+    command(Command::EngineeringTableView).access('J'),
     Separator,
     // The design checks, narrowest first: the cellview in front of the
     // reader, the whole design, and the check that gates a save.
-    command(Command::CheckCellview),
-    command(Command::CheckDesign),
+    command(Command::CheckCellview).access('L'),
+    command(Command::CheckDesign).access('K'),
     MenuEntry::Only(
         MenuContext::NotSymbolView,
-        &[project(ProjectCommand::CheckAndSave)],
+        &[project(ProjectCommand::CheckAndSave).access('C')],
     ),
-    MenuEntry::Only(MenuContext::SymbolView, &[command(Command::SymbolSave)]),
-    MenuEntry::Submenu {
-        label: "Violations",
-        entries: VIOLATIONS_MENU,
-    },
-    command(Command::RuleSetup),
+    MenuEntry::Only(
+        MenuContext::SymbolView,
+        &[command(Command::SymbolSave).access('V')],
+    ),
+    MenuEntry::submenu("Violations", VIOLATIONS_MENU).access('I'),
+    command(Command::RuleSetup).access('G'),
     MenuEntry::Only(
         MenuContext::VerilogAView,
         &[
             Separator,
-            command(Command::CompileVerilogA),
-            command(Command::VerilogABuildSettings),
+            command(Command::CompileVerilogA).access('M'),
+            command(Command::VerilogABuildSettings).access('B'),
         ],
     ),
 ];
@@ -415,89 +408,91 @@ const DESIGN_MENU: &[MenuEntry] = &[
 /// What a schematic places: the tools, then a part of each kind the
 /// one-key placements put down.
 const PLACE_MENU: &[MenuEntry] = &[
-    command_as(Command::PlaceInstance, "Instance\u{2026}"),
-    command_as(Command::PlaceWire, "Wire"),
-    command_as(Command::PlaceBus, "Bus"),
-    command_as(Command::PlaceBusTap, "Bus tap"),
-    command_as(Command::PlaceLabel, "Net label"),
-    command_as(Command::PlaceOffSheetConnector, "Off-sheet connector"),
-    command_as(Command::PlacePin, "Pins\u{2026}"),
-    command_as(Command::PlaceJunction, "Junction"),
-    command_as(Command::PlaceText, "Text or note\u{2026}"),
-    command_as(Command::PlaceShape, "Documentation shape\u{2026}"),
+    command_as(Command::PlaceInstance, "Instance\u{2026}").access('I'),
+    command_as(Command::PlaceWire, "Wire").access('W'),
+    command_as(Command::PlaceBus, "Bus").access('B'),
+    command_as(Command::PlaceBusTap, "Bus tap").access('T'),
+    command_as(Command::PlaceLabel, "Net label").access('L'),
+    command_as(Command::PlaceOffSheetConnector, "Off-sheet connector").access('O'),
+    command_as(Command::PlacePin, "Pins\u{2026}").access('P'),
+    command_as(Command::PlaceJunction, "Junction").access('J'),
+    command_as(Command::PlaceText, "Text or note\u{2026}").access('N'),
+    command_as(Command::PlaceShape, "Documentation shape\u{2026}").access('S'),
     Separator,
-    command_as(Command::Place(ComponentType::Resistor), "Resistor"),
-    command_as(Command::Place(ComponentType::Capacitor), "Capacitor"),
-    command_as(Command::Place(ComponentType::Inductor), "Inductor"),
-    command_as(Command::Place(ComponentType::Diode), "Diode"),
+    command_as(Command::Place(ComponentType::Resistor), "Resistor").access('R'),
+    command_as(Command::Place(ComponentType::Capacitor), "Capacitor").access('A'),
+    command_as(Command::Place(ComponentType::Inductor), "Inductor").access('U'),
+    command_as(Command::Place(ComponentType::Diode), "Diode").access('D'),
     command_as(
         Command::Place(ComponentType::VoltageSource),
         "Voltage source",
-    ),
+    )
+    .access('V'),
     command_as(
         Command::Place(ComponentType::CurrentSource),
         "Current source",
-    ),
-    command_as(Command::Place(ComponentType::Ground), "Ground"),
+    )
+    .access('C'),
+    command_as(Command::Place(ComponentType::Ground), "Ground").access('G'),
 ];
 
 /// What a symbol view places: its drawing tools, then the edits to one pin.
 const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
-    command_as(Command::SymbolPinTool, "Pin"),
-    command_as(Command::SymbolPolylineTool, "Line"),
-    command_as(Command::SymbolRectangleTool, "Rectangle"),
-    command_as(Command::SymbolCircleTool, "Circle"),
-    command_as(Command::SymbolArcTool, "Arc"),
-    command_as(Command::SymbolPolygonTool, "Polygon"),
-    command_as(Command::SymbolTextTool, "Text"),
+    command_as(Command::SymbolPinTool, "Pin").access('P'),
+    command_as(Command::SymbolPolylineTool, "Line").access('L'),
+    command_as(Command::SymbolRectangleTool, "Rectangle").access('R'),
+    command_as(Command::SymbolCircleTool, "Circle").access('C'),
+    command_as(Command::SymbolArcTool, "Arc").access('A'),
+    command_as(Command::SymbolPolygonTool, "Polygon").access('G'),
+    command_as(Command::SymbolTextTool, "Text").access('T'),
     Separator,
-    command(Command::SymbolRotatePin),
-    command(Command::SymbolMirrorPin),
-    command(Command::SymbolUpdatePinsFromContract),
+    command(Command::SymbolRotatePin).access('N'),
+    command(Command::SymbolMirrorPin).access('M'),
+    command(Command::SymbolUpdatePinsFromContract).access('U'),
 ];
 
 /// The sheets of the active drawing, in the order the strip shows them:
 /// navigate, then add and remove, then the sheet's own setup in the order
 /// it is done.
 const SHEET_MENU: &[MenuEntry] = &[
-    sheets(SheetsCommand::PreviousSheet),
-    sheets(SheetsCommand::NextSheet),
-    sheets(SheetsCommand::NewSheet),
-    MenuEntry::command_as(SheetsCommand::DeleteSheet.key(), "Delete\u{2026}"),
+    sheets(SheetsCommand::PreviousSheet).access('P'),
+    sheets(SheetsCommand::NextSheet).access('N'),
+    sheets(SheetsCommand::NewSheet).access('E'),
+    MenuEntry::command_as(SheetsCommand::DeleteSheet.key(), "Delete\u{2026}").access('D'),
     Separator,
-    sheets(SheetsCommand::SheetProperties),
-    sheets(SheetsCommand::SheetFormatManager),
-    sheets(SheetsCommand::SheetDefaults),
+    sheets(SheetsCommand::SheetProperties).access('S'),
+    sheets(SheetsCommand::SheetFormatManager).access('F'),
+    sheets(SheetsCommand::SheetDefaults).access('H'),
 ];
 
 /// The findings the checks left: step through them, or clear them.
 const VIOLATIONS_MENU: &[MenuEntry] = &[
-    command(Command::NextViolation),
-    command(Command::PreviousViolation),
+    command(Command::NextViolation).access('N'),
+    command(Command::PreviousViolation).access('P'),
     Separator,
-    command(Command::ClearChecks),
+    command(Command::ClearChecks).access('C'),
 ];
 
 /// The Design menu's Arrange submenu, group by group: turn and flip, line
 /// up, space out, put back on the grid.
 const ARRANGE_MENU: &[MenuEntry] = &[
-    command(Command::RotateSelection),
-    command(Command::RotateSelectionCounterClockwise),
-    command(Command::MirrorSelectionHorizontal),
-    command(Command::MirrorSelectionVertical),
+    command(Command::RotateSelection).access('R'),
+    command(Command::RotateSelectionCounterClockwise).access('C'),
+    command(Command::MirrorSelectionHorizontal).access('V'),
+    command(Command::MirrorSelectionVertical).access('M'),
     Separator,
-    command(Command::AlignSelectionLeft),
-    command(Command::AlignSelectionCenter),
-    command(Command::AlignSelectionRight),
-    command(Command::AlignSelectionTop),
-    command(Command::AlignSelectionMiddle),
-    command(Command::AlignSelectionBottom),
+    command(Command::AlignSelectionLeft).access('L'),
+    command(Command::AlignSelectionCenter).access('H'),
+    command(Command::AlignSelectionRight).access('A'),
+    command(Command::AlignSelectionTop).access('T'),
+    command(Command::AlignSelectionMiddle).access('G'),
+    command(Command::AlignSelectionBottom).access('B'),
     Separator,
-    command(Command::DistributeSelectionHorizontal),
-    command(Command::DistributeSelectionVertical),
+    command(Command::DistributeSelectionHorizontal).access('D'),
+    command(Command::DistributeSelectionVertical).access('E'),
     Separator,
-    command(Command::SnapSelectionToGrid),
-    command(Command::JoinCollinearWires),
+    command(Command::SnapSelectionToGrid).access('S'),
+    command(Command::JoinCollinearWires).access('J'),
 ];
 
 /// Simulate: choose and fill the active plan, set it up, check and run it,
@@ -507,74 +502,71 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     // that plan. Filling the chosen plan reads directly under choosing it;
     // the navigator, the catalogue's other route, is a panel a reader can
     // collapse.
-    simulate(SimulateCommand::ManagePlans),
-    simulate(SimulateCommand::AddAnalysis),
+    simulate(SimulateCommand::ManagePlans).access('M'),
+    simulate(SimulateCommand::AddAnalysis).access('A'),
     Separator,
-    MenuEntry::Submenu {
-        label: "Setup",
-        entries: SETUP_MENU,
-    },
+    MenuEntry::submenu("Setup", SETUP_MENU).access('U'),
     Separator,
-    simulate(SimulateCommand::Preflight),
-    MenuEntry::command_as(SimulateCommand::Run.key(), "Run"),
-    MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop"),
-    command(Command::GenerateNetlist),
-    simulate(SimulateCommand::JobsManager),
+    simulate(SimulateCommand::Preflight).access('C'),
+    MenuEntry::command_as(SimulateCommand::Run.key(), "Run").access('R'),
+    MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop").access('S'),
+    command(Command::GenerateNetlist).access('G'),
+    simulate(SimulateCommand::JobsManager).access('H'),
     Separator,
-    command_as(Command::PlaceProbe, "Probe"),
-    command(Command::AnnotateOperatingPoint),
-    command(Command::AnnotateTransientVoltages),
+    command_as(Command::PlaceProbe, "Probe").access('P'),
+    command(Command::AnnotateOperatingPoint).access('D'),
+    command(Command::AnnotateTransientVoltages).access('T'),
     MenuEntry::command_as(
         ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
         "Operating-point table",
-    ),
+    )
+    .access('O'),
 ];
 
 /// The Simulation Studio's pages in the order a plan is authored, then what
 /// the plan draws on from outside it.
 const SETUP_MENU: &[MenuEntry] = &[
-    simulate(SimulateCommand::Page(SimulationPage::Analyses)),
-    simulate(SimulateCommand::Page(SimulationPage::Excitations)),
-    simulate(SimulateCommand::Page(SimulationPage::Variables)),
-    simulate(SimulateCommand::Page(SimulationPage::Outputs)),
-    simulate(SimulateCommand::Page(SimulationPage::Specifications)),
-    simulate(SimulateCommand::Page(SimulationPage::RunSet)),
-    simulate(SimulateCommand::Page(SimulationPage::Models)),
-    simulate(SimulateCommand::Page(SimulationPage::Solver)),
-    simulate(SimulateCommand::Page(SimulationPage::Save)),
+    simulate(SimulateCommand::Page(SimulationPage::Analyses)).access('A'),
+    simulate(SimulateCommand::Page(SimulationPage::Excitations)).access('E'),
+    simulate(SimulateCommand::Page(SimulationPage::Variables)).access('D'),
+    simulate(SimulateCommand::Page(SimulationPage::Outputs)).access('O'),
+    simulate(SimulateCommand::Page(SimulationPage::Specifications)).access('R'),
+    simulate(SimulateCommand::Page(SimulationPage::RunSet)).access('V'),
+    simulate(SimulateCommand::Page(SimulationPage::Models)).access('M'),
+    simulate(SimulateCommand::Page(SimulationPage::Solver)).access('S'),
+    simulate(SimulateCommand::Page(SimulationPage::Save)).access('P'),
     Separator,
-    command(Command::ConfigurationSets),
+    command(Command::ConfigurationSets).access('C'),
     command_as(
         Command::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
-    ),
+    )
+    .access('L'),
 ];
 
 /// Results: where results are read, what is built from them, then what is
 /// done on the plot in front.
 const RESULTS_MENU: &[MenuEntry] = &[
-    results(ResultsCommand::DatasetManifestBrowser),
-    MenuEntry::command_as(viewer(ResultViewer::Waves), "Waveforms"),
-    MenuEntry::Submenu {
-        label: "View as",
-        entries: VIEW_AS_MENU,
-    },
+    results(ResultsCommand::DatasetManifestBrowser).access('B'),
+    MenuEntry::command_as(viewer(ResultViewer::Waves), "Waveforms").access('W'),
+    MenuEntry::submenu("View as", VIEW_AS_MENU).access('V'),
     Separator,
-    results(ResultsCommand::CreateResultDocument),
-    results(ResultsCommand::AddVisualizationPane),
-    results(ResultsCommand::CompareResultDatasets),
-    results(ResultsCommand::MeasurementLibrary),
-    results(ResultsCommand::FamilySlicing),
+    results(ResultsCommand::CreateResultDocument).access('N'),
+    results(ResultsCommand::AddVisualizationPane).access('A'),
+    results(ResultsCommand::CompareResultDatasets).access('D'),
+    results(ResultsCommand::MeasurementLibrary).access('M'),
+    results(ResultsCommand::FamilySlicing).access('F'),
     Separator,
     MenuEntry::command_as(
         ResultsCommand::ToggleLinkedCursors.key(),
         "Link A/B cursors",
-    ),
-    results(ResultsCommand::VisualizationDocumentProperties),
-    results(ResultsCommand::WaveformCalculator),
-    results(ResultsCommand::ExpressionDiagnostics),
-    hardcopy(HardcopyCommand::ReportAuthoring),
-    results(ResultsCommand::ClearResults),
+    )
+    .access('L'),
+    results(ResultsCommand::VisualizationDocumentProperties).access('P'),
+    results(ResultsCommand::WaveformCalculator).access('C'),
+    results(ResultsCommand::ExpressionDiagnostics).access('E'),
+    hardcopy(HardcopyCommand::ReportAuthoring).access('R'),
+    results(ResultsCommand::ClearResults).access('H'),
 ];
 
 /// The key of the command that opens `viewer`.
@@ -585,124 +577,120 @@ const fn viewer(viewer: ResultViewer) -> CommandKey {
 /// The other viewers the selected result can be read in, each offered only
 /// while it fits that result. The operating-point table is Simulate's.
 const VIEW_AS_MENU: &[MenuEntry] = &[
-    MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep"),
-    MenuEntry::offered(viewer(ResultViewer::Bode), "Bode"),
-    MenuEntry::offered(viewer(ResultViewer::Nyquist), "Nyquist"),
-    MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart"),
-    MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response"),
-    MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero"),
-    MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function"),
-    MenuEntry::offered(viewer(ResultViewer::NetworkMatrix), "Network matrix"),
-    MenuEntry::offered(viewer(ResultViewer::Fft), "FFT"),
+    MenuEntry::offered(viewer(ResultViewer::DcSweep), "DC sweep").access('D'),
+    MenuEntry::offered(viewer(ResultViewer::Bode), "Bode").access('B'),
+    MenuEntry::offered(viewer(ResultViewer::Nyquist), "Nyquist").access('Q'),
+    MenuEntry::offered(viewer(ResultViewer::Smith), "Smith chart").access('S'),
+    MenuEntry::offered(viewer(ResultViewer::Polar), "Polar response").access('R'),
+    MenuEntry::offered(viewer(ResultViewer::PoleZero), "Pole-zero").access('Z'),
+    MenuEntry::offered(viewer(ResultViewer::TransferFunction), "Transfer function").access('T'),
+    MenuEntry::offered(viewer(ResultViewer::NetworkMatrix), "Network matrix").access('K'),
+    MenuEntry::offered(viewer(ResultViewer::Fft), "FFT").access('F'),
     MenuEntry::offered(
         viewer(ResultViewer::HarmonicBalance),
         "Harmonic balance tones",
-    ),
-    MenuEntry::offered(viewer(ResultViewer::PhaseNoise), "Phase noise"),
-    MenuEntry::offered(viewer(ResultViewer::NoiseContrib), "Noise contribution"),
+    )
+    .access('H'),
+    MenuEntry::offered(viewer(ResultViewer::PhaseNoise), "Phase noise").access('P'),
+    MenuEntry::offered(viewer(ResultViewer::NoiseContrib), "Noise contribution").access('N'),
     MenuEntry::offered(
         viewer(ResultViewer::Contribution),
         "Sensitivity contribution",
-    ),
-    MenuEntry::offered(viewer(ResultViewer::Eye), "Eye diagram"),
-    MenuEntry::offered(viewer(ResultViewer::Hist), "Histogram"),
-    MenuEntry::offered(viewer(ResultViewer::Scatter), "Correlation scatter"),
-    MenuEntry::offered(viewer(ResultViewer::BoxViolin), "Box and violin"),
-    MenuEntry::offered(viewer(ResultViewer::Events), "Event history"),
-    MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area"),
-    MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization"),
-    MenuEntry::offered(viewer(ResultViewer::Specs), "Specification results"),
-    MenuEntry::offered(viewer(ResultViewer::Table), "Sample table"),
-    MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest"),
+    )
+    .access('I'),
+    MenuEntry::offered(viewer(ResultViewer::Eye), "Eye diagram").access('Y'),
+    MenuEntry::offered(viewer(ResultViewer::Hist), "Histogram").access('G'),
+    MenuEntry::offered(viewer(ResultViewer::Scatter), "Correlation scatter").access('C'),
+    MenuEntry::offered(viewer(ResultViewer::BoxViolin), "Box and violin").access('V'),
+    MenuEntry::offered(viewer(ResultViewer::Events), "Event history").access('E'),
+    MenuEntry::offered(viewer(ResultViewer::Soa), "Safe operating area").access('A'),
+    MenuEntry::offered(viewer(ResultViewer::Optimization), "Optimization").access('O'),
+    MenuEntry::offered(viewer(ResultViewer::Specs), "Specification results").access('U'),
+    MenuEntry::offered(viewer(ResultViewer::Table), "Sample table").access('L'),
+    MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest").access('M'),
 ];
 
 /// Verify: the analyses run over a design to sign it off, each opening its
 /// Verify page, with the specification matrix they check against.
 const VERIFY_MENU: &[MenuEntry] = &[
-    simulate(SimulateCommand::Verify(VerificationPage::Yield)),
-    simulate(SimulateCommand::Verify(VerificationPage::Corners)),
-    simulate(SimulateCommand::Verify(VerificationPage::Tuning)),
-    simulate(SimulateCommand::Verify(VerificationPage::Optimization)),
-    simulate(SimulateCommand::Verify(VerificationPage::DeviceSafety)),
-    results(ResultsCommand::EditSpecifications),
-    simulate(SimulateCommand::Verify(VerificationPage::Regression)),
+    simulate(SimulateCommand::Verify(VerificationPage::Yield)).access('M'),
+    simulate(SimulateCommand::Verify(VerificationPage::Corners)).access('C'),
+    simulate(SimulateCommand::Verify(VerificationPage::Tuning)).access('P'),
+    simulate(SimulateCommand::Verify(VerificationPage::Optimization)).access('O'),
+    simulate(SimulateCommand::Verify(VerificationPage::DeviceSafety)).access('A'),
+    results(ResultsCommand::EditSpecifications).access('S'),
+    simulate(SimulateCommand::Verify(VerificationPage::Regression)).access('R'),
 ];
 
 /// Tools: the libraries and models a design draws on, then the editors for
 /// netlists and scripts.
 const TOOLS_MENU: &[MenuEntry] = &[
-    models(ModelsCommand::Page(ModelsPage::Models)),
-    models(ModelsCommand::ModelBrowser),
-    models(ModelsCommand::ModelEditor),
-    models(ModelsCommand::ModelCreateProjectCopy),
-    models(ModelsCommand::ModelCorrelation),
-    models(ModelsCommand::PdkSettings),
-    models(ModelsCommand::RescanModelLibraries),
+    models(ModelsCommand::Page(ModelsPage::Models)).access('L'),
+    models(ModelsCommand::ModelBrowser).access('B'),
+    models(ModelsCommand::ModelEditor).access('E'),
+    models(ModelsCommand::ModelCreateProjectCopy).access('C'),
+    models(ModelsCommand::ModelCorrelation).access('M'),
+    models(ModelsCommand::PdkSettings).access('P'),
+    models(ModelsCommand::RescanModelLibraries).access('R'),
     Separator,
     command_as(
         Command::OpenWorkspace(Workspace::Netlist),
         "Netlist and script editor",
-    ),
-    command(Command::AutomationConsole),
+    )
+    .access('N'),
+    command(Command::AutomationConsole).access('S'),
 ];
 
 /// Window: the application's windows and the document in front, the
 /// workspaces and the documents in turn, then how the panels are laid out.
 const WINDOW_MENU: &[MenuEntry] = &[
-    command(Command::NewApplicationWindow),
-    MenuEntry::Submenu {
-        label: "Move document to",
-        entries: MOVE_DOCUMENT_MENU,
-    },
-    command(Command::ReattachDocument),
+    command(Command::NewApplicationWindow).access('N'),
+    MenuEntry::submenu("Move document to", MOVE_DOCUMENT_MENU).access('T'),
+    command(Command::ReattachDocument).access('R'),
     // Gathering windows back and finding ones left off screen are a desktop
     // application's: the browser and a tablet show one window.
     MenuEntry::Only(
         MenuContext::DesktopApplication,
         &[
-            command(Command::ConsolidateWindows),
-            command(Command::MonitorRecovery),
+            command(Command::ConsolidateWindows).access('M'),
+            command(Command::MonitorRecovery).access('O'),
         ],
     ),
     Separator,
-    MenuEntry::Submenu {
-        label: "Workspace",
-        entries: WORKSPACE_MENU,
-    },
-    command(Command::PreviousDocument),
-    command(Command::NextDocument),
+    MenuEntry::submenu("Workspace", WORKSPACE_MENU).access('W'),
+    command(Command::PreviousDocument).access('P'),
+    command(Command::NextDocument).access('D'),
     Separator,
-    MenuEntry::Submenu {
-        label: "Layout",
-        entries: LAYOUT_MENU,
-    },
-    command_as(Command::WindowManager, "Windows\u{2026}"),
+    MenuEntry::submenu("Layout", LAYOUT_MENU).access('L'),
+    command_as(Command::WindowManager, "Windows\u{2026}").access('S'),
 ];
 
 /// Where the document in front goes: a window of its own, or one of the
 /// windows already open, chosen in the dialog.
 const MOVE_DOCUMENT_MENU: &[MenuEntry] = &[
-    command_as(Command::DetachDocument, "New window\u{2026}"),
-    command_as(Command::MoveDocumentToWindow, "Another window\u{2026}"),
+    command_as(Command::DetachDocument, "New window\u{2026}").access('N'),
+    command_as(Command::MoveDocumentToWindow, "Another window\u{2026}").access('A'),
 ];
 
 /// The eight workspaces in the order of their keys, Alt+1 to Alt+8: the
 /// Stimulus library, fourth on the rail, kept the key it was given last.
 const WORKSPACE_MENU: &[MenuEntry] = &[
-    command_as(Command::OpenWorkspace(Workspace::Project), "Project"),
-    command_as(Command::OpenWorkspace(Workspace::Design), "Design"),
-    command_as(Command::OpenWorkspace(Workspace::Simulate), "Simulate"),
-    command_as(Command::OpenWorkspace(Workspace::Results), "Results"),
-    command_as(Command::OpenWorkspace(Workspace::Verify), "Verify"),
-    command_as(Command::OpenWorkspace(Workspace::Models), "Models"),
+    command_as(Command::OpenWorkspace(Workspace::Project), "Project").access('P'),
+    command_as(Command::OpenWorkspace(Workspace::Design), "Design").access('D'),
+    command_as(Command::OpenWorkspace(Workspace::Simulate), "Simulate").access('S'),
+    command_as(Command::OpenWorkspace(Workspace::Results), "Results").access('R'),
+    command_as(Command::OpenWorkspace(Workspace::Verify), "Verify").access('V'),
+    command_as(Command::OpenWorkspace(Workspace::Models), "Models").access('M'),
     command_as(
         Command::OpenWorkspace(Workspace::Netlist),
         "Netlist and script editor",
-    ),
+    )
+    .access('N'),
     command_as(
         Command::OpenWorkspace(Workspace::Stimulus),
         "Stimulus library",
-    ),
+    )
+    .access('L'),
 ];
 
 /// The saved panel layouts, chosen in their dialog, and the way back to
@@ -711,23 +699,24 @@ const LAYOUT_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(
         SettingsCommand::WorkspaceLayouts.key(),
         "Saved layouts\u{2026}",
-    ),
-    command(Command::ResetLayout),
+    )
+    .access('S'),
+    command(Command::ResetLayout).access('R'),
 ];
 
 /// Help: reading about RSpice and learning it from examples, getting help
 /// with a problem and the licence, then the notices and the version.
 const HELP_MENU: &[MenuEntry] = &[
-    command(Command::HelpCenter),
-    command(Command::KeyboardShortcuts),
-    command(Command::Examples),
-    command(Command::ReleaseNotes),
+    command(Command::HelpCenter).access('H'),
+    command(Command::KeyboardShortcuts).access('K'),
+    command(Command::Examples).access('E'),
+    command(Command::ReleaseNotes).access('N'),
     Separator,
-    command(Command::SystemDiagnostics),
-    cloud(CloudCommand::License),
+    command(Command::SystemDiagnostics).access('R'),
+    cloud(CloudCommand::License).access('L'),
     Separator,
-    command(Command::LegalPrivacy),
-    command(Command::About),
+    command(Command::LegalPrivacy).access('T'),
+    command(Command::About).access('A'),
 ];
 
 /// What the compact layout's Menu button holds: every application menu,
@@ -746,10 +735,7 @@ pub(in crate::workbench) const COMPACT_MENU: &[MenuEntry] = &[
 ];
 
 const fn compact_submenu(menu: ApplicationMenu) -> MenuEntry {
-    MenuEntry::Submenu {
-        label: menu.label(),
-        entries: application_menu_entries(menu),
-    }
+    MenuEntry::submenu(menu.label(), application_menu_entries(menu)).access(menu.access_key())
 }
 
 /// The source editor's right-click menu: the language group, shown only
@@ -760,18 +746,18 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
     MenuEntry::Only(
         MenuContext::NavigableSourceEditor,
         &[
-            command(Command::GoToDefinition),
-            command(Command::FindReferences),
-            command(Command::RenameSymbol),
+            command(Command::GoToDefinition).access('G'),
+            command(Command::FindReferences).access('F'),
+            command(Command::RenameSymbol).access('R'),
             Separator,
         ],
     ),
-    command(Command::Cut),
-    command(Command::Copy),
-    command(Command::Paste),
+    command(Command::Cut).access('T'),
+    command(Command::Copy).access('C'),
+    command(Command::Paste).access('P'),
     Separator,
-    command(Command::ToggleLineComment),
-    command(Command::FormatDocument),
+    command(Command::ToggleLineComment).access('M'),
+    command(Command::FormatDocument).access('O'),
 ];
 
 /// The icon a menu row shows: the one the command's toolbar button wears

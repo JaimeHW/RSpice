@@ -59,7 +59,7 @@ pub(super) fn menu_pin_for(
                     ));
                 }
                 menu_entries::MenuRow::Separator => out.push(format!("{indent}---")),
-                menu_entries::MenuRow::Submenu { label, rows } => {
+                menu_entries::MenuRow::Submenu { label, rows, .. } => {
                     out.push(format!("{indent}{label} >"));
                     pin(rows, &format!("{indent}  "), out);
                 }

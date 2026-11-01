@@ -31,6 +31,7 @@ use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
+mod access_keys;
 #[cfg(not(target_arch = "wasm32"))]
 mod capabilities;
 mod pins;
@@ -792,6 +793,7 @@ fn the_grid_rows_choose_the_drawn_style() {
             MenuEntry::Submenu {
                 label: "Grid",
                 entries,
+                ..
             } => Some(entries),
             _ => None,
         })
@@ -1177,6 +1179,7 @@ fn offered_rows_and_empty_submenus_are_left_out() {
             menu_entries::MenuRow::Submenu {
                 label: "View as",
                 rows,
+                ..
             } => Some(rows),
             _ => None,
         })

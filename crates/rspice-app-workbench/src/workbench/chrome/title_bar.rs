@@ -26,12 +26,14 @@ use application_menus::{
     shortcut_for_occurrence,
 };
 use keyboard::{
-    InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, begin_menu_render,
+    InitialMenuFocus, MENU_RENDER_STATE_ID, MenuRenderState, MenuRowRecord, RowActivation,
+    SUBMENU_OPEN_REQUEST, access_cues_shown, access_keys_apply_here, begin_menu_render,
     claim_menu_keys, finish_menu_render, handle_menu_bar_keyboard, handle_popup_keyboard,
-    record_menu_row, step_menu_row_focus, typeahead_menu_row_focus,
+    hold_access_letters, record_menu_row, step_menu_row_focus, take_row_access,
+    typeahead_menu_row_focus,
 };
-use menu_entries::{MenuEntry, menu_rows, show_scrolled_menu_rows};
-use menu_row::{MenuRowLead, MenuRowTrailing, paint_menu_row};
+use menu_entries::{MenuChoice, MenuEntry, menu_rows, show_scrolled_menu_rows};
+use menu_row::{MenuRowLead, MenuRowTrailing, paint_access_label, paint_menu_row};
 
 /// The narrowest a menu popup is; it widens to fit its longest row up to
 /// [`MENU_MAX_OUTER_WIDTH`].
@@ -306,6 +308,14 @@ impl MenuTriggerKey {
             Self::Compact => COMPACT_MENU_LABEL,
         }
     }
+
+    /// The letter that opens the menu with Alt on Windows and Linux.
+    pub const fn access(self) -> Option<char> {
+        match self {
+            Self::Application(menu) => Some(menu.access_key()),
+            Self::Compact => Some('M'),
+        }
+    }
 }
 
 const COMPACT_MENU_LABEL: &str = "Menu";
@@ -464,12 +474,14 @@ fn menu_trigger(
     } else {
         t.color.text_dim
     };
-    ui.painter().text(
+    paint_access_label(
+        ui.painter(),
         rect.center(),
         egui::Align2::CENTER_CENTER,
-        key.label(),
+        key.label().to_owned(),
         theme::sans(tokens::FS_1, FontWeight::Regular),
         ink,
+        key.access().filter(|_| access_cues_shown(ui.ctx())),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
 
@@ -483,8 +495,11 @@ fn menu_trigger(
         begin_menu_render(ui.ctx(), popup_id);
         let choice = show_scrolled_menu_rows(ui, key, &rows);
         let render_state = finish_menu_render(ui.ctx());
-        handle_popup_keyboard(ui.ctx(), popup_id, &response, &render_state.rows);
-        choice
+        let typed = handle_popup_keyboard(ui.ctx(), popup_id, &response, &render_state.rows);
+        if typed.is_some() {
+            ui.close();
+        }
+        choice.or(typed)
     });
     let popup_shown = popup.is_some();
     if let Some(choice) = popup.and_then(|shown| shown.inner) {
@@ -498,11 +513,18 @@ fn menu_trigger(
         Popup::open_id(ui.ctx(), popup_id);
     }
     let is_open = popup_shown || Popup::is_id_open(ui.ctx(), popup_id);
+    let access_key = key
+        .access()
+        .filter(|_| access_keys_apply_here(ui.ctx()))
+        .map(|letter| format!("Alt+{letter}"));
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::MenuItem);
         node.set_label(key.label());
         node.set_expanded(is_open);
         node.set_controls([popup_id.accesskit_id()]);
+        if let Some(access_key) = access_key {
+            node.set_access_key(access_key);
+        }
     });
 
     MenuTriggerResponse {

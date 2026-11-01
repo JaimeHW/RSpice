@@ -21,6 +21,9 @@ pub enum MenuEntry {
     Submenu {
         label: &'static str,
         entries: &'static [MenuEntry],
+        /// The letter that opens it from its menu: see
+        /// [`MenuEntry::access`].
+        access: Option<char>,
     },
     /// A rule between two groups of rows.
     Separator,
@@ -50,6 +53,9 @@ pub struct MenuCommand {
     radio: bool,
     /// The row is left out, rather than greyed, while it cannot run.
     offered_only: bool,
+    /// The letter that chooses the row while its menu is open on Windows and
+    /// Linux: see [`MenuEntry::access`].
+    access: Option<char>,
 }
 
 #[derive(Clone, Copy)]
@@ -125,6 +131,7 @@ impl MenuEntry {
             shortcut: None,
             radio: false,
             offered_only: false,
+            access: None,
         })
     }
 
@@ -136,6 +143,7 @@ impl MenuEntry {
             shortcut: None,
             radio: false,
             offered_only: false,
+            access: None,
         })
     }
 
@@ -148,6 +156,7 @@ impl MenuEntry {
             shortcut: None,
             radio: false,
             offered_only: true,
+            access: None,
         })
     }
 
@@ -160,7 +169,38 @@ impl MenuEntry {
             shortcut: None,
             radio: true,
             offered_only: false,
+            access: None,
         })
+    }
+
+    /// A row that opens `entries` as a menu of their own beside it.
+    pub const fn submenu(label: &'static str, entries: &'static [Self]) -> Self {
+        Self::Submenu {
+            label,
+            entries,
+            access: None,
+        }
+    }
+
+    /// The row with `key` as its access key: on Windows and Linux the letter
+    /// is underlined in the label while the keyboard drives the menus, and
+    /// typing it with the menu open chooses the row. The letter is one of
+    /// the label's; no two rows a menu shows at once share one.
+    pub const fn access(self, key: char) -> Self {
+        match self {
+            Self::Command(mut command) => {
+                command.access = Some(key);
+                Self::Command(command)
+            }
+            Self::Submenu { label, entries, .. } => Self::Submenu {
+                label,
+                entries,
+                access: Some(key),
+            },
+            Self::Separator | Self::Only(..) | Self::RecentFiles(_) => {
+                panic!("only a command's row or a submenu's row has an access key")
+            }
+        }
     }
 }
 
@@ -184,7 +224,7 @@ pub fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
 pub fn submenu_of(entries: &[MenuEntry], key: CommandKey) -> Option<Option<&'static str>> {
     entries.iter().find_map(|entry| match *entry {
         MenuEntry::Command(item) => (item.command == key).then_some(None),
-        MenuEntry::Submenu { label, entries } => submenu_of(entries, key).map(|_| Some(label)),
+        MenuEntry::Submenu { label, entries, .. } => submenu_of(entries, key).map(|_| Some(label)),
         MenuEntry::Only(_, entries) => submenu_of(entries, key),
         MenuEntry::Separator | MenuEntry::RecentFiles(_) => None,
     })
@@ -198,6 +238,8 @@ pub enum MenuRow {
     Submenu {
         label: &'static str,
         rows: Vec<MenuRow>,
+        /// The letter that opens it from its menu, if it has one.
+        access: Option<char>,
     },
 }
 
@@ -218,6 +260,9 @@ pub struct CommandRow {
     icon: Option<WorkbenchIcon>,
     /// What choosing the row does when it is not running `command`.
     pub action: Option<MenuAction>,
+    /// The letter or digit that chooses the row from its open menu, if it
+    /// has one.
+    pub access: Option<char>,
 }
 
 /// The rows `entries` show in the window `ctx` draws.
@@ -269,10 +314,16 @@ fn push_menu_rows(
                 radio: item.radio,
                 icon: app.command_icon(item.command),
                 action: None,
+                access: item.access,
             })),
-            MenuEntry::Submenu { label, entries } => rows.push(MenuRow::Submenu {
+            MenuEntry::Submenu {
+                label,
+                entries,
+                access,
+            } => rows.push(MenuRow::Submenu {
                 label,
                 rows: resolve_menu_rows(entries, app, platform, os),
+                access,
             }),
             MenuEntry::Separator => rows.push(MenuRow::Separator),
             MenuEntry::Only(context, entries) => {
@@ -292,6 +343,10 @@ fn push_menu_rows(
                         radio: false,
                         icon: None,
                         action: Some(MenuAction::OpenRecent(recent.clone())),
+                        // A file's name holds no letter it can keep from one
+                        // opening to the next; the arrows and its first
+                        // letters reach it.
+                        access: None,
                     })
                 }));
             }
@@ -405,7 +460,11 @@ pub fn show_menu_rows(ui: &mut Ui, rows: &[MenuRow]) -> Option<MenuChoice> {
                 menu_separator(ui);
                 None
             }
-            MenuRow::Submenu { label, rows } => submenu_row(ui, label, rows),
+            MenuRow::Submenu {
+                label,
+                rows,
+                access,
+            } => submenu_row(ui, label, *access, rows),
         };
         choice = choice.or(chosen);
     }
@@ -425,6 +484,10 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
     // Choosing it does nothing.
     let (rect, response) =
         ui.allocate_exact_size(Vec2::new(ui.available_width(), row_height), Sense::click());
+    let access_key = row
+        .access
+        .filter(|_| access_keys_apply_here(ui.ctx()))
+        .map(String::from);
     response.widget_info(|| match row.checked {
         Some(checked) => egui::WidgetInfo::selected(
             if row.radio {
@@ -457,8 +520,21 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
         if enabled && !row.shortcut.is_empty() {
             node.set_keyboard_shortcut(row.shortcut.as_str());
         }
+        if let Some(access) = access_key {
+            node.set_access_key(access);
+        }
     });
-    record_menu_row(ui.ctx(), &response, label);
+    record_menu_row(
+        ui.ctx(),
+        &response,
+        label,
+        row.access,
+        if enabled {
+            RowActivation::Choose(MenuChoice::for_row(row))
+        } else {
+            RowActivation::Greyed
+        },
+    );
 
     // The pointer lights only a row it can choose; the keyboard's focus
     // lights any row, so the reader sees where it is.
@@ -474,6 +550,7 @@ fn command_row(ui: &mut Ui, row: &CommandRow) -> Option<MenuChoice> {
             None => row.icon.map_or(MenuRowLead::Blank, MenuRowLead::Icon),
         },
         label,
+        row.access,
         MenuRowTrailing::Shortcut(&row.shortcut),
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
@@ -521,9 +598,14 @@ pub fn submenu_row_id(label: &str) -> Id {
 ///
 /// The submenu's rows are recorded apart from the enclosing menu's, so that
 /// menu's arrow keys step over the row rather than into its children. Right
-/// arrow, Enter or Space opens it with its first row focused; Left
-/// arrow or Escape closes it back onto the row.
-fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<MenuChoice> {
+/// arrow, Enter or Space, or its access key, opens it with its first row
+/// focused; Left arrow or Escape closes it back onto the row.
+fn submenu_row(
+    ui: &mut Ui,
+    label: &'static str,
+    access: Option<char>,
+    rows: &[MenuRow],
+) -> Option<MenuChoice> {
     let row_height = ui.spacing().interact_size.y.max(MENU_ROW_HEIGHT);
     let large_targets = row_height >= MENU_TOUCH_ROW_HEIGHT;
     let (_, rect) = ui.allocate_space(Vec2::new(ui.available_width(), row_height));
@@ -536,8 +618,13 @@ fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<Men
     if response.has_focus() {
         claim_menu_keys(ui.ctx(), response.id);
     }
+    // Its access key, typed in the menu, asked for it last pass.
+    let open_requested = ui
+        .data_mut(|data| data.remove_temp::<bool>(row_id.with(SUBMENU_OPEN_REQUEST)))
+        .is_some();
     let opened_by_key = response.has_focus()
-        && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowRight));
+        && (open_requested
+            || ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowRight)));
     if opened_by_key {
         // Marked shown as well as opened, or the menu would drop an open
         // item it has never drawn.
@@ -551,7 +638,13 @@ fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<Men
     }
 
     response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Button, true, label));
-    record_menu_row(ui.ctx(), &response, label);
+    record_menu_row(
+        ui.ctx(),
+        &response,
+        label,
+        access,
+        RowActivation::OpenSubmenu,
+    );
     let is_open = MenuState::from_id(ui.ctx(), parent_menu, |state| {
         state.open_item == Some(submenu_id)
     });
@@ -562,6 +655,7 @@ fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<Men
         true,
         MenuRowLead::Blank,
         label,
+        access,
         MenuRowTrailing::Submenu,
     );
     theme::paint_focus_ring_outset(ui, &response, rect);
@@ -576,17 +670,27 @@ fn submenu_row(ui: &mut Ui, label: &'static str, rows: &[MenuRow]) -> Option<Men
             focus_first.is_some().then_some(InitialMenuFocus::First),
             || choice = show_scrolled_menu_rows(ui, row_id, rows),
         );
-        handle_submenu_keyboard(&ctx, parent_menu, submenu_id, &response, &recorded.rows);
-        choice
+        let typed =
+            handle_submenu_keyboard(&ctx, parent_menu, submenu_id, &response, &recorded.rows);
+        if typed.is_some() {
+            ui.close();
+        }
+        choice.or(typed)
     });
     if shown.is_none() {
         ui.data_mut(|data| data.remove_temp::<bool>(focus_first_id));
     }
+    let access_key = access
+        .filter(|_| access_keys_apply_here(ui.ctx()))
+        .map(String::from);
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_role(egui::accesskit::Role::MenuItem);
         node.set_label(label);
         node.set_expanded(shown.is_some());
         node.set_controls([submenu_id.accesskit_id()]);
+        if let Some(access_key) = access_key {
+            node.set_access_key(access_key);
+        }
     });
     shown.and_then(|shown| shown.inner)
 }
@@ -664,17 +768,18 @@ fn render_nested_menu_rows(
 }
 
 /// Keys inside an open submenu, while one of its rows has the focus.
+/// Returns the row its access key chose.
 fn handle_submenu_keyboard(
     ctx: &Context,
     parent_menu: Id,
     submenu_id: Id,
     row: &Response,
     rows: &[MenuRowRecord],
-) {
+) -> Option<MenuChoice> {
     let focused = ctx.memory(|memory| memory.focused());
     let Some(focused_index) = focused.and_then(|id| rows.iter().position(|row| row.id == id))
     else {
-        return;
+        return None;
     };
     claim_menu_keys(ctx, rows[focused_index].id);
     if ctx.input_mut(|input| {
@@ -687,9 +792,15 @@ fn handle_submenu_keyboard(
             }
         });
         row.request_focus();
-        return;
+        return None;
     }
-    if !step_menu_row_focus(ctx, rows, Some(focused_index)) {
+    if step_menu_row_focus(ctx, rows, Some(focused_index)) {
+        return None;
+    }
+    let typed = take_row_access(ctx, rows, Some(focused_index));
+    if typed.is_none() {
         typeahead_menu_row_focus(ctx, rows, focused_index);
     }
+    hold_access_letters(ctx);
+    typed.flatten()
 }
