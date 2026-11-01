@@ -15,6 +15,7 @@ use crate::state::shortcuts::{
 };
 use crate::workbench::app_state::session::shortcuts::ShortcutInputSnapshot;
 use crate::workbench::app_state::session::shortcuts::resolver::*;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::results::commands::ResultsCommand;
@@ -1023,7 +1024,7 @@ fn ctrl_d_duplicates_the_line_in_a_focused_source_editor_and_the_selection_on_a_
         Duration::ZERO,
         |_| true,
     );
-    assert_eq!(in_editor.command, Some(Command::DuplicateLine.key()));
+    assert_eq!(in_editor.command, Some(CodeCommand::DuplicateLine.key()));
     let on_canvas = state.resolve(
         &snapshot(&[event(Key::D, primary(), false)], false),
         &profile,

@@ -242,7 +242,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             "Fit schematic content",
             Some(Command::FitSchematicContent.key()),
         ),
-        ("Show in netlist", Some(Command::ShowInNetlist.key())),
+        ("Show in netlist", Some(ids::SHOW_IN_NETLIST)),
         (
             "Add voltage or current probe…",
             Some(Command::PlaceProbe.key()),
@@ -290,10 +290,7 @@ fn each_target_gets_the_catalog_its_instance_master_slot_calls_for() {
             ("Draw wire", Some(Command::PlaceWire.key())),
             ("Place net label", Some(Command::PlaceLabel.key())),
             ("Place text or note…", Some(Command::PlaceText.key())),
-            (
-                "New Verilog-A device…",
-                Some(Command::NewVerilogADevice.key())
-            ),
+            ("New Verilog-A device…", Some(ids::NEW_VERILOGA_DEVICE)),
             ("Create symbol from schematic ports…", None),
             ("Sheet properties", Some(ids::SHEET_PROPERTIES)),
             (

@@ -7,6 +7,7 @@
 //! page that would report it.
 
 use super::*;
+use crate::workbench::code::commands::CodeCommand;
 
 /// Every one of these opens a window drawn only by the netlist page. Offered
 /// from a sibling page they set a dialog open with nothing on screen, and it
@@ -20,15 +21,15 @@ fn netlist_document_commands_are_not_offered_from_the_sibling_code_pages() {
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
     app.state.model.simulation.source.netlist_content = "deck\n.end\n".to_owned();
 
-    assert!(Command::ValidateCodeDocument.is_enabled(&app));
+    assert!(app.command_key_enabled(CodeCommand::ValidateCodeDocument.key()));
 
     app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
     assert!(
-        !Command::ValidateCodeDocument.is_enabled(&app),
+        !app.command_key_enabled(CodeCommand::ValidateCodeDocument.key()),
         "the Automation page does not own the netlist deck"
     );
     assert!(
-        !Command::CompareGeneratedRevisions.is_enabled(&app),
+        !app.command_key_enabled(CodeCommand::CompareGeneratedRevisions.key()),
         "the Automation page does not draw the revision comparison"
     );
 }
@@ -46,8 +47,8 @@ fn find_opens_the_window_the_visible_code_page_owns() {
     app.state.workbench.workspace = Workspace::Netlist;
 
     app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
-    assert!(Command::FindCodeDocument.is_enabled(&app));
-    Command::FindCodeDocument.execute(&mut app);
+    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
+    app.execute_command_key(CodeCommand::FindCodeDocument.key());
     assert!(app.state.code.netlist.find.open, "the deck find opened");
     assert!(
         app.state.code.code_workspace.source_search.is_none(),
@@ -56,8 +57,8 @@ fn find_opens_the_window_the_visible_code_page_owns() {
 
     app.state.code.netlist.find.open = false;
     app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
-    assert!(Command::FindCodeDocument.is_enabled(&app));
-    Command::FindCodeDocument.execute(&mut app);
+    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
+    app.execute_command_key(CodeCommand::FindCodeDocument.key());
     assert!(
         app.state.code.code_workspace.source_search.is_some(),
         "the bundle search opened"
@@ -79,7 +80,7 @@ fn find_opens_the_window_the_visible_code_page_owns() {
 fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     let mut app = RSpiceApp::test_instance();
     assert!(
-        !Command::CompileVerilogA.is_enabled(&app),
+        !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
         "with no Verilog-A view open there is nothing to compile"
     );
     let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
@@ -113,10 +114,10 @@ fn compiling_veriloga_requests_the_compile_and_not_only_the_page() {
     let page_before = app.state.code.code_workspace.page;
 
     assert!(
-        Command::CompileVerilogA.is_enabled(&app),
+        app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
         "the Models toolbar's Compile reaches the Verilog-A document in front"
     );
-    Command::CompileVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::CompileVerilogA.key());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     assert_eq!(

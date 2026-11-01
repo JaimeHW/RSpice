@@ -2,10 +2,11 @@
 
 use egui::{Context, Id, Key, Modifiers, Order, Rect, pos2, vec2};
 
-use crate::state::command_catalog::CommandPlatform;
+use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::command_palette::*;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::framework::command_registry::CommandSpec;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::project::commands::ProjectCommand;
@@ -31,15 +32,15 @@ use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, Command, command_registry, legacy_command,
 };
 
-/// What the registry declares about `command`.
-fn spec(command: Command) -> &'static CommandSpec {
+/// What the registry declares about the project feature's `command`.
+fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
     command_registry()
         .spec(command.key())
         .expect("the registry declares the command")
 }
 
-/// What the registry declares about the project feature's `command`.
-fn project_spec(command: ProjectCommand) -> &'static CommandSpec {
+/// What the registry declares about the code feature's `command`.
+fn code_spec(command: CodeCommand) -> &'static CommandSpec {
     command_registry()
         .spec(command.key())
         .expect("the registry declares the command")
@@ -54,8 +55,13 @@ fn palette_commands_listed() -> Vec<Command> {
 
 /// `command`'s entry as the palette lists it.
 fn palette_entry(command: Command) -> PaletteEntry {
+    palette_entry_for(command.key())
+}
+
+/// The entry of the command `key` names, as the palette lists it.
+fn palette_entry_for(key: CommandKey) -> PaletteEntry {
     palette_commands(&RSpiceApp::test_instance())
-        .find(|listed| listed.key() == command.key())
+        .find(|listed| listed.key() == key)
         .map(PaletteEntry::Command)
         .expect("the palette lists the command")
 }
@@ -113,7 +119,10 @@ fn palette_is_a_typed_registry_projection() {
         palette_commands(&RSpiceApp::test_instance())
             .any(|listed| listed.key() == ProjectCommand::OpenProject.key())
     );
-    assert!(commands.contains(&Command::GenerateNetlist));
+    assert!(
+        palette_commands(&RSpiceApp::test_instance())
+            .any(|listed| listed.key() == CodeCommand::GenerateNetlist.key())
+    );
     assert!(
         commands
             .iter()
@@ -165,21 +174,25 @@ fn a_command_is_found_under_the_menu_that_holds_it() {
         ]
     );
 
-    for (command, scope, detail) in [
+    for (key, scope, detail) in [
         (
-            Command::PlaceWire,
+            Command::PlaceWire.key(),
             PaletteScope::Design,
             "Design \u{203a} Place",
         ),
-        (Command::SelectAll, PaletteScope::Edit, "Edit"),
+        (Command::SelectAll.key(), PaletteScope::Edit, "Edit"),
         (
-            Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
+            Command::OpenWorkspace(crate::workbench::state::Workspace::Design).key(),
             PaletteScope::Window,
             "Window \u{203a} Workspace",
         ),
-        (Command::AutomationConsole, PaletteScope::Tools, "Tools"),
+        (
+            CodeCommand::AutomationConsole.key(),
+            PaletteScope::Tools,
+            "Tools",
+        ),
     ] {
-        let entry = palette_entry(command);
+        let entry = palette_entry_for(key);
         assert_eq!((entry.scope(), entry.detail().as_str()), (scope, detail));
     }
 
@@ -281,7 +294,7 @@ fn fuzzy_matching_marks_display_characters_and_searches_registry_metadata() {
         match_spans("Open generated netlist", "ogn"),
         Some((4, vec![0, 5, 7]))
     );
-    let command = palette_entry(Command::GenerateNetlist);
+    let command = palette_entry_for(CodeCommand::GenerateNetlist.key());
     let (_, marks) = match_entry(&command, "generated netlist").expect("label terms match");
     assert!(!marks.is_empty());
     assert!(match_entry(&command, "simulate").is_some());
@@ -300,7 +313,7 @@ fn palette_names_are_canonical_labels_without_ellipsis() {
         "Save all"
     );
     assert_eq!(
-        command_name(spec(Command::GenerateNetlist)),
+        command_name(code_spec(CodeCommand::GenerateNetlist)),
         "Open generated netlist"
     );
 }
@@ -730,7 +743,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
         .select_cell("behavioral", "gain");
 
     for (query, command) in [
-        ("Verilog-A device", Command::NewVerilogADevice.key()),
+        ("Verilog-A device", ids::NEW_VERILOGA_DEVICE),
         ("New view", ProjectCommand::NewView.key()),
     ] {
         let rows = palette_rows(
@@ -773,10 +786,7 @@ fn new_view_and_new_veriloga_device_are_palette_commands_that_open_their_dialogs
             .expect("the library")
             .read_only = true;
     }
-    for command in [
-        Command::NewVerilogADevice.key(),
-        ProjectCommand::NewView.key(),
-    ] {
+    for command in [ids::NEW_VERILOGA_DEVICE, ProjectCommand::NewView.key()] {
         assert!(!read_only.command_key_enabled(command), "{command:?}");
     }
 }
@@ -800,7 +810,7 @@ fn veriloga_build_settings_is_a_palette_command_that_opens_its_form() {
             egui::os::OperatingSystem::Windows,
         )
         .into_iter()
-        .find(|row| row.entry.command() == Some(Command::VerilogABuildSettings.key()))
+        .find(|row| row.entry.command() == Some(CodeCommand::VerilogABuildSettings.key()))
     };
     assert!(
         find(&app).is_none_or(|row| row.blocked.is_some()),

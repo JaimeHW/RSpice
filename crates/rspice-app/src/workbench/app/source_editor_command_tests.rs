@@ -7,6 +7,7 @@ use super::veriloga_design_tests::{
 };
 use super::*;
 use crate::state::{Point, ProjectSourceId, ProjectSourceLanguage, Wire};
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{self, CodeWorkspacePage};
 use crate::workbench::state::Workspace;
@@ -265,8 +266,11 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
         vec![key(egui::Key::ArrowDown, egui::Modifiers::NONE)],
     );
 
-    assert!(Command::ToggleLineComment.availability(&app).is_available());
-    Command::ToggleLineComment.execute(&mut app);
+    assert!(
+        app.command_availability(CodeCommand::ToggleLineComment.key())
+            .is_available()
+    );
+    app.execute_command_key(CodeCommand::ToggleLineComment.key());
     frame(&ctx, &mut app, DESKTOP);
     assert_eq!(
         root_text(&app, bundle_id),
@@ -322,13 +326,13 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     app.state.workbench.activate(Workspace::Project);
     frame(&ctx, &mut app, DESKTOP);
     for command in [
-        Command::ToggleLineComment,
-        Command::DuplicateLine,
-        Command::GoToLine,
-        Command::FoldAll,
+        CodeCommand::ToggleLineComment,
+        CodeCommand::DuplicateLine,
+        CodeCommand::GoToLine,
+        CodeCommand::FoldAll,
     ] {
         assert_eq!(
-            command.availability(&app),
+            app.command_availability(command.key()),
             crate::workbench::framework::command_registry::CommandAvailability::Hidden,
             "{command:?} off a source page"
         );

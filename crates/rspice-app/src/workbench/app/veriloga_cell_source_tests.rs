@@ -785,7 +785,7 @@ fn root_text(app: &RSpiceApp, reference: &CellViewRef) -> String {
 /// every byte, before the commit and after it.
 #[test]
 fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone() {
-    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::code::commands::CodeCommand;
 
     let mut app = open_project_app();
     let (reference, _) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
@@ -796,7 +796,7 @@ fn import_with_a_veriloga_tab_in_front_opens_the_form_and_leaves_the_view_alone(
     let sources = app.state.model.workspace.content.project_sources.clone();
     let text = root_text(&app, &reference);
 
-    Command::ImportVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::ImportVerilogA.key());
     assert!(app.state.code.code_workspace.veriloga.import_requested);
     code_workspace::complete_veriloga_file_pick(&mut app, "pair.va", TWO_TOP_MODULES);
 
@@ -881,7 +881,9 @@ const REPLACEMENT: &str = "module gain(p, n);\n  inout p, n;\n  electrical p, n;
 /// "Replace from file…" in the Manage source document dialog for the open
 /// `model.va`, through the picker, to the confirmation it opens.
 fn pick_replacement(ctx: &egui::Context, app: &mut RSpiceApp) {
-    crate::workbench::commands::vocabulary::Command::ManageSourceDocument.execute(app);
+    app.execute_command_key(
+        crate::workbench::code::commands::CodeCommand::ManageSourceDocument.key(),
+    );
     let mut output = frame(ctx, app, DESKTOP);
     for _ in 0..12 {
         output = frame(ctx, app, DESKTOP);

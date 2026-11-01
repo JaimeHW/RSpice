@@ -530,7 +530,9 @@ mod tests {
                     "UI focus qualification".to_owned(),
                 );
             }
-            crate::workbench::commands::vocabulary::Command::FindCodeDocument.execute(&mut app);
+            app.execute_command_key(
+                crate::workbench::code::commands::CodeCommand::FindCodeDocument.key(),
+            );
             let sources = app.state.model.workspace.content.project_sources.clone();
             let mut render = |events| {
                 let _ = ctx.run_ui(

@@ -312,6 +312,8 @@ mod tests {
     /// already running and the surface then refused the request.
     #[test]
     fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
+        use crate::workbench::code::commands::CodeCommand;
+
         let mut app = RSpiceApp::test_instance();
         // A Verilog-A cell view open in Design: the place Compile is offered.
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");
@@ -344,7 +346,7 @@ mod tests {
         app.state
             .workbench
             .activate(crate::workbench::state::Workspace::Design);
-        let enabled_before = Command::CompileVerilogA.is_enabled(&app);
+        let enabled_before = app.command_key_enabled(CodeCommand::CompileVerilogA.key());
         assert!(
             enabled_before,
             "a writable project compiles the Verilog-A cell view in front"
@@ -353,7 +355,7 @@ mod tests {
         app.state.model.safe_mode.active = true;
         app.state.model.safe_mode.applied.open_project_read_only = true;
         assert!(
-            !Command::CompileVerilogA.is_enabled(&app),
+            !app.command_key_enabled(CodeCommand::CompileVerilogA.key()),
             "a read-only project cannot compile; it was enabled before as {enabled_before}"
         );
     }

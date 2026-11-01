@@ -12,6 +12,7 @@ use crate::state::{
     Cell, CellViewRef, Library, ProjectSourceBundle, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, View, ViewType,
 };
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
@@ -208,8 +209,8 @@ fn find_in_a_veriloga_cell_view_searches_that_views_bundle() {
         "the view's bundle is the project's only Verilog-A source"
     );
 
-    assert!(Command::FindCodeDocument.is_enabled(&app));
-    Command::FindCodeDocument.execute(&mut app);
+    assert!(app.command_key_enabled(CodeCommand::FindCodeDocument.key()));
+    app.execute_command_key(CodeCommand::FindCodeDocument.key());
 
     let search = app
         .state
@@ -463,8 +464,8 @@ fn a_compile_from_design_starts_without_a_dialog_and_is_published_while_design_i
     open_in_design(&mut app.state, &reference);
     let ctx = themed_context();
 
-    assert!(Command::CompileVerilogA.is_enabled(&app));
-    Command::CompileVerilogA.execute(&mut app);
+    assert!(app.command_key_enabled(CodeCommand::CompileVerilogA.key()));
+    app.execute_command_key(CodeCommand::CompileVerilogA.key());
     assert_eq!(app.state.workbench.workspace, Workspace::Design);
     let clicked = app
         .state
@@ -604,7 +605,7 @@ fn a_manual_deck_design_over_a_deck_cell_validates_and_runs() {
     app.state.model.workspace.content.netlist_source = Some(deck(&app));
 
     let ctx = themed_context();
-    Command::CompileVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::CompileVerilogA.key());
     frame(&ctx, &mut app, DESKTOP);
     wait_for_compile(&ctx, &mut app);
     app.state.model.workspace.content.netlist_source = Some(deck(&app));
@@ -659,7 +660,7 @@ fn a_closure_edited_after_the_click_compiles_to_a_stale_result() {
     open_in_design(&mut app.state, &reference);
     let ctx = themed_context();
 
-    Command::CompileVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::CompileVerilogA.key());
     let clicked = app
         .state
         .code
@@ -736,7 +737,7 @@ fn a_failed_compile_is_on_screen_without_opening_anything() {
     )
     .unwrap();
 
-    Command::CompileVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::CompileVerilogA.key());
     frame(&ctx, &mut app, DESKTOP);
     wait_for_compile(&ctx, &mut app);
     frame(&ctx, &mut app, DESKTOP);

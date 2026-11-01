@@ -286,7 +286,7 @@ fn overview_run_action_opens_the_plan_without_starting_execution() {
 fn overview_import_deck_uses_the_independent_netlist_project_workflow() {
     assert_eq!(
         import_deck_intent(),
-        OverviewIntent::Command(Command::OpenNetlist.key())
+        OverviewIntent::Command(ids::OPEN_NETLIST)
     );
 }
 

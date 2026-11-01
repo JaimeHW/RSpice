@@ -20,6 +20,7 @@ use crate::workbench::chrome::title_bar::application_menus::{
 use crate::workbench::chrome::title_bar::menu_entries::{MenuEntry, menu_rows};
 use crate::workbench::chrome::title_bar::*;
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{Command, command_registry};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandFlags, ids};
 use crate::workbench::framework::host::Host;
@@ -459,8 +460,11 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
         listed.contains(&ModelsCommand::Page(ModelsPage::Models).key()),
         "no menu lists the model catalog"
     );
+    assert!(
+        listed.contains(&CodeCommand::AutomationConsole.key()),
+        "no menu lists the Automation workspace"
+    );
     for command in [
-        Command::AutomationConsole,
         Command::WindowManager,
         Command::ToggleFocusMode,
         Command::ToggleConsole,

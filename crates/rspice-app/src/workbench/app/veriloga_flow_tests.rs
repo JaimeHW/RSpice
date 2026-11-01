@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use super::*;
 use crate::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::simulate::commands::SimulateCommand;
@@ -354,8 +355,12 @@ fn new_project() -> (User, CellViewRef) {
 /// Compile the open view as the toolbar's Compile does, and frame until the
 /// result is published.
 fn compile(user: &mut User) {
-    assert!(Command::CompileVerilogA.is_enabled(&user.app));
-    Command::CompileVerilogA.execute(&mut user.app);
+    assert!(
+        user.app
+            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+    );
+    user.app
+        .execute_command_key(CodeCommand::CompileVerilogA.key());
     user.wait_for("the compile result", |app| {
         let veriloga = &app.state.code.code_workspace.veriloga;
         veriloga.compile_request.is_none() && veriloga.pending.is_none()
@@ -1321,7 +1326,8 @@ fn compact_models_import_from_their_source_folders_compile_and_place() {
     for (index, (folder, root, module)) in CMC_ROOTS.into_iter().enumerate() {
         let folder = models.join(folder);
         let text = std::fs::read_to_string(folder.join(root)).expect("the root is readable");
-        Command::ImportVerilogA.execute(&mut user.app);
+        user.app
+            .execute_command_key(CodeCommand::ImportVerilogA.key());
         code_workspace::complete_veriloga_files_pick(
             &mut user.app,
             &[(root, &text)],

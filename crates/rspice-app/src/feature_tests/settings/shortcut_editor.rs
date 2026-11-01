@@ -14,7 +14,7 @@ use crate::state::shortcuts::ShortcutStroke;
 use crate::workbench::app::dialogs::preferences::shortcut_preferences::capture::*;
 use crate::workbench::app::dialogs::preferences::shortcut_preferences::*;
 use crate::workbench::app_state::AppState;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::CommandRegistry;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::ids;
@@ -89,7 +89,7 @@ fn search_matches_context_and_binding_text() {
     let os = egui::os::OperatingSystem::Windows;
     assert!(
         filtered_commands(&editor, os, command_registry())
-            .contains(&Command::GenerateNetlist.key())
+            .contains(&CodeCommand::GenerateNetlist.key())
     );
     editor.query = "verification".to_owned();
     assert!(

@@ -88,7 +88,11 @@ fn a_running_compile_counts_and_cancel_stops_it() {
 
     assert_eq!(strip(&user).as_deref(), Some("Compiling… 3 s"));
     assert!(user.find(COMPILE).is_none(), "the control is Cancel now");
-    assert!(!Command::CompileVerilogA.is_enabled(&user.app));
+    assert!(
+        !user
+            .app
+            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+    );
 
     user.click(CANCEL);
 
@@ -107,7 +111,10 @@ fn a_running_compile_counts_and_cancel_stops_it() {
     );
     assert_eq!(user.prompt(), "Compile cancelled");
     user.expect(COMPILE);
-    assert!(Command::CompileVerilogA.is_enabled(&user.app));
+    assert!(
+        user.app
+            .command_key_enabled(CodeCommand::CompileVerilogA.key())
+    );
 }
 
 /// Editing under a running compile stops it, and the reader is told why no

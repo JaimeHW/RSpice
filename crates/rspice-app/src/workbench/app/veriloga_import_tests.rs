@@ -10,7 +10,7 @@ use super::veriloga_design_tests::{
 use super::*;
 use crate::state::workspace::ImportedInclude;
 use crate::state::{CellViewRef, ProjectSourceOwner};
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace;
 
 /// A root whose parameter and body live in files of their own, as the model
@@ -110,7 +110,7 @@ fn a_root_import_reads_its_includes_from_its_folder_and_a_missing_one_is_located
     let ctx = themed_context();
     let sources = app.state.model.workspace.content.project_sources.clone();
 
-    Command::ImportVerilogA.execute(&mut app);
+    app.execute_command_key(CodeCommand::ImportVerilogA.key());
     code_workspace::complete_veriloga_files_pick(&mut app, &[("gainer.va", ROOT)], Some(&folder));
 
     let listed = form(&app)

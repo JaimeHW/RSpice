@@ -9,7 +9,7 @@ use super::veriloga_interface_tests::{add_module_cell, compile_and_publish, edit
 use super::*;
 use crate::state::{CellViewRef, Point, PortDirection, SymbolDocument, SymbolElectricalType};
 use crate::workbench::app::actions::veriloga_symbol::update_veriloga_symbol;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace::{
     VerilogACellSymbol, VerilogASymbolDrift, symbol_standing,
 };
@@ -114,9 +114,9 @@ fn a_hand_drawn_symbol_keeps_its_artwork_through_a_recompile_and_update() {
 fn open_symbol_takes_a_compiled_module_to_its_symbol() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    assert!(Command::VerilogAOpenSymbol.is_enabled(&app));
+    assert!(app.command_key_enabled(CodeCommand::VerilogAOpenSymbol.key()));
 
-    Command::VerilogAOpenSymbol.execute(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
 
     assert_eq!(
         app.state.model.workspace.content.active_view,
@@ -187,7 +187,7 @@ fn update_symbol_lands_in_the_editor_with_the_new_pin_selected() {
 fn a_compiled_symbol_saves_and_keeps_its_rails_through_an_update() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    Command::VerilogAOpenSymbol.execute(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
     assert_eq!(app.state.refuse_unsavable_active_symbol(), None);
 
     open_in_design(&mut app.state, &reference);
@@ -212,7 +212,7 @@ fn the_editor_generates_what_the_compile_drew() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
     let drawn = symbol(&app, &reference);
-    Command::VerilogAOpenSymbol.execute(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
 
     app.state
         .generate_active_symbol_document()
@@ -228,7 +228,7 @@ fn the_editor_generates_what_the_compile_drew() {
 fn the_first_drag_on_a_compiled_symbol_lands_the_pin_where_it_is_dropped() {
     let mut app = open_project_app();
     let reference = compiled_amplifier(&mut app);
-    Command::VerilogAOpenSymbol.execute(&mut app);
+    app.execute_command_key(CodeCommand::VerilogAOpenSymbol.key());
     let ctx = themed_context();
     ctx.enable_accesskit();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());

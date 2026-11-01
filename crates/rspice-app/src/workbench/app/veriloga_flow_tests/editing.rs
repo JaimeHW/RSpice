@@ -22,7 +22,8 @@ fn redo(user: &mut User) {
 }
 
 fn format(user: &mut User) {
-    Command::FormatDocument.execute(&mut user.app);
+    user.app
+        .execute_command_key(CodeCommand::FormatDocument.key());
     user.settle();
 }
 
