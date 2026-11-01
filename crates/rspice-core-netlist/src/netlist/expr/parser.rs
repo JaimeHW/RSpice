@@ -390,6 +390,40 @@ impl<'a> ExprParser<'a> {
         }
     }
 
+    /// In a control expression only, `(a, b)` is the complex number ngspice's
+    /// comma operator makes (frontend/parse-bison.y:131; maths/cmaths/
+    /// cmath3.c:95 `cx_comma`): real part re(a) + im(b), imaginary part
+    /// im(a) + re(b). The cursor is at the comma.
+    #[inline(never)]
+    fn parse_comma(&mut self, first: Expr) -> Result<Expr, ExprError> {
+        self.consume(',');
+        let second = self.parse_ternary()?;
+        self.skip_ws();
+        let part = |name: &str, operand: &Expr| Expr::FnCall {
+            name: name.into(),
+            args: vec![operand.clone()],
+        };
+        let real = Expr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(part("REAL", &first)),
+            right: Box::new(part("IMAG", &second)),
+        };
+        let imaginary = Expr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(part("IMAG", &first)),
+            right: Box::new(part("REAL", &second)),
+        };
+        Self::checked_expr(Expr::BinOp {
+            op: BinOpKind::Add,
+            left: Box::new(real),
+            right: Box::new(Expr::BinOp {
+                op: BinOpKind::Mul,
+                left: Box::new(imaginary),
+                right: Box::new(Expr::ComplexNumber(ComplexValue::new(0.0, 1.0))),
+            }),
+        })
+    }
+
     /// In a control expression only, `x[i]` or `x[lo,hi]` written directly
     /// after an operand indexes it, binding tighter than `^` (ngspice
     /// frontend/parse-bison.y:93 `%left '[' ']'`). The call `[]` takes the
@@ -486,8 +520,11 @@ impl<'a> ExprParser<'a> {
         if self.check('(') || self.check('{') {
             let open = self.advance().ok_or(ExprError::UnexpectedChar('\0'))?;
             let close = if open == '(' { ')' } else { '}' };
-            let expr = self.parse_ternary()?; // Full expression inside parens
+            let mut expr = self.parse_ternary()?; // Full expression inside parens
             self.skip_ws();
+            if open == '(' && self.control_vectors && self.check(',') {
+                expr = self.parse_comma(expr)?;
+            }
             if !self.consume(close) {
                 return Err(if open == '(' {
                     ExprError::MissingCloseParen

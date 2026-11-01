@@ -3036,6 +3036,15 @@ fn control_expressions_read_ngspice_word_operators() {
         assert_eq!(value(source), expected, "{source}");
     }
     assert!(parse_control_expression_with_abort("a eq", &abort).is_err());
+    // ngspice's comma makes a complex number (cmath3.c:95 cx_comma).
+    let complex = |source: &str| {
+        let expression = parse_control_expression_with_abort(source, &abort).unwrap();
+        evaluate_complex(&expression, &variables).unwrap()
+    };
+    assert_eq!(complex("(0,2) * 3"), ComplexValue::new(0.0, 6.0));
+    assert_eq!(complex("(a, a+1)"), ComplexValue::new(3.0, 4.0));
+    assert_eq!(complex("((1,2), (3,4))"), ComplexValue::new(5.0, 5.0));
+    assert!(parse_expression("(0,2)").is_err());
     assert_eq!(
         parse_expression("a eq 3").unwrap_err(),
         ExprError::TrailingInput("eq 3".into())
