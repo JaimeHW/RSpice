@@ -1,3 +1,7 @@
+//! Tests of the print adapters: capability digests, exact printer modes and
+//! paper identity, the spool transaction and its failure receipts, the
+//! desktop print handoff, and the PDF the CUPS backend hands `lp`.
+
 #[cfg(not(target_arch = "wasm32"))]
 use std::cell::RefCell;
 #[cfg(not(target_arch = "wasm32"))]
