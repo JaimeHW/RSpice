@@ -360,13 +360,13 @@ fn two_step_dimensions_wrap_the_complete_dc_sweep_in_xyce_order() {
 }
 
 #[test]
-fn step_temp_and_data_cards_vary_in_card_order_across_cli_coordinate_namespaces() {
+fn a_data_card_drops_the_step_card_and_temp_and_data_vary_in_card_order() {
     let dir = test_dir("canonical_axis_order");
     let deck = dir.join("canonical_axis_order.sp");
     let output_path = dir.join("operating_point.csv");
     std::fs::write(
         &deck,
-        "* DeckPlan keeps the STEP, TEMP and DATA cards in card order\n\
+        "* a DATA card drops the STEP card; TEMP and DATA keep card order\n\
          .param rleft=1k rright=1k\n\
          V1 in 0 1\n\
          R1 in out {rleft}\n\
@@ -384,7 +384,6 @@ fn step_temp_and_data_cards_vary_in_card_order_across_cli_coordinate_namespaces(
     .expect("write mixed canonical-axis deck");
 
     let run = run_rspice(&[
-        "--quiet",
         "run",
         deck.to_str().unwrap(),
         "-o",
@@ -392,17 +391,23 @@ fn step_temp_and_data_cards_vary_in_card_order_across_cli_coordinate_namespaces(
         "-f",
         "csv",
     ]);
+    let stderr = String::from_utf8_lossy(&run.stderr);
     assert!(
         run.status.success(),
-        "stdout: {}; stderr: {}",
+        "stdout: {}; stderr: {stderr}",
         String::from_utf8_lossy(&run.stdout),
-        String::from_utf8_lossy(&run.stderr)
     );
     assert!(!output_path.exists(), "base path must remain unused");
+    // Xyce clears every other .STEP sweep beside a .STEP DATA= card; RSpice
+    // drops the card too, and names it.
+    assert!(
+        stderr.contains(".STEP PARAM RRIGHT is ignored"),
+        "stderr: {stderr}"
+    );
 
-    // Xyce, LTspice and QSPICE vary the first card fastest: the numeric STEP
-    // card first, then the TEMP card, and the DATA card last.
-    let expected = [0.5, 2.0 / 3.0, 0.5, 2.0 / 3.0, 0.25, 0.4, 0.25, 0.4];
+    // rright keeps its 1k default. The TEMP card comes first, so it varies
+    // fastest, and the DATA card varies slowest.
+    let expected = [0.5, 0.5, 0.25, 0.25];
     for (index, expected_vout) in expected.into_iter().enumerate() {
         let path = step_output(&output_path, index + 1);
         let csv = std::fs::read_to_string(&path)
@@ -410,11 +415,11 @@ fn step_temp_and_data_cards_vary_in_card_order_across_cli_coordinate_namespaces(
         let vout = scalar_csv_value(&csv, "V(OUT)");
         assert!(
             (vout - expected_vout).abs() < 1.0e-9,
-            "coordinate {} is not in STEP→TEMP→DATA card order: {csv}",
+            "coordinate {} is not in TEMP→DATA card order: {csv}",
             index + 1
         );
     }
-    assert_eq!(published_coordinate_count(&output_path), 8);
+    assert_eq!(published_coordinate_count(&output_path), 4);
 
     let _ = std::fs::remove_dir_all(&dir);
 }

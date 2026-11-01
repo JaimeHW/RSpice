@@ -2310,7 +2310,7 @@ mod tests {
     }
 
     #[test]
-    fn data_step_numeric_step_and_temp_keep_card_order() {
+    fn a_data_card_drops_the_numeric_step_card_and_temp_and_data_keep_card_order() {
         let netlist = crate::Netlist::parse(
             "axis ordering\n\
              .step param gain list 1 2\n\
@@ -2325,26 +2325,26 @@ mod tests {
              .end\n",
         )
         .expect("DATA, STEP, and TEMP deck parses");
+        // Xyce clears every other `.STEP` sweep once a `.STEP DATA=` card is
+        // present; RSpice drops the card too, and says so.
+        assert!(netlist.diagnostics.iter().any(|diagnostic| {
+            diagnostic.code == "xyce-step-data-drops-step"
+                && diagnostic
+                    .message
+                    .starts_with(".STEP PARAM GAIN is ignored")
+        }));
         let plan =
             DeckPlan::from_netlist(&netlist, &ResourceLimits::default()).expect("mixed axes plan");
 
         assert_eq!(
             plan.axes().iter().map(RunAxis::kind).collect::<Vec<_>>(),
-            [AxisKind::Step, AxisKind::Temperature, AxisKind::Data]
+            [AxisKind::Temperature, AxisKind::Data]
         );
         let coordinates = plan
             .coordinates_with_abort(&ResourceLimits::default(), &crate::NoAbort)
             .expect("mixed coordinates materialize");
-        assert_eq!(coordinates.len(), 8);
-        assert_eq!(
-            coordinates[0]
-                .assignments()
-                .iter()
-                .map(AxisAssignment::kind)
-                .collect::<Vec<_>>(),
-            [AxisKind::Step, AxisKind::Temperature, AxisKind::Data]
-        );
-        assert_eq!(numeric_values(&plan.axes()[1]), [-40.0, 125.0]);
+        assert_eq!(coordinates.len(), 4);
+        assert_eq!(numeric_values(&plan.axes()[0]), [-40.0, 125.0]);
         // The first card's axis varies fastest and the last card's slowest.
         let indices = |coordinate: &RunCoordinate| {
             coordinate
@@ -2353,9 +2353,8 @@ mod tests {
                 .map(AxisAssignment::value_index)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(indices(&coordinates[1]), [1, 0, 0]);
-        assert_eq!(indices(&coordinates[2]), [0, 1, 0]);
-        assert_eq!(indices(&coordinates[4]), [0, 0, 1]);
+        assert_eq!(indices(&coordinates[1]), [1, 0]);
+        assert_eq!(indices(&coordinates[2]), [0, 1]);
     }
 
     #[test]

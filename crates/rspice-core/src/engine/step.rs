@@ -2331,6 +2331,20 @@ mod tests {
         StepPlanLimits::new(max_runs, 64, 256, 4096)
     }
 
+    /// A `.STEP DATA=` card over `table`. A parsed deck keeps no other `.STEP`
+    /// card beside one, so a test that composes DATA with other dimensions
+    /// hands the planner this card itself.
+    fn data_step(table: &str) -> StepCommand {
+        StepCommand {
+            target: StepTarget::Param,
+            name: table.to_ascii_uppercase(),
+            param_name: None,
+            sweep: StepSweep::Data {
+                table_name: table.to_ascii_uppercase(),
+            },
+        }
+    }
+
     #[test]
     fn owned_step_plan_materializes_after_the_source_netlist_is_dropped() {
         let engine = Engine::default();
@@ -2543,14 +2557,14 @@ mod tests {
              20\n\
              .enddata\n\
              .step gain list 2\n\
-             .step data=samples\n\
              .step temp list 27\n\
              .step R1 list 100 200\n\
              .end\n",
         )
         .expect("deck parses");
         let engine = Engine::new(SimulationConfig::default());
-        let steps = step_commands(&netlist);
+        let mut steps = step_commands(&netlist);
+        steps.insert(1, data_step("samples"));
         let plan = engine
             .plan_step_commands(&netlist, &steps, plan_limits(4))
             .expect("four-run plan fits");
@@ -2615,14 +2629,15 @@ mod tests {
              .data samples R1:VALUE\n\
              20\n\
              .enddata\n\
-             .step data=samples\n\
              .step R1:R list 30\n\
              .end\n",
         )
         .expect("collision deck parses");
         let engine = Engine::new(SimulationConfig::default());
+        let mut steps = step_commands(&collision);
+        steps.insert(0, data_step("samples"));
         let error = engine
-            .plan_step_commands(&collision, &step_commands(&collision), plan_limits(1))
+            .plan_step_commands(&collision, &steps, plan_limits(1))
             .expect_err("DATA device override and explicit DEVICE target must collide");
         let message = error.to_string();
         assert!(message.contains("Duplicate .STEP target"), "{message}");

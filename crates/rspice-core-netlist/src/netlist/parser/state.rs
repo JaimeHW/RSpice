@@ -227,6 +227,7 @@ impl ParseState {
 
         let mut analyses = self.analyses;
         resolve_implicit_step_targets(&mut analyses, &params);
+        let step_card_lines = self.analysis_cards.step_card_lines().to_vec();
         let small_signal_states = self.analysis_cards.into_small_signal_states(&analyses)?;
 
         let mut options = self.options;
@@ -284,6 +285,7 @@ impl ParseState {
             dialect_instances::apply_ngspice_instance_readings(&mut netlist);
         }
         apply_temp_directive_to_options(&mut netlist);
+        apply_step_data_rule(&mut netlist, &step_card_lines)?;
         let ground_policy = netlist.ground_policy();
         netlist.saves.apply_ground_policy(ground_policy);
         for measurement in &mut netlist.measurements {
@@ -347,6 +349,142 @@ fn resolve_implicit_step_targets(analyses: &mut [AnalysisCommand], params: &Para
         if params.has_any_parameter_binding(&command.name) {
             command.target = StepTarget::Param;
         }
+    }
+}
+
+/// Step a deck with a `.STEP DATA=` card as Xyce does.
+///
+/// `.STEP DATA=` is Xyce syntax. Xyce turns each column of a stepped table
+/// into a TABLE sweep and, once one is present, clears every other `.STEP`
+/// sweep (N_ANP_SweepParam.C:664-667, `convertData`). A TABLE sweep reads
+/// `valList[stepNumber]` (N_ANP_SweepParam.C:128-131), so several tables step
+/// together, row by row, and Xyce refuses tables whose row counts differ
+/// ("For the TABLE all parameters must have matching number of points",
+/// N_ANP_SweepParam.C:478-493). RSpice does the same, but warns for each card
+/// it drops, and folds several tables into one table stepped at the first
+/// `.STEP DATA=` card. A table that does not resolve is left to the run
+/// planner, which refuses it.
+fn apply_step_data_rule(
+    netlist: &mut Netlist,
+    step_card_lines: &[(usize, usize)],
+) -> Result<(), ParseError> {
+    let line_of = |index: usize| {
+        step_card_lines
+            .iter()
+            .find(|(card, _)| *card == index)
+            .map_or(0, |(_, line)| *line)
+    };
+    let data_cards = netlist
+        .analyses
+        .iter()
+        .enumerate()
+        .filter_map(|(index, analysis)| match analysis {
+            AnalysisCommand::Step(StepCommand {
+                sweep: StepSweep::Data { table_name },
+                ..
+            }) => Some((index, table_name.clone())),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let Some((first_index, first_table)) = data_cards.first().cloned() else {
+        return Ok(());
+    };
+    for (index, analysis) in netlist.analyses.iter().enumerate() {
+        let AnalysisCommand::Step(command) = analysis else {
+            continue;
+        };
+        if matches!(command.sweep, StepSweep::Data { .. }) {
+            continue;
+        }
+        netlist.diagnostics.push(ParseDiagnostic::warning(
+            line_of(index),
+            "xyce-step-data-drops-step",
+            format!(
+                "{} is ignored: a deck with a .STEP DATA= card steps only its .DATA tables, \
+                 as Xyce does",
+                step_card_spelling(command)
+            ),
+        ));
+    }
+
+    let mut folded = None;
+    if data_cards.len() > 1 {
+        let mut tables = Vec::with_capacity(data_cards.len());
+        for (_, name) in &data_cards {
+            let mut matching = netlist
+                .data_tables
+                .iter()
+                .filter(|table| table.name.eq_ignore_ascii_case(name));
+            match (matching.next(), matching.next()) {
+                (Some(table), None) => tables.push(table),
+                _ => break,
+            }
+        }
+        if tables.len() == data_cards.len() {
+            let rows = tables[0].rows.len();
+            for ((index, name), table) in data_cards.iter().zip(&tables).skip(1) {
+                if table.rows.len() != rows {
+                    return Err(ParseError::Syntax {
+                        line: line_of(*index),
+                        message: format!(
+                            ".STEP DATA={name} has {} row(s) and .STEP DATA={first_table} has \
+                             {rows}; the tables step together, row by row, so their row \
+                             counts must match, as Xyce requires",
+                            table.rows.len()
+                        ),
+                    });
+                }
+            }
+            let name = data_cards
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>()
+                .join("+");
+            let params = tables
+                .iter()
+                .flat_map(|table| table.params.iter().cloned())
+                .collect();
+            let rows = (0..rows)
+                .map(|row| {
+                    tables
+                        .iter()
+                        .flat_map(|table| table.rows[row].iter().cloned())
+                        .collect()
+                })
+                .collect();
+            folded = Some(DataTable { name, params, rows });
+        }
+    }
+
+    if let Some(table) = folded {
+        if let Some(AnalysisCommand::Step(command)) = netlist.analyses.get_mut(first_index) {
+            command.name.clone_from(&table.name);
+            command.sweep = StepSweep::Data {
+                table_name: table.name.clone(),
+            };
+        }
+        netlist.data_tables.push(table);
+        netlist.retain_analyses(|index, analysis| {
+            !matches!(analysis, AnalysisCommand::Step(_)) || index == first_index
+        });
+    } else {
+        netlist.retain_analyses(|_, analysis| match analysis {
+            AnalysisCommand::Step(command) => matches!(command.sweep, StepSweep::Data { .. }),
+            _ => true,
+        });
+    }
+    Ok(())
+}
+
+/// A `.STEP` card as a diagnostic names it.
+fn step_card_spelling(command: &StepCommand) -> String {
+    match (command.target, command.param_name.as_deref()) {
+        (StepTarget::Temp, _) => ".STEP TEMP".to_string(),
+        (StepTarget::Param, _) => format!(".STEP PARAM {}", command.name),
+        (StepTarget::Model, Some(param)) => format!(".STEP MODEL {} {param}", command.name),
+        (StepTarget::Model, None) => format!(".STEP MODEL {}", command.name),
+        (StepTarget::Device, Some(param)) => format!(".STEP {}:{param}", command.name),
+        (StepTarget::Device, None) => format!(".STEP {}", command.name),
     }
 }
 
@@ -522,6 +660,140 @@ mod tests {
                 assert_eq!(duplicate_line, 3);
             }
             other => panic!("expected synthesized-name collision, got {other:?}"),
+        }
+    }
+
+    const STEP_DATA_TABLES: &str = ".data tab\n+ a b\n+ 1 1\n+ 2 2\n+ 3 3\n.enddata\n\
+                                    .data tab2\n+ c\n+ 4\n+ 5\n+ 6\n.enddata\n";
+
+    fn step_data_deck(cards: &str) -> String {
+        format!(
+            "step data\n.param a=1 b=1 c=1\nV1 1 0 {{a+10*b+100*c}}\nR1 1 0 1k\n{cards}\
+             {STEP_DATA_TABLES}.tran 0 1u\n.end\n"
+        )
+    }
+
+    fn step_cards(netlist: &Netlist) -> Vec<&StepCommand> {
+        netlist
+            .analyses
+            .iter()
+            .filter_map(|analysis| match analysis {
+                AnalysisCommand::Step(command) => Some(command),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn a_step_data_card_drops_every_other_step_card_and_names_each_one() {
+        // Xyce runs this deck as three steps with c=1, whichever card comes
+        // first: N_ANP_SweepParam.C convertData clears the other sweeps.
+        for (cards, param_line) in [
+            (
+                ".step c list 1 2\n.step data=tab\n.step temp list 25 26\n",
+                5,
+            ),
+            (
+                ".step data=tab\n.step c list 1 2\n.step temp list 25 26\n",
+                6,
+            ),
+        ] {
+            let netlist = Netlist::parse(&step_data_deck(cards)).expect("deck parses");
+            assert!(
+                matches!(
+                    step_cards(&netlist).as_slice(),
+                    [StepCommand { sweep: StepSweep::Data { table_name }, .. }]
+                        if table_name.eq_ignore_ascii_case("tab")
+                ),
+                "{cards}: {:?}",
+                netlist.analyses
+            );
+            let dropped = netlist
+                .diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.code == "xyce-step-data-drops-step")
+                .map(|diagnostic| (diagnostic.line, diagnostic.message.as_str()))
+                .collect::<Vec<_>>();
+            assert_eq!(dropped.len(), 2, "{cards}: {dropped:?}");
+            assert_eq!(dropped[0].0, param_line, "{cards}");
+            assert!(
+                dropped[0].1.starts_with(".STEP PARAM C is ignored"),
+                "{dropped:?}"
+            );
+            assert_eq!(dropped[1].0, 7, "{cards}");
+            assert!(
+                dropped[1].1.starts_with(".STEP TEMP is ignored"),
+                "{dropped:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_deck_without_a_step_data_card_keeps_its_step_cards() {
+        let netlist = Netlist::parse(&step_data_deck(".step c list 1 2\n.step temp list 25 26\n"))
+            .expect("deck parses");
+        assert_eq!(step_cards(&netlist).len(), 2);
+        assert!(
+            netlist
+                .diagnostics
+                .iter()
+                .all(|diagnostic| diagnostic.code != "xyce-step-data-drops-step")
+        );
+    }
+
+    #[test]
+    fn several_step_data_tables_fold_into_one_table_stepped_row_by_row() {
+        // Xyce steps the tables together (TABLE takes valList[stepNumber]):
+        // its .prn holds three steps, (a, b, c) = (1, 1, 4), (2, 2, 5), (3, 3, 6).
+        let netlist = Netlist::parse(&step_data_deck(".step data=tab\n.step data=tab2\n"))
+            .expect("deck parses");
+        let [
+            StepCommand {
+                sweep: StepSweep::Data { table_name },
+                ..
+            },
+        ] = step_cards(&netlist).as_slice()
+        else {
+            panic!(
+                "expected one folded .STEP DATA card: {:?}",
+                netlist.analyses
+            );
+        };
+        assert!(table_name.eq_ignore_ascii_case("tab+tab2"), "{table_name}");
+        let table = netlist
+            .data_tables
+            .iter()
+            .find(|table| table.name == *table_name)
+            .expect("folded table");
+        assert_eq!(
+            table
+                .params
+                .iter()
+                .map(|param| param.to_ascii_lowercase())
+                .collect::<Vec<_>>(),
+            ["a", "b", "c"]
+        );
+        assert_eq!(
+            table.rows,
+            [[1.0, 1.0, 4.0], [2.0, 2.0, 5.0], [3.0, 3.0, 6.0]]
+        );
+        assert!(
+            netlist
+                .data_tables
+                .iter()
+                .any(|table| table.name.eq_ignore_ascii_case("tab"))
+        );
+    }
+
+    #[test]
+    fn step_data_tables_with_different_row_counts_are_refused_as_xyce_refuses_them() {
+        let deck = step_data_deck(".step data=tab\n.step data=tab2\n").replace("+ 6\n", "");
+        match Netlist::parse(&deck) {
+            Err(ParseError::Syntax { line, message }) => {
+                assert_eq!(line, 6);
+                assert!(message.contains("row counts must match"), "{message}");
+            }
+            other => panic!("expected the row-count refusal, got {other:?}"),
         }
     }
 }

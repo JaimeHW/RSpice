@@ -11,6 +11,9 @@ pub(in crate::netlist::parser) struct AnalysisCardPlan {
     /// Published cards' `ACTIMES=`/`CHECKPOINT=` requests, checked against
     /// the deck's `.TRAN` card once the whole deck is read.
     small_signal_states: Vec<super::StagedSmallSignalState>,
+    /// Each published `.STEP` card's index in the deck's analysis list, with
+    /// the line that authored it.
+    step_card_lines: Vec<(usize, usize)>,
 }
 
 #[derive(Debug)]
@@ -76,6 +79,7 @@ impl AnalysisCardPlan {
         let card = match ParsedAnalysisCard::parse(command, &mut probe, parsing) {
             Ok(Some(card)) if !queued => {
                 *stream = probe;
+                self.record_step_card_line(&card, sink.analyses.len(), context.line_num);
                 self.small_signal_states.extend(card.publish(sink));
                 return Ok(true);
             }
@@ -226,7 +230,12 @@ impl AnalysisCardPlan {
             }
             lin_exists |= card.lin_analysis.is_some();
             current_noise = card.transient_noise.or(current_noise);
-            ready.push((entry.output_position, entry.diagnostic_position, card));
+            ready.push((
+                entry.output_position,
+                entry.diagnostic_position,
+                entry.line,
+                card,
+            ));
         }
         ensure_parse_not_aborted(abort)?;
         if let Some(error) = first_error {
@@ -239,7 +248,7 @@ impl AnalysisCardPlan {
         let mut diagnostics = std::mem::take(sink.diagnostics).into_iter();
         let mut output_cursor = 0;
         let mut diagnostic_cursor = 0;
-        for (output_position, diagnostic_position, card) in ready {
+        for (output_position, diagnostic_position, line, card) in ready {
             ensure_parse_not_aborted(abort)?;
             sink.output_requests
                 .extend(outputs.by_ref().take(output_position - output_cursor));
@@ -250,6 +259,7 @@ impl AnalysisCardPlan {
             );
             output_cursor = output_position;
             diagnostic_cursor = diagnostic_position;
+            self.record_step_card_line(&card, sink.analyses.len(), line);
             let staged = card.publish(AnalysisCardSink {
                 analyses: sink.analyses,
                 monte_carlo_source_cards: sink.monte_carlo_source_cards,
@@ -264,6 +274,17 @@ impl AnalysisCardPlan {
         sink.output_requests.extend(outputs);
         sink.diagnostics.extend(diagnostics);
         Ok(())
+    }
+
+    fn record_step_card_line(&mut self, card: &ParsedAnalysisCard, index: usize, line: usize) {
+        if matches!(card.analysis, Some(AnalysisCommand::Step(_))) {
+            self.step_card_lines.push((index, line));
+        }
+    }
+
+    /// Each published `.STEP` card's index in the analysis list, with its line.
+    pub(in crate::netlist::parser) fn step_card_lines(&self) -> &[(usize, usize)] {
+        &self.step_card_lines
     }
 
     /// Release every published card's small-signal state request, checked

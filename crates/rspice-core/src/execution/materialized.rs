@@ -731,18 +731,17 @@ mod tests {
     }
 
     #[test]
-    fn data_step_temp_coordinates_bit_match_the_checked_reparser() {
+    fn data_temp_coordinates_bit_match_the_checked_reparser() {
         let netlist = Netlist::parse(
-            "DATA STEP TEMP materialization\n\
+            "DATA TEMP materialization\n\
              .param bias=1 gain=1\n\
              V1 out 0 {bias+gain}\n\
              R1 out 0 1k\n\
-             .data samples bias\n\
-             10\n\
-             20\n\
+             .data samples bias gain\n\
+             10 1\n\
+             20 2\n\
              .enddata\n\
              .step data=samples\n\
-             .step param gain list 1 2\n\
              .temp 25 100\n\
              .ac lin 1 {gain} {gain}\n\
              .end\n",
@@ -758,7 +757,7 @@ mod tests {
             .expect("mixed-axis materializer");
 
         assert_eq!(materializer.coordinates(), expected);
-        assert_eq!(materializer.len(), 8);
+        assert_eq!(materializer.len(), 4);
         for (index, coordinate) in expected.iter().enumerate() {
             let run = materializer
                 .materialize_run(index)
@@ -768,21 +767,20 @@ mod tests {
                 analysis,
                 AnalysisCommand::Step(_) | AnalysisCommand::Temp { .. }
             )));
-            let [data, gain, temperature] = coordinate.assignments() else {
-                panic!("coordinate must retain DATA, STEP, and TEMP assignments")
+            let [data, temperature] = coordinate.assignments() else {
+                panic!("coordinate must retain DATA and TEMP assignments")
             };
             assert_eq!(data.kind(), AxisKind::Data);
-            assert_eq!(gain.kind(), AxisKind::Step);
             assert_eq!(temperature.kind(), AxisKind::Temperature);
             let RunAxisValue::DataRow(bindings) = data.value() else {
                 panic!("first assignment must be one coupled DATA row")
             };
-            assert_eq!(bindings.len(), 1);
+            assert_eq!(bindings.len(), 2);
             assert_eq!(bindings[0].name(), "bias");
             assert_eq!(bindings[0].value(), [10.0, 20.0][data.value_index()]);
-            let RunAxisValue::Numeric(gain_value) = gain.value() else {
-                panic!("gain assignment must be numeric")
-            };
+            assert_eq!(bindings[1].name(), "gain");
+            let gain_value = bindings[1].value();
+            assert_eq!(gain_value, [1.0, 2.0][data.value_index()]);
             let Some(AnalysisCommand::Ac {
                 start_freq,
                 stop_freq,
