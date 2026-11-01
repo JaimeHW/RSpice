@@ -8458,6 +8458,9 @@ impl Engine {
                             MosBodyJunctionModel::NgspiceReverseClamp
                         }
                     });
+                    mosfet.set_ngspice_convergence_test(
+                        self.config.spice_dialect != SpiceDialect::Xyce,
+                    );
 
                     // Device temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; model TNOM

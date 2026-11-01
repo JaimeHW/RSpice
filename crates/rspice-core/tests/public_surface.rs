@@ -519,8 +519,12 @@ const MAX_PUBLIC_ITEMS: usize = 5236;
 // the diode's. The census is 1,605.
 // `parse_xyce_expression_with_abort` adds one: `rspice-core` (analysis/
 // measure_signals.rs) parses a Xyce `.PRINT` expression under Xyce's lexer, which
-// reads `X1:R1:R` as one name. The census is 1,606, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1606;
+// reads `X1:R1:R` as one name. The census is 1,606.
+// `Mosfet::set_ngspice_convergence_test` adds one: the builder (`rspice-core`
+// engine/builder.rs) selects ngspice's current-only convergence test for
+// classic MOS instances outside the Xyce dialect. The census is 1,607, with
+// no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1607;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

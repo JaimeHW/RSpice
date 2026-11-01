@@ -192,6 +192,7 @@ impl Mosfet {
             update_open: false,
             junction_limited: false,
             native_xyce_transient_convergence: false,
+            ngspice_convergence_test: true,
             indices: MosfetIndices::default(),
         }
     }

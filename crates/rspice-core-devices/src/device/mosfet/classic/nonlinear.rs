@@ -124,6 +124,24 @@ impl Mosfet {
         false
     }
 
+    /// The channel current the previous load's linearization predicts at
+    /// the present bias.
+    fn predicted_drain_current(&self) -> Value {
+        if self.polarity() * self.eval_vds_prev < 0.0 {
+            self.id_prev
+                + self.gm_prev
+                    * ((self.eval_vgs - self.eval_vds) - (self.eval_vgs_prev - self.eval_vds_prev))
+                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
+                + self.gmb_prev
+                    * ((self.eval_vbs - self.eval_vds) - (self.eval_vbs_prev - self.eval_vds_prev))
+        } else {
+            self.id_prev
+                + self.gm_prev * (self.eval_vgs - self.eval_vgs_prev)
+                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
+                + self.gmb_prev * (self.eval_vbs - self.eval_vbs_prev)
+        }
+    }
+
     /// Make the present state the previous iterate.
     #[inline]
     fn advance_iterate_history(&mut self, constants: Option<&ClassicMosTransientConstants>) {
@@ -311,9 +329,20 @@ impl NonlinearDevice for Mosfet {
         // Every voltage, channel-current, and previous-junction field below
         // participates in a strict `< tolerance` predicate. IEEE NaN/Inf
         // therefore fails closed without a separate scan. The current body
-        // conductances and independent source diagonal do not participate in
-        // those expressions, so validate all three explicitly.
-        if !self.gbs.is_finite() || !self.gbd.is_finite() || !self.gss.is_finite() {
+        // conductances, the independent source diagonal and the previous
+        // branch voltages (only the Xyce dialect's step test reads them) do
+        // not participate in those expressions, so validate them explicitly.
+        if ![
+            self.gbs,
+            self.gbd,
+            self.gss,
+            self.vgs_prev,
+            self.vds_prev,
+            self.vbs_prev,
+        ]
+        .iter()
+        .all(|value| value.is_finite())
+        {
             return false;
         }
 
@@ -349,31 +378,25 @@ impl NonlinearDevice for Mosfet {
             return !self.junction_limited;
         }
 
-        let vgs_diff = (self.vgs - self.vgs_prev).abs();
-        let vds_diff = (self.vds - self.vds_prev).abs();
-        let vbs_diff = (self.vbs - self.vbs_prev).abs();
+        // ngspice's MOS1/2/3/6/9 convTest tests the drain and bulk currents
+        // only (mos2conv.c:42-95); a branch-voltage step bound on top of the
+        // node test never closes on a 5 mV branch whose nodes jitter by tens
+        // of microvolts at 5 V. The Xyce dialect keeps its step test.
+        if !self.ngspice_convergence_test {
+            let vgs_diff = (self.vgs - self.vgs_prev).abs();
+            let vds_diff = (self.vds - self.vds_prev).abs();
+            let vbs_diff = (self.vbs - self.vbs_prev).abs();
 
-        let vgs_tol = reltol * self.vgs.abs().max(self.vgs_prev.abs()) + voltage_tol;
-        let vds_tol = reltol * self.vds.abs().max(self.vds_prev.abs()) + voltage_tol;
-        let vbs_tol = reltol * self.vbs.abs().max(self.vbs_prev.abs()) + voltage_tol;
+            let vgs_tol = reltol * self.vgs.abs().max(self.vgs_prev.abs()) + voltage_tol;
+            let vds_tol = reltol * self.vds.abs().max(self.vds_prev.abs()) + voltage_tol;
+            let vbs_tol = reltol * self.vbs.abs().max(self.vbs_prev.abs()) + voltage_tol;
 
-        if !(vgs_diff < vgs_tol && vds_diff < vds_tol && vbs_diff < vbs_tol) {
-            return false;
+            if !(vgs_diff < vgs_tol && vds_diff < vds_tol && vbs_diff < vbs_tol) {
+                return false;
+            }
         }
 
-        let drain_current_hat = if self.polarity() * self.eval_vds_prev < 0.0 {
-            self.id_prev
-                + self.gm_prev
-                    * ((self.eval_vgs - self.eval_vds) - (self.eval_vgs_prev - self.eval_vds_prev))
-                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
-                + self.gmb_prev
-                    * ((self.eval_vbs - self.eval_vds) - (self.eval_vbs_prev - self.eval_vds_prev))
-        } else {
-            self.id_prev
-                + self.gm_prev * (self.eval_vgs - self.eval_vgs_prev)
-                + self.gout_prev * (self.eval_vds - self.eval_vds_prev)
-                + self.gmb_prev * (self.eval_vbs - self.eval_vbs_prev)
-        };
+        let drain_current_hat = self.predicted_drain_current();
         let drain_current_tol = reltol * self.id.abs().max(drain_current_hat.abs()) + current_tol;
         if (drain_current_hat - self.id)
             .abs()
@@ -394,6 +417,29 @@ impl NonlinearDevice for Mosfet {
             + self.gbd_prev * body_drain_delta;
         let bulk_current_tol =
             reltol * bulk_current.abs().max(bulk_current_hat.abs()) + current_tol;
+
+        if self.ngspice_convergence_test {
+            // The step the last load predicts, against that load's currents
+            // (mos2conv.c:56-95): cdhat against cd = mode * cdrain - cbd, and
+            // cbhat against cbs + cbd.
+            let drain_prev = self.polarity() * self.id_prev - self.ibd_prev;
+            let drain_step = self.polarity() * (drain_current_hat - self.id_prev)
+                - self.gbd_prev * body_drain_delta;
+            let drain_step_tol =
+                reltol * drain_prev.abs().max((drain_prev + drain_step).abs()) + current_tol;
+            if drain_step.abs().partial_cmp(&drain_step_tol) != Some(std::cmp::Ordering::Less) {
+                return false;
+            }
+            let bulk_prev = self.ibs_prev + self.ibd_prev;
+            let bulk_step_tol = reltol * bulk_prev.abs().max(bulk_current_hat.abs()) + current_tol;
+            if (bulk_current_hat - bulk_prev)
+                .abs()
+                .partial_cmp(&bulk_step_tol)
+                .is_none_or(|order| order == std::cmp::Ordering::Greater)
+            {
+                return false;
+            }
+        }
 
         (bulk_current_hat - bulk_current).abs() < bulk_current_tol
     }
@@ -456,11 +502,47 @@ mod tests {
             mos.l = 1.0;
             mos.update(&[0.0, 0.0, 2.0 * polarity, 0.0]);
             mos.update(&[0.0, 0.0, 2.0001 * polarity, 0.0]);
-            // Output current is exactly affine at fixed intrinsic overdrive.
-            // Permit this small voltage move while requiring the predictor
-            // to match the physical current to floating-point precision.
-            assert!(mos.is_converged(NonlinearConvergenceCriteria::new(0.01, 1e-14, 1e-14)));
+            // Output current is exactly affine at fixed intrinsic overdrive,
+            // so the predictor must match the physical current to
+            // floating-point precision.
+            let predicted = mos.predicted_drain_current();
+            assert!(
+                (predicted - mos.id).abs() <= 1e-14 * mos.id.abs() + 1e-14,
+                "predicted={predicted:e} id={:e}",
+                mos.id
+            );
         }
+    }
+
+    #[test]
+    fn classic_mos_convergence_tests_the_current_step_of_its_last_load() {
+        let criteria = NonlinearConvergenceCriteria::default();
+        // Cut off, with drain, gate and bulk on a 5 V rail and the source
+        // 5.5 mV below it: the branch voltages move together by 30 uV, five
+        // times reltol * |v| + vntol, while the predicted current step stays
+        // far below abstol.
+        let rail_jitter = |ngspice: bool| {
+            let mut mos = Mosfet::new_nmos("n".into(), 1, 2, 3, 4);
+            mos.set_ngspice_convergence_test(ngspice);
+            mos.vto = 1.0;
+            mos.kp = 2.0e-5;
+            mos.update(&[5.0, 5.0, 5.0 - 5.5e-3, 5.0]);
+            mos.update(&[5.0, 5.0, 5.0 - 5.53e-3, 5.0]);
+            mos.is_converged(criteria)
+        };
+        assert!(rail_jitter(true));
+        // The Xyce dialect keeps its branch-voltage step test.
+        assert!(!rail_jitter(false));
+
+        // Saturated at id = 40 uA: a 2 mV gate step is inside the branch
+        // tolerance and linearizes exactly to second order, but moves the
+        // current by 80 nA, twice reltol * |id|.
+        let mut mos = Mosfet::new_nmos("n".into(), 1, 2, 3, 4);
+        mos.vto = 1.0;
+        mos.kp = 2.0e-5;
+        mos.update(&[5.0, 3.0, 0.0, 0.0]);
+        mos.update(&[5.0, 3.002, 0.0, 0.0]);
+        assert!(!mos.is_converged(criteria));
     }
 
     #[test]

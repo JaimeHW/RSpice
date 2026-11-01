@@ -518,6 +518,10 @@ pub struct Mosfet {
     /// Report Xyce's transient device-convergence status (no junction
     /// limiting) instead of the SPICE current-prediction test.
     native_xyce_transient_convergence: bool,
+    /// Test convergence on ngspice's MOS1/2/3/6/9 convTest currents alone
+    /// (the ngspice and default dialects), not on the Xyce dialect's
+    /// branch-voltage step test.
+    ngspice_convergence_test: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -738,6 +742,15 @@ impl Mosfet {
     pub fn set_native_xyce_transient_convergence(&mut self, enabled: bool) {
         self.native_xyce_transient_convergence =
             enabled && matches!(self.level, 1..=3) && !self.uses_legacy_bsim();
+    }
+
+    /// Select ngspice's convTest for this instance: the drain and bulk
+    /// currents alone, as in every ngspice MOS1/2/3/6/9 and BSIM1 convTest
+    /// (mos2conv.c:42-95, b1cvtest.c). The engine clears it in the Xyce
+    /// dialect, which keeps its branch-voltage step test.
+    #[doc(hidden)]
+    pub fn set_ngspice_convergence_test(&mut self, enabled: bool) {
+        self.ngspice_convergence_test = enabled;
     }
 
     /// The deck marked this instance `OFF`, so its first Newton evaluation
