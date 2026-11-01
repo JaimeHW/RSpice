@@ -124,7 +124,7 @@ pub(super) fn sheets_manager_body(
         section_header(
             left,
             "Multi-sheet design",
-            Some(&format!("{} sheets \u{00b7} connected", sheets.len())),
+            Some(&counted(sheets.len(), "sheet")),
         );
         paint_table_header(
             left,
@@ -290,7 +290,7 @@ pub(super) fn variants_manager_body(
         section_header(
             left,
             "Assembly variants",
-            Some(&format!("{} governed variants", variants.len())),
+            Some(&counted(variants.len(), "variant")),
         );
         paint_table_header(
             left,
@@ -646,14 +646,14 @@ pub(super) fn hierarchy_manager_body(
             left,
             "Hierarchy and view resolution",
             Some(&format!(
-                "{} cells \u{00b7} {} views",
-                resolution.bindings.len(),
-                resolution.total_instances
+                "{} \u{00b7} {}",
+                counted(resolution.bindings.len(), "cell"),
+                counted(resolution.total_instances, "view")
             )),
         );
         paint_table_header(
             left,
-            &[0.25, 0.19, 0.17, 0.22, 0.17],
+            &[0.20, 0.14, 0.19, 0.22, 0.25],
             &[
                 "Instance path",
                 "Cell",
@@ -690,7 +690,7 @@ pub(super) fn hierarchy_manager_body(
                         .unwrap_or_else(|| binding.reference.view.clone()),
                     configuration,
                 ];
-                paint_table_row(left, &[0.25, 0.19, 0.17, 0.22, 0.17], &values, None);
+                paint_table_row(left, &[0.20, 0.14, 0.19, 0.22, 0.25], &values, None);
             }
         }
         toolbar(left, |ui| {

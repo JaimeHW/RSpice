@@ -109,6 +109,85 @@ fn probe_ids_participate_in_sheet_governance_and_selected_authority() {
     assert_eq!(selected_stable_object_ids(&schematic), vec![81]);
 }
 
+/// Each tab's settings are selects on one grid: one left edge, one width.
+/// The manager is as wide as its subflows, so the two never resize the
+/// dialog between them, and its counts read in the singular for one.
+#[test]
+fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
+    let tabs: [(DesignManagementTab, &[&str]); 4] = [
+        (
+            DesignManagementTab::Sheets,
+            &["Off-sheet connector policy", "Page numbering", "Delete behavior"],
+        ),
+        (
+            DesignManagementTab::Variants,
+            &["Inheritance", "Missing replacement", "Result compatibility"],
+        ),
+        (
+            DesignManagementTab::Annotation,
+            &["Reference designators", "Annotation scope", "Collision policy", "Backannotation"],
+        ),
+        (
+            DesignManagementTab::Hierarchy,
+            &["Missing view", "Black-box policy", "Cycle detection"],
+        ),
+    ];
+    for (tab, labels) in tabs {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        open_design_management_dialog(
+            &mut app.state.project.design_management,
+            &mut app.state.model,
+            &app.state.platform,
+            &mut app.state.workbench,
+        );
+        app.state.project.design_management.active_tab = tab;
+        // Access updates are incremental: keep the latest of every node.
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..4 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ctx| render_design_management_dialog(&mut parts(&mut app), ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let bounds = |label: &str, role: egui::accesskit::Role| {
+            nodes
+                .values()
+                .find(|node| node.role() == role && node.label() == Some(label))
+                .and_then(egui::accesskit::Node::bounds)
+                .unwrap_or_else(|| panic!("{tab:?}: {label} has bounds"))
+        };
+        // The surface is centred, and its primary ends 12 pt inside the
+        // frame's 1 pt border.
+        let primary = bounds(MANAGER_PRIMARY, egui::accesskit::Role::Button);
+        let width = 2.0 * (primary.x1 + 13.0) - 1440.0;
+        assert!((width - 980.0).abs() < 1.0, "{tab:?}: the manager is {width} pt wide");
+        let selects = labels
+            .iter()
+            .map(|label| bounds(label, egui::accesskit::Role::ComboBox))
+            .collect::<Vec<_>>();
+        for pair in selects.windows(2) {
+            assert!(
+                (pair[0].x0 - pair[1].x0).abs() < 0.5 && (pair[0].x1 - pair[1].x1).abs() < 0.5,
+                "{tab:?}: {selects:?} do not share one column"
+            );
+        }
+    }
+    assert_eq!(widgets::counted(1, "sheet"), "1 sheet");
+    assert_eq!(widgets::counted(2, "view"), "2 views");
+}
+
 #[test]
 fn manager_and_subflow_splits_match_the_mockup_contract() {
     assert_eq!(main_split_widths(760.0), (380.0, 380.0));

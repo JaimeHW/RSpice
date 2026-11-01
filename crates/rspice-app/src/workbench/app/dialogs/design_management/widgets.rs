@@ -68,19 +68,27 @@ pub(super) fn split_surface(
     ui.advance_cursor_after_rect(surface);
 }
 
+/// A pane's actions: one row under what they act on, on the pane's inset.
 pub(super) fn toolbar(ui: &mut Ui, content: impl FnOnce(&mut Ui)) {
-    let t = Tokens::get(ui.ctx());
     Frame::NONE
-        .fill(t.color.bg_panel)
         .inner_margin(Margin {
-            left: 8,
-            right: 8,
-            top: 7,
-            bottom: 7,
+            left: PANE_INSET as i8,
+            right: PANE_INSET as i8,
+            top: 8,
+            bottom: 0,
         })
         .show(ui, |ui| {
             ui.horizontal_wrapped(content);
         });
+}
+
+/// Where a pane's rows start: the inset its section titles and property rows
+/// already keep, so labels, selects, notes, buttons and table text share it.
+pub(super) const PANE_INSET: f32 = crate::workbench::design_system::PANEL_INSET;
+
+/// `count` of `noun`, which takes an "s" for any count but one.
+pub(super) fn counted(count: usize, noun: &str) -> String {
+    format!("{count} {noun}{}", if count == 1 { "" } else { "s" })
 }
 
 pub(super) fn paint_table_header(ui: &mut Ui, weights: &[f32], labels: &[&str]) {
@@ -148,9 +156,9 @@ pub(super) fn paint_table_cells(
             );
         }
         ui.painter()
-            .with_clip_rect(cell.shrink2(vec2(7.0, 2.0)))
+            .with_clip_rect(cell.shrink2(vec2(PANE_INSET, 2.0)))
             .text(
-                cell.left_center() + vec2(7.0, 0.0),
+                cell.left_center() + vec2(PANE_INSET, 0.0),
                 egui::Align2::LEFT_CENTER,
                 value,
                 if header {
@@ -178,11 +186,15 @@ pub(super) fn empty_table_row(ui: &mut Ui, text: &str) {
 }
 
 pub(super) fn muted_note(ui: &mut Ui, text: &str) {
-    ui.label(
-        egui::RichText::new(text)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
-            .color(Tokens::get(ui.ctx()).color.text_dim),
-    );
+    Frame::NONE
+        .inner_margin(Margin::symmetric(PANE_INSET as i8, 6))
+        .show(ui, |ui| {
+            ui.label(
+                egui::RichText::new(text)
+                    .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                    .color(Tokens::get(ui.ctx()).color.text_dim),
+            );
+        });
 }
 
 pub(super) fn combo_field<T: Copy + PartialEq>(
@@ -217,6 +229,8 @@ pub(super) fn combo_field<T: Copy + PartialEq>(
     .inner
 }
 
+/// One of a pane's settings: a select on the label/value grid its property
+/// rows stand on, so a pane's facts and choices share one label column.
 pub(super) fn setting_combo<T: Copy + PartialEq>(
     ui: &mut Ui,
     label: &str,
@@ -224,15 +238,27 @@ pub(super) fn setting_combo<T: Copy + PartialEq>(
     selected: &mut T,
     enabled: bool,
 ) -> bool {
-    combo_field(
+    let mut key = options
+        .iter()
+        .position(|(value, _)| value == selected)
+        .map_or_else(String::new, |index| index.to_string());
+    let choices = options
+        .iter()
+        .enumerate()
+        .map(|(index, (_, text))| (index.to_string(), (*text).to_owned()))
+        .collect::<Vec<_>>();
+    let changed = crate::workbench::design_system::property_row_combo(
         ui,
-        "design-management-setting",
         label,
-        options,
-        selected,
+        ("design-management-setting", label),
+        &mut key,
+        &choices,
         enabled,
-    )
-    .changed()
+    );
+    if let Some((value, _)) = key.parse::<usize>().ok().and_then(|index| options.get(index)) {
+        *selected = *value;
+    }
+    changed
 }
 
 pub(super) fn field_combo<T: Copy + PartialEq>(
@@ -290,6 +316,7 @@ pub(super) fn id_combo<T: Copy + PartialEq + std::fmt::Display>(
     .inner
 }
 
+/// [`setting_combo`] over identified choices, any of which may be unset.
 pub(super) fn setting_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
     ui: &mut Ui,
     label: &str,
@@ -297,16 +324,26 @@ pub(super) fn setting_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
     selected: &mut Option<T>,
     enabled: bool,
 ) -> bool {
-    id_combo(
+    let mut key = selected
+        .and_then(|id| options.iter().position(|(candidate, _)| *candidate == id))
+        .map_or_else(String::new, |index| index.to_string());
+    let choices = options
+        .iter()
+        .enumerate()
+        .map(|(index, (_, name))| (index.to_string(), name.clone()))
+        .collect::<Vec<_>>();
+    let changed = crate::workbench::design_system::property_row_combo(
         ui,
-        "design-management-setting-id",
         label,
-        options,
-        selected,
-        None,
+        ("design-management-setting-id", label),
+        &mut key,
+        &choices,
         enabled,
-    )
-    .changed()
+    );
+    if let Some((id, _)) = key.parse::<usize>().ok().and_then(|index| options.get(index)) {
+        *selected = Some(*id);
+    }
+    changed
 }
 
 pub(super) fn field_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(

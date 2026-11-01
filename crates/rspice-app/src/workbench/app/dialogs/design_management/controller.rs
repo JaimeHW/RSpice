@@ -44,11 +44,9 @@ pub(in crate::workbench) fn render_design_management_dialog(
     } else {
         SUBFLOW_INITIAL_HEIGHT
     };
-    let size = if page == DesignManagementPage::Manager {
-        DialogSize::SimulationWorkflow
-    } else {
-        DialogSize::WideWorkflow
-    };
+    // The manager and its subflows are one width, so moving between them
+    // never resizes the dialog, and each pane's tables keep their headings.
+    let size = DialogSize::WideWorkflow;
     let ghost = if discard {
         "Discard changes"
     } else if page == DesignManagementPage::Manager {
@@ -63,6 +61,7 @@ pub(in crate::workbench) fn render_design_management_dialog(
         .size(size)
         .initial_height(initial_height)
         .flush_body()
+        .overlay_scrollbar()
         .ghost(ghost)
         .primary_enabled(primary_enabled)
         .primary_on_enter(false)
