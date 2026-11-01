@@ -31,6 +31,8 @@ use crate::workbench::sheets::commands::SheetsCommand;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
 
+#[cfg(not(target_arch = "wasm32"))]
+mod capabilities;
 mod pins;
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -133,6 +133,13 @@ impl Command {
                         && !state.model.schematic.session.editor.selection.is_empty()
                 }
             }
+            Self::SelectOfKind(kind) => {
+                active_schematic_editor(app)
+                    && !crate::schematic::view::sheet_visibility::objects_of_kind_on_active_sheet(
+                        state, kind,
+                    )
+                    .is_empty()
+            }
             Self::RenameSelection => {
                 active_schematic_editor(app)
                     && crate::workbench::app::rename_selection_available(state)

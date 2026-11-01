@@ -304,6 +304,118 @@ pub(crate) fn selectable_objects_on_active_sheet(state: &AppState) -> Selection 
     selection
 }
 
+/// A kind of object Edit ▸ Select ▸ selects every one of on the active sheet.
+///
+/// The kind is named outright, so the selection filter, which governs what a
+/// click or a drag picks, does not narrow it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum SchematicObjectKind {
+    /// Placed parts and cell instances: every component but a pin.
+    Instances,
+    /// Wires, each whole.
+    Wires,
+    /// Net labels, off-sheet connectors among them.
+    NetLabels,
+    /// The pins that make the cell's interface.
+    Pins,
+    /// Text and notes.
+    Text,
+    /// Documentation shapes.
+    Shapes,
+}
+
+impl SchematicObjectKind {
+    /// Every kind, in the order Edit ▸ Select ▸ lists them.
+    pub(crate) const ALL: [Self; 6] = [
+        Self::Instances,
+        Self::Wires,
+        Self::NetLabels,
+        Self::Pins,
+        Self::Text,
+        Self::Shapes,
+    ];
+
+    /// Why selecting this kind does nothing: the sheet has none.
+    pub(crate) const fn absent(self) -> &'static str {
+        match self {
+            Self::Instances => "the sheet has no instances",
+            Self::Wires => "the sheet has no wires",
+            Self::NetLabels => "the sheet has no net labels",
+            Self::Pins => "the sheet has no pins",
+            Self::Text => "the sheet has no text",
+            Self::Shapes => "the sheet has no shapes",
+        }
+    }
+
+    /// `count` objects of this kind, as the status bar reports a selection.
+    pub(crate) fn counted(self, count: usize) -> String {
+        let (one, many) = match self {
+            Self::Instances => ("instance", "instances"),
+            Self::Wires => ("wire", "wires"),
+            Self::NetLabels => ("net label", "net labels"),
+            Self::Pins => ("pin", "pins"),
+            Self::Text => ("text item", "text items"),
+            Self::Shapes => ("shape", "shapes"),
+        };
+        format!("{count} {}", if count == 1 { one } else { many })
+    }
+}
+
+/// Every object of `kind` on the active sheet, whatever the selection filter
+/// admits.
+pub(crate) fn objects_of_kind_on_active_sheet(
+    state: &AppState,
+    kind: SchematicObjectKind,
+) -> Selection {
+    let document = state.model.schematic.document();
+    let on_sheet = |id: u64| object_is_on_active_sheet(state, id);
+    let mut selection = Selection::default();
+    match kind {
+        SchematicObjectKind::Instances | SchematicObjectKind::Pins => {
+            let pins = kind == SchematicObjectKind::Pins;
+            for object in &document.components {
+                if (object.kind == crate::state::ComponentType::Port) == pins && on_sheet(object.id)
+                {
+                    selection.select_component(object.id);
+                }
+            }
+        }
+        SchematicObjectKind::Wires => {
+            for object in document.wires.iter().filter(|object| on_sheet(object.id)) {
+                selection.select_wire(object.id);
+            }
+        }
+        SchematicObjectKind::NetLabels => {
+            for object in document
+                .net_labels
+                .iter()
+                .filter(|object| on_sheet(object.id))
+            {
+                selection.select_net_label(object.id);
+            }
+        }
+        SchematicObjectKind::Text => {
+            for object in document
+                .design_notes
+                .iter()
+                .filter(|object| on_sheet(object.id))
+            {
+                selection.select_design_note(object.id);
+            }
+        }
+        SchematicObjectKind::Shapes => {
+            for object in document
+                .documentation_shapes
+                .iter()
+                .filter(|object| on_sheet(object.id))
+            {
+                selection.select_documentation_shape(object.id);
+            }
+        }
+    }
+    selection
+}
+
 pub(super) fn select_in_rect_on_active_sheet(
     state: &mut AppState,
     symbol_context: &SchematicSymbolContext,

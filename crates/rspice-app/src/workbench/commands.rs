@@ -289,6 +289,7 @@ impl Command {
             | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
+            | Self::SelectOfKind(_)
             | Self::PlaceInstance
             | Self::PlaceWire
             | Self::PlaceBus
@@ -486,6 +487,9 @@ impl Command {
                 }
             }
             Self::DeselectAll => deselect_all(app),
+            Self::SelectOfKind(kind) => {
+                app.state.select_schematic_objects_of_kind(kind);
+            }
             Self::RenameSelection => {
                 crate::workbench::app::open_selected_object_rename(&mut app.state);
             }

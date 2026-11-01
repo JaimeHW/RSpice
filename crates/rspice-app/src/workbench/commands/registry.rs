@@ -428,6 +428,7 @@ impl Command {
             | Self::Delete
             | Self::SelectAll
             | Self::DeselectAll
+            | Self::SelectOfKind(_)
             | Self::RenameSelection
             | Self::ObjectProperties
             | Self::ZoomIn
@@ -880,6 +881,10 @@ impl Command {
                 "no placement or edit has run yet"
             }
             Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
+            Self::SelectOfKind(_) if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
+            Self::SelectOfKind(kind) => kind.absent(),
             Self::NextViolation | Self::PreviousViolation => "the last check found no violations",
             Self::ClearChecks => "no check has run",
             Self::SetGridStyle(_) | Self::AnnotateOperatingPoint => "open a schematic or testbench",

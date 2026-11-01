@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
 };
@@ -57,6 +58,8 @@ pub enum Command {
     SelectAll,
     /// Clear the drawing's selection.
     DeselectAll,
+    /// Select every object of one kind on the active sheet.
+    SelectOfKind(SchematicObjectKind),
     RenameSelection,
     ObjectProperties,
     FindInDesign,
@@ -310,6 +313,24 @@ impl Command {
             Self::Delete => spec("delete-selection", "Delete", "Edit"),
             Self::SelectAll => spec("select-all", "Select all", "Edit"),
             Self::DeselectAll => spec("deselect-all", "Deselect all", "Edit"),
+            Self::SelectOfKind(SchematicObjectKind::Instances) => {
+                spec("select-instances", "Select instances", "Edit")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Wires) => {
+                spec("select-wires", "Select wires", "Edit")
+            }
+            Self::SelectOfKind(SchematicObjectKind::NetLabels) => {
+                spec("select-net-labels", "Select net labels", "Edit")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Pins) => {
+                spec("select-pins", "Select pins", "Edit")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Text) => {
+                spec("select-text", "Select text", "Edit")
+            }
+            Self::SelectOfKind(SchematicObjectKind::Shapes) => {
+                spec("select-shapes", "Select shapes", "Edit")
+            }
             Self::RenameSelection => spec("rename-selection", "Rename…", "Edit"),
             Self::ObjectProperties => spec("object-properties", "Properties…", "Edit"),
             Self::FindInDesign => spec("find-design", "Find…", "Edit"),
@@ -680,6 +701,12 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::Delete,
     Command::SelectAll,
     Command::DeselectAll,
+    Command::SelectOfKind(SchematicObjectKind::Instances),
+    Command::SelectOfKind(SchematicObjectKind::Wires),
+    Command::SelectOfKind(SchematicObjectKind::NetLabels),
+    Command::SelectOfKind(SchematicObjectKind::Pins),
+    Command::SelectOfKind(SchematicObjectKind::Text),
+    Command::SelectOfKind(SchematicObjectKind::Shapes),
     Command::RenameSelection,
     Command::ObjectProperties,
     Command::FindInDesign,
@@ -881,6 +908,12 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::Delete.key(),
     Command::SelectAll.key(),
     Command::DeselectAll.key(),
+    Command::SelectOfKind(SchematicObjectKind::Instances).key(),
+    Command::SelectOfKind(SchematicObjectKind::Wires).key(),
+    Command::SelectOfKind(SchematicObjectKind::NetLabels).key(),
+    Command::SelectOfKind(SchematicObjectKind::Pins).key(),
+    Command::SelectOfKind(SchematicObjectKind::Text).key(),
+    Command::SelectOfKind(SchematicObjectKind::Shapes).key(),
     Command::RenameSelection.key(),
     Command::ObjectProperties.key(),
     Command::FindInDesign.key(),

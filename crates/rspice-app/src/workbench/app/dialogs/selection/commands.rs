@@ -13,7 +13,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 
 use crate::schematic::view::schematic_symbol_context;
 use crate::schematic::view::sheet_visibility::{
-    off_active_sheet, selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
+    SchematicObjectKind, objects_of_kind_on_active_sheet, off_active_sheet,
+    selectable_objects_on_active_sheet, selection_filtered_to_active_sheet,
     with_active_wire_topology,
 };
 use crate::state::{CellViewRef, DuplicateExternalNets, Point, SchematicState, Selection};
@@ -27,6 +28,23 @@ use crate::workbench::app::dialogs::selection::commands::floating::FloatingPaste
 use crate::workbench::app_state::AppState;
 
 pub(in crate::workbench) mod floating;
+
+/// Make `selection` the active sheet's selection. Selecting changes no
+/// document, so the buffer's selection is written on its own rather than
+/// through the whole save-and-revalidate path an edit takes.
+fn replace_schematic_selection(state: &mut AppState, selection: Selection) {
+    state.model.schematic.session.editor.selection = selection;
+    let active_key = state
+        .model
+        .workspace
+        .content
+        .active_schematic_reference()
+        .key();
+    if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
+        buffer.editor.session.editor.selection =
+            state.model.schematic.session.editor.selection.clone();
+    }
+}
 
 impl AppState {
     /// Delete what is selected on the active sheet.
@@ -247,21 +265,23 @@ impl AppState {
             state.prompt("Nothing matches the selection filter.");
             return false;
         }
-        state.model.schematic.session.editor.selection = selection;
-        // Selecting changes no document, so the buffer's selection is written on
-        // its own rather than through the whole save-and-revalidate path an edit
-        // takes.
-        let active_key = state
-            .model
-            .workspace
-            .content
-            .active_schematic_reference()
-            .key();
-        if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
-            buffer.editor.session.editor.selection =
-                state.model.schematic.session.editor.selection.clone();
-        }
+        replace_schematic_selection(state, selection);
         state.prompt(format!("Selected {}.", object_count(count)));
+        true
+    }
+
+    /// Select every object of `kind` on the active sheet in place of what was
+    /// selected: Edit ▸ Select ▸. Returns whether the sheet had any.
+    pub(crate) fn select_schematic_objects_of_kind(&mut self, kind: SchematicObjectKind) -> bool {
+        let selection = objects_of_kind_on_active_sheet(self, kind);
+        let count = selection.count();
+        if count == 0 {
+            let absent = kind.absent();
+            self.prompt(format!("{}{}.", absent[..1].to_uppercase(), &absent[1..]));
+            return false;
+        }
+        replace_schematic_selection(self, selection);
+        self.prompt(format!("Selected {}.", kind.counted(count)));
         true
     }
 

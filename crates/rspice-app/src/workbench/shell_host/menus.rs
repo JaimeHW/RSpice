@@ -2,6 +2,7 @@
 //! renderer draws and a test can read. The source editor's right-click menu
 //! is written the same way.
 
+use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::state::ComponentType;
 use crate::state::ModelsPage;
 use crate::state::SimulationPage;
@@ -208,7 +209,21 @@ const EDIT_MENU: &[MenuEntry] = &[
     ),
     Separator,
     command(Command::SelectAll),
-    MenuEntry::Only(MenuContext::Drawing, &[command(Command::DeselectAll)]),
+    MenuEntry::Only(
+        MenuContext::Drawing,
+        &[
+            command(Command::DeselectAll),
+            // A symbol view's objects are its own; these kinds are a
+            // schematic's.
+            MenuEntry::Only(
+                MenuContext::NotSymbolView,
+                &[MenuEntry::Submenu {
+                    label: "Select",
+                    entries: SELECT_MENU,
+                }],
+            ),
+        ],
+    ),
     Separator,
     MenuEntry::Only(
         MenuContext::SourceEditor,
@@ -239,6 +254,22 @@ const EDIT_MENU: &[MenuEntry] = &[
     ),
     Separator,
     settings(SettingsCommand::Preferences),
+];
+
+/// Every object of one kind on the active sheet, in place of the selection.
+const SELECT_MENU: &[MenuEntry] = &[
+    command_as(
+        Command::SelectOfKind(SchematicObjectKind::Instances),
+        "Instances",
+    ),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Wires), "Wires"),
+    command_as(
+        Command::SelectOfKind(SchematicObjectKind::NetLabels),
+        "Net labels",
+    ),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Pins), "Pins"),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Text), "Text"),
+    command_as(Command::SelectOfKind(SchematicObjectKind::Shapes), "Shapes"),
 ];
 
 /// View: how near, what is drawn over the drawing, which panels stand
