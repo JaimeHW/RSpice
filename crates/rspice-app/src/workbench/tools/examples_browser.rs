@@ -74,9 +74,7 @@ fn open_refusal(state: &AppState) -> Option<&'static str> {
         .project
         .configuration
         .is_dirty(&state.model.workspace.content.configuration_sets)
-        .then_some(
-            "Apply or revert the configuration edits first: an example replaces the project",
-        )
+        .then_some("Apply or revert the configuration edits first: an example replaces the project")
 }
 
 /// Where a row of `rect` paints: its highlight, and the x its name starts
@@ -346,7 +344,13 @@ mod tests {
             confirmation.pending_action,
             Some(crate::workbench::app::ConfirmationAction::ProjectNew)
         );
-        assert_eq!(confirmation.pending_example.as_deref(), Some(EXAMPLES[0].name));
-        assert_eq!(state.model.schematic.document().components.len(), components);
+        assert_eq!(
+            confirmation.pending_example.as_deref(),
+            Some(EXAMPLES[0].name)
+        );
+        assert_eq!(
+            state.model.schematic.document().components.len(),
+            components
+        );
     }
 }

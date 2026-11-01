@@ -255,7 +255,11 @@ pub(super) fn setting_combo<T: Copy + PartialEq>(
         &choices,
         enabled,
     );
-    if let Some((value, _)) = key.parse::<usize>().ok().and_then(|index| options.get(index)) {
+    if let Some((value, _)) = key
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| options.get(index))
+    {
         *selected = *value;
     }
     changed
@@ -340,7 +344,11 @@ pub(super) fn setting_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
         &choices,
         enabled,
     );
-    if let Some((id, _)) = key.parse::<usize>().ok().and_then(|index| options.get(index)) {
+    if let Some((id, _)) = key
+        .parse::<usize>()
+        .ok()
+        .and_then(|index| options.get(index))
+    {
         *selected = Some(*id);
     }
     changed

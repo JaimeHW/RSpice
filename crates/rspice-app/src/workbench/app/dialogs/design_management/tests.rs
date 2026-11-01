@@ -117,7 +117,11 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
     let tabs: [(DesignManagementTab, &[&str]); 4] = [
         (
             DesignManagementTab::Sheets,
-            &["Off-sheet connector policy", "Page numbering", "Delete behavior"],
+            &[
+                "Off-sheet connector policy",
+                "Page numbering",
+                "Delete behavior",
+            ],
         ),
         (
             DesignManagementTab::Variants,
@@ -125,7 +129,12 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
         ),
         (
             DesignManagementTab::Annotation,
-            &["Reference designators", "Annotation scope", "Collision policy", "Backannotation"],
+            &[
+                "Reference designators",
+                "Annotation scope",
+                "Collision policy",
+                "Backannotation",
+            ],
         ),
         (
             DesignManagementTab::Hierarchy,
@@ -172,7 +181,10 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
         // frame's 1 pt border.
         let primary = bounds(MANAGER_PRIMARY, egui::accesskit::Role::Button);
         let width = 2.0 * (primary.x1 + 13.0) - 1440.0;
-        assert!((width - 980.0).abs() < 1.0, "{tab:?}: the manager is {width} pt wide");
+        assert!(
+            (width - 980.0).abs() < 1.0,
+            "{tab:?}: the manager is {width} pt wide"
+        );
         let selects = labels
             .iter()
             .map(|label| bounds(label, egui::accesskit::Role::ComboBox))

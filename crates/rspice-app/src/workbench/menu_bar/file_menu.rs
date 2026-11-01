@@ -252,7 +252,10 @@ mod tests {
             .rename("amp2")
             .expect("valid name");
         dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo);
-        assert!(state.workbench.confirmation_dialog.visible, "edited project");
+        assert!(
+            state.workbench.confirmation_dialog.visible,
+            "edited project"
+        );
     }
 
     #[test]
