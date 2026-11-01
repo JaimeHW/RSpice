@@ -12820,11 +12820,25 @@ impl Engine {
                     .transient_device_max_timestep(&circuit, t, hinted_max_step)
                     .min(span_ceiling.unwrap_or(Value::INFINITY));
                 timestep.set_max_dt(restarted_max_step);
+                // Xyce's completeStep leaves the step that landed on the stop
+                // time as it was (`stopTime - currentTime < minTimeStep`,
+                // N_TIA_OneStep.C:2242), and the restart then takes the
+                // smaller of that step and a tenth of the one the breakpoint
+                // interrupted (N_TIA_OneStep.C:1719, :1738-1741). Its growth
+                // proposal for the landing step never reaches the restart.
+                let landing_dt = if lte_estimator.uses_accepted_solution_reference()
+                    && !landed_device_event
+                    && !physical_event
+                {
+                    dt
+                } else {
+                    timestep.dt()
+                };
                 let controller_dt = approach
                     .into_iter()
                     .chain(edge_completion_resume)
                     .reduce(Value::max)
-                    .map_or(timestep.dt(), |step| step.max(timestep.dt()));
+                    .map_or(landing_dt, |step| step.max(landing_dt));
                 timestep.force_step(restart_dt.min(controller_dt).min(restarted_max_step));
             }
             if hit_breakpoint

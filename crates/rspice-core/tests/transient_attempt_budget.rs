@@ -151,3 +151,51 @@ fn xyce_dialect_integrates_with_one_step_trapezoidal_by_default() {
     assert_eq!(default.time, trapezoidal.time);
     assert_eq!(default.voltages, trapezoidal.voltages);
 }
+
+#[test]
+fn xyce_breakpoint_restart_keeps_a_landing_step_below_a_tenth_of_the_interrupted_one() {
+    // Xyce's completeStep leaves the step that landed on a breakpoint as it
+    // was (N_TIA_OneStep.C:2242), and the restart takes the smaller of that
+    // step and a tenth of the one the breakpoint interrupted
+    // (N_TIA_OneStep.C:1719, :1738-1741). Here 0.1 ns steps land 2.54 ps
+    // short of the PULSE corner at 2.27 ns. Xyce 7.10 restarts with those
+    // 2.54 ps, to 2.27253906e-9; the grown 5.08 ps proposal for the landing
+    // step used to restart at 2.27507812e-9 instead.
+    let netlist = Netlist::parse(
+        "rc breakpoint restart
+         v1 in 0 pulse(0 1 1n 1.27n 1n 5n 20n)
+         r1 in out 1k
+         c1 out 0 1p
+         .tran 0.1ns 4ns 0 0.1ns
+         .end
+",
+    )
+    .expect("RC deck parses");
+    let engine = Engine::new(rspice_core::engine::resolve_simulation_config(
+        &SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        },
+        Some(&netlist.options),
+        &Default::default(),
+    ));
+    let result = engine
+        .run_tran(&netlist, 4.0e-9, 1.0e-10)
+        .expect("the RC transient completes");
+    let corner = result
+        .time
+        .iter()
+        .position(|time| (time - 2.27e-9).abs() < 1.0e-18)
+        .expect("the run lands on the PULSE corner");
+    let landing = result.time[corner] - result.time[corner - 1];
+    let restart = result.time[corner + 1] - result.time[corner];
+    assert!(
+        (restart - landing).abs() <= 1.0e-24,
+        "landing {landing:e}, restart {restart:e}"
+    );
+    assert!(
+        (result.time[corner + 1] - 2.27253906e-9).abs() < 5.0e-18,
+        "{:e}",
+        result.time[corner + 1]
+    );
+}
