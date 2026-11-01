@@ -610,7 +610,7 @@ def configuration_opening_input(browser):
     """Typing straight after New configuration is clicked lands in its Name,
     and Escape leaves the project without the configuration."""
     name, new = "Browser configuration draft", "New configuration\u2026"
-    choose_command(browser, "Configurations")
+    choose_command(browser, "Configuration sets")
     wait_for(lambda: any(control["label"] == new and control["role"] == "button"
                         for control in controls(browser.snapshot())), "the Configuration page")
     browser.click(new, "button", keyboard=(("a", ("\ue009",)), (name, ())))
