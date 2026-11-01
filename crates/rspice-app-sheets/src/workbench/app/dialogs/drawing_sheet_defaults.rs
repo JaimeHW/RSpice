@@ -155,12 +155,11 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
     let enabled = valid && project_authority.is_none() && (project_changed || personal_changed);
 
     let mut open_presets = false;
-    let mut dialog = Dialog::new(TITLE, "Save sheet defaults");
+    let mut dialog = Dialog::new(TITLE, "Save sheet defaults").description(DESCRIPTION);
     if !project_changed && !personal_changed {
         dialog = dialog.hint(UNCHANGED);
     }
     let choice = dialog
-        .description(DESCRIPTION)
         .size(DialogSize::DrawingSheetWorkflow)
         // The body is one bordered shell whose regions meet on their own
         // 1 px seams. The dialog's default 12 pt inset framed that shell in
