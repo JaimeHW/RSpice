@@ -547,6 +547,16 @@ fn insert_device_op_trace_spellings<'a>(
             trace.values.as_slice(),
         );
     }
+    // Xyce's lead power, which it also spells W().
+    if operator == "P" {
+        for accessor in ["P", "W"] {
+            insert_case_variants(
+                signals,
+                &format!("{accessor}({})", trace.device_name),
+                trace.values.as_slice(),
+            );
+        }
+    }
 }
 
 /// Build the measurement signal table for a transient result.

@@ -9,6 +9,7 @@
 mod fft;
 mod hdl_variables;
 mod integral_trace;
+mod lead_power;
 mod post_results;
 use super::result::canonical_event_name;
 use super::{
@@ -4001,6 +4002,8 @@ impl Engine {
             .signals
             .iter()
             .any(|signal| matches!(signal, SaveSignal::DeviceParam { .. }))
+            // A transistor's lead power is summed from its lead currents.
+            || lead_power::requests_lead_power(netlist)
             // An assertion on a device quantity reads its trace afterwards.
             || netlist.assertions.iter().any(|assertion| match &assertion.check {
                 crate::netlist::AssertCheck::Device { .. } => true,
@@ -4750,6 +4753,7 @@ impl Engine {
         // An instance parameter cannot move during the run, so it is read
         // once from the circuit as built rather than recorded at every step.
         let instance_parameters = circuit.requested_static_instance_parameters(netlist);
+        let lead_power = lead_power::requested_lead_power(netlist)?;
         let (mut result, end, checkpoints) = self.run_tran_prepared(
             netlist,
             checkpoint_netlist,
@@ -4763,6 +4767,7 @@ impl Engine {
             },
         )?;
         result.record_static_instance_parameters(&instance_parameters);
+        lead_power::record_lead_power(&lead_power, &mut result);
         Ok((result, end, checkpoints))
     }
 
