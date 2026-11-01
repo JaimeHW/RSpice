@@ -1292,7 +1292,9 @@ fn simulate_menu_plan_manager_row_reports_the_commands_truthful_unavailable_reas
 /// A menu row wears an icon only where the command has a toolbar button,
 /// and then the button's own icon, so the two read as one command. Every
 /// row used to carry one, most of them stand-ins (a check for Legal, a
-/// folder for Close project) that matched nothing on screen.
+/// folder for Close project) that matched nothing on screen. The check
+/// buttons' glyph is the exception: in a menu a check says a toggle is on,
+/// and Check cellview and Check design wore one beside View's Navigator.
 #[test]
 fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
     let app = RSpiceApp::test_instance();
@@ -1344,6 +1346,9 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::DescendHierarchy,
         Command::DesignSpecialistWorkspaces,
         Command::KeyboardShortcuts,
+        Command::CheckCellview,
+        Command::CheckDesign,
+        Command::ValidateCodeDocument,
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1351,6 +1356,12 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             "{}",
             command.spec().id
         );
+    }
+    for key in [
+        SimulateCommand::Preflight.key(),
+        ModelsCommand::ModelValidate.key(),
+    ] {
+        assert_eq!(app.command_icon(key), None, "{key:?}");
     }
 }
 

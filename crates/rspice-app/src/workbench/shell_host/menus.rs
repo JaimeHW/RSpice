@@ -738,7 +738,9 @@ pub(in crate::workbench) const SOURCE_EDITOR_MENU: &[MenuEntry] = &[
 /// The icon a menu row shows: the one the command's toolbar button wears
 /// (`chrome/toolbar.rs`), for a command that has a button. A command with
 /// no button shows none, so an icon in a menu always marks the toolbar's
-/// twin. The column stays for the rows that carry a check mark.
+/// twin. The column stays for the rows that carry a check mark, which is why
+/// the check buttons' own glyph is the one no row wears: Check cellview,
+/// Check design, Check and netlist and Validate would read as switched on.
 pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIcon> {
     let icon = match command {
         Command::SelectTool => WorkbenchIcon::Select,
@@ -770,9 +772,6 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
         Command::VisibilityOptions => WorkbenchIcon::Visibility,
         Command::CycleGrid => WorkbenchIcon::Grid,
-        Command::CheckCellview | Command::CheckDesign | Command::ValidateCodeDocument => {
-            WorkbenchIcon::Check
-        }
         Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
         Command::SourceLanguageTools => WorkbenchIcon::Target,
@@ -808,7 +807,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
         return match command {
             SimulateCommand::Run => Some(WorkbenchIcon::Run),
             SimulateCommand::Stop => Some(WorkbenchIcon::Stop),
-            SimulateCommand::Preflight => Some(WorkbenchIcon::Check),
             SimulateCommand::Options => Some(WorkbenchIcon::Sliders),
             _ => None,
         };
@@ -817,7 +815,6 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
         return match command {
             ModelsCommand::ModelSaveRevision => Some(WorkbenchIcon::Save),
             ModelsCommand::RescanModelLibraries => Some(WorkbenchIcon::Refresh),
-            ModelsCommand::ModelValidate => Some(WorkbenchIcon::Check),
             ModelsCommand::ModelCompareRelease => Some(WorkbenchIcon::Compare),
             ModelsCommand::ModelRunQualificationTests => Some(WorkbenchIcon::Run),
             _ => None,
