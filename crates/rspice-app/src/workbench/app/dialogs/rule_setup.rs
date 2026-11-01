@@ -24,6 +24,11 @@ const PRIMARY: &str = "Apply";
 const DESCRIPTION: &str = "The severity each design rule is reported at in this project, and \
     whether a finding of it may be waived. Saved with the project.";
 
+/// What the last column states, for a reader who asks.
+const LOWEST_ALLOWED: &str = "The lowest severity this project may report the rule at; a finding     on an instance the deck cannot write is held at the second where one is named";
+/// Why Apply is unavailable while the draft is the project's deck.
+const UNCHANGED: &str = "No rule's severity has changed";
+
 /// Why an option below a rule's floor cannot be chosen.
 const REFUSES_THE_RUN: &str = "A finding of this rule refuses the run whatever it is reported as";
 const INVENTED_VALUE: &str = "The run would simulate a value nobody entered";
@@ -72,9 +77,14 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
     let changed = state.design.rule_setup.draft != *state.model.workspace.content.design_rules;
     let mut dialog = Dialog::new(TITLE, PRIMARY)
         .description(DESCRIPTION)
-        .size(DialogSize::Manager)
+        // Wide enough for the table: on the manager size the rows ran past
+        // the header and the footer, which stopped at the size's width.
+        .size(DialogSize::WideWorkflow)
         .ghost("Close")
         .primary_enabled(editable && changed);
+    if editable && !changed {
+        dialog = dialog.hint(UNCHANGED);
+    }
     if let Some(issue) = &unread {
         dialog = dialog.transaction_state(
             DialogTransactionTone::Error,
@@ -128,12 +138,22 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
                 .striped(true)
                 .spacing([12.0, 2.0])
                 .show(ui, |ui| {
-                    for label in ["Rule", "Code", "Default", "Project", "Waivable", "Floor"] {
-                        ui.label(
+                    for label in [
+                        "Rule",
+                        "Code",
+                        "Default",
+                        "Project",
+                        "Waivable",
+                        "Lowest allowed",
+                    ] {
+                        let heading = ui.label(
                             RichText::new(label)
                                 .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
                                 .color(tokens.color.text_dim),
                         );
+                        if label == "Lowest allowed" {
+                            heading.on_hover_text(LOWEST_ALLOWED);
+                        }
                     }
                     ui.end_row();
                     let mut category: Option<DrcRuleCategory> = None;
@@ -310,8 +330,8 @@ mod tests {
             vec![(3, NEVER_BLOCKS), (4, NEVER_BLOCKS)]
         );
         // An empty reference may be set to anything; the instance the deck
-        // cannot write is held at an error by the checker, and the floor
-        // column says so.
+        // cannot write is held at an error by the checker, and the lowest
+        // allowed column says so.
         assert!(refused_options(DrcViolationType::EmptyName).is_empty());
         assert_eq!(
             floor_cell(DrcViolationType::EmptyName),
@@ -330,5 +350,62 @@ mod tests {
             unread_issue(&app.state.design.rule_setup.draft),
             Some(DeckIssue::UnsupportedSchema { version: 9 })
         ));
+    }
+
+    /// The table is inside the dialog its header and footer bound: every
+    /// cell ends left of the footer's last button. On the manager size the
+    /// rows ran about 180 points past the header and the footer, which
+    /// stopped at the size's width while the surface grew under the table.
+    /// Apply, unavailable on an unchanged deck, says why in the footer.
+    #[test]
+    fn the_rule_table_stays_inside_its_dialog() {
+        let mut app = RSpiceApp::test_instance();
+        open_rule_setup(&mut app.state);
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let _ = render_rule_setup_dialog(ui.ctx(), &mut app.state);
+                    },
+                )
+                .shapes;
+        }
+        let texts = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    egui::Rect::from_min_size(text.pos, text.galley.size()),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let at = |wanted: &str| {
+            texts
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .map(|(_, rect)| *rect)
+                .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+        };
+        let footer_end = at(PRIMARY).right();
+        for wanted in ["Lowest allowed", "DRC-OFF-SHEET-CONNECTOR-WITHOUT-PARTNER"] {
+            assert!(
+                at(wanted).right() < footer_end,
+                "{wanted:?} ends at {}, past the footer's {footer_end}",
+                at(wanted).right()
+            );
+        }
+        assert!(texts.iter().all(|(text, _)| text != "Floor"));
+        let _ = at(UNCHANGED);
     }
 }
