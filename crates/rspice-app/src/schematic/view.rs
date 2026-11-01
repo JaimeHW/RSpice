@@ -55,6 +55,7 @@ use rspice_schematic_editor::view::{
 
 use self::coordinates::viewport_from_camera;
 use self::interaction::handle_tool_interactions;
+pub(crate) use self::interaction::{highlight_selected_net, selected_net};
 use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
 use self::preview::{draw_interaction_previews, draw_shelf_drag_preview};

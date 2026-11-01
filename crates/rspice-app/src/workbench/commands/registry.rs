@@ -483,6 +483,7 @@ impl Command {
             | Self::CheckCellview
             | Self::CheckDesign
             | Self::ConnectivityManager
+            | Self::HighlightNet
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
             | Self::RuleSetup
@@ -815,6 +816,13 @@ impl Command {
             | Self::MirrorSelectionVertical
             | Self::SnapSelectionToGrid => "select an editable object",
             Self::ConnectivityManager => "open a schematic or testbench",
+            Self::HighlightNet if !super::active_schematic_editor(app) => {
+                "open a schematic or testbench"
+            }
+            // What the command would have refused with is the reason.
+            Self::HighlightNet => crate::schematic::view::selected_net(&app.state)
+                .err()
+                .unwrap_or("command is unavailable in this context"),
             Self::SelectionBulkEdit => "open a schematic project",
             Self::ConfigurationSets | Self::RuleSetup => "open a project",
             Self::ReviewComments => "open a schematic project",

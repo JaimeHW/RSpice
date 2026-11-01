@@ -168,3 +168,46 @@ fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
     assert_eq!(view(&app), opened);
     assert!(!app.is_enabled(key));
 }
+
+/// Highlight net lights the net a selected wire is on, the one the canvas
+/// lights when the wire is clicked, and says why it cannot when the
+/// selection names no net or more than one.
+#[test]
+fn highlight_net_lights_the_net_the_selection_is_on() {
+    let mut app = title_test_app();
+    rspice_app_state::workbench::examples::load_example(
+        "RC Lowpass Filter",
+        &mut app.state.model.schematic,
+    );
+    let key = Command::HighlightNet.key();
+    assert_eq!(
+        app.availability(key),
+        CommandAvailability::Disabled("select a wire, a net label or a pin")
+    );
+
+    app.execute(Command::SelectOfKind(SchematicObjectKind::Wires).key());
+    assert_eq!(
+        app.availability(key),
+        CommandAvailability::Disabled("the selection is on more than one net")
+    );
+
+    let wire = app.state.model.schematic.document().wires[0].id;
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_only_wire(wire);
+    assert!(app.is_enabled(key));
+    app.execute(key);
+    let highlight = &app.state.model.schematic.session.editor.net_highlight;
+    assert!(highlight.active);
+    assert!(highlight.highlighted_wires.contains(&wire));
+    assert_eq!(
+        highlight.selected_net_name.as_deref(),
+        crate::schematic::view::selected_net(&app.state)
+            .ok()
+            .as_deref()
+    );
+}

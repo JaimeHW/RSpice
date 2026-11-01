@@ -1601,6 +1601,77 @@ pub(super) fn highlight_canvas_net(state: &mut AppState, select: impl Fn(&Design
     }
 }
 
+/// The one net the selection is on, as Design ▸ Highlight net lights it: a
+/// selected wire's (whole, a segment or a corner), the net a selected label
+/// names, or the net a selected part's terminals are on. `Err` says why
+/// there is none to light.
+pub(crate) fn selected_net(state: &AppState) -> Result<String, &'static str> {
+    if !state
+        .design
+        .schematic_visibility
+        .net_highlighting
+        .lights_selected_net()
+    {
+        return Err("Display options light no selected net");
+    }
+    let selection = &state.model.schematic.session.editor.selection;
+    let wires = selection
+        .wires
+        .iter()
+        .copied()
+        .chain(
+            selection
+                .wire_segments
+                .iter()
+                .map(|segment| segment.wire_id),
+        )
+        .chain(selection.wire_vertices.iter().map(|vertex| vertex.wire_id))
+        .collect::<std::collections::HashSet<_>>();
+    let labels = state
+        .model
+        .schematic
+        .document()
+        .net_labels
+        .iter()
+        .filter(|label| selection.net_labels.contains(&label.id))
+        .map(|label| label.name.as_str())
+        .collect::<Vec<_>>();
+    if wires.is_empty() && labels.is_empty() && selection.components.is_empty() {
+        return Err("select a wire, a net label or a pin");
+    }
+    let nets = live_design_nets(state);
+    let mut on = nets.iter().filter(|net| {
+        net.wire_ids.iter().any(|id| wires.contains(id))
+            || labels
+                .iter()
+                .any(|label| label.eq_ignore_ascii_case(&net.name))
+            || net
+                .terminals
+                .iter()
+                .any(|terminal| selection.components.contains(&terminal.component_id))
+    });
+    let net = on.next().ok_or("the selection is on no net")?;
+    if on.next().is_some() {
+        return Err("the selection is on more than one net");
+    }
+    Ok(net.name.clone())
+}
+
+/// Light the net the selection is on. Returns whether one was lit.
+pub(crate) fn highlight_selected_net(state: &mut AppState) -> bool {
+    match selected_net(state) {
+        Ok(name) => {
+            highlight_canvas_net(state, |net| net.name == name);
+            state.prompt(format!("Highlighted net {name}."));
+            true
+        }
+        Err(reason) => {
+            state.prompt(format!("No net highlighted: {reason}."));
+            false
+        }
+    }
+}
+
 fn exactly_one_net_name<'a>(mut matches: impl Iterator<Item = &'a DesignNet>) -> Option<String> {
     let name = matches.next()?.name.clone();
     matches.next().is_none().then_some(name)

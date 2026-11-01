@@ -379,6 +379,7 @@ const DESIGN_MENU: &[MenuEntry] = &[
     project(ProjectCommand::Variants),
     project(ProjectCommand::Annotate),
     command(Command::ConnectivityManager),
+    command(Command::HighlightNet),
     command(Command::ReviewComments),
     command(Command::EngineeringTableView),
     Separator,

@@ -130,6 +130,8 @@ pub enum Command {
     UpdateInstanceInterface,
     CreateHierarchy,
     ConnectivityManager,
+    /// Light the net the selection is on.
+    HighlightNet,
     SelectionBulkEdit,
     ConfigurationSets,
     /// The project's design-rule deck: the severity each rule is reported
@@ -440,6 +442,7 @@ impl Command {
                 "Connectivity and buses\u{2026}",
                 "Design",
             ),
+            Self::HighlightNet => spec("highlight-net", "Highlight net", "Design"),
             Self::SelectionBulkEdit => spec("design-bulk-tools", "Bulk edit\u{2026}", "Edit"),
             Self::ConfigurationSets => spec(
                 "configuration-sets",
@@ -781,6 +784,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::CreateHierarchy,
     Command::SelectionBulkEdit,
     Command::ConnectivityManager,
+    Command::HighlightNet,
     Command::ConfigurationSets,
     Command::RuleSetup,
     Command::ReviewComments,
@@ -1021,6 +1025,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::Annotate.key(),
     Command::SelectionBulkEdit.key(),
     Command::ConnectivityManager.key(),
+    Command::HighlightNet.key(),
     Command::ConfigurationSets.key(),
     Command::RuleSetup.key(),
     Command::ReviewComments.key(),

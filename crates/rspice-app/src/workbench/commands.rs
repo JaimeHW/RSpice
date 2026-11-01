@@ -310,6 +310,7 @@ impl Command {
             | Self::UpdateInstanceInterface
             | Self::CreateHierarchy
             | Self::ConnectivityManager
+            | Self::HighlightNet
             | Self::SelectionBulkEdit
             | Self::RuleSetup
             | Self::ReviewComments
@@ -643,6 +644,9 @@ impl Command {
             }
             Self::GridSnapRouting => {
                 crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
+            }
+            Self::HighlightNet => {
+                crate::schematic::view::highlight_selected_net(&mut app.state);
             }
             Self::VisibilityOptions => {
                 crate::workbench::app::open_schematic_visibility_options(&mut app.state);
