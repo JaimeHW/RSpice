@@ -1305,6 +1305,109 @@ mod workbench_session_tests {
         assert_eq!(restored.workbench.command_query, "probe");
     }
 
+    /// The specialist workspaces the browser listed but nothing could open
+    /// are retired after it. No build could navigate to one, but a session
+    /// that names one as its current route, in its history and as its
+    /// window's route still loads: the routes are dropped with one diagnostic
+    /// and the session opens on Design.
+    #[test]
+    fn session_naming_a_retired_specialist_workspace_still_restores() {
+        const RETIRED: [&str; 34] = [
+            "multi-test-studio",
+            "ams-workbench",
+            "rf-workbench",
+            "high-sigma-workbench",
+            "layout-workbench",
+            "lvs-pex-workbench",
+            "em-workbench",
+            "si-pi-workbench",
+            "device-safety-workbench",
+            "digital-event-workbench",
+            "rf-data-display-workbench",
+            "measurement-interchange-workbench",
+            "statistical-visualization-workbench",
+            "pcell-designer",
+            "model-extraction",
+            "job-diagnostics",
+            "regression-orchestration",
+            "api-browser",
+            "fastspice-workbench",
+            "photonics-workbench",
+            "heterogeneous-workbench",
+            "library-characterization",
+            "power-electronics-workbench",
+            "instrument-workbench",
+            "pcb-workbench",
+            "cli-batch-workbench",
+            "design-migration-workbench",
+            "rf-application-workbench",
+            "cosimulation-workbench",
+            "compliance-lab-workbench",
+            "quantum-workbench",
+            "solver-qualification-center",
+            "deck-compatibility-center",
+            "protected-ip-center",
+        ];
+        let mut state = AppState::default();
+        state.workbench.activate(Workspace::Results);
+        let primary = state.workbench.window_session.primary();
+        state
+            .workbench
+            .window_session
+            .state_mut(primary)
+            .expect("the primary window")
+            .route = state.workbench.current_route();
+        let saved =
+            ron::to_string(&WorkbenchWireRef::capture(&state)).expect("workbench serializes");
+        for retired in RETIRED {
+            assert!(
+                retired.parse::<SurfaceId>().is_err(),
+                "{retired} is still a surface"
+            );
+            let route = format!("\"?surface={retired}\"");
+            let session = saved.replace("\"?view=results\"", &route).replacen(
+                "back:[",
+                &format!("back:[{route},"),
+                1,
+            );
+            for named_in in ["current:", "route:", "back:["] {
+                assert!(
+                    session.contains(&format!("{named_in}{route}")),
+                    "the session must name {retired} ({named_in}) for this to prove anything"
+                );
+            }
+
+            let mut restored =
+                restore(ron::from_str(&session).unwrap_or_else(|error| {
+                    panic!("a session naming {retired} restores: {error}")
+                }));
+            restored.workbench.reconcile_restored_navigation();
+
+            assert_eq!(
+                restored.workbench.current_route(),
+                SurfaceRoute::surface(SurfaceId::Design),
+                "{retired}"
+            );
+            assert!(
+                restored
+                    .workbench
+                    .take_route_diagnostic()
+                    .is_some_and(|message| message.contains("Malformed routes")),
+                "{retired}"
+            );
+            assert_eq!(
+                restored
+                    .workbench
+                    .window_session
+                    .state(primary)
+                    .expect("the primary window")
+                    .route,
+                SurfaceRoute::surface(SurfaceId::Design),
+                "{retired}"
+            );
+        }
+    }
+
     #[test]
     fn library_cellview_route_and_page_restore_with_models_workspace_ownership() {
         let mut state = AppState::default();

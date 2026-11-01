@@ -114,14 +114,6 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui route-owned help and diagnostics manager",
             evidence_boundary: "Canonical deep links, browser history, versioned guidance, release and migration notes, diagnostics, support-bundle disclosure, and legal/privacy notices are executable. External support delivery is not implied.",
         },
-        SurfaceId::MultiTestStudio
-        | SurfaceId::RfDataDisplayWorkbench
-        | SurfaceId::StatisticalVisualizationWorkbench
-        | SurfaceId::JobDiagnostics
-        | SurfaceId::CliBatchWorkbench
-        | SurfaceId::DeckCompatibilityCenter => SurfaceExecutionAvailability::Unavailable {
-            reason: "This specialist workspace is a governed design specification, but this build does not ship its complete Rust document and interaction executor. Use its owning primary workspace for currently implemented tasks.",
-        },
         SurfaceId::WorkflowDialog => SurfaceExecutionAvailability::Unavailable {
             reason: "Transactional workflow dialogs are available only from the command or object that supplies their required draft context; the generic catalog identity is not a standalone destination.",
         },
@@ -217,7 +209,6 @@ mod tests {
     #[test]
     fn contextual_and_unimplemented_catalog_routes_fail_with_specific_guidance() {
         let cases = [
-            (SurfaceId::MultiTestStudio, "owning primary workspace"),
             (SurfaceId::WorkflowDialog, "required draft context"),
             (SurfaceId::MobileNavigation, "responsive workbench"),
             (SurfaceId::MobileTaskHandoff, "not implemented"),
@@ -237,9 +228,9 @@ mod tests {
 
     #[test]
     fn specialist_designs_fail_closed_until_an_executor_is_registered() {
-        let route = SurfaceRoute::surface(SurfaceId::RfWorkbench);
-        let error = require_available(route).expect_err("RF route is not implemented");
-        assert_eq!(error.surface, SurfaceId::RfWorkbench);
+        let route = SurfaceRoute::surface(SurfaceId::ReleaseCockpit);
+        let error = require_available(route).expect_err("Release closure is not implemented");
+        assert_eq!(error.surface, SurfaceId::ReleaseCockpit);
         assert!(error.reason.contains("this build cannot open it yet"));
     }
 
@@ -298,24 +289,6 @@ mod tests {
             assert!(
                 surface_availability(surface).can_open(),
                 "{surface} lost its registered Rust executor"
-            );
-        }
-        for surface in [
-            SurfaceId::PcellDesigner,
-            SurfaceId::ModelExtraction,
-            SurfaceId::LibraryCharacterization,
-            SurfaceId::ProtectedIpCenter,
-        ] {
-            let availability = surface_availability(surface);
-            assert!(
-                !availability.can_open(),
-                "{surface} must not become available merely because its mockup exists"
-            );
-            assert!(
-                availability
-                    .reason()
-                    .is_some_and(|reason| reason.contains("this build cannot open it yet")),
-                "{surface} does not expose the expected implementation boundary"
             );
         }
     }
