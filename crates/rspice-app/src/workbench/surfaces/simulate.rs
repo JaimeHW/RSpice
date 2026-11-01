@@ -396,7 +396,7 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
     checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
     transient_checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
-    simulation_workflow_dialog(ctx, app);
+    simulation_workflow_dialog(ctx, &mut crate::workbench::features::cx(app));
     analysis_catalog(ctx, app);
 }
 

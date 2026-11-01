@@ -32,6 +32,7 @@
 
 use crate::product::AnalysisInstanceId;
 use crate::simulation::plan::{AnalysisDraft, AnalysisKind};
+use crate::workbench::app_state::Model;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{self, RunSetPoint};
@@ -369,10 +370,8 @@ impl PlanWorkload {
 /// one owner keeps the picker's number and this table's from disagreeing about
 /// the same instance. `None` where the draft's workload cannot be read at all,
 /// which is a plan with no queue to price.
-pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Option<usize> {
-    let global_axes_active = app
-        .state
-        .model
+pub(super) fn instance_task_rate(model: &Model, draft: &AnalysisDraft) -> Option<usize> {
+    let global_axes_active = model
         .sim_setup
         .run_set
         .enabled_dimensions()
@@ -380,8 +379,8 @@ pub(super) fn instance_task_rate(app: &RSpiceApp, draft: &AnalysisDraft) -> Opti
         .is_some();
     task_rate(
         draft,
-        &app.state.model.sim_setup.run_set,
-        app.state.model.sim_setup.reference_pvt,
+        &model.sim_setup.run_set,
+        model.sim_setup.reference_pvt,
         global_axes_active,
     )
     .ok()

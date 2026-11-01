@@ -600,7 +600,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
 
     let mut rate_sum = 0usize;
     for instance in app.state.model.sim_setup.enabled_analysis_instances() {
-        rate_sum += super::workload::instance_task_rate(&app, instance.draft())
+        rate_sum += super::workload::instance_task_rate(&app.state.model, instance.draft())
             .expect("every enabled instance has a rate");
     }
     assert!(

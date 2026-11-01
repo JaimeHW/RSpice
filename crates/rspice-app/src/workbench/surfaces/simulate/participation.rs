@@ -22,11 +22,11 @@ use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
+use crate::workbench::AppState;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::AnalysisRunPointsDraft;
-use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
 use rspice_simulation_contract::run_set::{self, RunSetPoint};
 
@@ -403,15 +403,14 @@ pub(super) fn commit_point_selection(
 /// its own scope, and every retained dataset keeps the points it already froze.
 pub(super) fn analysis_run_points_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: AnalysisRunPointsDraft,
 ) {
-    let resolved = PlanParticipation::resolve(&app.state.model);
+    let resolved = PlanParticipation::resolve(cx.model);
     let points = resolved.point_keys.clone();
-    let labels = point_labels(app);
+    let labels = point_labels(cx.model);
     let over_limit = points.len() > POINT_PICKER_LIMIT;
-    let name = app
-        .state
+    let name = cx
         .model
         .sim_setup
         .analysis_plan
@@ -424,14 +423,13 @@ pub(super) fn analysis_run_points_dialog(
     // A point is not a task. A PSS that retains harmonics mints two tasks per
     // point, so the note prices the selection through the one owner that prices
     // a queue rather than equating the two counts.
-    let task_rate = app
-        .state
+    let task_rate = cx
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
         .and_then(|plan| plan.instance(draft.instance))
-        .and_then(|instance| super::workload::instance_task_rate(app, instance.draft()));
+        .and_then(|instance| super::workload::instance_task_rate(cx.model, instance.draft()));
 
     // Points the run set has dropped since the dialog opened are struck from
     // the draft as they are drawn, so a selection can never be committed
@@ -481,12 +479,7 @@ pub(super) fn analysis_run_points_dialog(
             picker_note(ui, &selection_note);
             super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
         });
-    super::workflows::finish_workflow_choice(
-        &mut crate::workbench::features::cx(app),
-        choice,
-        draft,
-        commit_point_selection,
-    );
+    super::workflows::finish_workflow_choice(cx, choice, draft, commit_point_selection);
 }
 
 /// What a point selection buys, in points and in tasks.
@@ -583,8 +576,8 @@ fn point_grid(
 }
 
 /// The authored label of every resolved point, in declared order.
-fn point_labels(app: &RSpiceApp) -> Vec<String> {
-    run_set::resolve(&app.state.model.sim_setup.run_set)
+fn point_labels(model: &Model) -> Vec<String> {
+    run_set::resolve(&model.sim_setup.run_set)
         .unwrap_or_default()
         .iter()
         .map(RunSetPoint::label)

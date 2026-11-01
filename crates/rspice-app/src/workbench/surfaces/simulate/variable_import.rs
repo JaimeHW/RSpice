@@ -39,8 +39,10 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, select};
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
     DesignVariableDraft, DesignVariableImportDraft, DesignVariableImportRow,
     SimulationWorkflowDialog, VariableImportRefusal,
@@ -153,7 +155,13 @@ pub(super) fn poll_pending_import(
 ) {
     match file_exchange::take_opened(ctx, exchange_id()) {
         Some(Ok(Some(sheet))) => {
-            let draft = import_draft_for_sheet(app, plan_id, &sheet.name, &sheet.text);
+            let draft = import_draft_for_sheet(
+                &app.state.model,
+                &app.state.simulate,
+                plan_id,
+                &sheet.name,
+                &sheet.text,
+            );
             app.state.simulate.simulation_workflow =
                 Some(SimulationWorkflowDialog::DesignVariableImport(draft));
         }
@@ -303,7 +311,8 @@ fn auto_binding(headers: &[String]) -> Result<Vec<Option<usize>>, VariableImport
 /// hands back what the dialog should show. The caller decides that the dialog
 /// opens; this only decides what is in it.
 pub(super) fn import_draft_for_sheet(
-    app: &RSpiceApp,
+    model: &Model,
+    simulate: &SimulateState,
     plan_id: SimulationPlanId,
     file_name: &str,
     source: &str,
@@ -318,7 +327,7 @@ pub(super) fn import_draft_for_sheet(
         ))
     }) {
         Ok(mut draft) => {
-            resolve_rows(app, plan_id, &mut draft);
+            resolve_rows(model, simulate, plan_id, &mut draft);
             draft
         }
         // A sheet that cannot be read at all still opens the dialog, because
@@ -337,7 +346,12 @@ pub(super) fn import_draft_for_sheet(
 /// Ticks are preserved across a re-resolve where the row is still adoptable, so
 /// correcting one column's binding does not discard a selection made over the
 /// rest of the sheet.
-fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVariableImportDraft) {
+fn resolve_rows(
+    model: &Model,
+    simulate: &SimulateState,
+    plan_id: SimulationPlanId,
+    draft: &mut DesignVariableImportDraft,
+) {
     let previously_declined = draft
         .rows
         .iter()
@@ -379,13 +393,11 @@ fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVa
         });
         let (row_draft, refusal) = match resolved {
             Ok(row_draft) => {
-                let refusal = design_variable_from_draft_categorized(
-                    &app.state.model,
-                    &app.state.simulate,
-                    &row_draft,
-                )
-                .err()
-                .map(|(defect, detail)| refusal_for_defect(defect, *line, &row_draft.name, detail));
+                let refusal = design_variable_from_draft_categorized(model, simulate, &row_draft)
+                    .err()
+                    .map(|(defect, detail)| {
+                        refusal_for_defect(defect, *line, &row_draft.name, detail)
+                    });
                 (row_draft, refusal)
             }
             Err(refusal) => (DesignVariableDraft::default(), Some(refusal.at_line(*line))),
@@ -405,7 +417,7 @@ fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVa
         });
     }
     draft.rows = rows;
-    mark_collisions(app, plan_id, draft);
+    mark_collisions(model, plan_id, draft);
 }
 
 /// Mark the ticked rows that cannot be added because a name is already taken.
@@ -414,13 +426,11 @@ fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVa
 /// one of two rows sharing a name resolves the other. So this is recomputed
 /// whenever a tick changes, and only ticked rows are considered.
 fn mark_collisions(
-    app: &RSpiceApp,
+    model: &Model,
     plan_id: SimulationPlanId,
     draft: &mut DesignVariableImportDraft,
 ) {
-    let owned = app
-        .state
-        .model
+    let owned = model
         .workspace
         .content
         .plan_data(plan_id)
@@ -504,11 +514,11 @@ fn import_refusal(draft: &DesignVariableImportDraft) -> Option<String> {
 /// The guided design-variable import.
 pub(super) fn design_variable_import_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: DesignVariableImportDraft,
 ) {
-    let Ok(plan) = app.state.model.sim_setup.stable_analysis_plan() else {
-        app.state.simulate.simulation_workflow = None;
+    let Ok(plan) = cx.model.sim_setup.stable_analysis_plan() else {
+        cx.state.simulation_workflow = None;
         return;
     };
     let plan_id = plan.id();
@@ -580,7 +590,7 @@ pub(super) fn design_variable_import_dialog(
                         "Nothing resolves from this sheet yet. The refusal above says why.",
                     );
                 } else if row_table(ui, draft) {
-                    mark_collisions(app, plan_id, draft);
+                    mark_collisions(cx.model, plan_id, draft);
                 }
                 import_note(
                     ui,
@@ -595,14 +605,9 @@ pub(super) fn design_variable_import_dialog(
     });
 
     if changed {
-        resolve_rows(app, plan_id, &mut draft);
+        resolve_rows(cx.model, cx.state, plan_id, &mut draft);
     }
-    finish_workflow_choice(
-        &mut crate::workbench::features::cx(app),
-        choice,
-        draft,
-        commit_selected_rows,
-    );
+    finish_workflow_choice(cx, choice, draft, commit_selected_rows);
 }
 
 /// One line per declared column, naming which of the sheet's own columns
@@ -1110,7 +1115,13 @@ mod tests {
         plan_id: SimulationPlanId,
         sheet: &str,
     ) -> DesignVariableImportDraft {
-        let draft = import_draft_for_sheet(app, plan_id, "spec.csv", sheet);
+        let draft = import_draft_for_sheet(
+            &app.state.model,
+            &app.state.simulate,
+            plan_id,
+            "spec.csv",
+            sheet,
+        );
         app.state.simulate.simulation_workflow =
             Some(SimulationWorkflowDialog::DesignVariableImport(draft));
         match app.state.simulate.simulation_workflow.clone() {
@@ -1342,7 +1353,7 @@ mod tests {
         // never a fact about the sheet; it was a fact about taking both.
         draft.rows[0].accepted = false;
         draft.rows[1].accepted = true;
-        mark_collisions(&app, plan_id, &mut draft);
+        mark_collisions(&app.state.model, plan_id, &mut draft);
 
         assert_eq!(row_ids(&draft), [None, None]);
         assert_eq!(draft.accepted_count(), 1);
@@ -1387,7 +1398,7 @@ mod tests {
         assert_eq!(row_ids(&draft), [Some("VARIMP-BOUNDS")]);
 
         draft.binding[MINIMUM] = Some(3);
-        resolve_rows(&app, plan_id, &mut draft);
+        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
 
         assert_eq!(row_ids(&draft), [None]);
         assert_eq!(draft.rows[0].draft.allowed_range, "1 kohm \u{2026} 1 Mohm");
@@ -1418,7 +1429,7 @@ mod tests {
         );
 
         draft.binding[EXPRESSION] = Some(2);
-        resolve_rows(&app, plan_id, &mut draft);
+        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
 
         assert!(draft.sheet_refusal.is_none());
         assert_eq!(row_ids(&draft), [None]);
@@ -1442,7 +1453,7 @@ mod tests {
 
         draft.scope = 1;
         draft.override_scope = true;
-        resolve_rows(&app, plan_id, &mut draft);
+        resolve_rows(&app.state.model, &app.state.simulate, plan_id, &mut draft);
 
         assert!(draft.rows.iter().all(|row| row.draft.scope == 1));
         commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)

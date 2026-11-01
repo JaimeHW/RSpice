@@ -18,38 +18,26 @@ use crate::state::{
 use crate::ui::widgets::IconButton;
 use crate::workbench::state::{CaptureGroupDraft, CaptureGroupRuleDraft};
 
-pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceApp) {
-    let Some(workflow) = app.state.simulate.simulation_workflow.clone() else {
+pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+    let Some(workflow) = cx.state.simulation_workflow.clone() else {
         return;
     };
     match workflow {
         SimulationWorkflowDialog::PlanManager(draft) => {
-            super::plan_manager::plan_manager_dialog(
-                ctx,
-                &mut crate::workbench::features::cx(app),
-                draft,
-            );
+            super::plan_manager::plan_manager_dialog(ctx, cx, draft);
         }
-        SimulationWorkflowDialog::ClonePlan(draft) => {
-            clone_plan_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
-        }
-        SimulationWorkflowDialog::DesignVariable(draft) => {
-            design_variable_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
-        }
-        SimulationWorkflowDialog::SavedOutput(draft) => {
-            saved_output_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
-        }
+        SimulationWorkflowDialog::ClonePlan(draft) => clone_plan_dialog(ctx, cx, draft),
+        SimulationWorkflowDialog::DesignVariable(draft) => design_variable_dialog(ctx, cx, draft),
+        SimulationWorkflowDialog::SavedOutput(draft) => saved_output_dialog(ctx, cx, draft),
         SimulationWorkflowDialog::RenameAnalysis(draft) => {
-            rename_analysis_dialog(ctx, &mut crate::workbench::features::cx(app), draft);
+            rename_analysis_dialog(ctx, cx, draft);
         }
-        SimulationWorkflowDialog::CaptureGroup(draft) => {
-            capture_group_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
-        }
+        SimulationWorkflowDialog::CaptureGroup(draft) => capture_group_dialog(ctx, cx, draft),
         SimulationWorkflowDialog::AnalysisRunPoints(draft) => {
-            super::participation::analysis_run_points_dialog(ctx, app, draft);
+            super::participation::analysis_run_points_dialog(ctx, cx, draft);
         }
         SimulationWorkflowDialog::DesignVariableImport(draft) => {
-            super::variable_import::design_variable_import_dialog(ctx, app, draft);
+            super::variable_import::design_variable_import_dialog(ctx, cx, draft);
         }
     }
 }

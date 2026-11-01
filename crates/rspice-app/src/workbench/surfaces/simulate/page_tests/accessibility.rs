@@ -604,7 +604,8 @@ pub(super) fn studio_overlays() -> Vec<(String, RSpiceApp)> {
         .expect("the fixture holds a stable plan")
         .id();
     let draft = super::super::variable_import::import_draft_for_sheet(
-        &app,
+        &app.state.model,
+        &app.state.simulate,
         plan_id,
         "spec.csv",
         "name,quantity,expression,minimum,maximum,scope,description\n\
