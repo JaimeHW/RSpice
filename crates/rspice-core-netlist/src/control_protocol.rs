@@ -93,6 +93,27 @@ pub trait ControlScalarEvaluator {
             .map(Some)
     }
 
+    /// `let name[index] = expression` (ngspice frontend/com_let.c:115): the
+    /// elements `index` selects of the existing vector `name` take the
+    /// expression's values. Returns the scalar the session rebinds when
+    /// `name` is a scalar `let`, else `None`. Hosts without vectors have no
+    /// vector to index.
+    fn evaluate_indexed_let(
+        &mut self,
+        _name: &str,
+        _index: &str,
+        _expression: &str,
+        _variables: &ParamContext,
+        line: usize,
+        _abort: &dyn AbortSignal,
+    ) -> Result<Option<ComplexValue>, ControlError> {
+        Err(ControlError::new(
+            line,
+            ControlErrorKind::Host,
+            "when creating a new vector, it cannot be indexed",
+        ))
+    }
+
     /// `$&name`: the words ngspice makes of the vector `name` (a `let`
     /// vector, a dataset's vector or an expression naming one), one per
     /// element, or `None` when the host keeps no such vector. Hosts without

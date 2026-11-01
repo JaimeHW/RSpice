@@ -327,6 +327,159 @@ impl ControlCircuit {
         Ok(())
     }
 
+    /// `let name[index] = expression` (frontend/com_let.c:115): the elements
+    /// the index selects of the vector `vec_get` finds take the expression's
+    /// values, which must fill them exactly; a real vector cannot take
+    /// complex values. Returns the new element of a scalar `let`.
+    pub(in crate::engine::control) fn assign_elements(
+        &mut self,
+        name: &str,
+        index: &str,
+        expression: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<ComplexValue>, ControlError> {
+        let target = self.find_vector(name, true).ok_or_else(|| {
+            command_error(
+                line,
+                format!("'{name}' is no vector; when creating a new vector, it cannot be indexed"),
+            )
+        })?;
+        let length = self.vectors.vectors[target].value.samples.len();
+        let (low, high) = self.element_range(index, length, variables, line, abort)?;
+        let value = match self.vector_or_scalar(expression, variables, line, abort)? {
+            Evaluated::Scalar(value) => VectorValue {
+                samples: vec![value],
+                complex: value.im != 0.0,
+                scale: None,
+                unit: SignalUnit::Unspecified,
+            },
+            Evaluated::Vector { value, .. } => value,
+        };
+        let required = high - low + 1;
+        if value.samples.len() != required {
+            return Err(command_error(
+                line,
+                format!(
+                    "data for an index vector must fit exactly: the indexed range required {required} \
+                     element{}, but {} {} supplied",
+                    if required == 1 { "" } else { "s" },
+                    value.samples.len(),
+                    if value.samples.len() == 1 {
+                        "was"
+                    } else {
+                        "were"
+                    },
+                ),
+            ));
+        }
+        let vector = &mut self.vectors.vectors[target].value;
+        if !vector.complex && value.complex {
+            return Err(command_error(
+                line,
+                "complex data cannot be used to fill an array of real data",
+            ));
+        }
+        vector.samples[low..=high].copy_from_slice(&value.samples);
+        Ok(self.vectors.vectors[target]
+            .scalar
+            .then(|| self.vectors.vectors[target].value.samples[0]))
+    }
+
+    /// ngspice `find_indices` (com_let.c:302) for a vector of one dimension:
+    /// `[i]` or `[low:high]`, where a blank low is 0 and a blank high the
+    /// last element.
+    fn element_range(
+        &self,
+        index: &str,
+        length: usize,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<(usize, usize), ControlError> {
+        let (text, rest) = index
+            .split_once(']')
+            .ok_or_else(|| command_error(line, "the ']' for dimension 1 could not be found"))?;
+        if text.contains(',') || rest.trim_start().starts_with('[') {
+            return Err(command_error(
+                line,
+                "too many dimensions given; only 1 is present",
+            ));
+        }
+        if !rest.trim().is_empty() {
+            return Err(command_error(
+                line,
+                format!("invalid text after the index: '{}'", rest.trim()),
+            ));
+        }
+        let element = |text: &str| self.element_index(text, variables, line, abort);
+        let (low, high) = match text.split_once(':') {
+            None => {
+                let index =
+                    element(text)?.ok_or_else(|| command_error(line, "the index is empty"))?;
+                (index, index)
+            }
+            Some((low, high)) => (
+                element(low)?.unwrap_or(0),
+                element(high)?.unwrap_or(length.saturating_sub(1)),
+            ),
+        };
+        if low > high {
+            return Err(command_error(
+                line,
+                format!("low range ({low}) is greater than high range ({high})"),
+            ));
+        }
+        // ngspice checks only a range; past the end it writes out of bounds.
+        if high >= length {
+            return Err(command_error(
+                line,
+                format!(
+                    "high range ({high}) exceeds the maximum value ({})",
+                    length as isize - 1
+                ),
+            ));
+        }
+        Ok((low, high))
+    }
+
+    /// ngspice `get_one_index_value` (com_let.c:497): `None` for blank text,
+    /// else a real scalar rounded to the nearest integer, never negative.
+    fn element_index(
+        &self,
+        text: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<usize>, ControlError> {
+        if text.trim().is_empty() {
+            return Ok(None);
+        }
+        let value = match self.vector_or_scalar(text, variables, line, abort)? {
+            Evaluated::Scalar(value) => Some(value),
+            Evaluated::Vector { value, .. } => match value.samples.as_slice() {
+                [sample] if !value.complex => Some(*sample),
+                _ => None,
+            },
+        };
+        let Some(value) = value.filter(|value| value.im == 0.0 && value.re.is_finite()) else {
+            return Err(command_error(
+                line,
+                format!("index expression '{}' is not a real scalar", text.trim()),
+            ));
+        };
+        let index = (value.re + 0.5).floor();
+        if index < 0.0 {
+            return Err(command_error(
+                line,
+                format!("negative index ({index}) is not allowed"),
+            ));
+        }
+        // A huge index saturates and fails the range check.
+        Ok(Some(index as usize))
+    }
+
     /// `compose`: replace the vector of this name in the current plot only
     /// (com_compose.c:83 vec_remove), or add one there.
     pub(in crate::engine::control) fn compose_vector(

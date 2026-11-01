@@ -82,6 +82,9 @@ enum Op {
     },
     Let {
         name: String,
+        /// The text after the destination's first `[`, as com_let.c:73
+        /// splits it; the host finds the indices when it runs.
+        index: Option<String>,
         expression: String,
     },
     Break,
@@ -259,15 +262,20 @@ impl ControlProgram {
                     Op::End { opening }
                 }
                 "let" => {
-                    let (name, expression) = rest
+                    let (target, expression) = rest
                         .split_once('=')
                         .ok_or_else(|| syntax(line, "let requires name = expression"))?;
-                    require_identifier(name.trim(), line)?;
+                    let (name, index) = match target.split_once('[') {
+                        Some((name, index)) => (name.trim(), Some(index.trim().to_owned())),
+                        None => (target.trim(), None),
+                    };
+                    require_identifier(name, line)?;
                     if expression.trim().is_empty() {
                         return Err(syntax(line, "let requires an expression"));
                     }
                     Op::Let {
-                        name: name.trim().to_owned(),
+                        name: name.to_owned(),
+                        index,
                         expression: expression.trim().to_owned(),
                     }
                 }
@@ -451,7 +459,32 @@ impl ControlSession<'_> {
                 "execution steps",
             )?;
             match &instruction.op {
-                Op::Let { name, expression } => {
+                Op::Let {
+                    name,
+                    index: Some(index),
+                    expression,
+                } => {
+                    let index = self.substitute(index, line, evaluator, abort)?;
+                    let expression = self.substitute(expression, line, evaluator, abort)?;
+                    // A scalar `let` keeps its parameter in step with its
+                    // one element.
+                    if let Some(value) = evaluator.evaluate_indexed_let(
+                        name,
+                        &index,
+                        &expression,
+                        &self.variables,
+                        line,
+                        abort,
+                    )? {
+                        self.variables.set_complex(name, finite(value, line)?);
+                    }
+                    self.pc += 1;
+                }
+                Op::Let {
+                    name,
+                    index: None,
+                    expression,
+                } => {
                     let expression = self.substitute(expression, line, evaluator, abort)?;
                     let key = name.to_ascii_lowercase();
                     match evaluator.evaluate_let(name, &expression, &self.variables, line, abort)? {

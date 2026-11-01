@@ -7,7 +7,7 @@ use rspice_core::engine::{
 };
 use rspice_core::execution::SignalUnit;
 use rspice_core::execution::control::{ControlCommand, ControlLimits, ControlProgram};
-use rspice_core::{ConvergenceConfig, Engine, Netlist, NoAbort, SimulationConfig};
+use rspice_core::{ComplexValue, ConvergenceConfig, Engine, Netlist, NoAbort, SimulationConfig};
 
 fn drive(
     source: &str,
@@ -1309,6 +1309,75 @@ fn indexing_selects_elements_and_ranges_as_ngspice_does() {
         "no index\nV1 1 0 5\nR1 1 0 1k\n.control\nlet w = vector(3)\necho $&w[2]\n.endc\n.end\n",
     );
     assert!(error.unwrap().contains("names no vector"));
+}
+
+/// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
+/// elements the index selects, which the values must fit exactly: an index
+/// rounds to the nearest integer, a blank bound is the vector's end, and a
+/// scalar `let` keeps its parameter in step. ngspice-46 echoes these lines
+/// and prints `c` as `0`, `5`, `0+2j` for the same script.
+#[test]
+fn indexed_let_assigns_elements_as_ngspice_does() {
+    let source = "indexed let\nV1 1 0 5\nR1 1 0 1k\n.control\nlet w = vector(5)\nlet w[2] = 10\n\
+        echo $&w\nlet w[0:1] = vector(2) + 7\necho $&w\nlet w[3:] = vector(2) * 100\necho $&w\n\
+        let w[:1] = vector(2) - 3\necho $&w\nlet n = 1\nlet w[n+3] = -1\nlet w[1.6] = 9\n\
+        echo $&w\nlet w[ 0 ] = 42\necho $&w\nlet c = j(vector(3))\nlet c[1] = 5\nlet s = 4\n\
+        let s[0] = 6\nlet t = s + unitvec(2)\necho $&const.s $&t\nop\nlet k = unitvec(3)\n\
+        let k[2] = v(1)\necho $&k $&w\nprint c\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "0 1 10 3 4",
+            "7 8 10 3 4",
+            "7 8 10 0 100",
+            "-3 -2 10 0 100",
+            "-3 -2 9 0 -1",
+            "42 -2 9 0 -1",
+            "6 7 7",
+            "1 1 5 42 -2 9 0 -1",
+        ]
+    );
+    let c = &printed(presented.last().unwrap())[0];
+    assert_eq!(
+        c.y.samples,
+        [
+            ComplexValue::new(0.0, 0.0),
+            ComplexValue::new(5.0, 0.0),
+            ComplexValue::new(0.0, 2.0)
+        ]
+    );
+
+    for (assignment, message) in [
+        ("let z[0] = 1", "it cannot be indexed"),
+        (
+            "let w[0:9] = vector(10)",
+            "high range (9) exceeds the maximum value (4)",
+        ),
+        (
+            "let w[5] = 77",
+            "high range (5) exceeds the maximum value (4)",
+        ),
+        ("let w[0:1] = 5", "required 2 elements, but 1 was supplied"),
+        ("let w[0] = j(1)", "complex data cannot be used"),
+        ("let w[-1] = 1", "negative index (-1) is not allowed"),
+        ("let w[1][2] = 1", "too many dimensions"),
+        ("let w[1,2] = 1", "too many dimensions"),
+        (
+            "let w[3:1] = vector(3)",
+            "low range (3) is greater than high range (1)",
+        ),
+        ("let w[] = 1", "the index is empty"),
+        ("let w[2]x = 1", "invalid text after the index"),
+    ] {
+        let (_, error) = run_until_error(&format!(
+            "indexed let error\nV1 1 0 5\nR1 1 0 1k\n.control\nlet w = vector(5)\n{assignment}\n\
+             .endc\n.end\n"
+        ));
+        let error = error.unwrap_or_default();
+        assert!(error.contains(message), "{assignment}: {error}");
+    }
 }
 
 /// ngspice binds a scalar `let` as a one-element vector of the current plot

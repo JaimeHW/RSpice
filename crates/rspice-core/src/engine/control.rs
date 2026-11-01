@@ -881,6 +881,18 @@ impl ControlScalarEvaluator for ControlCircuit {
         }
     }
 
+    fn evaluate_indexed_let(
+        &mut self,
+        name: &str,
+        index: &str,
+        expression: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<ComplexValue>, ControlError> {
+        self.assign_elements(name, index, expression, variables, line, abort)
+    }
+
     fn vector_words(
         &mut self,
         name: &str,
