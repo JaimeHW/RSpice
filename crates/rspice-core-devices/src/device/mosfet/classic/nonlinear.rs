@@ -420,6 +420,29 @@ mod tests {
     }
 
     #[test]
+    fn native_xyce_transient_convergence_skips_only_the_current_prediction_test() {
+        // Xyce's MOSFET levels 1-3 report `isConverged = !limitedFlag`
+        // (N_DEV_MOSFET1.h:771-774): an unlimited load converges even where
+        // the SPICE current-prediction test would still refuse the iterate.
+        let first = [1.2, 1.8, 0.2, -0.1];
+        let moved = [1.25, 1.8, 0.2, -0.1];
+        let converged = |native: bool, level: i32| {
+            let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+            mos.level = level;
+            mos.set_native_xyce_transient_convergence(native);
+            mos.update(&first);
+            mos.update(&moved);
+            assert!(!mos.junction_limited);
+            mos.is_converged(NonlinearConvergenceCriteria::default())
+        };
+        assert!(!converged(false, 1), "the strict test sees the 50 mV move");
+        assert!(converged(true, 1));
+        // Xyce's level 6 also waits for a second Newton iterate, so it keeps
+        // the strict test (N_DEV_MOSFET6.C:2645-2648).
+        assert!(!converged(true, 6));
+    }
+
+    #[test]
     fn inverse_channel_output_steps_satisfy_the_current_convergence_contract() {
         for (mut mos, polarity) in [
             (Mosfet::new_nmos("n".into(), 1, 2, 3, 4), 1.0),

@@ -355,7 +355,12 @@ impl Mosfet {
 
         let (mut delxl, mut dldvd, mut ddldvg, mut ddldvd, mut ddldvb) =
             if params.lvds <= params.vdsat {
-                if self.mos3_max_drift_velocity > 0.0 {
+                // Below VDSAT, Xyce's MOSFET3 applies no channel-length
+                // modulation at all (N_DEV_MOSFET3.C:2201, `goto line700`).
+                // The continuation below is ngspice's (mos3load.c:728-743);
+                // combined with Xyce's derivative assembly it would drop the
+                // linear-region drain conductance from the Jacobian.
+                if self.mos3_max_drift_velocity > 0.0 || xyce_semantics {
                     return (cdrain, gm, gds, gmb, 0.0);
                 }
                 let ratio = params.lvds / params.vdsat;

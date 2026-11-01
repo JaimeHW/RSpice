@@ -756,10 +756,13 @@ mod tests {
         mos.set_body_junction_model(MosBodyJunctionModel::XyceClassicLinearizedReverse);
         let (vgs, vds, vbs) = (1.8, 2.2, -0.4);
         let state = mos.mos3_state(vgs, vds, vbs);
-        // This is the Xyce 7.10 MOS3 equation value for the fixture bias.
-        // The corresponding ngspice-compatible branch is intentionally
-        // different; the dialect selector must not collapse the two paths.
-        let expected_xyce_gds: Value = 1.544_363_540_890e-3;
+        // The bias is below VDSAT, where Xyce 7.10's MOSFET3 applies no
+        // channel-length modulation (N_DEV_MOSFET3.C:2201). Xyce's own DC
+        // sweep of this card gives I(VD) = -2.91205003e-3 / -2.91233890e-3 A
+        // at VD = 2.2 -/+ 1e-4 V, a slope of 1.44435e-3 S. ngspice continues
+        // CLM below VDSAT, so its branch is intentionally different; the
+        // dialect selector must not collapse the two paths.
+        let expected_xyce_gds: Value = 1.444_353_885_119e-3;
         let tolerance = 1.0e-12 * expected_xyce_gds.abs().max(1.0e-12);
         assert!(
             (state.gds - expected_xyce_gds).abs() <= tolerance,

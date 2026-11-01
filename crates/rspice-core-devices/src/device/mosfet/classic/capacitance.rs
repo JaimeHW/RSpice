@@ -1152,6 +1152,39 @@ mod tests {
     }
 
     #[test]
+    fn level3_xyce_linear_region_drain_conductance_matches_the_current_slope() {
+        // Xyce's MOSFET3 applies channel-length modulation only beyond VDSAT
+        // (N_DEV_MOSFET3.C:2201). Running ngspice's linear-region CLM
+        // continuation through Xyce's derivative assembly left the Jacobian
+        // with almost none of the linear-region gds, and the Xyce-dialect
+        // Newton diverged at vds ~ 0 on every MOS3 inverter.
+        let mut mos = mos3_capacitance_fixture();
+        mos.mos3_max_drift_velocity = 0.0;
+        // NSUB gives the CLM depletion factor alpha; without it CLM is off.
+        mos.mos2_substrate_doping = 1.0e16;
+        for model in [
+            MosBodyJunctionModel::XyceClassicLinearizedReverse,
+            MosBodyJunctionModel::NgspiceReverseClamp,
+        ] {
+            mos.body_junction_model = model;
+            let (vgs, vbs) = (3.0, 0.0);
+            for vds in [1.0e-5, 1.0e-3, 0.05] {
+                let state = mos.mos3_state(vgs, vds, vbs);
+                assert!(vds < state.vdsat, "{vds} V must be in the linear region");
+                let h = vds * 1.0e-4;
+                let slope = (mos.mos3_state(vgs, vds + h, vbs).ids
+                    - mos.mos3_state(vgs, vds - h, vbs).ids)
+                    / (2.0 * h);
+                assert!(
+                    (state.gds - slope).abs() <= 1.0e-4 * slope.abs(),
+                    "{model:?} vds={vds}: gds {} vs dId/dVds {slope}",
+                    state.gds
+                );
+            }
+        }
+    }
+
+    #[test]
     fn level3_transient_meyer_uses_xyce_weak_inversion_partition() {
         let mut mos = mos3_capacitance_fixture();
         mos.body_junction_model = MosBodyJunctionModel::XyceClassicLinearizedReverse;

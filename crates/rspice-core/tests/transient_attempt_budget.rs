@@ -35,15 +35,15 @@ fn valid_locked_run_can_exceed_the_removed_global_attempt_heuristic() {
 }
 
 #[test]
-fn xyce_classic_mos_transient_converges_on_limiter_activity_alone() {
-    // Xyce's MOSFET levels 1-3 report `isConverged = !limitedFlag`
-    // (N_DEV_MOSFET1.h:771-774), where `limitedFlag` is pnjlim's `Check` on
-    // the bulk junctions (N_DEV_MOSFET3.C:1756-1769). The SPICE current
-    // prediction test is not part of Xyce's transient Newton, so applying it
-    // in the Xyce dialect rejected steps Xyce accepts. On the first 2 us of
-    // ISSUE_239's mos3_test2Ref inverter the strict test rejected 4237 of
-    // 17017 attempts and the native status 1453 of 5877; Xyce 7.10 takes 94
-    // steps and rejects 8. An explicit ENFORCEDEVICECONV keeps the strict test.
+fn xyce_mos3_inverter_converges_through_vds_zero() {
+    // Below VDSAT, Xyce's MOSFET3 applies no channel-length modulation
+    // (N_DEV_MOSFET3.C:2201). The Xyce dialect ran ngspice's linear-region
+    // CLM continuation through Xyce's derivative assembly, which left the
+    // Jacobian with a fraction of the linear-region drain conductance. With
+    // the inverter's NMOS on and vds ~ 0, Newton diverged in a growing
+    // two-cycle: on the first 2 us of ISSUE_239's mos3_test2Ref inverter it
+    // rejected 1396 of 5656 attempts, and 4069 of 16 346 under an explicit
+    // ENFORCEDEVICECONV. Xyce 7.10 takes 102 attempts and rejects 8.
     let netlist = Netlist::parse(
         "mos3 inverter\n\
          vdddev vdd 0 5v\n\
@@ -67,26 +67,30 @@ fn xyce_classic_mos_transient_converges_on_limiter_activity_alone() {
          .end\n",
     )
     .expect("MOS3 inverter deck parses");
-    let rejected = |enforce_device_convergence: Option<bool>| {
-        let engine = Engine::new(SimulationConfig {
-            spice_dialect: SpiceDialect::Xyce,
-            transient_enforce_device_convergence: enforce_device_convergence,
-            ..SimulationConfig::default()
-        });
-        let result = engine
-            .run_tran(&netlist, 2.0e-6, 0.2e-6)
-            .expect("the inverter transient completes");
-        assert_eq!(result.time.last().copied(), Some(2.0e-6));
-        let quality = engine.convergence_quality();
-        assert_eq!(quality.force_accepted_points, 0);
-        quality.timestep_reductions
-    };
-
-    let native = rejected(None);
-    let strict = rejected(Some(true));
+    let engine = Engine::new(SimulationConfig {
+        spice_dialect: SpiceDialect::Xyce,
+        ..SimulationConfig::default()
+    });
+    let result = engine
+        .run_tran(&netlist, 2.0e-6, 0.2e-6)
+        .expect("the inverter transient completes");
+    assert_eq!(result.time.last().copied(), Some(2.0e-6));
+    let quality = engine.convergence_quality();
+    assert_eq!(quality.force_accepted_points, 0);
+    // Every rejection left is a truncation-error one, as Xyce's are.
+    assert_eq!(
+        quality.timestep_reductions, quality.lte_rejections,
+        "the vds ~ 0 Newton solves must converge"
+    );
     assert!(
-        2 * native < strict,
-        "native Xyce MOS convergence rejected {native} steps, the strict test {strict}"
+        quality.lte_rejections <= 12,
+        "{} truncation-error rejections; Xyce 7.10 rejects 8",
+        quality.lte_rejections
+    );
+    assert!(
+        result.time.len() <= 120,
+        "{} accepted points; Xyce 7.10 accepts 94",
+        result.time.len()
     );
 }
 
