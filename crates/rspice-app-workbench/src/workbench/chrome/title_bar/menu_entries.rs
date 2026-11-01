@@ -178,6 +178,18 @@ pub fn menu_keys(entries: &[MenuEntry], keys: &mut Vec<CommandKey>) {
     }
 }
 
+/// Where in `entries` the command `key` has its first row, whatever context
+/// its block shows in: `Some(None)` for a row of `entries` themselves,
+/// `Some(Some(label))` for one in the submenu `label` (or below it).
+pub fn submenu_of(entries: &[MenuEntry], key: CommandKey) -> Option<Option<&'static str>> {
+    entries.iter().find_map(|entry| match *entry {
+        MenuEntry::Command(item) => (item.command == key).then_some(None),
+        MenuEntry::Submenu { label, entries } => submenu_of(entries, key).map(|_| Some(label)),
+        MenuEntry::Only(_, entries) => submenu_of(entries, key),
+        MenuEntry::Separator | MenuEntry::RecentFiles(_) => None,
+    })
+}
+
 /// A menu row as it reads for the application's state right now.
 #[derive(Debug, Clone)]
 pub enum MenuRow {

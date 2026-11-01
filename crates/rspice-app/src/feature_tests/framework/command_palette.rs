@@ -128,8 +128,7 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
     assert!(
         commands
             .iter()
-            .copied()
-            .all(|command| { PaletteScope::for_command(spec(command)) != PaletteScope::All })
+            .all(|command| palette_entry(*command).scope() != PaletteScope::All)
     );
     let assigned = PaletteScope::ALL
         .into_iter()
@@ -137,8 +136,7 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
         .map(|scope| {
             commands
                 .iter()
-                .copied()
-                .filter(|command| scope.contains(spec(*command)))
+                .filter(|command| palette_entry(**command).scope() == scope)
                 .count()
         })
         .sum::<usize>();
@@ -146,43 +144,62 @@ fn registered_command_projection_is_total_without_signal_substitutes() {
     assert!(
         commands
             .iter()
-            .copied()
-            .all(|command| PaletteScope::for_command(spec(command)) != PaletteScope::Signals),
+            .all(|command| palette_entry(*command).scope() != PaletteScope::Signals),
         "signal rows must represent real result waveforms, not generic commands"
     );
 }
 
-/// Opening a workspace or a project page is navigating. The palette files a
-/// command by its group alone, so each of these must carry a group the
-/// Navigate scope takes.
+/// The tabs are the menu bar's: a command is found under the menu that
+/// holds its first row, and the row's subtitle is the way there, not a
+/// sentence its whole group shares. A workspace opens from Window ▸
+/// Workspace, and a project page, which no menu lists, is found beside it
+/// with no subtitle.
 #[test]
-fn opening_a_workspace_or_a_project_page_is_navigating() {
-    let (mut workspaces, mut pages) = (0, 0);
-    for &command in COMMAND_REGISTRY {
-        let Command::OpenWorkspace(_) = command else {
-            continue;
-        };
-        workspaces += 1;
-        assert_eq!(
-            PaletteScope::for_command(spec(command)),
-            PaletteScope::Navigate,
-            "{command:?} is filed under {}",
-            spec(command).group
-        );
+fn a_command_is_found_under_the_menu_that_holds_it() {
+    let tabs = PaletteScope::ALL.map(PaletteScope::label);
+    assert_eq!(
+        tabs,
+        [
+            "All", "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Tools",
+            "Window", "Help", "Signals",
+        ]
+    );
+
+    for (command, scope, detail) in [
+        (
+            Command::PlaceWire,
+            PaletteScope::Design,
+            "Design \u{203a} Place",
+        ),
+        (Command::SelectAll, PaletteScope::Edit, "Edit"),
+        (
+            Command::OpenWorkspace(crate::workbench::state::Workspace::Design),
+            PaletteScope::Window,
+            "Window \u{203a} Workspace",
+        ),
+        (Command::AutomationConsole, PaletteScope::Tools, "Tools"),
+    ] {
+        let entry = palette_entry(command);
+        assert_eq!((entry.scope(), entry.detail().as_str()), (scope, detail));
     }
+
+    let mut pages = 0;
     for command in ProjectCommand::ALL {
         let ProjectCommand::Page(_) = command else {
             continue;
         };
         pages += 1;
+        let entry = palette_commands(&RSpiceApp::test_instance())
+            .find(|listed| listed.key() == command.key())
+            .map(PaletteEntry::Command)
+            .expect("the palette lists the project page");
         assert_eq!(
-            PaletteScope::for_command(project_spec(command)),
-            PaletteScope::Navigate,
-            "{command:?} is filed under {}",
+            (entry.scope(), entry.detail().as_str()),
+            (PaletteScope::Window, ""),
+            "{command:?} in {}",
             project_spec(command).group
         );
     }
-    assert_eq!(workspaces, crate::workbench::state::Workspace::ALL.len());
     assert!(pages > 0, "the registry lists the project pages");
 }
 
@@ -190,7 +207,7 @@ fn opening_a_workspace_or_a_project_page_is_navigating() {
 fn command_scopes_and_metadata_search_only_return_registered_commands() {
     let design = palette_commands_listed()
         .into_iter()
-        .filter(|command| PaletteScope::Design.contains(spec(*command)))
+        .filter(|command| palette_entry(*command).scope() == PaletteScope::Design)
         .filter(|command| match_entry(&palette_entry(*command), "wire").is_some())
         .collect::<Vec<_>>();
     assert_eq!(
@@ -198,34 +215,31 @@ fn command_scopes_and_metadata_search_only_return_registered_commands() {
         vec![Command::PlaceWire, Command::JoinCollinearWires]
     );
 
+    // Probe is Simulate's; the other three are Design ▸ Place's.
     assert_eq!(
-        PaletteScope::for_command(spec(Command::PlaceProbe)),
-        PaletteScope::Design
+        palette_entry(Command::PlaceProbe).scope(),
+        PaletteScope::Simulate
     );
+    for command in [
+        Command::PlaceBus,
+        Command::PlaceBusTap,
+        Command::PlaceJunction,
+    ] {
+        assert_eq!(palette_entry(command).scope(), PaletteScope::Design);
+    }
+    // Export ▸ Dataset… is File's.
     assert_eq!(
-        PaletteScope::for_command(spec(Command::PlaceBus)),
-        PaletteScope::Design
-    );
-    assert_eq!(
-        PaletteScope::for_command(spec(Command::PlaceBusTap)),
-        PaletteScope::Design
-    );
-    assert_eq!(
-        PaletteScope::for_command(spec(Command::PlaceJunction)),
-        PaletteScope::Design
-    );
-    assert_eq!(
-        PaletteScope::for_command(
-            command_registry()
-                .spec(ResultsCommand::ExportWaveformsCsv.key())
-                .expect("the registry declares the command")
-        ),
-        PaletteScope::Results
+        palette_commands(&RSpiceApp::test_instance())
+            .find(|listed| listed.key() == ResultsCommand::ExportWaveformsCsv.key())
+            .map(PaletteEntry::Command)
+            .expect("the palette lists the export")
+            .scope(),
+        PaletteScope::File
     );
 
     let help = palette_commands_listed()
         .into_iter()
-        .filter(|command| PaletteScope::Help.contains(spec(*command)))
+        .filter(|command| palette_entry(*command).scope() == PaletteScope::Help)
         .collect::<Vec<_>>();
     assert!(help.contains(&Command::KeyboardShortcuts));
     assert!(help.contains(&Command::About));
@@ -817,7 +831,7 @@ fn loaded_model_records_are_searchable_and_select_the_catalog_record() {
     let mut rows = palette_rows(
         &app,
         "qualified foundry_65lp",
-        PaletteScope::Models,
+        PaletteScope::Tools,
         CommandPlatform::Desktop,
         egui::os::OperatingSystem::Windows,
     );

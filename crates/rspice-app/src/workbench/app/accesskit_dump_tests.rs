@@ -63,18 +63,9 @@ const APPLICATION_MENUS: [&str; 10] = [
 ];
 
 /// The command palette's search scopes, by the names their chips carry.
-const PALETTE_SCOPES: [&str; 11] = [
-    "All",
-    "Navigate",
-    "Commands",
-    "Design",
-    "Simulation",
-    "Results",
-    "Verification",
-    "Models",
-    "Automation",
-    "Signals",
-    "Help",
+const PALETTE_SCOPES: [&str; 12] = [
+    "All", "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Tools", "Window",
+    "Help", "Signals",
 ];
 
 type Setup = Box<dyn Fn(&mut RSpiceApp)>;

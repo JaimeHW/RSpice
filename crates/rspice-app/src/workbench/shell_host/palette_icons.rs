@@ -14,6 +14,10 @@ use crate::workbench::simulate::commands::SimulateCommand;
 /// scope's.
 pub(super) fn palette_icon(command: Command) -> Option<Icon> {
     let icon = match command {
+        Command::SelectTool => Icon::Select,
+        // Placing an instance picks one from the library.
+        Command::PlaceInstance => Icon::Library,
+        Command::PlaceOffSheetConnector => Icon::ChevronRight,
         Command::PlaceWire | Command::JoinCollinearWires => Icon::Wire,
         Command::PlaceBus => Icon::Bus,
         Command::PlaceBusTap => Icon::Bus,

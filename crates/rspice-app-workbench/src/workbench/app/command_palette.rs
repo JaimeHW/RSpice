@@ -24,7 +24,7 @@ use crate::ui::tokens::{self, Mode, Tokens};
 use crate::ui::widgets::focus_is_within_modal;
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::command_registry::{CommandFlags, CommandSpec};
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::host::{Host, MenuPlace};
 
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 
@@ -183,54 +183,60 @@ pub struct PaletteRegions {
     pub footer: Rect,
 }
 
-/// Search groups from the reviewed command-dialog mockup. Every indexed item
-/// has exactly one primary scope; the Signals scope is backed only by actual
-/// active-run waveform records.
+/// The palette's tabs: everything, then the ten menus of the menu bar, then
+/// the waveforms of the active run. A command is found under the menu that
+/// holds its row, and one no menu lists under the menu that holds its
+/// group's; a cell view under Design and a model under Tools, beside the
+/// Library manager.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 #[repr(u8)]
 pub enum PaletteScope {
     #[default]
     All,
-    Navigate,
-    Commands,
+    File,
+    Edit,
+    View,
     Design,
-    Simulation,
+    Simulate,
     Results,
-    Verification,
-    Models,
-    Automation,
-    Signals,
+    Verify,
+    Tools,
+    Window,
     Help,
+    Signals,
 }
 
 impl PaletteScope {
-    pub const ALL: [Self; 11] = [
+    pub const ALL: [Self; 12] = [
         Self::All,
-        Self::Navigate,
-        Self::Commands,
+        Self::File,
+        Self::Edit,
+        Self::View,
         Self::Design,
-        Self::Simulation,
+        Self::Simulate,
         Self::Results,
-        Self::Verification,
-        Self::Models,
-        Self::Automation,
-        Self::Signals,
+        Self::Verify,
+        Self::Tools,
+        Self::Window,
         Self::Help,
+        Self::Signals,
     ];
 
-    const fn label(self) -> &'static str {
+    /// The tab's name: the menu's, for a menu's tab.
+    pub const fn label(self) -> &'static str {
         match self {
             Self::All => "All",
-            Self::Navigate => "Navigate",
-            Self::Commands => "Commands",
+            Self::File => "File",
+            Self::Edit => "Edit",
+            Self::View => "View",
             Self::Design => "Design",
-            Self::Simulation => "Simulation",
+            Self::Simulate => "Simulate",
             Self::Results => "Results",
-            Self::Verification => "Verification",
-            Self::Models => "Models",
-            Self::Automation => "Automation",
-            Self::Signals => "Signals",
+            Self::Verify => "Verify",
+            Self::Tools => "Tools",
+            Self::Window => "Window",
             Self::Help => "Help",
+            Self::Signals => "Signals",
         }
     }
 
@@ -240,48 +246,23 @@ impl PaletteScope {
             .find(|scope| scope.label().eq_ignore_ascii_case(label))
     }
 
-    /// The scope of the command `spec` declares, by its group. Opening a
-    /// workspace or a project page is navigating, as their groups say.
-    pub fn for_command(spec: &CommandSpec) -> Self {
-        match spec.group {
-            "Navigate" | "Project" => Self::Navigate,
-            "Design" => Self::Design,
-            "Simulate" => Self::Simulation,
+    /// The tab of a command no menu lists: the menu that holds the commands
+    /// of the group `group`. Opening a workspace or a project page is
+    /// Window's, beside Workspace ▸.
+    pub fn for_group(group: &str) -> Self {
+        match group {
+            "File" | "Save" | "Cloud" => Self::File,
+            "View" => Self::View,
+            "Design" | "Symbol" => Self::Design,
+            "Simulate" | "Stimulus" => Self::Simulate,
             "Results" => Self::Results,
-            "Verify" => Self::Verification,
-            "Models" => Self::Models,
-            "Automation" => Self::Automation,
+            "Verify" => Self::Verify,
+            "Models" | "Automation" => Self::Tools,
+            "Window" | "Navigate" | "Project" => Self::Window,
             "Help" => Self::Help,
-            // File, Edit, View, and Window are general application commands,
-            // matching the mockup's Commands projection.
-            _ => Self::Commands,
-        }
-    }
-
-    #[cfg(any(test, feature = "test-support"))]
-    pub fn contains(self, spec: &CommandSpec) -> bool {
-        self == Self::All || Self::for_command(spec) == self
-    }
-
-    fn detail(self, registry_group: &'static str) -> &'static str {
-        match self {
-            Self::All => "Registered application command",
-            Self::Navigate => "Open or switch an engineering workspace",
-            Self::Commands => match registry_group {
-                "File" => "File and project command",
-                "Edit" => "Editing command",
-                "View" => "Active-view command",
-                "Window" => "Workbench window command",
-                _ => "Registered application command",
-            },
-            Self::Design => "Schematic design and editing command",
-            Self::Simulation => "Simulation setup or execution command",
-            Self::Results => "Results inspection or dataset command",
-            Self::Verification => "Verification and design-check command",
-            Self::Models => "Model, library, or PDK command",
-            Self::Automation => "Automation and scripting command",
-            Self::Signals => "Signal in the active result dataset",
-            Self::Help => "Product help and information command",
+            // Edit, the source editor's Code group and anything else that
+            // acts on what is open.
+            _ => Self::Edit,
         }
     }
 }
@@ -354,11 +335,26 @@ pub struct PaletteCommand {
     /// The glyph the shell gives the command, where it has one of its own
     /// rather than its scope's.
     icon: Option<Icon>,
+    /// Where the menu bar has the command; `None` for one no menu lists.
+    place: Option<MenuPlace>,
 }
 
 impl PaletteCommand {
     pub const fn key(self) -> CommandKey {
         self.spec.key
+    }
+
+    /// The tab the command is found under: its menu's, or for a command no
+    /// menu lists, the one its group's commands are in.
+    pub fn scope(self) -> PaletteScope {
+        self.place
+            .and_then(|place| PaletteScope::from_label(place.menu))
+            .unwrap_or_else(|| PaletteScope::for_group(self.spec.group))
+    }
+
+    /// Whether the command opens a workspace or one of its pages.
+    fn navigates(self) -> bool {
+        matches!(self.spec.group, "Navigate" | "Project")
     }
 }
 
@@ -382,11 +378,12 @@ pub enum PaletteEntry {
 }
 
 impl PaletteEntry {
-    fn scope(&self) -> PaletteScope {
+    /// The tab the entry is found under.
+    pub fn scope(&self) -> PaletteScope {
         match self {
-            Self::Command(command) => PaletteScope::for_command(command.spec),
+            Self::Command(command) => command.scope(),
             Self::CellView(_) => PaletteScope::Design,
-            Self::Model(_) => PaletteScope::Models,
+            Self::Model(_) => PaletteScope::Tools,
             Self::Signal(_) => PaletteScope::Signals,
         }
     }
@@ -403,11 +400,16 @@ impl PaletteEntry {
         }
     }
 
-    fn detail(&self) -> String {
+    /// The second line of the entry's row: for a command, where the menu bar
+    /// has it.
+    pub fn detail(&self) -> String {
         match self {
-            Self::Command(command) => PaletteScope::for_command(command.spec)
-                .detail(command.spec.group)
-                .to_owned(),
+            // Where the menu bar has it, or nothing: the name says what it
+            // does.
+            Self::Command(command) => command
+                .place
+                .map(|place| place.to_string())
+                .unwrap_or_default(),
             Self::CellView(entry) => {
                 let path = entry.reference.display_path();
                 if entry.description.trim().is_empty() {
@@ -438,13 +440,13 @@ impl PaletteEntry {
         match self {
             Self::Command(command) => {
                 let spec = command.spec;
-                let scope = PaletteScope::for_command(spec);
+                let place = command.place.map(|place| place.to_string());
                 format!(
                     "{} {} {} {}",
                     spec.key.as_str(),
                     spec.group,
-                    scope.label(),
-                    scope.detail(spec.group)
+                    command.scope().label(),
+                    place.unwrap_or_default()
                 )
             }
             Self::CellView(entry) => format!(
@@ -631,6 +633,7 @@ pub fn palette_commands(host: &impl Host) -> impl Iterator<Item = PaletteCommand
         .map(|spec| PaletteCommand {
             spec,
             icon: host.palette_icon(spec.key),
+            place: host.menu_place(spec.key),
         })
 }
 
@@ -800,18 +803,16 @@ pub fn palette_rows(
 
         let recents = &app.workbench().command_palette.recent;
         let workspace_scope = match app.workbench().workspace {
-            crate::workbench::state::Workspace::Project => PaletteScope::Navigate,
+            crate::workbench::state::Workspace::Project => PaletteScope::File,
             crate::workbench::state::Workspace::Design => PaletteScope::Design,
-            crate::workbench::state::Workspace::Simulate => PaletteScope::Simulation,
-            // The library has no command group of its own — its verbs
-            // live where the definitions are consumed. A scope row that
-            // filtered to nothing would be a promise with no rows behind
-            // it, so the workspace shares the studio's.
-            crate::workbench::state::Workspace::Stimulus => PaletteScope::Simulation,
+            // The library has no menu of its own: Simulate ▸ Setup opens
+            // it, and its definitions are consumed by the plan.
+            crate::workbench::state::Workspace::Simulate
+            | crate::workbench::state::Workspace::Stimulus => PaletteScope::Simulate,
             crate::workbench::state::Workspace::Results => PaletteScope::Results,
-            crate::workbench::state::Workspace::Verify => PaletteScope::Verification,
-            crate::workbench::state::Workspace::Models => PaletteScope::Models,
-            crate::workbench::state::Workspace::Netlist => PaletteScope::Automation,
+            crate::workbench::state::Workspace::Verify => PaletteScope::Verify,
+            crate::workbench::state::Workspace::Models
+            | crate::workbench::state::Workspace::Netlist => PaletteScope::Tools,
         };
         let mut suggestions = entries
             .into_iter()
@@ -820,30 +821,28 @@ pub fn palette_rows(
                 let recent_index = entry
                     .command()
                     .and_then(|command| recents.iter().position(|candidate| *candidate == command));
-                let entry_scope = entry.scope();
+                let in_context = entry.scope() == workspace_scope;
+                let navigates =
+                    matches!(&entry, PaletteEntry::Command(command) if command.navigates());
                 let has_shortcut = !entry
                     .shortcut_label(app, platform, operating_system)
                     .is_empty();
-                (recent_index.is_some()
-                    || entry_scope == workspace_scope
-                    || entry_scope == PaletteScope::Navigate
-                    || has_shortcut)
-                    .then_some((
-                        registry_index,
-                        recent_index,
-                        entry_scope,
-                        has_shortcut,
-                        entry,
-                    ))
+                (recent_index.is_some() || in_context || navigates || has_shortcut).then_some((
+                    registry_index,
+                    recent_index,
+                    (in_context, navigates),
+                    has_shortcut,
+                    entry,
+                ))
             })
             .collect::<Vec<_>>();
         suggestions.sort_by_key(
-            |(registry_index, recent_index, entry_scope, has_shortcut, _)| {
-                let context_rank = if *entry_scope == workspace_scope {
+            |(registry_index, recent_index, (in_context, navigates), has_shortcut, _)| {
+                let context_rank = if *in_context {
                     0
                 } else if *has_shortcut {
                     1
-                } else if *entry_scope == PaletteScope::Navigate {
+                } else if *navigates {
                     2
                 } else {
                     3
@@ -1536,14 +1535,21 @@ fn render_result_row(
         c.text
     };
     let name_galley = matched_name_galley(ui, &name, &row.marks, base_color, c.accent);
-    painter.galley(body_rect.min, name_galley, base_color);
-    painter.text(
-        pos2(body_rect.left(), body_rect.top() + 15.0),
-        egui::Align2::LEFT_TOP,
-        detail,
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        c.text_faint,
-    );
+    if detail.is_empty() {
+        // A command no menu lists has no second line: its name stands
+        // alone, centred on the row as the icon is.
+        let top = rect.center().y - name_galley.size().y * 0.5;
+        painter.galley(pos2(body_rect.left(), top), name_galley, base_color);
+    } else {
+        painter.galley(body_rect.min, name_galley, base_color);
+        painter.text(
+            pos2(body_rect.left(), body_rect.top() + 15.0),
+            egui::Align2::LEFT_TOP,
+            detail,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            c.text_faint,
+        );
+    }
 
     theme::paint_focus_ring(ui, &response, rect);
     if row.blocked.is_none() {
@@ -1597,19 +1603,21 @@ pub fn row_icon(entry: &PaletteEntry) -> Icon {
             PaletteEntry::Command(_) => unreachable!("command handled above"),
         };
     };
-    command
-        .icon
-        .unwrap_or_else(|| match PaletteScope::for_command(command.spec) {
-            PaletteScope::Navigate => Icon::Folder,
-            PaletteScope::Design => Icon::Schematic,
-            PaletteScope::Simulation => Icon::Simulate,
-            PaletteScope::Results => Icon::Results,
-            PaletteScope::Verification => Icon::Check,
-            PaletteScope::Models => Icon::Library,
-            PaletteScope::Signals => Icon::Probe,
-            PaletteScope::Help => Icon::Brand,
-            PaletteScope::All | PaletteScope::Commands | PaletteScope::Automation => Icon::File,
-        })
+    command.icon.unwrap_or_else(|| match command.scope() {
+        _ if command.navigates() => Icon::Folder,
+        PaletteScope::Design => Icon::Schematic,
+        PaletteScope::Simulate => Icon::Simulate,
+        PaletteScope::Results => Icon::Results,
+        PaletteScope::Verify => Icon::Check,
+        PaletteScope::Tools => Icon::Library,
+        PaletteScope::Signals => Icon::Probe,
+        PaletteScope::Help => Icon::Brand,
+        PaletteScope::All
+        | PaletteScope::File
+        | PaletteScope::Edit
+        | PaletteScope::View
+        | PaletteScope::Window => Icon::File,
+    })
 }
 
 fn render_footer(

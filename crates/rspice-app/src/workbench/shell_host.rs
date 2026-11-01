@@ -607,6 +607,19 @@ impl Host for RSpiceApp {
         )
     }
 
+    fn menu_place(&self, key: CommandKey) -> Option<crate::workbench::framework::host::MenuPlace> {
+        application_menus::ALL_MENUS.into_iter().find_map(|menu| {
+            crate::workbench::chrome::title_bar::menu_entries::submenu_of(
+                application_menu_entries(menu),
+                key,
+            )
+            .map(|submenu| crate::workbench::framework::host::MenuPlace {
+                menu: menu.label(),
+                submenu,
+            })
+        })
+    }
+
     fn open_workspace(&self, workspace: Workspace) -> CommandKey {
         Command::OpenWorkspace(workspace).key()
     }

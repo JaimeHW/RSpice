@@ -23,6 +23,7 @@
 //! are the host's tables, handed over the same way.
 
 use std::borrow::Cow;
+use std::fmt;
 
 use egui::Ui;
 use egui::os::OperatingSystem;
@@ -32,6 +33,25 @@ use super::command_registry::{CommandAvailability, Registry};
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{NotificationAction, Problem};
+
+/// Where a command's row is on the menu bar, by the names a reader sees: the
+/// menu, then the submenu the row sits in, if any.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct MenuPlace {
+    pub menu: &'static str,
+    pub submenu: Option<&'static str>,
+}
+
+/// The path a reader follows to the row: "Design › Place".
+impl fmt::Display for MenuPlace {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.menu)?;
+        if let Some(submenu) = self.submenu {
+            write!(f, " \u{203a} {submenu}")?;
+        }
+        Ok(())
+    }
+}
 
 /// A place in the workbench a container leaves to an owner.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -315,6 +335,11 @@ pub trait Host: 'static {
     /// The glyph the palette gives the command `key` names, where it has
     /// one of its own rather than its scope's.
     fn palette_icon(&self, key: CommandKey) -> Option<Icon>;
+
+    /// Where the menu bar has the command `key` names: the menu its first
+    /// row is in and the submenu that row sits in, if any. `None` for a
+    /// command no menu lists.
+    fn menu_place(&self, key: CommandKey) -> Option<MenuPlace>;
 
     /// The command that opens `workspace`.
     fn open_workspace(&self, workspace: Self::WorkspaceKey) -> CommandKey;
