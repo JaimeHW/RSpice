@@ -20,7 +20,10 @@ use crate::state::{
 use crate::ui::{
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Dialog, DialogChoice, DialogSize, Problem, paint_problem_mark},
+    widgets::{
+        DIALOG_BODY_INSET, Dialog, DialogChoice, DialogSize, Problem, SegmentedWidth,
+        paint_problem_mark, segmented,
+    },
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
@@ -33,7 +36,9 @@ use crate::workbench::state::JobsPlanScope;
 const TITLE: &str = "Run history";
 const DESCRIPTION: &str =
     "Review running and saved runs, how each run was prepared, and export run manifests.";
-const TABLE_MIN_WIDTH: f32 = 800.0;
+/// The queue's narrowest legible width: under it the table scrolls sideways.
+/// The manager's left pane is wider at its own width, so it never does there.
+const TABLE_MIN_WIDTH: f32 = 720.0;
 const QUEUE_COLUMN_FRACTIONS: [f32; 6] = [0.08, 0.24, 0.18, 0.18, 0.14, 0.18];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -370,7 +375,9 @@ impl SimulateFeature {
             let output = ScrollArea::vertical()
                 .id_salt("workbench.jobs-manager.body")
                 .vertical_scroll_offset(body_scroll_offset)
-                .auto_shrink([false, false])
+                // The history is as tall as its runs, up to the surface's
+                // height: an empty one is not a tall empty shell.
+                .auto_shrink([false, true])
                 .show(ui, |ui| {
                     render_content(
                         ui,
@@ -470,21 +477,22 @@ fn render_plan_scope(
     let t = Tokens::get(ui.ctx());
     Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 6))
+        .inner_margin(Margin::symmetric(DIALOG_BODY_INSET as i8, 6))
         .show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.label(
-                    RichText::new("History scope")
-                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-                        .color(t.color.text_dim),
-                );
-                for scope in JobsPlanScope::ALL {
-                    if ui
-                        .selectable_label(current == scope, scope.label())
-                        .clicked()
-                    {
-                        *requested = scope;
-                    }
+            ui.horizontal(|ui| {
+                let labels = JobsPlanScope::ALL.map(JobsPlanScope::label);
+                let mut index = JobsPlanScope::ALL
+                    .iter()
+                    .position(|scope| *scope == current)
+                    .unwrap_or_default();
+                if segmented(
+                    ui,
+                    "workbench.jobs-manager.scope",
+                    &labels,
+                    &mut index,
+                    SegmentedWidth::Natural,
+                ) {
+                    *requested = JobsPlanScope::ALL[index];
                 }
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     ui.label(
@@ -669,11 +677,14 @@ fn render_queue_and_graph(
     let selected = snapshot.selected();
     section_head(
         ui,
-        "Frozen execution graph",
+        "Analyses",
         selected
-            .map(|row| format!("{} analysis nodes", row.tasks.len()))
+            .map(|row| match row.tasks.len() {
+                1 => "1 analysis".to_owned(),
+                count => format!("{count} analyses"),
+            })
             .as_deref()
-            .unwrap_or("no selected run"),
+            .unwrap_or(""),
     );
     ScrollArea::horizontal()
         .id_salt("workbench.jobs-manager.graph-table")
@@ -693,11 +704,8 @@ fn render_queue_and_graph(
                         task_table_row(ui, width, task);
                     }
                 }
-                _ => empty_row(
-                    ui,
-                    width,
-                    "No frozen task graph is available for the selected run.",
-                ),
+                Some(_) => empty_row(ui, width, "This run recorded no analyses."),
+                None => empty_row(ui, width, "Select a run to see its analyses."),
             }
         });
 }
@@ -836,7 +844,8 @@ fn section_head(ui: &mut Ui, title: &str, status: &str) {
         .layout_no_wrap(status.to_owned(), status_font.clone(), tone)
         .size()
         .x;
-    let (title_rect, status_rect) = trailing_text_regions(rect, 10.0, 10.0, status_desired);
+    let (title_rect, status_rect) =
+        trailing_text_regions(rect, DIALOG_BODY_INSET, DIALOG_BODY_INSET, status_desired);
     let visible_title =
         crate::workbench::design_system::elide_text(ui, title, &title_font, title_rect.width());
     let visible_status =
@@ -1021,7 +1030,7 @@ fn empty_row(ui: &mut Ui, width: f32, message: &str) {
     let (rect, response) = ui.allocate_exact_size(vec2(width, 42.0), Sense::hover());
     response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, message));
     ui.painter().text(
-        pos2(rect.left() + 10.0, rect.center().y),
+        pos2(rect.left() + DIALOG_BODY_INSET, rect.center().y),
         Align2::LEFT_CENTER,
         message,
         theme::mono(tokens::FS_0, FontWeight::Regular),
@@ -1045,7 +1054,9 @@ fn paint_cells(
     for (index, (label, fraction)) in labels.iter().zip(fractions).enumerate() {
         let cell_width = rect.width() * *fraction;
         let cell = Rect::from_min_max(pos2(x, rect.top()), pos2(x + cell_width, rect.bottom()));
-        let mut clipped = cell.shrink2(vec2(8.0, 0.0));
+        // Every cell's text starts on the dialog's inset from its rule, so
+        // the first column stands on the edge the title and headings do.
+        let mut clipped = cell.shrink2(vec2(DIALOG_BODY_INSET, 0.0));
         if let Some(problem) = status_problem.filter(|_| index + 1 == labels.len()) {
             paint_problem_mark(
                 &ui.painter().with_clip_rect(clipped),
