@@ -499,6 +499,7 @@ fn revision_history_body(
                                         format!("Revision {}", row.revision),
                                     )
                                 });
+                                crate::ui::theme::paint_focus_ring(ui, &response, extent);
                                 if response.clicked() {
                                     action = HistoryAction::ToggleSelection(
                                         row.key.clone(),

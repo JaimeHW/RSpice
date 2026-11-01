@@ -1406,6 +1406,7 @@ fn table_cell(ui: &mut Ui, size: Vec2, text: &str, kind: TableCell) -> egui::Res
         if let Some(fill) = fill {
             ui.painter().rect_filled(rect, 2.0, fill);
         }
+        theme::paint_focus_ring(ui, &response, rect);
     } else {
         response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, text));
     }
