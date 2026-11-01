@@ -91,6 +91,10 @@ const NARROW_MAX_WIDTH: f32 = 560.0;
 const NARROW_GUTTER: f32 = 6.0;
 
 const SEARCH_HEIGHT: f32 = 48.0;
+/// The search text's inset from its field's edge: the kit text field's own
+/// (`form::mono_input`, the command form's fields), so the focus ring stands
+/// clear of the placeholder and the caret.
+const SEARCH_FIELD_MARGIN: Margin = Margin::symmetric(8, 4);
 const SCOPE_HEIGHT: f32 = 37.0;
 /// Around a coarse-pointer chip, which is the theme's touch target: 7 px of
 /// block padding on both sides and the 1 px rule.
@@ -1167,8 +1171,9 @@ fn render_search_row(surface: &mut Ui, rect: Rect, query: &mut String) -> egui::
             .id(search_id())
             .font(theme::sans(tokens::FS_2, FontWeight::Regular))
             .hint_text("Search commands, cells, signals, models…")
-            .frame(egui::Frame::NONE)
-            .margin(Margin::same(0))
+            // The frame holds the inset: a field given a frame of its own
+            // ignores `margin`.
+            .frame(egui::Frame::NONE.inner_margin(SEARCH_FIELD_MARGIN))
             .vertical_align(Align::Center),
     );
     response.widget_info(|| WidgetInfo::labeled(WidgetType::ComboBox, true, "Command search"));

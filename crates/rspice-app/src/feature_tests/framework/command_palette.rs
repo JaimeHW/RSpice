@@ -1078,6 +1078,49 @@ fn accesskit_exposes_modal_combobox_scopes_listbox_and_options() {
     );
 }
 
+/// The search text stands inside its field by the kit text field's 8 px, so
+/// the focus ring drawn around the field clears the placeholder and the
+/// caret instead of touching the one and sitting on the other.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_search_text_stands_clear_of_the_fields_focus_ring() {
+    fn text_left(shape: &egui::Shape, prefix: &str) -> Option<f32> {
+        match shape {
+            egui::Shape::Text(text) if text.galley.text().starts_with(prefix) => {
+                Some(text.pos.x + text.galley.rect.left())
+            }
+            egui::Shape::Vec(shapes) => shapes.iter().find_map(|shape| text_left(shape, prefix)),
+            _ => None,
+        }
+    }
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = test_app();
+    app.state.workbench.command_palette.open();
+    let mut shapes = Vec::new();
+    for _ in 0..2 {
+        shapes = ctx
+            .run_ui(raw_input(Vec::new()), |ctx| {
+                render_command_palette(&mut app, ctx)
+            })
+            .shapes;
+    }
+    assert!(
+        ctx.memory(|memory| memory.has_focus(search_id())),
+        "the palette opens with its search field focused, ring and all"
+    );
+    let field = ctx.read_response(search_id()).expect("search field").rect;
+    let placeholder_left = shapes
+        .iter()
+        .find_map(|clipped| text_left(&clipped.shape, "Search commands"))
+        .expect("the empty field paints its placeholder");
+    assert!(
+        placeholder_left - field.left() >= 8.0,
+        "the placeholder starts {} px inside the field the ring frames",
+        placeholder_left - field.left()
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn keyboard_navigation_wraps_and_enter_runs_only_available_commands() {
