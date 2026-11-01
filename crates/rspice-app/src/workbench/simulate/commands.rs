@@ -94,7 +94,7 @@ const STOP: &[ShortcutBinding] = &[
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
-    pub(crate) const ALL: [Self; 21] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::Run,
         Self::Stop,
         Self::JobsManager,
@@ -113,14 +113,16 @@ impl SimulateCommand {
         Self::Page(SimulationPage::Save),
         Self::Verify(VerificationPage::Yield),
         Self::Verify(VerificationPage::Corners),
+        Self::Verify(VerificationPage::Tuning),
         Self::Verify(VerificationPage::Optimization),
         Self::Verify(VerificationPage::DeviceSafety),
         Self::Verify(VerificationPage::Regression),
     ];
 
-    /// The commands that run but are not listed: the tuning sandbox opens
-    /// from the instance it tunes, never from a menu or the palette.
-    pub(crate) const UNLISTED: [Self; 1] = [Self::Verify(VerificationPage::Tuning)];
+    /// The commands that run but are not listed: none. Parameter tuning,
+    /// which once opened only from the instance it tunes, is listed in
+    /// Verify and the palette like the other pages.
+    pub(crate) const UNLISTED: [Self; 0] = [];
 
     /// The key a shortcut profile names this command by.
     pub(crate) const fn key(self) -> CommandKey {
@@ -276,11 +278,11 @@ const fn simulation_page_label(page: SimulationPage) -> &'static str {
 /// What the command that opens the Verify workspace on `page` is called.
 const fn verification_page_label(page: VerificationPage) -> &'static str {
     match page {
-        VerificationPage::Yield => "Verification cockpit",
-        VerificationPage::Corners => "Corner matrix",
-        VerificationPage::Tuning => "Parameter tuning sandbox",
+        VerificationPage::Yield => "Monte Carlo yield",
+        VerificationPage::Corners => "Process corners",
+        VerificationPage::Tuning => "Parameter tuning",
         VerificationPage::Optimization => "Optimization",
         VerificationPage::DeviceSafety => "Safe operating area",
-        VerificationPage::Regression => "Regression plan",
+        VerificationPage::Regression => "Regression",
     }
 }

@@ -1147,6 +1147,24 @@ fn results_menu_exposes_only_truthful_completed_result_workflows() {
     );
 }
 
+/// Every Verify row is a command the palette finds too: Parameter tuning
+/// was unlisted, reachable only from the instance it tunes.
+#[test]
+fn every_verify_row_is_in_the_palette() {
+    let registry = command_registry();
+    let rows = listed_commands(application_menu_entries(ApplicationMenu::Verify));
+    assert!(rows.contains(&SimulateCommand::Verify(VerificationPage::Tuning).key()));
+    for key in rows {
+        assert!(
+            registry
+                .spec(key)
+                .is_some_and(|spec| spec.flags.contains(CommandFlags::PALETTE_VISIBLE)),
+            "{key:?} is not in the palette"
+        );
+        assert!(registry.order().contains(&key), "{key:?} is not ordered");
+    }
+}
+
 /// A row offered only while it can run is left out, not greyed, while it
 /// cannot; a submenu whose rows are all left out is left out with them.
 #[test]
@@ -2701,11 +2719,13 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::Verify,
         &[
-            "Verification cockpit | yield |  | on",
-            "Corner matrix | corners |  | on",
+            "Monte Carlo yield | yield |  | on",
+            "Process corners | corners |  | on",
+            "Parameter tuning | tuning |  | on",
             "Optimization | optimization |  | on",
             "Safe operating area | device-safety |  | on",
-            "Regression plan | regression |  | on",
+            "Specification matrix… | specifications |  | on",
+            "Regression | regression |  | on",
         ],
     ),
     (

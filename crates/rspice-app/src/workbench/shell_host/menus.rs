@@ -578,27 +578,16 @@ const VIEW_AS_MENU: &[MenuEntry] = &[
     MenuEntry::offered(viewer(ResultViewer::Manifest), "Dataset manifest"),
 ];
 
+/// Verify: the analyses run over a design to sign it off, each opening its
+/// Verify page, with the specification matrix they check against.
 const VERIFY_MENU: &[MenuEntry] = &[
-    MenuEntry::command_as(
-        SimulateCommand::Verify(VerificationPage::Yield).key(),
-        "Verification cockpit",
-    ),
-    MenuEntry::command_as(
-        SimulateCommand::Verify(VerificationPage::Corners).key(),
-        "Corner matrix",
-    ),
-    MenuEntry::command_as(
-        SimulateCommand::Verify(VerificationPage::Optimization).key(),
-        "Optimization",
-    ),
-    MenuEntry::command_as(
-        SimulateCommand::Verify(VerificationPage::DeviceSafety).key(),
-        "Safe operating area",
-    ),
-    MenuEntry::command_as(
-        SimulateCommand::Verify(VerificationPage::Regression).key(),
-        "Regression plan",
-    ),
+    simulate(SimulateCommand::Verify(VerificationPage::Yield)),
+    simulate(SimulateCommand::Verify(VerificationPage::Corners)),
+    simulate(SimulateCommand::Verify(VerificationPage::Tuning)),
+    simulate(SimulateCommand::Verify(VerificationPage::Optimization)),
+    simulate(SimulateCommand::Verify(VerificationPage::DeviceSafety)),
+    results(ResultsCommand::EditSpecifications),
+    simulate(SimulateCommand::Verify(VerificationPage::Regression)),
 ];
 
 const MODELS_MENU: &[MenuEntry] = &[

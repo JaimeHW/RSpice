@@ -284,8 +284,8 @@ impl ResultsCommand {
                 NONE,
             ),
             Self::EditSpecifications => (
-                "Edit specification matrix",
-                "Results",
+                "Specification matrix…",
+                "Verify",
                 PROJECT,
                 ShortcutContext::VerificationWorkspace,
                 NONE,

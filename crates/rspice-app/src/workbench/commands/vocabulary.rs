@@ -1161,6 +1161,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Manifest).key(),
     ResultsCommand::EditSpecifications.key(),
     SimulateCommand::Verify(VerificationPage::Corners).key(),
+    SimulateCommand::Verify(VerificationPage::Tuning).key(),
     SimulateCommand::Verify(VerificationPage::Optimization).key(),
     SimulateCommand::Verify(VerificationPage::DeviceSafety).key(),
     SimulateCommand::Verify(VerificationPage::Regression).key(),
