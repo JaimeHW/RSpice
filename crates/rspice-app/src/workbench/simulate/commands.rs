@@ -45,7 +45,6 @@ pub(crate) enum SimulateCommand {
     Verify(VerificationPage),
 }
 
-const ALL: &[CommandPlatform] = &CommandPlatform::ALL;
 const DESKTOP: &[CommandPlatform] = &[CommandPlatform::Desktop];
 const HOST: &[CommandPlatform] = &[
     CommandPlatform::Browser,
