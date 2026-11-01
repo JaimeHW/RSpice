@@ -2685,6 +2685,12 @@ impl Engine {
         circuit.update_jfet_static_linearizations(solution);
 
         let num_nodes = circuit.num_nodes();
+        // A promoted VBIC's milliohm branch joins nearly equal voltages while
+        // carrying picoamperes: its absolute companion J*x-I rounds that
+        // current to J*|x|*eps, which OneStep's history would then inject into
+        // every later step. Take its rows physically, as the Newton correction
+        // does, and the rest of the residual in double-double.
+        let vbic_correction = Self::requires_vbic_correction_form(circuit);
         matrix.with_probe_values(|probe, probe_rhs| {
             Self::stamp_nodal_gmin(circuit, probe, baseline_diag_gmin.max(0.0));
             circuit.stamp_transient_linear_direct(probe, probe_rhs);
@@ -2702,7 +2708,7 @@ impl Engine {
             circuit.stamp_xyce_core_static_residual(probe, solution);
             if circuit.has_nonlinear_devices() {
                 circuit
-                    .try_stamp_static_dae_nonlinear(probe, probe_rhs, solution)
+                    .try_stamp_static_dae_nonlinear(probe, probe_rhs, solution, vbic_correction)
                     .map_err(SimulationError::from)?;
                 circuit
                     .stamp_behavioral_static_dae_probe(
@@ -2726,9 +2732,22 @@ impl Engine {
                 // event-driven models at the breakpoint.
                 circuit.stamp_xspice_static_residual(solution, probe_rhs);
             }
-            let mut residual = probe
-                .residual_vector(solution, probe_rhs)
-                .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+            let mut residual = if vbic_correction {
+                let mut correction = Vec::with_capacity(probe_rhs.len());
+                probe
+                    .correction_rhs_into(probe_rhs, solution, &mut correction)
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?;
+                circuit.stamp_promoted_vbic_correction(probe, &mut correction, solution);
+                // The correction is -(A*x-b); the history is A*x-b.
+                for value in &mut correction {
+                    *value = -*value;
+                }
+                correction
+            } else {
+                probe
+                    .residual_vector(solution, probe_rhs)
+                    .map_err(|error| SimulationError::Circuit(error.to_string()))?
+            };
             circuit.overwrite_xyce_core_static_residual(&mut residual, solution);
             Ok(residual)
         })

@@ -488,3 +488,38 @@ fn a_xyce_run_finishes_inside_its_finish_window_short_of_a_singular_stop() {
         );
     }
 }
+
+/// vbicNand's subcircuit supply nodes float: picoampere junction and GMIN
+/// currents set their level, so the circuit's conductance there is ~1e-12 S,
+/// while each VBIC 1.3's RBP=1e-9 sits on the 1 mOhm floor (1e3 S). The
+/// OneStep order-2 history 0.5*(F_prev-B_prev) took that branch through its
+/// absolute companion J*x-I, whose rounding (~1e3*0.8 V*eps = 1e-13 A) it then
+/// injected into every step. With no charge to damp it, the static first 2 us
+/// rang with growing amplitude until LTE recovery was exhausted at 0.8 us
+/// (dt 1.8e-21). Xyce 7.10 sums F from device loads; it holds V(OUT2) at
+/// 0.8175760 within 1e-8 there, on a 0.2 us grid.
+#[test]
+fn a_xyce_vbic_history_carries_no_companion_rounding_into_a_floating_supply() {
+    let result =
+        run_xyce_regression_deck("Certification_Tests/BUG_1007_SON/vbicNand0.cir", 10.0e-6)
+            .expect("the VBIC NAND transient holds its static interval");
+    let out2 = node_series(&result, "out2");
+    let plateau: Vec<(f64, f64)> = result
+        .time
+        .iter()
+        .copied()
+        .zip(out2.iter().copied())
+        .filter(|(time, _)| (0.5e-6..1.9e-6).contains(time))
+        .collect();
+    assert!(
+        plateau.len() >= 5,
+        "the static interval has {} points",
+        plateau.len()
+    );
+    for (time, voltage) in plateau {
+        assert!(
+            (voltage - 0.817_576_0).abs() < 1.0e-7,
+            "V(OUT2) at {time:e} s is {voltage}, Xyce 0.8175760"
+        );
+    }
+}

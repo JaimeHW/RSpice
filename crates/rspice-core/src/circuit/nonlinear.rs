@@ -1561,19 +1561,21 @@ impl CircuitData {
 
     /// Static DAE history omits runtime Verilog-A derivatives while retaining
     /// each device's settled operator state. Ordinary residual probes keep
-    /// their complete transient companions.
+    /// their complete transient companions. `defer_vbic` leaves promoted
+    /// VBIC rows for a direct residual pass, as the Newton correction does.
     pub(crate) fn try_stamp_static_dae_nonlinear(
         &mut self,
         matrix: &mut StaticMatrix,
         rhs: &mut [Value],
         voltages: &[Value],
+        defer_vbic: bool,
     ) -> Result<(), StampError> {
         self.try_stamp_nonlinear_with_mode(
             matrix,
             rhs,
             voltages,
             NonlinearStampMode::StaticDaeProbe,
-            false,
+            defer_vbic,
         )
     }
 
