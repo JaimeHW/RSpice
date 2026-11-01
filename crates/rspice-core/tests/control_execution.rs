@@ -846,4 +846,9 @@ fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
     assert!(circuit.settings().suppress_initial_listing);
     assert_eq!(circuit.settings().maximum_parallel_workers, Some(2));
     assert!(set(&mut circuit, "colorx=red").is_err());
+    // ngspice's noacct also suppresses the initial transient listing.
+    let netlist = Netlist::parse("set deck\nV1 in 0 1\nR1 in 0 1k\n.end\n").unwrap();
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    set(&mut circuit, "noacct").unwrap();
+    assert!(circuit.settings().suppress_initial_listing);
 }

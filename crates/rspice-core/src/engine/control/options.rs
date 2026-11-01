@@ -110,9 +110,13 @@ impl ControlCircuit {
         let mut settings = self.settings.clone();
         for assignment in &assignments {
             let name = assignment.name.to_ascii_lowercase();
-            if name == "noinit" {
-                // ngspice frontend/options.c sets ft_noinitprint. It does not
-                // change the circuit, charge state, or .TRAN UIC flag.
+            if name == "noinit" || name == "noacct" {
+                // ngspice frontend/options.c sets ft_noinitprint (noinit) or
+                // ft_noacctprint (noacct). Both suppress the initial transient
+                // listing (spicelib/analysis/dctran.c:251); noacct also drops
+                // the batch accounting summary (frontend/dotcards.c:401), which
+                // this host never prints. Neither changes the circuit, charge
+                // state, or .TRAN UIC flag.
                 settings.suppress_initial_listing = true;
             } else if name == "num_threads" {
                 let SetValue::Word(value) = &assignment.value else {
