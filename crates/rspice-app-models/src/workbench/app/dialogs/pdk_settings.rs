@@ -18,8 +18,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H,
-    PANE_RAIL_W, PaneSide, chip, pane_footer, pane_header, two_pane,
+    Button, Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_RAIL_W, PaneSide,
+    chip, pane_footer, pane_header, pane_header_height, two_pane,
 };
 use crate::workbench::app_state::session::pdk_settings::{
     PdkSettingsDialogResult, PdkSettingsDialogState,
@@ -210,7 +210,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     };
     let env_list_h = (env.len() as f32 * ENV_ROW_H + trailing_h).min(96.0);
     // Two pane headers (sources, environment) and the rule between the lists.
-    let sources_h = PANE_HEIGHT - 2.0 * PANE_HEADER_H - 1.0 - env_list_h;
+    let sources_h = PANE_HEIGHT - 2.0 * pane_header_height(ui.ctx()) - 1.0 - env_list_h;
 
     let mut action: Option<SourceAction> = None;
     egui::ScrollArea::vertical()
@@ -872,7 +872,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         .collect();
 
     // An empty list has no columns to head.
-    let mut scroll_h = PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H;
+    let mut scroll_h = PANE_HEIGHT - pane_header_height(ui.ctx()) - PANE_FOOTER_H;
     if !files.is_empty() {
         table_header(ui);
         scroll_h -= FILE_ROW_H;
@@ -1201,7 +1201,8 @@ mod tests {
         let (_, add) = named("Add environment variable").expect("the add-variable row");
         // The panes start at the sources header's top, which its caption
         // is centred in, and are PANE_HEIGHT tall.
-        let panes_bottom = sources.center().y - PANE_HEADER_H * 0.5 + PANE_HEIGHT;
+        let panes_bottom =
+            sources.center().y - crate::ui::widgets::PANE_HEADER_H * 0.5 + PANE_HEIGHT;
         assert!(
             add.bottom() <= panes_bottom + 0.5,
             "the environment list ends at {} under panes ending at {panes_bottom}",

@@ -18,7 +18,7 @@ use crate::state::SimulationState;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    PANE_FOOTER_H, PANE_HEADER_H, PaneSide, pane_footer, pane_header, two_pane,
+    PANE_FOOTER_H, PaneSide, pane_footer, pane_header, pane_header_height, two_pane,
 };
 use crate::workbench::app_state::session::calculator::{CalculatorPanel, FunctionCategory};
 use crate::workbench::design_system::subsection_header;
@@ -465,7 +465,7 @@ impl CalculatorPanel {
 
         egui::ScrollArea::vertical()
             .id_salt("rspice.calc.signals")
-            .max_height(PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H)
+            .max_height(PANE_HEIGHT - pane_header_height(ui.ctx()) - PANE_FOOTER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;
@@ -548,7 +548,7 @@ impl CalculatorPanel {
 
         egui::ScrollArea::vertical()
             .id_salt("rspice.calc.functions")
-            .max_height(PANE_HEIGHT - PANE_HEADER_H - PANE_FOOTER_H)
+            .max_height(PANE_HEIGHT - pane_header_height(ui.ctx()) - PANE_FOOTER_H)
             .auto_shrink([false, false])
             .show(ui, |ui| {
                 ui.spacing_mut().item_spacing.y = 0.0;

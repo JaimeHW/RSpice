@@ -57,7 +57,8 @@ pub use form::{
 };
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{
-    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header, two_pane,
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
+    pane_header_height, two_pane,
 };
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};

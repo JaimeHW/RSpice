@@ -13,7 +13,8 @@ use egui::{Align, CornerRadius, Layout, Rect, Sense, Stroke, Ui, UiBuilder, pos2
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
 
-/// Height of the `.hd` header strip.
+/// Height of the `.hd` header strip under a pointer; see
+/// [`pane_header_height`].
 pub const PANE_HEADER_H: f32 = 36.0;
 /// Height of the footer strip (the spec reuses `.hd` at the pane foot).
 pub const PANE_FOOTER_H: f32 = 36.0;
@@ -94,13 +95,26 @@ pub fn two_pane(
     );
 }
 
-/// The `.hd` strip at the top of a pane: 36 pt, contents centered
-/// vertically inside 10 pt side padding (right-aligned sub-layouts land
-/// on the padded edge, not the pane border), hairline rule underneath.
+/// How tall a pane's header strip is: [`PANE_HEADER_H`], or under a finger
+/// as tall as the controls it holds and the strip's 4 pt of air over and
+/// under them, so a 44 pt button is not taller than its strip.
+pub fn pane_header_height(ctx: &egui::Context) -> f32 {
+    let metrics = Tokens::get(ctx).metrics;
+    if metrics.is_touch() {
+        PANE_HEADER_H.max(metrics.ctl_h + 8.0)
+    } else {
+        PANE_HEADER_H
+    }
+}
+
+/// The `.hd` strip at the top of a pane: [`pane_header_height`] tall,
+/// contents centered vertically inside 10 pt side padding (right-aligned
+/// sub-layouts land on the padded edge, not the pane border), hairline rule
+/// underneath.
 pub fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
-    let (rect, _) =
-        ui.allocate_exact_size(vec2(ui.available_width(), PANE_HEADER_H), Sense::hover());
+    let height = pane_header_height(ui.ctx());
+    let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let mut header_ui = ui.new_child(
         UiBuilder::new()
             .max_rect(rect.shrink2(vec2(10.0, 0.0)))
@@ -133,4 +147,21 @@ pub fn pane_footer(ui: &mut Ui, text: &str) {
             c.text_faint,
         );
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Under a finger a header's 44 pt buttons stand inside its strip with
+    /// the strip's air over and under them; under a pointer it stays 36 pt.
+    #[test]
+    fn a_pane_header_holds_the_controls_a_finger_gets() {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        assert_eq!(pane_header_height(&ctx), PANE_HEADER_H);
+        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
+        let ctl_h = Tokens::get(&ctx).metrics.ctl_h;
+        assert!(pane_header_height(&ctx) >= ctl_h + 8.0);
+    }
 }
