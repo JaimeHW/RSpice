@@ -55,6 +55,10 @@ pub enum DialogSize {
     /// scroll-free by construction, and the standard body otherwise withholds a
     /// gutter that shows as bare surface down the trailing edge.
     CommandForm,
+    /// A [`Self::CommandForm`] whose option rows set three choices side by
+    /// side in columns shared from row to row: 520 pt wide, which holds three
+    /// two-word options a row beside the label column.
+    CommandFormColumns,
     /// Transactional edits and confirmations: 760 pt wide, content-height,
     /// capped at 760 pt, and a content-height card with the same 12 pt gutter
     /// as [`Self::Confirmation`] at 560 pt and below.
@@ -199,6 +203,10 @@ impl DialogSize {
                 app_background: true,
                 radius: 4.0,
                 top_anchored: false,
+            },
+            Self::CommandFormColumns => DialogSurfaceSpec {
+                width: 520.0,
+                ..Self::CommandForm.spec()
             },
             Self::Transaction => DialogSurfaceSpec {
                 width: 760.0,

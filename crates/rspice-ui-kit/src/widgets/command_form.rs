@@ -120,6 +120,9 @@ pub struct FormRows<'u> {
     label_col: f32,
     stacked: bool,
     started: bool,
+    /// Air the row above held back under its ink, which the gap to the next
+    /// row gives back: see [`Self::check_columns`].
+    owed: f32,
 }
 
 impl<'u> FormRows<'u> {
@@ -137,7 +140,15 @@ impl<'u> FormRows<'u> {
             label_col,
             stacked,
             started: false,
+            owed: 0.0,
         }
+    }
+
+    /// The air over what comes next: `gap`, and whatever the row above held
+    /// back.
+    fn gap(&mut self, gap: f32) {
+        let owed = std::mem::take(&mut self.owed);
+        self.ui.add_space(gap + owed);
     }
 
     /// The x offset a derived line and a stacked control start at.
@@ -163,8 +174,19 @@ impl<'u> FormRows<'u> {
         trim: f32,
         control: impl FnOnce(&mut Ui, f32) -> R,
     ) -> R {
+        self.row_inset(label, trim, 0.0, control)
+    }
+
+    /// [`Self::row_trimmed`], laid out `bottom` shorter at its foot too.
+    fn row_inset<R>(
+        &mut self,
+        label: &str,
+        trim: f32,
+        bottom: f32,
+        control: impl FnOnce(&mut Ui, f32) -> R,
+    ) -> R {
         if self.started {
-            self.ui.add_space(ROW_GAP);
+            self.gap(ROW_GAP);
         }
         self.started = true;
         let t = Tokens::get(self.ui.ctx());
@@ -183,7 +205,7 @@ impl<'u> FormRows<'u> {
                 .inner;
         }
         let label_col = self.label_col;
-        let laid_h = row_h - trim;
+        let laid_h = row_h - trim - bottom;
         self.ui
             .allocate_ui_with_layout(
                 vec2(full_width, laid_h),
@@ -341,6 +363,21 @@ impl<'u> FormRows<'u> {
         })
     }
 
+    /// [`Self::segmented`] across the whole control column in equal
+    /// segments: as wide as the fields above it, with its options standing in
+    /// the columns a [`Self::check_columns`] row of as many checks uses.
+    pub fn segmented_columns(
+        &mut self,
+        label: &str,
+        id_salt: &'static str,
+        options: &[&str],
+        selected: &mut usize,
+    ) -> bool {
+        self.row(label, |ui, _| {
+            segmented(ui, id_salt, options, selected, SegmentedWidth::Equal)
+        })
+    }
+
     /// One dropdown. Returns the picked index when the reader picked one.
     pub fn select(
         &mut self,
@@ -424,7 +461,7 @@ impl<'u> FormRows<'u> {
     pub fn derived(&mut self, text: &str) {
         let t = Tokens::get(self.ui.ctx());
         let indent = self.control_indent();
-        self.ui.add_space(DERIVED_GAP);
+        self.gap(DERIVED_GAP);
         let full_width = self.ui.available_width();
         let width = (full_width - indent).max(1.0);
         let mut job = egui::text::LayoutJob::single_section(
@@ -464,7 +501,7 @@ impl<'u> FormRows<'u> {
     pub fn field_line(&mut self, field: Option<Id>, line: FieldLine<'_>) {
         let t = Tokens::get(self.ui.ctx());
         let indent = self.control_indent();
-        self.ui.add_space(DERIVED_GAP);
+        self.gap(DERIVED_GAP);
         let full_width = self.ui.available_width();
         let width = (full_width - indent).max(1.0);
         let (rect, response) = self
@@ -524,7 +561,7 @@ impl<'u> FormRows<'u> {
         control: impl FnOnce(&mut Ui, f32) -> R,
     ) -> R {
         if self.started {
-            self.ui.add_space(ROW_GAP);
+            self.gap(ROW_GAP);
         }
         self.started = true;
         let full_width = self.ui.available_width();
@@ -586,6 +623,64 @@ impl<'u> FormRows<'u> {
             }
             changed
         })
+    }
+
+    /// A set of on/off choices on one line of the form's grid, each check in
+    /// an equal share of the control column. Rows of as many checks line up
+    /// column by column, and with a [`Self::segmented_columns`] row of as
+    /// many options. Where a share cannot hold its words, the set flows as
+    /// [`Self::checks`] lays it out. Returns `true` when any changed.
+    ///
+    /// The row is as tall as a field's, so every row of the form keeps one
+    /// pitch. Its words, not its line, meet the body's edges: as the first
+    /// row it gives up the air over its ink, as a field's frame starts at the
+    /// row's top, and it holds back the air under its ink, which the gap to
+    /// the next row gives back. The whole line stays each check's target.
+    pub fn check_columns(&mut self, label: &str, items: &mut [(&str, &mut bool)]) -> bool {
+        let share =
+            (self.ui.available_width() - self.label_col - LABEL_GAP) / items.len().max(1) as f32;
+        let last = items.len().saturating_sub(1);
+        let fits = !self.stacked
+            && items.iter().enumerate().all(|(index, (words, _))| {
+                let air = if index == last { 0.0 } else { MARK_COLUMN_GAP };
+                MARK_SIDE + MARK_GAP + mark_galley(self.ui, words).size().x + air <= share
+            });
+        if !fits {
+            return self.checks(label, items);
+        }
+        let row_h = Tokens::get(self.ui.ctx()).metrics.ctl_h;
+        // What the row inks: its marks, and its words' glyphs centred with
+        // them, not the words' whole line.
+        let ink = mark_galley(self.ui, "Ag")
+            .mesh_bounds
+            .height()
+            .max(MARK_SIDE);
+        let edge = ((row_h - ink) * 0.5).floor().max(0.0);
+        let top = if self.started { 0.0 } else { edge };
+        let id = self.ui.id().with(("command-form.check-columns", label));
+        let changed = self.row_inset(label, top, edge, |ui, width| {
+            let (span, _) =
+                ui.allocate_exact_size(vec2(width, row_h - top - edge), egui::Sense::hover());
+            // The held-back air is never another row's, so the line is the
+            // span each mark answers to.
+            let line = Rect::from_min_size(pos2(span.left(), span.top() - top), vec2(width, row_h));
+            let mark_line = MarkLine { line, span: line };
+            let share = width / items.len() as f32;
+            let mut changed = false;
+            for (column, (words, value)) in items.iter_mut().enumerate() {
+                let left = line.left() + column as f32 * share;
+                let item = id.with(column);
+                if mark_control(ui, item, left, mark_line, words, **value, MarkKind::Check)
+                    .clicked()
+                {
+                    **value = !**value;
+                    changed = true;
+                }
+            }
+            changed
+        });
+        self.owed = edge;
+        changed
     }
 
     /// One exclusive choice among a few, each its own radio button, laid out
@@ -768,7 +863,7 @@ impl<'u> FormRows<'u> {
     /// entry per column.
     pub fn table(&mut self, columns: &[TableColumn<'_>], rows: &[Vec<String>]) {
         if self.started {
-            self.ui.add_space(ROW_GAP);
+            self.gap(ROW_GAP);
         }
         self.started = true;
         let t = Tokens::get(self.ui.ctx());
@@ -1251,6 +1346,14 @@ impl<'a> CommandForm<'a> {
         self
     }
 
+    /// The 520-point card, for a form whose option rows set three choices
+    /// side by side in shared columns ([`FormRows::check_columns`],
+    /// [`FormRows::segmented_columns`]), which the 420-point card would wrap.
+    pub fn option_columns(mut self) -> Self {
+        self.size = DialogSize::CommandFormColumns;
+        self
+    }
+
     /// Hold Cancel off while the command is finishing what it started — a
     /// save in flight — so leaving cannot abandon it half-done. Esc still
     /// reports [`DialogChoice::Cancelled`]; the caller ignores it meanwhile.
@@ -1698,6 +1801,34 @@ mod tests {
             (over - under).abs() <= 1.0,
             "checks last: {over} over the first row, {under} under the last"
         );
+        for checks_first in [false, true] {
+            let (over, under) = body_air(|ctx| {
+                let (mut case, mut word, mut name) = (true, false, String::from("R1"));
+                let _ = CommandForm::new("Find", "Find")
+                    .option_columns()
+                    .show(ctx, |rows| {
+                        let mut checks = |rows: &mut FormRows<'_>| {
+                            rows.check_columns(
+                                "Match",
+                                &mut [("Match case", &mut case), ("Whole word", &mut word)],
+                            );
+                        };
+                        if checks_first {
+                            checks(rows);
+                        }
+                        let field =
+                            rows.text("Find", Id::new("command-form.air.find"), &mut name, "");
+                        if !checks_first {
+                            checks(rows);
+                        }
+                        Some(field.id)
+                    });
+            });
+            assert!(
+                (over - under).abs() <= 1.0,
+                "check columns first {checks_first}: {over} over the first row, {under} under the last"
+            );
+        }
     }
 
     /// A read-only fact as the first row has the air over it that a field
@@ -2223,6 +2354,113 @@ mod tests {
                 assert!(
                     (line.center().y - field.center().y).abs() <= 1.0,
                     "{touch:?} {shown:?}: the line {line:?} is not on the middle of {field:?}"
+                );
+            }
+        }
+    }
+
+    /// Rows of checks in shared columns line up with each other and with a
+    /// segmented row of as many options, which spans the field column in
+    /// equal segments; every row keeps a field's pitch, under a cursor and
+    /// under a finger.
+    #[test]
+    fn option_columns_share_one_grid_and_one_pitch() {
+        const LOOK_IN: [&str; 3] = ["Instance names", "Net labels", "Values"];
+        const SCOPE: [&str; 3] = ["Sheet", "Cell view", "Hierarchy below"];
+        const MATCH: [&str; 3] = ["Whole word", "Match case", "Regular expression"];
+        for touch in [None, Some(44.0)] {
+            let ctx = Context::default();
+            crate::Theme::default().apply(&ctx);
+            crate::Theme::default().apply_responsive_metrics_with_target(&ctx, touch);
+            ctx.all_styles_mut(|style| style.animation_time = 0.0);
+            ctx.enable_accesskit();
+            let input = || egui::RawInput {
+                screen_rect: Some(Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1024.0, 768.0),
+                )),
+                ..Default::default()
+            };
+            let mut nodes = Vec::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(input(), |ctx| {
+                    let (mut find, mut scope) = (String::new(), 1usize);
+                    let [mut a, mut b, mut c, mut d, mut e, mut f] =
+                        [true, false, true, false, true, false];
+                    let _ = CommandForm::new("Find and replace", "Replace all")
+                        .option_columns()
+                        .show(ctx, |rows| {
+                            let id = Id::new("command-form.columns.find");
+                            rows.text("Find", id, &mut find, "");
+                            let [x, y, z] = LOOK_IN;
+                            rows.check_columns(
+                                "Look in",
+                                &mut [(x, &mut a), (y, &mut b), (z, &mut c)],
+                            );
+                            rows.segmented_columns(
+                                "Scope",
+                                "command-form.columns",
+                                &SCOPE,
+                                &mut scope,
+                            );
+                            let [x, y, z] = MATCH;
+                            rows.check_columns(
+                                "Match",
+                                &mut [(x, &mut d), (y, &mut e), (z, &mut f)],
+                            );
+                            Some(id)
+                        });
+                });
+                nodes = output
+                    .platform_output
+                    .accesskit_update
+                    .map(|update| update.nodes)
+                    .unwrap_or_default();
+            }
+            let rect = |name: &str| {
+                nodes
+                    .iter()
+                    .find(|(_, node)| node.label() == Some(name))
+                    .and_then(|(_, node)| node.bounds())
+                    .map(|b| {
+                        Rect::from_min_max(
+                            pos2(b.x0 as f32, b.y0 as f32),
+                            pos2(b.x1 as f32, b.y1 as f32),
+                        )
+                    })
+                    .unwrap_or_else(|| panic!("{touch:?}: {name} is not published"))
+            };
+            let field = rect("Find");
+            let segments = SCOPE.map(rect);
+            assert!(
+                (segments[0].left() - field.left()).abs() <= 0.5,
+                "{touch:?}"
+            );
+            assert!(
+                (segments[2].right() - field.right()).abs() <= 0.5,
+                "{touch:?}"
+            );
+            for segment in &segments {
+                assert!(
+                    (segment.width() - field.width() / 3.0).abs() <= 0.5,
+                    "{touch:?}: {segments:?} are not equal thirds of {field:?}"
+                );
+            }
+            for column in 0..3 {
+                let (look, scope, matching) =
+                    (rect(LOOK_IN[column]), segments[column], rect(MATCH[column]));
+                assert!(
+                    (look.left() - scope.left()).abs() <= 0.5
+                        && (matching.left() - scope.left()).abs() <= 0.5,
+                    "{touch:?}: column {column} starts at {look:?}, {scope:?} and {matching:?}"
+                );
+            }
+            let pitch = Tokens::get(&ctx).metrics.ctl_h + ROW_GAP;
+            let rows = [field, rect(LOOK_IN[0]), segments[0], rect(MATCH[0])];
+            for pair in rows.windows(2) {
+                assert!(
+                    (pair[1].center().y - pair[0].center().y - pitch).abs() <= 0.5,
+                    "{touch:?}: {pair:?} are not {pitch} apart"
                 );
             }
         }

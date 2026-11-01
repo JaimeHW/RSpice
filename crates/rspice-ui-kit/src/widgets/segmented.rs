@@ -28,6 +28,11 @@ pub enum SegmentedWidth {
     /// grid item stretches. The options keep their natural widths and the
     /// remaining inset area stays deliberately blank.
     PhoneStretch,
+    /// Fill the available width in equal segments, as a control in a form's
+    /// field column does, so the options stand in that column's thirds or
+    /// quarters. A label wider than its share gives the group its natural
+    /// proportions instead, stretched to the width.
+    Equal,
 }
 
 /// Contiguous option buttons matching the mockup `.segmented` control.
@@ -60,16 +65,21 @@ pub fn segmented(
         .collect::<Vec<_>>();
     let desired_width = natural_widths.iter().sum::<f32>();
     let phone = ui.ctx().content_rect().width() <= PHONE_MAX_WIDTH;
-    let width = if phone && sizing == SegmentedWidth::PhoneStretch {
+    let fill = sizing == SegmentedWidth::Equal;
+    let width = if fill || (phone && sizing == SegmentedWidth::PhoneStretch) {
         ui.available_width()
     } else {
         desired_width.min(ui.available_width())
     };
     let (rect, _) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
-    let scale = if desired_width > 0.0 {
-        (rect.width() / desired_width).min(1.0)
-    } else {
+    let share = rect.width() / options.len().max(1) as f32;
+    let equal = fill && natural_widths.iter().all(|natural| *natural <= share);
+    let scale = if desired_width <= 0.0 {
         1.0
+    } else if fill {
+        rect.width() / desired_width
+    } else {
+        (rect.width() / desired_width).min(1.0)
     };
     let mut changed = false;
     ui.painter().rect(
@@ -81,11 +91,15 @@ pub fn segmented(
     );
     let mut cell_left = rect.left();
     for (index, label) in options.iter().enumerate() {
-        let cell_width = natural_widths[index] * scale;
+        let cell_width = if equal {
+            share
+        } else {
+            natural_widths[index] * scale
+        };
         let cell = Rect::from_min_max(
             egui::pos2(cell_left, rect.top()),
             egui::pos2(
-                if index + 1 == options.len() && rect.width() <= desired_width {
+                if index + 1 == options.len() && (fill || rect.width() <= desired_width) {
                     rect.right()
                 } else {
                     cell_left + cell_width
