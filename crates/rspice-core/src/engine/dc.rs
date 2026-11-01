@@ -578,6 +578,7 @@ impl Engine {
     }
 
     fn populate_dc_observables(
+        netlist: &Netlist,
         circuit: &mut CircuitData,
         solution: &[Value],
         result: &mut SimulationResult,
@@ -840,6 +841,15 @@ impl Engine {
                 if result.try_dc_observable_named(&name).is_none() {
                     result.push_dc_observable(name, value);
                 }
+            }
+        }
+        // A static instance parameter an output card names (`C1:C`, `M1:L`,
+        // `@v1[dcv0]`) is read from the device installed at this point, so a
+        // sweep or step of it reads the value that point solved with.
+        for (device, parameter, value) in circuit.requested_static_instance_parameters(netlist) {
+            let name = format!("{device}:{parameter}");
+            if result.try_dc_observable_named(&name).is_none() {
+                result.push_dc_observable(name, value);
             }
         }
         Ok(())
@@ -1357,7 +1367,7 @@ impl Engine {
         result.branch_names = branch_names;
 
         populate_public_dc_solution(&circuit, &solution, &mut result)?;
-        Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
+        Self::populate_dc_observables(netlist, &mut circuit, &solution, &mut result)?;
         let device_op_report = circuit
             .device_op_report_for_solution(&solution)
             .map_err(SimulationError::Circuit)?;
@@ -1986,7 +1996,7 @@ impl Engine {
                     .collect();
                 result.branch_names = branch_names.clone();
                 populate_public_dc_solution(&circuit, &solution, &mut result)?;
-                Self::populate_dc_observables(&mut circuit, &solution, &mut result)?;
+                Self::populate_dc_observables(netlist, &mut circuit, &solution, &mut result)?;
 
                 let point = DcSweepPointResult {
                     sweep_value,

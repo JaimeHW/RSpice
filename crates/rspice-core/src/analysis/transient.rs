@@ -1499,6 +1499,27 @@ impl TransientResult {
         added_values
     }
 
+    /// Publish each static instance parameter as a constant trace over the
+    /// run, unless the device already reported it at every sample.
+    pub(crate) fn record_static_instance_parameters(
+        &mut self,
+        parameters: &[(String, String, Value)],
+    ) {
+        for (device, parameter, value) in parameters {
+            if self
+                .try_device_op_waveform_named(device, parameter)
+                .is_some()
+            {
+                continue;
+            }
+            self.device_op_traces.push(TransientDeviceOpTrace {
+                device_name: device.clone(),
+                parameter: parameter.clone(),
+                values: vec![*value; self.time.len()],
+            });
+        }
+    }
+
     /// Append committed XSPICE digital values at an accepted transient time.
     pub(crate) fn record_digital_snapshot(
         &mut self,

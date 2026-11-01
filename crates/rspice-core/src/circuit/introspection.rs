@@ -8,6 +8,7 @@
 use super::*;
 
 mod dc_branch_loops;
+mod instance_parameters;
 mod intrinsic_voltages;
 mod power;
 

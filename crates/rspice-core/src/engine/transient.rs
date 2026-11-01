@@ -4747,7 +4747,10 @@ impl Engine {
         if let Some(seed) = window.dc_seed {
             seed.validate_for_circuit(&circuit)?;
         }
-        self.run_tran_prepared(
+        // An instance parameter cannot move during the run, so it is read
+        // once from the circuit as built rather than recorded at every step.
+        let instance_parameters = circuit.requested_static_instance_parameters(netlist);
+        let (mut result, end, checkpoints) = self.run_tran_prepared(
             netlist,
             checkpoint_netlist,
             window,
@@ -4758,7 +4761,9 @@ impl Engine {
                 modified_trapezoidal_coefficients,
                 resume_continuation,
             },
-        )
+        )?;
+        result.record_static_instance_parameters(&instance_parameters);
+        Ok((result, end, checkpoints))
     }
 
     // Keep the large integration frame separate from model compilation even
