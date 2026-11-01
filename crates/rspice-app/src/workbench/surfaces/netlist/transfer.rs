@@ -263,16 +263,12 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
                 .selected_text(match dialog.format {
                     crate::io::NetlistFormat::Spice => "SPICE",
                     crate::io::NetlistFormat::Spectre => "Spectre",
-                    crate::io::NetlistFormat::Hspice => "HSPICE",
-                    crate::io::NetlistFormat::Xyce => "Xyce",
                 })
                 .width(ui.available_width().max(1.0))
                 .show_ui(ui, |ui| {
                     for (format, label) in [
                         (crate::io::NetlistFormat::Spice, "SPICE"),
                         (crate::io::NetlistFormat::Spectre, "Spectre"),
-                        (crate::io::NetlistFormat::Hspice, "HSPICE"),
-                        (crate::io::NetlistFormat::Xyce, "Xyce"),
                     ] {
                         ui.selectable_value(&mut dialog.format, format, label);
                     }

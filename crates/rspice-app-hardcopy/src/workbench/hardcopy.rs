@@ -1,11 +1,11 @@
-//! The hardcopy feature: the schematic and publication exports, Print and
-//! Export active view, and the report editor.
+//! The hardcopy feature: Print and Export active view, and the report
+//! editor.
 //!
 //! Its commands are answered and carried out in a [`Cx`] over the feature's
 //! own slot, the model, the session and the platform services' state, and
-//! read what the results workspace shows through its port. The schematic and
-//! publication exports write through the export IO the context lends, and
-//! Print and Export active view open their workflow in the same context.
+//! read what the results workspace shows through its port. Print and Export
+//! active view open their workflow in the same context, which writes through
+//! the export IO the context lends.
 //!
 //! The hardcopy dialog is the feature's dialog step, drawn in the same
 //! context. The shell opens its workflow, in the same context, for the
@@ -17,7 +17,6 @@
 //! the shell lays out and dispatches like any other.
 
 pub mod commands;
-pub mod exports;
 pub mod report;
 pub mod report_authoring;
 
@@ -124,9 +123,7 @@ impl CommandSet for HardcopyCommand {
     fn availability(self, reads: &Reads<'_, HardcopyFeature>) -> CommandAvailability {
         let editor = &reads.state.report_authoring;
         let available = match self {
-            Self::ExportSchematicSvg | Self::ExportPublicationSnapshot | Self::ReportAuthoring => {
-                true
-            }
+            Self::ReportAuthoring => true,
             Self::PrintHardcopy => {
                 cfg!(any(target_os = "windows", target_arch = "wasm32"))
                     && active_app_hardcopy_source_available(
@@ -161,12 +158,6 @@ impl CommandSet for HardcopyCommand {
 
     fn execute(self, cx: &mut Cx<'_, HardcopyFeature>) {
         match self {
-            Self::ExportSchematicSvg => {
-                exports::action_export_svg_with_io(cx.model, cx.handles.export_io);
-            }
-            Self::ExportPublicationSnapshot => {
-                exports::action_export_publication_snapshot_with_io(cx)
-            }
             Self::PrintHardcopy => open_workflow(cx, HardcopyWorkflow::Print),
             Self::ExportActiveView => open_workflow(cx, HardcopyWorkflow::Export),
             Self::ReportAuthoring => report::open(cx.wb),

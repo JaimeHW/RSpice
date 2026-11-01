@@ -63,8 +63,6 @@ pub(crate) fn action_export_netlist_with_io(
     let filter_name = match format {
         crate::io::NetlistFormat::Spectre => "Spectre Netlist",
         crate::io::NetlistFormat::Spice => "SPICE Netlist",
-        crate::io::NetlistFormat::Hspice => "HSPICE Netlist",
-        crate::io::NetlistFormat::Xyce => "Xyce Netlist",
     };
 
     let extension = format.extension();
@@ -215,8 +213,6 @@ fn publish_generated_source(
     let filter_name = match format {
         crate::io::NetlistFormat::Spectre => "Spectre Netlist",
         crate::io::NetlistFormat::Spice => "SPICE Netlist",
-        crate::io::NetlistFormat::Hspice => "HSPICE Netlist",
-        crate::io::NetlistFormat::Xyce => "Xyce Netlist",
     };
     let default_name = format!(
         "generated-{}.{}",
@@ -267,9 +263,7 @@ fn generated_export_source(source: &str, format: crate::io::NetlistFormat) -> St
         crate::io::NetlistFormat::Spectre => {
             super::netlist_compat::spice_to_ahdl_compatible_netlist(source)
         }
-        crate::io::NetlistFormat::Spice
-        | crate::io::NetlistFormat::Hspice
-        | crate::io::NetlistFormat::Xyce => source.to_owned(),
+        crate::io::NetlistFormat::Spice => source.to_owned(),
     }
 }
 
@@ -434,16 +428,24 @@ mod tests {
     use super::*;
 
     #[test]
-    fn non_spectre_generated_exports_preserve_exact_source_bytes() {
+    fn spice_generated_exports_preserve_exact_source_bytes() {
         let source = "title μ\r\nR1 out 0 1k\r\n.end\r\n";
-        for format in [
-            crate::io::NetlistFormat::Spice,
-            crate::io::NetlistFormat::Hspice,
-            crate::io::NetlistFormat::Xyce,
-        ] {
+        assert_eq!(
+            generated_export_source(source, crate::io::NetlistFormat::Spice).as_bytes(),
+            source.as_bytes()
+        );
+    }
+
+    /// A netlist format saved by a build that also offered HSPICE and Xyce,
+    /// which wrote the SPICE text under their own extensions, reads back
+    /// as SPICE.
+    #[test]
+    fn a_saved_hspice_or_xyce_format_reads_back_as_spice() {
+        for saved in ["\"Hspice\"", "\"Xyce\"", "\"Spice\""] {
             assert_eq!(
-                generated_export_source(source, format).as_bytes(),
-                source.as_bytes()
+                serde_json::from_str::<crate::io::NetlistFormat>(saved).unwrap(),
+                crate::io::NetlistFormat::Spice,
+                "{saved}"
             );
         }
     }

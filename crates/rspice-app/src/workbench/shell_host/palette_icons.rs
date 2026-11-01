@@ -40,11 +40,8 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
 /// The glyph the palette gives a feature's command; `None` for one that
 /// wears its scope's.
 pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
-    if let Some(command) = HardcopyCommand::from_key(key) {
-        return match command {
-            HardcopyCommand::ExportSchematicSvg => Some(Icon::File),
-            _ => None,
-        };
+    if HardcopyCommand::from_key(key).is_some() {
+        return None;
     }
     if let Some(command) = SimulateCommand::from_key(key) {
         return match command {

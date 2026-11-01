@@ -7,7 +7,7 @@
 mod authored_sheet_output;
 #[cfg(not(target_arch = "wasm32"))]
 mod content_options;
-mod exports;
+
 #[cfg(not(target_arch = "wasm32"))]
 mod histogram_publication;
 mod publication_snapshot;

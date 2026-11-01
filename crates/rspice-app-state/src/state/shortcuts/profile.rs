@@ -21,6 +21,20 @@ use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutContext, ShortcutKind,
 };
 
+/// The stable ids of commands an earlier build had and this one removed. A
+/// shortcut profile that build saved may still bind one; loading drops the
+/// entry without a word, since nothing the reader could do would bring the
+/// command back.
+pub const RETIRED_COMMAND_IDS: &[&str] = &[
+    // Wrote SVG, which File > Export > Image or PDF writes too.
+    "export-schematic-svg",
+    // Wrote the bytes Publish to web uploads; nothing read the file.
+    "export-publication-snapshot",
+    // Both wrote the SPICE netlist under another extension.
+    "export-netlist-hspice",
+    "export-netlist-xyce",
+];
+
 /// Persisted user shortcut profile. Command entries remain raw until they are
 /// requested so a malformed or future command cannot invalidate the complete
 /// preferences/session document. What a command ships with, and where its
@@ -102,6 +116,8 @@ impl<'de> Deserialize<'de> for ShortcutPreferences {
         let mut malformed_command_entries = BTreeMap::new();
         for (raw_id, value) in wire.commands {
             match CommandId::new(raw_id.clone()) {
+                // A command an earlier build removed: nothing to bind.
+                Ok(id) if RETIRED_COMMAND_IDS.contains(&id.as_str()) => {}
                 Ok(id) => {
                     command_entries.insert(id, value);
                 }

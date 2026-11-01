@@ -55,6 +55,29 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
     assert!(audit.is_valid(), "default shortcut profile: {audit:#?}");
 }
 
+/// A profile saved by a build that had a command this one removed loads
+/// with no issue: the binding is dropped, not reported as belonging to a
+/// command this build lacks, and is not written back.
+#[test]
+fn a_profile_naming_retired_commands_loads_without_an_issue() {
+    use crate::state::command_catalog::CommandCatalog;
+    use crate::state::shortcuts::RETIRED_COMMAND_IDS;
+    let commands = RETIRED_COMMAND_IDS
+        .iter()
+        .map(|id| format!("\"{id}\":{{\"bindings\":[]}}"))
+        .collect::<Vec<_>>()
+        .join(",");
+    let preferences: ShortcutPreferences =
+        serde_json::from_str(&format!("{{\"commands\":{{{commands}}}}}")).unwrap();
+    let audit = preferences.audit(&CommandRegistry);
+    assert!(audit.issues().is_empty(), "{audit:#?}");
+    let saved = serde_json::to_string(&preferences).unwrap();
+    for id in RETIRED_COMMAND_IDS {
+        assert!(CommandRegistry.resolve(id).is_none(), "{id} is a command");
+        assert!(!saved.contains(id), "{id} is written back: {saved}");
+    }
+}
+
 #[test]
 fn default_profile_is_valid_with_complete_symbol_tool_registry() {
     let preferences = ShortcutPreferences::default();

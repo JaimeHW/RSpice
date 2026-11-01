@@ -28,7 +28,6 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
         "content_options",
     ),
     ("workbench/hardcopy.rs", "commands"),
-    ("workbench/hardcopy.rs", "exports"),
     ("workbench/hardcopy.rs", "report"),
     ("workbench/hardcopy.rs", "report_authoring"),
     ("workbench/hardcopy/report_authoring.rs", "result_insert"),

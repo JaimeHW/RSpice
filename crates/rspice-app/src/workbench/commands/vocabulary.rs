@@ -304,12 +304,7 @@ impl Command {
             Self::ExportNetlist(crate::io::NetlistFormat::Spice) => {
                 spec("export-netlist-spice", "Export SPICE netlist…", "File")
             }
-            Self::ExportNetlist(crate::io::NetlistFormat::Hspice) => {
-                spec("export-netlist-hspice", "Export HSPICE netlist…", "File")
-            }
-            Self::ExportNetlist(crate::io::NetlistFormat::Xyce) => {
-                spec("export-netlist-xyce", "Export Xyce netlist…", "File")
-            }
+
             Self::Exit => spec("exit-rspice", "Exit", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
             Self::Redo => spec("redo", "Redo", "Edit"),
@@ -698,8 +693,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ImportVerilogA,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
-    Command::ExportNetlist(crate::io::NetlistFormat::Hspice),
-    Command::ExportNetlist(crate::io::NetlistFormat::Xyce),
     Command::Exit,
     Command::Undo,
     Command::Redo,
@@ -898,14 +891,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ImportNetlist.key(),
     Command::ImportVerilogA.key(),
     ResultsCommand::ImportResultDataset.key(),
-    HardcopyCommand::ExportSchematicSvg.key(),
-    HardcopyCommand::ExportPublicationSnapshot.key(),
     CloudCommand::LiveSession.key(),
     CloudCommand::PublishToWeb.key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
-    Command::ExportNetlist(crate::io::NetlistFormat::Hspice).key(),
-    Command::ExportNetlist(crate::io::NetlistFormat::Xyce).key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
     SheetsCommand::CustomSheetSizes.key(),

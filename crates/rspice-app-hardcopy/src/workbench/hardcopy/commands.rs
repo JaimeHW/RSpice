@@ -16,8 +16,6 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 /// One command of the hardcopy feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HardcopyCommand {
-    ExportSchematicSvg,
-    ExportPublicationSnapshot,
     PrintHardcopy,
     ExportActiveView,
     ReportAuthoring,
@@ -86,12 +84,6 @@ const EXPORT_ACTIVE_VIEW: &[ShortcutBinding] = &[binding(
 const LISTED_COMMAND: CommandFlags =
     CommandFlags::PALETTE_VISIBLE.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
 
-/// A [`LISTED_COMMAND`] that exports what the project holds, so a value typed
-/// into the inspector and not yet committed is committed before it, and the
-/// export does not run when that commit is refused.
-const PROJECT_EXPORT: CommandFlags =
-    LISTED_COMMAND.with(CommandFlags::COMMITS_INSPECTOR_EDIT, true);
-
 /// A [`LISTED_COMMAND`] that resolves the active view, so it waits for a
 /// project operation.
 const ACTIVE_VIEW_OUTPUT: CommandFlags =
@@ -104,9 +96,7 @@ const REPORT_ACTION: CommandFlags =
 
 impl HardcopyCommand {
     /// The commands the registry lists, in the shell's order.
-    pub const LISTED: [Self; 5] = [
-        Self::ExportSchematicSvg,
-        Self::ExportPublicationSnapshot,
+    pub const LISTED: [Self; 3] = [
         Self::PrintHardcopy,
         Self::ExportActiveView,
         Self::ReportAuthoring,
@@ -133,8 +123,6 @@ impl HardcopyCommand {
     /// by.
     pub const fn key(self) -> CommandKey {
         match self {
-            Self::ExportSchematicSvg => CommandKey::new("export-schematic-svg"),
-            Self::ExportPublicationSnapshot => CommandKey::new("export-publication-snapshot"),
             Self::PrintHardcopy => ids::PRINT_HARDCOPY,
             Self::ExportActiveView => CommandKey::new("export-active-view"),
             Self::ReportAuthoring => CommandKey::new("report-page-editor"),
@@ -147,20 +135,6 @@ impl HardcopyCommand {
     /// What the command declares about itself.
     pub const fn declared_spec(self) -> CommandSpec {
         let (label, group, flags, context, bindings) = match self {
-            Self::ExportSchematicSvg => (
-                "Export schematic SVG\u{2026}",
-                "File",
-                PROJECT_EXPORT,
-                ShortcutContext::Global,
-                NONE,
-            ),
-            Self::ExportPublicationSnapshot => (
-                "Export publication snapshot\u{2026}",
-                "File",
-                PROJECT_EXPORT,
-                ShortcutContext::Global,
-                NONE,
-            ),
             Self::PrintHardcopy => (
                 "Print\u{2026}",
                 "File",

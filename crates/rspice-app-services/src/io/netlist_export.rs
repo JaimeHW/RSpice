@@ -13,12 +13,11 @@ pub enum NetlistFormat {
     /// Cadence Spectre format
     #[default]
     Spectre,
-    /// Standard SPICE format
+    /// Standard SPICE format. An earlier build also wrote the same text
+    /// under HSPICE and Xyce extensions; a choice of either saved then reads
+    /// back as SPICE.
+    #[serde(alias = "Hspice", alias = "Xyce")]
     Spice,
-    /// Synopsys HSPICE format
-    Hspice,
-    /// Xyce format
-    Xyce,
 }
 
 impl NetlistFormat {
@@ -27,8 +26,6 @@ impl NetlistFormat {
         match self {
             NetlistFormat::Spectre => "scs",
             NetlistFormat::Spice => "spice",
-            NetlistFormat::Hspice => "sp",
-            NetlistFormat::Xyce => "cir",
         }
     }
 }
