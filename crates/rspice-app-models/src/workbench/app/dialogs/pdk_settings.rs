@@ -18,8 +18,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W,
-    PaneSide, chip, pane_footer, pane_header, two_pane,
+    Button, Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_HEADER_H,
+    PANE_RAIL_W, PaneSide, chip, pane_footer, pane_header, two_pane,
 };
 use crate::workbench::app_state::session::pdk_settings::{
     PdkSettingsDialogResult, PdkSettingsDialogState,
@@ -168,19 +168,26 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
         header_caption(ui, "Sources");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
+            // Actions, so buttons in the body face: a toggle chip's mono
+            // label is for an option that is on or off, like Recursive.
             // Native folder pickers don't exist in the browser build. Browser
             // imports accept one complete sibling-file dependency bundle.
             #[cfg(not(target_arch = "wasm32"))]
-            if chip(ui, "Browse…", false).clicked()
+            if Button::new("Browse…").compact().show(ui).clicked()
                 && let Some(path) = rfd::FileDialog::new().pick_folder()
             {
                 state.add_library_path(path.to_string_lossy().to_string());
             }
             #[cfg(target_arch = "wasm32")]
-            if chip(ui, "Import bundle…", false).clicked() {
+            if Button::new("Import bundle…").compact().show(ui).clicked() {
                 import_browser_file = true;
             }
-            if chip(ui, "+ Add", false).clicked() {
+            if Button::new("Add")
+                .icon(Icon::Add)
+                .compact()
+                .show(ui)
+                .clicked()
+            {
                 state.adding_path = true;
                 ui.ctx().memory_mut(|m| m.request_focus(add_path_id()));
             }
@@ -1199,6 +1206,66 @@ mod tests {
             add.bottom() <= panes_bottom + 0.5,
             "the environment list ends at {} under panes ending at {panes_bottom}",
             add.bottom()
+        );
+    }
+
+    /// Add and Browse act, so they are buttons in the body face. They were
+    /// toggle chips, whose labels are monospace, reading "+ Add" with a
+    /// typed plus.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_sources_actions_are_buttons_and_not_mono_chips() {
+        let mut state = PdkSettingsDialogState::new();
+        state.open(crate::state::pdk_config::PdkConfig::default());
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.global_style_mut(|style| style.animation_time = 0.0);
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| {
+                        let _ = render_pdk_settings_dialog(ui.ctx(), &mut state);
+                    },
+                )
+                .shapes;
+        }
+        let families = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::epaint::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley
+                        .job
+                        .sections
+                        .first()?
+                        .format
+                        .font_id
+                        .family
+                        .clone(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let mono = [FontWeight::Regular, FontWeight::Medium]
+            .map(|weight| theme::mono(tokens::FS_0, weight).family);
+        for label in ["Add", "Browse…"] {
+            let (_, family) = families
+                .iter()
+                .find(|(text, _)| text == label)
+                .unwrap_or_else(|| panic!("no {label:?} painted: {families:?}"));
+            assert!(!mono.contains(family), "{label:?} is set in {family:?}");
+        }
+        assert!(
+            !families.iter().any(|(text, _)| text == "+ Add"),
+            "the plus is typed"
         );
     }
 }
