@@ -58,12 +58,14 @@
 # nightly build. A build selecting additional generated Verilog-A models can
 # execute decks this census recorded as unsupported, and will legitimately
 # disagree with this file.
+Netlists/ABM_SPLINES/downsample2.cir	index_aligned
 Netlists/BUG_1301/rlc_tranline.cir	index_aligned
 Netlists/Certification_Tests/BUG_1145_SON/lotka_volterra.cir	index_aligned
 Netlists/Certification_Tests/BUG_524_SON/cmod_capmod.cir	index_aligned
 Netlists/Certification_Tests/BUG_963_SON/nonzeroInitialValue.cir	index_aligned
 Netlists/Certification_Tests/ISSUE_575/issue575_small.cir	index_aligned
 Netlists/GSWITCH/gswitchHyst1.cir	index_aligned
+Netlists/ISWITCH/iswitchHyst1.cir	index_aligned
 Netlists/MINDUCTORS/NonLinInductor.cir	index_aligned
 Netlists/MINDUCTORS/cpldLMIs.cir	index_aligned
 Netlists/MINDUCTORS/cpldLMIs_ic.cir	index_aligned
@@ -95,3 +97,4 @@ Netlists/SUBCKT/subckt_l0.cir	index_aligned
 Netlists/SUBCKT/subckt_l1.cir	index_aligned
 Netlists/VCCS/vccs_tran.cir	index_aligned
 Netlists/VCVS/vcvs_trans.cir	index_aligned
+Netlists/VSWITCH/VswitchHyst1.cir	index_aligned
