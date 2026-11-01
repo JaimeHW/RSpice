@@ -219,7 +219,7 @@ SLICE_RULES = [
     (W + r"surfaces/(automation|netlist|veriloga)", "code"),
     (W + r"surfaces/(design|stimulus)", "design"),
     (W + r"surfaces/(library_cellview_manager|project)", "project"),
-    (W + r"surfaces/(models|model_editor|model_correlation|model_correlation_controller|pdk_technology_admin)", "models"),
+    (W + r"surfaces/(models|model_editor|model_correlation|model_correlation_controller)", "models"),
     (W + r"surfaces/results", "results"),
     (W + r"surfaces/(simulate|verify)", "simulate"),
     # Tools, workflows, lifecycle and the rest of workbench/.
