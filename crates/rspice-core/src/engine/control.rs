@@ -91,6 +91,7 @@ enum PreparedCommand {
 enum CommandKind {
     Options,
     Set,
+    Unset,
     Alter,
     Analysis,
     Run,
@@ -120,6 +121,7 @@ impl CommandKind {
         Ok(match command.name.as_str() {
             "option" | "options" => Self::Options,
             "set" | "setcs" => Self::Set,
+            "unset" => Self::Unset,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" => Self::Analysis,
@@ -249,6 +251,12 @@ impl ControlCircuit {
             }
             CommandKind::Set => {
                 self.apply_set(command, variables, abort)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Unset => {
+                self.apply_unset(command)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
@@ -863,6 +871,17 @@ impl ControlScalarEvaluator for ControlCircuit {
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<String>>, ControlError> {
         self.expand_vector(name, variables, line, abort)
+    }
+
+    /// ngspice defines `curplot` from its plots (frontend/options.c:72),
+    /// and `batchmode` under `-b` (main.c:1032), as which this host runs
+    /// every script.
+    fn host_variable(&mut self, name: &str) -> Option<Vec<String>> {
+        match name.to_ascii_lowercase().as_str() {
+            "curplot" => Some(vec![self.plot_name()]),
+            "batchmode" => Some(Vec::new()),
+            _ => None,
+        }
     }
 }
 

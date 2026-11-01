@@ -815,8 +815,11 @@ fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
     );
 }
 
+/// Any `set` name is a shell variable (frontend/variable.c:86 cp_vset),
+/// except the simulator options ngspice hands the circuit (options.c:454
+/// if_option), which this host refuses rather than drops.
 #[test]
-fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
+fn set_accepts_shell_variables_and_applies_assignments_atomically() {
     let netlist = Netlist::parse("set deck\nV1 in 0 1\nR1 in 0 1k\n.end\n").unwrap();
     let variables = netlist.params.clone();
     let mut circuit = ControlCircuit::new(netlist).unwrap();
@@ -833,8 +836,8 @@ fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
             &NoAbort,
         )
     };
-    let error = set(&mut circuit, "noinit num_threads=2 units=degrees").unwrap_err();
-    assert!(error.to_string().contains("'units'"), "{error}");
+    let error = set(&mut circuit, "noinit num_threads=2 gmin=1e-12").unwrap_err();
+    assert!(error.to_string().contains("'gmin'"), "{error}");
     assert!(!circuit.settings().suppress_initial_listing);
     assert_eq!(circuit.settings().maximum_parallel_workers, None);
     set(
@@ -845,7 +848,7 @@ fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
     .unwrap();
     assert!(circuit.settings().suppress_initial_listing);
     assert_eq!(circuit.settings().maximum_parallel_workers, Some(2));
-    assert!(set(&mut circuit, "colorx=red").is_err());
+    set(&mut circuit, "colorx=red units=degrees gold = unknown1").unwrap();
     // ngspice's noacct also suppresses the initial transient listing.
     let netlist = Netlist::parse("set deck\nV1 in 0 1\nR1 in 0 1k\n.end\n").unwrap();
     let mut circuit = ControlCircuit::new(netlist).unwrap();
@@ -1338,4 +1341,40 @@ fn a_scalar_let_is_also_a_vector_of_its_plot() {
     );
     assert_eq!(error, None);
     assert_eq!(printed(&presented[0])[0].y.samples, one(4.0));
+}
+
+/// ngspice shell variables (frontend/variable.c): `set` stores numbers
+/// through ft_numparse, `$curplot` names the current plot, `strcmp` stores
+/// the comparison, braces expand after substitution (parser/glob.c), `$#`
+/// counts a list and `unset` removes a variable. ngspice-46 prints these
+/// lines for the same script.
+#[test]
+fn shell_variables_expand_as_ngspice_does() {
+    let source = "shell vars\nV1 in 0 2\nR1 in 0 1k\n.control\nsetplot new\nset gold = $curplot\n\
+        let i1 = 1k\nop\nstrcmp flag $curplot $gold\nstrcmp same $gold unknown1\n\
+        echo $gold $curplot $flag $same $?gold $?nothing $?batchmode\nset n = i1\n\
+        set g = \"{$gold}.$n\"\necho $g\nif $g = 1000\necho equal\nend\n\
+        set list = ( -4 2.50 x )\necho $list $#list\nforeach v $list\necho v $v\nend\n\
+        set e = 1k f = 2.5 s = \"3\"\necho $e $f $s\nunset e\necho $?e\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "unknown1 op1 -1 0 1 0 1",
+            "unknown1.i1",
+            "equal",
+            "-4 2.5 x 3",
+            "v -4",
+            "v 2.5",
+            "v x",
+            "1000 2.5 3",
+            "0",
+        ]
+    );
+    // A simulator option is not a shell variable: ngspice hands it to the
+    // circuit, and this host refuses it rather than drop it.
+    let (_, error) =
+        run_until_error("option\nV1 in 0 2\nR1 in 0 1k\n.control\nset gmin=1e-12\n.endc\n.end\n");
+    assert!(error.unwrap().contains("simulator option"));
 }

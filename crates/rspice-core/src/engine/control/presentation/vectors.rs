@@ -106,6 +106,12 @@ impl Shape {
 }
 
 impl ControlCircuit {
+    /// ngspice `$curplot` (frontend/options.c:72): the current plot's name,
+    /// `const` before any plot exists.
+    pub(in crate::engine::control) fn plot_name(&self) -> String {
+        self.current_plot().unwrap_or("const").to_owned()
+    }
+
     /// The current plot's name; `None` before any plot exists, when ngspice
     /// binds vectors in its constants plot.
     fn current_plot(&self) -> Option<&str> {
@@ -372,7 +378,7 @@ impl ControlCircuit {
                 value
                     .samples
                     .iter()
-                    .map(|sample| percent_g(sample.re))
+                    .map(|sample| crate::execution::control::shell::percent_g(sample.re))
                     .collect(),
             )),
             Err(error)
@@ -1019,34 +1025,6 @@ fn sampled(
         scale: Some(selected.dataset.name.clone()),
         unit: selected.unit.clone(),
     })
-}
-
-/// C's `%G` (frontend/variable.c:53 `cp_varwl`): six significant digits,
-/// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
-fn percent_g(value: Value) -> String {
-    if value.is_nan() {
-        return "NAN".into();
-    }
-    if value.is_infinite() {
-        return if value < 0.0 { "-INF" } else { "INF" }.into();
-    }
-    let trim = |text: &str| -> String {
-        if text.contains('.') {
-            text.trim_end_matches('0').trim_end_matches('.').to_owned()
-        } else {
-            text.to_owned()
-        }
-    };
-    let text = format!("{value:.5e}");
-    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
-    let exponent: i32 = exponent.parse().unwrap_or(0);
-    if (-4..6).contains(&exponent) {
-        let decimals = (5 - exponent) as usize;
-        trim(&format!("{value:.decimals$}"))
-    } else {
-        let sign = if exponent < 0 { '-' } else { '+' };
-        format!("{}E{sign}{:02}", trim(mantissa), exponent.unsigned_abs())
-    }
 }
 
 fn charge(budget: &mut usize, samples: usize, line: usize) -> Result<(), ControlError> {

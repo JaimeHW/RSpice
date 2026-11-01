@@ -1,7 +1,8 @@
-//! ngspice command-line words and `set` assignments (frontend/parser/lexical.c,
-//! frontend/variable.c `cp_setparse`).
+//! ngspice command-line words, `set` assignments and shell variables
+//! (frontend/parser/lexical.c, frontend/variable.c `cp_setparse`).
 
 use super::{ControlError, syntax};
+use crate::Value;
 
 /// One shell word. Quotes group whitespace and are removed, as `cp_unquote`
 /// removes them before a command sees its words.
@@ -141,6 +142,158 @@ pub(crate) fn assignments(text: &str, line: usize) -> Result<Vec<Assignment>, Co
     Ok(assignments)
 }
 
+/// An ngspice shell variable (frontend/variable.c `struct variable`), with
+/// its numbers already rendered as `cp_varwl` renders them.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum ShellValue {
+    /// A Boolean: `set name`, or `batchmode` under `-b`.
+    Flag,
+    Word(String),
+    List(Vec<String>),
+}
+
+impl ShellValue {
+    /// The value `cp_set` stores (variable.c:387 `cp_setparse`): a quoted
+    /// word is a string; otherwise a word that starts with a number is that
+    /// number (an integer when it is one), and any other word a string.
+    pub(crate) fn assigned(value: &SetValue) -> Self {
+        let word = |word: &Word| {
+            if word.quoted {
+                return word.text.clone();
+            }
+            match number_prefix(&word.text) {
+                Some(number) if number == f64::from(number as i32) => {
+                    format!("{}", number as i32)
+                }
+                Some(number) => percent_g(number),
+                None => word.text.clone(),
+            }
+        };
+        match value {
+            SetValue::Flag => Self::Flag,
+            SetValue::Word(value) => Self::Word(word(value)),
+            SetValue::List(items) => Self::List(items.iter().map(word).collect()),
+        }
+    }
+
+    /// `$name` (variable.c:36 `cp_varwl`): a Boolean reads TRUE, and a list
+    /// its words separated by spaces.
+    pub(crate) fn text(&self) -> String {
+        match self {
+            Self::Flag => "TRUE".into(),
+            Self::Word(word) => word.clone(),
+            Self::List(items) => items.join(" "),
+        }
+    }
+
+    /// `$#name` (variable.c:963): a list's length, 0 for a Boolean, else 1.
+    pub(crate) fn count(&self) -> usize {
+        match self {
+            Self::Flag => 0,
+            Self::Word(_) => 1,
+            Self::List(items) => items.len(),
+        }
+    }
+}
+
+/// ngspice `ft_numparse` of a word's start, not requiring the whole word
+/// (frontend/parser/numparse.c:40): a decimal number, then an exponent or
+/// one scale factor; the letters after it are ignored. `None` when the word
+/// does not start with a number.
+pub(crate) fn number_prefix(text: &str) -> Option<Value> {
+    let bytes = text.as_bytes();
+    let digits = |mut index: usize| {
+        while bytes.get(index).is_some_and(u8::is_ascii_digit) {
+            index += 1;
+        }
+        index
+    };
+    // numparse.c:181 get_decimal_number: a sign, then a digit or a point
+    // followed by a digit.
+    let decimal = |start: usize| -> Option<(Value, usize)> {
+        let sign = usize::from(matches!(bytes.get(start), Some(b'+' | b'-')));
+        let first = start + sign;
+        let whole = digits(first);
+        if whole == first && !(bytes.get(first) == Some(&b'.') && whole + 1 < digits(first + 1)) {
+            return None;
+        }
+        let end = if bytes.get(whole) == Some(&b'.') {
+            digits(whole + 1)
+        } else {
+            whole
+        };
+        let mut number = text[first..end].to_owned();
+        if number.ends_with('.') {
+            number.push('0');
+        }
+        if number.starts_with('.') {
+            number.insert(0, '0');
+        }
+        let value: Value = number.parse().ok()?;
+        Some((
+            if bytes.get(start) == Some(&b'-') {
+                -value
+            } else {
+                value
+            },
+            end,
+        ))
+    };
+    let (mut mantissa, end) = decimal(0)?;
+    let suffix = text[end..].to_ascii_lowercase();
+    let exponent = match suffix.as_bytes().first() {
+        Some(b'e') => decimal(end + 1).map_or(0.0, |(exponent, _)| exponent),
+        Some(b't') => 12.0,
+        Some(b'g') => 9.0,
+        Some(b'k') => 3.0,
+        Some(b'u') => -6.0,
+        Some(b'n') => -9.0,
+        Some(b'p') => -12.0,
+        Some(b'f') => -15.0,
+        Some(b'a') => -18.0,
+        Some(b'm') if suffix.starts_with("meg") => 6.0,
+        Some(b'm') if suffix.starts_with("mil") => {
+            mantissa *= 25.4;
+            -6.0
+        }
+        Some(b'm') => -3.0,
+        _ => 0.0,
+    };
+    Some(if exponent == 0.0 {
+        mantissa
+    } else {
+        mantissa * Value::powf(10.0, exponent)
+    })
+}
+
+/// C's `%G` (frontend/variable.c:53 `cp_varwl`): six significant digits,
+/// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
+pub(crate) fn percent_g(value: Value) -> String {
+    if value.is_nan() {
+        return "NAN".into();
+    }
+    if value.is_infinite() {
+        return if value < 0.0 { "-INF" } else { "INF" }.into();
+    }
+    let trim = |text: &str| -> String {
+        if text.contains('.') {
+            text.trim_end_matches('0').trim_end_matches('.').to_owned()
+        } else {
+            text.to_owned()
+        }
+    };
+    let text = format!("{value:.5e}");
+    let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    if (-4..6).contains(&exponent) {
+        let decimals = (5 - exponent) as usize;
+        trim(&format!("{value:.decimals$}"))
+    } else {
+        let sign = if exponent < 0 { '-' } else { '+' };
+        format!("{}E{sign}{:02}", trim(mantissa), exponent.unsigned_abs())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -159,6 +312,47 @@ mod tests {
         let texts: Vec<_> = words.iter().map(|word| word.text.as_str()).collect();
         assert_eq!(texts, ["hello", "a  b", "c de"]);
         assert!(!words[0].quoted && words[1].quoted && words[2].quoted);
+    }
+
+    /// variable.c:387 `cp_setparse` stores numbers through `ft_numparse`
+    /// (frontend/parser/numparse.c:40), and `cp_varwl` prints them `%d`
+    /// or `%G`; ngspice-46 echoes these words for the same `set` values.
+    #[test]
+    fn shell_values_render_numbers_as_ngspice_does() {
+        let value = |text: &str| {
+            ShellValue::assigned(&assignments(&format!("x = {text}"), 1).unwrap()[0].value).text()
+        };
+        for (text, expected) in [
+            ("3", "3"),
+            ("-4", "-4"),
+            ("1k", "1000"),
+            ("2.5", "2.5"),
+            ("1.5meg", "1500000"),
+            ("1e-20", "1E-20"),
+            (".5", "0.5"),
+            ("7.", "7"),
+            ("3abc", "3E-18"),
+            ("2mil", "5.08E-05"),
+            ("abc", "abc"),
+            ("\"3\"", "3"),
+            ("( 1 2.50 x )", "1 2.5 x"),
+        ] {
+            assert_eq!(value(text), expected, "{text}");
+        }
+        assert_eq!(ShellValue::Flag.text(), "TRUE");
+        assert_eq!(ShellValue::Flag.count(), 0);
+        assert_eq!(ShellValue::List(vec!["a".into(), "b".into()]).count(), 2);
+        for (value, expected) in [
+            (0.0, "0"),
+            (-0.0, "-0"),
+            (1234567.0, "1.23457E+06"),
+            (999999.6, "1E+06"),
+            (0.0001, "0.0001"),
+            (0.00001234567, "1.23457E-05"),
+            (100000.0, "100000"),
+        ] {
+            assert_eq!(percent_g(value), expected);
+        }
     }
 
     #[test]

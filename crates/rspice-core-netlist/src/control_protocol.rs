@@ -106,4 +106,12 @@ pub trait ControlScalarEvaluator {
     ) -> Result<Option<Vec<String>>, ControlError> {
         Ok(None)
     }
+
+    /// `$name` of a variable the host defines rather than the script, such
+    /// as ngspice's `curplot` (frontend/options.c:51 `cp_enqvar`): its words,
+    /// none for a Boolean that is set, or `None` when the host defines no
+    /// such variable.
+    fn host_variable(&mut self, _name: &str) -> Option<Vec<String>> {
+        None
+    }
 }

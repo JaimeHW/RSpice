@@ -135,67 +135,104 @@ impl ControlCircuit {
                     .into());
                 }
                 settings.maximum_parallel_workers = Some(count as usize);
-            } else if !presentation_variable(&name) {
+            } else if simulator_option(&name) {
                 return Err(command_error(
                     command.line,
                     format!(
-                        "set variable '{}' has no control-host handler",
+                        "set variable '{}' is a simulator option this host does not set; \
+                         use option",
                         assignment.name
                     ),
                 )
                 .into());
             }
+            // Any other name is a shell variable, which the session keeps;
+            // it steers nothing here, as interactive, plotting and hardcopy
+            // variables steer nothing in a batch run.
         }
         self.settings = settings;
         Ok(())
     }
+
+    /// `unset`: the variables this host keeps return to their defaults.
+    pub(super) fn apply_unset(&mut self, command: &ControlCommand) -> Result<(), ControlError> {
+        let words = crate::execution::control::shell::words(&command.arguments);
+        if words.is_empty() {
+            return Err(command_error(command.line, "unset requires a variable"));
+        }
+        for word in words {
+            match word.text.to_ascii_lowercase().as_str() {
+                "noinit" | "noacct" => self.settings.suppress_initial_listing = false,
+                "num_threads" => self.settings.maximum_parallel_workers = None,
+                _ => {}
+            }
+        }
+        Ok(())
+    }
 }
 
-/// Variables that only steer interactive use, plotting or hardcopy. A batch
-/// run has no window, printer or prompt, so ngspice -b accepts them with no
-/// effect on any result (manual section 17.7, "Variables").
-fn presentation_variable(name: &str) -> bool {
+/// The options ngspice's `set` hands the circuit (frontend/options.c:454
+/// `if_option`; spicelib/analysis/cktsopt.c:260, the settable entries). A
+/// batch host must not drop one silently.
+fn simulator_option(name: &str) -> bool {
     const NAMES: &[&str] = &[
-        "askquit",
-        "noaskquit",
-        "nolegend",
-        "nogrid",
-        "gridstyle",
-        "gridsize",
-        "plotstyle",
-        "pointchars",
-        "ticmarks",
-        "ticlist",
-        "ticchar",
-        "pensize",
-        "xbrushwidth",
-        "xgridwidth",
-        "xfont",
-        "xfont_size",
-        "wfont",
-        "wfont_size",
-        "x11lineararcs",
-        "plotwinwidth",
-        "plotwinheight",
-        "plotwininfo",
-        "device",
-        "term",
-        "lprplot",
-        "lprps",
-        "editor",
-        "prompt",
-        "history",
-        "moremode",
-        "nomoremode",
-        "interactive",
-        "controlswait",
-        "curplottitle",
+        "maxopalter",
+        "maxevtiter",
+        "noopalter",
+        "ramptime",
+        "convlimit",
+        "convstep",
+        "convabsstep",
+        "autopartial",
+        "rshunt",
+        "cshunt",
+        "noopiter",
+        "gmin",
+        "gshunt",
+        "reltol",
+        "abstol",
+        "vntol",
+        "trtol",
+        "chgtol",
+        "pivtol",
+        "pivrel",
+        "tnom",
+        "temp",
+        "itl1",
+        "itl2",
+        "itl4",
+        "itl6",
+        "srcsteps",
+        "gminsteps",
+        "gminfactor",
+        "oldlimit",
+        "method",
+        "maxord",
+        "indverbosity",
+        "xmu",
+        "defm",
+        "defl",
+        "defw",
+        "minbreak",
+        "defad",
+        "defas",
+        "bypass",
+        "trytocompact",
+        "badmos3",
+        "keepopinfo",
+        "copynodesets",
+        "nodedamping",
+        "absdv",
+        "reldv",
+        "noopac",
+        "epsmin",
+        "sparse",
+        "klu",
+        "klu_memgrow_factor",
+        "ltereltol",
+        "lteabstol",
+        "ltetrtol",
+        "newtrunc",
     ];
     NAMES.contains(&name)
-        || ["hcopy", "gnuplot_", "svg_"]
-            .iter()
-            .any(|prefix| name.starts_with(prefix))
-        || name
-            .strip_prefix("color")
-            .is_some_and(|index| !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
 }

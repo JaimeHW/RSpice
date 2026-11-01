@@ -14,6 +14,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod shell;
 
+use shell::ShellValue;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ControlLimits {
     pub max_source_bytes: usize,
@@ -93,6 +95,10 @@ enum Op {
     /// ngspice `define name(arguments) body`, substituted when it runs.
     Define {
         text: String,
+    },
+    /// ngspice `strcmp variable first second`, substituted when it runs.
+    Strcmp {
+        arguments: String,
     },
     Command {
         name: String,
@@ -292,6 +298,9 @@ impl ControlProgram {
                 "define" => Op::Define {
                     text: rest.to_owned(),
                 },
+                "strcmp" => Op::Strcmp {
+                    arguments: rest.to_owned(),
+                },
                 _ => Op::Command {
                     name: head.to_ascii_lowercase(),
                     arguments: rest.to_owned(),
@@ -339,7 +348,7 @@ impl ControlProgram {
         ControlSession {
             program: self,
             variables,
-            words: BTreeMap::new(),
+            shell: BTreeMap::new(),
             vectors: BTreeSet::new(),
             loops: Vec::new(),
             pc: 0,
@@ -373,7 +382,9 @@ struct LoopFrame {
 pub struct ControlSession<'a> {
     program: &'a ControlProgram,
     variables: ParamContext,
-    words: BTreeMap<String, String>,
+    /// Shell variables (`set`, `foreach`, `strcmp`) by lowercase name, as
+    /// ngspice keeps them apart from vectors (frontend/variable.c).
+    shell: BTreeMap<String, ShellValue>,
     /// Lowercase names the host bound as vectors (`let` of a vector value).
     vectors: BTreeSet<String>,
     loops: Vec<LoopFrame>,
@@ -538,7 +549,10 @@ impl ControlSession<'_> {
                                 self.pc = end + 1;
                                 continue;
                             };
-                            self.words.insert(variable.clone(), first.clone());
+                            self.shell.insert(
+                                variable.to_ascii_lowercase(),
+                                ShellValue::Word(first.clone()),
+                            );
                             self.loops.push(LoopFrame {
                                 opening: self.pc,
                                 end: *end,
@@ -576,7 +590,10 @@ impl ControlSession<'_> {
                                     next,
                                 } => {
                                     if let Some(value) = values.get(*next) {
-                                        self.words.insert(variable.clone(), value.clone());
+                                        self.shell.insert(
+                                            variable.to_ascii_lowercase(),
+                                            ShellValue::Word(value.clone()),
+                                        );
                                         *next += 1;
                                         self.pc = opening + 1;
                                         continue;
@@ -624,14 +641,48 @@ impl ControlSession<'_> {
                     self.variables.define_function(name, arguments, body);
                     self.pc += 1;
                 }
+                Op::Strcmp { arguments } => {
+                    let arguments = self.substitute(arguments, line, evaluator, abort)?;
+                    let words = shell::words(&arguments);
+                    let [variable, first, second] = words.as_slice() else {
+                        return Err(syntax(line, "strcmp requires a variable and two strings"));
+                    };
+                    // frontend/com_strcmp.c:12 sets the variable to the
+                    // comparison of the unquoted strings.
+                    let order = first.text.cmp(&second.text) as i32;
+                    self.shell.insert(
+                        variable.text.to_ascii_lowercase(),
+                        ShellValue::Word(order.to_string()),
+                    );
+                    self.pc += 1;
+                }
                 Op::Command { name, arguments } => {
-                    let command = ControlCommand {
+                    let arguments = self.substitute(arguments, line, evaluator, abort)?;
+                    // A shell variable is the session's (variable.c:86
+                    // cp_vset); the host still sees `set` and `unset`, for
+                    // the variables that steer it.
+                    match name.as_str() {
+                        "set" | "setcs" => {
+                            for assignment in shell::assignments(&arguments, line)? {
+                                self.shell.insert(
+                                    assignment.name.to_ascii_lowercase(),
+                                    ShellValue::assigned(&assignment.value),
+                                );
+                            }
+                        }
+                        "unset" => {
+                            for word in shell::words(&arguments) {
+                                self.shell.remove(&word.text.to_ascii_lowercase());
+                            }
+                        }
+                        _ => {}
+                    }
+                    self.pc += 1;
+                    return Ok(Some(ControlCommand {
                         line,
                         name: name.clone(),
-                        arguments: self.substitute(arguments, line, evaluator, abort)?,
-                    };
-                    self.pc += 1;
-                    return Ok(Some(command));
+                        arguments,
+                    }));
                 }
             }
         }
@@ -647,7 +698,20 @@ impl ControlSession<'_> {
     ) -> Result<String, ControlError> {
         let mut output = String::new();
         let mut chars = text.chars().peekable();
+        let mut braces = 0usize;
         while let Some(character) = chars.next() {
+            // ngspice expands `{$name}` to the variable's words (brace
+            // expansion after substitution, frontend/parser/glob.c:136), so
+            // `"{$gold}.$n"` reads `unknown1.i1`. Other braces keep their
+            // expression meaning here, as in `option reltol={expr}`.
+            if character == '{' && chars.peek() == Some(&'$') {
+                braces += 1;
+                continue;
+            }
+            if character == '}' && braces > 0 {
+                braces -= 1;
+                continue;
+            }
             if character != '$' {
                 output.push(character);
                 continue;
@@ -666,6 +730,7 @@ impl ControlSession<'_> {
                 continue;
             }
             let existence = chars.next_if_eq(&'?').is_some();
+            let count = !existence && chars.next_if_eq(&'#').is_some();
             let mut name = String::new();
             while chars
                 .peek()
@@ -676,34 +741,55 @@ impl ControlSession<'_> {
                 }
             }
             require_identifier(&name, line)?;
-            if !existence
-                && !self.words.contains_key(&name)
-                && self.vectors.contains(&name.to_ascii_lowercase())
-            {
-                return Err(ControlError::new(
-                    line,
-                    ControlErrorKind::Expression,
-                    format!("'${name}' names a vector; a control variable cannot expand it"),
-                ));
-            }
+            // ngspice reads a shell variable, then one its host defines
+            // (frontend/variable.c:908 vareval); a scalar parameter answers
+            // after both.
+            let key = name.to_ascii_lowercase();
+            let value = self.shell.get(&key).cloned().or_else(|| {
+                evaluator
+                    .host_variable(&name)
+                    .map(|words| match <[String; 1]>::try_from(words) {
+                        Ok([word]) => ShellValue::Word(word),
+                        Err(words) if words.is_empty() => ShellValue::Flag,
+                        Err(words) => ShellValue::List(words),
+                    })
+            });
             if existence {
                 output.push(
-                    if self.words.contains_key(&name)
-                        || self.variables.has_any_parameter_binding(&name)
-                    {
+                    if value.is_some() || self.variables.has_any_parameter_binding(&name) {
                         '1'
                     } else {
                         '0'
                     },
                 );
-            } else if let Some(value) = self.words.get(&name) {
+            } else if let Some(value) = value {
+                let text = if count {
+                    value.count().to_string()
+                } else {
+                    value.text()
+                };
                 check_limit(
-                    output.len().saturating_add(value.len()),
+                    output.len().saturating_add(text.len()),
                     self.program.limits.max_source_bytes,
                     line,
                     "expanded command bytes",
                 )?;
-                output.push_str(value);
+                output.push_str(&text);
+            } else if self.vectors.contains(&key) {
+                return Err(ControlError::new(
+                    line,
+                    ControlErrorKind::Expression,
+                    format!("'${name}' names a vector; a control variable cannot expand it"),
+                ));
+            } else if count {
+                if !self.variables.has_any_parameter_binding(&name) {
+                    return Err(ControlError::new(
+                        line,
+                        ControlErrorKind::Expression,
+                        format!("'$#{name}': no such variable"),
+                    ));
+                }
+                output.push('1');
             } else {
                 output.push_str(&self.parameter_text(&name, line, abort)?);
             }
