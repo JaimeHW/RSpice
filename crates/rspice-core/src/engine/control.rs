@@ -100,6 +100,7 @@ enum CommandKind {
     Listing,
     ResourceUsage,
     SetPlot,
+    Compose,
     /// A command ngspice -b accepts with no batch effect.
     Ignored(Ignored),
 }
@@ -129,6 +130,7 @@ impl CommandKind {
             "listing" => Self::Listing,
             "rusage" => Self::ResourceUsage,
             "setplot" => Self::SetPlot,
+            "compose" => Self::Compose,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
             }
@@ -202,6 +204,9 @@ impl ControlCircuit {
     }
 
     fn current_dataset(&self) -> Option<&ControlNamedDataset> {
+        if self.vectors.current_plot().is_some() {
+            return None;
+        }
         self.current.and_then(|index| self.datasets.get(index))
     }
 
@@ -365,14 +370,37 @@ impl ControlCircuit {
                     }
                     return Err(command_error(line, "setplot takes one plot name").into());
                 };
-                let index = self
+                if name.text.eq_ignore_ascii_case("new") {
+                    // frontend/vectors.c:1164 plot_alloc("unknown").
+                    let ordinal = self
+                        .ordinals
+                        .get("unknown")
+                        .copied()
+                        .unwrap_or(0)
+                        .checked_add(1)
+                        .ok_or_else(|| command_error(line, "plot ordinal overflow"))?;
+                    self.ordinals.insert("unknown", ordinal);
+                    self.vectors.new_plot(format!("unknown{ordinal}"));
+                } else if let Some(index) = self
                     .datasets
                     .iter()
                     .position(|dataset| dataset.name.eq_ignore_ascii_case(&name.text))
-                    .ok_or_else(|| {
-                        command_error(line, format!("setplot: no plot named '{}'", name.text))
-                    })?;
-                self.current = Some(index);
+                {
+                    self.current = Some(index);
+                    self.vectors.leave_plot();
+                } else if !self.vectors.select_plot(&name.text) {
+                    return Err(command_error(
+                        line,
+                        format!("setplot: no plot named '{}'", name.text),
+                    )
+                    .into());
+                }
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Compose => {
+                self.compose(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
@@ -626,6 +654,7 @@ impl ControlCircuit {
             result,
         });
         self.current = Some(self.datasets.len() - 1);
+        self.vectors.leave_plot();
         self.ordinals.insert(kind, ordinal);
         self.retained_values = retained_values;
         Ok(name)

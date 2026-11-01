@@ -1169,3 +1169,64 @@ fn check_first(
         "{samples:?} against {expected}"
     );
 }
+
+/// ngspice com_compose (frontend/com_compose.c) and `setplot new`
+/// (frontend/vectors.c:1164): ngspice-46 prints a = 1.5 3 7,
+/// b = 1 1.5 2 2.5 3, c = 0 1/3 2/3 1, d = 1 3.162278 10 31.62278 100,
+/// e = 1 2 4 8, y = 2 4 6 in plot unknown1, and a again in op1.
+#[test]
+fn compose_and_setplot_new_build_vectors_as_ngspice_does() {
+    let source = "compose\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\nop\n\
+        compose a values v(out) 2*v(out) 7\ncompose b start=1 stop=3 step=0.5\n\
+        compose c lin=4 start=0 stop=1\ncompose d dec=2 start=1 stop=100\n\
+        compose e start=1 stop=8 log=4\nprint a b c d e\nsetplot new\n\
+        compose x values 1 2 3\nlet y = x * 2\nprint y\nsetplot op1\nprint a unknown1.y\n\
+        setplot unknown1\nprint x\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    let values = |print: usize, trace: usize| -> Vec<f64> {
+        printed(&presented[print])[trace]
+            .y
+            .samples
+            .iter()
+            .map(|value| value.re)
+            .collect()
+    };
+    let close = |actual: Vec<f64>, expected: &[f64]| {
+        assert_eq!(actual.len(), expected.len(), "{actual:?}");
+        for (actual, expected) in actual.iter().zip(expected) {
+            assert!(
+                (actual - expected).abs() <= 1e-9 * expected.abs().max(1.0),
+                "{actual}"
+            );
+        }
+    };
+    close(values(0, 0), &[1.5, 3.0, 7.0]);
+    close(values(0, 1), &[1.0, 1.5, 2.0, 2.5, 3.0]);
+    close(values(0, 2), &[0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0]);
+    close(
+        values(0, 3),
+        &[1.0, 10f64.sqrt(), 10.0, 1000f64.sqrt(), 100.0],
+    );
+    close(values(0, 4), &[1.0, 2.0, 4.0, 8.0]);
+    close(values(1, 0), &[2.0, 4.0, 6.0]);
+    // The first vector of a new plot is its scale.
+    assert_eq!(printed(&presented[1])[0].x.expression, "x");
+    close(values(2, 0), &[1.5, 3.0, 7.0]);
+    close(values(2, 1), &[2.0, 4.0, 6.0]);
+    close(values(3, 0), &[1.0, 2.0, 3.0]);
+
+    for (arguments, message) in [
+        ("b start=1 stop=2", "must be given"),
+        ("b lin=3 dec=2 start=1 stop=2", "at most one"),
+        ("b start=1 stop=2 step=0", "step"),
+        ("b dec=2 start=0 stop=2", "positive"),
+        ("b values", "requires a value"),
+    ] {
+        let (_, error) = run_until_error(&format!(
+            "bad compose\nV1 in 0 1\nR1 in 0 1k\n.control\nop\ncompose {arguments}\n.endc\n.end\n"
+        ));
+        let error = error.unwrap();
+        assert!(error.contains(message), "{arguments}: {error}");
+    }
+}

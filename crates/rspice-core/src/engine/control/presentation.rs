@@ -2,6 +2,7 @@
 
 use super::*;
 mod batch;
+mod compose;
 mod dcmatch;
 mod distortion;
 mod functions;

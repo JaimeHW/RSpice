@@ -19,18 +19,65 @@ pub(in crate::engine::control) struct VectorValue {
 #[derive(Debug, Clone)]
 struct UserVector {
     name: String,
-    /// The owning plot's dataset name; `None` is ngspice's constants plot,
-    /// which holds the vectors bound before any analysis ran.
+    /// The owning plot's name, a dataset's or one `setplot new` made; `None`
+    /// is ngspice's constants plot, which holds the vectors bound before any
+    /// analysis ran.
     plot: Option<String>,
     value: VectorValue,
+}
+
+/// A plot `setplot new` made (frontend/vectors.c:1164). It holds only the
+/// vectors bound in it, and the first of them is its scale (vec_new).
+#[derive(Debug)]
+struct UserPlot {
+    name: String,
+    scale: Option<String>,
 }
 
 #[derive(Debug, Default)]
 pub(in crate::engine::control) struct VectorStore {
     vectors: Vec<UserVector>,
+    plots: Vec<UserPlot>,
+    /// The user plot that is current, if `setplot` chose one last.
+    current: Option<usize>,
 }
 
 impl VectorStore {
+    /// The current plot's name when it is a user plot.
+    pub(in crate::engine::control) fn current_plot(&self) -> Option<&str> {
+        self.current.map(|index| self.plots[index].name.as_str())
+    }
+
+    /// A dataset became the current plot.
+    pub(in crate::engine::control) fn leave_plot(&mut self) {
+        self.current = None;
+    }
+
+    /// `setplot new`: an empty plot of this name becomes current.
+    pub(in crate::engine::control) fn new_plot(&mut self, name: String) {
+        self.plots.push(UserPlot { name, scale: None });
+        self.current = Some(self.plots.len() - 1);
+    }
+
+    /// `setplot name` of a user plot; false when there is none of that name.
+    pub(in crate::engine::control) fn select_plot(&mut self, name: &str) -> bool {
+        let index = self
+            .plots
+            .iter()
+            .position(|plot| plot.name.eq_ignore_ascii_case(name));
+        if index.is_some() {
+            self.current = index;
+        }
+        index.is_some()
+    }
+
+    fn plot(&self, name: &str) -> Option<&str> {
+        self.plots
+            .iter()
+            .find(|plot| plot.name.eq_ignore_ascii_case(name))
+            .map(|plot| plot.name.as_str())
+    }
+
     /// Retained values, counting each sample as a complex pair.
     fn values(&self) -> usize {
         self.vectors.iter().fold(0usize, |count, vector| {
@@ -56,18 +103,30 @@ impl Shape {
 }
 
 impl ControlCircuit {
+    /// The current plot's name; `None` before any plot exists, when ngspice
+    /// binds vectors in its constants plot.
+    fn current_plot(&self) -> Option<&str> {
+        self.vectors
+            .current_plot()
+            .or_else(|| self.current_dataset().map(|dataset| dataset.name.as_str()))
+    }
+
     /// ngspice `vec_get`: a plot prefix names the plot, otherwise the current
     /// plot; the constants plot answers for either when it has the name.
     fn user_vector(&self, name: &str) -> Option<usize> {
         let (plot, name) = match name.split_once('.') {
             Some((prefix, rest)) if prefix.eq_ignore_ascii_case("const") => (Some(None), rest),
-            Some((prefix, rest)) => match self.dataset(prefix) {
-                Some(dataset) => (Some(Some(dataset.name.as_str())), rest),
+            Some((prefix, rest)) => match self
+                .dataset(prefix)
+                .map(|dataset| dataset.name.as_str())
+                .or_else(|| self.vectors.plot(prefix))
+            {
+                Some(plot) => (Some(Some(plot)), rest),
                 None => (None, name),
             },
             None => (None, name),
         };
-        let plot = plot.unwrap_or_else(|| self.current_dataset().map(|d| d.name.as_str()));
+        let plot = plot.unwrap_or_else(|| self.current_plot());
         let find = |plot: Option<&str>| {
             self.vectors.vectors.iter().position(|vector| {
                 vector.plot.as_deref() == plot && vector.name.eq_ignore_ascii_case(name)
@@ -173,16 +232,71 @@ impl ControlCircuit {
         }
         match index {
             Some(index) => self.vectors.vectors[index].value = value,
-            None => {
-                let plot = self.current_dataset().map(|dataset| dataset.name.clone());
-                self.vectors.vectors.push(UserVector {
-                    name: name.to_owned(),
-                    plot,
-                    value,
-                });
-            }
+            None => self.push_vector(name, value),
         }
         Ok(())
+    }
+
+    /// `compose`: replace the vector of this name in the current plot only
+    /// (com_compose.c:83 vec_remove), or add one there.
+    pub(in crate::engine::control) fn compose_vector(
+        &mut self,
+        name: &str,
+        value: VectorValue,
+        line: usize,
+    ) -> Result<(), ControlError> {
+        let plot = self.current_plot().map(str::to_owned);
+        if let Some(index) = self
+            .vectors
+            .vectors
+            .iter()
+            .position(|vector| vector.plot == plot && vector.name.eq_ignore_ascii_case(name))
+        {
+            self.vectors.vectors.remove(index);
+        }
+        let requested = self
+            .retained_values
+            .saturating_add(self.vectors.values())
+            .saturating_add(value.samples.len().saturating_mul(2));
+        if requested > self.value_limit {
+            return Err(ControlError::new(
+                line,
+                ControlErrorKind::ResourceLimit,
+                format!("result values limit {} exceeded", self.value_limit),
+            ));
+        }
+        self.push_vector(name, value);
+        Ok(())
+    }
+
+    /// Add a vector to the current plot. A user plot's first vector is its
+    /// scale (frontend/vectors.c:921 vec_new).
+    fn push_vector(&mut self, name: &str, value: VectorValue) {
+        let plot = self.current_plot().map(str::to_owned);
+        if let Some(index) = self.vectors.current
+            && self.vectors.plots[index].scale.is_none()
+        {
+            self.vectors.plots[index].scale = Some(name.to_owned());
+        }
+        self.vectors.vectors.push(UserVector {
+            name: name.to_owned(),
+            plot,
+            value,
+        });
+    }
+
+    /// The scale of the current user plot, when it has `length` elements.
+    fn user_plot_scale(&self, length: usize) -> Option<&UserVector> {
+        let plot = &self.vectors.plots[self.vectors.current?];
+        let scale = plot.scale.as_deref()?;
+        self.vectors
+            .vectors
+            .iter()
+            .find(|vector| {
+                vector.plot.as_deref() == Some(plot.name.as_str())
+                    && vector.name.eq_ignore_ascii_case(scale)
+            })
+            .filter(|vector| vector.value.samples.len() == length)
     }
 
     /// A scalar `let` of a name drops the vector it would otherwise leave
@@ -436,7 +550,7 @@ impl ControlCircuit {
         let dataset = value
             .scale
             .clone()
-            .or_else(|| self.current_dataset().map(|dataset| dataset.name.clone()))
+            .or_else(|| self.current_plot().map(str::to_owned))
             .unwrap_or_else(|| "const".into());
         let x = match x {
             Some((expression, label)) => {
@@ -488,15 +602,25 @@ impl ControlCircuit {
                         voltage_sources: Vec::new(),
                     }
                 }
-                None => ControlVector {
-                    expression: "index".into(),
-                    dataset: dataset.clone(),
-                    unit: SignalUnit::Dimensionless,
-                    samples: (0..value.samples.len())
-                        .map(|index| ComplexValue::from(index as Value))
-                        .collect(),
-                    current_sources: Vec::new(),
-                    voltage_sources: Vec::new(),
+                None => match self.user_plot_scale(value.samples.len()) {
+                    Some(scale) => ControlVector {
+                        expression: scale.name.clone(),
+                        dataset: dataset.clone(),
+                        unit: scale.value.unit.clone(),
+                        samples: scale.value.samples.clone(),
+                        current_sources: Vec::new(),
+                        voltage_sources: Vec::new(),
+                    },
+                    None => ControlVector {
+                        expression: "index".into(),
+                        dataset: dataset.clone(),
+                        unit: SignalUnit::Dimensionless,
+                        samples: (0..value.samples.len())
+                            .map(|index| ComplexValue::from(index as Value))
+                            .collect(),
+                        current_sources: Vec::new(),
+                        voltage_sources: Vec::new(),
+                    },
                 },
             },
         };
