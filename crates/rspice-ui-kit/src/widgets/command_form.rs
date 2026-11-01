@@ -861,7 +861,13 @@ impl<'u> FormRows<'u> {
     /// entry and start at one x each, left-aligned; a table wider than the
     /// form shortens its longest entries from the middle. `rows` holds one
     /// entry per column.
+    ///
+    /// Its lines are read, not pressed, so its words meet the body's edges as
+    /// a field's frame does: as the first row it gives up the air over its
+    /// headings, and it holds back the air under its last line's words, which
+    /// the gap to a next row gives back.
     pub fn table(&mut self, columns: &[TableColumn<'_>], rows: &[Vec<String>]) {
+        let first = !self.started;
         if self.started {
             self.gap(ROW_GAP);
         }
@@ -903,9 +909,59 @@ impl<'u> FormRows<'u> {
                 *column *= scale;
             }
         }
-        let paint_line = |ui: &mut Ui, cells: &[&str], header: bool| {
-            let (rect, response) =
-                ui.allocate_exact_size(vec2(width, line_h), egui::Sense::hover());
+        // The air a line holds over or under its words' ink, set centred.
+        let air = |ui: &Ui, cells: &[&str], fonts: &dyn Fn(usize) -> egui::FontId, under: bool| {
+            cells
+                .iter()
+                .enumerate()
+                .filter(|(_, cell)| !cell.trim().is_empty())
+                .map(|(index, cell)| {
+                    let galley = ui.painter().layout_no_wrap(
+                        (*cell).to_owned(),
+                        fonts(index),
+                        Color32::PLACEHOLDER,
+                    );
+                    let half = (line_h - galley.size().y) * 0.5;
+                    if under {
+                        half + galley.size().y - galley.mesh_bounds.bottom()
+                    } else {
+                        half + galley.mesh_bounds.top()
+                    }
+                })
+                .fold(f32::INFINITY, f32::min)
+        };
+        let edge = |air: f32| {
+            if air.is_finite() {
+                air.floor().max(0.0)
+            } else {
+                0.0
+            }
+        };
+        let headers = columns
+            .iter()
+            .map(|column| column.header)
+            .collect::<Vec<_>>();
+        let top = if first {
+            edge(air(self.ui, &headers, &|_| header_font.clone(), false))
+        } else {
+            0.0
+        };
+        // The headings' rule is ink at their line's foot, so a table of no
+        // rows keeps that line whole.
+        let bottom = rows.last().map_or(0.0, |row| {
+            let cells = row.iter().map(String::as_str).collect::<Vec<_>>();
+            edge(air(
+                self.ui,
+                &cells,
+                &|index| cell_font(&columns[index]),
+                true,
+            ))
+        });
+        let paint_line = |ui: &mut Ui, cells: &[&str], header: bool, top: f32, bottom: f32| {
+            let (span, response) =
+                ui.allocate_exact_size(vec2(width, line_h - top - bottom), egui::Sense::hover());
+            let rect =
+                Rect::from_min_size(pos2(span.left(), span.top() - top), vec2(width, line_h));
             let mut x = rect.left();
             for (index, (column, text)) in columns.iter().zip(cells).enumerate() {
                 let font = if header {
@@ -949,15 +1005,13 @@ impl<'u> FormRows<'u> {
                 egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), &spoken)
             });
         };
-        let headers = columns
-            .iter()
-            .map(|column| column.header)
-            .collect::<Vec<_>>();
-        paint_line(self.ui, &headers, true);
-        for row in rows {
+        paint_line(self.ui, &headers, true, top, 0.0);
+        for (index, row) in rows.iter().enumerate() {
             let cells = row.iter().map(String::as_str).collect::<Vec<_>>();
-            paint_line(self.ui, &cells, false);
+            let under = if index + 1 == rows.len() { bottom } else { 0.0 };
+            paint_line(self.ui, &cells, false, 0.0, under);
         }
+        self.owed = bottom;
     }
 }
 
@@ -1691,6 +1745,11 @@ mod tests {
     /// the footer's: the air a reader sees over the first row and under the
     /// last.
     fn body_air(pass: impl FnMut(&Context)) -> (f32, f32) {
+        body_air_at(None, pass)
+    }
+
+    /// [`body_air`] under a finger's metrics when `touch` names a target.
+    fn body_air_at(touch: Option<f32>, pass: impl FnMut(&Context)) -> (f32, f32) {
         fn walk(shape: &egui::Shape, into: &mut Vec<(Rect, bool)>) {
             match shape {
                 egui::Shape::Vec(shapes) => {
@@ -1723,6 +1782,7 @@ mod tests {
         let screen = egui::vec2(1024.0, 640.0);
         let ctx = Context::default();
         crate::Theme::default().apply(&ctx);
+        crate::Theme::default().apply_responsive_metrics_with_target(&ctx, touch);
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
         let input = || egui::RawInput {
             screen_rect: Some(Rect::from_min_size(egui::Pos2::ZERO, screen)),
@@ -1828,6 +1888,57 @@ mod tests {
                 (over - under).abs() <= 1.0,
                 "check columns first {checks_first}: {over} over the first row, {under} under the last"
             );
+        }
+    }
+
+    /// A table that ends a form, as Replace instance's does, leaves the air
+    /// under its last line's words that a field leaves under its frame, under
+    /// a pointer and under a finger; one that starts a form has the air over
+    /// its headings that a field has over its frame.
+    #[test]
+    fn a_table_meets_the_body_edges_as_a_field_does() {
+        let columns = [
+            TableColumn {
+                header: "Name",
+                mono: true,
+            },
+            TableColumn {
+                header: "Kind",
+                mono: false,
+            },
+            TableColumn {
+                header: "Replacement",
+                mono: false,
+            },
+        ];
+        let rows = [
+            vec!["+".to_owned(), "Pin".to_owned(), "Carried".to_owned()],
+            vec!["-".to_owned(), "Pin".to_owned(), "Carried".to_owned()],
+        ];
+        for touch in [None, Some(44.0)] {
+            for table_first in [false, true] {
+                let (over, under) = body_air_at(touch, |ctx| {
+                    let mut name = String::from("R1");
+                    let _ =
+                        CommandForm::new("Replace instance", "Replace")
+                            .wide()
+                            .show(ctx, |form| {
+                                if table_first {
+                                    form.table(&columns, &rows);
+                                }
+                                let id = Id::new("command-form.table-air.name");
+                                let field = form.text("Name", id, &mut name, "");
+                                if !table_first {
+                                    form.table(&columns, &rows);
+                                }
+                                Some(field.id)
+                            });
+                });
+                assert!(
+                    (over - under).abs() <= 1.0,
+                    "touch {touch:?}, table first {table_first}: {over} over, {under} under"
+                );
+            }
         }
     }
 
