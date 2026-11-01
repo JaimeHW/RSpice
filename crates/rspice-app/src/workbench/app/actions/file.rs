@@ -284,15 +284,22 @@ impl RSpiceApp {
         action: ConfirmationAction,
         path: Option<std::path::PathBuf>,
         recent_kind: Option<crate::services::recent_files::RecentKind>,
-        _example: Option<String>,
+        example: Option<String>,
         open_project: impl FnOnce(&mut crate::workbench::app_state::AppState) -> bool,
     ) {
         match action {
-            ConfirmationAction::ProjectNew => {
+            ConfirmationAction::ProjectNew => match example {
+                // An example opens as a new project the reader then saves.
+                Some(example) => {
+                    crate::workbench::tools::examples_browser::open_example(
+                        &mut self.state,
+                        &example,
+                    );
+                }
                 // The confirmation resolved what happens to the *current*
                 // project; the new one still has to be named before it exists.
-                crate::workbench::app::open_new_project_dialog(&mut self.state);
-            }
+                None => crate::workbench::app::open_new_project_dialog(&mut self.state),
+            },
             ConfirmationAction::ProjectOpen => {
                 let opened = open_project(&mut self.state);
                 #[cfg(target_arch = "wasm32")]

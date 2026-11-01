@@ -5,8 +5,8 @@
 //! Opening one replaces the session with a new project named after it, draws
 //! the circuit as its top cell, and saves it where the reader says: a file
 //! they choose on the desktop, this browser's storage on the web. While the
-//! open project has unsaved changes it refuses, and says so, rather than
-//! replace them.
+//! open project has unsaved changes, Open asks to save them first, as New
+//! project does.
 
 use egui::{Context, Sense, vec2};
 
@@ -14,14 +14,16 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 use crate::workbench::app_state::AppState;
+use crate::workbench::framework::feature::ModelsPort;
 use crate::workbench::workflows::project_workflow::{NewProjectParams, save_project_as};
 use rspice_app_state::workbench::examples::{EXAMPLES, Example, load_example};
 
 /// The name column every row shares.
 const NAME_COLUMN: f32 = 220.0;
 /// How far a row's highlight reaches past its words on either side: the
-/// words keep the dialog's left edge, and the highlight stands proud of it.
-const HIGHLIGHT_BLEED: f32 = 6.0;
+/// words keep the dialog's left edge, and the highlight runs out to the
+/// frame, as a table row's fill does.
+const HIGHLIGHT_BLEED: f32 = crate::ui::widgets::DIALOG_BODY_INSET;
 
 /// Replace the session with a new project holding `example`, named after it.
 ///
@@ -37,22 +39,44 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
     Ok(())
 }
 
-/// Why Open is refused, if it is.
+/// Open `name` as a new project, then ask where to save it.
+pub(crate) fn open_example(state: &mut AppState, name: &str) {
+    if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
+        && create_example_project(state, example).is_ok()
+    {
+        save_project_as(state);
+    }
+}
+
+/// Open `example` in place of the open project, asking first about any
+/// changes it has, as New project does.
+fn request_example(state: &mut AppState, example: Example) {
+    let unsaved = state.platform.project_lifecycle.is_open()
+        && (crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
+            || ModelsPort::model_editor_has_unsaved_changes(&*state.models));
+    if unsaved {
+        state
+            .workbench
+            .confirmation_dialog
+            .show_example(example.name);
+    } else {
+        open_example(state, example.name);
+    }
+}
+
+/// Why Open is refused, if it is: configuration edits not applied, which
+/// no save prompt resolves.
 fn open_refusal(state: &AppState) -> Option<&'static str> {
     if !state.platform.project_lifecycle.is_open() {
         return None;
     }
-    if state
+    state
         .project
         .configuration
         .is_dirty(&state.model.workspace.content.configuration_sets)
-    {
-        return Some(
+        .then_some(
             "Apply or revert the configuration edits first: an example replaces the project",
-        );
-    }
-    crate::workbench::lifecycle::project_lifecycle::has_unsaved_changes(state)
-        .then_some("Save or close the open project first: an example replaces it")
+        )
 }
 
 /// Where a row of `rect` paints: its highlight, and the x its name starts
@@ -80,9 +104,9 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
         let painter = ui.painter();
         let (highlight, name_left) = row_geometry(rect);
         if selected {
-            painter.rect_filled(highlight, t.radius, t.color.bg_active);
+            painter.rect_filled(highlight, 0.0, t.color.bg_active);
         } else if response.hovered() {
-            painter.rect_filled(highlight, t.radius, t.color.bg_hover);
+            painter.rect_filled(highlight, 0.0, t.color.bg_hover);
         }
         painter.text(
             egui::pos2(name_left, rect.center().y),
@@ -166,9 +190,7 @@ pub(crate) fn show(ctx: &Context, state: &mut AppState) {
     }
     if open {
         state.project.examples_selection = None;
-        if create_example_project(state, EXAMPLES[selected]).is_ok() {
-            save_project_as(state);
-        }
+        request_example(state, EXAMPLES[selected]);
     }
 }
 
@@ -307,14 +329,24 @@ mod tests {
         assert_eq!(highlight.y_range(), rect.y_range());
     }
 
-    /// Opening an example refuses while the open project has unsaved
-    /// changes, and says why, instead of replacing them.
+    /// Open stays offered while the open project has unsaved changes, and
+    /// asks about them, as New project does, instead of replacing them.
     #[test]
-    fn an_example_does_not_replace_unsaved_work() {
+    fn an_example_asks_to_save_unsaved_work_before_replacing_it() {
         let mut state = AppState::default();
         state.open_project_session();
         load_example("Voltage Divider", &mut state.model.schematic);
         state.sync_active_schematic_to_workspace();
-        assert!(open_refusal(&state).is_some());
+        assert!(open_refusal(&state).is_none());
+        let components = state.model.schematic.document().components.len();
+        request_example(&mut state, EXAMPLES[0]);
+        let confirmation = &state.workbench.confirmation_dialog;
+        assert!(confirmation.visible);
+        assert_eq!(
+            confirmation.pending_action,
+            Some(crate::workbench::app::ConfirmationAction::ProjectNew)
+        );
+        assert_eq!(confirmation.pending_example.as_deref(), Some(EXAMPLES[0].name));
+        assert_eq!(state.model.schematic.document().components.len(), components);
     }
 }

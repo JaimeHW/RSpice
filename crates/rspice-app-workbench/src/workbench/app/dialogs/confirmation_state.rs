@@ -131,6 +131,13 @@ impl ConfirmationDialogState {
         self.pending_example = None;
     }
 
+    /// Ask about the open project's changes before `example` opens as a new
+    /// project in its place: New project's question, carrying the example.
+    pub fn show_example(&mut self, example: &str) {
+        self.show(ConfirmationAction::ProjectNew);
+        self.pending_example = Some(example.to_owned());
+    }
+
     /// Close the dialog and clear pending action
     pub fn close(&mut self) {
         self.visible = false;
