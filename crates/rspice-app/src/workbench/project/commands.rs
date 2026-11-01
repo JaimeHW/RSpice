@@ -365,6 +365,10 @@ pub(crate) enum ProjectRequest {
     OpenCreateHierarchy,
     /// Save the validated revision the open Check and save dialog reviewed.
     CommitCheckAndSave,
+    /// Save a copy of the project that keeps its current technology, which
+    /// the technology attachment dialog offers in place of a migration, and
+    /// log it once it is saved.
+    SaveMigrationCopy,
     /// Go on with leaving the project once the configuration edits held
     /// for it are settled: ask about the project's unsaved work, or carry
     /// out `action`, with the recent project an Open recent asked for.

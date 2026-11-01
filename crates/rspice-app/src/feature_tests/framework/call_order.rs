@@ -27,6 +27,7 @@ const SERIALIZATION: &str = include_str!("../../workbench/app_state/session/seri
 const STATUS_ORDER: &str = include_str!("../../workbench/shell_host/status_order.rs");
 const PROJECT_TRANSACTIONS: &str = include_str!("../../workbench/session/project_transactions.rs");
 const LIBRARY_SURFACE: &str = include_str!("../../workbench/surfaces/project/library.rs");
+const TECHNOLOGY_DIALOG: &str = include_str!("../../workbench/surfaces/project/technology.rs");
 
 /// One step of a frame function: its number in the frame-order census, and
 /// the calls that make it up, in the order they run. A call is matched with
@@ -765,7 +766,7 @@ const PROJECT_CONTRIBUTIONS: &[Step] = &[
            project::page(ui, app);\
            app.after_contribution();\
            });",
-            "project::show_technology_attachment_dialog(&ctx, app);\
+            "project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));\
            }",
         ],
     ),
@@ -1822,6 +1823,63 @@ fn the_check_and_save_dialog_draws_in_the_project_context_and_what_it_raises_is_
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
         CHECK_AND_SAVE_COMMITTED,
+    );
+}
+
+/// What the technology attachment dialog's migration copy hands the shell,
+/// carried out as the dialog once did it: the copy saved as a new project,
+/// then its line in the log once it is saved.
+const MIGRATION_COPY_SAVED: &[Step] = &[(
+    "SaveMigrationCopy",
+    &[
+        "ProjectRequest::SaveMigrationCopy => {",
+        "let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);",
+        "if saved {",
+        "app.state.record(",
+        "\"Saved a migration copy that keeps the current technology; no technology was attached.\",",
+    ],
+)];
+
+/// The technology attachment dialog draws in the project feature's context
+/// once the open project's page has drawn. Its migration copy closes the
+/// dialog, hands the save to the shell and returns, and the workspace's
+/// closing drain answers it straight after.
+#[test]
+fn the_technology_dialogs_migration_copy_is_answered_as_the_dialog_returns() {
+    let dialog = without_whitespace(&body(
+        TECHNOLOGY_DIALOG,
+        "fn show_technology_attachment_dialog(",
+    ));
+    assert!(
+        dialog.contains(&without_whitespace(
+            "cx.state.technology_attachment.close();
+             cx.wb.outbox.push(ProjectRequest::SaveMigrationCopy);
+             return;"
+        )),
+        "the migration copy closes the dialog, then hands the save over and returns"
+    );
+    assert_eq!(
+        dialog.matches("outbox.push(").count(),
+        1,
+        "the dialog hands the shell one request"
+    );
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        &[(
+            "technology dialog",
+            &[
+                "project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));",
+                "app.after_contribution();",
+                "Point::SplitResults =>",
+            ],
+        )],
+    );
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        MIGRATION_COPY_SAVED,
     );
 }
 

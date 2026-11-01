@@ -118,7 +118,7 @@ impl Host for RSpiceApp {
                     Workspace::Project => {
                         let ctx = ui.ctx().clone();
                         #[cfg(target_arch = "wasm32")]
-                        project::poll_browser_completions(&ctx, app);
+                        project::poll_browser_completions(&ctx, &mut features::cx(app));
                         if app.state.platform.project_lifecycle.is_open() {
                             let fill = crate::ui::tokens::Tokens::get(&ctx).color.bg_app;
                             egui::Frame::new().fill(fill).show(ui, |ui| {
@@ -137,7 +137,7 @@ impl Host for RSpiceApp {
                         } else {
                             project::show_landing(ui, app);
                         }
-                        project::show_technology_attachment_dialog(&ctx, app);
+                        project::show_technology_attachment_dialog(&ctx, &mut features::cx(app));
                     }
                     Workspace::Design => design::show(ui, app),
                     Workspace::Simulate => simulate::show(ui, app),

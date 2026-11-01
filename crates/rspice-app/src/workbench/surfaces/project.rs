@@ -137,9 +137,12 @@ thread_local! {
 /// Take what the browser finished writing or reading for this workspace
 /// before it draws.
 #[cfg(target_arch = "wasm32")]
-pub(in crate::workbench) fn poll_browser_completions(ctx: &Context, app: &mut RSpiceApp) {
-    poll_browser_technology_checkpoint(ctx, app);
-    poll_browser_recovery_completions(ctx, app);
+pub(in crate::workbench) fn poll_browser_completions(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+) {
+    poll_browser_technology_checkpoint(ctx, cx);
+    poll_browser_recovery_completions(ctx, cx);
 }
 
 /// The workspace with no project behind it, which it is whenever a project

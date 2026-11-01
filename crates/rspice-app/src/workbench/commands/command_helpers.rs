@@ -368,6 +368,17 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
             };
             Command::OpenWorkspace(workspace).execute(app);
         }
+        ProjectRequest::SaveMigrationCopy => {
+            let saved =
+                crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
+            if saved {
+                app.state.record(
+                    LogSeverity::Info,
+                    LogSource::Studio,
+                    "Saved a migration copy that keeps the current technology; no technology was attached.",
+                );
+            }
+        }
         ProjectRequest::OpenRootAndCheck(root) => {
             app.state.open_workspace_view(root);
             Command::OpenWorkspace(Workspace::Design).execute(app);

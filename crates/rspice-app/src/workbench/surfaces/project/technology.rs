@@ -9,6 +9,7 @@
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
 use crate::workbench::app_state::Model;
+use crate::workbench::project::commands::ProjectRequest;
 
 #[derive(Debug, Clone)]
 pub(super) struct TechnologyCandidate {
@@ -185,23 +186,24 @@ pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>)
         .open(selected_library, selected_signed_package);
 }
 
-pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app: &mut RSpiceApp) {
-    if !app.state.project.technology_attachment.open {
+pub(in crate::workbench) fn show_technology_attachment_dialog(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+) {
+    if !cx.state.technology_attachment.open {
         return;
     }
 
-    let catalog = technology_candidates(&app.state.model);
+    let catalog = technology_candidates(cx.model);
     let candidates = &catalog.candidates;
-    let packages = app
-        .state
+    let packages = cx
         .model
         .pdk_config
         .technology_registry
         .validated_packages()
         .to_vec();
-    let selected_is_current = app
+    let selected_is_current = cx
         .state
-        .project
         .technology_attachment
         .selected_library
         .as_deref()
@@ -211,13 +213,12 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                 .any(|candidate| candidate.binding.model_library() == selected)
         });
     if !selected_is_current {
-        app.state.project.technology_attachment.selected_library = candidates
+        cx.state.technology_attachment.selected_library = candidates
             .first()
             .map(|candidate| candidate.binding.model_library().to_owned());
     }
-    let selected_package_is_current = app
+    let selected_package_is_current = cx
         .state
-        .project
         .technology_attachment
         .selected_signed_package
         .as_deref()
@@ -227,11 +228,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                 .any(|package| signed_package_key(package) == selected)
         });
     if !selected_package_is_current {
-        app.state
-            .project
-            .technology_attachment
-            .selected_signed_package = app
-            .state
+        cx.state.technology_attachment.selected_signed_package = cx
             .model
             .pdk_config
             .technology_registry
@@ -245,12 +242,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
             .map(signed_package_key);
     }
 
-    let selected_name = app
-        .state
-        .project
-        .technology_attachment
-        .selected_library
-        .clone();
+    let selected_name = cx.state.technology_attachment.selected_library.clone();
     let selected_index = selected_name.as_deref().and_then(|name| {
         candidates
             .iter()
@@ -264,9 +256,8 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         .and_then(|index| options.get(index))
         .map(String::as_str)
         .unwrap_or("No model library can be attached");
-    let selected_package_key = app
+    let selected_package_key = cx
         .state
-        .project
         .technology_attachment
         .selected_signed_package
         .clone();
@@ -295,8 +286,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                 .clone()
                 .with_signed_package_metadata(package.metadata())
                 .and_then(|binding| {
-                    app.state
-                        .model
+                    cx.model
                         .pdk_config
                         .technology_registry
                         .validate_project_binding(&binding)?;
@@ -311,24 +301,23 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         .or(package_runtime_error.clone());
     let selected_binding = selected_binding.ok().flatten();
     let selected_package = selected_package_index.and_then(|index| packages.get(index));
-    let migration_preview = app
-        .state
-        .model
-        .project_signed_technology_package()
-        .and_then(|baseline| match (baseline, selected_package) {
-            (Some(baseline), Some(candidate))
-                if baseline.binding() != candidate.binding()
-                    || baseline.archive_digest() != candidate.archive_digest() =>
-            {
-                crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
-                    baseline.metadata(),
-                    candidate.metadata(),
-                )
-                .map(Some)
-                .map_err(|error| error.to_string())
-            }
-            _ => Ok(None),
-        });
+    let migration_preview =
+        cx.model
+            .project_signed_technology_package()
+            .and_then(|baseline| match (baseline, selected_package) {
+                (Some(baseline), Some(candidate))
+                    if baseline.binding() != candidate.binding()
+                        || baseline.archive_digest() != candidate.archive_digest() =>
+                {
+                    crate::state::pdk_config::PdkTechnologyRevisionDiff::between(
+                        baseline.metadata(),
+                        candidate.metadata(),
+                    )
+                    .map(Some)
+                    .map_err(|error| error.to_string())
+                }
+                _ => Ok(None),
+            });
     let migration_evidence = migration_preview
         .as_ref()
         .map_err(Clone::clone)
@@ -373,35 +362,14 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         .and_then(Option::as_ref)
         .is_some();
     let migration_ready = migration_gate_error.is_none()
-        && (!migration_requires_review
-            || app.state.project.technology_attachment.migration_reviewed);
-    let validation_error = app
-        .state
-        .project
-        .technology_attachment
-        .validation_error
-        .clone();
-    let checkpoint_pending = technology_checkpoint_pending(&app.state.project);
-    let authority_ready =
-        technology_authority_fields_ready(&app.state.project.technology_attachment);
+        && (!migration_requires_review || cx.state.technology_attachment.migration_reviewed);
+    let validation_error = cx.state.technology_attachment.validation_error.clone();
+    let checkpoint_pending = technology_checkpoint_pending(cx.state);
+    let authority_ready = technology_authority_fields_ready(&cx.state.technology_attachment);
     let selected_is_attached = selected_binding.as_ref().is_some_and(|binding| {
         let label = binding.display_label();
-        app.state
-            .model
-            .workspace
-            .content
-            .project
-            .technology_binding()
-            == Some(binding)
-            && app
-                .state
-                .model
-                .workspace
-                .content
-                .project
-                .technology
-                .as_deref()
-                == Some(label.as_str())
+        cx.model.workspace.content.project.technology_binding() == Some(binding)
+            && cx.model.workspace.content.project.technology.as_deref() == Some(label.as_str())
     });
     let primary = technology_primary_state(
         selected_binding.is_some() && authority_ready && migration_ready,
@@ -428,9 +396,9 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
             &options,
             ui.available_width(),
         ) {
-            app.state.project.technology_attachment.selected_library =
+            cx.state.technology_attachment.selected_library =
                 Some(candidates[index].binding.model_library().to_owned());
-            app.state.project.technology_attachment.validation_error = None;
+            cx.state.technology_attachment.validation_error = None;
         }
 
         ui.add_space(10.0);
@@ -443,12 +411,11 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
             &package_options,
             ui.available_width(),
         ) {
-            app.state
-                .project
+            cx.state
                 .technology_attachment
                 .selected_signed_package = Some(signed_package_key(&packages[index]));
-            app.state.project.technology_attachment.migration_reviewed = false;
-            app.state.project.technology_attachment.validation_error = None;
+            cx.state.technology_attachment.migration_reviewed = false;
+            cx.state.technology_attachment.validation_error = None;
         }
 
         ui.add_space(10.0);
@@ -456,7 +423,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         ui.add_enabled(
             !checkpoint_pending,
             egui::TextEdit::singleline(
-                &mut app.state.project.technology_attachment.actor_id,
+                &mut cx.state.technology_attachment.actor_id,
             )
             .hint_text("Actor ID")
             .char_limit(240)
@@ -465,7 +432,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         ui.add_enabled(
             !checkpoint_pending,
             egui::TextEdit::singleline(
-                &mut app.state.project.technology_attachment.authority_id,
+                &mut cx.state.technology_attachment.authority_id,
             )
             .hint_text("Authority ID")
             .char_limit(240)
@@ -473,7 +440,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         );
         ui.add_enabled(
             !checkpoint_pending,
-            egui::TextEdit::multiline(&mut app.state.project.technology_attachment.reason)
+            egui::TextEdit::multiline(&mut cx.state.technology_attachment.reason)
                 .hint_text("Change reason")
                 .char_limit(1_024)
                 .desired_rows(2)
@@ -614,7 +581,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                     ui.add_enabled(
                         !checkpoint_pending,
                         egui::Checkbox::new(
-                            &mut app.state.project.technology_attachment.migration_reviewed,
+                            &mut cx.state.technology_attachment.migration_reviewed,
                             "I reviewed the signed revision diff and approve this non-breaking replacement",
                         ),
                     );
@@ -679,15 +646,8 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
     });
 
     if create_migration_copy {
-        app.state.project.technology_attachment.close();
-        let saved = crate::workbench::workflows::project_workflow::save_project_as(&mut app.state);
-        if saved {
-            app.state.record(
-                LogSeverity::Info,
-                LogSource::Studio,
-                "Saved a migration copy that keeps the current technology; no technology was attached.",
-            );
-        }
+        cx.state.technology_attachment.close();
+        cx.wb.outbox.push(ProjectRequest::SaveMigrationCopy);
         return;
     }
 
@@ -700,11 +660,11 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                         .to_owned()
                 })
                 .and_then(|binding| {
-                    technology_change_authority(&app.state.project.technology_attachment).and_then(
+                    technology_change_authority(&cx.state.technology_attachment).and_then(
                         |authority| {
                             attach_technology_binding(
                                 ctx,
-                                app,
+                                cx,
                                 binding,
                                 authority,
                                 migration_evidence.clone().ok().flatten(),
@@ -714,22 +674,22 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
                 });
             match result {
                 Ok(receipt) => {
-                    if technology_checkpoint_pending(&app.state.project) {
-                        app.state.prompt(receipt);
+                    if technology_checkpoint_pending(cx.state) {
+                        cx.wb.prompt(receipt);
                         return;
                     }
-                    app.state.project.technology_attachment.close();
-                    app.state
+                    cx.state.technology_attachment.close();
+                    cx.model
                         .record(LogSeverity::Info, LogSource::Studio, receipt);
                 }
                 Err(error) => {
-                    app.state.project.technology_attachment.validation_error = Some(error);
+                    cx.state.technology_attachment.validation_error = Some(error);
                 }
             }
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            if !technology_checkpoint_pending(&app.state.project) {
-                app.state.project.technology_attachment.close();
+            if !technology_checkpoint_pending(cx.state) {
+                cx.state.technology_attachment.close();
             }
         }
         DialogChoice::Secondary | DialogChoice::None => {}
@@ -738,71 +698,57 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
 
 pub(super) fn attach_technology_binding(
     ctx: &Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
     migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<String, String> {
     #[cfg(not(target_arch = "wasm32"))]
     let _ = ctx;
-    verify_pinned_technology_contract(&binding, app)?;
-    validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
+    verify_pinned_technology_contract(&binding, cx.model)?;
+    validate_migration_evidence_for_binding(cx.model, &binding, migration_evidence.as_ref())?;
     let label = binding.display_label();
-    if app
-        .state
-        .model
-        .workspace
-        .content
-        .project
-        .technology_binding()
-        == Some(&binding)
-        && app
-            .state
-            .model
-            .workspace
-            .content
-            .project
-            .technology
-            .as_deref()
-            == Some(label.as_str())
+    if cx.model.workspace.content.project.technology_binding() == Some(&binding)
+        && cx.model.workspace.content.project.technology.as_deref() == Some(label.as_str())
     {
         return Ok(format!(
             "{} is already attached at project revision {}; nothing was changed.",
             label,
-            app.state.model.workspace.content.project.revision().get()
+            cx.model.workspace.content.project.revision().get()
         ));
     }
 
     #[cfg(not(target_arch = "wasm32"))]
     {
         let checkpoint = crate::workbench::lifecycle::project_checkpoint::create(
-            &mut app.state,
+            &mut crate::workbench::project::lifecycle_parts(cx.model, cx.platform, cx.wb, &cx.peers),
             crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         )?;
-        commit_technology_after_checkpoint(app, binding, authority, migration_evidence, &checkpoint)
+        commit_technology_after_checkpoint(cx, binding, authority, migration_evidence, &checkpoint)
     }
 
     #[cfg(target_arch = "wasm32")]
     {
-        start_browser_technology_checkpoint(ctx, app, binding, authority, migration_evidence)?;
+        start_browser_technology_checkpoint(ctx, cx, binding, authority, migration_evidence)?;
         Ok("Writing and verifying the full-project recovery checkpoint…".to_owned())
     }
 }
 
 pub(super) fn commit_technology_after_checkpoint(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
     migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
     checkpoint: &crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointSummary,
 ) -> Result<String, String> {
-    verify_pinned_technology_contract(&binding, app)?;
-    validate_migration_evidence_for_binding(app, &binding, migration_evidence.as_ref())?;
-    let previous_revision = app.state.model.workspace.content.project.revision();
+    verify_pinned_technology_contract(&binding, cx.model)?;
+    validate_migration_evidence_for_binding(cx.model, &binding, migration_evidence.as_ref())?;
+    let previous_revision = cx.model.workspace.content.project.revision();
     if checkpoint.project_revision() != previous_revision.get()
-        || checkpoint.project_name() != app.state.model.workspace.content.project.name()
+        || checkpoint.project_name() != cx.model.workspace.content.project.name()
         || !crate::workbench::lifecycle::project_checkpoint::matches_current_state(
-            checkpoint, &app.state,
+            checkpoint,
+            &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
         )?
     {
         return Err(
@@ -826,8 +772,7 @@ pub(super) fn commit_technology_after_checkpoint(
             .with_migration_evidence(evidence)
             .map_err(|error| format!("The reviewed technology migration is invalid: {error}"))?;
     }
-    let (revision, audit_receipt) = app
-        .state
+    let (revision, audit_receipt) = cx
         .model
         .workspace
         .content
@@ -836,7 +781,7 @@ pub(super) fn commit_technology_after_checkpoint(
     if revision == previous_revision {
         return Err("Technology attachment unexpectedly produced no project revision".to_owned());
     }
-    app.state.project.project_checkpoint_recovery.invalidate();
+    cx.state.project_checkpoint_recovery.invalidate();
     Ok(format!(
         "Attached {} at project revision {} (technology receipt #{}, {} source file{}); checkpoint {} keeps revision {}.",
         binding.display_label(),
@@ -866,21 +811,21 @@ pub(super) fn technology_checkpoint_pending(
 #[cfg(target_arch = "wasm32")]
 pub(super) fn start_browser_technology_checkpoint(
     ctx: &Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     binding: ProjectTechnologyBinding,
     authority: crate::state::ProjectTechnologyChangeAuthority,
     migration_evidence: Option<crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
-    if app.state.project.technology_attachment.checkpoint_pending {
+    if cx.state.technology_attachment.checkpoint_pending {
         return Err("A project recovery checkpoint is already being written".to_owned());
     }
-    let project_id = app.state.model.workspace.content.project.id().to_string();
-    let expected_revision = app.state.model.workspace.content.project.revision().get();
+    let project_id = cx.model.workspace.content.project.id().to_string();
+    let expected_revision = cx.model.workspace.content.project.revision().get();
     let queued_project_id = project_id.clone();
     let queued_binding = binding.clone();
     let repaint = ctx.clone();
     crate::workbench::lifecycle::project_checkpoint::start_create(
-        &app.state,
+        &crate::workbench::project::lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers),
         crate::workbench::lifecycle::project_checkpoint::ProjectCheckpointReason::TechnologyAttachment,
         move |result| {
             BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS.with(|queue| {
@@ -898,61 +843,60 @@ pub(super) fn start_browser_technology_checkpoint(
             repaint.request_repaint();
         },
     )?;
-    app.state.project.technology_attachment.checkpoint_pending = true;
-    app.state.project.technology_attachment.validation_error = None;
+    cx.state.technology_attachment.checkpoint_pending = true;
+    cx.state.technology_attachment.validation_error = None;
     Ok(())
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_browser_technology_checkpoint(_: &Context, app: &mut RSpiceApp) {
+pub(super) fn poll_browser_technology_checkpoint(_: &Context, cx: &mut Cx<'_, ProjectFeature>) {
     let completions = BROWSER_TECHNOLOGY_CHECKPOINT_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in completions {
-        if app.state.model.workspace.content.project.id().to_string() != completion.project_id
-            || app.state.model.workspace.content.project.revision().get()
-                != completion.expected_revision
+        if cx.model.workspace.content.project.id().to_string() != completion.project_id
+            || cx.model.workspace.content.project.revision().get() != completion.expected_revision
         {
-            app.state.project.technology_attachment.checkpoint_pending = false;
-            app.state.project.technology_attachment.validation_error = Some(
+            cx.state.technology_attachment.checkpoint_pending = false;
+            cx.state.technology_attachment.validation_error = Some(
                 "Project changed while its recovery checkpoint was being written; attachment was not committed"
                     .to_owned(),
             );
             continue;
         }
         let result = completion.result.and_then(|checkpoint| {
-            verify_pinned_technology_contract(&completion.binding, app)?;
+            verify_pinned_technology_contract(&completion.binding, cx.model)?;
             commit_technology_after_checkpoint(
-                app,
+                cx,
                 completion.binding,
                 completion.authority,
                 completion.migration_evidence,
                 &checkpoint,
             )
         });
-        app.state.project.technology_attachment.checkpoint_pending = false;
+        cx.state.technology_attachment.checkpoint_pending = false;
         match result {
             Ok(receipt) => {
-                app.state.project.technology_attachment.close();
-                app.state
+                cx.state.technology_attachment.close();
+                cx.model
                     .record(LogSeverity::Info, LogSource::Studio, receipt);
             }
             Err(error) => {
-                app.state.project.technology_attachment.validation_error = Some(error);
+                cx.state.technology_attachment.validation_error = Some(error);
             }
         }
     }
 }
 
 #[cfg(target_arch = "wasm32")]
-pub(super) fn poll_browser_recovery_completions(_: &Context, app: &mut RSpiceApp) {
-    let project_id = app.state.model.workspace.content.project.id().to_string();
+pub(super) fn poll_browser_recovery_completions(_: &Context, cx: &mut Cx<'_, ProjectFeature>) {
+    let project_id = cx.model.workspace.content.project.id().to_string();
     let catalog = BROWSER_RECOVERY_CATALOG_COMPLETIONS
         .with(|queue| queue.borrow_mut().drain(..).collect::<Vec<_>>());
     for completion in catalog {
         if completion.project_id != project_id {
             continue;
         }
-        let recovery = &mut app.state.project.project_checkpoint_recovery;
+        let recovery = &mut cx.state.project_checkpoint_recovery;
         recovery.loading = false;
         recovery.initialized = true;
         match completion.result {
@@ -980,14 +924,14 @@ pub(super) fn poll_browser_recovery_completions(_: &Context, app: &mut RSpiceApp
         });
         match result {
             Ok(()) => {
-                app.state.record(
+                cx.model.record(
                     LogSeverity::Info,
                     LogSource::Studio,
                     format!("Downloaded a recovery copy as {}.", completion.filename),
                 );
             }
             Err(error) => {
-                app.state
+                cx.model
                     .record(LogSeverity::Error, LogSource::Studio, error);
             }
         }
@@ -1019,11 +963,10 @@ pub(super) fn verify_pinned_model_sources(
 
 pub(super) fn verify_pinned_technology_contract(
     binding: &ProjectTechnologyBinding,
-    app: &RSpiceApp,
+    model: &Model,
 ) -> Result<(), String> {
-    verify_pinned_model_sources(binding, &app.state.model.model_library_manager)?;
-    app.state
-        .model
+    verify_pinned_model_sources(binding, &model.model_library_manager)?;
+    model
         .pdk_config
         .technology_registry
         .validate_project_binding(binding)
@@ -1031,17 +974,15 @@ pub(super) fn verify_pinned_technology_contract(
 }
 
 fn validate_migration_evidence_for_binding(
-    app: &RSpiceApp,
+    model: &Model,
     binding: &ProjectTechnologyBinding,
     evidence: Option<&crate::state::pdk_config::PdkTechnologyMigrationEvidence>,
 ) -> Result<(), String> {
-    let baseline = app.state.model.project_signed_technology_package()?;
+    let baseline = model.project_signed_technology_package()?;
     let candidate_pin = binding
         .signed_package()
         .ok_or_else(|| "The candidate binding has no signed PDK package pin.".to_owned())?;
-    let candidate = app
-        .state
-        .model
+    let candidate = model
         .pdk_config
         .technology_registry
         .validated_packages()
