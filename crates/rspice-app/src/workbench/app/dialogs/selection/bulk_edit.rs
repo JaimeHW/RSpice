@@ -2338,5 +2338,21 @@ mod tests {
                 );
             }
         }
+        // Every choice is the kit's select, named for what it picks: the
+        // raw combo boxes it replaced had no name to announce.
+        for select in [
+            "Object kinds",
+            "Hierarchy scope",
+            "Property",
+            "Unset behavior",
+            "Model section",
+        ] {
+            assert!(
+                nodes.values().any(|node| {
+                    node.role() == egui::accesskit::Role::ComboBox && node.label() == Some(select)
+                }),
+                "no select is named {select:?}"
+            );
+        }
     }
 }
