@@ -275,6 +275,10 @@ pub struct Peers<'a> {
     /// `None` in the models feature's own context, as `results` is in the
     /// results feature's.
     models: Option<&'a dyn ModelsPort>,
+    /// The cloud's sessions: whom the account names and where live peers
+    /// point. `None` in the cloud feature's own context, which holds them as
+    /// its own handles.
+    cloud_session: Option<&'a dyn CloudSessionPort>,
 }
 
 impl<'a> Peers<'a> {
@@ -295,7 +299,22 @@ impl<'a> Peers<'a> {
             simulate,
             code,
             models,
+            cloud_session: None,
         }
+    }
+
+    /// These peers with the cloud's sessions lent beside them.
+    pub fn with_cloud_session(mut self, session: &'a dyn CloudSessionPort) -> Self {
+        self.cloud_session = Some(session);
+        self
+    }
+
+    /// The cloud's sessions. The cloud feature's own context holds no such
+    /// peer, because the feature holds them as its own handles; its code
+    /// asking for one is a fault in that code.
+    pub fn cloud_session(&self) -> &'a dyn CloudSessionPort {
+        self.cloud_session
+            .expect("the cloud feature holds its own sessions, never as a peer")
     }
 
     /// What design shows. Design's own context holds no such peer, because

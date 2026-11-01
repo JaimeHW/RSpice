@@ -42,9 +42,9 @@ use rspice_app_services::workbench::workflows::export_workflow::{
 };
 
 use super::{
-    CanvasGesturePort, CloudPort, CodePort, Cx, DesignPort, Feature, FeatureCommand,
-    FeatureRegistry, HardcopyPort, LowerHandles, ModelsPort, Peers, PublicationDraft, Reads,
-    SimulatePort,
+    CanvasGesturePort, CloudPort, CloudSessionPort, CodePort, Cx, DesignPort, Feature,
+    FeatureCommand, FeatureRegistry, HardcopyPort, LiveCursor, LowerHandles, ModelsPort, Peers,
+    PublicationDraft, Reads, SimulatePort,
 };
 use crate::workbench::framework::ports::{
     CapturedViewport, DisplayedDatasetView, ModelGateFact, ResultsPeer, ResultsPort, RunEventPort,
@@ -116,6 +116,22 @@ impl CloudPort for NullPorts {
 
     fn license_holder(&self) -> Option<&str> {
         None
+    }
+}
+
+/// Signed out, with no live session: the names fall back to the license
+/// holder the cloud shows, and no peer points anywhere.
+impl CloudSessionPort for NullPorts {
+    fn review_actor(&self, cloud: &dyn CloudPort) -> String {
+        cloud.license_holder().unwrap_or_default().to_owned()
+    }
+
+    fn account_holder(&self, cloud: &dyn CloudPort) -> Option<String> {
+        cloud.license_holder().map(str::to_owned)
+    }
+
+    fn live_cursors(&self, _doc: &str) -> Vec<LiveCursor> {
+        Vec::new()
     }
 }
 
@@ -410,7 +426,8 @@ where
                 Some(&NullPorts),
                 Some(&NullPorts),
                 Some(&NullPorts),
-            ),
+            )
+            .with_cloud_session(&NullPorts),
             self.commands,
         )
     }

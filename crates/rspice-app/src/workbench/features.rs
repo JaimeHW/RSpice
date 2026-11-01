@@ -119,6 +119,18 @@ macro_rules! cloud_peer {
     };
 }
 
+/// `peers` with the cloud's sessions lent beside them for the feature whose
+/// slot is `slot`: none for the cloud feature itself, whose own handles they
+/// are.
+macro_rules! cloud_session_peer {
+    (cloud, $app:ident, $peers:expr) => {
+        $peers
+    };
+    ($slot:ident, $app:ident, $peers:expr) => {
+        $peers.with_cloud_session(&$app.cloud)
+    };
+}
+
 /// The hardcopy peer a context over `state` holds for the feature whose slot
 /// is `slot`: none for the hardcopy feature itself, whose slot it is.
 macro_rules! hardcopy_peer {
@@ -233,14 +245,18 @@ macro_rules! features {
                         &mut *state.platform,
                         &mut *state.runs,
                         handles,
-                        Peers::new(
-                            design_peer!($slot, state),
-                            cloud_peer!($slot, state),
-                            hardcopy_peer!($slot, state),
-                            results_peer!($slot, state),
-                            simulate_peer!($slot, state),
-                            code_peer!($slot, state),
-                            models_peer!($slot, state),
+                        cloud_session_peer!(
+                            $slot,
+                            app,
+                            Peers::new(
+                                design_peer!($slot, state),
+                                cloud_peer!($slot, state),
+                                hardcopy_peer!($slot, state),
+                                results_peer!($slot, state),
+                                simulate_peer!($slot, state),
+                                code_peer!($slot, state),
+                                models_peer!($slot, state),
+                            )
                         ),
                         command_registry(),
                     )
@@ -440,6 +456,30 @@ pub(super) fn commit_inspector<F: Registered>(app: &mut RSpiceApp, ctx: &egui::C
 mod tests {
     use super::*;
     use crate::workbench::commands::vocabulary::command_registry;
+    use crate::workbench::framework::feature::CloudSessionPort;
+
+    /// A feature's context lends the cloud's sessions as a peer, so what it
+    /// signs carries the name the cloud gives.
+    #[test]
+    fn a_feature_context_reads_the_cloud_sessions_as_a_peer() {
+        let mut app = RSpiceApp::test_instance();
+        let expected = app.cloud.review_actor(&*app.state.cloud);
+        let cx = cx::<DesignFeature>(&mut app);
+        assert_eq!(
+            cx.peers.cloud_session().review_actor(cx.peers.cloud()),
+            expected
+        );
+    }
+
+    /// The cloud feature holds its sessions as its own handles, never as a
+    /// peer of itself.
+    #[test]
+    #[should_panic(expected = "the cloud feature holds its own sessions, never as a peer")]
+    fn the_cloud_feature_holds_its_sessions_as_its_own() {
+        let mut app = RSpiceApp::test_instance();
+        let cx = cx::<CloudFeature>(&mut app);
+        let _ = cx.peers.cloud_session();
+    }
 
     /// The registry the shell orders commands by declares each feature
     /// command exactly as its feature does, and one feature declares it.
