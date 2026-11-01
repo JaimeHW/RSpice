@@ -22,31 +22,30 @@ use crate::state::{
     ProjectSourceLanguage, ProjectSourceOwner,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
-use crate::workbench::MessageId;
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{
-    VerilogAImportFormState, close_veriloga_import_form, request_veriloga_import_locate,
-    writable_libraries,
+    VerilogAImportFormState, VerilogAReplaceReview, VerilogAWorkbenchState,
+    close_veriloga_import_form, request_veriloga_import_locate, writable_libraries,
 };
+use crate::workbench::{MessageCatalog, MessageId};
 
 /// Where each top module of the form's file lands in its library: the module,
 /// its cell view, and whether that cell is new.
 fn planned_cells(
-    state: &AppState,
+    model: &Model,
     form: &VerilogAImportFormState,
 ) -> Vec<(DeclaredModule, CellViewRef, bool)> {
     if form.closure.modules.is_err() {
         return Vec::new();
     }
     let modules = form.chosen_modules();
-    let active = &state.model.workspace.content.active_view;
+    let active = &model.workspace.content.active_view;
     let schematic_ports = |reference: &CellViewRef| {
         if reference == active {
             return Some(
-                state
-                    .model
+                model
                     .schematic
                     .document()
                     .interface_ports()
@@ -55,8 +54,7 @@ fn planned_cells(
                     .collect(),
             );
         }
-        state
-            .model
+        model
             .workspace
             .content
             .schematic_buffers
@@ -78,7 +76,7 @@ fn planned_cells(
         .iter()
         .map(|module| {
             let (reference, new_cell) = veriloga_cell_for_module(
-                &state.model.library_manager,
+                &model.library_manager,
                 &interface_of,
                 &form.library,
                 module,
@@ -182,206 +180,196 @@ fn included_by(file: &crate::state::workspace::ImportClosureFile) -> &str {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_veriloga_import_dialog(&mut self, ctx: &Context) {
-        let Some(form) = self.state.code.code_workspace.veriloga.import_form.clone() else {
-            return;
-        };
-        let messages = self.state.workbench.messages();
-        let libraries = writable_libraries(&self.state.model.library_manager);
-        let plan = planned_cells(&self.state, &form);
-        let refusal = import_refusal(messages, &form, &libraries);
-        let ready = refusal.is_none() && !plan.is_empty();
-        let title = messages.text(MessageId::VerilogAImportTitle);
-        let primary = messages.text(MessageId::VerilogAImportPrimary);
-        let description = messages.text(MessageId::VerilogAImportDescription);
-        let file_label = messages.text(MessageId::VerilogAImportFile);
-        let library_label = messages.text(MessageId::VerilogAImportLibrary);
-        let modules_label = messages.text(MessageId::VerilogAImportModules);
-        let creates_label = messages.text(MessageId::VerilogAImportCreates);
-        let missing_label = messages.text(MessageId::VerilogAImportMissing);
-        let locate = messages.text(MessageId::VerilogAImportLocate);
-        let include_header = messages.text(MessageId::VerilogAImportIncludes);
-        let source_header = messages.text(MessageId::VerilogAImportIncludeSource);
-        let found = messages.text(MessageId::VerilogAImportIncludeFound);
-        let built_in = messages.text(MessageId::VerilogAImportIncludeBuiltIn);
-        let columns = [
-            TableColumn {
-                header: &include_header,
-                mono: true,
-            },
-            TableColumn {
-                header: &source_header,
-                mono: false,
-            },
-        ];
-        let reached = form
-            .closure
-            .files
-            .iter()
-            .filter_map(|file| match file.include {
-                ImportedInclude::Found => Some(vec![file.path.clone(), found.clone()]),
-                ImportedInclude::BuiltIn => Some(vec![file.path.clone(), built_in.clone()]),
-                ImportedInclude::Missing { .. } => None,
-            })
-            .collect::<Vec<_>>();
-        let missing = form
-            .closure
-            .missing()
-            .map(|file| {
-                (
-                    file.path.clone(),
-                    messages.format(
-                        MessageId::VerilogAImportMissingFile,
-                        &[("file", &file.path), ("including", included_by(file))],
-                    ),
-                )
-            })
-            .collect::<Vec<_>>();
-        let modules = form
-            .closure
-            .modules
-            .as_ref()
-            .map_or_else(|_| Vec::new(), Clone::clone);
-        let mut chosen = modules
-            .iter()
-            .map(|module| form.chosen.contains(&module.name))
-            .collect::<Vec<_>>();
-        let line = plan_line(&plan);
-        let mut picked = None;
-        let mut locate_path = None;
-        let mut chosen_changed = false;
-        let choice = CommandForm::new(&title, &primary)
-            .describe(&description)
-            .primary_enabled(ready)
-            .fields_enabled(!libraries.is_empty())
-            .status(match refusal.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .show(ctx, |rows| {
-                rows.value_mono(&file_label, &form.file_name);
-                if !reached.is_empty() {
-                    rows.table(&columns, &reached);
-                }
-                for (path, text) in &missing {
-                    if rows.value_action(&missing_label, text, &locate) {
-                        locate_path = Some(path.clone());
-                    }
-                }
-                picked = rows.select(
-                    &library_label,
-                    "workbench.veriloga-import.library",
-                    &form.library,
-                    &libraries,
-                );
-                // One module is chosen by importing at all; several are each
-                // the reader's choice.
-                if modules.len() > 1 {
-                    let mut items = modules
-                        .iter()
-                        .zip(chosen.iter_mut())
-                        .map(|(module, on)| (module.name.as_str(), on))
-                        .collect::<Vec<_>>();
-                    chosen_changed = rows.checks(&modules_label, &mut items);
-                }
-                if let Some(line) = line.as_deref() {
-                    rows.value_mono(&creates_label, line);
-                }
-                None
-            });
-        if let Some(form) = self.state.code.code_workspace.veriloga.import_form.as_mut() {
-            if let Some(index) = picked
-                && let Some(library) = libraries.get(index)
-            {
-                form.library = library.clone();
-                form.error = None;
-            }
-            if chosen_changed {
-                form.chosen = modules
-                    .iter()
-                    .zip(&chosen)
-                    .filter(|(_, on)| **on)
-                    .map(|(module, _)| module.name.clone())
-                    .collect();
-                form.error = None;
-            }
-        }
-        if let Some(path) = locate_path {
-            request_veriloga_import_locate(&mut self.state.code.code_workspace.veriloga, &path);
-        }
-        match choice {
-            DialogChoice::Primary if ready => {
-                if let Err(error) = self.commit_veriloga_import()
-                    && let Some(form) = self.state.code.code_workspace.veriloga.import_form.as_mut()
-                {
-                    form.error = Some(error);
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                close_veriloga_import_form(&mut self.state.code.code_workspace.veriloga);
-            }
-            DialogChoice::Primary | DialogChoice::None | DialogChoice::Secondary => {}
-        }
-    }
-
-    /// The confirmation "Replace source from file…" opens once a file is
-    /// picked: which file it replaces, with what, and whether the text it
-    /// replaces can be restored. Nothing is replaced until it is confirmed.
-    pub(in crate::workbench) fn render_veriloga_replace_dialog(&mut self, ctx: &Context) {
-        let Some(review) = self
-            .state
-            .code
-            .code_workspace
-            .veriloga
-            .replace_review
-            .clone()
-        else {
-            return;
-        };
-        let messages = self.state.workbench.messages();
-        let title = messages.text(MessageId::VerilogAReplaceTitle);
-        let primary = messages.text(MessageId::VerilogAReplacePrimary);
-        let description = messages.text(MessageId::VerilogAReplaceDescription);
-        let view_label = messages.text(MessageId::VerilogAReplaceView);
-        let replaces = messages.text(MessageId::VerilogAReplaceFile);
-        let with = messages.text(MessageId::VerilogAReplaceWith);
-        let note = if review.restorable {
-            messages.text(MessageId::VerilogAReplaceRestorable)
-        } else {
-            messages.format(
-                MessageId::VerilogAReplaceNotRestorable,
-                &[("file", &review.target.logical_path)],
+/// Draw Import Verilog-A/AMS… while it is open, over the Verilog-A views'
+/// state, the model and the reader's messages. Returns whether the reader
+/// asked to import a plan that is ready.
+pub(in crate::workbench) fn render_veriloga_import_dialog(
+    veriloga: &mut VerilogAWorkbenchState,
+    model: &Model,
+    messages: &MessageCatalog,
+    ctx: &Context,
+) -> bool {
+    let Some(form) = veriloga.import_form.clone() else {
+        return false;
+    };
+    let libraries = writable_libraries(&model.library_manager);
+    let plan = planned_cells(model, &form);
+    let refusal = import_refusal(*messages, &form, &libraries);
+    let ready = refusal.is_none() && !plan.is_empty();
+    let title = messages.text(MessageId::VerilogAImportTitle);
+    let primary = messages.text(MessageId::VerilogAImportPrimary);
+    let description = messages.text(MessageId::VerilogAImportDescription);
+    let file_label = messages.text(MessageId::VerilogAImportFile);
+    let library_label = messages.text(MessageId::VerilogAImportLibrary);
+    let modules_label = messages.text(MessageId::VerilogAImportModules);
+    let creates_label = messages.text(MessageId::VerilogAImportCreates);
+    let missing_label = messages.text(MessageId::VerilogAImportMissing);
+    let locate = messages.text(MessageId::VerilogAImportLocate);
+    let include_header = messages.text(MessageId::VerilogAImportIncludes);
+    let source_header = messages.text(MessageId::VerilogAImportIncludeSource);
+    let found = messages.text(MessageId::VerilogAImportIncludeFound);
+    let built_in = messages.text(MessageId::VerilogAImportIncludeBuiltIn);
+    let columns = [
+        TableColumn {
+            header: &include_header,
+            mono: true,
+        },
+        TableColumn {
+            header: &source_header,
+            mono: false,
+        },
+    ];
+    let reached = form
+        .closure
+        .files
+        .iter()
+        .filter_map(|file| match file.include {
+            ImportedInclude::Found => Some(vec![file.path.clone(), found.clone()]),
+            ImportedInclude::BuiltIn => Some(vec![file.path.clone(), built_in.clone()]),
+            ImportedInclude::Missing { .. } => None,
+        })
+        .collect::<Vec<_>>();
+    let missing = form
+        .closure
+        .missing()
+        .map(|file| {
+            (
+                file.path.clone(),
+                messages.format(
+                    MessageId::VerilogAImportMissingFile,
+                    &[("file", &file.path), ("including", included_by(file))],
+                ),
             )
-        };
-        let view = review.target.view.display_path();
-        let choice = CommandForm::new(&title, &primary)
-            .describe(&description)
-            .status(Ok(Some(note.as_str())))
-            .show(ctx, |rows| {
-                rows.value_mono(&view_label, &view);
-                rows.value_mono(&replaces, &review.target.logical_path);
-                rows.value_mono(&with, &review.file_name);
-                None
-            });
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) =
-                    crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(
-                        self,
-                    )
-                {
-                    self.state
-                        .record(LogSeverity::Error, LogSource::Studio, error);
+        })
+        .collect::<Vec<_>>();
+    let modules = form
+        .closure
+        .modules
+        .as_ref()
+        .map_or_else(|_| Vec::new(), Clone::clone);
+    let mut chosen = modules
+        .iter()
+        .map(|module| form.chosen.contains(&module.name))
+        .collect::<Vec<_>>();
+    let line = plan_line(&plan);
+    let mut picked = None;
+    let mut locate_path = None;
+    let mut chosen_changed = false;
+    let choice = CommandForm::new(&title, &primary)
+        .describe(&description)
+        .primary_enabled(ready)
+        .fields_enabled(!libraries.is_empty())
+        .status(match refusal.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .show(ctx, |rows| {
+            rows.value_mono(&file_label, &form.file_name);
+            if !reached.is_empty() {
+                rows.table(&columns, &reached);
+            }
+            for (path, text) in &missing {
+                if rows.value_action(&missing_label, text, &locate) {
+                    locate_path = Some(path.clone());
                 }
             }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.code.code_workspace.veriloga.replace_review = None;
+            picked = rows.select(
+                &library_label,
+                "workbench.veriloga-import.library",
+                &form.library,
+                &libraries,
+            );
+            // One module is chosen by importing at all; several are each
+            // the reader's choice.
+            if modules.len() > 1 {
+                let mut items = modules
+                    .iter()
+                    .zip(chosen.iter_mut())
+                    .map(|(module, on)| (module.name.as_str(), on))
+                    .collect::<Vec<_>>();
+                chosen_changed = rows.checks(&modules_label, &mut items);
             }
-            DialogChoice::None | DialogChoice::Secondary => {}
+            if let Some(line) = line.as_deref() {
+                rows.value_mono(&creates_label, line);
+            }
+            None
+        });
+    if let Some(form) = veriloga.import_form.as_mut() {
+        if let Some(index) = picked
+            && let Some(library) = libraries.get(index)
+        {
+            form.library = library.clone();
+            form.error = None;
+        }
+        if chosen_changed {
+            form.chosen = modules
+                .iter()
+                .zip(&chosen)
+                .filter(|(_, on)| **on)
+                .map(|(module, _)| module.name.clone())
+                .collect();
+            form.error = None;
         }
     }
+    if let Some(path) = locate_path {
+        request_veriloga_import_locate(veriloga, &path);
+    }
+    match choice {
+        DialogChoice::Primary if ready => true,
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            close_veriloga_import_form(veriloga);
+            false
+        }
+        DialogChoice::Primary | DialogChoice::None | DialogChoice::Secondary => false,
+    }
+}
 
+/// The confirmation "Replace source from file…" opens once a file is
+/// picked: which file it replaces, with what, and whether the text it
+/// replaces can be restored. Nothing is replaced until it is confirmed.
+pub(in crate::workbench) fn render_veriloga_replace_dialog(
+    replace_review: &mut Option<VerilogAReplaceReview>,
+    messages: &MessageCatalog,
+    ctx: &Context,
+) -> bool {
+    let Some(review) = replace_review.clone() else {
+        return false;
+    };
+    let title = messages.text(MessageId::VerilogAReplaceTitle);
+    let primary = messages.text(MessageId::VerilogAReplacePrimary);
+    let description = messages.text(MessageId::VerilogAReplaceDescription);
+    let view_label = messages.text(MessageId::VerilogAReplaceView);
+    let replaces = messages.text(MessageId::VerilogAReplaceFile);
+    let with = messages.text(MessageId::VerilogAReplaceWith);
+    let note = if review.restorable {
+        messages.text(MessageId::VerilogAReplaceRestorable)
+    } else {
+        messages.format(
+            MessageId::VerilogAReplaceNotRestorable,
+            &[("file", &review.target.logical_path)],
+        )
+    };
+    let view = review.target.view.display_path();
+    let choice = CommandForm::new(&title, &primary)
+        .describe(&description)
+        .status(Ok(Some(note.as_str())))
+        .show(ctx, |rows| {
+            rows.value_mono(&view_label, &view);
+            rows.value_mono(&replaces, &review.target.logical_path);
+            rows.value_mono(&with, &review.file_name);
+            None
+        });
+    match choice {
+        DialogChoice::Primary => true,
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            *replace_review = None;
+            false
+        }
+        DialogChoice::None | DialogChoice::Secondary => false,
+    }
+}
+
+impl RSpiceApp {
     /// Create the form's cells in one library transaction and open the first
     /// in Design. Nothing is published unless every cell, view and bundle is.
     pub(in crate::workbench) fn commit_veriloga_import(&mut self) -> Result<CellViewRef, String> {
@@ -405,7 +393,7 @@ impl RSpiceApp {
         if !writable_libraries(&self.state.model.library_manager).contains(&form.library) {
             return Err(format!("Library '{}' cannot be written.", form.library));
         }
-        let plan = planned_cells(&self.state, &form);
+        let plan = planned_cells(&self.state.model, &form);
         let Some((_, first, first_is_new)) = plan.first().cloned() else {
             return Err(format!("{} declares no module.", form.file_name));
         };

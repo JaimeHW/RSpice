@@ -424,6 +424,24 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 app.state.code.new_veriloga_device.error = Some(error);
             }
         }
+        CodeRequest::ImportVerilogACells => {
+            if let Err(error) = app.commit_veriloga_import()
+                && let Some(form) = app.state.code.code_workspace.veriloga.import_form.as_mut()
+            {
+                form.error = Some(error);
+            }
+        }
+        CodeRequest::ReplaceVerilogASource => {
+            if let Err(error) =
+                crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(app)
+            {
+                app.state.record(
+                    crate::diagnostics::LogSeverity::Error,
+                    crate::diagnostics::LogSource::Studio,
+                    error,
+                );
+            }
+        }
     }
 }
 

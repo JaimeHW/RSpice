@@ -59,7 +59,7 @@ pub use page::{
     CodeSourceSearchScope, CodeSourceSearchState, CodeSourceWorkspaceDialogState,
     CodeWorkspaceRuntimeState, PendingVerilogACompile, SourceOperationToken,
     VerilogACompileOutcome, VerilogAFileSelection, VerilogAImportFormState, VerilogAReplaceReview,
-    VerilogAReplaceTarget,
+    VerilogAReplaceTarget, VerilogAWorkbenchState,
 };
 pub(crate) use source_files::{
     assign_automation_source_role, commit_source_file_dialog, commit_source_history_restore,

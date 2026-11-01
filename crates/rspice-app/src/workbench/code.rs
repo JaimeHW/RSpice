@@ -13,6 +13,7 @@ use crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
 };
+use crate::workbench::app::dialogs::library::veriloga_import;
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
 };
@@ -352,6 +353,37 @@ impl CodeFeature {
             ctx,
         ) {
             cx.wb.outbox.push(CodeRequest::CreateVerilogADevice);
+        }
+    }
+
+    /// Import Verilog-A/AMS….
+    pub(in crate::workbench) fn render_veriloga_import_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        let messages = cx.wb.messages();
+        if veriloga_import::render_veriloga_import_dialog(
+            &mut cx.state.code_workspace.veriloga,
+            cx.model,
+            &messages,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::ImportVerilogACells);
+        }
+    }
+
+    /// Replace source from file….
+    pub(in crate::workbench) fn render_veriloga_replace_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        let messages = cx.wb.messages();
+        if veriloga_import::render_veriloga_replace_dialog(
+            &mut cx.state.code_workspace.veriloga.replace_review,
+            &messages,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::ReplaceVerilogASource);
         }
     }
 }

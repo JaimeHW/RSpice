@@ -469,13 +469,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.veriloga_import"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_veriloga_import_dialog(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_veriloga_import_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.veriloga_replace"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_veriloga_replace_dialog(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_veriloga_replace_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.veriloga_build_settings"),
