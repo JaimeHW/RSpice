@@ -4,6 +4,7 @@ use super::*;
 mod batch;
 mod dcmatch;
 mod distortion;
+mod functions;
 mod noise;
 mod pole_zero;
 mod sensitivity;
@@ -803,11 +804,10 @@ impl ControlCircuit {
                 } else {
                     None
                 };
-                let vector = |expression: &Expr| {
-                    self.names_user_vector(expression)
-                        || vectors::calls_user_function(expression, variables)
-                };
-                if vector(&y) || x.as_ref().is_some_and(|(x, _)| vector(x)) {
+                if self.needs_vector_path(&y, variables)
+                    || x.as_ref()
+                        .is_some_and(|(x, _)| self.needs_vector_path(x, variables))
+                {
                     let trace = self.vector_trace(
                         (&y, &label),
                         x.as_ref().map(|(x, label)| (x, label.as_str())),

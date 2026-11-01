@@ -76,6 +76,41 @@ impl ControlCircuit {
         find(plot).or_else(|| find(None))
     }
 
+    /// Whether only the vector evaluator can evaluate the expression: it
+    /// reads a `let` vector or a constant, or calls a function the dataset
+    /// resolver lacks.
+    pub(in crate::engine::control) fn needs_vector_path(
+        &self,
+        expression: &Expr,
+        variables: &ParamContext,
+    ) -> bool {
+        self.names_user_vector(expression)
+            || self.names_constant(expression, variables)
+            || needs_vector_functions(expression, variables)
+    }
+
+    /// Whether the expression reads one of ngspice's constants, which a
+    /// dataset vector or a parameter of the same name would hide.
+    fn names_constant(&self, expression: &Expr, variables: &ParamContext) -> bool {
+        match expression {
+            Expr::Param(name) => {
+                constant(name).is_some()
+                    && variables.get_complex(name).is_none()
+                    && !self
+                        .qualified(name, 0)
+                        .is_ok_and(|(dataset, raw)| self.select(dataset, raw, None, 0).is_ok())
+            }
+            Expr::FnCall { name, args } => {
+                !is_probe(name) && args.iter().any(|arg| self.names_constant(arg, variables))
+            }
+            Expr::BinOp { left, right, .. } => {
+                self.names_constant(left, variables) || self.names_constant(right, variables)
+            }
+            Expr::UnaryOp { operand, .. } => self.names_constant(operand, variables),
+            Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) => false,
+        }
+    }
+
     /// Whether the expression reads a vector bound by `let`.
     pub(in crate::engine::control) fn names_user_vector(&self, expression: &Expr) -> bool {
         match expression {
@@ -173,21 +208,37 @@ impl ControlCircuit {
             .value_limit
             .saturating_sub(self.retained_values)
             .saturating_sub(self.vectors.values());
-        let mut bound = expression.clone();
+        let mut inlined = expression.clone();
         let mut nodes = MAX_INLINED_NODES;
-        inline_functions(&mut bound, variables, 0, &mut nodes, line, abort)?;
+        inline_functions(&mut inlined, variables, 0, &mut nodes, line, abort)?;
+        self.vector_value(&inlined, &mut budget, variables, line, abort)
+    }
+
+    /// The vector an expression whose user functions are expanded evaluates
+    /// to, charging its operands and result against `budget`.
+    fn vector_value(
+        &self,
+        expression: &Expr,
+        budget: &mut usize,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<VectorValue, ControlError> {
+        let mut bound = expression.clone();
         let mut leaves = Vec::new();
-        let shape =
-            self.bind_leaves(&mut bound, &mut leaves, &mut budget, variables, line, abort)?;
+        let shape = self.bind_leaves(&mut bound, &mut leaves, budget, variables, line, abort)?;
         bound
             .ensure_stack_safe_depth()
             .map_err(|error| command_error(line, error.to_string()))?;
+        if leaves.len() == 1 && matches!(&bound, Expr::Param(name) if name == "\0V0") {
+            return Ok(leaves.remove(0));
+        }
         let length = leaves
             .iter()
             .map(|leaf: &VectorValue| leaf.samples.len())
             .max()
             .unwrap_or(1);
-        charge(&mut budget, length, line)?;
+        charge(budget, length, line)?;
         let keys: Vec<_> = (0..leaves.len())
             .map(|index| format!("\0V{index}"))
             .collect();
@@ -261,9 +312,12 @@ impl ControlCircuit {
                     let value = sampled(&selected, budget, line, abort)?;
                     return Ok(leaf(expression, value, leaves));
                 }
-                let value = variables.get_complex(name).ok_or_else(|| {
-                    command_error(line, format!("vector or scalar '{name}' is unavailable"))
-                })?;
+                let value = variables
+                    .get_complex(name)
+                    .or_else(|| constant(name))
+                    .ok_or_else(|| {
+                        command_error(line, format!("vector or scalar '{name}' is unavailable"))
+                    })?;
                 *expression = Expr::ComplexNumber(value);
                 Shape {
                     unit: SignalUnit::Unspecified,
@@ -303,6 +357,18 @@ impl ControlCircuit {
                     }
                     let selected = self.direct(expression, variables, line, abort)?;
                     let value = sampled(&selected, budget, line, abort)?;
+                    return Ok(leaf(expression, value, leaves));
+                }
+                if functions::is_vector_function(name) {
+                    let [argument] = args.as_slice() else {
+                        return Err(command_error(
+                            line,
+                            format!("{name} requires one vector expression"),
+                        ));
+                    };
+                    let argument = self.vector_value(argument, budget, variables, line, abort)?;
+                    let value = functions::apply(self, name, argument, line, abort)?;
+                    charge(budget, value.samples.len(), line)?;
                     return Ok(leaf(expression, value, leaves));
                 }
                 // The functions whose control-vector semantics the print
@@ -453,22 +519,64 @@ impl ControlCircuit {
 const MAX_INLINE_DEPTH: usize = 64;
 const MAX_INLINED_NODES: usize = 1 << 16;
 
-/// Whether the expression calls a user function (`define` or `.func`).
-pub(in crate::engine::control) fn calls_user_function(
-    expression: &Expr,
-    variables: &ParamContext,
-) -> bool {
+/// Whether the expression calls a user function, one of ngspice's predefined
+/// ones or a whole-vector function, which only the vector evaluator knows.
+fn needs_vector_functions(expression: &Expr, variables: &ParamContext) -> bool {
     match expression {
         Expr::FnCall { name, args } => {
             variables.has_function(name)
-                || args.iter().any(|arg| calls_user_function(arg, variables))
+                || functions::is_vector_function(name)
+                || builtin_function(name, args.len()).is_some()
+                || args
+                    .iter()
+                    .any(|arg| needs_vector_functions(arg, variables))
         }
         Expr::BinOp { left, right, .. } => {
-            calls_user_function(left, variables) || calls_user_function(right, variables)
+            needs_vector_functions(left, variables) || needs_vector_functions(right, variables)
         }
-        Expr::UnaryOp { operand, .. } => calls_user_function(operand, variables),
+        Expr::UnaryOp { operand, .. } => needs_vector_functions(operand, variables),
         Expr::Number(_) | Expr::ComplexNumber(_) | Expr::Param(_) | Expr::StringLiteral(_) => false,
     }
+}
+
+/// The functions ngspice defines at startup (frontend/cpitf.c:52).
+fn builtin_function(name: &str, arity: usize) -> Option<(&'static [&'static str], &'static str)> {
+    const ONE: &[&str] = &["X"];
+    const TWO: &[&str] = &["X", "Y"];
+    Some(match (name, arity) {
+        ("MAX", 2) => (TWO, "(x > y) * x + (x <= y) * y"),
+        ("MIN", 2) => (TWO, "(x < y) * x + (x >= y) * y"),
+        ("VDB", 1) => (ONE, "db(v(x))"),
+        ("VDB", 2) => (TWO, "db(v(x) - v(y))"),
+        ("VI", 1) => (ONE, "im(v(x))"),
+        ("VI", 2) => (TWO, "im(v(x) - v(y))"),
+        ("VM", 1) => (ONE, "mag(v(x))"),
+        ("VM", 2) => (TWO, "mag(v(x) - v(y))"),
+        ("VP", 1) => (ONE, "ph(v(x))"),
+        ("VP", 2) => (TWO, "ph(v(x) - v(y))"),
+        ("VR", 1) => (ONE, "re(v(x))"),
+        ("VR", 2) => (TWO, "re(v(x) - v(y))"),
+        _ => return None,
+    })
+}
+
+/// ngspice's constants plot (frontend/cpitf.c:40). The ngspice-46 release
+/// prints boltz = 1.380649e-23, so its charge, Boltzmann and Planck
+/// constants are the exact SI 2019 values.
+fn constant(name: &str) -> Option<ComplexValue> {
+    Some(match name.to_ascii_lowercase().as_str() {
+        "yes" | "true" => 1.0.into(),
+        "no" | "false" => 0.0.into(),
+        "pi" => std::f64::consts::PI.into(),
+        "e" => std::f64::consts::E.into(),
+        "c" => 299_792_458.0.into(),
+        "i" => ComplexValue::new(0.0, 1.0),
+        "kelvin" => (-273.15).into(),
+        "echarge" => 1.602_176_634e-19.into(),
+        "boltz" => 1.380_649e-23.into(),
+        "planck" => 6.626_070_15e-34.into(),
+        _ => return None,
+    })
 }
 
 /// Expand each call of a user function in place. ngspice substitutes the
@@ -488,8 +596,15 @@ fn inline_functions(
             for arg in args.iter_mut() {
                 inline_functions(arg, variables, depth, nodes, line, abort)?;
             }
-            let Some(function) = variables.get_function(name) else {
-                return Ok(());
+            let (formals, text) = match variables.get_function(name) {
+                Some(function) => (function.args.clone(), function.body.as_str()),
+                None => match builtin_function(name, args.len()) {
+                    Some((formals, body)) => (
+                        formals.iter().map(|formal| (*formal).to_owned()).collect(),
+                        body,
+                    ),
+                    None => return Ok(()),
+                },
             };
             if depth >= MAX_INLINE_DEPTH {
                 return Err(command_error(
@@ -497,24 +612,24 @@ fn inline_functions(
                     format!("user function '{name}' nests deeper than {MAX_INLINE_DEPTH} calls"),
                 ));
             }
-            if function.args.len() != args.len() {
+            if formals.len() != args.len() {
                 return Err(command_error(
                     line,
                     format!(
                         "user function '{name}' takes {} arguments, not {}",
-                        function.args.len(),
+                        formals.len(),
                         args.len()
                     ),
                 ));
             }
-            let text = function.body.trim();
+            let text = text.trim();
             let text = text
                 .strip_prefix('{')
                 .and_then(|text| text.strip_suffix('}'))
                 .unwrap_or(text);
             let mut body = parse_control_expression_with_abort(text, abort)
                 .map_err(|error| ControlError::evaluation(line, error.into()))?;
-            substitute_formals(&mut body, &function.args, args, nodes, line)?;
+            substitute_formals(&mut body, &formals, args, nodes, line)?;
             inline_functions(&mut body, variables, depth + 1, nodes, line, abort)?;
             body.ensure_stack_safe_depth()
                 .map_err(|error| command_error(line, error.to_string()))?;

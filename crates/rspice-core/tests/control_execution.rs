@@ -997,3 +997,175 @@ fn define_binds_user_functions_for_scalars_conditions_and_vectors() {
         assert!(error.contains(message), "{definition}: {error}");
     }
 }
+
+/// ngspice's whole-vector functions (maths/cmaths) and its predefined
+/// functions and constants (frontend/cpitf.c), against ngspice-46 on this
+/// script. ngspice prints seven significant digits, six for a negative
+/// value; each value is checked at half a unit of its last printed digit,
+/// with a relative 1e-9 for a value that rounds at the half.
+#[test]
+fn vector_functions_match_ngspice() {
+    let source = "vector functions\nV1 in 0 dc 0 ac 1\nR1 in out 1k\nC1 out 0 1u\nR2 out 0 3k\n\
+        .control\ndc v1 0 2 0.5\nlet y = v(out)*v(out)*v(out)\n\
+        print deriv(y) deriv(v(out)*v(out))\nprint vecmax(y) vecmin(y) mean(y) length(y)\n\
+        print vector(4) unitvec(3)\nlet s = sqrt(v(out) - 1)\nprint s\n\
+        print floor(y) nint(y) pos(v(out) - 0.7)\nprint max(v(out), 0.6) min(v(out), 0.6)\n\
+        print exp(v(out)) log(v(out)+1) log10(v(out)+1)\nac dec 2 10 1k\n\
+        print db(v(out)) ph(v(out)) cph(v(out)) mag(v(out))\nprint vdb(out) vp(out) vm(out)\n\
+        print j(v(out)) conj(v(out)) sqrt(v(out)) mean(v(out)) vecmax(v(out))\n\
+        print log(v(out)) log10(v(out)) exp(v(out))\nprint pi e boltz i*2\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    let samples = |print: usize, trace: usize| printed(&presented[print])[trace].y.samples.clone();
+    let close = |actual: f64, printed: &str| {
+        let expected: f64 = printed.parse().unwrap();
+        let tolerance = match printed.split_once('e') {
+            Some((mantissa, exponent)) => {
+                let decimals = mantissa.split_once('.').map_or(0, |(_, d)| d.len()) as i32;
+                0.5 * 10f64.powi(exponent.parse::<i32>().unwrap() - decimals)
+            }
+            None => 1e-12,
+        };
+        (actual - expected).abs() <= tolerance + 1e-9 * expected.abs()
+    };
+    let check = |print: usize, trace: usize, expected: &[&str]| {
+        let actual = samples(print, trace);
+        assert_eq!(actual.len(), expected.len(), "print {print} trace {trace}");
+        for (value, expected) in actual.iter().zip(expected) {
+            let (re, im) = expected.split_once(',').unwrap_or((expected, "0"));
+            assert!(
+                close(value.re, re) && close(value.im, im),
+                "print {print} trace {trace}: {actual:?} against {expected:?}"
+            );
+        }
+    };
+    check(
+        0,
+        0,
+        &[
+            "-2.10938e-01",
+            "4.218750e-01",
+            "1.371094e+00",
+            "2.953125e+00",
+            "4.851562e+00",
+        ],
+    );
+    check(
+        0,
+        1,
+        &[
+            "0.000000e+00",
+            "5.625000e-01",
+            "1.125000e+00",
+            "1.687500e+00",
+            "2.250000e+00",
+        ],
+    );
+    for (trace, expected) in [
+        "3.375000e+00",
+        "0.000000e+00",
+        "1.054688e+00",
+        "5.000000e+00",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        check(1, trace, &[expected]);
+    }
+    check(2, 0, &["0", "1", "2", "3"]);
+    check(2, 1, &["1", "1", "1"]);
+    check(
+        3,
+        0,
+        &[
+            "0,1.000000e+00",
+            "0,7.905694e-01",
+            "0,5.000000e-01",
+            "3.535534e-01,0",
+            "7.071068e-01,0",
+        ],
+    );
+    check(4, 0, &["0", "0", "0", "1", "3"]);
+    check(4, 1, &["0", "0", "0", "1", "3"]);
+    check(4, 2, &["0", "0", "1", "1", "1"]);
+    check(
+        5,
+        0,
+        &[
+            "6.000000e-01",
+            "6.000000e-01",
+            "7.500000e-01",
+            "1.125000e+00",
+            "1.500000e+00",
+        ],
+    );
+    check(
+        5,
+        1,
+        &[
+            "0",
+            "3.750000e-01",
+            "6.000000e-01",
+            "6.000000e-01",
+            "6.000000e-01",
+        ],
+    );
+    assert!(close(samples(6, 0)[1].re, "1.454991e+00"));
+    assert!(close(samples(6, 1)[1].re, "3.184537e-01"));
+    assert!(close(samples(6, 2)[1].re, "1.383027e-01"));
+    let db = [
+        "-2.50841e+00",
+        "-2.59416e+00",
+        "-3.36972e+00",
+        "-7.57822e+00",
+        "-1.61549e+01",
+    ];
+    let ph = [
+        "-4.70891e-02",
+        "-1.47930e-01",
+        "-4.40375e-01",
+        "-9.79761e-01",
+        "-1.36169e+00",
+    ];
+    let mag = [
+        "7.491686e-01",
+        "7.418087e-01",
+        "6.784439e-01",
+        "4.179158e-01",
+        "1.556881e-01",
+    ];
+    for (print, traces) in [(7, [0, 1, 2, 3]), (8, [0, 1, 1, 2])] {
+        check(print, traces[0], &db);
+        check(print, traces[1], &ph);
+        check(print, traces[2], &ph);
+        check(print, traces[3], &mag);
+    }
+    assert_eq!(printed(&presented[7])[0].x.expression, "frequency");
+    let first = |print: usize, trace: usize, expected: &str| {
+        check_first(&samples(print, trace), expected, &close)
+    };
+    first(9, 0, "3.526461e-02,7.483382e-01");
+    first(9, 1, "7.483382e-01,3.526461e-02");
+    first(9, 2, "-8.65305e-01,2.037697e-02");
+    first(9, 3, "4.721899e-01,-1.86625e-01");
+    first(9, 4, "7.483382e-01,-3.52646e-02");
+    first(10, 0, "-2.88791e-01,-4.70891e-02");
+    first(10, 1, "-1.25420e-01,-4.70891e-02");
+    first(10, 2, "2.112171e+00,-7.45158e-02");
+    first(11, 0, "3.141593e+00,0");
+    first(11, 1, "2.718282e+00,0");
+    first(11, 2, "1.380649e-23,0");
+    first(11, 3, "0,2.000000e+00");
+}
+
+fn check_first(
+    samples: &[num_complex::Complex64],
+    expected: &str,
+    close: &dyn Fn(f64, &str) -> bool,
+) {
+    let (re, im) = expected.split_once(',').unwrap();
+    assert!(
+        close(samples[0].re, re) && close(samples[0].im, im),
+        "{samples:?} against {expected}"
+    );
+}
