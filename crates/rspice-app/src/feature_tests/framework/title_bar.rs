@@ -47,6 +47,16 @@ fn title_test_app() -> RSpiceApp {
     RSpiceApp::test_instance()
 }
 
+/// A context that draws the Windows and Linux menus whatever the host, as
+/// `shown_rows` and the pins read them. The macOS menus differ (the
+/// RSpice menu holds About, Settings and Quit) and are pinned in `macos`.
+#[cfg(not(target_arch = "wasm32"))]
+fn title_test_ctx() -> Context {
+    let ctx = Context::default();
+    ctx.set_os(egui::os::OperatingSystem::Windows);
+    ctx
+}
+
 /// What `menu` holds, as the shell hands it to the title bar.
 fn application_menu_entries(menu: ApplicationMenu) -> &'static [MenuEntry] {
     RSpiceApp::test_instance().menu_entries(menu)
@@ -85,7 +95,7 @@ fn closed_project_title_context_does_not_leak_the_previous_document_identity() {
 #[test]
 fn the_painted_desktop_title_names_no_project_when_none_is_open() {
     fn painted(project_open: bool) -> String {
-        let ctx = Context::default();
+        let ctx = title_test_ctx();
         crate::ui::Theme::default().apply(&ctx);
         let mut app = title_test_app();
         app.state.workbench.workspace = Workspace::Design;
@@ -122,7 +132,7 @@ fn the_painted_desktop_title_names_no_project_when_none_is_open() {
 #[test]
 fn unsaved_project_changes_put_a_star_after_the_painted_title() {
     fn painted(app: &RSpiceApp, width: f32) -> String {
-        let ctx = Context::default();
+        let ctx = title_test_ctx();
         crate::ui::Theme::default().apply(&ctx);
         let bounds = egui::Rect::from_min_size(egui::pos2(0.0, 0.0), egui::vec2(width, 32.0));
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
@@ -238,7 +248,7 @@ fn assert_menu_lists(menu: ApplicationMenu, run: &[CommandKey]) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn rendered_results_menu_labels() -> Vec<String> {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let app = title_test_app();
@@ -302,7 +312,7 @@ fn rendered_results_menu_labels() -> Vec<String> {
 fn rendered_simulate_menu_rows(
     stable_analysis_plan: bool,
 ) -> (CommandAvailability, Vec<(String, Option<String>)>) {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -481,7 +491,7 @@ fn every_row_the_overflow_held_has_a_home_in_a_menu() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn desktop_menu_triggers_fill_the_title_track_without_vertical_clipping() {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -550,7 +560,7 @@ fn command_keycap_uses_canonical_intrinsic_border_box_width() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn f10_then_enter_opens_the_focused_application_menu() {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     let mut app = title_test_app();
     run_title_menu_frame(&ctx, &mut app, vec![title_key_event(Key::F10)]);
     run_title_menu_frame(&ctx, &mut app, Vec::new());
@@ -801,7 +811,7 @@ fn the_grid_rows_choose_the_drawn_style() {
         .expect("View has a Grid submenu");
     let mut app = title_test_app();
     app.state.workbench.workspace = Workspace::Design;
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let output = ctx.run_ui(
@@ -988,7 +998,7 @@ fn menu_items_after_frame(
 fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
     use crate::state::{Component, ComponentType, Point};
 
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -1665,7 +1675,7 @@ fn switching_rows_are_checked_while_their_state_is_on() {
 fn switching_rows_read_as_checkable_menu_items_with_their_state() {
     use egui::accesskit::{Role, Toggled};
 
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -1721,7 +1731,7 @@ fn switching_rows_read_as_checkable_menu_items_with_their_state() {
 #[test]
 fn the_account_button_shows_a_person_until_an_identity_names_someone() {
     fn painted(initials: Option<&str>) -> (Vec<String>, usize) {
-        let ctx = Context::default();
+        let ctx = title_test_ctx();
         crate::ui::Theme::default().apply(&ctx);
         let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
             egui::CentralPanel::default()
@@ -1794,7 +1804,7 @@ fn shown_rows(menu: ApplicationMenu, app: &RSpiceApp) -> Vec<(String, bool)> {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -1853,7 +1863,7 @@ fn the_keyboard_walks_greyed_rows_and_enter_on_one_does_nothing() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn a_menu_of_greyed_rows_still_answers_its_keys() {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     ctx.enable_accesskit();
     let mut app = title_test_app();
@@ -1923,7 +1933,7 @@ struct TitleBarWindow {
 #[cfg(not(target_arch = "wasm32"))]
 impl TitleBarWindow {
     fn new(size: egui::Vec2) -> Self {
-        let ctx = Context::default();
+        let ctx = title_test_ctx();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         Self {
@@ -2156,7 +2166,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
             }
         }
     }
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     let mut needed = Vec::new();
     for app in [title_test_app(), source_editor_app()] {
@@ -2186,7 +2196,7 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
         } else {
             MENU_ROW_HEIGHT
         };
-        let ctx = Context::default();
+        let ctx = title_test_ctx();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = title_test_app();
@@ -2333,7 +2343,7 @@ fn no_menu_draws_a_rule_at_its_edge_or_two_rules_together() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn title_context_ellipsis_is_measured_instead_of_character_estimated() {
-    let ctx = Context::default();
+    let ctx = title_test_ctx();
     crate::ui::Theme::default().apply(&ctx);
     let mut fitted = String::new();
     let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
