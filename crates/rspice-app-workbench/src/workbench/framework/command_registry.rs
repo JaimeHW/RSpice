@@ -360,7 +360,6 @@ pub mod ids {
         SHEET_PROPERTIES = "page-setup";
         SIMULATION_ANALYSES = "simulation-analyses";
         SIMULATE_WORKSPACE = "simulate";
-        SPECIALIST_TOOL_BROWSER = "specialist-tool-browser";
         STIMULUS_WORKSPACE = "stimulus";
         STOP_SIMULATION = "stop-run";
         SUPPORT_BUNDLE = "support-bundle";

@@ -13,9 +13,7 @@ use rspice_app_state::workbench::preferences::WorkspacePreset;
 use rspice_app_state::workbench::workspace::Workspace;
 use serde::{Deserialize, Serialize};
 
-use super::console_views::{
-    ConsoleView, InlineEdit, NotificationFilter, SpecialistToolBrowserState,
-};
+use super::console_views::{ConsoleView, InlineEdit, NotificationFilter};
 use super::navigator_tree::NavigatorTrees;
 use super::problems_view::ProblemsView;
 use super::retired_documents;
@@ -411,9 +409,6 @@ pub struct WorkbenchSession {
     /// vocabulary above it.
     pub last_repeatable_command: Option<String>,
     pub drawer: Option<Drawer>,
-    /// Personal specialist discovery metadata plus task-local browser state.
-    /// The owned engineering documents remain in their canonical surfaces.
-    pub specialist_tool_browser: SpecialistToolBrowserState,
     /// Session activity center. Its records live in `UiSessionState::toasts`;
     /// only this transient presentation state belongs to the workbench.
     pub notification_center_open: bool,
@@ -511,7 +506,6 @@ impl Default for WorkbenchSession {
             inline_edit: InlineEdit::default(),
             last_repeatable_command: None,
             drawer: None,
-            specialist_tool_browser: SpecialistToolBrowserState::default(),
             notification_center_open: false,
             notification_filter: NotificationFilter::default(),
             notification_unread_only: false,
@@ -658,7 +652,6 @@ impl WorkbenchSession {
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         let transition = self.navigation.navigate(route, source);
-        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
@@ -678,7 +671,6 @@ impl WorkbenchSession {
         let previous = self.navigation.current();
         self.reconcile_workspace_layout(previous, route);
         self.navigation.replace(route, source);
-        self.reconcile_specialist_tool_browser_route(previous, route);
         if let Some(workspace) = route.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
@@ -741,7 +733,6 @@ impl WorkbenchSession {
                     .to_owned(),
             );
         }
-        self.specialist_tool_browser.normalize();
     }
 
     pub fn record_route_diagnostic(&mut self, diagnostic: impl Into<String>) {
@@ -821,7 +812,6 @@ impl WorkbenchSession {
         let destination = self.navigation.back_entries().last().copied()?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back(source)?;
-        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
@@ -848,7 +838,6 @@ impl WorkbenchSession {
         )?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_back_steps(count, source)?;
-        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
@@ -874,24 +863,11 @@ impl WorkbenchSession {
         )?;
         self.reconcile_workspace_layout(self.navigation.current(), destination);
         let transition = self.navigation.go_forward_steps(count, source)?;
-        self.reconcile_specialist_tool_browser_route(transition.previous, transition.current);
         if let Some(workspace) = transition.current.surface_id().owner_workspace() {
             self.workspace = workspace;
         }
         self.close_drawer();
         Some(transition)
-    }
-
-    fn reconcile_specialist_tool_browser_route(
-        &mut self,
-        previous: SurfaceRoute,
-        current: SurfaceRoute,
-    ) {
-        let browser = SurfaceId::SpecialistToolBrowser;
-        if previous.surface_id() != browser && current.surface_id() == browser {
-            self.specialist_tool_browser.normalize();
-            self.specialist_tool_browser.focus_search = true;
-        }
     }
 
     #[cfg(any(test, feature = "test-support", target_arch = "wasm32"))]

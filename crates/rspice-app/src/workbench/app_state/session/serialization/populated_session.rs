@@ -320,9 +320,6 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
         .netlist_outline_collapsed
         .insert(crate::state::OutlineSectionKind::Parameters);
     workbench.command_query = "probe".to_owned();
-    workbench
-        .specialist_tool_browser
-        .toggle_favorite(crate::workbench::SurfaceId::RfWorkbench);
     state.hardcopy.report_authoring.selected_document =
         Some(crate::product::ResultDocumentId::new());
     state.models.pdk_technology_authoring.dirty = true;

@@ -82,10 +82,6 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui jobs, targets, and retained run history manager",
             evidence_boundary: "Stable local job/run selection, current controller progress and cancellation, retained target/provenance inspection, and versioned manifest export are executable. Unconfigured remote schedulers, quotas, and checkpoints are not represented as live capabilities.",
         },
-        SurfaceId::SpecialistToolBrowser => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui canonical specialist workspace discovery manager",
-            evidence_boundary: "Search, profile filtering, personal favorites and pins, device-local recents, canonical metadata inspection, and route availability disclosure are executable. Discoverability never implies that the selected engineering surface, engine, connector, entitlement, platform, or sign-off path is available.",
-        },
         SurfaceId::ReportAuthoring => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned report and datasheet document composer",
             evidence_boundary: "Versioned report documents in the project, outlines from templates, adding and reordering pages, paper settings, text and result blocks, live result references that follow the project's latest results, frozen references that keep a fixed image, publication settings, and hardcopy export all work. A reference to missing, stale, or unlinked results is shown as such and is never drawn with made-up content. The composer shows whether a release can be handed off and links to Release Closure; it never freezes, approves, promotes, or signs off a release candidate, and offers no external publishing or distribution service.",
@@ -201,7 +197,6 @@ mod tests {
                 SurfaceId::JobsManager,
                 SurfaceId::NotificationCenter,
                 SurfaceId::HelpCenter,
-                SurfaceId::SpecialistToolBrowser,
             ]
         );
     }

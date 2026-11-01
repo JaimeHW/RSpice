@@ -74,9 +74,6 @@ pub enum DialogSize {
     /// 890 pt of content, which the old ceiling would have scrolled the last
     /// section of and the viewport holds whole.
     SimulationWorkflow,
-    /// Mockup-owned specialist workspace discovery manager: 760 pt wide on
-    /// desktop and full-viewport at the 820 pt one-column breakpoint.
-    SpecialistToolBrowser,
     /// Browsers and settings managers: 760 pt wide and content-height,
     /// capped at 530 pt, with the mockup's 28/34 pt viewport gutters and
     /// 8 pt phone inset.
@@ -235,22 +232,6 @@ impl DialogSize {
                 cap_narrow_height: false,
                 edge_to_edge_narrow: true,
                 fill_narrow_viewport: false,
-                fill_height: false,
-                app_background: true,
-                radius: 4.0,
-                top_anchored: false,
-            },
-            Self::SpecialistToolBrowser => DialogSurfaceSpec {
-                width: 760.0,
-                max_height: 760.0,
-                horizontal_inset: 24.0,
-                vertical_inset: 24.0,
-                narrow_max_width: 820.0,
-                narrow_inset: 0.0,
-                narrow_vertical_inset: 0.0,
-                cap_narrow_height: false,
-                edge_to_edge_narrow: true,
-                fill_narrow_viewport: true,
                 fill_height: false,
                 app_background: true,
                 radius: 4.0,

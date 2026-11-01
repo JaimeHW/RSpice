@@ -901,7 +901,6 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "surfaces",
     "tools/notification_center",
     "tools/project_launcher",
-    "tools/specialist_tool_browser",
     "tools/jobs_manager",
     "preflight",
     "cross_probe",
@@ -1017,7 +1016,6 @@ const ALLOWED_WORKBENCH_VIOLATIONS: &[(&str, &str, usize)] = &[
     // route or a state transition, not the widget that draws the result.
     ("commands", "chrome", 10),
     ("commands", "menu_bar", 5),
-    ("commands", "tools/specialist_tool_browser", 1),
     ("surfaces", "preflight", 1),
     // The shell's own persisted state reaching up into the window session.
     // This is the same inversion the top-level `state -> *` entries describe,

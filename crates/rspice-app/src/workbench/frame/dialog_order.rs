@@ -558,14 +558,6 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| crate::workbench::tools::jobs_manager::show(ctx, app),
     },
     DialogSpec {
-        key: DialogKey("framework.specialist_tool_browser"),
-        modality: Modality::Application,
-        is_open: Some(|state| {
-            state.workbench.current_route().surface_id() == SurfaceId::SpecialistToolBrowser
-        }),
-        render: |app, ctx| crate::workbench::tools::specialist_tool_browser::show(ctx, app),
-    },
-    DialogSpec {
         key: DialogKey("simulate.workflow_dialogs"),
         modality: Modality::Application,
         is_open: Some(|state| {

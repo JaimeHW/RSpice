@@ -135,7 +135,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(any(test, feature = "test-support"))]
-            pub const ALL: [Self; 63] = [$(Self::$variant),+];
+            pub const ALL: [Self; 62] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -310,7 +310,6 @@ define_surface_catalog! {
     NotificationCenter => { id: "notification-center", label: "Notifications", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
     HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
     ProductReadinessCenter => { id: "product-readiness-center", label: "Product readiness contracts", archetype: Internal, tier: Internal, status: InternalOnly, deep_link: "?surface=product-readiness-center" },
-    SpecialistToolBrowser => { id: "specialist-tool-browser", label: "Specialist tool browser", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=specialist-tool-browser" },
     MobileNavigation => { id: "mobile-navigation", label: "Compact task navigation", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-navigation" },
     MobileTaskHandoff => { id: "mobile-task-handoff", label: "Qualified-target handoff", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-task-handoff" },
     SurfaceContextMenu => { id: "surface-context-menu", label: "Selection context menu", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=surface-context-menu" },
@@ -378,7 +377,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 63);
+        assert_eq!(SurfaceId::ALL.len(), 62);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -393,9 +392,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 63);
-        assert_eq!(labels.len(), 63);
-        assert_eq!(deep_links.len(), 63);
+        assert_eq!(ids.len(), 62);
+        assert_eq!(labels.len(), 62);
+        assert_eq!(deep_links.len(), 62);
     }
 
     #[test]
@@ -406,7 +405,7 @@ mod tests {
                 .filter(|surface| surface.release_status() == status)
                 .count()
         };
-        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 20);
+        assert_eq!(count_status(ReleaseStatus::ReleaseScope), 19);
         assert_eq!(count_status(ReleaseStatus::Preview), 35);
         assert_eq!(count_status(ReleaseStatus::ExternalFirst), 6);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 2);
@@ -419,7 +418,7 @@ mod tests {
         };
         assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
         assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 40);
-        assert_eq!(count_archetype(SurfaceArchetype::Manager), 9);
+        assert_eq!(count_archetype(SurfaceArchetype::Manager), 8);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
         assert_eq!(count_archetype(SurfaceArchetype::Internal), 1);

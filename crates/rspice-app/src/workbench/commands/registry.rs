@@ -480,8 +480,7 @@ impl Command {
             | Self::SelectionBulkEdit
             | Self::ConfigurationSets
             | Self::RuleSetup
-            | Self::ReviewComments
-            | Self::DesignSpecialistWorkspaces => ShortcutContext::DesignWorkspace,
+            | Self::ReviewComments => ShortcutContext::DesignWorkspace,
             Self::NextViolation | Self::PreviousViolation => ShortcutContext::ViolationNavigation,
             Self::SymbolPinTool
             | Self::SymbolPolylineTool

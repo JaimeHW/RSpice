@@ -286,9 +286,7 @@ impl Command {
             | Self::CloseOtherDocuments
             | Self::CloseAllDocuments
             | Self::WindowManager
-            | Self::CommandPalette
-            | Self::SpecialistToolBrowser
-            | Self::DesignSpecialistWorkspaces => CommandOwner::Framework,
+            | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
             | Self::PlaceInstance
@@ -1142,9 +1140,6 @@ impl Command {
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
-            Self::DesignSpecialistWorkspaces | Self::SpecialistToolBrowser => {
-                crate::workbench::tools::specialist_tool_browser::open(app);
-            }
             Self::HelpCenter => {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)
             }

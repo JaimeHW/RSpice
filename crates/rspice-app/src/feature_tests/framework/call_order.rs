@@ -423,7 +423,6 @@ const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
 const ROUTE_OVERLAYS: &[(&str, &str)] = &[
     ("features::render_dialog", "cloud"),
     ("tools::jobs_manager::show", "simulate"),
-    ("tools::specialist_tool_browser::show", "framework"),
     ("surfaces::show_simulation_workflow_dialogs", "simulate"),
 ];
 
@@ -1229,8 +1228,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        76,
-        "the frame's 73 dialog steps, the route overlays' 4 owners in place of their host"
+        75,
+        "the frame's 73 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);

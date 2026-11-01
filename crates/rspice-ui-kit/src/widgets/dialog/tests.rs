@@ -391,25 +391,6 @@ fn simulation_workflow_becomes_edge_to_edge_at_the_mockup_breakpoint() {
 }
 
 #[test]
-fn specialist_browser_uses_desktop_cap_and_full_tablet_phone_viewport() {
-    let desktop_screen = Rect::from_min_size(egui::pos2(10.0, 20.0), vec2(1_440.0, 900.0));
-    let desktop = DialogLayout::resolve(DialogSize::SpecialistToolBrowser, desktop_screen, None);
-    assert_eq!(desktop.surface_rect.size(), vec2(760.0, 760.0));
-    assert_eq!(desktop.surface_rect.center(), desktop_screen.center());
-    assert_eq!(desktop.radius, 4.0);
-    assert!(!desktop.fill_height);
-
-    for size in [vec2(820.0, 900.0), vec2(390.0, 844.0)] {
-        let screen = Rect::from_min_size(egui::pos2(7.0, 11.0), size);
-        let compact = DialogLayout::resolve(DialogSize::SpecialistToolBrowser, screen, None);
-        assert_eq!(compact.surface_rect, screen);
-        assert_eq!(compact.radius, 0.0);
-        assert!(compact.narrow);
-        assert!(compact.fill_height);
-    }
-}
-
-#[test]
 fn flush_body_is_opt_in() {
     let padded = Dialog::new(TEST_TITLE, "Accept");
     assert!(!padded.flush_body);

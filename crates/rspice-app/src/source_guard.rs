@@ -958,7 +958,7 @@ mod tests {
     /// roles.
     #[test]
     fn chrome_console_tools_and_help_paint_no_status_in_colour() {
-        const FILES: [&str; 45] = [
+        const FILES: [&str; 43] = [
             "workbench/app/dialogs/help.rs",
             "workbench/chrome.rs",
             "workbench/chrome/activity_rail.rs",
@@ -1002,8 +1002,6 @@ mod tests {
             "workbench/tools/notification_center.rs",
             "workbench/tools/project_launcher.rs",
             "workbench/tools/project_launcher/recovery.rs",
-            "workbench/tools/specialist_tool_browser.rs",
-            "workbench/tools/specialist_tool_browser/workspace_rows.rs",
         ];
         const BANNED_CALLS: [&str; 4] = [
             "colored_label",

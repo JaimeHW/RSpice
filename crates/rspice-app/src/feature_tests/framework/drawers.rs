@@ -107,12 +107,12 @@ fn drawer_scrims_match_the_mockup_dark_and_light_tokens() {
     );
 }
 
-/// Fourteen one-line rows under two heads, not taglined cards under four:
+/// Thirteen one-line rows under two heads, not taglined cards under four:
 /// the one-column sheet was 1,237 px of scrolling.
 #[test]
 fn mobile_navigation_grid_height_tracks_its_real_rows() {
     assert_eq!(mobile_navigation_natural_height(2), 486.0);
-    assert_eq!(mobile_navigation_natural_height(1), 850.0);
+    assert_eq!(mobile_navigation_natural_height(1), 798.0);
 }
 
 /// A workspace is called what the rest of the shell calls it, and the

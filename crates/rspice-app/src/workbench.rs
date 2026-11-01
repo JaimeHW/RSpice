@@ -23,9 +23,9 @@
 //! - `surfaces` — the canonical task owners that fill the central area. One
 //!   is active at a time, and it is what the current route names.
 //! - `tools` — application-modal tools that float above the active surface
-//!   (project launcher, jobs list, specialist-tool browser, calculator,
-//!   notification centre). They own neither a route nor a document: they
-//!   open over whatever is beneath, do one job, and close.
+//!   (project launcher, jobs list, calculator, notification centre). They
+//!   own neither a route nor a document: they open over whatever is beneath,
+//!   do one job, and close.
 //! - `app/dialogs` — modal dialogs. They block the surface beneath until
 //!   dismissed, which is what separates them from a `tools` float.
 //!

@@ -8,24 +8,6 @@ use super::*;
 use crate::workbench::project::commands::ProjectCommand;
 
 #[test]
-fn design_specialist_command_routes_to_the_existing_real_browser() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Design);
-
-    let command = Command::DesignSpecialistWorkspaces;
-    assert_eq!(command.stable_id(), "specialist-tools-design");
-    assert_eq!(Command::from_stable_id(command.stable_id()), Some(command));
-    assert_eq!(command.availability(&app), CommandAvailability::Available);
-
-    command.execute(&mut app);
-
-    assert_eq!(
-        app.state.workbench.current_route().surface_id(),
-        crate::workbench::SurfaceId::SpecialistToolBrowser
-    );
-}
-
-#[test]
 fn design_menu_commands_explain_wrong_context_and_read_only_states() {
     let authoring_commands = [
         Command::PlaceInstance,

@@ -14,11 +14,10 @@ mod workflow_drafts;
 
 // The workbench's own session and the views over its records, which the
 // workbench reads by these paths.
-pub use console_views::{ConsoleChannel, InlineEditField, SpecialistToolBrowserState};
+pub use console_views::{ConsoleChannel, InlineEditField};
 #[cfg(test)]
 pub use console_views::{
     ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView, NotificationFilter,
-    SpecialistToolFilter,
 };
 pub(crate) use console_views::{InlineEditAuthority, InlineEditSession};
 pub use navigator_tree::*;
@@ -46,8 +45,7 @@ use serde::{Deserialize, Serialize};
 // What the session tests name the routes and presets by.
 #[cfg(test)]
 use super::{
-    BrowserHistoryEffect, RouteTransitionSource, SurfaceArchetype, SurfaceId, SurfaceRoute,
-    WorkspacePreset,
+    BrowserHistoryEffect, RouteTransitionSource, SurfaceId, SurfaceRoute, WorkspacePreset,
 };
 
 /// The two Design navigator tabs specified by the workbench mockup.

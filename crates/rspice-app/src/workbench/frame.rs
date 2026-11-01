@@ -1788,7 +1788,6 @@ mod tests {
                     crate::workbench::framework::dialogs::DialogKey("cloud.account_organization"),
                 );
                 tools::jobs_manager::show(ctx, &mut app);
-                tools::specialist_tool_browser::show(ctx, &mut app);
                 surfaces::show_simulation_workflow_dialogs(ctx, &mut app);
             },
         );

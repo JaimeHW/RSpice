@@ -76,84 +76,6 @@ fn every_claimed_viewer_document_is_in_the_catalog() {
 }
 
 #[test]
-fn specialist_preferences_restore_known_ids_and_ignore_corrupt_entries() {
-    let restored: SpecialistToolBrowserState = serde_json::from_value(serde_json::json!({
-        "favorites": ["rf-workbench", "removed-workspace", 42, null],
-        "pinned": "not-an-array",
-        "recents": ["photonics-workbench", {}, "model-editor"]
-    }))
-    .expect("future and malformed preference entries are isolated");
-
-    assert_eq!(restored.favorites, [SurfaceId::RfWorkbench]);
-    assert!(restored.pinned.is_empty());
-    assert_eq!(
-        restored.recents,
-        [SurfaceId::PhotonicsWorkbench, SurfaceId::ModelEditor]
-    );
-}
-
-#[test]
-fn specialist_preferences_normalize_identity_and_bound_recent_history() {
-    let specialist_ids = SurfaceId::ALL
-        .into_iter()
-        .filter(|surface| surface.archetype() == SurfaceArchetype::SpecialistWorkspace)
-        .take(SpecialistToolBrowserState::RECENT_LIMIT + 3)
-        .collect::<Vec<_>>();
-    let mut browser = SpecialistToolBrowserState {
-        favorites: vec![
-            SurfaceId::RfWorkbench,
-            SurfaceId::Project,
-            SurfaceId::RfWorkbench,
-        ],
-        pinned: vec![SurfaceId::ModelEditor, SurfaceId::ModelEditor],
-        recents: specialist_ids.clone(),
-        ..SpecialistToolBrowserState::default()
-    };
-
-    browser.normalize();
-    assert_eq!(browser.favorites, [SurfaceId::RfWorkbench]);
-    assert_eq!(browser.pinned, [SurfaceId::ModelEditor]);
-    assert_eq!(
-        browser.recents,
-        specialist_ids[..SpecialistToolBrowserState::RECENT_LIMIT]
-    );
-
-    browser.record_recent(SurfaceId::Project);
-    assert_eq!(
-        browser.recents,
-        specialist_ids[..SpecialistToolBrowserState::RECENT_LIMIT]
-    );
-    browser.record_recent(SurfaceId::RfWorkbench);
-    assert_eq!(browser.recents.first(), Some(&SurfaceId::RfWorkbench));
-    assert_eq!(
-        browser.recents.len(),
-        SpecialistToolBrowserState::RECENT_LIMIT
-    );
-}
-
-#[test]
-fn specialist_session_round_trip_retains_preferences_not_transient_review_state() {
-    let browser = SpecialistToolBrowserState {
-        query: "rf gain".to_owned(),
-        filter: SpecialistToolFilter::Favorites,
-        focus_search: true,
-        favorites: vec![SurfaceId::RfWorkbench],
-        pinned: vec![SurfaceId::ModelEditor],
-        recents: vec![SurfaceId::PhotonicsWorkbench],
-    };
-
-    let encoded = serde_json::to_string(&browser).expect("browser preferences serialize");
-    let restored: SpecialistToolBrowserState =
-        serde_json::from_str(&encoded).expect("browser preferences restore");
-    assert_eq!(restored.query, "");
-    assert_eq!(restored.filter, SpecialistToolFilter::All);
-    assert!(!restored.focus_search);
-    assert_eq!(restored.favorites, browser.favorites);
-    assert_eq!(restored.pinned, browser.pinned);
-    assert_eq!(restored.recents, browser.recents);
-}
-
-#[test]
 fn responsive_width_classes_match_every_mockup_boundary() {
     assert_eq!(WidthClass::for_width(560.0), WidthClass::Phone);
     assert_eq!(WidthClass::for_width(561.0), WidthClass::Tablet);
@@ -233,10 +155,10 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
         .expect("jobs manager is available");
     state
         .navigate(
-            SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser),
+            SurfaceRoute::surface(SurfaceId::HelpCenter),
             RouteTransitionSource::User,
         )
-        .expect("specialist tool browser is available");
+        .expect("the help center is available");
     state.clear_browser_history_effects();
 
     let transition = state
@@ -245,7 +167,7 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
 
     assert_eq!(
         transition.previous,
-        SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser)
+        SurfaceRoute::surface(SurfaceId::HelpCenter)
     );
     assert_eq!(
         transition.current,
@@ -265,8 +187,8 @@ fn multi_step_return_reconciles_manager_and_workspace_once_at_final_route() {
 fn manager_history_roundtrips_back_and_forward_to_its_source() {
     let mut state = WorkbenchSession::default();
     let jobs = SurfaceRoute::surface(SurfaceId::JobsManager);
-    let tools = SurfaceRoute::surface(SurfaceId::SpecialistToolBrowser);
-    for route in [jobs, tools] {
+    let help = SurfaceRoute::surface(SurfaceId::HelpCenter);
+    for route in [jobs, help] {
         state
             .navigate(route, RouteTransitionSource::User)
             .expect("the manager route has an executor");
@@ -276,16 +198,16 @@ fn manager_history_roundtrips_back_and_forward_to_its_source() {
     assert_eq!(
         state
             .navigate_back(RouteTransitionSource::User)
-            .expect("the tool browser retains its jobs source")
+            .expect("the help center retains its jobs source")
             .current,
         jobs
     );
     assert_eq!(
         state
             .navigate_forward_steps(1, RouteTransitionSource::User)
-            .expect("forward restores the tool browser")
+            .expect("forward restores the help center")
             .current,
-        tools
+        help
     );
 }
 

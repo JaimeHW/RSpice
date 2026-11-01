@@ -93,7 +93,7 @@ pub mod workbench {
 
         pub use console_views::{
             ConsoleChannel, ConsoleReveal, ConsoleSelection, ConsoleSeverity, ConsoleView,
-            NotificationFilter, SpecialistToolBrowserState, SpecialistToolFilter,
+            NotificationFilter,
         };
         pub use rspice_app_state::workbench::workspace::Workspace;
         pub use workbench_session::{
@@ -104,6 +104,5 @@ pub mod workbench {
     pub mod surfaces;
     pub mod tools {
         pub mod notification_center;
-        pub mod specialist_tool_browser;
     }
 }

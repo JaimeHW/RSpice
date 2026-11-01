@@ -37,10 +37,9 @@ use crate::workbench::slots::{
     SettingsState, SimulateState,
 };
 use crate::workbench::state::{
-    ConsolePage, DesignPanel, SpecialistToolBrowserState, VerificationSessionState,
-    WorkbenchSession, Workspace, WorkspaceDocumentId, WorkspaceDocumentRegistry,
-    WorkspaceLayoutState, default_analysis_index, default_console_height, default_inspector_width,
-    default_navigator_width,
+    ConsolePage, DesignPanel, VerificationSessionState, WorkbenchSession, Workspace,
+    WorkspaceDocumentId, WorkspaceDocumentRegistry, WorkspaceLayoutState, default_analysis_index,
+    default_console_height, default_inspector_width, default_navigator_width,
 };
 use crate::workbench::{SurfaceNavigation, WorkspacePreset};
 
@@ -356,8 +355,8 @@ pub(in crate::workbench) struct WorkbenchWire {
     netlist_outline_collapsed: BTreeSet<crate::state::OutlineSectionKind>,
     #[serde(default)]
     command_query: String,
-    #[serde(default)]
-    specialist_tool_browser: SpecialistToolBrowserState,
+    // A `specialist_tool_browser` block from older sessions is ignored: the
+    // browser and the workspaces it listed are retired.
     #[serde(default)]
     report_authoring: ReportAuthoringState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -462,8 +461,6 @@ pub(in crate::workbench) struct WorkbenchWireRef<'a> {
     #[serde(default)]
     command_query: &'a String,
     #[serde(default)]
-    specialist_tool_browser: &'a SpecialistToolBrowserState,
-    #[serde(default)]
     report_authoring: &'a ReportAuthoringState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_editor_recovery: Option<&'a ModelEditorRecoveryDraft>,
@@ -532,7 +529,6 @@ impl<'a> WorkbenchWireRef<'a> {
             inline_edit: _,
             last_repeatable_command: _,
             drawer: _,
-            specialist_tool_browser,
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
@@ -593,7 +589,6 @@ impl<'a> WorkbenchWireRef<'a> {
             selected_model: &models.selected_model,
             netlist_outline_collapsed: &code.netlist_outline_collapsed,
             command_query,
-            specialist_tool_browser,
             report_authoring: &hardcopy.report_authoring,
             model_editor_recovery: models.model_editor_recovery.as_ref(),
             pdk_technology_authoring: &models.pdk_technology_authoring,
@@ -646,7 +641,6 @@ impl<'a> WorkbenchWireRef<'a> {
             selected_model: self.selected_model.clone(),
             netlist_outline_collapsed: self.netlist_outline_collapsed.clone(),
             command_query: self.command_query.clone(),
-            specialist_tool_browser: self.specialist_tool_browser.clone(),
             report_authoring: self.report_authoring.clone(),
             model_editor_recovery: self.model_editor_recovery.cloned(),
             pdk_technology_authoring: self.pdk_technology_authoring.clone(),
@@ -700,7 +694,6 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             selected_model: &wire.selected_model,
             netlist_outline_collapsed: &wire.netlist_outline_collapsed,
             command_query: &wire.command_query,
-            specialist_tool_browser: &wire.specialist_tool_browser,
             report_authoring: &wire.report_authoring,
             model_editor_recovery: wire.model_editor_recovery.as_ref(),
             pdk_technology_authoring: &wire.pdk_technology_authoring,
@@ -769,7 +762,6 @@ impl WorkbenchWire {
             inline_edit: _,
             last_repeatable_command: _,
             drawer: _,
-            specialist_tool_browser,
             notification_center_open: _,
             notification_filter: _,
             notification_unread_only: _,
@@ -829,7 +821,6 @@ impl WorkbenchWire {
         state.models.selected_model = self.selected_model;
         state.code.netlist_outline_collapsed = self.netlist_outline_collapsed;
         *command_query = self.command_query;
-        *specialist_tool_browser = self.specialist_tool_browser;
         state.hardcopy.report_authoring = self.report_authoring;
         state.models.model_editor_recovery = self.model_editor_recovery;
         state.models.pdk_technology_authoring = self.pdk_technology_authoring;
@@ -1245,6 +1236,73 @@ mod workbench_session_tests {
                 .take_route_diagnostic()
                 .is_some_and(|message| message.contains("Malformed routes"))
         );
+    }
+
+    /// A session saved while the Specialist tool browser existed carries its
+    /// `specialist_tool_browser` block, whose favorites, pins and recents name
+    /// the specialist workspaces retired with it, and may have quit on the
+    /// browser, so its route is both the current route and the primary
+    /// window's. The session must still load: the block is ignored, the route
+    /// is dropped with one diagnostic, the window opens on Design, and the
+    /// rest of the session survives.
+    #[test]
+    fn session_saved_with_the_deleted_specialist_tool_browser_still_restores() {
+        const BROWSER: &str = concat!(
+            "specialist_tool_browser:(favorites:[\"rf-workbench\",\"model-editor\"],",
+            "pinned:[\"photonics-workbench\"],",
+            "recents:[\"pcb-workbench\",\"report-authoring\"])"
+        );
+        let mut state = AppState::default();
+        state.workbench.activate(Workspace::Results);
+        state.workbench.command_query = "probe".to_owned();
+        let primary = state.workbench.window_session.primary();
+        state
+            .workbench
+            .window_session
+            .state_mut(primary)
+            .expect("the primary window")
+            .route = state.workbench.current_route();
+        let saved =
+            ron::to_string(&WorkbenchWireRef::capture(&state)).expect("workbench serializes");
+        let saved = saved.replace("\"?view=results\"", "\"?surface=specialist-tool-browser\"");
+        for quit_on in ["current:", "route:"] {
+            assert!(
+                saved.contains(&format!("{quit_on}\"?surface=specialist-tool-browser\"")),
+                "the session must have quit on the browser ({quit_on}) for this to prove anything"
+            );
+        }
+        let saved = format!(
+            "{},{BROWSER})",
+            saved
+                .strip_suffix(')')
+                .expect("a workbench session is a RON struct")
+        );
+
+        let mut restored = restore(
+            ron::from_str(&saved).expect("a session that kept the browser's state restores"),
+        );
+        restored.workbench.reconcile_restored_navigation();
+
+        assert_eq!(
+            restored.workbench.current_route(),
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
+        assert!(
+            restored
+                .workbench
+                .take_route_diagnostic()
+                .is_some_and(|message| message.contains("Malformed routes"))
+        );
+        assert_eq!(
+            restored
+                .workbench
+                .window_session
+                .state(primary)
+                .expect("the primary window")
+                .route,
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
+        assert_eq!(restored.workbench.command_query, "probe");
     }
 
     #[test]

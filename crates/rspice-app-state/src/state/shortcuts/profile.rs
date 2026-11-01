@@ -47,6 +47,10 @@ pub const RETIRED_COMMAND_IDS: &[&str] = &[
     // definition being read; the zooms, Fit and each filter's own clear
     // button restore what a reader sees.
     "reset-active-view",
+    // Opened the Specialist tool browser, a list of specialist workspaces
+    // that, but for the few the menus open, this build cannot open.
+    "specialist-tool-browser",
+    "specialist-tools-design",
 ];
 
 /// Persisted user shortcut profile. Command entries remain raw until they are

@@ -164,10 +164,6 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(Command::PlacePin.spec().id, "place-pin");
     assert_eq!(Command::PlaceText.spec().id, "place-text");
     assert_eq!(Command::PlaceShape.spec().id, "place-shape");
-    assert_eq!(
-        Command::DesignSpecialistWorkspaces.spec().id,
-        "specialist-tools-design"
-    );
     assert_eq!(Command::ConfigurationSets.spec().id, "configuration-sets");
     assert_eq!(
         ProjectCommand::DesignManagement.key().as_str(),

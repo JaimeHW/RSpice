@@ -429,8 +429,8 @@ fn the_compact_bar_drops_the_title_and_the_search_field_narrows() {
 /// The overflow menu the in-between widths showed is gone, and each of its
 /// rows still has a home in a real menu. Its jobs row read "Jobs & targets"
 /// and opens what is now the run history, so Simulate lists it under that
-/// name. The specialist tool browser, the overflow's only other own row, is
-/// reached from the palette and the Design menu's specialist row.
+/// name. The overflow's only other own row, the specialist tool browser, is
+/// retired.
 #[test]
 fn every_row_the_overflow_held_has_a_home_in_a_menu() {
     let listed = ALL_MENUS
@@ -1105,12 +1105,7 @@ fn upgraded_design_menu_commands_remain_palette_discoverable() {
                 .contains(CommandFlags::PALETTE_VISIBLE)
         );
     }
-    for command in [
-        Command::CreateHierarchy,
-        Command::DesignSpecialistWorkspaces,
-    ] {
-        assert!(command.palette_visible());
-    }
+    assert!(Command::CreateHierarchy.palette_visible());
     assert!(
         ProjectCommand::CheckAndSave
             .declared_spec()
@@ -1344,7 +1339,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::SelectAll,
         Command::RenameSelection,
         Command::DescendHierarchy,
-        Command::DesignSpecialistWorkspaces,
         Command::KeyboardShortcuts,
         Command::CheckCellview,
         Command::CheckDesign,

@@ -94,9 +94,6 @@ const APPLICATION_GATE: &[GateRow] = &[
     ("route JobsManager", |state| {
         navigate(state, SurfaceId::JobsManager);
     }),
-    ("route SpecialistToolBrowser", |state| {
-        navigate(state, SurfaceId::SpecialistToolBrowser);
-    }),
     ("route NotificationCenter", |state| {
         navigate(state, SurfaceId::NotificationCenter);
     }),

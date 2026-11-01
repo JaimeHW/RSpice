@@ -1018,7 +1018,6 @@ mod tests {
                 ids::SIMULATE_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Simulate),
             ),
-            (ids::SPECIALIST_TOOL_BROWSER, Command::SpecialistToolBrowser),
             (
                 ids::STIMULUS_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Stimulus),

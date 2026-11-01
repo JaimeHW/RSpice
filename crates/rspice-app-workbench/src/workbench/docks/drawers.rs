@@ -297,12 +297,7 @@ pub const WORKSPACE_ACTIONS: [MobileNavigationAction; 8] = [
 /// Notifications are here because a phone's title bar has no room for the
 /// bell: without this row the panel was reachable only from the palette, and
 /// the unread count from nowhere.
-pub const TOOL_ACTIONS: [MobileNavigationAction; 6] = [
-    MobileNavigationAction {
-        command: ids::SPECIALIST_TOOL_BROWSER,
-        icon: WorkbenchIcon::More,
-        label: "Specialist tool browser",
-    },
+pub const TOOL_ACTIONS: [MobileNavigationAction; 5] = [
     MobileNavigationAction {
         command: ids::OPEN_CONSOLE,
         icon: WorkbenchIcon::Console,
@@ -437,9 +432,7 @@ fn mobile_navigation_dialog(
     ctx.accesskit_node_builder(shown.response.id, |node| {
         node.set_role(egui::accesskit::Role::Dialog);
         node.set_label("Workspaces & tools");
-        node.set_description(
-            "Choose a workspace, specialist tool, utility, or preference surface.",
-        );
+        node.set_description("Choose a workspace, utility, or preference surface.");
         node.set_modal();
     });
     maintain_mobile_navigation_focus(ctx, &focus_ids, first_card_id);
