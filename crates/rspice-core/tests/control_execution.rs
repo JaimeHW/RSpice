@@ -1388,3 +1388,16 @@ fn shell_variables_expand_as_ngspice_does() {
         run_until_error("option\nV1 in 0 2\nR1 in 0 1k\n.control\nset gmin=1e-12\n.endc\n.end\n");
     assert!(error.unwrap().contains("simulator option"));
 }
+
+/// ngspice `save` narrows what a later analysis keeps; every vector it
+/// names stays readable here, as in ngspice-46, which prints
+/// `v(out) = 1.500000e+00` for the same script.
+#[test]
+fn save_keeps_the_vectors_it_names_readable() {
+    let (presented, error) = run_until_error(
+        "save\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\nsave out v(in)\nop\n\
+         print v(out)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert!((printed(&presented[0])[0].y.samples[0].re - 1.5).abs() < 1e-9);
+}

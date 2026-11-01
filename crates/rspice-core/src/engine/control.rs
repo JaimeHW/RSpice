@@ -92,6 +92,7 @@ enum CommandKind {
     Options,
     Set,
     Unset,
+    Save,
     Alter,
     Analysis,
     Run,
@@ -122,6 +123,7 @@ impl CommandKind {
             "option" | "options" => Self::Options,
             "set" | "setcs" => Self::Set,
             "unset" => Self::Unset,
+            "save" => Self::Save,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" => Self::Analysis,
@@ -261,6 +263,12 @@ impl ControlCircuit {
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
+            // ngspice `save` (frontend/breakp2.c:34 com_save) narrows the
+            // vectors a later analysis keeps. Every analysis here keeps all
+            // of its vectors, so each one the list names stays readable.
+            CommandKind::Save => Ok(PreparedCommand::Complete(
+                ControlCommandEffect::CircuitChanged,
+            )),
             CommandKind::Alter => {
                 self.alter(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
