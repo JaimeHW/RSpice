@@ -9,6 +9,8 @@ use crate::state::{
     ComponentType, DesignNote, DesignNoteKind, DocumentationShape, DocumentationShapeGeometry,
     Point, Selection,
 };
+use crate::workbench::framework::requests::ClipboardImage;
+use crate::workbench::hardcopy::commands::HardcopyCommand;
 
 /// A sheet holding objects of every kind Edit ▸ Select ▸ names, each kind's
 /// expected selection beside it.
@@ -209,5 +211,83 @@ fn highlight_net_lights_the_net_the_selection_is_on() {
         crate::schematic::view::selected_net(&app.state)
             .ok()
             .as_deref()
+    );
+}
+
+/// Copy as image draws the selection, or with nothing selected the whole
+/// sheet in view, through the hardcopy renderer and leaves the picture for
+/// the clipboard: ink on a white border, the selection's picture the smaller,
+/// the status bar saying what was copied.
+#[test]
+fn copy_as_image_draws_the_selection_or_else_the_view() {
+    let mut app = title_test_app();
+    let schematic = &mut app.state.model.schematic;
+    let resistor = schematic.add_component(ComponentType::Resistor, Point::new(0, 0));
+    schematic
+        .add_wire(vec![Point::new(-300, 0), Point::new(-40, 0)])
+        .expect("a wire is added");
+    app.state.workbench.activate(Workspace::Design);
+    let reference = app.state.model.workspace.content.active_view.clone();
+    app.state
+        .workbench
+        .documents
+        .activate(crate::workbench::state::WorkspaceDocumentId::CellView(
+            reference,
+        ));
+    let key = HardcopyCommand::CopyAsImage.key();
+    assert_eq!(app.availability(key), CommandAvailability::Available);
+    let copy = |app: &mut RSpiceApp| {
+        app.execute(key);
+        let ClipboardImage(image) = app
+            .state
+            .workbench
+            .outbox
+            .take::<ClipboardImage>()
+            .unwrap_or_else(|| {
+                panic!(
+                    "no picture: {:?}",
+                    app.state.workbench.prompt.as_ref().map(|p| &p.text)
+                )
+            });
+        image
+    };
+
+    let view = copy(&mut app);
+    app.state
+        .model
+        .schematic
+        .session
+        .editor
+        .selection
+        .select_component(resistor);
+    let selection = copy(&mut app);
+    for image in [&view, &selection] {
+        let [width, height] = image.size;
+        assert_eq!(image.pixels[0], egui::Color32::WHITE);
+        assert_eq!(image.pixels[width * height - 1], egui::Color32::WHITE);
+        assert!(
+            image
+                .pixels
+                .iter()
+                .any(|pixel| pixel.r() < 128 && pixel.a() == 255),
+            "a picture with no ink"
+        );
+    }
+    assert!(
+        selection.size[0] < view.size[0] / 2 && selection.size[1] < view.size[1] / 2,
+        "the selection {:?} against the view {:?}",
+        selection.size,
+        view.size
+    );
+    assert_eq!(
+        app.state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| &*prompt.text),
+        Some(&*format!(
+            "Copied the selection as a {} \u{00d7} {} picture.",
+            selection.size[0], selection.size[1]
+        ))
     );
 }

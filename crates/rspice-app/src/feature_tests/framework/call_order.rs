@@ -57,6 +57,8 @@ const UI: &[Step] = &[
         &[
             "framework::requests::drain(self,",
             "ClipboardText(text)| ctx.copy_text(text)",
+            "framework::requests::drain(self,",
+            "ClipboardImage(image)| ctx.copy_image(image)",
         ],
     ),
     ("10", &["autosave::autosave_tick("]),

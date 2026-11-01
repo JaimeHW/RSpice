@@ -1028,6 +1028,11 @@ impl eframe::App for RSpiceApp {
             |app| &mut app.state.workbench.outbox,
             |_, crate::workbench::framework::requests::ClipboardText(text)| ctx.copy_text(text),
         );
+        crate::workbench::framework::requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
+            |_, crate::workbench::framework::requests::ClipboardImage(image)| ctx.copy_image(image),
+        );
         #[cfg(not(target_arch = "wasm32"))]
         crate::workbench::app_state::session::autosave::autosave_tick(
             &mut self.state.platform,

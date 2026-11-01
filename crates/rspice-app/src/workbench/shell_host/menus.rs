@@ -195,6 +195,11 @@ const EDIT_MENU: &[MenuEntry] = &[
     Separator,
     command(Command::Cut),
     command(Command::Copy),
+    // A picture of the selection or the view, for a document or a message.
+    MenuEntry::Only(
+        MenuContext::Drawing,
+        &[hardcopy(HardcopyCommand::CopyAsImage)],
+    ),
     command(Command::Paste),
     MenuEntry::Only(
         MenuContext::SourceEditor,

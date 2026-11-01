@@ -1,7 +1,7 @@
 //! The commands the hardcopy feature declares: the schematic and publication
-//! exports, Print and Export active view, and the report editor, as the
-//! registry lists them; and the report route's own toolbar actions, which the
-//! registry leaves out.
+//! exports, Print, Export active view and Copy as image, and the report
+//! editor, as the registry lists them; and the report route's own toolbar
+//! actions, which the registry leaves out.
 //!
 //! What each command does is the feature's own; what it declares here is all
 //! the shell's order, menus, palette and shortcut profile read of it.
@@ -18,6 +18,8 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 pub enum HardcopyCommand {
     PrintHardcopy,
     ExportActiveView,
+    /// Draw the selection, or the view, as a picture on the clipboard.
+    CopyAsImage,
     ReportAuthoring,
     SaveReportDocument,
     AddReportPage,
@@ -96,9 +98,10 @@ const REPORT_ACTION: CommandFlags =
 
 impl HardcopyCommand {
     /// The commands the registry lists, in the shell's order.
-    pub const LISTED: [Self; 3] = [
+    pub const LISTED: [Self; 4] = [
         Self::PrintHardcopy,
         Self::ExportActiveView,
+        Self::CopyAsImage,
         Self::ReportAuthoring,
     ];
 
@@ -125,6 +128,7 @@ impl HardcopyCommand {
         match self {
             Self::PrintHardcopy => ids::PRINT_HARDCOPY,
             Self::ExportActiveView => CommandKey::new("export-active-view"),
+            Self::CopyAsImage => CommandKey::new("copy-as-image"),
             Self::ReportAuthoring => CommandKey::new("report-page-editor"),
             Self::SaveReportDocument => CommandKey::new("report-save-document"),
             Self::AddReportPage => CommandKey::new("report-add-page"),
@@ -148,6 +152,14 @@ impl HardcopyCommand {
                 ACTIVE_VIEW_OUTPUT,
                 ShortcutContext::Global,
                 EXPORT_ACTIVE_VIEW,
+            ),
+            // No chord: the browser keeps Ctrl+Shift+C for its inspector.
+            Self::CopyAsImage => (
+                "Copy as image",
+                "Edit",
+                ACTIVE_VIEW_OUTPUT,
+                ShortcutContext::Global,
+                NONE,
             ),
             Self::ReportAuthoring => (
                 "Report editor\u{2026}",

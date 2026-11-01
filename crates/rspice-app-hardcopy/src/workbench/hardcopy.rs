@@ -1,5 +1,5 @@
-//! The hardcopy feature: Print and Export active view, and the report
-//! editor.
+//! The hardcopy feature: Print, Export active view and Copy as image, and
+//! the report editor.
 //!
 //! Its commands are answered and carried out in a [`Cx`] over the feature's
 //! own slot, the model, the session and the platform services' state, and
@@ -29,6 +29,7 @@ use crate::workbench::framework::dialogs::DialogKey;
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureDialog, FeatureRegistry, FeatureSurface, Reads, ToolbarTool,
 };
+use crate::workbench::framework::requests::ClipboardImage;
 use crate::workbench::hardcopy_adapters::sources::active_app_hardcopy_source_available;
 use crate::workbench::slots::HardcopyState;
 use crate::workbench::state::WorkbenchSession;
@@ -84,6 +85,36 @@ pub fn open_workflow(cx: &mut Cx<'_, HardcopyFeature>, workflow: HardcopyWorkflo
     open_hardcopy_workflow(&mut workflow_parts(cx), workflow);
 }
 
+/// Copy as image: draw the selection, or the view, and hand the picture to
+/// the platform clipboard, the status bar saying what was copied or why it
+/// could not be.
+fn copy_as_image(cx: &mut Cx<'_, HardcopyFeature>) {
+    let copied =
+        crate::workbench::app::dialogs::hardcopy::clipboard::copy_as_image(&workflow_parts(cx));
+    match copied {
+        Ok(copied) => {
+            cx.wb.prompt(copied.summary());
+            cx.wb.outbox.push(ClipboardImage(copied.image));
+        }
+        Err(error) => cx.wb.prompt(format!(
+            "Copy as image is unavailable: {}.",
+            error.trim_end_matches('.')
+        )),
+    }
+}
+
+/// Whether the platform clipboard takes a picture. A browser hands its
+/// clipboard only to a page served over HTTPS (or from this machine).
+#[cfg(target_arch = "wasm32")]
+fn clipboard_takes_pictures() -> bool {
+    web_sys::window().is_some_and(|window| window.is_secure_context())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn clipboard_takes_pictures() -> bool {
+    true
+}
+
 /// The report route's toolbar: its document actions, in the order the
 /// toolbar lays them out. The mockup's Build review draft action stays off
 /// it until exact plot artwork publication and the release handoff complete
@@ -116,13 +147,29 @@ impl CommandSet for HardcopyCommand {
     }
 
     /// The exports and the report editor run whenever a project is open,
-    /// which the shell's guard has already asked. Print and Export active
-    /// view need a view to resolve, and Print a host that prints. The report
-    /// toolbar's actions need the report route and a report the project lets
-    /// change.
+    /// which the shell's guard has already asked. Print, Export active view
+    /// and Copy as image need a view to resolve, Print a host that prints and
+    /// Copy as image a clipboard that takes a picture. The report toolbar's
+    /// actions need the report route and a report the project lets change.
     fn availability(self, reads: &Reads<'_, HardcopyFeature>) -> CommandAvailability {
         let editor = &reads.state.report_authoring;
         let available = match self {
+            Self::CopyAsImage if !clipboard_takes_pictures() => {
+                return CommandAvailability::Disabled(
+                    "the browser shares its clipboard only with a page served over HTTPS",
+                );
+            }
+            Self::CopyAsImage => {
+                if !active_app_hardcopy_source_available(
+                    &reads.state.report_authoring,
+                    reads.model,
+                    reads.wb,
+                    reads.results,
+                ) {
+                    return CommandAvailability::Disabled("the view has nothing to draw");
+                }
+                true
+            }
             Self::ReportAuthoring => true,
             Self::PrintHardcopy => {
                 cfg!(any(target_os = "windows", target_arch = "wasm32"))
@@ -160,6 +207,7 @@ impl CommandSet for HardcopyCommand {
         match self {
             Self::PrintHardcopy => open_workflow(cx, HardcopyWorkflow::Print),
             Self::ExportActiveView => open_workflow(cx, HardcopyWorkflow::Export),
+            Self::CopyAsImage => copy_as_image(cx),
             Self::ReportAuthoring => report::open(cx.wb),
             // Saving the report is saving the project, behind its own
             // prologue; nothing follows it here.

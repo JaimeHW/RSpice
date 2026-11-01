@@ -911,6 +911,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::Redo.key(),
     Command::Cut.key(),
     Command::Copy.key(),
+    HardcopyCommand::CopyAsImage.key(),
     Command::Paste.key(),
     Command::Duplicate.key(),
     Command::Delete.key(),

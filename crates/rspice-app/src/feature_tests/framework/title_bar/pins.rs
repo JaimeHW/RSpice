@@ -257,6 +257,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "---",
             "Cut | cut-selection | Ctrl+X | off: select an editable object",
             "Copy | copy-selection | Ctrl+C | off: select an editable object",
+            "Copy as image | copy-as-image |  | off: the view has nothing to draw",
             "Paste | paste-selection | Ctrl+V | off: clipboard has no compatible content",
             "Duplicate | duplicate-selection | Ctrl+D | off: select an editable object",
             "Delete | delete-selection | Delete | off: select an editable object",

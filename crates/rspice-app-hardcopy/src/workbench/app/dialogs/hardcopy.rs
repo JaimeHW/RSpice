@@ -17,6 +17,7 @@ use rspice_hardcopy_contract::{
 #[cfg(test)]
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource, PrinterRasterGeometry};
 
+pub mod clipboard;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod execution;
 #[cfg(not(target_arch = "wasm32"))]
