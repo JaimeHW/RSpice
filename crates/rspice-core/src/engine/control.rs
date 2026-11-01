@@ -845,7 +845,7 @@ impl ControlScalarEvaluator for ControlCircuit {
     ) -> Result<Option<ComplexValue>, ControlError> {
         match self.vector_or_scalar(expression, variables, line, abort)? {
             Evaluated::Scalar(value) => {
-                self.unbind_vector(name);
+                self.bind_scalar(name, value, line)?;
                 Ok(Some(value))
             }
             Evaluated::Vector { value, .. } => {

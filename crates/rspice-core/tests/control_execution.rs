@@ -1307,3 +1307,35 @@ fn indexing_selects_elements_and_ranges_as_ngspice_does() {
     );
     assert!(error.unwrap().contains("names no vector"));
 }
+
+/// ngspice binds a scalar `let` as a one-element vector of the current plot
+/// (frontend/com_let.c:191 vec_new), so `plot.name` and `v(name)` read it.
+/// ngspice-46 echoes `1000 3 6 3` and `1003` for the same script. A read
+/// that names no plot keeps the session parameter, as before: `$&b` still
+/// expands {:.17e}, and `b` stays a parameter `$b` can expand.
+#[test]
+fn a_scalar_let_is_also_a_vector_of_its_plot() {
+    let source = "scalar lets\nV1 in 0 2\nR1 in 0 1k\n.control\nsetplot new\nlet i1 = 1k\nop\n\
+        let a = 3\nlet b = a * 2\necho $&unknown1.i1 $&op1.a $&b $&v(a)\n\
+        print unknown1.i1 op1.a\nlet c = unknown1.i1 + op1.a\necho $&c $b\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            format!("1000 3 {:.17e} 3", 6.0),
+            format!("1003 {:.17e}", 6.0)
+        ]
+    );
+    let one = |value: f64| vec![num_complex::Complex64::from(value)];
+    let qualified = printed(&presented[1]);
+    assert_eq!(qualified[0].y.samples, one(1000.0));
+    assert_eq!(qualified[1].y.samples, one(3.0));
+    // The plot copy follows a later scalar `let` of the name.
+    let (presented, error) = run_until_error(
+        "rebind\nV1 in 0 2\nR1 in 0 1k\n.control\nop\nlet a = 3\nlet a = a + 1\nprint op1.a\n\
+         .endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(printed(&presented[0])[0].y.samples, one(4.0));
+}

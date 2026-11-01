@@ -24,6 +24,9 @@ struct UserVector {
     /// analysis ran.
     plot: Option<String>,
     value: VectorValue,
+    /// A scalar `let` keeps its session parameter, which answers every read
+    /// that does not name a plot; this copy answers `plot.name`.
+    scalar: bool,
 }
 
 /// A plot `setplot new` made (frontend/vectors.c:1164). It holds only the
@@ -112,8 +115,14 @@ impl ControlCircuit {
     }
 
     /// ngspice `vec_get`: a plot prefix names the plot, otherwise the current
-    /// plot; the constants plot answers for either when it has the name.
+    /// plot; the constants plot answers for either when it has the name. A
+    /// scalar `let`'s copy answers only a read that names its plot.
     fn user_vector(&self, name: &str) -> Option<usize> {
+        self.find_vector(name, false)
+    }
+
+    /// `vec_get` over every vector, a scalar `let`'s copy included.
+    fn find_vector(&self, name: &str, scalars: bool) -> Option<usize> {
         let (plot, name) = match name.split_once('.') {
             Some((prefix, rest)) if prefix.eq_ignore_ascii_case("const") => (Some(None), rest),
             Some((prefix, rest)) => match self
@@ -126,10 +135,13 @@ impl ControlCircuit {
             },
             None => (None, name),
         };
+        let scalars = scalars || plot.is_some();
         let plot = plot.unwrap_or_else(|| self.current_plot());
         let find = |plot: Option<&str>| {
             self.vectors.vectors.iter().position(|vector| {
-                vector.plot.as_deref() == plot && vector.name.eq_ignore_ascii_case(name)
+                vector.plot.as_deref() == plot
+                    && vector.name.eq_ignore_ascii_case(name)
+                    && (scalars || !vector.scalar)
             })
         };
         find(plot).or_else(|| find(None))
@@ -187,7 +199,8 @@ impl ControlCircuit {
     }
 
     /// ngspice reads `v(name)` as the vector `name` (frontend/parse.c), so
-    /// it names a `let` vector before a node of the same name.
+    /// it names a `let` vector, a scalar one too, before a node of the same
+    /// name.
     fn voltage_alias(&self, name: &str, args: &[Expr]) -> Option<usize> {
         let [Expr::Param(vector)] = args else {
             return None;
@@ -197,9 +210,9 @@ impl ControlCircuit {
             return None;
         }
         if prefix.is_empty() {
-            self.user_vector(vector)
+            self.find_vector(vector, true)
         } else {
-            self.user_vector(&format!("{prefix}.{vector}"))
+            self.find_vector(&format!("{prefix}.{vector}"), true)
         }
     }
 
@@ -211,7 +224,38 @@ impl ControlCircuit {
         value: VectorValue,
         line: usize,
     ) -> Result<(), ControlError> {
-        let index = self.user_vector(name);
+        self.bind(name, value, false, line)
+    }
+
+    /// A scalar `let` stays a session parameter; ngspice also binds it as a
+    /// one-element vector of the current plot, which `plot.name` reads.
+    pub(in crate::engine::control) fn bind_scalar(
+        &mut self,
+        name: &str,
+        value: ComplexValue,
+        line: usize,
+    ) -> Result<(), ControlError> {
+        if !value.re.is_finite() || !value.im.is_finite() {
+            // The session refuses the value; nothing is bound.
+            return Ok(());
+        }
+        let value = VectorValue {
+            samples: vec![value],
+            complex: value.im != 0.0,
+            scale: None,
+            unit: SignalUnit::Unspecified,
+        };
+        self.bind(name, value, true, line)
+    }
+
+    fn bind(
+        &mut self,
+        name: &str,
+        value: VectorValue,
+        scalar: bool,
+        line: usize,
+    ) -> Result<(), ControlError> {
+        let index = self.find_vector(name, true);
         let replaced = index.map_or(0, |index| {
             self.vectors.vectors[index]
                 .value
@@ -231,8 +275,12 @@ impl ControlCircuit {
             ));
         }
         match index {
-            Some(index) => self.vectors.vectors[index].value = value,
-            None => self.push_vector(name, value),
+            Some(index) => {
+                let vector = &mut self.vectors.vectors[index];
+                vector.value = value;
+                vector.scalar = scalar;
+            }
+            None => self.push_vector(name, value, scalar),
         }
         Ok(())
     }
@@ -265,13 +313,13 @@ impl ControlCircuit {
                 format!("result values limit {} exceeded", self.value_limit),
             ));
         }
-        self.push_vector(name, value);
+        self.push_vector(name, value, false);
         Ok(())
     }
 
     /// Add a vector to the current plot. A user plot's first vector is its
     /// scale (frontend/vectors.c:921 vec_new).
-    fn push_vector(&mut self, name: &str, value: VectorValue) {
+    fn push_vector(&mut self, name: &str, value: VectorValue, scalar: bool) {
         let plot = self.current_plot().map(str::to_owned);
         if let Some(index) = self.vectors.current
             && self.vectors.plots[index].scale.is_none()
@@ -282,6 +330,7 @@ impl ControlCircuit {
             name: name.to_owned(),
             plot,
             value,
+            scalar,
         });
     }
 
@@ -335,14 +384,6 @@ impl ControlCircuit {
                 Ok(None)
             }
             Err(error) => Err(error),
-        }
-    }
-
-    /// A scalar `let` of a name drops the vector it would otherwise leave
-    /// shadowing the new value.
-    pub(in crate::engine::control) fn unbind_vector(&mut self, name: &str) {
-        if let Some(index) = self.user_vector(name) {
-            self.vectors.vectors.remove(index);
         }
     }
 
