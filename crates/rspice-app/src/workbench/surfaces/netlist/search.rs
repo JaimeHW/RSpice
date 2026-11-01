@@ -677,20 +677,30 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
     .hint(status)
     .hint_tone(tone)
     .show_with_initial_body_focus(ctx, |ui| {
+        // A field is a control's height, as tall as the Scope select beside
+        // it and a finger's target in a touch shell.
+        let field_size = |ui: &Ui| {
+            egui::vec2(
+                ui.available_width().max(180.0),
+                crate::ui::tokens::Tokens::get(ui.ctx()).metrics.ctl_h,
+            )
+        };
         let mut find_control_id = None;
         if compact_fields {
             ui.label(messages.text(MessageId::CommonFind));
-            let response = ui.add(
+            let response = ui.add_sized(
+                field_size(ui),
                 egui::TextEdit::singleline(&mut find.find)
-                    .desired_width(ui.available_width())
+                    .vertical_align(egui::Align::Center)
                     .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
             );
             find_control_id = Some(response.id);
             if scope_replaceable {
                 ui.label(messages.text(MessageId::CommonReplace));
-                ui.add(
+                ui.add_sized(
+                    field_size(ui),
                     egui::TextEdit::singleline(&mut find.replacement)
-                        .desired_width(ui.available_width()),
+                        .vertical_align(egui::Align::Center),
                 );
             }
             ui.label(messages.text(MessageId::CommonScope));
@@ -701,18 +711,20 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                 .spacing([10.0, 8.0])
                 .show(ui, |ui| {
                     ui.label(messages.text(MessageId::CommonFind));
-                    let response = ui.add(
+                    let response = ui.add_sized(
+                        field_size(ui),
                         egui::TextEdit::singleline(&mut find.find)
-                            .desired_width(ui.available_width().max(180.0))
+                            .vertical_align(egui::Align::Center)
                             .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
                     );
                     find_control_id = Some(response.id);
                     ui.end_row();
                     if scope_replaceable {
                         ui.label(messages.text(MessageId::CommonReplace));
-                        ui.add(
+                        ui.add_sized(
+                            field_size(ui),
                             egui::TextEdit::singleline(&mut find.replacement)
-                                .desired_width(ui.available_width().max(180.0)),
+                                .vertical_align(egui::Align::Center),
                         );
                         ui.end_row();
                     }
@@ -1273,5 +1285,57 @@ mod tests {
         let says = |text: &str| names.iter().any(|name| name == text);
         assert!(says("Find and replace in source"), "{names:?}");
         assert!(says("Replace"), "an owned deck offers no Replace");
+    }
+
+    /// The Find field is a control's height like the Scope select beside it,
+    /// a finger's target in a touch shell. It was egui's default single line,
+    /// shorter than the select at the desktop size and half its height on a
+    /// tablet.
+    #[test]
+    fn the_find_field_is_as_tall_as_the_scope_select() {
+        use egui::accesskit::Role;
+
+        for coarse in [false, true] {
+            let mut app = RSpiceApp::test_instance();
+            app.state.code.code_workspace.page =
+                crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+            app.state.code.netlist.find.open = true;
+            let ctx = egui::Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            crate::ui::Theme::default().apply_responsive_metrics_with_target(
+                &ctx,
+                coarse.then_some(crate::ui::tokens::TOUCH_TARGET),
+            );
+            let mut nodes = std::collections::HashMap::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1024.0, 768.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ui| find_replace_window(ui.ctx(), &mut app),
+                );
+                if let Some(update) = output.platform_output.accesskit_update {
+                    nodes.extend(update.nodes);
+                }
+            }
+            let height = |role: Role| {
+                nodes
+                    .values()
+                    .find(|node| node.role() == role)
+                    .and_then(|node| node.bounds())
+                    .map(|bounds| bounds.y1 - bounds.y0)
+                    .unwrap_or_else(|| panic!("no {role:?}"))
+            };
+            let (field, select) = (height(Role::TextInput), height(Role::ComboBox));
+            assert!(
+                (field - select).abs() <= 1.0,
+                "touch {coarse}: the field is {field} tall and the select {select}"
+            );
+        }
     }
 }
