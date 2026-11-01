@@ -752,11 +752,17 @@ impl Engine {
             .num_nodes()
             .min(solution.len())
             .min(next_solution.len());
-        let voltage_abstol = self.voltage_abstol();
-        let fixed_point_converged = solution[..node_count]
-            .iter()
-            .zip(next_solution[..node_count].iter())
-            .all(|(current, next)| (next - current).abs() <= voltage_abstol);
+        // The next Newton correction must pass the node test an iterate
+        // passes (niconv.c: reltol * max(|old|, |new|) + vntol). An absolute
+        // vntol bound never closes on a node that only gmin and reverse
+        // junctions hold near a rail: its correction keeps jittering by tens
+        // of microvolts at 5 V, a hundredth of the node test's tolerance.
+        let fixed_point_converged = Self::check_voltage_convergence_with_tolerances(
+            &solution[..node_count],
+            &next_solution[..node_count],
+            self.voltage_abstol(),
+            self.voltage_reltol(),
+        );
         fixed_point_converged || circuit.has_jfet_gate_generation_branches()
     }
 
@@ -1252,6 +1258,64 @@ mod startup_constraint_tests {
             assert!(merit(&[2.0, 1.1], &constraints) > 1e-6);
             assert!(merit(&[2.1, 1.0], &constraints) > 1e-6);
         }
+    }
+}
+
+#[cfg(test)]
+mod fixed_point_tests {
+    use super::*;
+    use crate::netlist::Netlist;
+
+    #[test]
+    fn a_candidate_whose_next_correction_passes_the_node_test_is_a_fixed_point() {
+        // Teraohm resistors keep the KCL residual of either offset below the
+        // 1 pA current tolerance, so the next correction alone decides.
+        let netlist = Netlist::parse(
+            r#"
+v1 a 0 dc 5
+r1 a b 1e12
+r2 b 0 1e12
+.op
+.end
+"#,
+        )
+        .expect("divider parses");
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).expect("divider builds");
+        let mut matrix = engine.build_matrix(&circuit).expect("matrix builds");
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .expect("divider solves");
+        let tap = circuit
+            .node_names_sorted()
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case("b"))
+            .expect("tap node exists");
+        let node_tolerance =
+            engine.voltage_reltol() * solution[tap].abs() + engine.voltage_abstol();
+
+        // 40 uV off the tap: beyond vntol, inside niconv.c's reltol * |v| +
+        // vntol, with a KCL residual near 1e-16 A.
+        let mut near = solution.clone();
+        near[tap] += 4.0e-5;
+        assert!(4.0e-5 > engine.voltage_abstol() && 4.0e-5 < node_tolerance);
+        assert!(
+            engine
+                .try_nonlinear_residual_converged(&mut circuit, &mut matrix, &near)
+                .expect("probe stamps"),
+            "a correction inside the node tolerance must close the solve"
+        );
+        // 4 mV off: beyond the node test, with a KCL residual near 1e-14 A.
+        let mut far = solution;
+        far[tap] += 4.0e-3;
+        assert!(4.0e-3 > node_tolerance);
+        assert!(
+            !engine
+                .try_nonlinear_residual_converged(&mut circuit, &mut matrix, &far)
+                .expect("probe stamps"),
+            "a correction beyond the node tolerance must not"
+        );
     }
 }
 
