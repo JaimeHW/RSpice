@@ -941,16 +941,38 @@ pub fn account_action(ui: &mut Ui, initials: Option<&str>, large_target: bool) -
                 ink,
             );
         }
-        // Painted as a vector, inset so the head and shoulders sit inside
-        // the ring.
-        None => WorkbenchIcon::User.paint(
-            ui.painter(),
-            Rect::from_center_size(avatar_rect.center(), avatar_rect.size() * 0.65),
-            ink,
-        ),
+        None => paint_person(ui.painter(), avatar_rect, ink),
     }
     theme::paint_focus_ring_outset(ui, &response, target_rect);
     response.on_hover_text(label).clicked()
+}
+
+/// A person in the avatar's ring: a head over the curve of the shoulders,
+/// which run on past the ring and are cut by it, so the two shapes never
+/// close into a figure eight. The head and the shoulders' crown sit either
+/// side of the ring's centre.
+fn paint_person(painter: &egui::Painter, ring: Rect, ink: egui::Color32) {
+    let center = ring.center();
+    let radius = ring.width().min(ring.height()) * 0.5;
+    let stroke = egui::Stroke::new(1.2, ink);
+    painter.circle_stroke(
+        center + Vec2::new(0.0, -0.3 * radius),
+        0.28 * radius,
+        stroke,
+    );
+    // The upper half of a circle below the ring's centre, kept where it is
+    // inside the ring's stroke.
+    let shoulders = center + Vec2::new(0.0, 0.9 * radius);
+    let span = 0.66 * radius;
+    let inside = radius - 1.0;
+    let points = (0..=48)
+        .map(|step| {
+            let angle = std::f32::consts::PI * (1.0 + step as f32 / 48.0);
+            shoulders + Vec2::new(angle.cos(), angle.sin()) * span
+        })
+        .filter(|point| point.distance(center) <= inside)
+        .collect::<Vec<_>>();
+    painter.add(egui::Shape::line(points, stroke));
 }
 
 /// Where the notification panel hangs from: the bell's rectangle as of the

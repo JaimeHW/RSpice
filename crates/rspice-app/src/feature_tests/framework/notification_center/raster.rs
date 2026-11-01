@@ -87,13 +87,13 @@ const CASES: [Case; 7] = [
 
 /// Index-aligned with [`CASES`].
 const FINGERPRINTS: [&str; 7] = [
-    "3c4543ddf3df9c40c77dd894acc1e0eaf9039bb7444249e581edd63127871f8d",
-    "875b393b42bd80c3444218ce3cf2e2745496531e68662cadfe2cce598c34a0ce",
+    "c07c058f6e62d5890f87fd4f123d97a96c0a206725a9509a7cbf4e2180b5d01e",
+    "296ec29d2fa9a21525e17bfc6af97444194be0917c2b0a5287e12c6fa0038289",
     "966cd532fefcdcda849a8e20e2fd7ea5b59fe4cb60d3059a9bce7dcc4a6038c3",
-    "5083b78010945add3eeb66230ab62d3ff5a615c0c9bc16a789c4d87af7047d2f",
-    "ff5aafe25fab968698bbcb1cd008d2090e6ed8cdee74d3302108424f352fb741",
-    "07913ccfd9e88a89fd3b35ccbe610e2863e5ebd21b58944768a7dd2a8f316a6c",
-    "15a2973b8619110dfc681e6df0289ed3c8c8f3bf5b87836d54bc8fb266c0d3ba",
+    "5419d00d0c65660b0afd914d3a0763af642d7796116910375620120eada424f1",
+    "de080c47df5f59db21d3aa63e1064223fdf3452f7302e057e116f2253f184368",
+    "adccbf677af04e4c7b23bce0a85788c56da9ee4f9b8659900d47f7fd02c25d3f",
+    "eab7c52a473e2d4afcc7c4ff23cafd6e69aa03ccb598b2fcc2bc6e1449050a92",
 ];
 
 /// Where the first row sits under the desktop bell: inside the panel's list,
