@@ -7,7 +7,7 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
+use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use super::bulk_filter::{
     SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
@@ -23,7 +23,7 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
 use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
@@ -762,6 +762,34 @@ fn pane_content(ui: &mut Ui, add: impl FnOnce(&mut Ui)) {
         .show(ui, add);
 }
 
+/// The kit's select over `options`, writing the one picked to `value`;
+/// whether that changed it. The dialog's choices were raw combo boxes with
+/// egui's own triangle, the only controls in it the kit did not draw.
+fn pick<T: Copy + PartialEq>(
+    ui: &mut Ui,
+    id: &str,
+    label: &str,
+    value: &mut T,
+    options: &[(T, &str)],
+    width: f32,
+) -> bool {
+    let selected = options
+        .iter()
+        .find_map(|(candidate, label)| (*candidate == *value).then_some(*label))
+        .unwrap_or_default();
+    let labels = options
+        .iter()
+        .map(|(_, label)| (*label).to_owned())
+        .collect::<Vec<_>>();
+    match select(ui, id, label, selected, &labels, width) {
+        Some(index) if options[index].0 != *value => {
+            *value = options[index].0;
+            true
+        }
+        _ => false,
+    }
+}
+
 fn saved_filter_controls(
     ui: &mut Ui,
     dialog: &mut SelectionBulkEditDialogState,
@@ -780,33 +808,24 @@ fn saved_filter_controls(
             *action = SelectionBulkBodyAction::SaveFilter;
         }
         if !saved_filters.is_empty() {
-            ComboBox::from_id_salt("selection-bulk-saved-filter")
-                .selected_text(
-                    dialog
-                        .selected_saved_filter
-                        .as_deref()
-                        .unwrap_or("Saved filters"),
-                )
-                .show_ui(ui, |ui| {
-                    for name in saved_filters {
-                        ui.selectable_value(
-                            &mut dialog.selected_saved_filter,
-                            Some(name.clone()),
-                            name,
-                        );
-                    }
-                });
+            if let Some(index) = select(
+                ui,
+                "selection-bulk-saved-filter",
+                "Saved filters",
+                dialog
+                    .selected_saved_filter
+                    .as_deref()
+                    .unwrap_or("Saved filters"),
+                saved_filters,
+                180.0,
+            ) {
+                dialog.selected_saved_filter = Some(saved_filters[index].clone());
+            }
             let has_saved = dialog.selected_saved_filter.is_some();
-            if ui
-                .add_enabled(has_saved, egui::Button::new("Load"))
-                .clicked()
-            {
+            if Button::new("Load").enabled(has_saved).show(ui).clicked() {
                 *action = SelectionBulkBodyAction::LoadFilter;
             }
-            if ui
-                .add_enabled(has_saved, egui::Button::new("Delete"))
-                .clicked()
-            {
+            if Button::new("Delete").enabled(has_saved).show(ui).clicked() {
                 *action = SelectionBulkBodyAction::DeleteFilter;
             }
         }
@@ -822,41 +841,36 @@ fn selection_filter_fields(
     ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |columns| {
         columns[0].label("Object kinds");
-        ComboBox::from_id_salt("selection-bulk-object-kind")
-            .width(columns[0].available_width())
-            .selected_text(dialog.filter.object_kind.label())
-            .show_ui(&mut columns[0], |ui| {
-                for kind in SelectionBulkObjectKind::ALL {
-                    if ui
-                        .selectable_value(&mut dialog.filter.object_kind, kind, kind.label())
-                        .changed()
-                    {
-                        *action = SelectionBulkBodyAction::FilterChanged;
-                    }
-                }
-            });
+        let width = columns[0].available_width();
+        if pick(
+            &mut columns[0],
+            "selection-bulk-object-kind",
+            "Object kinds",
+            &mut dialog.filter.object_kind,
+            &SelectionBulkObjectKind::ALL.map(|kind| (kind, kind.label())),
+            width,
+        ) {
+            *action = SelectionBulkBodyAction::FilterChanged;
+        }
         columns[1].label("Hierarchy scope");
-        ComboBox::from_id_salt("selection-bulk-hierarchy-scope")
-            .width(columns[1].available_width())
-            .selected_text(match dialog.filter.hierarchy_scope {
-                SelectionBulkHierarchyScope::ActiveHierarchyPath => hierarchy_path,
-                scope => scope.label(),
-            })
-            .show_ui(&mut columns[1], |ui| {
-                for scope in SelectionBulkHierarchyScope::ALL {
-                    let label = if scope == SelectionBulkHierarchyScope::ActiveHierarchyPath {
-                        hierarchy_path
-                    } else {
-                        scope.label()
-                    };
-                    if ui
-                        .selectable_value(&mut dialog.filter.hierarchy_scope, scope, label)
-                        .changed()
-                    {
-                        *action = SelectionBulkBodyAction::FilterChanged;
-                    }
-                }
-            });
+        let width = columns[1].available_width();
+        if pick(
+            &mut columns[1],
+            "selection-bulk-hierarchy-scope",
+            "Hierarchy scope",
+            &mut dialog.filter.hierarchy_scope,
+            &SelectionBulkHierarchyScope::ALL.map(|scope| {
+                let label = if scope == SelectionBulkHierarchyScope::ActiveHierarchyPath {
+                    hierarchy_path
+                } else {
+                    scope.label()
+                };
+                (scope, label)
+            }),
+            width,
+        ) {
+            *action = SelectionBulkBodyAction::FilterChanged;
+        }
     });
     ui.add_space(9.0);
     ui.columns(2, |columns| {
@@ -1057,20 +1071,15 @@ fn bulk_edit_fields(
     ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |columns| {
         columns[0].label("Property");
-        let before = dialog.property;
-        ComboBox::from_id_salt("selection-bulk-property")
-            .width(columns[0].available_width())
-            .selected_text(bulk_property_label(dialog.property))
-            .show_ui(&mut columns[0], |ui| {
-                for property in BULK_PROPERTIES {
-                    ui.selectable_value(
-                        &mut dialog.property,
-                        property,
-                        bulk_property_label(property),
-                    );
-                }
-            });
-        if before != dialog.property {
+        let width = columns[0].available_width();
+        if pick(
+            &mut columns[0],
+            "selection-bulk-property",
+            "Property",
+            &mut dialog.property,
+            &BULK_PROPERTIES.map(|property| (property, bulk_property_label(property))),
+            width,
+        ) {
             dialog.new_value.clear();
             *action = SelectionBulkBodyAction::FilterChanged;
         }
@@ -1081,18 +1090,15 @@ fn bulk_edit_fields(
     });
     ui.add_space(9.0);
     ui.label("Unset behavior");
-    ComboBox::from_id_salt("selection-bulk-unset")
-        .width(ui.available_width())
-        .selected_text(bulk_unset_label(dialog.unset_behavior))
-        .show_ui(ui, |ui| {
-            for behavior in BULK_UNSET_BEHAVIORS {
-                ui.selectable_value(
-                    &mut dialog.unset_behavior,
-                    behavior,
-                    bulk_unset_label(behavior),
-                );
-            }
-        });
+    let width = ui.available_width();
+    pick(
+        ui,
+        "selection-bulk-unset",
+        "Unset behavior",
+        &mut dialog.unset_behavior,
+        &BULK_UNSET_BEHAVIORS.map(|behavior| (behavior, bulk_unset_label(behavior))),
+        width,
+    );
     ui.add_space(12.0);
     impact_row(ui, "Objects changed", &impact.changed.to_string());
     // Only a non-zero count is news. A row reading "0" on every clean filter
@@ -1151,44 +1157,50 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
             // The footer says why the list is empty; the control says only
             // that it is.
             let shown = if dialog.bound_sections.is_empty() {
-                RichText::new("None defined")
+                "None defined"
             } else if dialog.new_value.is_empty() {
-                RichText::new("Choose a section").color(Tokens::get(ui.ctx()).color.text_faint)
+                "Choose a section"
             } else {
-                RichText::new(dialog.new_value.as_str())
-            };
+                dialog.new_value.as_str()
+            }
+            .to_owned();
             ui.add_enabled_ui(!dialog.bound_sections.is_empty(), |ui| {
-                ComboBox::from_id_salt("selection-bulk-model-section")
-                    .width(ui.available_width())
-                    .selected_text(shown)
-                    .show_ui(ui, |ui| {
-                        for section in &dialog.bound_sections {
-                            ui.selectable_value(&mut dialog.new_value, section.clone(), section);
-                        }
-                    });
+                let width = ui.available_width();
+                if let Some(index) = select(
+                    ui,
+                    "selection-bulk-model-section",
+                    "Model section",
+                    &shown,
+                    &dialog.bound_sections,
+                    width,
+                ) {
+                    dialog.new_value = dialog.bound_sections[index].clone();
+                }
             });
             before != dialog.new_value
         }
         SelectionBulkProperty::Display => {
             let before = dialog.new_value.clone();
-            ComboBox::from_id_salt("selection-bulk-display")
-                .width(ui.available_width())
-                .selected_text(&dialog.new_value)
-                .show_ui(ui, |ui| {
-                    for mode in [
-                        ComponentDisplayMode::NameAndValue,
-                        ComponentDisplayMode::NameOnly,
-                        ComponentDisplayMode::ValueOnly,
-                        ComponentDisplayMode::Hidden,
-                        ComponentDisplayMode::Inherit,
-                    ] {
-                        ui.selectable_value(
-                            &mut dialog.new_value,
-                            mode.label().to_owned(),
-                            mode.label(),
-                        );
-                    }
-                });
+            let modes = [
+                ComponentDisplayMode::NameAndValue,
+                ComponentDisplayMode::NameOnly,
+                ComponentDisplayMode::ValueOnly,
+                ComponentDisplayMode::Hidden,
+                ComponentDisplayMode::Inherit,
+            ]
+            .map(|mode| mode.label().to_owned());
+            let width = ui.available_width();
+            let shown = dialog.new_value.clone();
+            if let Some(index) = select(
+                ui,
+                "selection-bulk-display",
+                "Display",
+                &shown,
+                &modes,
+                width,
+            ) {
+                dialog.new_value = modes[index].clone();
+            }
             before != dialog.new_value
         }
         SelectionBulkProperty::Temperature
