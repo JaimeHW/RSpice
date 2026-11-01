@@ -1,7 +1,7 @@
 //! Fail-closed scalar-LTRA model classification regressions.
 
 use rspice_core::Netlist;
-use rspice_core::engine::{Engine, SimulationConfig};
+use rspice_core::engine::{Engine, SimulationConfig, SpiceDialect};
 
 fn deck(model: &str) -> Netlist {
     Netlist::parse(&format!(
@@ -104,5 +104,49 @@ RRG out_rg 0 75
                 point.voltages[index]
             );
         }
+    }
+}
+
+#[test]
+fn matched_lossless_ltra_halves_the_drive_at_both_ends() {
+    // A 50 ohm LC line (r=0, g=0) between a 50 ohm source and a 50 ohm load
+    // sees the drive split exactly in half at its near end, and delivers that
+    // half TD = len*sqrt(L*C) = 5 ns later at its far end. ngspice-46,
+    // Xyce 7.10 and LTspice 26.1.1 all print 0.5000000 on both plateaus. The
+    // RLC kernel's beta = 0 h1dash term used to double the line's admittance,
+    // which put 1/3 V on both.
+    let deck = Netlist::parse(
+        "matched lossless ltra
+         v1 in 0 pulse(0 1 1n 1n 1n 5n 20n)
+         r1 in a 50
+         o1 a 0 b 0 lline
+         r2 b 0 50
+         .model lline ltra r=0 g=0 l=250n c=100p len=1
+         .tran 0.1n 20n
+         .end
+",
+    )
+    .expect("matched line deck parses");
+    for dialect in [SpiceDialect::Ngspice, SpiceDialect::Xyce] {
+        let engine = Engine::new(SimulationConfig::default().with_spice_dialect(dialect));
+        let result = engine
+            .run_tran(&deck, 20.0e-9, 0.1e-9)
+            .expect("the matched line transient completes");
+        let near = result.try_voltage_waveform_named("a").expect("v(a)");
+        let far = result.try_voltage_waveform_named("b").expect("v(b)");
+        let mut checked = 0;
+        for (index, &time) in result.time.iter().enumerate() {
+            for (plateau, wave) in [((2.2e-9, 6.8e-9), near), ((7.2e-9, 11.8e-9), far)] {
+                if time > plateau.0 && time < plateau.1 {
+                    checked += 1;
+                    assert!(
+                        (wave[index] - 0.5).abs() <= 0.5e-6,
+                        "{dialect:?} at {time:e}: {:e}",
+                        wave[index]
+                    );
+                }
+            }
+        }
+        assert!(checked > 40, "{dialect:?}: {checked} plateau points");
     }
 }

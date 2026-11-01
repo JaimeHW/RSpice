@@ -472,9 +472,11 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
     let mut delta1 = hi1 - lo1;
     let exp_term0 = (-beta * hi1).exp();
     let mut h1_lo1: Value;
-    let mut h1_hi1 = if beta == 0.0 {
-        hi1
-    } else if hi1 == 0.0 {
+    // The twice-integrated h1dash, (I1(bt) + I0(bt)) t e^(-bt) - t, vanishes
+    // as beta -> 0: a lossless line has no h1dash term. ngspice's
+    // `LTRArlcH1dashTwiceIntFunc` returns `time` there, a branch it never
+    // reaches, because an LC card takes LTRA_MOD_LC.
+    let mut h1_hi1 = if beta == 0.0 || hi1 == 0.0 {
         0.0
     } else {
         (bessel_i1(beta * hi1) + bessel_i0(beta * hi1)) * hi1 * exp_term0 - hi1
@@ -512,9 +514,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
 
             h1_lo1 = h1_hi2;
             let exp_term = (-beta * hi1).exp();
-            h1_hi1 = if beta == 0.0 {
-                hi1
-            } else if hi1 == 0.0 {
+            h1_hi1 = if beta == 0.0 || hi1 == 0.0 {
                 0.0
             } else {
                 (bessel_i1(beta * hi1) + bessel_i0(beta * hi1)) * hi1 * exp_term - hi1
