@@ -418,6 +418,11 @@ impl Command {
                 | Self::ToggleConsoleMaximized
                 | Self::ClearConsole
                 | Self::DescendHierarchyDirect
+                // The macOS Window menu's: a browser page has no window to
+                // minimize or zoom, and Windows and Linux do it from the
+                // title bar.
+                | Self::MinimizeWindow
+                | Self::ZoomWindow
         )
     }
 

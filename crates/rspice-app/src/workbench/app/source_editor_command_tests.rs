@@ -353,7 +353,7 @@ fn palette_shortcut(output: &egui::FullOutput, label: &str) -> Option<String> {
 fn the_palette_lists_toggle_line_comment_with_the_platform_shortcut() {
     for (os, expected) in [
         (egui::os::OperatingSystem::Windows, "Ctrl+/"),
-        (egui::os::OperatingSystem::Mac, "Cmd+/"),
+        (egui::os::OperatingSystem::Mac, "\u{2318}/"),
     ] {
         let (ctx, mut app, _) = veriloga_with_focused_editor();
         ctx.set_os(os);

@@ -23,7 +23,7 @@ use crate::workbench::results::commands::ResultsCommand;
 use super::features;
 use super::framework::dialogs::DialogKey;
 use super::framework::requests::{
-    self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox,
+    self, ExportCsv, ExportResultQuantities, FullScreen, OpenProducingPlan, Outbox, WindowFrame,
 };
 use super::layout::LayoutSpec;
 use super::sheets::SheetsFeature;
@@ -926,6 +926,14 @@ fn apply_platform_full_screen_request(ctx: &Context, app: &mut RSpiceApp) {
     requests::drain(app, outbox, |_, FullScreen(enabled)| {
         ctx.send_viewport_cmd(egui::ViewportCommand::Fullscreen(enabled));
     });
+    // Minimize and Zoom go to the platform's window the same way.
+    requests::drain(app, outbox, |_, frame: WindowFrame| match frame {
+        WindowFrame::Minimize => ctx.send_viewport_cmd(egui::ViewportCommand::Minimized(true)),
+        WindowFrame::Zoom => {
+            let zoomed = ctx.input(|input| input.viewport().maximized.unwrap_or(false));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Maximized(!zoomed));
+        }
+    });
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -933,6 +941,8 @@ fn apply_platform_full_screen_request(_ctx: &Context, app: &mut RSpiceApp) {
     requests::drain(app, outbox, |app, FullScreen(enabled)| {
         apply_browser_full_screen(app, enabled);
     });
+    // A page has no window of its own to minimize or zoom.
+    requests::drain(app, outbox, |_, _: WindowFrame| {});
 }
 
 #[cfg(target_arch = "wasm32")]

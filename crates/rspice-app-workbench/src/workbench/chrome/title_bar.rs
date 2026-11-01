@@ -94,7 +94,7 @@ pub fn show(
                 if viewport_width <= 820.0 {
                     ui.add_space(5.0);
                 }
-                brand(
+                let application_menu = brand(
                     ui,
                     app,
                     menu_projection.shows_title_context(),
@@ -102,12 +102,15 @@ pub fn show(
                     large_targets,
                     layout.compact_shell && viewport_width > 820.0,
                 );
-                menus(
+                menus_after(
                     ui,
                     app,
-                    menu_projection,
-                    large_targets,
-                    layout.title_bar_height,
+                    MenuBarPresentation {
+                        projection: menu_projection,
+                        large_targets,
+                        title_bar_height: layout.title_bar_height,
+                    },
+                    application_menu,
                 );
                 let context_left = ui.available_rect_before_wrap().left();
                 let mut context_right = ui.max_rect().right();
@@ -199,14 +202,17 @@ impl MenuProjection {
     }
 }
 
+/// The brand at the bar's left: on the macOS desktop the RSpice menu's
+/// trigger, returned so the bar's keys reach it; elsewhere the way to the
+/// project overview.
 fn brand(
     ui: &mut Ui,
-    app: &mut impl WorkbenchHost,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
     show_wordmark: bool,
     height: f32,
     large_target: bool,
     retain_desktop_width: bool,
-) {
+) -> Option<MenuTriggerResponse> {
     let t = Tokens::get(ui.ctx());
     let width = if show_wordmark || retain_desktop_width {
         // Icon (20), 7 px lockup gap, measured wordmark, and 10 px end
@@ -218,6 +224,27 @@ fn brand(
     } else {
         34.0
     };
+    if application_menus::shows_application_menu(
+        crate::workbench::app_state::session::shortcuts::runtime_command_platform(ui.ctx()),
+        ui.ctx().os(),
+    ) {
+        let entries = app.application_menu();
+        return Some(menu_trigger(
+            ui,
+            app,
+            MenuTriggerKey::RSpice,
+            MenuTriggerPresentation {
+                width,
+                height,
+                large_targets: large_target,
+                face: TriggerFace::Brand {
+                    wordmark: show_wordmark,
+                    wide: show_wordmark || retain_desktop_width,
+                },
+            },
+            entries,
+        ));
+    }
     let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::labeled(
@@ -229,7 +256,25 @@ fn brand(
     if response.hovered() {
         ui.painter().rect_filled(rect, 0.0, t.color.bg_hover);
     }
-    let icon_center_x = if show_wordmark || retain_desktop_width {
+    paint_brand(
+        ui,
+        rect,
+        show_wordmark,
+        show_wordmark || retain_desktop_width,
+    );
+    if response.clicked() {
+        app.execute(ids::PROJECT_WORKSPACE);
+    }
+    theme::paint_focus_ring_outset(ui, &response, rect);
+    response.on_hover_text("RSpice project overview");
+    None
+}
+
+/// The brand's mark in `rect`, and its wordmark after it when `wordmark`;
+/// `wide` is the width that holds the wordmark, kept with or without it.
+fn paint_brand(ui: &Ui, rect: Rect, wordmark: bool, wide: bool) {
+    let t = Tokens::get(ui.ctx());
+    let icon_center_x = if wide {
         rect.left() + 21.0
     } else {
         rect.left() + 17.0
@@ -242,7 +287,7 @@ fn brand(
         ),
         t.color.accent,
     );
-    if show_wordmark {
+    if wordmark {
         ui.painter().text(
             egui::Pos2::new(rect.left() + 38.0, rect.center().y),
             egui::Align2::LEFT_CENTER,
@@ -251,11 +296,6 @@ fn brand(
             t.color.text,
         );
     }
-    if response.clicked() {
-        app.execute(ids::PROJECT_WORKSPACE);
-    }
-    theme::paint_focus_ring_outset(ui, &response, rect);
-    response.on_hover_text("RSpice project overview");
 }
 
 pub fn menus(
@@ -265,8 +305,41 @@ pub fn menus(
     large_targets: bool,
     title_bar_height: f32,
 ) {
+    menus_after(
+        ui,
+        app,
+        MenuBarPresentation {
+            projection,
+            large_targets,
+            title_bar_height,
+        },
+        None,
+    );
+}
+
+/// How the bar's menus are laid out.
+#[derive(Debug, Clone, Copy)]
+struct MenuBarPresentation {
+    projection: MenuProjection,
+    large_targets: bool,
+    title_bar_height: f32,
+}
+
+/// The menus, after the trigger the brand drew when it opens the RSpice
+/// menu, which the bar's keys then reach first.
+fn menus_after(
+    ui: &mut Ui,
+    app: &mut impl WorkbenchHost<Menu = ApplicationMenu, MenuEntry = MenuEntry>,
+    presentation: MenuBarPresentation,
+    leading: Option<MenuTriggerResponse>,
+) {
+    let MenuBarPresentation {
+        projection,
+        large_targets,
+        title_bar_height,
+    } = presentation;
     let bar_width = menu_bar_width(ui, projection);
-    let mut triggers = Vec::new();
+    let mut triggers: Vec<MenuTriggerResponse> = leading.into_iter().collect();
     let menu_bar = ui.allocate_ui_with_layout(
         Vec2::new(bar_width, title_bar_height),
         Layout::left_to_right(Align::Center),
@@ -299,6 +372,8 @@ pub enum MenuTriggerKey {
     Application(ApplicationMenu),
     /// The compact layout's one button, holding every menu.
     Compact,
+    /// The brand on the macOS desktop, opening the RSpice menu.
+    RSpice,
 }
 
 impl MenuTriggerKey {
@@ -306,6 +381,7 @@ impl MenuTriggerKey {
         match self {
             Self::Application(menu) => menu.label(),
             Self::Compact => COMPACT_MENU_LABEL,
+            Self::RSpice => "RSpice",
         }
     }
 
@@ -314,6 +390,7 @@ impl MenuTriggerKey {
         match self {
             Self::Application(menu) => Some(menu.access_key()),
             Self::Compact => Some('M'),
+            Self::RSpice => None,
         }
     }
 }
@@ -332,6 +409,17 @@ struct MenuTriggerPresentation {
     width: f32,
     height: f32,
     large_targets: bool,
+    face: TriggerFace,
+}
+
+/// What a trigger shows.
+#[derive(Debug, Clone, Copy)]
+enum TriggerFace {
+    /// Its menu's name.
+    Label,
+    /// The brand's mark, and its wordmark when `wordmark`, in the width that
+    /// holds the wordmark when `wide`.
+    Brand { wordmark: bool, wide: bool },
 }
 
 fn menu_bar_width(ui: &Ui, projection: MenuProjection) -> f32 {
@@ -372,6 +460,7 @@ fn top_menu(
             width,
             height: title_bar_height,
             large_targets,
+            face: TriggerFace::Label,
         },
         entries,
     )
@@ -394,6 +483,7 @@ fn compact_menu_button(
             width,
             height: title_bar_height,
             large_targets: true,
+            face: TriggerFace::Label,
         },
         entries,
     )
@@ -410,6 +500,7 @@ fn menu_trigger(
         width,
         height,
         large_targets,
+        face,
     } = presentation;
     let t = Tokens::get(ui.ctx());
     let id = Id::new(("workbench.title_menu.trigger", key));
@@ -474,15 +565,18 @@ fn menu_trigger(
     } else {
         t.color.text_dim
     };
-    paint_access_label(
-        ui.painter(),
-        rect.center(),
-        egui::Align2::CENTER_CENTER,
-        key.label().to_owned(),
-        theme::sans(tokens::FS_1, FontWeight::Regular),
-        ink,
-        key.access().filter(|_| access_cues_shown(ui.ctx())),
-    );
+    match face {
+        TriggerFace::Label => paint_access_label(
+            ui.painter(),
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            key.label().to_owned(),
+            theme::sans(tokens::FS_1, FontWeight::Regular),
+            ink,
+            key.access().filter(|_| access_cues_shown(ui.ctx())),
+        ),
+        TriggerFace::Brand { wordmark, wide } => paint_brand(ui, rect, wordmark, wide),
+    }
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let popup = Popup::menu(&response).gap(MENU_POPUP_GAP).show(|ui| {
@@ -544,9 +638,10 @@ fn known_application_popup_ids() -> Vec<Id> {
             ))
             .with("popup")
         })
-        .chain(std::iter::once(
-            Id::new(("workbench.title_menu.trigger", MenuTriggerKey::Compact)).with("popup"),
-        ))
+        .chain(
+            [MenuTriggerKey::Compact, MenuTriggerKey::RSpice]
+                .map(|key| Id::new(("workbench.title_menu.trigger", key)).with("popup")),
+        )
         .collect()
 }
 

@@ -110,6 +110,11 @@ pub enum Command {
     CloseOtherDocuments,
     CloseAllDocuments,
     WindowManager,
+    /// The macOS Window menu's Minimize: the window goes to the Dock.
+    MinimizeWindow,
+    /// The macOS Window menu's Zoom: the window fills the screen, or goes
+    /// back to the size it had.
+    ZoomWindow,
     SelectTool,
     PlaceInstance,
     PlaceWire,
@@ -416,6 +421,8 @@ impl Command {
                 "Windows, documents and session\u{2026}",
                 "Window",
             ),
+            Self::MinimizeWindow => spec("minimize-window", "Minimize", "Window"),
+            Self::ZoomWindow => spec("zoom-window", "Zoom", "Window"),
             Self::SelectTool => spec("select-tool", "Select tool", "Design"),
             Self::PlaceInstance => spec("place-instance", "Place instance…", "Design"),
             Self::PlaceWire => spec("place-wire", "Draw wire", "Design"),
@@ -772,6 +779,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::CloseOtherDocuments,
     Command::CloseAllDocuments,
     Command::WindowManager,
+    Command::MinimizeWindow,
+    Command::ZoomWindow,
     Command::ResetLayout,
     Command::SelectTool,
     Command::PlaceInstance,
@@ -1011,6 +1020,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::CloseAllDocuments.key(),
     SettingsCommand::WorkspaceLayouts.key(),
     Command::WindowManager.key(),
+    Command::MinimizeWindow.key(),
+    Command::ZoomWindow.key(),
     Command::ResetLayout.key(),
     Command::SelectTool.key(),
     Command::PlaceInstance.key(),

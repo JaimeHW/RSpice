@@ -54,7 +54,7 @@ use crate::workbench::sheets::SheetsFeature;
 use crate::workbench::state::workbench_session::WorkspaceDocument;
 use crate::workbench::state::{WorkbenchSession, Workspace, WorkspaceDocumentId};
 use crate::workbench::{AppState, MessageId, RSpiceApp};
-use menus::{COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
+use menus::{APPLICATION_MENU, COMPACT_MENU, SOURCE_EDITOR_MENU, application_menu_entries};
 
 /// A route whose surface brings its own toolbar, in place of its
 /// workspace's.
@@ -626,6 +626,10 @@ impl Host for RSpiceApp {
         COMPACT_MENU
     }
 
+    fn application_menu(&self) -> &'static [MenuEntry] {
+        APPLICATION_MENU
+    }
+
     fn source_editor_menu(&self) -> &'static [MenuEntry] {
         SOURCE_EDITOR_MENU
     }
@@ -636,6 +640,7 @@ impl Host for RSpiceApp {
             menu_keys(application_menu_entries(menu), &mut keys);
         }
         menu_keys(COMPACT_MENU, &mut keys);
+        menu_keys(APPLICATION_MENU, &mut keys);
         menu_keys(SOURCE_EDITOR_MENU, &mut keys);
         command_registry().validate(
             ids::named()

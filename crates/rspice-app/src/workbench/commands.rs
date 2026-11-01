@@ -287,6 +287,8 @@ impl Command {
             | Self::CloseOtherDocuments
             | Self::CloseAllDocuments
             | Self::WindowManager
+            | Self::MinimizeWindow
+            | Self::ZoomWindow
             | Self::CommandPalette => CommandOwner::Framework,
             Self::ConfigurationSets => CommandOwner::Project,
             Self::SelectTool
@@ -784,6 +786,16 @@ impl Command {
                 .workbench
                 .window_session_dialog
                 .open(crate::workbench::app::WindowSessionPage::Windows),
+            Self::MinimizeWindow => app
+                .state
+                .workbench
+                .outbox
+                .push(crate::workbench::framework::requests::WindowFrame::Minimize),
+            Self::ZoomWindow => app
+                .state
+                .workbench
+                .outbox
+                .push(crate::workbench::framework::requests::WindowFrame::Zoom),
             Self::SelectTool => {
                 if active_symbol_editor(app) {
                     app.activate_symbol_tool(crate::workbench::SymbolTool::Select);

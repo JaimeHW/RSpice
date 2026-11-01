@@ -118,15 +118,29 @@ impl ShortcutStroke {
         self.shift
     }
 
+    /// The chord as `operating_system` writes it: `Ctrl+Alt+Shift+S` on
+    /// Windows and Linux; on Apple platforms the modifiers' glyphs in the
+    /// order Apple sets (Control, Option, Shift, Command) with the key's
+    /// right after, `⌥⇧⌘S`.
     #[must_use]
     pub fn display_label_for(self, operating_system: OperatingSystem) -> String {
+        if operating_system.is_mac() {
+            let mut label = String::new();
+            if self.alt {
+                label.push('\u{2325}');
+            }
+            if self.shift {
+                label.push('\u{21E7}');
+            }
+            if self.primary {
+                label.push('\u{2318}');
+            }
+            label.push_str(apple_key_symbol(self.key.get()));
+            return label;
+        }
         let mut parts = Vec::with_capacity(4);
         if self.primary {
-            parts.push(if operating_system.is_mac() {
-                "Cmd"
-            } else {
-                "Ctrl"
-            });
+            parts.push("Ctrl");
         }
         if self.alt {
             parts.push("Alt");
@@ -136,6 +150,19 @@ impl ShortcutStroke {
         }
         parts.push(self.key.get().symbol_or_name());
         parts.join("+")
+    }
+}
+
+/// The glyph an Apple menu writes for `key`, where it writes one; the key's
+/// own symbol or name otherwise.
+fn apple_key_symbol(key: Key) -> &'static str {
+    match key {
+        Key::Backspace => "\u{232B}",
+        Key::Delete => "\u{2326}",
+        Key::Escape => "\u{238B}",
+        Key::Tab => "\u{21E5}",
+        Key::Enter => "\u{21A9}",
+        _ => key.symbol_or_name(),
     }
 }
 
@@ -692,10 +719,10 @@ mod tests {
     #[test]
     fn display_labels_use_product_key_symbols_but_wire_keys_use_stable_names() {
         let labels = [
-            (Key::Plus, "Ctrl++", "Cmd++", "Plus"),
-            (Key::Minus, "Ctrl+\u{2212}", "Cmd+\u{2212}", "Minus"),
-            (Key::OpenBracket, "Ctrl+[", "Cmd+[", "OpenBracket"),
-            (Key::CloseBracket, "Ctrl+]", "Cmd+]", "CloseBracket"),
+            (Key::Plus, "Ctrl++", "\u{2318}+", "Plus"),
+            (Key::Minus, "Ctrl+\u{2212}", "\u{2318}\u{2212}", "Minus"),
+            (Key::OpenBracket, "Ctrl+[", "\u{2318}[", "OpenBracket"),
+            (Key::CloseBracket, "Ctrl+]", "\u{2318}]", "CloseBracket"),
         ];
         for (key, windows_label, mac_label, wire_name) in labels {
             let stroke = ShortcutStroke::new(key, true, false, false);
@@ -713,15 +740,41 @@ mod tests {
         let stroke = ShortcutStroke::new(Key::S, true, false, true);
         assert_eq!(
             stroke.display_label_for(OperatingSystem::Mac),
-            "Cmd+Shift+S"
+            "\u{21E7}\u{2318}S"
         );
         assert_eq!(
             stroke.display_label_for(OperatingSystem::IOS),
-            "Cmd+Shift+S"
+            "\u{21E7}\u{2318}S"
         );
         assert_eq!(
             stroke.display_label_for(OperatingSystem::Windows),
             "Ctrl+Shift+S"
+        );
+    }
+
+    /// An Apple menu writes a chord as glyphs, Option then Shift then
+    /// Command, with the key straight after and its own glyph where it has
+    /// one: ⌥⇧⌘S, ⇧⌘⌫.
+    #[test]
+    fn apple_labels_write_the_modifiers_as_glyphs_in_apples_order() {
+        assert_eq!(
+            ShortcutStroke::new(Key::S, true, true, true).display_label_for(OperatingSystem::Mac),
+            "\u{2325}\u{21E7}\u{2318}S"
+        );
+        assert_eq!(
+            ShortcutStroke::new(Key::Backspace, true, false, true)
+                .display_label_for(OperatingSystem::Mac),
+            "\u{21E7}\u{2318}\u{232B}"
+        );
+        assert_eq!(
+            ShortcutStroke::new(Key::F4, false, true, false)
+                .display_label_for(OperatingSystem::Mac),
+            "\u{2325}F4"
+        );
+        assert_eq!(
+            ShortcutStroke::new(Key::Backspace, true, false, true)
+                .display_label_for(OperatingSystem::Windows),
+            "Ctrl+Shift+Backspace"
         );
     }
 

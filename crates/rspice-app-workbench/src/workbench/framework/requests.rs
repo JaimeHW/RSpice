@@ -359,6 +359,18 @@ impl Request for FullScreen {
     const DRAIN: Drain = Drain::AfterChrome;
 }
 
+/// Minimize the window, or zoom it between the size its reader gave it and
+/// the screen's: the macOS Window menu's Minimize and Zoom.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowFrame {
+    Minimize,
+    Zoom,
+}
+
+impl Request for WindowFrame {
+    const DRAIN: Drain = Drain::AfterChrome;
+}
+
 /// Adopt the live session host's project as this install's mirror. Raised
 /// once the close that makes room for it has landed, or at once when no
 /// project is open.

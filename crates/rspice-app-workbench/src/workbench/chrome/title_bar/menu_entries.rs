@@ -81,6 +81,13 @@ pub enum MenuContext {
     /// RSpice runs as a desktop application on Windows or Linux, whose File
     /// menu ends in Exit. On macOS the application menu's Quit ends it.
     ExitInFileMenu,
+    /// RSpice runs as a desktop application on macOS: the RSpice menu at the
+    /// bar's left holds About, Settings and Quit, and Window minimizes and
+    /// zooms the window.
+    MacApplication,
+    /// Anywhere but the macOS desktop: there is no RSpice menu, so About is
+    /// Help's and Preferences is Edit's.
+    NoApplicationMenu,
     /// A project is open.
     ProjectOpen,
     /// No project is open: the start screen.
@@ -107,6 +114,8 @@ impl MenuContext {
             Self::Drawing => editor.is_none(),
             Self::DesktopApplication => file_menu_shows_exit(platform),
             Self::ExitInFileMenu => file_menu_shows_exit(platform) && os != OperatingSystem::Mac,
+            Self::MacApplication => application_menus::shows_application_menu(platform, os),
+            Self::NoApplicationMenu => !application_menus::shows_application_menu(platform, os),
             Self::ProjectOpen => app.platform().project_lifecycle.is_open(),
             Self::NoProject => !app.platform().project_lifecycle.is_open(),
             Self::SymbolView => design_view_is(app, crate::state::ViewType::Symbol),
@@ -171,6 +180,20 @@ impl MenuEntry {
             offered_only: false,
             access: None,
         })
+    }
+
+    /// The row with `label` at its right edge in place of its command's own
+    /// key: a key the platform answers itself, such as macOS's ⌘Q.
+    pub const fn shows_key(self, label: &'static str) -> Self {
+        match self {
+            Self::Command(mut command) => {
+                command.shortcut = Some(label);
+                Self::Command(command)
+            }
+            Self::Submenu { .. } | Self::Separator | Self::Only(..) | Self::RecentFiles(_) => {
+                panic!("only a command's row shows a key")
+            }
+        }
     }
 
     /// A row that opens `entries` as a menu of their own beside it.

@@ -34,6 +34,7 @@ use crate::workbench::state::Workspace;
 mod access_keys;
 #[cfg(not(target_arch = "wasm32"))]
 mod capabilities;
+mod macos;
 mod pins;
 
 #[cfg(not(target_arch = "wasm32"))]

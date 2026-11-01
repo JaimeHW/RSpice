@@ -64,6 +64,18 @@ pub fn access_keys_apply(
         && os != egui::os::OperatingSystem::Mac
 }
 
+/// Whether the bar opens with the RSpice menu, its brand turned into the
+/// application menu the way a macOS application's menu bar begins: on the
+/// macOS desktop. The browser has its own, and Windows and Linux keep About,
+/// Preferences and Exit in Help, Edit and File.
+pub fn shows_application_menu(
+    platform: crate::state::command_catalog::CommandPlatform,
+    os: egui::os::OperatingSystem,
+) -> bool {
+    platform == crate::state::command_catalog::CommandPlatform::Desktop
+        && os == egui::os::OperatingSystem::Mac
+}
+
 /// Where `label` underlines its access key `key`: the first letter that is
 /// `key` and starts a word ("Save &as"), else the first that is `key` at
 /// all ("E&xit"), ignoring case. A char index, or `None` when the label has

@@ -350,6 +350,10 @@ pub trait Host: 'static {
     /// What the compact layout's one Menu button holds.
     fn compact_menu(&self) -> &'static [Self::MenuEntry];
 
+    /// What the RSpice menu holds: the application menu the brand opens at
+    /// the bar's left on the macOS desktop.
+    fn application_menu(&self) -> &'static [Self::MenuEntry];
+
     /// What the source editor's right-click menu holds.
     fn source_editor_menu(&self) -> &'static [Self::MenuEntry];
 

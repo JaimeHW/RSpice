@@ -263,8 +263,14 @@ const EDIT_MENU: &[MenuEntry] = &[
             command(Command::FindReplace).access('I'),
         ],
     ),
-    Separator,
-    settings(SettingsCommand::Preferences).access('N'),
+    // On macOS, Settings is the RSpice menu's.
+    MenuEntry::Only(
+        MenuContext::NoApplicationMenu,
+        &[
+            Separator,
+            settings(SettingsCommand::Preferences).access('N'),
+        ],
+    ),
 ];
 
 /// Every object of one kind on the active sheet, in place of the selection.
@@ -644,6 +650,15 @@ const TOOLS_MENU: &[MenuEntry] = &[
 /// Window: the application's windows and the document in front, the
 /// workspaces and the documents in turn, then how the panels are laid out.
 const WINDOW_MENU: &[MenuEntry] = &[
+    // A macOS Window menu begins with the window itself.
+    MenuEntry::Only(
+        MenuContext::MacApplication,
+        &[
+            command(Command::MinimizeWindow),
+            command(Command::ZoomWindow),
+            Separator,
+        ],
+    ),
     command(Command::NewApplicationWindow).access('N'),
     MenuEntry::submenu("Move document to", MOVE_DOCUMENT_MENU).access('T'),
     command(Command::ReattachDocument).access('R'),
@@ -716,7 +731,23 @@ const HELP_MENU: &[MenuEntry] = &[
     cloud(CloudCommand::License).access('L'),
     Separator,
     command(Command::LegalPrivacy).access('T'),
-    command(Command::About).access('A'),
+    // On macOS, About is the RSpice menu's.
+    MenuEntry::Only(
+        MenuContext::NoApplicationMenu,
+        &[command(Command::About).access('A')],
+    ),
+];
+
+/// The RSpice menu the brand opens at the bar's left on the macOS desktop:
+/// the application itself, its settings, and quitting it. Check for
+/// updates… stands under About once RSpice has that command.
+pub(in crate::workbench) const APPLICATION_MENU: &[MenuEntry] = &[
+    command(Command::About),
+    Separator,
+    MenuEntry::command_as(SettingsCommand::Preferences.key(), "Settings\u{2026}"),
+    Separator,
+    // macOS answers ⌘Q itself, from the menu every application has.
+    command_as(Command::Exit, "Quit RSpice").shows_key("\u{2318}Q"),
 ];
 
 /// What the compact layout's Menu button holds: every application menu,
