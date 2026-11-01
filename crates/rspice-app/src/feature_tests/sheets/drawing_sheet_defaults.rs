@@ -412,3 +412,110 @@ fn chip_rows_pack_within_the_row_and_stretch_never_drops_a_chip() {
     }];
     assert_eq!(pack_chip_rows(&wide, 400.0).len(), 1);
 }
+
+/// The defaults read as the rest of the application does: sentence-case
+/// headings, a card's frame and what it is for on lines of their own, every
+/// choice a kit select named for what it picks, and Save unavailable on
+/// unchanged defaults with the reason beside it. The cards were headed in
+/// upper case, ran the frame and the purpose together across an em dash,
+/// and offered four unnamed raw combo boxes with egui's own triangle.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_defaults_speak_in_sentence_case_through_named_selects() {
+    use egui::accesskit::Role;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    open_drawing_sheet_defaults(
+        &mut app.state.sheets.drawing_sheet_defaults,
+        &app.state.model,
+    );
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut output = None;
+    for index in 0..4u32 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                time: Some(f64::from(index) * 0.25),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+        ));
+    }
+    let output = output.expect("frames ran");
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .clone()
+        .expect("an AccessKit tree");
+    let painted = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some((
+                text.galley.text().to_owned(),
+                egui::Rect::from_min_size(text.pos, text.galley.size()),
+            )),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    let at = |wanted: &str| {
+        painted
+            .iter()
+            .find(|(text, _)| text == wanted)
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| panic!("{wanted:?} was not painted"))
+    };
+    // What the dialog paints, from its title to its footer: the status bar
+    // behind it has dashes of its own.
+    let surface = at("Drawing-sheet defaults")
+        .union(at("Save sheet defaults"))
+        .expand2(egui::vec2(16.0, 0.0));
+    let texts = painted
+        .iter()
+        .filter(|(_, rect)| surface.contains_rect(*rect))
+        .map(|(text, _)| text.clone())
+        .collect::<Vec<_>>();
+    for wanted in [
+        "Project default",
+        "Personal default",
+        "New sheets",
+        "Custom",
+        "Neither default has changed",
+    ] {
+        assert!(
+            texts.iter().any(|text| text == wanted),
+            "{wanted:?} was not painted: {texts:?}"
+        );
+    }
+    for gone in [
+        "PROJECT DEFAULT",
+        "PERSONAL DEFAULT",
+        "NEW SHEETS",
+        "CUSTOM",
+    ] {
+        assert!(
+            texts.iter().all(|text| text != gone),
+            "{gone:?} is still painted"
+        );
+    }
+    assert!(
+        texts.iter().all(|text| !text.contains('\u{2014}')),
+        "a dash is still painted: {texts:?}"
+    );
+    for select in ["New sheets", "Display units", "Border", "Title block"] {
+        assert!(
+            tree.nodes
+                .iter()
+                .any(|(_, node)| node.role() == Role::ComboBox && node.label() == Some(select)),
+            "no select is named {select:?}"
+        );
+    }
+}

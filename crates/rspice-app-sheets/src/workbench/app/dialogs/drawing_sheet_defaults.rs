@@ -15,8 +15,8 @@
 //! seams inside one border — no floating cards, no gutters.
 
 use egui::{
-    Align, Align2, Color32, ComboBox, Context, Frame, Layout, Rect, RichText, Sense, Stroke,
-    StrokeKind, Ui, UiBuilder, pos2,
+    Align, Align2, Color32, Context, Frame, Layout, Rect, RichText, Sense, Stroke, StrokeKind, Ui,
+    UiBuilder, pos2,
     text::{LayoutJob, TextFormat},
     vec2,
 };
@@ -30,7 +30,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Button, Dialog, DialogChoice, DialogSize, select, select_with_response};
 use crate::workbench::DrawingSheetPersonalPreferences;
 use crate::workbench::app::SchematicEditAuthority;
 use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
@@ -125,6 +125,9 @@ fn refresh_untouched_baselines(defaults: &mut DrawingSheetDefaultsDialogState, m
     }
 }
 
+/// Why Save is unavailable while neither default has been edited.
+const UNCHANGED: &str = "Neither default has changed";
+
 /// Draw the drawing-sheet defaults while they are open, over the open
 /// drawing's model, opening the custom sheet size library over them when the
 /// reader asks for a new size.
@@ -152,7 +155,11 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
     let enabled = valid && project_authority.is_none() && (project_changed || personal_changed);
 
     let mut open_presets = false;
-    let choice = Dialog::new(TITLE, "Save sheet defaults")
+    let mut dialog = Dialog::new(TITLE, "Save sheet defaults");
+    if !project_changed && !personal_changed {
+        dialog = dialog.hint(UNCHANGED);
+    }
+    let choice = dialog
         .description(DESCRIPTION)
         .size(DialogSize::DrawingSheetWorkflow)
         // The body is one bordered shell whose regions meet on their own
@@ -160,6 +167,9 @@ pub(crate) fn render_drawing_sheet_defaults_dialog(
         // a band of elevated background instead of letting it reach the
         // surface edge.
         .flush_body()
+        // A withheld scrollbar gutter left a strip of bare surface between
+        // the shell's trailing edge and the dialog's.
+        .overlay_scrollbar()
         .ghost("Cancel")
         .primary_enabled(enabled)
         .show(ctx, |ui| {
@@ -562,16 +572,25 @@ fn target_band(
         DrawingSheetDefaultsTarget::Project => &state.draft_project.default_format,
         DrawingSheetDefaultsTarget::Personal => &state.draft_personal.default_format,
     };
-    let (kicker, seeds) = match band_target {
+    let (heading, seeds) = match band_target {
         DrawingSheetDefaultsTarget::Project => {
-            ("PROJECT DEFAULT", "draws the sheets that follow it")
+            ("Project default", "Draws the sheets that follow it")
         }
-        DrawingSheetDefaultsTarget::Personal => ("PERSONAL DEFAULT", "seeds new projects"),
+        DrawingSheetDefaultsTarget::Personal => ("Personal default", "Seeds new projects"),
     };
     let response = ui.interact(rect, ui.id().with(("sheet-defaults", salt)), Sense::click());
     let painter = ui.painter();
+    // The edited record's card is tinted with the accent, lightly: on the
+    // light theme's pale surfaces the dark theme's strength read as a solid
+    // tan block rather than a selection.
     let fill = if active {
-        t.color.accent.gamma_multiply(0.11)
+        t.color
+            .accent
+            .gamma_multiply(if t.mode == tokens::Mode::Light {
+                0.05
+            } else {
+                0.11
+            })
     } else if response.hovered() {
         t.color.bg_hover
     } else {
@@ -587,8 +606,10 @@ fn target_band(
     }
 
     let strong = default_record_summary(format);
+    // The frame on one line and what the record is for on the next, rather
+    // than both run together across a dash.
     let small = format!(
-        "{} \u{00b7} {} \u{2014} {}",
+        "{} \u{00b7} {}\n{}",
         border_template_label(format.border),
         format.title_block_template_label(format.title_block.template),
         seeds
@@ -606,7 +627,7 @@ fn target_band(
     painter.text(
         pos2(x, y),
         Align2::LEFT_TOP,
-        kicker,
+        heading,
         theme::sans(tokens::FS_MICRO, FontWeight::Medium),
         if active {
             t.color.text_dim
@@ -634,7 +655,7 @@ fn target_band(
             egui::WidgetType::Button,
             true,
             active,
-            format!("{kicker}: {strong}"),
+            format!("{heading}: {strong}"),
         )
     });
     response.clicked()
@@ -661,31 +682,34 @@ fn behavior_band(
         |ui| {
             ui.spacing_mut().item_spacing.y = 4.0;
             ui.label(
-                RichText::new("NEW SHEETS")
+                RichText::new("New sheets")
                     .font(theme::sans(tokens::FS_MICRO, FontWeight::Medium))
                     .color(t.color.text_faint),
             );
             ui.add_enabled_ui(project_editable, |ui| {
                 let selected = state.draft_project.new_sheet_policy;
-                ComboBox::from_id_salt("drawing-sheet-new-policy")
-                    .width(ui.available_width())
-                    .selected_text(new_sheet_policy_label(selected))
-                    .show_ui(ui, |ui| {
-                        for value in [
-                            DrawingSheetNewSheetPolicy::ProjectDefault,
-                            DrawingSheetNewSheetPolicy::Ask,
-                            DrawingSheetNewSheetPolicy::MatchCurrent,
-                        ] {
-                            ui.selectable_value(
-                                &mut state.draft_project.new_sheet_policy,
-                                value,
-                                new_sheet_policy_label(value),
-                            )
-                            .on_hover_text(new_sheet_policy_note(value));
-                        }
-                    })
+                let policies = [
+                    DrawingSheetNewSheetPolicy::ProjectDefault,
+                    DrawingSheetNewSheetPolicy::Ask,
+                    DrawingSheetNewSheetPolicy::MatchCurrent,
+                ];
+                let labels = policies
+                    .map(|policy| new_sheet_policy_label(policy).to_owned())
+                    .to_vec();
+                let picked = select_with_response(
+                    ui,
+                    "drawing-sheet-new-policy",
+                    "New sheets",
+                    new_sheet_policy_label(selected),
+                    &labels,
+                    ui.available_width(),
+                );
+                picked
                     .response
                     .on_hover_text(new_sheet_policy_note(selected));
+                if let Some(index) = picked.picked {
+                    state.draft_project.new_sheet_policy = policies[index];
+                }
                 ui.checkbox(
                     &mut state.draft_project.remember_last_explicit_format,
                     RichText::new("Remember the last explicit choice")
@@ -807,7 +831,7 @@ fn build_chip_series(
         selected: false,
     });
     series_list.push(ChipSeries {
-        label: "CUSTOM",
+        label: "Custom",
         note: custom_note.to_owned(),
         chips: custom_chips,
         rows: Vec::new(),
@@ -1316,6 +1340,7 @@ fn unit_frame_block(
             enum_combo(
                 ui,
                 "sheet-defaults-unit",
+                "Display units",
                 &mut selected,
                 &[
                     (DrawingSheetDisplayUnit::Millimetres, "mm"),
@@ -1343,6 +1368,7 @@ fn border_frame_block(
             enum_combo(
                 ui,
                 "sheet-defaults-border",
+                "Border",
                 &mut selected,
                 &[
                     DrawingSheetBorderTemplate::Standard,
@@ -1374,6 +1400,7 @@ fn title_frame_block(
                 enum_combo(
                     ui,
                     "sheet-defaults-title-block",
+                    "Title block",
                     &mut selected,
                     &[DrawingSheetTitleBlockTemplate::OrganizationManaged]
                         .map(|template| (template, template.label())),
@@ -1398,7 +1425,13 @@ fn title_frame_block(
                 })
                 .map(|template| (template, record.title_block_template_label(template)))
                 .collect::<Vec<_>>();
-                enum_combo(ui, "sheet-defaults-title-block", &mut selected, &choices);
+                enum_combo(
+                    ui,
+                    "sheet-defaults-title-block",
+                    "Title block",
+                    &mut selected,
+                    &choices,
+                );
             }
             if selected != record.title_block.template {
                 edits.push(RecordEdit::TitleBlock(selected));
@@ -1647,9 +1680,13 @@ pub fn retarget_default(
     rebuild(base.title_block.clone()).unwrap_or(base)
 }
 
+/// The kit's select over `options`, writing the one picked to `value`. It
+/// was a raw combo box with egui's own triangle, the one control in the
+/// dialog not drawn by the kit.
 fn enum_combo<T: Copy + PartialEq>(
     ui: &mut Ui,
-    id: impl std::hash::Hash + std::fmt::Debug,
+    id: &str,
+    label: &str,
     value: &mut T,
     options: &[(T, &str)],
 ) {
@@ -1657,14 +1694,13 @@ fn enum_combo<T: Copy + PartialEq>(
         .iter()
         .find_map(|(candidate, label)| (*candidate == *value).then_some(*label))
         .unwrap_or("Unavailable");
-    ComboBox::from_id_salt(id)
-        .width(ui.available_width())
-        .selected_text(selected)
-        .show_ui(ui, |ui| {
-            for (candidate, label) in options {
-                ui.selectable_value(value, *candidate, *label);
-            }
-        });
+    let labels = options
+        .iter()
+        .map(|(_, label)| (*label).to_owned())
+        .collect::<Vec<_>>();
+    if let Some(index) = select(ui, id, label, selected, &labels, ui.available_width()) {
+        *value = options[index].0;
+    }
 }
 
 fn validate_project_authority(
