@@ -26,11 +26,6 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
             "Sheet formats…",
         ),
         (
-            SheetsCommand::CustomSheetSizes,
-            "sheet-preset-library",
-            "Custom sheet sizes…",
-        ),
-        (
             SheetsCommand::SheetDefaults,
             "sheet-defaults",
             "Sheet defaults…",

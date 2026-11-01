@@ -200,17 +200,9 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
             .availability(SheetsCommand::SheetFormatManager.key())
             .is_available()
     );
-    assert!(
-        sheets
-            .availability(SheetsCommand::CustomSheetSizes.key())
-            .is_available()
-    );
 
     sheets.execute(SheetsCommand::SheetFormatManager.key());
     assert!(sheets.state.drawing_sheet_support.manager.open);
-
-    sheets.execute(SheetsCommand::CustomSheetSizes.key());
-    assert!(sheets.state.drawing_sheet_presets.any_open());
 
     // The project default is where a format reaches several sheets, so its
     // dialog is a command of its own.
@@ -235,11 +227,7 @@ fn document_sheet_commands_open_their_real_surfaces_only_in_schematic_context() 
             .availability(SheetsCommand::SheetFormatManager.key())
             .is_available()
     );
-    assert!(
-        !results
-            .availability(SheetsCommand::CustomSheetSizes.key())
-            .is_available()
-    );
+
     assert!(
         !results
             .availability(SheetsCommand::SheetDefaults.key())

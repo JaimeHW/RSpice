@@ -33,9 +33,7 @@ pub mod workbench {
             DrawingSheetDefaultsDialogState, open_drawing_sheet_defaults,
         };
         pub(crate) use dialogs::drawing_sheet_overflow::open_drawing_sheet_overflow_review;
-        pub(crate) use dialogs::drawing_sheet_presets::{
-            DrawingSheetPresetDialogsState, open_custom_sheet_size_library,
-        };
+        pub(crate) use dialogs::drawing_sheet_presets::DrawingSheetPresetDialogsState;
         pub(crate) use dialogs::drawing_sheet_support::{
             DrawingSheetSupportState, open_sheet_format_manager,
         };

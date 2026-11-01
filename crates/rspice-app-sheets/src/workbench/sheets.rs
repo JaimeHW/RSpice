@@ -21,9 +21,7 @@ use crate::workbench::app::dialogs::drawing_sheet_presets::PresetDialogs;
 use crate::workbench::app::dialogs::drawing_sheet_support::render_drawing_sheet_support_dialogs;
 use crate::workbench::app::drawing_sheet_edit::drawing_sheet_editable;
 use crate::workbench::app::sheets as sheet_actions;
-use crate::workbench::app::{
-    open_custom_sheet_size_library, open_drawing_sheet_defaults, open_sheet_format_manager,
-};
+use crate::workbench::app::{open_drawing_sheet_defaults, open_sheet_format_manager};
 use crate::workbench::app_state::Model;
 use crate::workbench::chrome::sheet_strip::{self, SheetStrip};
 use crate::workbench::docks::inspector::design::sheet::{
@@ -244,10 +242,7 @@ impl CommandSet for SheetsCommand {
                     },
                 )
             }
-            Self::CustomSheetSizes => available_or(
-                editable && !state.drawing_sheet_presets.any_open(),
-                UNAVAILABLE,
-            ),
+
             Self::SheetDefaults => {
                 available_or(editable && !state.drawing_sheet_defaults.open, UNAVAILABLE)
             }
@@ -297,9 +292,7 @@ impl CommandSet for SheetsCommand {
                     cx.wb.prompt(error);
                 }
             }
-            Self::CustomSheetSizes => {
-                open_custom_sheet_size_library(&mut cx.state.drawing_sheet_presets, cx.model);
-            }
+
             Self::SheetDefaults => {
                 open_drawing_sheet_defaults(&mut cx.state.drawing_sheet_defaults, cx.model);
             }

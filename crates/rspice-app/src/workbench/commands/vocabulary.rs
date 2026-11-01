@@ -874,7 +874,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
 /// ones a feature declares alike.
 static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::ProjectLauncher.key(),
-    ProjectCommand::RecentProjects.key(),
     ProjectCommand::OpenProject.key(),
     ProjectCommand::NewProject.key(),
     ProjectCommand::Save.key(),
@@ -897,7 +896,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
-    SheetsCommand::CustomSheetSizes.key(),
     SheetsCommand::SheetDefaults.key(),
     HardcopyCommand::PrintHardcopy.key(),
     HardcopyCommand::ExportActiveView.key(),

@@ -31,7 +31,6 @@ use crate::workbench::project::workspace_state::{LibraryDeletionTarget, ProjectP
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum ProjectCommand {
     ProjectLauncher,
-    RecentProjects,
     OpenProject,
     NewProject,
     Save,
@@ -131,9 +130,8 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 22] = [
+    pub(crate) const ALL: [Self; 21] = [
         Self::ProjectLauncher,
-        Self::RecentProjects,
         Self::OpenProject,
         Self::NewProject,
         Self::Save,
@@ -160,7 +158,7 @@ impl ProjectCommand {
     pub(crate) const fn key(self) -> CommandKey {
         match self {
             Self::ProjectLauncher => ids::PROJECT_LAUNCHER,
-            Self::RecentProjects => CommandKey::new("recent-projects"),
+
             Self::OpenProject => CommandKey::new("open-project"),
             Self::NewProject => ids::NEW_PROJECT,
             Self::Save => ids::SAVE,
@@ -223,7 +221,7 @@ impl ProjectCommand {
                 global,
                 PROJECT_LAUNCHER,
             ),
-            Self::RecentProjects => ("Recent projects…", "File", navigates, global, NONE),
+
             Self::OpenProject => ("Open project…", "File", reserved, global, OPEN_PROJECT),
             Self::NewProject => ("New project…", "File", reserved, global, NEW_PROJECT),
             Self::Save => ("Save", "File", reserved, global, SAVE_PROJECT),

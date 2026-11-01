@@ -81,7 +81,6 @@ fn project_operation_gate_covers_every_mutating_project_command() {
     }
     for command in [
         ProjectCommand::ProjectLauncher,
-        ProjectCommand::RecentProjects,
         ProjectCommand::NewProject,
         ProjectCommand::OpenProject,
         ProjectCommand::Save,
@@ -462,10 +461,12 @@ fn standalone_schematic_save_remains_available_without_a_project() {
     );
 }
 
+/// All projects…, which ends File ▸ Open recent, opens the launcher on every
+/// project, not on the filter it was left on.
 #[test]
-fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
+fn all_projects_opens_the_launcher_on_every_project() {
     let mut app = RSpiceApp::test_instance();
-    app.state.project.project_launcher_filter = ProjectLauncherFilter::Pinned;
+    app.state.project.project_launcher_filter = ProjectLauncherFilter::Recent;
     app.state.project.project_launcher_open = false;
     let _ = app
         .state
@@ -473,7 +474,7 @@ fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
         .outbox
         .take::<FocusProjectLauncherSearch>();
 
-    app.execute_command_key(ProjectCommand::RecentProjects.key());
+    app.execute_command_key(ProjectCommand::ProjectLauncher.key());
     let state = &app.state;
 
     assert!(state.project.project_launcher_open);
@@ -490,6 +491,6 @@ fn recent_projects_opens_the_launcher_on_the_real_recent_filter() {
     );
     assert_eq!(
         state.project.project_launcher_filter,
-        ProjectLauncherFilter::Recent
+        ProjectLauncherFilter::All
     );
 }

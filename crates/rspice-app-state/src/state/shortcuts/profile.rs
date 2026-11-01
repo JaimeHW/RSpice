@@ -33,6 +33,12 @@ pub const RETIRED_COMMAND_IDS: &[&str] = &[
     // Both wrote the SPICE netlist under another extension.
     "export-netlist-hspice",
     "export-netlist-xyce",
+    // Opened the project launcher on its Recent filter; File > Open recent
+    // lists the projects and ends in All projects.
+    "recent-projects",
+    // Opened the sheet size library, which Sheet defaults offers beside the
+    // sizes it picks from.
+    "sheet-preset-library",
 ];
 
 /// Persisted user shortcut profile. Command entries remain raw until they are

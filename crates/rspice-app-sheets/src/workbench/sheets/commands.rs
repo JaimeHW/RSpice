@@ -17,7 +17,6 @@ use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, 
 pub enum SheetsCommand {
     SheetProperties,
     SheetFormatManager,
-    CustomSheetSizes,
     SheetDefaults,
     DrawingSheetLayers,
     NextSheet,
@@ -64,10 +63,9 @@ const DRAWING_EDIT: CommandFlags = PROJECT_COMMAND
 
 impl SheetsCommand {
     /// Every command of the feature.
-    pub const ALL: [Self; 9] = [
+    pub const ALL: [Self; 8] = [
         Self::SheetProperties,
         Self::SheetFormatManager,
-        Self::CustomSheetSizes,
         Self::SheetDefaults,
         Self::DrawingSheetLayers,
         Self::NextSheet,
@@ -83,7 +81,7 @@ impl SheetsCommand {
             // sheet's properties moved into the inspector.
             Self::SheetProperties => ids::SHEET_PROPERTIES,
             Self::SheetFormatManager => CommandKey::new("sheet-format-manager"),
-            Self::CustomSheetSizes => CommandKey::new("sheet-preset-library"),
+
             Self::SheetDefaults => CommandKey::new("sheet-defaults"),
             Self::DrawingSheetLayers => CommandKey::new("sheet-layer-visibility"),
             Self::NextSheet => CommandKey::new("next-sheet"),
@@ -110,13 +108,7 @@ impl SheetsCommand {
                 ShortcutContext::DesignWorkspace,
                 NONE,
             ),
-            Self::CustomSheetSizes => (
-                "Custom sheet sizes…",
-                "File",
-                PROJECT_COMMAND,
-                ShortcutContext::DesignWorkspace,
-                NONE,
-            ),
+
             Self::SheetDefaults => (
                 "Sheet defaults…",
                 "Design",

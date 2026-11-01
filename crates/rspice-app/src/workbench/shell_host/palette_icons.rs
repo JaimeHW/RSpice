@@ -59,7 +59,6 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             ProjectCommand::CheckAndSave => Some(Icon::Check),
             ProjectCommand::OpenProject
             | ProjectCommand::ProjectLauncher
-            | ProjectCommand::RecentProjects
             | ProjectCommand::OpenSchematic => Some(Icon::Folder),
             ProjectCommand::NewProject
             | ProjectCommand::Save

@@ -246,16 +246,6 @@ fn open_all_projects(
     project.project_launcher_filter = ProjectLauncherFilter::All;
 }
 
-/// Open the project launcher filtered to the recent projects.
-fn open_recent_projects(
-    project: &mut ProjectState,
-    wb: &mut WorkbenchSession,
-    platform: &mut PlatformState,
-) {
-    open_project_launcher(project, wb, platform);
-    project.project_launcher_filter = ProjectLauncherFilter::Recent;
-}
-
 /// Open New cell on the selected library while it can be written, else on
 /// the first library that can, against the catalog revision it opened on.
 fn open_new_cell_dialog(project: &mut ProjectState, model: &Model) {
@@ -402,7 +392,6 @@ impl CommandSet for ProjectCommand {
                 "the active schematic is read-only",
             ),
             Self::ProjectLauncher
-            | Self::RecentProjects
             | Self::OpenProject
             | Self::NewProject
             | Self::NewCell
@@ -423,7 +412,7 @@ impl CommandSet for ProjectCommand {
     fn execute(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::ProjectLauncher => open_all_projects(cx.state, cx.wb, cx.platform),
-            Self::RecentProjects => open_recent_projects(cx.state, cx.wb, cx.platform),
+
             Self::NewProject => cx.wb.outbox.push(ProjectFileAction::NewProject),
             Self::OpenProject => cx.wb.outbox.push(ProjectFileAction::OpenProject),
             // File Save always persists the project, including incomplete or
