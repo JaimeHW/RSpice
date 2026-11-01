@@ -147,9 +147,14 @@ def validated_save_clock(browser, review_intervals):
     browser.keys("\ue00c")
 
     note = "Validated browser clock revision"
+    # A landed save closes its form and says so only in the session log, so
+    # the log is emptied while nothing modal covers the Console.
+    browser.click("Expand console", "button")
+    clear_console(browser)
+    browser.click("Collapse console", "button")
     choose_command(browser, "Check and save", keyboard=((note, ()),))
     snapshot = browser.capture("validated-save-preconditions")
-    if not any(control["label"] == "Checks" and control["value"] == "0 blockers · 0 advisories"
+    if not any(control["label"] == "Checks" and control["value"] == "No blockers or advisories"
                for control in controls(snapshot)):
         raise AssertionError("The authored circuit did not pass schematic validation")
     before = canonical_projects(browser)
@@ -157,7 +162,7 @@ def validated_save_clock(browser, review_intervals):
         raise AssertionError("A first-save fixture already contains a canonical project")
     for fault in CLOCK_FAULTS:
         with wall_clock(browser, fault):
-            browser.click("Save validated revision", "button")
+            browser.click("Save", "button")
             verify_clock_rejection(browser.capture(f"validated-save-clock-{fault}"),
                                    "validated revision", note)
             if canonical_projects(browser) != before:
@@ -170,30 +175,23 @@ def validated_save_clock(browser, review_intervals):
     browser.script("window.__rspiceOriginalSavePicker = window.showSaveFilePicker; window.showSaveFilePicker = undefined;")
     started_ms = time.time_ns() // 1_000_000
     try:
-        browser.click("Save validated revision", "button")
-        wait_for(lambda: any(control["label"] == "Saved snapshot"
-                            for control in controls(browser.snapshot())), "the canonical validated save")
+        browser.click("Save", "button")
+        # A refused save keeps the form open on its note; a landed one closes it.
+        wait_for(lambda: not any(control["label"] == "Revision note" and control["role"] == "textInput"
+                                 for control in controls(browser.snapshot())),
+                 "the canonical validated save")
     finally:
         browser.script("window.showSaveFilePicker = window.__rspiceOriginalSavePicker; delete window.__rspiceOriginalSavePicker;")
         browser.record_input("file_picker_restored")
     finished_ms = time.time_ns() // 1_000_000
-    saved_controls = controls(browser.capture("validated-save-complete"))
-    # The completed save states its verdict as the snapshot heading and the two
-    # facts beneath it, and a different dialog helper publishes each one. They
-    # are named individually so that a helper which stops publishing reddens
-    # this job: an observable that disappears is a failure, never a pass.
-    for label, value in (("Saved snapshot", ""), ("Project", "Untitled Project"),
-                         ("Revision", "1")):
-        published = [control["value"] for control in saved_controls if control["label"] == label]
-        if value not in published:
-            if published:
-                detail = f"that label carried {published!r}"
-            else:
-                labels = sorted({control["label"] for control in saved_controls if control["label"]})
-                detail = f"nothing carried that label; the dialog published {labels!r}"
-            raise AssertionError(
-                "The completed save did not display its validated snapshot status: expected the "
-                f"label {label!r} to carry the value {value!r}, but {detail}")
+    # The completed save states its verdict as a session-log line. It is read,
+    # not inferred from the form closing: an observable that disappears is a
+    # failure, never a pass.
+    browser.click("Expand console", "button")
+    wait_for(lambda: reports(controls(browser.snapshot()), "Saved a validated revision"),
+             "the validated save's session-log record")
+    browser.capture("validated-save-complete")
+    browser.click("Collapse console", "button")
     files = canonical_projects(browser)
     if len(files) != 1:
         raise AssertionError("Validated save did not publish exactly one canonical project")
@@ -207,7 +205,6 @@ def validated_save_clock(browser, review_intervals):
     if any(not started_ms <= record["created_unix_ms"] <= finished_ms for record in records):
         raise AssertionError("The canonical project retained a fabricated revision timestamp")
     (browser.output / "validated-project.rspiceproj").write_bytes(raw.encode("utf-8"))
-    browser.click("Close", "button")
     choose_command(browser, "Revision history")
     verify_age(browser, "revision", finished_ms)
     browser.click("Close", "button")
