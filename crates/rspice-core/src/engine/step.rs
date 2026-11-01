@@ -341,7 +341,7 @@ impl Engine {
                     for param in &table.params {
                         Self::insert_step_target(
                             &mut canonical_targets,
-                            Self::canonical_reparse_override_target(netlist, param)?,
+                            Self::resolve_data_step_column(netlist, param)?.0,
                         )?;
                     }
                     StepPlanDimension::PendingDataRows {
@@ -422,7 +422,7 @@ impl Engine {
                             ".STEP DATA table '{table_name}' disappeared while planning"
                         ))
                     })?;
-                let (params, rows) = Self::copy_data_step_coordinates(table, abort)?;
+                let (params, rows) = Self::copy_data_step_coordinates(netlist, table, abort)?;
                 *dimension = StepPlanDimension::DataRows { params, rows };
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
@@ -666,31 +666,55 @@ impl Engine {
         }
     }
 
-    fn canonical_reparse_override_target(
+    /// Resolve one `.STEP DATA` column to its canonical plan target and to the
+    /// override key the reparse applies for each row.
+    ///
+    /// Xyce sets each column by name (N_ANP_SweepParam.C:541, `setParam`) and
+    /// resolves that name as `setParameter` does (N_DEV_DeviceMgr.C:6505-6634):
+    /// TEMP is an artificial parameter, a global parameter comes next, then the
+    /// default parameter of a device of that name, and any other name is an
+    /// error ("Unable to find parameter"). A bare `R1` column therefore steps
+    /// the resistance of `R1` unless a parameter `R1` is declared.
+    fn resolve_data_step_column(
         netlist: &Netlist,
         name: &str,
-    ) -> Result<String, SimulationError> {
-        let Some((device_name, param_name)) = name.split_once(':') else {
-            return Ok(format!("PARAM:{}", name.to_ascii_uppercase()));
-        };
-        if device_name.is_empty() || param_name.is_empty() || param_name.contains(':') {
-            return Err(SimulationError::Circuit(format!(
-                ".STEP DATA column '{name}' has an unsupported hierarchical device override; expected device:param"
-            )));
+    ) -> Result<(String, String), SimulationError> {
+        let column = name.trim();
+        if column.eq_ignore_ascii_case("TEMP") || netlist.params.has_any_parameter_binding(column) {
+            let parameter = column.to_ascii_uppercase();
+            return Ok((format!("PARAM:{parameter}"), parameter));
         }
+        let (device_name, param_name) = match column.split_once(':') {
+            Some((device_name, param_name)) => {
+                if device_name.is_empty() || param_name.is_empty() || param_name.contains(':') {
+                    return Err(SimulationError::Circuit(format!(
+                        ".STEP DATA column '{name}' has an unsupported hierarchical device override; expected device:param"
+                    )));
+                }
+                (device_name, Some(param_name))
+            }
+            None => (column, None),
+        };
         let element = netlist
             .elements
             .iter()
             .find(|element| element.name.eq_ignore_ascii_case(device_name))
             .ok_or_else(|| {
-                SimulationError::Circuit(format!(
-                    ".STEP DATA column '{name}' references unknown top-level device '{device_name}'"
-                ))
+                SimulationError::Circuit(if param_name.is_some() {
+                    format!(
+                        ".STEP DATA column '{name}' references unknown top-level device '{device_name}'"
+                    )
+                } else {
+                    format!(
+                        ".STEP DATA column '{name}' names no declared parameter and no top-level device"
+                    )
+                })
             })?;
-        let param = Self::canonical_device_parameter(&element.kind, Some(param_name));
-        Ok(format!(
-            "DEVICE:{}:{param}",
-            element.name.to_ascii_uppercase()
+        let param = Self::canonical_device_parameter(&element.kind, param_name);
+        let device = element.name.to_ascii_uppercase();
+        Ok((
+            format!("DEVICE:{device}:{param}"),
+            format!("{device}:{param}"),
         ))
     }
 
@@ -990,13 +1014,17 @@ impl Engine {
         let table = Self::validated_data_step_table(netlist, table_name, abort)?;
         self.ensure_batch_runs(table.rows.len())?;
 
+        let keys = table
+            .params
+            .iter()
+            .map(|param| Self::resolve_data_step_column(netlist, param).map(|(_, key)| key))
+            .collect::<Result<Vec<_>, _>>()?;
         let mut stepped = Vec::with_capacity(table.rows.len());
         for (row_index, row) in table.rows.iter().enumerate() {
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            let overrides = table
-                .params
+            let overrides = keys
                 .iter()
                 .cloned()
                 .zip(row.iter().copied())
@@ -1066,7 +1094,10 @@ impl Engine {
         Ok(table)
     }
 
+    /// Copy a DATA table's rows, with each column resolved to the override key
+    /// its rows bind (see `resolve_data_step_column`).
     fn copy_data_step_coordinates(
+        netlist: &Netlist,
         table: &crate::netlist::DataTable,
         abort: &dyn AbortSignal,
     ) -> Result<(Vec<String>, Vec<Vec<Value>>), SimulationError> {
@@ -1075,7 +1106,7 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
-            params.push(param.clone());
+            params.push(Self::resolve_data_step_column(netlist, param)?.1);
         }
 
         let mut rows = Vec::with_capacity(table.rows.len());
@@ -2660,6 +2691,100 @@ mod tests {
                 .to_string()
                 .contains("unsupported hierarchical device override")
         );
+    }
+
+    fn data_row_resistance(netlist: &Netlist, name: &str) -> Value {
+        let resistor = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+            .expect("resistor exists");
+        match &resistor.kind {
+            ElementKind::Resistor { value, .. } => *value,
+            other => panic!("unexpected {name} kind: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_bare_data_column_steps_the_device_of_that_name_unless_a_parameter_has_it() {
+        // Xyce resolves a .DATA column as a declared parameter first, then as
+        // the default parameter of the device of that name, and refuses any
+        // other name. Xyce 7.10 prints V(out) 0.5 and 0.75 for this deck.
+        let device = Netlist::parse(
+            "bare device DATA column\n\
+             V1 in 0 1\n\
+             R2 in out 1k\n\
+             R1 out 0 1k\n\
+             .data t R1\n\
+             1k\n\
+             3k\n\
+             .enddata\n\
+             .step data=t\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("bare-device DATA deck parses");
+        let engine = Engine::new(SimulationConfig::default());
+        let plan = engine
+            .plan_step_commands(&device, &step_commands(&device), plan_limits(2))
+            .expect("a bare device column plans");
+        let run = engine
+            .materialize_step_run(&plan, 1)
+            .expect("row 1 materializes");
+        assert_eq!(data_row_resistance(run.netlist(), "R1"), 3000.0);
+        let stepped = engine
+            .step_netlists_for_command(&device, &step_commands(&device)[0], &[])
+            .expect("the single-card DATA path binds the device too");
+        assert_eq!(data_row_resistance(&stepped[1].1, "R1"), 3000.0);
+
+        let parameter = Netlist::parse(
+            "parameter named like a device\n\
+             .param R1=1k\n\
+             V1 in 0 1\n\
+             R2 in out 1k\n\
+             R1 out 0 {R1*2}\n\
+             .data t R1\n\
+             1k\n\
+             3k\n\
+             .enddata\n\
+             .step data=t\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("parameter DATA deck parses");
+        let plan = engine
+            .plan_step_commands(&parameter, &step_commands(&parameter), plan_limits(2))
+            .expect("a parameter column plans");
+        let run = engine
+            .materialize_step_run(&plan, 1)
+            .expect("row 1 materializes");
+        assert_eq!(run.netlist().params.get("R1"), Some(3000.0));
+
+        let unknown = Netlist::parse(
+            "unknown DATA column\n\
+             V1 in 0 1\n\
+             R1 in 0 1k\n\
+             .data t foo\n\
+             1k\n\
+             .enddata\n\
+             .step data=t\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("unknown-column DATA deck parses");
+        let error = engine
+            .plan_step_commands(&unknown, &step_commands(&unknown), plan_limits(1))
+            .expect_err("a column naming nothing must be refused, not stepped silently");
+        assert!(
+            error
+                .to_string()
+                .contains("names no declared parameter and no top-level device"),
+            "{error}"
+        );
+        let error = engine
+            .step_netlists_for_command(&unknown, &step_commands(&unknown)[0], &[])
+            .expect_err("the single-card DATA path refuses it too");
+        assert!(error.to_string().contains("'foo'"), "{error}");
     }
 
     #[test]
