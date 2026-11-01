@@ -58,7 +58,11 @@ fn root_source(app: &RSpiceApp, reference: &CellViewRef) -> String {
 fn lines(app: &RSpiceApp) -> (Line, Line) {
     let messages = app.state.workbench.messages();
     (
-        cell_line(&app.state, &messages),
+        cell_line(
+            &app.state.code.new_veriloga_device,
+            &app.state.model,
+            &messages,
+        ),
         ports_line(&app.state.code.new_veriloga_device.ports, &messages),
     )
 }
@@ -359,7 +363,13 @@ fn nothing_moves_while_the_draft_is_typed() {
         let mut app = app_with_draft(name, ports);
         app.state.code.new_veriloga_device.error = error.map(str::to_owned);
         painted_runs(screen, Mode::Dark, 3, |ctx| {
-            app.render_new_veriloga_device_form(ctx);
+            let messages = app.state.workbench.messages();
+            super::render_new_veriloga_device_form(
+                &mut app.state.code.new_veriloga_device,
+                &app.state.model,
+                &messages,
+                ctx,
+            );
         })
     };
     let primary = |painted: &PaintedRuns| painted.rect_of("Create").expect("the primary");

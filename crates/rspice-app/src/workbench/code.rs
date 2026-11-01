@@ -5,11 +5,13 @@
 
 pub(crate) mod commands;
 
+use egui::Context;
+
 use crate::io::NetlistFormat;
 use crate::state::ViewType;
 use crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol;
 use crate::workbench::app::dialogs::library::new_veriloga_device::{
-    new_veriloga_device_available_in, open_new_veriloga_device_form_in,
+    self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
 };
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
@@ -331,4 +333,25 @@ fn schematic_in_front(reads: &Reads<'_, CodeFeature>) -> bool {
             reads.model.workspace.content.active_view_type(),
             ViewType::Schematic | ViewType::Testbench
         )
+}
+
+/// The dialogs the shell's dialog order draws, each over the parts of the
+/// code slot it owns. What a dialog's choice still needs of the whole
+/// application it hands the shell, which the step answers as it returns.
+impl CodeFeature {
+    /// New Verilog-A device….
+    pub(in crate::workbench) fn render_new_veriloga_device_form(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        let messages = cx.wb.messages();
+        if new_veriloga_device::render_new_veriloga_device_form(
+            &mut cx.state.new_veriloga_device,
+            cx.model,
+            &messages,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::CreateVerilogADevice);
+        }
+    }
 }

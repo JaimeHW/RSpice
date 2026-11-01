@@ -419,6 +419,11 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
             activate_workspace(app, Workspace::Design);
             crate::workbench::app::actions::veriloga_symbol::open_veriloga_symbol(&mut app.state);
         }
+        CodeRequest::CreateVerilogADevice => {
+            if let Err(error) = app.commit_new_veriloga_device() {
+                app.state.code.new_veriloga_device.error = Some(error);
+            }
+        }
     }
 }
 

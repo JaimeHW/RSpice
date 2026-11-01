@@ -8,6 +8,7 @@
 
 use crate::workbench::app::{command_palette, dialogs};
 use crate::workbench::app_state::AppState;
+use crate::workbench::code::CodeFeature;
 use crate::workbench::design::DesignFeature;
 use crate::workbench::features;
 use crate::workbench::framework::dialogs::{DialogKey, DialogSpec, ModalGate, ModalSpec, Modality};
@@ -459,7 +460,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.new_veriloga_device"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.code.new_veriloga_device.open),
-        render: |app, ctx| app.render_new_veriloga_device_form(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_new_veriloga_device_form(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.veriloga_import"),

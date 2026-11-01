@@ -115,15 +115,22 @@ enum Draft {
 }
 
 fn draft(state: &AppState) -> Draft {
-    let form = &state.code.new_veriloga_device;
-    let messages = state.workbench.messages();
-    if !writable_libraries(&state.model.library_manager).contains(&form.library) {
+    draft_in(
+        &state.code.new_veriloga_device,
+        &state.model,
+        &state.workbench.messages(),
+    )
+}
+
+/// [`draft`], over the form, the model and the reader's messages alone.
+fn draft_in(form: &NewVerilogADeviceFormState, model: &Model, messages: &MessageCatalog) -> Draft {
+    if !writable_libraries(&model.library_manager).contains(&form.library) {
         return Draft::Refused(messages.text(MessageId::VerilogADeviceNoLibrary));
     }
-    match typed_cell(state, &messages) {
+    match typed_cell(form, model, messages) {
         None => Draft::Empty,
         Some(Err(refusal)) => Draft::Refused(refusal),
-        Some(Ok(cell)) => match typed_ports(&form.ports, &messages) {
+        Some(Ok(cell)) => match typed_ports(&form.ports, messages) {
             Ok(ports) => Draft::Ready { cell, ports },
             Err(refusal) => Draft::Refused(refusal),
         },
@@ -134,8 +141,11 @@ fn draft(state: &AppState) -> Draft {
 /// or why it cannot. A cell name is letters, digits and underscores, as New
 /// Cell's is; the module it is named after is made from it by
 /// [`verilog_module_name`].
-fn typed_cell(state: &AppState, messages: &MessageCatalog) -> Option<Result<String, String>> {
-    let form = &state.code.new_veriloga_device;
+fn typed_cell(
+    form: &NewVerilogADeviceFormState,
+    model: &Model,
+    messages: &MessageCatalog,
+) -> Option<Result<String, String>> {
     let cell = form.name.trim();
     if cell.is_empty() {
         return None;
@@ -147,8 +157,7 @@ fn typed_cell(state: &AppState, messages: &MessageCatalog) -> Option<Result<Stri
         return Some(Err(messages.text(MessageId::VerilogADeviceCellInvalid)));
     }
     let requested = crate::state::canonical_cell_view_owner_key(&form.library, cell, "");
-    let taken = state
-        .model
+    let taken = model
         .library_manager
         .get_library(&form.library)
         .is_some_and(|library| {
@@ -223,8 +232,8 @@ impl Line {
 /// The line under Cell name: blank while there is none (the footer says
 /// what Create waits for), the module the cell's view will declare, or why
 /// the name is refused.
-fn cell_line(state: &AppState, messages: &MessageCatalog) -> Line {
-    match typed_cell(state, messages) {
+fn cell_line(form: &NewVerilogADeviceFormState, model: &Model, messages: &MessageCatalog) -> Line {
+    match typed_cell(form, model, messages) {
         None => Line::Blank,
         Some(Err(refusal)) => Line::Error(refusal),
         Some(Ok(cell)) => Line::Derived(messages.format(
@@ -250,92 +259,95 @@ fn ports_line(typed: &str, messages: &MessageCatalog) -> Line {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_new_veriloga_device_form(&mut self, ctx: &Context) {
-        if !self.state.code.new_veriloga_device.open {
-            return;
-        }
-        let messages = self.state.workbench.messages();
-        let libraries = writable_libraries(&self.state.model.library_manager);
-        let current = draft(&self.state);
-        let form = &self.state.code.new_veriloga_device;
-        // A refusal about a field stands under that field. The status line
-        // holds what belongs to none: no library to write, or a create the
-        // project refused; and, as every form's does, what Create waits for.
-        let status = form.error.clone().or_else(|| {
-            (!libraries.contains(&form.library))
-                .then(|| messages.text(MessageId::VerilogADeviceNoLibrary))
-        });
-        let waiting = form
-            .name
-            .trim()
-            .is_empty()
-            .then(|| messages.text(MessageId::VerilogADeviceCellMissing));
-        let cell = cell_line(&self.state, &messages);
-        let ports = ports_line(&form.ports, &messages);
-        let title = messages.text(MessageId::VerilogADeviceTitle);
-        let primary = messages.text(MessageId::VerilogADevicePrimary);
-        let description = messages.text(MessageId::VerilogADeviceDescription);
-        let library_label = messages.text(MessageId::VerilogADeviceLibrary);
-        let cell_label = messages.text(MessageId::VerilogADeviceCell);
-        let ports_label = messages.text(MessageId::VerilogADevicePorts);
-        let ports_hint = messages.text(MessageId::VerilogADevicePortsHint);
-        let name_id = egui::Id::new("workbench.new-veriloga-device.name");
-        let ports_id = egui::Id::new("workbench.new-veriloga-device.ports");
-
-        let form = &mut self.state.code.new_veriloga_device;
-        let typed_before = (form.name.clone(), form.ports.clone());
-        let mut picked = None;
-        let choice = CommandForm::new(&title, &primary)
-            .describe(&description)
-            .primary_enabled(matches!(current, Draft::Ready { .. }) && form.error.is_none())
-            .fields_enabled(!libraries.is_empty())
-            .status(match status.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(waiting.as_deref()),
-            })
-            .show(ctx, |rows| {
-                picked = rows.select(
-                    &library_label,
-                    "workbench.new-veriloga-device.library",
-                    &form.library,
-                    &libraries,
-                );
-                rows.text(&cell_label, name_id, &mut form.name, "");
-                rows.field_line(Some(name_id), cell.field_line());
-                rows.text(&ports_label, ports_id, &mut form.ports, &ports_hint);
-                rows.field_line(Some(ports_id), ports.field_line());
-                Some(name_id)
-            });
-        if let Some(index) = picked
-            && let Some(library) = libraries.get(index)
-        {
-            form.library = library.clone();
-            form.error = None;
-        }
-        if (form.name.as_str(), form.ports.as_str())
-            != (typed_before.0.as_str(), typed_before.1.as_str())
-        {
-            form.error = None;
-        }
-        match choice {
-            // Revalidate the post-edit frame: Enter must never create a cell
-            // the same frame's keystroke just made invalid. A draft refusal is
-            // already under its field; only a failure of the create itself
-            // reaches the status line.
-            DialogChoice::Primary if matches!(draft(&self.state), Draft::Ready { .. }) => {
-                if let Err(error) = self.commit_new_veriloga_device() {
-                    self.state.code.new_veriloga_device.error = Some(error);
-                }
-            }
-            DialogChoice::Primary => {}
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.code.new_veriloga_device = NewVerilogADeviceFormState::default();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
+/// Draw New Verilog-A device… while it is open, over the form, the model and
+/// the reader's messages. Returns whether the reader asked to create a draft
+/// that is ready on this frame's edits.
+pub(in crate::workbench) fn render_new_veriloga_device_form(
+    form: &mut NewVerilogADeviceFormState,
+    model: &Model,
+    messages: &MessageCatalog,
+    ctx: &Context,
+) -> bool {
+    if !form.open {
+        return false;
     }
+    let libraries = writable_libraries(&model.library_manager);
+    let current = draft_in(form, model, messages);
+    // A refusal about a field stands under that field. The status line
+    // holds what belongs to none: no library to write, or a create the
+    // project refused; and, as every form's does, what Create waits for.
+    let status = form.error.clone().or_else(|| {
+        (!libraries.contains(&form.library))
+            .then(|| messages.text(MessageId::VerilogADeviceNoLibrary))
+    });
+    let waiting = form
+        .name
+        .trim()
+        .is_empty()
+        .then(|| messages.text(MessageId::VerilogADeviceCellMissing));
+    let cell = cell_line(form, model, messages);
+    let ports = ports_line(&form.ports, messages);
+    let title = messages.text(MessageId::VerilogADeviceTitle);
+    let primary = messages.text(MessageId::VerilogADevicePrimary);
+    let description = messages.text(MessageId::VerilogADeviceDescription);
+    let library_label = messages.text(MessageId::VerilogADeviceLibrary);
+    let cell_label = messages.text(MessageId::VerilogADeviceCell);
+    let ports_label = messages.text(MessageId::VerilogADevicePorts);
+    let ports_hint = messages.text(MessageId::VerilogADevicePortsHint);
+    let name_id = egui::Id::new("workbench.new-veriloga-device.name");
+    let ports_id = egui::Id::new("workbench.new-veriloga-device.ports");
 
+    let typed_before = (form.name.clone(), form.ports.clone());
+    let mut picked = None;
+    let choice = CommandForm::new(&title, &primary)
+        .describe(&description)
+        .primary_enabled(matches!(current, Draft::Ready { .. }) && form.error.is_none())
+        .fields_enabled(!libraries.is_empty())
+        .status(match status.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(waiting.as_deref()),
+        })
+        .show(ctx, |rows| {
+            picked = rows.select(
+                &library_label,
+                "workbench.new-veriloga-device.library",
+                &form.library,
+                &libraries,
+            );
+            rows.text(&cell_label, name_id, &mut form.name, "");
+            rows.field_line(Some(name_id), cell.field_line());
+            rows.text(&ports_label, ports_id, &mut form.ports, &ports_hint);
+            rows.field_line(Some(ports_id), ports.field_line());
+            Some(name_id)
+        });
+    if let Some(index) = picked
+        && let Some(library) = libraries.get(index)
+    {
+        form.library = library.clone();
+        form.error = None;
+    }
+    if (form.name.as_str(), form.ports.as_str())
+        != (typed_before.0.as_str(), typed_before.1.as_str())
+    {
+        form.error = None;
+    }
+    match choice {
+        // Revalidate the post-edit frame: Enter must never create a cell
+        // the same frame's keystroke just made invalid. A draft refusal is
+        // already under its field; only a failure of the create itself
+        // reaches the status line.
+        DialogChoice::Primary => {
+            matches!(draft_in(form, model, messages), Draft::Ready { .. })
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            *form = NewVerilogADeviceFormState::default();
+            false
+        }
+        DialogChoice::None | DialogChoice::Secondary => false,
+    }
+}
+
+impl RSpiceApp {
     /// Create the drafted cell in one library transaction and open its
     /// module in Design.
     pub(in crate::workbench) fn commit_new_veriloga_device(
