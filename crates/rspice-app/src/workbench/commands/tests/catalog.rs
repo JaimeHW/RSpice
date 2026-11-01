@@ -7,6 +7,7 @@
 //! can see.
 
 use super::*;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::models::commands::ModelsCommand;
 use crate::workbench::project::commands::ProjectCommand;
@@ -121,12 +122,15 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     assert_eq!(SimulateCommand::Run.key().as_str(), "start-run");
     assert_eq!(SimulateCommand::Stop.key().as_str(), "stop-run");
     assert_eq!(ProjectCommand::OpenProject.key().as_str(), "open-project");
-    assert_eq!(Command::OpenNetlist.spec().id, "open-netlist");
+    assert_eq!(CodeCommand::OpenNetlist.key().as_str(), "open-netlist");
     assert_eq!(ProjectCommand::NewProject.key().as_str(), "new-project");
     assert_eq!(ProjectCommand::Save.key().as_str(), "save-project");
     assert_eq!(Command::CloseActiveDocument.spec().id, "close-document");
     assert_eq!(Command::ToggleFullScreen.spec().id, "full-screen");
-    assert_eq!(Command::GenerateNetlist.spec().id, "generated-netlist");
+    assert_eq!(
+        CodeCommand::GenerateNetlist.key().as_str(),
+        "generated-netlist"
+    );
     assert_eq!(Command::ToggleConsole.spec().id, "console");
     assert_eq!(Command::PreviousDocument.spec().id, "previous-document");
     assert_eq!(Command::NextDocument.spec().id, "next-document");
@@ -181,7 +185,7 @@ fn protected_commands_keep_the_exact_mockup_action_ids() {
     );
     assert_eq!(SheetsCommand::NewSheet.key().as_str(), "new-sheet");
     assert_eq!(SheetsCommand::DeleteSheet.key().as_str(), "delete-sheet");
-    assert_eq!(Command::ShowInNetlist.spec().id, "show-in-netlist");
+    assert_eq!(CodeCommand::ShowInNetlist.key().as_str(), "show-in-netlist");
     assert_eq!(ModelsCommand::ModelEditor.key().as_str(), "model-editor");
     assert_eq!(
         ResultsCommand::ImportResultDataset.key().as_str(),

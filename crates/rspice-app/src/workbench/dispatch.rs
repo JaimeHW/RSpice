@@ -25,12 +25,13 @@ use crate::workbench::app::dialogs::hierarchy::descend::{
     DescendHierarchy, answer_descend_hierarchy,
 };
 use crate::workbench::app_state::PlatformState;
+use crate::workbench::code::commands::CodeRequest;
 #[cfg(test)]
 use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
-    active_schematic_editor, answer_project_request, command_edits_schematic, file_action,
-    run_project_file_action,
+    active_schematic_editor, answer_code_request, answer_project_request, command_edits_schematic,
+    file_action, run_project_file_action,
 };
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -190,8 +191,9 @@ impl RSpiceApp {
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
-    /// live session's mirror, the descent Descend into hierarchy checked, and
-    /// last what the project feature hands over and the project's file commands.
+    /// live session's mirror, what a code command still needs of the whole
+    /// application, the descent Descend into hierarchy checked, and last what
+    /// the project feature hands over and the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -417,6 +419,11 @@ impl RSpiceApp {
         requests::drain(
             self,
             |app| &mut app.state.workbench.outbox,
+            |app, request: CodeRequest| answer_code_request(app, request),
+        );
+        requests::drain(
+            self,
+            |app| &mut app.state.workbench.outbox,
             |app, request: DescendHierarchy| answer_descend_hierarchy(&mut app.state, request),
         );
         requests::drain(
@@ -558,7 +565,7 @@ mod tests {
     fn the_registry_lists_every_command_the_enum_declares() {
         let declared = declared_variants();
         assert!(
-            declared.len() > 150,
+            declared.len() > 100,
             "`enum Command` parsed as only {} variants: the parse broke, not the enum",
             declared.len()
         );

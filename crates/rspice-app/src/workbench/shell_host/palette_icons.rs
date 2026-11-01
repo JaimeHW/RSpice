@@ -3,6 +3,7 @@
 
 use crate::state::command_catalog::CommandKey;
 use crate::ui::icons::Icon;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
@@ -35,10 +36,6 @@ pub(super) fn palette_icon(command: Command) -> Option<Icon> {
         Command::ConfigurationSets => Icon::Grid,
         Command::RuleSetup => Icon::Check,
         Command::CheckCellview | Command::CheckDesign => Icon::Check,
-        Command::ImportNetlist
-        | Command::ImportVerilogA
-        | Command::ExportNetlist(_)
-        | Command::ExportBillOfMaterials => Icon::File,
         _ => return None,
     };
     Some(icon)
@@ -55,6 +52,15 @@ pub(super) fn feature_palette_icon(key: CommandKey) -> Option<Icon> {
             SimulateCommand::Run => Some(Icon::Run),
             SimulateCommand::Stop => Some(Icon::Stop),
             SimulateCommand::Preflight => Some(Icon::Check),
+            _ => None,
+        };
+    }
+    if let Some(command) = CodeCommand::from_key(key) {
+        return match command {
+            CodeCommand::ImportNetlist
+            | CodeCommand::ImportVerilogA
+            | CodeCommand::ExportNetlist(_)
+            | CodeCommand::ExportBillOfMaterials => Some(Icon::File),
             _ => None,
         };
     }

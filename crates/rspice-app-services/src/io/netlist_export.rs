@@ -2,8 +2,8 @@
 //!
 //! Only the vocabulary lives here. Netlists are emitted by
 //! `simulation::netlist_gen` for execution and by
-//! `workbench::menu_bar::netlist_export` for `Command::ExportNetlist`, and
-//! each owns its own writing.
+//! `workbench::menu_bar::netlist_export` for the Export netlist commands,
+//! and each owns its own writing.
 
 use serde::{Deserialize, Serialize};
 

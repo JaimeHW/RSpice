@@ -23,6 +23,7 @@ use crate::workbench::app_state::session::shortcuts::{
     ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
 };
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::{
     COMMAND_REGISTRY, CommandRegistry, command_registry, legacy_command,
 };
@@ -143,6 +144,7 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                     .or_else(|| ModelsCommand::from_key(key).map(ModelsCommand::declared_spec))
                     .or_else(|| SimulateCommand::from_key(key).map(SimulateCommand::declared_spec))
                     .or_else(|| ProjectCommand::from_key(key).map(ProjectCommand::declared_spec))
+                    .or_else(|| CodeCommand::from_key(key).map(CodeCommand::declared_spec))
                     .unwrap_or_else(|| panic!("{key:?} is ordered but nothing declares it"));
                 return feature_row(index, &spec, apps);
             };
@@ -157,8 +159,8 @@ pub(crate) fn legacy_command_rows() -> Vec<CommandRow> {
                 blocked_by_project_operation: command.blocked_by_project_operation(),
                 mutates_window_session: command.mutates_window_session(),
                 palette_visible: command.palette_visible(),
-                source_editor_only: command.source_editor_only(),
-                navigates_source_language: command.navigates_source_language(),
+                source_editor_only: false,
+                navigates_source_language: false,
                 repeatable: command.repeatable(),
                 commits_inspector_edit: command.commits_inspector_edit(),
                 edits_active_document: command_edits_schematic(command),
@@ -226,8 +228,8 @@ fn registry_command_rows() -> Vec<CommandRow> {
                 blocked_by_project_operation: command.blocked_by_project_operation(),
                 mutates_window_session: command.mutates_window_session(),
                 palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
-                source_editor_only: command.source_editor_only(),
-                navigates_source_language: command.navigates_source_language(),
+                source_editor_only: false,
+                navigates_source_language: false,
                 repeatable: command.repeatable(),
                 commits_inspector_edit: command.commits_inspector_edit(),
                 edits_active_document: command_edits_schematic(command),
@@ -264,6 +266,7 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
         checked: Host::checked(app, spec.key),
         context_live: spec.context.matches(&app.state.workbench, &app.state.model),
     };
+    let code = CodeCommand::from_key(spec.key);
     CommandRow {
         index,
         id: spec.key.as_str(),
@@ -275,12 +278,14 @@ fn feature_row(index: usize, spec: &CommandSpec, apps: [&RSpiceApp; 3]) -> Comma
             .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION),
         mutates_window_session: false,
         palette_visible: spec.flags.contains(CommandFlags::PALETTE_VISIBLE),
-        source_editor_only: false,
-        navigates_source_language: false,
+        source_editor_only: code.is_some_and(CodeCommand::source_editor_only),
+        navigates_source_language: code.is_some_and(CodeCommand::navigates_source_language),
         repeatable: false,
         commits_inspector_edit: spec.flags.contains(CommandFlags::COMMITS_INSPECTOR_EDIT),
         edits_active_document: spec.flags.contains(CommandFlags::EDITS_ACTIVE_DOCUMENT),
-        source_editor_request: None,
+        source_editor_request: code
+            .and_then(CodeCommand::source_editor_request)
+            .map(|request| format!("{request:?}")),
         context: spec.context.label(),
         context_suppressed_by_text_focus: spec.context.suppressed_by_text_focus(),
         bindings: spec.bindings.iter().map(binding_row).collect(),
@@ -491,22 +496,29 @@ fn the_registry_order_breaks_ties_as_the_command_registry_does() {
     for (index, (key, command)) in shell_order.iter().zip(COMMAND_REGISTRY).enumerate() {
         assert_eq!(*key, command.key(), "position {index} is {command:?}");
     }
-    let position = |command: Command| {
+    let position = |key: CommandKey| {
         order
             .iter()
-            .position(|key| *key == command.key())
-            .unwrap_or_else(|| panic!("{command:?} is ordered"))
+            .position(|ordered| *ordered == key)
+            .unwrap_or_else(|| panic!("{key:?} is ordered"))
     };
-    for (earlier, later) in [
-        (Command::Duplicate, Command::DuplicateLine),
-        (Command::PlaceWire, Command::ToggleLineComment),
-    ] {
+    for (earlier, later) in TIED_PAIRS {
         assert!(position(earlier) < position(later), "{earlier:?}");
     }
 }
 
+/// Pairs of commands that share a chord in contexts of equal precedence, the
+/// earlier first in the registry's order.
+const TIED_PAIRS: [(CommandKey, CommandKey); 2] = [
+    (Command::Duplicate.key(), CodeCommand::DuplicateLine.key()),
+    (
+        Command::PlaceWire.key(),
+        CodeCommand::ToggleLineComment.key(),
+    ),
+];
+
 /// Two candidates of equal context precedence answering one chord are
-/// ordered by their position in [`COMMAND_REGISTRY`], so a replacement
+/// ordered by their position in the registry's order, so a replacement
 /// registry has to keep that order. The environment makes an editor-tier
 /// canvas context and the source editor live at once; the profile audit sees
 /// their view families as disjoint and accepts the shared chord.
@@ -532,25 +544,23 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
             ..egui::Modifiers::NONE
         },
     };
-    let registry_index = |command: Command| {
-        COMMAND_REGISTRY
+    let registry_index = |key: CommandKey| {
+        command_registry()
+            .order()
             .iter()
-            .position(|registered| *registered == command)
-            .unwrap_or_else(|| panic!("{command:?} is registered"))
+            .position(|ordered| *ordered == key)
+            .unwrap_or_else(|| panic!("{key:?} is ordered"))
     };
 
-    for (earlier, later) in [
-        (Command::Duplicate, Command::DuplicateLine),
-        (Command::PlaceWire, Command::ToggleLineComment),
-    ] {
+    for (earlier, later) in TIED_PAIRS {
         assert!(registry_index(earlier) < registry_index(later));
         for bound in [[earlier, later], [later, earlier]] {
             let mut profile = ShortcutPreferences::default();
-            for command in bound {
+            for key in bound {
                 profile
                     .set_binding(
                         &vocabulary::CommandRegistry,
-                        command.key(),
+                        key,
                         ShortcutBindingSlot::Primary,
                         vec![CommandPlatform::Desktop],
                         Some(ShortcutSequence::single(chord)),
@@ -562,9 +572,10 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
                 "{bound:?}"
             );
             let precedence = profile.policies().context_precedence();
+            let context = |key| CommandRegistry.context(key).expect("ordered");
             assert_eq!(
-                shortcut_context_precedence_rank(earlier.shortcut_context(), precedence),
-                shortcut_context_precedence_rank(later.shortcut_context(), precedence),
+                shortcut_context_precedence_rank(context(earlier), precedence),
+                shortcut_context_precedence_rank(context(later), precedence),
             );
 
             let resolve = |available: &dyn Fn(CommandKey) -> bool| {
@@ -583,11 +594,11 @@ fn the_shortcut_resolver_breaks_equal_precedence_ties_by_registry_index() {
                     )
                     .command
             };
-            assert_eq!(resolve(&|_| true), Some(earlier.key()), "{bound:?}");
+            assert_eq!(resolve(&|_| true), Some(earlier), "{bound:?}");
             // The later command was a live candidate the tie-break passed over.
             assert_eq!(
-                resolve(&|command| command != earlier.key()),
-                Some(later.key()),
+                resolve(&|command| command != earlier),
+                Some(later),
                 "{bound:?}"
             );
         }

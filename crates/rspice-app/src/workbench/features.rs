@@ -494,6 +494,7 @@ mod tests {
         let models = <ModelsFeature as Registered>::registry();
         let simulate = <SimulateFeature as Registered>::registry();
         let project = <ProjectFeature as Registered>::registry();
+        let code = <CodeFeature as Registered>::registry();
         for key in registry.order() {
             let Some(spec) = spec(*key) else { continue };
             assert_eq!(
@@ -509,6 +510,7 @@ mod tests {
                 models.command(*key).is_some(),
                 simulate.command(*key).is_some(),
                 project.command(*key).is_some(),
+                code.command(*key).is_some(),
             ];
             assert_eq!(
                 declaring.iter().filter(|declares| **declares).count(),
@@ -530,6 +532,7 @@ mod tests {
                 + crate::workbench::models::commands::ModelsCommand::ALL.len()
                 + crate::workbench::simulate::commands::SimulateCommand::ALL.len()
                 + crate::workbench::project::commands::ProjectCommand::ALL.len()
+                + crate::workbench::code::commands::CodeCommand::ALL.len()
         );
     }
 
@@ -560,16 +563,21 @@ mod tests {
     /// the window session or runs only in a source editor does.
     #[test]
     fn a_command_a_feature_reads_runs_exactly_when_it_is_available() {
+        use crate::workbench::code::commands::CodeCommand;
         use crate::workbench::commands::vocabulary::legacy_command;
 
         for (slot, keys) in foreign_availability() {
             for key in keys {
                 if let Some(command) = legacy_command(*key) {
                     assert!(
-                        !command.mutates_window_session() && !command.source_editor_only(),
+                        !command.mutates_window_session(),
                         "{slot} reads {key:?}, whose answer refuses more than its run does"
                     );
                 }
+                assert!(
+                    !CodeCommand::from_key(*key).is_some_and(CodeCommand::source_editor_only),
+                    "{slot} reads {key:?}, whose answer refuses more than its run does"
+                );
             }
         }
         for open in [false, true] {

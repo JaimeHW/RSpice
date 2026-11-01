@@ -108,7 +108,7 @@ const FILE_MENU: &[MenuEntry] = &[
     project(ProjectCommand::NewProject).access('N'),
     project(ProjectCommand::NewCell).access('W'),
     project(ProjectCommand::NewView).access('V'),
-    command(Command::NewVerilogADevice).access('G'),
+    code(CodeCommand::NewVerilogADevice).access('G'),
     Separator,
     // A schematic file is opened as a document of its own only on the start
     // screen; inside a project it is imported as a new cell view.
@@ -159,13 +159,13 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
 const IMPORT_MENU: &[MenuEntry] = &[
     MenuEntry::command_as(CodeCommand::ImportNetlist.key(), "SPICE deck\u{2026}").access('S'),
     MenuEntry::command_as(CodeCommand::ImportVerilogA.key(), "Verilog-A\u{2026}").access('V'),
-    command_as(
-        Command::ImportLtspiceSchematic,
+    MenuEntry::command_as(
+        CodeCommand::ImportLtspiceSchematic.key(),
         "LTspice schematic (.asc)\u{2026}",
     )
     .access('L'),
-    command_as(
-        Command::ImportQspiceSchematic,
+    MenuEntry::command_as(
+        CodeCommand::ImportQspiceSchematic.key(),
         "QSPICE schematic (.qsch)\u{2026}",
     )
     .access('Q'),
@@ -201,8 +201,8 @@ const EXPORT_MENU: &[MenuEntry] = &[
     )
     .access('N'),
     MenuEntry::command_as(ResultsCommand::ExportWaveformsCsv.key(), "Dataset\u{2026}").access('D'),
-    command_as(
-        Command::ExportBillOfMaterials,
+    MenuEntry::command_as(
+        CodeCommand::ExportBillOfMaterials.key(),
         "Bill of materials (CSV)\u{2026}",
     )
     .access('B'),
@@ -232,7 +232,7 @@ const EDIT_MENU: &[MenuEntry] = &[
         MenuContext::SourceEditor,
         &[
             code(CodeCommand::DuplicateLine).access('L'),
-            command(Command::DeleteLine).access('D'),
+            code(CodeCommand::DeleteLine).access('D'),
         ],
     ),
     MenuEntry::Only(
@@ -882,11 +882,7 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::PlacePin => WorkbenchIcon::Pin,
         Command::PlaceProbe => WorkbenchIcon::Probe,
         Command::PlaceText => WorkbenchIcon::Text,
-        Command::ManageSourceDocument => WorkbenchIcon::Folder,
         Command::SymbolSave => WorkbenchIcon::Save,
-        // The Models toolbar's button; the Verilog-A view's wears Run.
-        Command::CompileVerilogA => WorkbenchIcon::Netlist,
-        Command::CancelVerilogACompile => WorkbenchIcon::Stop,
         Command::RotateSelection => WorkbenchIcon::Rotate,
         Command::MirrorSelectionHorizontal => WorkbenchIcon::Mirror,
         Command::MirrorSelectionVertical => WorkbenchIcon::MirrorVertical,
@@ -901,11 +897,6 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::ZoomFit => WorkbenchIcon::ZoomFit,
         Command::VisibilityOptions => WorkbenchIcon::Visibility,
         Command::CycleGrid => WorkbenchIcon::Grid,
-        Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
-        Command::FindCodeDocument => WorkbenchIcon::Search,
-        Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice) => WorkbenchIcon::Export,
-        Command::AutomationConsole => WorkbenchIcon::Terminal,
         _ => return None,
     };
     Some(icon)
@@ -936,6 +927,22 @@ pub(in crate::workbench) fn feature_command_icon(key: CommandKey) -> Option<Work
             SimulateCommand::Run => Some(WorkbenchIcon::Run),
             SimulateCommand::Stop => Some(WorkbenchIcon::Stop),
             SimulateCommand::Options => Some(WorkbenchIcon::Sliders),
+            _ => None,
+        };
+    }
+    if let Some(command) = CodeCommand::from_key(key) {
+        return match command {
+            CodeCommand::ManageSourceDocument => Some(WorkbenchIcon::Folder),
+            // The Models toolbar's button; the Verilog-A view's wears Run.
+            CodeCommand::CompileVerilogA => Some(WorkbenchIcon::Netlist),
+            CodeCommand::CancelVerilogACompile => Some(WorkbenchIcon::Stop),
+            CodeCommand::VerilogABuildSettings => Some(WorkbenchIcon::Sliders),
+            CodeCommand::FindCodeDocument => Some(WorkbenchIcon::Search),
+            CodeCommand::CompareGeneratedRevisions => Some(WorkbenchIcon::Compare),
+            CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice) => {
+                Some(WorkbenchIcon::Export)
+            }
+            CodeCommand::AutomationConsole => Some(WorkbenchIcon::Terminal),
             _ => None,
         };
     }

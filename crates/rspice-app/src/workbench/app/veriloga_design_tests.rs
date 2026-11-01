@@ -13,7 +13,6 @@ use crate::state::{
     ProjectSourceOwner, View, ViewType,
 };
 use crate::workbench::code::commands::CodeCommand;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace::{
     self, PendingVerilogACompile, VerilogACompileOutcome,
 };
@@ -251,7 +250,7 @@ fn rename_symbol_renames_the_name_under_the_caret_in_that_views_bundle() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_active_source(&mut app, Command::RenameSymbol).expect("the caret is on g");
+    super::navigate_active_source(&mut app, CodeCommand::RenameSymbol).expect("the caret is on g");
     let form = app
         .state
         .code
@@ -314,7 +313,8 @@ fn find_references_lists_each_occurrence_on_the_references_page() {
         caret_in(&source, "g * V"),
     );
 
-    super::navigate_active_source(&mut app, Command::FindReferences).expect("the caret is on g");
+    super::navigate_active_source(&mut app, CodeCommand::FindReferences)
+        .expect("the caret is on g");
 
     assert!(app.state.code.code_workspace.language_tools.is_none());
     assert_eq!(

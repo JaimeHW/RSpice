@@ -638,6 +638,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
         ProjectCommand::OpenProject.declared_spec(),
         ProjectCommand::Save.declared_spec(),
         SimulateCommand::Run.declared_spec(),
+        CodeCommand::GenerateNetlist.declared_spec(),
     ] {
         let declared = command
             .bindings
@@ -655,11 +656,7 @@ fn menu_shortcuts_are_projected_from_the_typed_registry() {
             declared
         );
     }
-    for command in [
-        Command::ToggleFullScreen,
-        Command::GenerateNetlist,
-        Command::ToggleConsole,
-    ] {
+    for command in [Command::ToggleFullScreen, Command::ToggleConsole] {
         assert_eq!(
             shortcut_for_occurrence(
                 &app,
@@ -691,9 +688,13 @@ fn core_menu_commands_are_all_real_dispatch_commands() {
         Command::PlaceBus,
         Command::PlaceBusTap,
         Command::PlaceJunction,
-        Command::AutomationConsole,
     ];
     assert!(commands.iter().all(|command| !command.spec().id.is_empty()));
+    assert!(
+        command_registry()
+            .spec(CodeCommand::AutomationConsole.key())
+            .is_some()
+    );
     assert!(
         command_registry()
             .spec(ResultsCommand::WaveformCalculator.key())
@@ -1323,8 +1324,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         (Command::AscendHierarchy, WorkbenchIcon::ArrowUp),
         (Command::DescendHierarchyDirect, WorkbenchIcon::Layers),
         (Command::VisibilityOptions, WorkbenchIcon::Visibility),
-        (Command::CompileVerilogA, WorkbenchIcon::Netlist),
-        (Command::AutomationConsole, WorkbenchIcon::Terminal),
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1332,6 +1331,12 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
             "{}",
             command.spec().id
         );
+    }
+    for (command, icon) in [
+        (CodeCommand::CompileVerilogA, WorkbenchIcon::Netlist),
+        (CodeCommand::AutomationConsole, WorkbenchIcon::Terminal),
+    ] {
+        assert_eq!(app.command_icon(command.key()), Some(icon), "{command:?}");
     }
     assert_eq!(
         app.command_icon(ModelsCommand::ModelCompareRelease.key()),
@@ -1363,7 +1368,6 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         Command::KeyboardShortcuts,
         Command::CheckCellview,
         Command::CheckDesign,
-        Command::ValidateCodeDocument,
     ] {
         assert_eq!(
             app.command_icon(command.key()),
@@ -1373,6 +1377,7 @@ fn menu_icons_mark_only_the_toolbars_twins_with_the_buttons_icon() {
         );
     }
     for key in [
+        CodeCommand::ValidateCodeDocument.key(),
         SimulateCommand::Preflight.key(),
         ModelsCommand::ModelValidate.key(),
     ] {

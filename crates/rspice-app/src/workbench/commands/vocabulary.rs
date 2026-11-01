@@ -13,6 +13,7 @@
 use std::collections::HashMap;
 use std::sync::LazyLock;
 
+use crate::io::NetlistFormat;
 use crate::schematic::view::sheet_visibility::SchematicObjectKind;
 use crate::state::command_catalog::{
     CommandCatalog, CommandKey, CommandPlatform, ShortcutBinding, ShortcutContext,
@@ -20,6 +21,7 @@ use crate::state::command_catalog::{
 use crate::state::{ComponentType, ModelsPage};
 use crate::state::{SimulationPage, VerificationPage};
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::framework::command_registry::{self, CommandFlags, Registry};
 use crate::workbench::hardcopy::commands::HardcopyCommand;
 use crate::workbench::models::commands::ModelsCommand;
@@ -40,16 +42,6 @@ pub enum Command {
     OpenWorkspace(Workspace),
     RevertActiveDocument,
     CloseActiveDocument,
-    /// A cell whose Verilog-A module the reader writes next, with the symbol
-    /// its ports generate.
-    NewVerilogADevice,
-    OpenNetlist,
-    ImportNetlist,
-    ImportVerilogA,
-    ImportLtspiceSchematic,
-    ImportQspiceSchematic,
-    ExportNetlist(crate::io::NetlistFormat),
-    ExportBillOfMaterials,
     Exit,
     Undo,
     Redo,
@@ -201,10 +193,6 @@ pub enum Command {
     /// Direct edit-in-place hierarchy gesture used by the toolbar and
     /// Shift+E. The Design-menu command above owns the explicit transaction.
     DescendHierarchyDirect,
-    /// Sole owner of "locate this instance in the generated deck". The
-    /// canvas context menu, the instance inspector and the design navigator
-    /// all route here rather than each moving the workspace themselves.
-    ShowInNetlist,
     /// The open cellview's own findings: what an author runs while drawing.
     /// A symbol view checks its pins against the cell's interface.
     CheckCellview,
@@ -215,38 +203,6 @@ pub enum Command {
     ClearChecks,
     NextViolation,
     PreviousViolation,
-    GenerateNetlist,
-    FindCodeDocument,
-    ValidateCodeDocument,
-    ManageSourceDocument,
-    /// The source editor's line, navigation and folding commands. Each acts
-    /// on the source editor the page on screen shows as its document, and
-    /// only there.
-    ToggleLineComment,
-    IndentLines,
-    OutdentLines,
-    DuplicateLine,
-    DeleteLine,
-    MoveLineUp,
-    MoveLineDown,
-    GoToMatchingBracket,
-    GoToLine,
-    /// The next or previous finding in the focused source document.
-    NextProblem,
-    PreviousProblem,
-    /// Say what the finding at the caret of the focused source document is.
-    ShowProblemAtCaret,
-    FormatDocument,
-    FoldSelection,
-    UnfoldAtCaret,
-    FoldAll,
-    UnfoldAll,
-    /// Language navigation from the caret of the active source editor, for
-    /// languages whose language service answers it.
-    GoToDefinition,
-    FindReferences,
-    RenameSymbol,
-    CompareGeneratedRevisions,
     StimulusNewDefinition,
     StimulusDuplicateDefinition,
     StimulusDeleteDefinition,
@@ -255,11 +211,6 @@ pub enum Command {
     StimulusValidateLibrary,
     StimulusPlaceDefinition,
     StimulusShowAdopter,
-    CompileVerilogA,
-    CancelVerilogACompile,
-    VerilogABuildSettings,
-    VerilogAOpenSymbol,
-    AutomationConsole,
     CommandPalette,
     KeyboardShortcuts,
     HelpCenter,
@@ -326,31 +277,6 @@ impl Command {
             }
             Self::RevertActiveDocument => spec("revert-document", "Revert to saved…", "File"),
             Self::CloseActiveDocument => spec("close-document", "Close", "File"),
-            Self::NewVerilogADevice => spec("new-veriloga-device", "New Verilog-A device…", "File"),
-            Self::OpenNetlist => spec("open-netlist", "Open netlist as project…", "File"),
-            Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
-            Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A/AMS…", "File"),
-            Self::ImportLtspiceSchematic => spec(
-                "import-ltspice-schematic",
-                "Import LTspice schematic…",
-                "File",
-            ),
-            Self::ImportQspiceSchematic => spec(
-                "import-qspice-schematic",
-                "Import QSPICE schematic…",
-                "File",
-            ),
-            Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
-                spec("export-netlist-spectre", "Export Spectre netlist…", "File")
-            }
-            Self::ExportNetlist(crate::io::NetlistFormat::Spice) => {
-                spec("export-netlist-spice", "Export SPICE netlist…", "File")
-            }
-            Self::ExportBillOfMaterials => spec(
-                "export-bill-of-materials",
-                "Export bill of materials…",
-                "File",
-            ),
 
             Self::Exit => spec("exit-rspice", "Exit", "File"),
             Self::Undo => spec("undo", "Undo", "Edit"),
@@ -625,7 +551,6 @@ impl Command {
                 "Design",
             ),
             Self::DescendHierarchyDirect => spec("descend-selected-instance", "Descend", "Design"),
-            Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
             Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
             Self::CheckDesign => spec("check-design", "Check design", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
@@ -640,47 +565,6 @@ impl Command {
                 "annotate-transient-voltages",
                 "Annotate transient voltages",
                 "Simulate",
-            ),
-            Self::GenerateNetlist => {
-                spec("generated-netlist", "Open generated netlist", "Simulate")
-            }
-            Self::FindCodeDocument => spec("find-code", "Find in source…", "Code"),
-            Self::ValidateCodeDocument => {
-                spec("validate-code", "Validate active Code document", "Code")
-            }
-            Self::ManageSourceDocument => spec(
-                "manage-source-document",
-                "Manage source document\u{2026}",
-                "Code",
-            ),
-            Self::ToggleLineComment => spec("toggle-line-comment", "Toggle line comment", "Edit"),
-            Self::IndentLines => spec("indent-lines", "Indent lines", "Edit"),
-            Self::OutdentLines => spec("outdent-lines", "Outdent lines", "Edit"),
-            Self::DuplicateLine => spec("duplicate-line", "Duplicate line", "Edit"),
-            Self::DeleteLine => spec("delete-line", "Delete line", "Edit"),
-            Self::MoveLineUp => spec("move-line-up", "Move line up", "Edit"),
-            Self::MoveLineDown => spec("move-line-down", "Move line down", "Edit"),
-            Self::GoToMatchingBracket => {
-                spec("go-to-matching-bracket", "Go to matching bracket", "Edit")
-            }
-            Self::GoToLine => spec("go-to-line", "Go to line\u{2026}", "Edit"),
-            Self::NextProblem => spec("next-problem", "Next problem", "Edit"),
-            Self::PreviousProblem => spec("previous-problem", "Previous problem", "Edit"),
-            Self::ShowProblemAtCaret => {
-                spec("show-problem-at-caret", "Show problem at caret", "Edit")
-            }
-            Self::FormatDocument => spec("format-document", "Format document", "Edit"),
-            Self::FoldSelection => spec("fold-selection", "Fold selection", "View"),
-            Self::UnfoldAtCaret => spec("unfold-at-caret", "Unfold at caret", "View"),
-            Self::FoldAll => spec("fold-all", "Fold all", "View"),
-            Self::UnfoldAll => spec("unfold-all", "Unfold all", "View"),
-            Self::GoToDefinition => spec("go-to-definition", "Go to definition", "Code"),
-            Self::FindReferences => spec("find-references", "Find references", "Code"),
-            Self::RenameSymbol => spec("rename-symbol", "Rename symbol\u{2026}", "Code"),
-            Self::CompareGeneratedRevisions => spec(
-                "compare-generated-revisions",
-                "Compare generated revisions",
-                "Code",
             ),
             Self::StimulusNewDefinition => {
                 spec("stimulus-new", "New stimulus definition", "Stimulus")
@@ -708,17 +592,6 @@ impl Command {
                 "Show adopter on schematic",
                 "Stimulus",
             ),
-            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A/AMS", "Design"),
-            Self::CancelVerilogACompile => {
-                spec("veriloga-cancel", "Cancel Verilog-A/AMS compile", "Design")
-            }
-            Self::VerilogABuildSettings => spec(
-                "veriloga-build-settings",
-                "Build settings\u{2026}",
-                "Design",
-            ),
-            Self::VerilogAOpenSymbol => spec("veriloga-open-symbol", "Open symbol", "Design"),
-            Self::AutomationConsole => spec("automation", "Scripts", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
@@ -771,15 +644,6 @@ pub(in crate::workbench) const fn spec(
 pub const COMMAND_REGISTRY: &[Command] = &[
     Command::RevertActiveDocument,
     Command::CloseActiveDocument,
-    Command::NewVerilogADevice,
-    Command::OpenNetlist,
-    Command::ImportNetlist,
-    Command::ImportVerilogA,
-    Command::ImportLtspiceSchematic,
-    Command::ImportQspiceSchematic,
-    Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
-    Command::ExportNetlist(crate::io::NetlistFormat::Spice),
-    Command::ExportBillOfMaterials,
     Command::Exit,
     Command::Undo,
     Command::Redo,
@@ -921,37 +785,11 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::AscendHierarchy,
     Command::DescendHierarchy,
     Command::DescendHierarchyDirect,
-    Command::ShowInNetlist,
     Command::CheckCellview,
     Command::CheckDesign,
     Command::ClearChecks,
     Command::NextViolation,
     Command::PreviousViolation,
-    Command::GenerateNetlist,
-    Command::FindCodeDocument,
-    Command::ValidateCodeDocument,
-    Command::ManageSourceDocument,
-    Command::ToggleLineComment,
-    Command::IndentLines,
-    Command::OutdentLines,
-    Command::DuplicateLine,
-    Command::DeleteLine,
-    Command::MoveLineUp,
-    Command::MoveLineDown,
-    Command::GoToMatchingBracket,
-    Command::GoToLine,
-    Command::NextProblem,
-    Command::PreviousProblem,
-    Command::ShowProblemAtCaret,
-    Command::FormatDocument,
-    Command::FoldSelection,
-    Command::UnfoldAtCaret,
-    Command::FoldAll,
-    Command::UnfoldAll,
-    Command::GoToDefinition,
-    Command::FindReferences,
-    Command::RenameSymbol,
-    Command::CompareGeneratedRevisions,
     Command::StimulusNewDefinition,
     Command::StimulusDuplicateDefinition,
     Command::StimulusDeleteDefinition,
@@ -960,11 +798,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::StimulusValidateLibrary,
     Command::StimulusPlaceDefinition,
     Command::StimulusShowAdopter,
-    Command::CompileVerilogA,
-    Command::CancelVerilogACompile,
-    Command::VerilogABuildSettings,
-    Command::VerilogAOpenSymbol,
-    Command::AutomationConsole,
     Command::CommandPalette,
     Command::KeyboardShortcuts,
     Command::HelpCenter,
@@ -992,19 +825,19 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ProjectCommand::CloseProject.key(),
     ProjectCommand::NewCell.key(),
     ProjectCommand::NewView.key(),
-    Command::NewVerilogADevice.key(),
+    CodeCommand::NewVerilogADevice.key(),
     ProjectCommand::OpenSchematic.key(),
-    Command::OpenNetlist.key(),
-    Command::ImportNetlist.key(),
-    Command::ImportVerilogA.key(),
-    Command::ImportLtspiceSchematic.key(),
-    Command::ImportQspiceSchematic.key(),
+    CodeCommand::OpenNetlist.key(),
+    CodeCommand::ImportNetlist.key(),
+    CodeCommand::ImportVerilogA.key(),
+    CodeCommand::ImportLtspiceSchematic.key(),
+    CodeCommand::ImportQspiceSchematic.key(),
     ResultsCommand::ImportResultDataset.key(),
     CloudCommand::LiveSession.key(),
     CloudCommand::PublishToWeb.key(),
-    Command::ExportNetlist(crate::io::NetlistFormat::Spectre).key(),
-    Command::ExportNetlist(crate::io::NetlistFormat::Spice).key(),
-    Command::ExportBillOfMaterials.key(),
+    CodeCommand::ExportNetlist(NetlistFormat::Spectre).key(),
+    CodeCommand::ExportNetlist(NetlistFormat::Spice).key(),
+    CodeCommand::ExportBillOfMaterials.key(),
     SheetsCommand::SheetProperties.key(),
     SheetsCommand::SheetFormatManager.key(),
     SheetsCommand::SheetDefaults.key(),
@@ -1189,7 +1022,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::AscendHierarchy.key(),
     Command::DescendHierarchy.key(),
     Command::DescendHierarchyDirect.key(),
-    Command::ShowInNetlist.key(),
+    CodeCommand::ShowInNetlist.key(),
     Command::CheckCellview.key(),
     Command::CheckDesign.key(),
     ProjectCommand::CheckAndSave.key(),
@@ -1203,31 +1036,31 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SimulateCommand::ManagePlans.key(),
     SimulateCommand::AddAnalysis.key(),
     SimulateCommand::Options.key(),
-    Command::GenerateNetlist.key(),
-    Command::FindCodeDocument.key(),
-    Command::ValidateCodeDocument.key(),
-    Command::ManageSourceDocument.key(),
-    Command::ToggleLineComment.key(),
-    Command::IndentLines.key(),
-    Command::OutdentLines.key(),
-    Command::DuplicateLine.key(),
-    Command::DeleteLine.key(),
-    Command::MoveLineUp.key(),
-    Command::MoveLineDown.key(),
-    Command::GoToMatchingBracket.key(),
-    Command::GoToLine.key(),
-    Command::NextProblem.key(),
-    Command::PreviousProblem.key(),
-    Command::ShowProblemAtCaret.key(),
-    Command::FormatDocument.key(),
-    Command::FoldSelection.key(),
-    Command::UnfoldAtCaret.key(),
-    Command::FoldAll.key(),
-    Command::UnfoldAll.key(),
-    Command::GoToDefinition.key(),
-    Command::FindReferences.key(),
-    Command::RenameSymbol.key(),
-    Command::CompareGeneratedRevisions.key(),
+    CodeCommand::GenerateNetlist.key(),
+    CodeCommand::FindCodeDocument.key(),
+    CodeCommand::ValidateCodeDocument.key(),
+    CodeCommand::ManageSourceDocument.key(),
+    CodeCommand::ToggleLineComment.key(),
+    CodeCommand::IndentLines.key(),
+    CodeCommand::OutdentLines.key(),
+    CodeCommand::DuplicateLine.key(),
+    CodeCommand::DeleteLine.key(),
+    CodeCommand::MoveLineUp.key(),
+    CodeCommand::MoveLineDown.key(),
+    CodeCommand::GoToMatchingBracket.key(),
+    CodeCommand::GoToLine.key(),
+    CodeCommand::NextProblem.key(),
+    CodeCommand::PreviousProblem.key(),
+    CodeCommand::ShowProblemAtCaret.key(),
+    CodeCommand::FormatDocument.key(),
+    CodeCommand::FoldSelection.key(),
+    CodeCommand::UnfoldAtCaret.key(),
+    CodeCommand::FoldAll.key(),
+    CodeCommand::UnfoldAll.key(),
+    CodeCommand::GoToDefinition.key(),
+    CodeCommand::FindReferences.key(),
+    CodeCommand::RenameSymbol.key(),
+    CodeCommand::CompareGeneratedRevisions.key(),
     ResultsCommand::ExportWaveformsCsv.key(),
     ResultsCommand::ClearResults.key(),
     ResultsCommand::ToggleLinkedCursors.key(),
@@ -1288,11 +1121,11 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::StimulusValidateLibrary.key(),
     Command::StimulusPlaceDefinition.key(),
     Command::StimulusShowAdopter.key(),
-    Command::CompileVerilogA.key(),
-    Command::CancelVerilogACompile.key(),
-    Command::VerilogABuildSettings.key(),
-    Command::VerilogAOpenSymbol.key(),
-    Command::AutomationConsole.key(),
+    CodeCommand::CompileVerilogA.key(),
+    CodeCommand::CancelVerilogACompile.key(),
+    CodeCommand::VerilogABuildSettings.key(),
+    CodeCommand::VerilogAOpenSymbol.key(),
+    CodeCommand::AutomationConsole.key(),
     Command::CommandPalette.key(),
     Command::KeyboardShortcuts.key(),
     CloudCommand::AccountOrganization.key(),
@@ -1358,6 +1191,7 @@ pub(crate) fn command_registry() -> &'static Registry {
                 .chain(ModelsCommand::ALL.map(ModelsCommand::declared_spec))
                 .chain(SimulateCommand::ALL.map(SimulateCommand::declared_spec))
                 .chain(ProjectCommand::ALL.map(ProjectCommand::declared_spec))
+                .chain(CodeCommand::ALL.map(CodeCommand::declared_spec))
                 .collect(),
             LEGACY_ALIASES,
         )

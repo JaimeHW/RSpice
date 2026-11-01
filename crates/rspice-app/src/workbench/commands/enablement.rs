@@ -23,29 +23,16 @@ impl Command {
             }
             Self::RevertActiveDocument => {
                 state.platform.project_lifecycle.accepted().is_some()
-                    && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(state)
+                    && crate::workbench::lifecycle::project_lifecycle::active_document_is_dirty(
+                        state,
+                    )
                     && !state.model.simulation.execution.has_active_execution()
             }
             Self::CloseActiveDocument => {
                 crate::workbench::lifecycle::project_lifecycle::can_close_active_document(state)
             }
-            // Each is enabled exactly where its dialog could create something.
-            Self::NewVerilogADevice => crate::workbench::app::new_veriloga_device_available(state),
-            Self::OpenNetlist => {
-                !state.model.simulation.execution.has_active_execution()
-            }
-            Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
-                super::foreign_import_refusal(&state.model, &state.platform).is_none()
-            }
-            Self::ImportNetlist => {
-                state.platform.project_lifecycle.is_open()
-                    && !state.model.safe_mode.project_read_only()
-                    && !state.model.simulation.execution.has_active_execution()
-            }
             Self::Undo => {
-                if state.model.safe_mode.project_read_only()
-                    || state.schematic_edit_in_progress()
-                {
+                if state.model.safe_mode.project_read_only() || state.schematic_edit_in_progress() {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_undo_netlist_edit(state))
@@ -61,9 +48,7 @@ impl Command {
                 }
             }
             Self::Redo => {
-                if state.model.safe_mode.project_read_only()
-                    || state.schematic_edit_in_progress()
-                {
+                if state.model.safe_mode.project_read_only() || state.schematic_edit_in_progress() {
                     false
                 } else if (netlist_page_is_visible(state)
                     && crate::workbench::documents::netlist_document::can_redo_netlist_edit(state))
@@ -120,7 +105,8 @@ impl Command {
             }
             Self::Paste => {
                 if active_symbol_editor(app) {
-                    !state.active_view_read_only() && !state.design.symbol.editor.clipboard.is_empty()
+                    !state.active_view_read_only()
+                        && !state.design.symbol.editor.clipboard.is_empty()
                 } else {
                     active_schematic_editor(app)
                         && !state.schematic_edit_read_only()
@@ -208,7 +194,11 @@ impl Command {
             Self::ArraySelection => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state.model.schematic.validate_array_source_selection().is_ok()
+                    && state
+                        .model
+                        .schematic
+                        .validate_array_source_selection()
+                        .is_ok()
             }
             Self::ReplaceInstance => {
                 active_schematic_editor(app)
@@ -226,16 +216,13 @@ impl Command {
             Self::UpdateInstanceInterface => {
                 active_schematic_editor(app)
                     && !state.schematic_edit_read_only()
-                    && state
-                        .model.schematic
-                        .selected_instance_interface_is_stale(
-                            &state.model.library_manager,
-                            &state.model.workspace.content.schematic_buffers,
-                        )
+                    && state.model.schematic.selected_instance_interface_is_stale(
+                        &state.model.library_manager,
+                        &state.model.workspace.content.schematic_buffers,
+                    )
             }
             Self::CreateHierarchy => {
-                active_schematic_editor(app)
-                    && state.model.create_hierarchy_available()
+                active_schematic_editor(app) && state.model.create_hierarchy_available()
             }
             Self::ConnectivityManager => {
                 active_schematic_editor(app) && state.platform.project_lifecycle.is_open()
@@ -249,9 +236,11 @@ impl Command {
             Self::FindReplace => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::RepeatLastCommand => {
                 active_schematic_editor(app)
-                    && vocabulary::last_repeatable(state.workbench.last_repeatable_command.as_deref())
-                        .and_then(|spec| vocabulary::legacy_command(spec.key))
-                        .is_some_and(|command| command.is_enabled(app))
+                    && vocabulary::last_repeatable(
+                        state.workbench.last_repeatable_command.as_deref(),
+                    )
+                    .and_then(|spec| vocabulary::legacy_command(spec.key))
+                    .is_some_and(|command| command.is_enabled(app))
             }
             Self::ConfigurationSets | Self::RuleSetup => state.platform.project_lifecycle.is_open(),
             Self::ReviewComments => {
@@ -283,7 +272,8 @@ impl Command {
             }
             Self::ZoomOneToOne => active_symbol_editor(app) || active_schematic_editor(app),
             Self::ZoomToSelection => {
-                active_schematic_editor(app) && schematic_selection_has_live_object(&state.model.schematic)
+                active_schematic_editor(app)
+                    && schematic_selection_has_live_object(&state.model.schematic)
             }
             Self::ZoomBox => active_schematic_editor(app),
             Self::ZoomPrevious => {
@@ -295,7 +285,13 @@ impl Command {
                     state.design.symbol.editor.view_history.can_step_back()
                 } else {
                     active_schematic_editor(app)
-                        && state.model.schematic.session.editor.view_history.can_step_back()
+                        && state
+                            .model
+                            .schematic
+                            .session
+                            .editor
+                            .view_history
+                            .can_step_back()
                 }
             }
             Self::EngineeringTableView => active_schematic_editor(app),
@@ -327,13 +323,11 @@ impl Command {
                         .iter()
                         .any(|document| document.open && document.active)
             }
-            Self::ConsolidateWindows | Self::MonitorRecovery => {
-                !state
-                    .workbench
-                    .window_session
-                    .secondary_window_ids()
-                    .is_empty()
-            }
+            Self::ConsolidateWindows | Self::MonitorRecovery => !state
+                .workbench
+                .window_session
+                .secondary_window_ids()
+                .is_empty(),
             Self::PreviousDocument | Self::NextDocument => {
                 crate::workbench::chrome::document_bar::document_descriptors(state)
                     .iter()
@@ -365,15 +359,11 @@ impl Command {
             | Self::PlaceProbe
             | Self::PlacePin
             | Self::PlaceText
-            | Self::PlaceShape => {
-                active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
+            | Self::PlaceShape => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::PlaceInstance
             | Self::PlaceLabel
             | Self::PlaceOffSheetConnector
-            | Self::Place(_) => {
-                active_schematic_editor(app) && !state.schematic_edit_read_only()
-            }
+            | Self::Place(_) => active_schematic_editor(app) && !state.schematic_edit_read_only(),
             Self::SymbolPinTool
             | Self::SymbolPolylineTool
             | Self::SymbolRectangleTool
@@ -385,8 +375,20 @@ impl Command {
                 active_symbol_editor(app)
                     && !state.active_view_read_only()
                     && state.design.symbol.editor.effective_selection().pins.len() == 1
-                    && state.design.symbol.editor.effective_selection().shapes.is_empty()
-                    && state.design.symbol.editor.effective_selection().attributes.is_empty()
+                    && state
+                        .design
+                        .symbol
+                        .editor
+                        .effective_selection()
+                        .shapes
+                        .is_empty()
+                    && state
+                        .design
+                        .symbol
+                        .editor
+                        .effective_selection()
+                        .attributes
+                        .is_empty()
             }
             // Nothing to reconcile against without a declared interface, and
             // the command must say so by reporting unavailable rather than
@@ -404,7 +406,8 @@ impl Command {
                 active_symbol_editor(app) && state.symbol_in_place().is_some()
             }
             Self::AscendHierarchy => {
-                active_schematic_editor(app) && state.model.workspace.content.hierarchy_stack.len() > 1
+                active_schematic_editor(app)
+                    && state.model.workspace.content.hierarchy_stack.len() > 1
             }
             Self::DescendHierarchy => {
                 active_schematic_editor(app) && state.selected_hierarchy_master().is_some()
@@ -416,9 +419,6 @@ impl Command {
                 active_schematic_editor(app)
                     && (state.selected_hierarchy_master().is_some()
                         || state.selected_veriloga_source().is_some())
-            }
-            Self::ShowInNetlist => {
-                active_schematic_editor(app) && state.selected_instance_netlist_block().is_none()
             }
             // A symbol cellview checks its pin contract. The editor's own
             // keyboard route always did this; the command must agree, or the
@@ -433,99 +433,13 @@ impl Command {
                 state.model.design_checks.drc_results.is_some()
                     || state.active_design_check_status().last_receipt().is_some()
             }
-            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => {
-                state
-                    .active_symbol_pin_finding_count()
-                    .is_some_and(|findings| findings > 0)
-            }
+            Self::NextViolation | Self::PreviousViolation if active_symbol_editor(app) => state
+                .active_symbol_pin_finding_count()
+                .is_some_and(|findings| findings > 0),
             Self::NextViolation | Self::PreviousViolation => state
                 .active_design_check_status()
                 .current_receipt()
                 .is_some_and(|receipt| !receipt.result.violations().is_empty()),
-            // Each of these opens a window that only the netlist page draws.
-            // Availability therefore has to name the page, not just the
-            // workspace: from Automation they would set a dialog open with
-            // nothing on screen, and it would then appear unprompted the
-            // moment the user came back.
-            // Find exists on every code document: the netlist page has its
-            // own deck find, and the Automation page and a Verilog-A cell view
-            // in Design search their bundle. It was restricted to the netlist
-            // page only while the bundle search had no surface.
-            Self::FindCodeDocument => code_document_is_visible(state),
-            Self::ValidateCodeDocument => {
-                netlist_page_is_visible(state)
-                    && state.code.netlist.active_document
-                        != crate::workbench::documents::netlist_document::ActiveNetlistDocument::GeneratedDiff
-                    && !state.model.simulation.source.netlist_content.trim().is_empty()
-            }
-            // Unlike its neighbours this one belongs to the source documents,
-            // the Automation page and a Verilog-A cell view, not the netlist
-            // page: it manages a project source bundle, which the deck is not.
-            Self::ManageSourceDocument => {
-                code_document_is_visible(state)
-                    && crate::workbench::app::source_document_dialog_is_available(
-                        state.workbench.workspace,
-                        &state.model,
-                        &state.code.code_workspace,
-                        &state.code.netlist,
-                        &state.platform,
-                    )
-            }
-            // With a source editor on screen these were answered above.
-            Self::ToggleLineComment
-            | Self::IndentLines
-            | Self::OutdentLines
-            | Self::DuplicateLine
-            | Self::DeleteLine
-            | Self::MoveLineUp
-            | Self::MoveLineDown
-            | Self::GoToMatchingBracket
-            | Self::GoToLine
-            | Self::FormatDocument
-            | Self::FoldSelection
-            | Self::UnfoldAtCaret
-            | Self::FoldAll
-            | Self::UnfoldAll => false,
-            // Every source editor can be stepped through, read-only or not.
-            Self::NextProblem | Self::PreviousProblem | Self::ShowProblemAtCaret => {
-                state.workbench.active_source_editor.is_some()
-            }
-            Self::GoToDefinition | Self::FindReferences => state
-                .workbench
-                .active_source_editor
-                .is_some_and(|editor| editor.navigable),
-            Self::RenameSymbol => state
-                .workbench
-                .active_source_editor
-                .is_some_and(|editor| editor.navigable && editor.editable),
-            // This gate was written for the compile command and never
-            // attached, so the button stayed enabled with no bundle, no
-            // selected source, an empty root, a compile already running, or a
-            // read-only project -- and then the surface refused the request it
-            // had just been handed.
-            Self::CompileVerilogA => code_context::resolve_veriloga_compile(
-                &state.model,
-                &state.code.code_workspace,
-                &state.platform,
-            )
-            .is_some(),
-            Self::CancelVerilogACompile => {
-                app.state.code.code_workspace.veriloga.pending.is_some()
-            }
-            // Build settings opens on a read-only project too, to be read;
-            // its Save is what that refuses.
-            Self::VerilogABuildSettings => {
-                crate::workbench::app::veriloga_build_settings_available(
-                    &state.model,
-                    &state.platform,
-                )
-            }
-            Self::VerilogAOpenSymbol => crate::workbench::app::actions::veriloga_symbol::can_open_veriloga_symbol(&state.model),
-            Self::CompareGeneratedRevisions => {
-                netlist_page_is_visible(state)
-                    && !state.code.netlist.generated_history.is_empty()
-                    && state.model.netlist_artifacts.generated_document.is_some()
-            }
             // Every library verb needs the instrument open, because they all
             // act on the definition it is reading; New and Validate need only
             // that, because a library with nothing in it is exactly where New

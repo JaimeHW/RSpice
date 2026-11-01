@@ -25,7 +25,7 @@ use egui::{Context, Id};
 
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::documents::code_workspace;
 
 const RENAME_TITLE: &str = "Rename symbol";
@@ -37,7 +37,10 @@ const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
 ///
 /// A netlist answers through its own language service. Verilog-A and
 /// Automation answer through the project source index.
-pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> Result<(), String> {
+pub(crate) fn navigate_active_source(
+    app: &mut RSpiceApp,
+    command: CodeCommand,
+) -> Result<(), String> {
     use crate::workbench::documents::netlist_document::language as netlist;
 
     let Some(language) = code_workspace::active_source_language(
@@ -46,9 +49,13 @@ pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> R
         app.state.code.code_workspace.page,
     ) else {
         let message = match command {
-            Command::GoToDefinition => Some(netlist::go_to_definition_at_cursor(&mut app.state)?),
-            Command::FindReferences => Some(netlist::find_references_at_cursor(&mut app.state)?),
-            Command::RenameSymbol => {
+            CodeCommand::GoToDefinition => {
+                Some(netlist::go_to_definition_at_cursor(&mut app.state)?)
+            }
+            CodeCommand::FindReferences => {
+                Some(netlist::find_references_at_cursor(&mut app.state)?)
+            }
+            CodeCommand::RenameSymbol => {
                 netlist::begin_rename_at_cursor(&mut app.state)?;
                 None
             }
@@ -102,7 +109,7 @@ pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> R
         .as_ref()
         .map(|tools| tools.query.clone())
         .unwrap_or_default();
-    if command == Command::RenameSymbol {
+    if command == CodeCommand::RenameSymbol {
         if caret_name.is_empty() {
             app.state.code.code_workspace.language_tools = previous;
             return Err("Place the caret on a name to rename it.".to_owned());
@@ -114,7 +121,7 @@ pub(crate) fn navigate_active_source(app: &mut RSpiceApp, command: Command) -> R
     }
     let tools = std::mem::replace(&mut app.state.code.code_workspace.language_tools, previous)
         .ok_or_else(|| "The source index could not be built.".to_owned())?;
-    if command == Command::FindReferences {
+    if command == CodeCommand::FindReferences {
         if caret_name.is_empty() {
             return Err("Place the caret on a name to find its references.".to_owned());
         }
@@ -312,8 +319,6 @@ mod tests {
     /// already running and the surface then refused the request.
     #[test]
     fn compiling_verilog_a_is_refused_while_a_compile_is_already_pending() {
-        use crate::workbench::code::commands::CodeCommand;
-
         let mut app = RSpiceApp::test_instance();
         // A Verilog-A cell view open in Design: the place Compile is offered.
         let reference = crate::state::CellViewRef::new("behavioral", "gain", "veriloga");

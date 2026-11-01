@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::workbench::cloud::commands::CloudCommand;
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::command_registry;
 use crate::workbench::framework::command_registry::CommandFlags;
 use crate::workbench::framework::requests::FocusProjectLauncherSearch;
@@ -68,14 +69,18 @@ fn project_tab_commands_activate_the_project_workspace_and_exact_tab() {
 
 #[test]
 fn project_operation_gate_covers_every_mutating_project_command() {
-    for command in [
-        Command::RevertActiveDocument,
-        Command::CloseActiveDocument,
-        Command::ImportNetlist,
-        Command::ImportVerilogA,
-    ] {
+    for command in [Command::RevertActiveDocument, Command::CloseActiveDocument] {
         assert!(
             command.blocked_by_project_operation(),
+            "ungated: {command:?}"
+        );
+    }
+    for command in [CodeCommand::ImportNetlist, CodeCommand::ImportVerilogA] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::BLOCKED_BY_PROJECT_OPERATION),
             "ungated: {command:?}"
         );
     }
@@ -143,18 +148,28 @@ fn project_owned_subcommands_cannot_bypass_the_closed_project_boundary() {
     // This independent expectation list prevents the predicate under test
     // from silently omitting a newly exposed submenu route.
     for command in [
-        Command::ImportNetlist,
-        Command::ImportVerilogA,
-        Command::ExportNetlist(crate::io::NetlistFormat::Spice),
         Command::FindInDesign,
         Command::SelectionBulkEdit,
         Command::ConnectivityManager,
-        Command::GenerateNetlist,
-        Command::CompileVerilogA,
-        Command::AutomationConsole,
     ] {
         assert!(
             command.requires_open_project(),
+            "missing closed-project boundary: {command:?}"
+        );
+    }
+    for command in [
+        CodeCommand::ImportNetlist,
+        CodeCommand::ImportVerilogA,
+        CodeCommand::ExportNetlist(crate::io::NetlistFormat::Spice),
+        CodeCommand::GenerateNetlist,
+        CodeCommand::CompileVerilogA,
+        CodeCommand::AutomationConsole,
+    ] {
+        assert!(
+            command
+                .declared_spec()
+                .flags
+                .contains(CommandFlags::REQUIRES_OPEN_PROJECT),
             "missing closed-project boundary: {command:?}"
         );
     }

@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 use super::*;
 use crate::state::{CellViewRef, Component, ComponentType, Point, SymbolDocument, Tool};
 use crate::workbench::code::commands::CodeCommand;
-use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::simulate::commands::SimulateCommand;
 use crate::workbench::state::Workspace;
@@ -1161,18 +1160,18 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
         .find(|diagnostic| diagnostic.line == Some(26))
         .map(|diagnostic| diagnostic.message.to_string())
         .expect("the misspelt slew variable is an error");
-    let step = |user: &mut User, command: Command| {
-        command.execute(&mut user.app);
+    let step = |user: &mut User, command: CodeCommand| {
+        user.app.execute_command_key(command.key());
         user.settle();
         user.prompt()
     };
     assert_eq!(
-        step(&mut user, Command::NextProblem),
+        step(&mut user, CodeCommand::NextProblem),
         format!("Error 1 of {count}, line 21: {gbww}")
     );
     assert_eq!(user.caret(), (21, 29));
     assert_eq!(
-        step(&mut user, Command::ShowProblemAtCaret),
+        step(&mut user, CodeCommand::ShowProblemAtCaret),
         format!("Error {code} at line 21, column 29: {gbww}")
     );
 
@@ -1181,12 +1180,12 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &commented);
     user.settle();
     assert_eq!(
-        step(&mut user, Command::NextProblem),
+        step(&mut user, CodeCommand::NextProblem),
         format!("Error 1 of {count}, line 22: {gbww}")
     );
     assert_eq!(user.caret(), (22, 29));
     assert_eq!(
-        step(&mut user, Command::ShowProblemAtCaret),
+        step(&mut user, CodeCommand::ShowProblemAtCaret),
         format!("Error {code} at line 22, column 29, found before your latest edits: {gbww}")
     );
 
@@ -1199,7 +1198,7 @@ fn a_failed_compiles_errors_follow_their_text_through_edits_until_it_is_deleted(
     super::veriloga_interface_tests::edit_source(&mut user.app, &deleted);
     user.settle();
     for _ in 0..count {
-        let said = step(&mut user, Command::NextProblem);
+        let said = step(&mut user, CodeCommand::NextProblem);
         assert!(said.contains(&format!(" of {}, ", count - 1)), "{said:?}");
         assert!(!said.contains(&vslw), "{said:?}");
     }
@@ -1281,7 +1280,7 @@ fn a_pause_in_writing_checks_a_long_module_and_finds_the_error_typed_into_it() {
                 .is_none(),
             "nothing was compiled"
         );
-        Command::NextProblem.execute(&mut user.app);
+        user.app.execute_command_key(CodeCommand::NextProblem.key());
         user.settle();
         user.prompt()
     };

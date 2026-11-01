@@ -292,7 +292,7 @@ fn edit_toggle_line_comment_comments_the_caret_line_and_source_items_hide_elsewh
     for _ in 0..3 {
         output = frame(&ctx, &mut app, DESKTOP);
     }
-    let find = Command::FindCodeDocument.spec().label;
+    let find = CodeCommand::FindCodeDocument.declared_spec().label;
     assert_eq!(menu_shortcut(&output, find).as_deref(), Some("Ctrl+F"));
     assert!(menu_item(&output, "Find in design…").is_none());
     frame_with(

@@ -126,6 +126,15 @@ pub(crate) fn veriloga_dependency_view(
     }
 }
 
+/// Whether `shown` is the Netlist workspace on its netlist page: the
+/// netlist document, not merely the workspace that hosts it.
+pub(crate) fn netlist_page_shown(
+    shown: crate::workbench::state::Workspace,
+    code: &CodeWorkspaceRuntimeState,
+) -> bool {
+    shown == crate::workbench::state::Workspace::Netlist && code.page == CodeWorkspacePage::Netlist
+}
+
 /// Whether the Design workspace is showing a Verilog-A cell view, which is
 /// where that view's editor lives.
 pub(crate) fn design_hosts_veriloga(

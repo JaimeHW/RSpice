@@ -588,6 +588,10 @@ const AFTER_CONTRIBUTION: &[Step] = &[
         ],
     ),
     (
+        "20.1",
+        &["|app, request: CodeRequest| answer_code_request(app, request)"],
+    ),
+    (
         "21",
         &["|app, request: DescendHierarchy| answer_descend_hierarchy(&mut app.state, request)"],
     ),
@@ -1357,8 +1361,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        23,
-        "`after_contribution` answers exactly the twenty-three requests it lists"
+        24,
+        "`after_contribution` answers exactly the twenty-four requests it lists"
     );
 }
 

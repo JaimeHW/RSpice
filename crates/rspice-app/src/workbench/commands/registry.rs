@@ -50,16 +50,6 @@ const fn chord(
 }
 
 const NONE: &[ShortcutBinding] = &[];
-// The build keys of Visual Studio and VS Code. A browser keeps Ctrl+Shift+B
-// for its bookmarks bar, so there F7 is the only one.
-const COMPILE_VERILOGA: &[ShortcutBinding] = &[
-    primary(chord(Key::F7, false, false, false, "F7"), ALL),
-    alternate(chord(Key::B, true, false, true, "Ctrl+Shift+B"), DESKTOP),
-];
-const OPEN_NETLIST: &[ShortcutBinding] = &[
-    primary(chord(Key::L, true, false, true, "Ctrl+Shift+L"), DESKTOP),
-    alternate(chord(Key::L, true, true, true, "Ctrl+Alt+Shift+L"), HOST),
-];
 const CLOSE_DOCUMENT: &[ShortcutBinding] = &[
     primary(chord(Key::W, true, false, false, "Ctrl+W"), DESKTOP),
     alternate(
@@ -94,59 +84,6 @@ const RENAME_SELECTION: &[ShortcutBinding] = &[primary(
 )];
 const OBJECT_PROPERTIES: &[ShortcutBinding] =
     &[primary(chord(Key::Q, false, false, false, "Q"), ALL)];
-// The source editor's own keys. Ctrl+D is Duplicate on a schematic too; the
-// two contexts never hold focus at once, so the focused surface decides.
-const TOGGLE_LINE_COMMENT: &[ShortcutBinding] = &[primary(
-    chord(Key::Slash, true, false, false, "Ctrl+/"),
-    ALL,
-)];
-const DUPLICATE_LINE: &[ShortcutBinding] =
-    &[primary(chord(Key::D, true, false, false, "Ctrl+D"), ALL)];
-const DELETE_LINE: &[ShortcutBinding] = &[primary(
-    chord(Key::K, true, false, true, "Ctrl+Shift+K"),
-    ALL,
-)];
-const MOVE_LINE_UP: &[ShortcutBinding] = &[primary(
-    chord(Key::ArrowUp, false, true, false, "Alt+Up"),
-    ALL,
-)];
-const MOVE_LINE_DOWN: &[ShortcutBinding] = &[primary(
-    chord(Key::ArrowDown, false, true, false, "Alt+Down"),
-    ALL,
-)];
-const GO_TO_MATCHING_BRACKET: &[ShortcutBinding] = &[primary(
-    chord(Key::Backslash, true, false, true, "Ctrl+Shift+\\"),
-    ALL,
-)];
-const GO_TO_LINE: &[ShortcutBinding] = &[primary(chord(Key::G, true, false, false, "Ctrl+G"), ALL)];
-// F8 also steps through a drawing's violations; with a source editor focused
-// the editor's context outranks the workspace's, so the key follows focus.
-const NEXT_PROBLEM: &[ShortcutBinding] = &[primary(chord(Key::F8, false, false, false, "F8"), ALL)];
-const PREVIOUS_PROBLEM: &[ShortcutBinding] =
-    &[primary(chord(Key::F8, false, false, true, "Shift+F8"), ALL)];
-const FOLD_SELECTION: &[ShortcutBinding] = &[primary(
-    chord(Key::OpenBracket, true, false, true, "Ctrl+Shift+["),
-    ALL,
-)];
-const UNFOLD_AT_CARET: &[ShortcutBinding] = &[primary(
-    chord(Key::CloseBracket, true, false, true, "Ctrl+Shift+]"),
-    ALL,
-)];
-// F12 opens a browser's developer tools, so definition and references are
-// desktop keys. F2 is Rename selection on a schematic and Rename symbol in
-// a focused source editor; as with Ctrl+D the focused surface decides.
-const GO_TO_DEFINITION: &[ShortcutBinding] = &[primary(
-    chord(Key::F12, false, false, false, "F12"),
-    DESKTOP,
-)];
-const FIND_REFERENCES: &[ShortcutBinding] = &[primary(
-    chord(Key::F12, false, false, true, "Shift+F12"),
-    DESKTOP,
-)];
-const RENAME_SYMBOL: &[ShortcutBinding] = &[primary(
-    chord(Key::F2, false, false, false, "F2"),
-    DESKTOP_BROWSER,
-)];
 const FIND_DESIGN: &[ShortcutBinding] =
     &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 // A browser keeps Ctrl+H for its history, so there the menu reaches it.
@@ -158,10 +95,6 @@ const FIND_REPLACE: &[ShortcutBinding] = &[primary(
 // bound nowhere.
 const REPEAT_LAST_COMMAND: &[ShortcutBinding] =
     &[primary(chord(Key::Period, false, false, false, "."), ALL)];
-// Ctrl+F in a focused source editor finds in that source; on a drawing it
-// finds in the design. As with Ctrl+D the focused surface decides.
-const FIND_CODE_DOCUMENT: &[ShortcutBinding] =
-    &[primary(chord(Key::F, true, false, false, "Ctrl+F"), ALL)];
 const ZOOM_IN: &[ShortcutBinding] = &[
     primary(chord(Key::Plus, false, false, false, "+"), ALL),
     alternate(chord(Key::Plus, false, false, true, "+"), ALL),
@@ -332,14 +265,6 @@ const PREVIOUS_VIOLATION: &[ShortcutBinding] = &[
     primary(chord(Key::OpenBracket, false, false, false, "["), ALL),
     alternate(chord(Key::F8, false, false, true, "Shift+F8"), ALL),
 ];
-const GENERATED_NETLIST: &[ShortcutBinding] = &[
-    primary(chord(Key::L, true, false, false, "Ctrl+L"), DESKTOP),
-    alternate(chord(Key::L, true, true, false, "Ctrl+Alt+L"), HOST),
-];
-const AUTOMATION_CONSOLE: &[ShortcutBinding] = &[primary(
-    chord(Key::Backtick, true, false, false, "Ctrl+`"),
-    ALL,
-)];
 const CANCEL: &[ShortcutBinding] = &[primary(
     chord(Key::Escape, false, false, false, "Escape"),
     ALL,
@@ -361,13 +286,6 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::NewVerilogADevice
-                | Self::ImportNetlist
-                | Self::ImportVerilogA
-                | Self::ImportLtspiceSchematic
-                | Self::ImportQspiceSchematic
-                | Self::ExportNetlist(_)
-                | Self::ExportBillOfMaterials
                 | Self::SetStandardValueSeries(_)
                 | Self::FindInDesign
                 | Self::CheckDesign
@@ -378,7 +296,6 @@ impl Command {
                 | Self::RuleSetup
                 | Self::ReviewComments
                 | Self::CreateHierarchy
-                | Self::GenerateNetlist
                 | Self::StimulusNewDefinition
                 | Self::StimulusDuplicateDefinition
                 | Self::StimulusDeleteDefinition
@@ -387,13 +304,7 @@ impl Command {
                 | Self::StimulusValidateLibrary
                 | Self::StimulusPlaceDefinition
                 | Self::StimulusShowAdopter
-                | Self::CompileVerilogA
-                | Self::CancelVerilogACompile
-                | Self::VerilogABuildSettings
-                | Self::VerilogAOpenSymbol
-                | Self::AutomationConsole
                 | Self::DescendHierarchyDirect
-                | Self::ShowInNetlist
         )
     }
 
@@ -404,12 +315,6 @@ impl Command {
                 | Self::CloseActiveDocument
                 | Self::CloseOtherDocuments
                 | Self::CloseAllDocuments
-                | Self::NewVerilogADevice
-                | Self::OpenNetlist
-                | Self::ImportNetlist
-                | Self::ImportVerilogA
-                | Self::ImportLtspiceSchematic
-                | Self::ImportQspiceSchematic
                 | Self::ConnectivityManager
                 | Self::SelectionBulkEdit
                 | Self::FindReplace
@@ -506,7 +411,6 @@ impl Command {
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
             | Self::EditSymbolInPlace
-            | Self::ShowInNetlist
             | Self::GridSnapRouting
             | Self::SetStandardValueSeries(_)
             | Self::VisibilityOptions
@@ -531,49 +435,8 @@ impl Command {
             | Self::SymbolUpdatePinsFromContract
             | Self::SymbolSave
             | Self::ExitSymbolInPlace => ShortcutContext::SymbolCanvas,
-            Self::ToggleLineComment
-            | Self::IndentLines
-            | Self::OutdentLines
-            | Self::DuplicateLine
-            | Self::DeleteLine
-            | Self::MoveLineUp
-            | Self::MoveLineDown
-            | Self::GoToMatchingBracket
-            | Self::GoToLine
-            | Self::NextProblem
-            | Self::PreviousProblem
-            | Self::ShowProblemAtCaret
-            | Self::FormatDocument
-            | Self::FoldSelection
-            | Self::UnfoldAtCaret
-            | Self::FoldAll
-            | Self::UnfoldAll
-            | Self::GoToDefinition
-            | Self::FindReferences
-            | Self::RenameSymbol
-            | Self::FindCodeDocument => ShortcutContext::SourceEditor,
             _ => ShortcutContext::Global,
         }
-    }
-
-    /// Whether this command exists only for the source editor in front of the
-    /// reader. Elsewhere it is hidden rather than offered disabled.
-    ///
-    /// Find is the exception: its key acts in the focused editor, but the
-    /// command searches whichever code page is on screen, from its toolbar
-    /// and the palette as well.
-    pub(crate) const fn source_editor_only(self) -> bool {
-        matches!(self.shortcut_context(), ShortcutContext::SourceEditor)
-            && !matches!(self, Self::FindCodeDocument)
-    }
-
-    /// The language-service group: offered only where the document's
-    /// language service can answer it.
-    pub(crate) const fn navigates_source_language(self) -> bool {
-        matches!(
-            self,
-            Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol
-        )
     }
 
     pub const fn shortcut_bindings(self) -> &'static [ShortcutBinding] {
@@ -587,8 +450,6 @@ impl Command {
             Self::OpenWorkspace(Workspace::Stimulus) => STIMULUS_WORKSPACE,
             Self::StimulusApplyDraft => STIMULUS_APPLY_DRAFT,
             Self::OpenWorkspace(Workspace::Netlist) => AUTOMATION_WORKSPACE,
-            Self::OpenNetlist => OPEN_NETLIST,
-            Self::CompileVerilogA => COMPILE_VERILOGA,
             Self::CloseActiveDocument => CLOSE_DOCUMENT,
             Self::Exit => EXIT,
             Self::Undo => UNDO,
@@ -686,28 +547,8 @@ impl Command {
             Self::CheckDesign => NONE,
             Self::NextViolation => NEXT_VIOLATION,
             Self::PreviousViolation => PREVIOUS_VIOLATION,
-            Self::GenerateNetlist => GENERATED_NETLIST,
-            Self::AutomationConsole => AUTOMATION_CONSOLE,
             Self::CommandPalette => COMMAND_PALETTE,
             Self::Cancel => CANCEL,
-            Self::ToggleLineComment => TOGGLE_LINE_COMMENT,
-            // Tab and Shift+Tab stay the focused editor's own keys.
-            Self::IndentLines | Self::OutdentLines => NONE,
-            Self::DuplicateLine => DUPLICATE_LINE,
-            Self::DeleteLine => DELETE_LINE,
-            Self::MoveLineUp => MOVE_LINE_UP,
-            Self::MoveLineDown => MOVE_LINE_DOWN,
-            Self::GoToMatchingBracket => GO_TO_MATCHING_BRACKET,
-            Self::GoToLine => GO_TO_LINE,
-            Self::NextProblem => NEXT_PROBLEM,
-            Self::PreviousProblem => PREVIOUS_PROBLEM,
-            Self::ShowProblemAtCaret => NONE,
-            Self::FoldSelection => FOLD_SELECTION,
-            Self::UnfoldAtCaret => UNFOLD_AT_CARET,
-            Self::GoToDefinition => GO_TO_DEFINITION,
-            Self::FindReferences => FIND_REFERENCES,
-            Self::RenameSymbol => RENAME_SYMBOL,
-            Self::FindCodeDocument => FIND_CODE_DOCUMENT,
             _ => NONE,
         }
     }
@@ -734,20 +575,10 @@ impl Command {
                 "finish or cancel the active application dialog before changing window ownership",
             );
         }
-        if self.source_editor_only()
-            && app
-                .state
-                .workbench
-                .active_source_editor
-                .is_none_or(|editor| self.navigates_source_language() && !editor.navigable)
-        {
-            return CommandAvailability::Hidden;
-        }
         if self.is_enabled(app) {
             return CommandAvailability::Available;
         }
         let reason = match self {
-            _ if self.source_editor_only() => "the source document is read-only",
             Self::OpenWorkspace(workspace) if workspace != Workspace::Project => {
                 "no project is open"
             }
@@ -894,34 +725,6 @@ impl Command {
                 .err()
                 .map_or("select one instance", |refusal| refusal.reason()),
             Self::ExitSymbolInPlace => "no symbol is being edited in place",
-            Self::ShowInNetlist if !super::active_schematic_editor(app) => {
-                "open a schematic or testbench"
-            }
-            // The locator owns every reason the jump cannot be made, so the
-            // disabled explanation is the one the execution would have hit.
-            Self::ShowInNetlist => app
-                .state
-                .selected_instance_netlist_block()
-                .unwrap_or("command is unavailable in this context"),
-            Self::OpenNetlist | Self::ImportNetlist
-                if app.state.model.simulation.execution.has_active_execution() =>
-            {
-                "an active simulation execution still owns the project"
-            }
-            Self::ImportNetlist if app.state.model.safe_mode.project_read_only() => {
-                "the project is open read-only"
-            }
-            Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
-                super::foreign_import_refusal(&app.state.model, &app.state.platform)
-                    .unwrap_or("command is unavailable in this context")
-            }
-            Self::NewVerilogADevice => "no library can be written",
-            Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(
-                &app.state.model,
-                &app.state.code.code_workspace,
-                &app.state.platform,
-            ),
-            Self::CancelVerilogACompile => "no Verilog-A compile is running",
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"
             }
@@ -981,10 +784,7 @@ impl Command {
         platform.has_browser_reserved_primary()
             && matches!(
                 self,
-                Self::CloseActiveDocument
-                    | Self::ToggleFullScreen
-                    | Self::GenerateNetlist
-                    | Self::ToggleConsole
+                Self::CloseActiveDocument | Self::ToggleFullScreen | Self::ToggleConsole
             )
     }
 }
@@ -993,8 +793,10 @@ impl Command {
 mod tests {
     use super::*;
     use crate::state::VerificationPage;
-    use crate::state::command_catalog::CommandCatalog;
+    use crate::state::command_catalog::{CommandCatalog, CommandKey};
     use crate::workbench::ResultViewer;
+    use crate::workbench::code::commands::CodeCommand;
+    use crate::workbench::framework::command_registry::CommandFlags;
     use crate::workbench::results::commands::ResultsCommand;
     use crate::workbench::simulate::commands::SimulateCommand;
 
@@ -1008,6 +810,20 @@ mod tests {
                     .iter()
                     .any(|binding| binding.chord == chord && binding.supports(platform))
             })
+            .collect()
+    }
+
+    /// Every command the registry orders, the shell's and the features',
+    /// that binds `chord` on `platform`, in the registry's order.
+    fn ordered_binding_owners(chord: ShortcutChord, platform: CommandPlatform) -> Vec<CommandKey> {
+        crate::workbench::commands::vocabulary::command_registry()
+            .ordered()
+            .filter(|spec| {
+                spec.bindings
+                    .iter()
+                    .any(|binding| binding.chord == chord && binding.supports(platform))
+            })
+            .map(|spec| spec.key)
             .collect()
     }
 
@@ -1081,23 +897,31 @@ mod tests {
     /// owners live in contexts that can never be active together.
     #[test]
     fn rename_shortcut_is_unambiguous_and_desktop_browser_only() {
+        let rename_symbol = CodeCommand::RenameSymbol.declared_spec();
         for platform in [CommandPlatform::Desktop, CommandPlatform::Browser] {
             assert_eq!(
-                binding_owners(RENAME_SELECTION[0].chord, platform),
-                vec![Command::RenameSelection, Command::RenameSymbol]
+                ordered_binding_owners(RENAME_SELECTION[0].chord, platform),
+                vec![Command::RenameSelection.key(), rename_symbol.key]
             );
             assert!(!crate::state::shortcuts::shortcut_contexts_overlap(
                 Command::RenameSelection.shortcut_context(),
-                Command::RenameSymbol.shortcut_context(),
+                rename_symbol.context,
             ));
-            assert_eq!(Command::RenameSymbol.default_shortcut_label(platform), "F2");
+            assert_eq!(
+                rename_symbol
+                    .bindings
+                    .iter()
+                    .find(|binding| binding.supports(platform))
+                    .map_or("", |binding| binding.chord.label),
+                "F2"
+            );
             assert_eq!(
                 Command::RenameSelection.default_shortcut_label(platform),
                 "F2"
             );
         }
         for platform in [CommandPlatform::Tablet, CommandPlatform::Phone] {
-            assert!(binding_owners(RENAME_SELECTION[0].chord, platform).is_empty());
+            assert!(ordered_binding_owners(RENAME_SELECTION[0].chord, platform).is_empty());
             assert_eq!(
                 Command::RenameSelection.default_shortcut_label(platform),
                 ""
@@ -1436,15 +1260,15 @@ mod tests {
     /// context-menu row cannot be bound or automated.
     #[test]
     fn show_in_netlist_is_one_discoverable_command() {
-        use crate::workbench::commands::vocabulary::COMMAND_REGISTRY;
-
-        assert!(COMMAND_REGISTRY.contains(&Command::ShowInNetlist));
-        assert_eq!(
-            Command::ShowInNetlist.shortcut_context(),
-            ShortcutContext::DesignWorkspace
+        let spec = CodeCommand::ShowInNetlist.declared_spec();
+        assert!(
+            crate::workbench::commands::vocabulary::command_registry()
+                .order()
+                .contains(&spec.key)
         );
-        assert!(Command::ShowInNetlist.palette_visible());
-        assert!(Command::ShowInNetlist.shortcut_bindings().is_empty());
+        assert_eq!(spec.context, ShortcutContext::DesignWorkspace);
+        assert!(spec.flags.contains(CommandFlags::PALETTE_VISIBLE));
+        assert!(spec.bindings.is_empty());
     }
 
     /// Every disabled state names the thing that is missing, in the locator's
@@ -1455,7 +1279,7 @@ mod tests {
         let (mut app, load_id, unmapped_id) = app_with_generated_deck();
 
         assert_eq!(
-            Command::ShowInNetlist.availability(&app),
+            app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled("select one instance")
         );
 
@@ -1467,7 +1291,7 @@ mod tests {
             .selection
             .select_only_component(load_id);
         assert_eq!(
-            Command::ShowInNetlist.availability(&app),
+            app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Available
         );
 
@@ -1479,7 +1303,7 @@ mod tests {
             .selection
             .select_only_component(unmapped_id);
         assert_eq!(
-            Command::ShowInNetlist.availability(&app),
+            app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled("no netlist line for this instance")
         );
 
@@ -1493,7 +1317,7 @@ mod tests {
         app.state.model.netlist_artifacts.generated_document = None;
         app.state.model.netlist_artifacts.generated_source.clear();
         assert_eq!(
-            Command::ShowInNetlist.availability(&app),
+            app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled(
                 "no generated netlist yet — open the Netlist workspace to generate one"
             )
@@ -1511,7 +1335,7 @@ mod tests {
             .select_only_component(load_id);
         app.state.workbench.workspace = Workspace::Results;
         assert_eq!(
-            Command::ShowInNetlist.availability(&app),
+            app.command_availability(CodeCommand::ShowInNetlist.key()),
             CommandAvailability::Disabled("open a schematic or testbench")
         );
     }
@@ -1530,7 +1354,7 @@ mod tests {
             .selection
             .select_only_component(load_id);
 
-        Command::ShowInNetlist.execute(&mut app);
+        app.execute_command_key(CodeCommand::ShowInNetlist.key());
 
         assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
         assert_eq!(

@@ -494,7 +494,7 @@ fn save_and_compile_compiles_with_the_new_settings() {
 fn build_settings_follows_compile_on_the_desktop_toolbar_only() {
     let mut app = veriloga_view_holding(TWO_MODULES);
     let ctx = themed_context();
-    let label = Command::VerilogABuildSettings.spec().label;
+    let label = CodeCommand::VerilogABuildSettings.declared_spec().label;
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let settings = node_rect(node(&output, label).expect("on the desktop toolbar"));
@@ -513,8 +513,9 @@ fn build_settings_follows_compile_on_the_desktop_toolbar_only() {
     let output = frame_with(&ctx, &mut app, phone, Vec::new());
     assert!(node(&output, label).is_none(), "not on a phone's toolbar");
     assert!(
-        crate::workbench::commands::vocabulary::COMMAND_REGISTRY
-            .contains(&Command::VerilogABuildSettings)
+        crate::workbench::commands::vocabulary::command_registry()
+            .order()
+            .contains(&CodeCommand::VerilogABuildSettings.key())
     );
 }
 
@@ -523,7 +524,7 @@ fn build_settings_follows_compile_on_the_desktop_toolbar_only() {
 #[test]
 fn build_targets_stand_under_advanced_after_the_checks() {
     let mut app = veriloga_view_holding(TWO_MODULES);
-    Command::VerilogABuildSettings.execute(&mut app);
+    app.execute_command_key(CodeCommand::VerilogABuildSettings.key());
     let ctx = themed_context();
     frame_with(&ctx, &mut app, DESKTOP, Vec::new());
     let output = frame_with(&ctx, &mut app, DESKTOP, Vec::new());

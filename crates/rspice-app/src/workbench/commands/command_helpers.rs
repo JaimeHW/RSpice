@@ -6,6 +6,7 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
+use crate::workbench::code::commands::{CodeCommand, CodeRequest};
 use crate::workbench::framework::requests::ProjectFileAction;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
@@ -129,20 +130,10 @@ fn lower_first_word(text: &str) -> String {
 }
 
 pub(super) fn netlist_page_is_visible(state: &crate::workbench::AppState) -> bool {
-    state.workbench.workspace == Workspace::Netlist
-        && state.code.code_workspace.page
-            == crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist
-}
-
-/// Whether a code document is the thing on screen: one of the Netlist
-/// workspace's pages, or a Verilog-A cell view the Design workspace is
-/// showing.
-pub(super) fn code_document_is_visible(state: &crate::workbench::AppState) -> bool {
-    state.workbench.workspace == Workspace::Netlist
-        || crate::workbench::documents::code_workspace::design_hosts_veriloga(
-            state.workbench.workspace,
-            &state.model.workspace,
-        )
+    crate::workbench::documents::code_workspace::netlist_page_shown(
+        state.workbench.workspace,
+        &state.code.code_workspace,
+    )
 }
 
 pub(super) fn activate_workspace(app: &mut RSpiceApp, workspace: Workspace) {
@@ -345,6 +336,98 @@ pub(in crate::workbench) fn run_project_file_action(
             ProjectFileAction::CloseProject => FileMenuAction::CloseProject,
         },
     );
+}
+
+/// Carry out what the code feature handed over, as the shell's table did in
+/// place: open or import a netlist or a Verilog-A file through the file
+/// workflow, import an LTspice or QSPICE schematic, export the deck from
+/// outside the netlist page, export the bill of materials, open the
+/// generated deck, show the selected instance in it, and
+/// open the Code workspace's find, validation and document tools,
+/// language navigation from the caret, the Verilog-A compile, its build
+/// settings and the symbol of the module it compiles.
+// Interim: each answer is the body the shell's table ran for the command,
+// until the code feature carries it out over its own parts.
+pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: CodeRequest) {
+    match request {
+        CodeRequest::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
+        CodeRequest::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
+        CodeRequest::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
+        CodeRequest::ImportLtspiceSchematic => {
+            import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Ltspice)
+        }
+        CodeRequest::ImportQspiceSchematic => {
+            import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Qspice)
+        }
+        CodeRequest::ExportNetlist(format) => {
+            crate::workbench::menu_bar::action_export_netlist_with_io(
+                &mut app.state,
+                format,
+                app.export_workflow_io.as_ref(),
+            );
+        }
+        CodeRequest::ExportBillOfMaterials => {
+            crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
+                &mut app.state,
+                app.export_workflow_io.as_ref(),
+            );
+        }
+        CodeRequest::GenerateNetlist => {
+            crate::workbench::menu_bar::action_view_netlist(&mut app.state);
+            activate_workspace(app, Workspace::Netlist);
+        }
+        CodeRequest::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
+        CodeRequest::FindCodeDocument => {
+            if let Err(error) =
+                crate::workbench::documents::code_workspace::open_active_source_search(app)
+            {
+                app.state.prompt(error);
+            }
+        }
+        CodeRequest::ValidateCodeDocument => {
+            crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
+        }
+        CodeRequest::ManageSourceDocument => {
+            if let Err(error) = crate::workbench::app::open_source_document_dialog(&mut app.state) {
+                app.state.prompt(error);
+            }
+        }
+        CodeRequest::GoToDefinition => navigate_active_source(app, CodeCommand::GoToDefinition),
+        CodeRequest::FindReferences => navigate_active_source(app, CodeCommand::FindReferences),
+        CodeRequest::RenameSymbol => navigate_active_source(app, CodeCommand::RenameSymbol),
+        CodeRequest::CompileVerilogA => {
+            // The command compiles the active Verilog-A cell view and
+            // takes the reader to where its result is shown: the view is
+            // edited in Design, so that is where a compile of it lands,
+            // whichever workspace offered the command.
+            activate_workspace(app, Workspace::Design);
+            // The closure is taken now, at the click; the frame loop
+            // starts the compile on its next pass. Nothing is asked.
+            if let Err(error) =
+                crate::workbench::documents::code_workspace::request_veriloga_compile(app)
+            {
+                app.state.prompt(error);
+            }
+        }
+        CodeRequest::VerilogABuildSettings => {
+            activate_workspace(app, Workspace::Design);
+            if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
+                app.state.prompt(error);
+            }
+        }
+        CodeRequest::VerilogAOpenSymbol => {
+            activate_workspace(app, Workspace::Design);
+            crate::workbench::app::actions::veriloga_symbol::open_veriloga_symbol(&mut app.state);
+        }
+    }
+}
+
+/// Go to definition, Find references or Rename symbol from the caret of the
+/// source editor on screen, saying why not when it cannot.
+fn navigate_active_source(app: &mut RSpiceApp, command: CodeCommand) {
+    if let Err(error) = crate::workbench::app::navigate_active_source(app, command) {
+        app.state.prompt(error);
+    }
 }
 
 /// Carry out what the project feature handed over, as the feature did in

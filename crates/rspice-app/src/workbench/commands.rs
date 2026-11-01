@@ -9,6 +9,7 @@ use crate::schematic::view::selection_transform::{
     SelectionTransform, transform_selection_on_active_sheet,
 };
 use crate::state::{ComponentType, Tool};
+use crate::workbench::code::commands::CodeCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::framework::command_registry::{CommandOwner, ids};
 use crate::workbench::framework::requests::{FocusNavigatorSearch, FocusPlacementSearch};
@@ -135,9 +136,7 @@ impl Command {
     pub(crate) const fn source_editor_request(
         self,
     ) -> Option<crate::workbench::framework::requests::SourceEditorRequest> {
-        use crate::workbench::framework::requests::{
-            EditorViewCommand, SourceEditorRequest, StandardCommand, StructuralCommand,
-        };
+        use crate::workbench::framework::requests::{SourceEditorRequest, StandardCommand};
         Some(match self {
             Self::Undo => SourceEditorRequest::Standard(StandardCommand::Undo),
             Self::Redo => SourceEditorRequest::Standard(StandardCommand::Redo),
@@ -146,26 +145,6 @@ impl Command {
             Self::Paste => SourceEditorRequest::Standard(StandardCommand::Paste),
             Self::Delete => SourceEditorRequest::Standard(StandardCommand::Delete),
             Self::SelectAll => SourceEditorRequest::Standard(StandardCommand::SelectAll),
-            Self::ToggleLineComment => {
-                SourceEditorRequest::Structural(StructuralCommand::ToggleComment)
-            }
-            Self::IndentLines => SourceEditorRequest::Structural(StructuralCommand::Indent),
-            Self::OutdentLines => SourceEditorRequest::Structural(StructuralCommand::Outdent),
-            Self::DuplicateLine => {
-                SourceEditorRequest::Structural(StructuralCommand::DuplicateLine)
-            }
-            Self::DeleteLine => SourceEditorRequest::Structural(StructuralCommand::DeleteLine),
-            Self::MoveLineUp => SourceEditorRequest::Structural(StructuralCommand::MoveLineUp),
-            Self::MoveLineDown => SourceEditorRequest::Structural(StructuralCommand::MoveLineDown),
-            Self::GoToMatchingBracket => {
-                SourceEditorRequest::Structural(StructuralCommand::MatchBracket)
-            }
-            Self::GoToLine => SourceEditorRequest::GoToLine,
-            Self::FormatDocument => SourceEditorRequest::FormatDocument,
-            Self::FoldSelection => SourceEditorRequest::View(EditorViewCommand::FoldSelection),
-            Self::UnfoldAtCaret => SourceEditorRequest::View(EditorViewCommand::UnfoldAtCaret),
-            Self::FoldAll => SourceEditorRequest::View(EditorViewCommand::FoldAll),
-            Self::UnfoldAll => SourceEditorRequest::View(EditorViewCommand::UnfoldAll),
             _ => return None,
         })
     }
@@ -224,10 +203,8 @@ impl Command {
                     | Self::AscendHierarchy
                     | Self::DescendHierarchy
                     | Self::DescendHierarchyDirect
-                    | Self::GenerateNetlist
                     | Self::CheckCellview
                     | Self::CheckDesign
-                    | Self::ShowInNetlist
                     | Self::ToggleInspector
                     | Self::ToggleFocusMode
                     | Self::ResetLayout
@@ -356,7 +333,6 @@ impl Command {
             | Self::AscendHierarchy
             | Self::DescendHierarchy
             | Self::DescendHierarchyDirect
-            | Self::ShowInNetlist
             | Self::CheckCellview
             | Self::CheckDesign
             | Self::ClearChecks
@@ -381,44 +357,6 @@ impl Command {
             | Self::StimulusValidateLibrary
             | Self::StimulusPlaceDefinition
             | Self::StimulusShowAdopter => CommandOwner::Design,
-            Self::NewVerilogADevice
-            | Self::OpenNetlist
-            | Self::ImportNetlist
-            | Self::ImportVerilogA
-            | Self::ImportLtspiceSchematic
-            | Self::ImportQspiceSchematic
-            | Self::ExportNetlist(_)
-            | Self::ExportBillOfMaterials
-            | Self::GenerateNetlist
-            | Self::FindCodeDocument
-            | Self::ValidateCodeDocument
-            | Self::ManageSourceDocument
-            | Self::ToggleLineComment
-            | Self::IndentLines
-            | Self::OutdentLines
-            | Self::DuplicateLine
-            | Self::DeleteLine
-            | Self::MoveLineUp
-            | Self::MoveLineDown
-            | Self::GoToMatchingBracket
-            | Self::GoToLine
-            | Self::NextProblem
-            | Self::PreviousProblem
-            | Self::ShowProblemAtCaret
-            | Self::FormatDocument
-            | Self::FoldSelection
-            | Self::UnfoldAtCaret
-            | Self::FoldAll
-            | Self::UnfoldAll
-            | Self::GoToDefinition
-            | Self::FindReferences
-            | Self::RenameSymbol
-            | Self::CompareGeneratedRevisions
-            | Self::CompileVerilogA
-            | Self::CancelVerilogACompile
-            | Self::VerilogABuildSettings
-            | Self::VerilogAOpenSymbol
-            | Self::AutomationConsole => CommandOwner::Code,
         }
     }
 
@@ -439,38 +377,6 @@ impl Command {
             }
             Self::RevertActiveDocument => file_action(app, FileMenuAction::RevertActiveDocument),
             Self::CloseActiveDocument => file_action(app, FileMenuAction::CloseActiveDocument),
-            Self::NewVerilogADevice => {
-                crate::workbench::app::open_new_veriloga_device_form(&mut app.state);
-            }
-            Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
-            Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
-            Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
-            Self::ImportLtspiceSchematic => import_foreign_schematic(
-                app,
-                rspice_design::foreign_schematic::ForeignTool::Ltspice,
-            ),
-            Self::ImportQspiceSchematic => {
-                import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Qspice)
-            }
-            Self::ExportNetlist(format) => {
-                if netlist_page_is_visible(&app.state) {
-                    app.state.code.netlist.export_dialog.open = true;
-                    app.state.code.netlist.export_dialog.format = format;
-                    app.state.code.netlist.export_dialog.error = None;
-                } else {
-                    crate::workbench::menu_bar::action_export_netlist_with_io(
-                        &mut app.state,
-                        format,
-                        app.export_workflow_io.as_ref(),
-                    );
-                }
-            }
-            Self::ExportBillOfMaterials => {
-                crate::workbench::menu_bar::action_export_bill_of_materials_with_io(
-                    &mut app.state,
-                    app.export_workflow_io.as_ref(),
-                );
-            }
             Self::Exit => file_action(app, FileMenuAction::Exit),
             Self::Undo => app.action_edit_undo(),
             Self::Redo => app.action_edit_redo(),
@@ -551,7 +457,7 @@ impl Command {
                 ) {
                     // A Verilog-A cell view has no instances or nets to find;
                     // Find searches its source bundle instead.
-                    Self::FindCodeDocument.execute(app);
+                    app.execute_command_key(CodeCommand::FindCodeDocument.key());
                 } else {
                     activate_workspace(app, Workspace::Design);
                     app.state.workbench.navigator_visible = true;
@@ -1113,7 +1019,6 @@ impl Command {
             Self::DescendHierarchyDirect => {
                 app.state.open_selected_instance_master();
             }
-            Self::ShowInNetlist => app.state.show_selected_instance_in_netlist(),
             Self::CheckCellview if active_symbol_editor(app) => {
                 app.state.run_active_symbol_pin_checks();
             }
@@ -1133,78 +1038,6 @@ impl Command {
             }
             Self::PreviousViolation => {
                 crate::schematic::view::violations::cycle_violation(&mut app.state, -1);
-            }
-            Self::GenerateNetlist => {
-                crate::workbench::menu_bar::action_view_netlist(&mut app.state);
-                activate_workspace(app, Workspace::Netlist);
-            }
-            Self::FindCodeDocument => {
-                if let Err(error) =
-                    crate::workbench::documents::code_workspace::open_active_source_search(app)
-                {
-                    app.state.prompt(error);
-                }
-            }
-            Self::ValidateCodeDocument => {
-                crate::workbench::workflows::netlist_workflow::validate_visible_netlist_source(app);
-            }
-            Self::ManageSourceDocument => {
-                if let Err(error) =
-                    crate::workbench::app::open_source_document_dialog(&mut app.state)
-                {
-                    app.state.prompt(error);
-                }
-            }
-            // Routed to the active source editor above; with none on screen
-            // there is nothing for them to act on.
-            Self::ToggleLineComment
-            | Self::IndentLines
-            | Self::OutdentLines
-            | Self::DuplicateLine
-            | Self::DeleteLine
-            | Self::MoveLineUp
-            | Self::MoveLineDown
-            | Self::GoToMatchingBracket
-            | Self::GoToLine
-            | Self::FormatDocument
-            | Self::FoldSelection
-            | Self::UnfoldAtCaret
-            | Self::FoldAll
-            | Self::UnfoldAll => {}
-            // The focused editor's page takes the step as it draws.
-            Self::NextProblem => app
-                .state
-                .workbench
-                .outbox
-                .push(crate::workbench::documents::code_workspace::ProblemStep::Next),
-            Self::PreviousProblem => app
-                .state
-                .workbench
-                .outbox
-                .push(crate::workbench::documents::code_workspace::ProblemStep::Previous),
-            Self::ShowProblemAtCaret => app
-                .state
-                .workbench
-                .outbox
-                .push(crate::workbench::documents::code_workspace::ProblemStep::AtCaret),
-            Self::GoToDefinition | Self::FindReferences | Self::RenameSymbol => {
-                if let Err(error) = crate::workbench::app::navigate_active_source(app, self) {
-                    app.state.prompt(error);
-                }
-            }
-            Self::CompareGeneratedRevisions => {
-                app.state.code.netlist.comparison_dialog.open = true;
-                app.state
-                    .code
-                    .netlist
-                    .comparison_dialog
-                    .selected_history_index = app
-                    .state
-                    .code
-                    .netlist
-                    .generated_history
-                    .len()
-                    .saturating_sub(1);
             }
             Self::StimulusNewDefinition => {
                 crate::workbench::app::actions::stimulus::new_definition(&mut app.state);
@@ -1230,40 +1063,6 @@ impl Command {
             Self::StimulusShowAdopter => {
                 crate::workbench::app::actions::stimulus::show_adopter_on_schematic(&mut app.state);
                 activate_workspace(app, Workspace::Design);
-            }
-            Self::CompileVerilogA => {
-                // The command compiles the active Verilog-A cell view and
-                // takes the reader to where its result is shown: the view is
-                // edited in Design, so that is where a compile of it lands,
-                // whichever workspace offered the command.
-                activate_workspace(app, Workspace::Design);
-                // The closure is taken now, at the click; the frame loop
-                // starts the compile on its next pass. Nothing is asked.
-                if let Err(error) =
-                    crate::workbench::documents::code_workspace::request_veriloga_compile(app)
-                {
-                    app.state.prompt(error);
-                }
-            }
-            Self::CancelVerilogACompile => {
-                crate::workbench::documents::code_workspace::cancel_veriloga_compile(app);
-            }
-            Self::VerilogABuildSettings => {
-                activate_workspace(app, Workspace::Design);
-                if let Err(error) = crate::workbench::app::open_veriloga_build_settings(app) {
-                    app.state.prompt(error);
-                }
-            }
-            Self::VerilogAOpenSymbol => {
-                activate_workspace(app, Workspace::Design);
-                crate::workbench::app::actions::veriloga_symbol::open_veriloga_symbol(
-                    &mut app.state,
-                );
-            }
-            Self::AutomationConsole => {
-                activate_workspace(app, Workspace::Netlist);
-                app.state.code.code_workspace.page =
-                    crate::workbench::documents::code_workspace::CodeWorkspacePage::Automation;
             }
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
@@ -1296,7 +1095,8 @@ mod command_helpers;
 pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
-    active_schematic_editor, answer_project_request, file_action, run_project_file_action,
+    active_schematic_editor, answer_code_request, answer_project_request, file_action,
+    foreign_import_refusal, run_project_file_action,
 };
 
 #[cfg(test)]

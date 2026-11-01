@@ -796,6 +796,7 @@ const FEATURE_COMMAND_FILES: &[&str] = &[
     "workbench/cloud/commands.rs",
     "workbench/models/commands.rs",
     "workbench/simulate/commands.rs",
+    "workbench/code/commands.rs",
     "workbench/project/commands.rs",
 ];
 
@@ -807,8 +808,8 @@ const UNROUTED_COMMANDS: &[(&str, &str)] = &[];
 
 /// The `Command` variants `COMMAND_REGISTRY` lists.
 ///
-/// Payloads are dropped: a menu that routes `Command::ExportNetlist(format)`
-/// routes every format, so the variant is the unit of reachability.
+/// Payloads are dropped: a menu that routes `Command::OpenWorkspace(workspace)`
+/// routes every workspace, so the variant is the unit of reachability.
 fn registered_commands(code: &str) -> BTreeSet<String> {
     let body = braced_body(code, "pub const COMMAND_REGISTRY: &[Command] = &[")
         .expect("COMMAND_REGISTRY is declared in vocabulary.rs");

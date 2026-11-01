@@ -472,17 +472,18 @@ fn start_veriloga_compile(
 
 /// Stop the running compile at the reader's request. The source keeps the
 /// standing it had: what the last finished compile proved is still proved.
-pub(crate) fn cancel_veriloga_compile(app: &mut RSpiceApp) {
-    let Some(pending) = app.state.code.code_workspace.veriloga.pending.take() else {
+pub(crate) fn cancel_veriloga_compile(
+    code: &mut CodeWorkspaceRuntimeState,
+    wb: &mut WorkbenchSession,
+) {
+    let Some(pending) = code.veriloga.pending.take() else {
         return;
     };
     pending.cancellation.cancel();
-    let cancelled = app
-        .state
-        .workbench
+    let cancelled = wb
         .messages()
         .text(MessageId::VerilogACompileCancelledAnnouncement);
-    app.state.workbench.prompt(cancelled);
+    wb.prompt(cancelled);
 }
 
 /// Time as the compile status gives it: whole seconds while the count runs,
