@@ -262,6 +262,7 @@ impl Command {
             | Self::ZoomOneToOne
             | Self::ZoomToSelection
             | Self::ZoomBox
+            | Self::ZoomPrevious
             | Self::ToggleFullScreen
             | Self::RevertActiveDocument
             | Self::CloseActiveDocument
@@ -607,6 +608,25 @@ impl Command {
             Self::ZoomBox => {
                 activate_workspace(app, Workspace::Design);
                 app.state.model.schematic.session.editor.zoom_box.arm();
+            }
+            // The canvas in front steps back to the view it showed before;
+            // stepping back is not itself a view the history keeps.
+            Self::ZoomPrevious => {
+                if let Some(session) = app.state.symbol_in_place_mut() {
+                    if let Some(view) = session.view_history.step_back() {
+                        (session.zoom, session.pan) = view;
+                    }
+                } else if active_symbol_editor(app) {
+                    let editor = &mut app.state.design.symbol.editor;
+                    if let Some(view) = editor.view_history.step_back() {
+                        (editor.zoom, editor.pan) = view;
+                    }
+                } else {
+                    let editor = &mut app.state.model.schematic.session.editor;
+                    if let Some(view) = editor.view_history.step_back() {
+                        (editor.zoom, editor.pan) = view;
+                    }
+                }
             }
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::SetGridStyle(style) => app.state.design.set_grid_style(style),

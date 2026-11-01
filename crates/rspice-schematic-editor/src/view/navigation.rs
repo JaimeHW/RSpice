@@ -439,10 +439,113 @@ fn zoom_to_about(
     pan.1 = focus.1 - focus_schematic_y * new_zoom;
 }
 
+/// How many earlier views a canvas keeps for Zoom previous.
+pub const VIEW_HISTORY_DEPTH: usize = 16;
+
+/// Seconds without a change of view that end one gesture: the frames of a
+/// wheel burst or a drag are one step back, not dozens.
+pub const VIEW_GESTURE_GAP_SECONDS: f64 = 0.5;
+
+/// The views a canvas showed before the one it shows, newest last, so Zoom
+/// previous can step back through them. `V` is the canvas's own camera, its
+/// zoom and pan.
+///
+/// The canvas reports the view each frame ends on. The first change after a
+/// pause keeps the view it left; the changes that follow it closely are the
+/// same gesture and keep nothing.
+#[derive(Debug, Clone)]
+pub struct ViewHistory<V> {
+    earlier: Vec<V>,
+    shown: Option<V>,
+    last_change: f64,
+}
+
+impl<V> Default for ViewHistory<V> {
+    fn default() -> Self {
+        Self {
+            earlier: Vec::new(),
+            shown: None,
+            last_change: f64::NEG_INFINITY,
+        }
+    }
+}
+
+impl<V: Copy + PartialEq> ViewHistory<V> {
+    /// Note that a frame at `time` seconds ended on `view`.
+    pub fn observe(&mut self, view: V, time: f64) {
+        match self.shown {
+            Some(shown) if shown == view => return,
+            Some(shown) => {
+                let new_gesture = !(time - self.last_change < VIEW_GESTURE_GAP_SECONDS
+                    && time >= self.last_change);
+                if new_gesture && self.earlier.last() != Some(&shown) {
+                    if self.earlier.len() == VIEW_HISTORY_DEPTH {
+                        self.earlier.remove(0);
+                    }
+                    self.earlier.push(shown);
+                }
+                self.last_change = time;
+            }
+            None => {}
+        }
+        self.shown = Some(view);
+    }
+
+    /// Whether there is an earlier view to go back to.
+    pub fn can_step_back(&self) -> bool {
+        !self.earlier.is_empty()
+    }
+
+    /// The view before the one shown, taken off the history: the canvas
+    /// shows it next, and the next change starts a gesture of its own.
+    pub fn step_back(&mut self) -> Option<V> {
+        let view = self.earlier.pop()?;
+        self.shown = Some(view);
+        self.last_change = f64::NEG_INFINITY;
+        Some(view)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use egui::{pos2, vec2};
+
+    #[test]
+    fn view_history_keeps_the_view_each_gesture_left() {
+        let mut history = ViewHistory::default();
+        history.observe(1, 0.0);
+        assert!(!history.can_step_back());
+        // A wheel burst: one gesture, one step back.
+        history.observe(2, 1.0);
+        history.observe(3, 1.1);
+        history.observe(4, 1.2);
+        // A pause, then a fit.
+        history.observe(9, 3.0);
+        assert_eq!(history.step_back(), Some(4));
+        // Stepping back is not a change of its own.
+        history.observe(4, 3.1);
+        assert_eq!(history.step_back(), Some(1));
+        assert_eq!(history.step_back(), None);
+        // A change after stepping back keeps the view it left.
+        history.observe(1, 3.2);
+        history.observe(5, 3.3);
+        assert_eq!(history.step_back(), Some(1));
+    }
+
+    #[test]
+    fn view_history_holds_a_bounded_number_of_views() {
+        let mut history = ViewHistory::default();
+        for view in 0..40 {
+            history.observe(view, f64::from(view));
+        }
+        let mut back = Vec::new();
+        while let Some(view) = history.step_back() {
+            back.push(view);
+        }
+        assert_eq!(back.len(), VIEW_HISTORY_DEPTH);
+        assert_eq!(back.first(), Some(&38));
+    }
 
     #[test]
     fn pan_delta_moves_viewport_by_screen_delta() {

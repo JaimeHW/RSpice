@@ -73,6 +73,8 @@ pub enum Command {
     ZoomOneToOne,
     ZoomToSelection,
     ZoomBox,
+    /// Go back to the view the canvas showed before this one.
+    ZoomPrevious,
     CycleGrid,
     /// Draw the grid in one style.
     SetGridStyle(crate::state::GridStyle),
@@ -343,6 +345,7 @@ impl Command {
             Self::ZoomOneToOne => spec("zoom-one-to-one", "Zoom 100%", "View"),
             Self::ZoomToSelection => spec("zoom-to-selection", "Zoom to selection", "View"),
             Self::ZoomBox => spec("zoom-box", "Zoom box", "View"),
+            Self::ZoomPrevious => spec("zoom-previous", "Zoom previous", "View"),
             Self::CycleGrid => spec("cycle-grid", "Cycle grid display", "View"),
             Self::SetGridStyle(crate::state::GridStyle::Dots) => {
                 spec("grid-dots", "Dot grid", "View")
@@ -727,6 +730,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::ZoomOneToOne,
     Command::ZoomToSelection,
     Command::ZoomBox,
+    Command::ZoomPrevious,
     Command::CycleGrid,
     Command::SetGridStyle(crate::state::GridStyle::Dots),
     Command::SetGridStyle(crate::state::GridStyle::Lines),
@@ -959,6 +963,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ZoomOneToOne.key(),
     Command::ZoomToSelection.key(),
     Command::ZoomBox.key(),
+    Command::ZoomPrevious.key(),
     Command::CycleGrid.key(),
     Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
     Command::SetGridStyle(crate::state::GridStyle::Lines).key(),

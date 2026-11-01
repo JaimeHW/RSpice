@@ -269,6 +269,16 @@ impl Command {
                 active_schematic_editor(app) && schematic_selection_has_live_object(&state.model.schematic)
             }
             Self::ZoomBox => active_schematic_editor(app),
+            Self::ZoomPrevious => {
+                if let Some(session) = state.symbol_in_place() {
+                    session.view_history.can_step_back()
+                } else if active_symbol_editor(app) {
+                    state.design.symbol.editor.view_history.can_step_back()
+                } else {
+                    active_schematic_editor(app)
+                        && state.model.schematic.session.editor.view_history.can_step_back()
+                }
+            }
             Self::EngineeringTableView => active_schematic_editor(app),
             Self::NewApplicationWindow
             | Self::DetachDocument

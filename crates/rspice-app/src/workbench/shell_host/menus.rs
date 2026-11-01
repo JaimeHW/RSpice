@@ -282,6 +282,7 @@ const VIEW_MENU: &[MenuEntry] = &[
     command(Command::FitSchematicContent),
     command(Command::ZoomToSelection),
     command(Command::ZoomBox),
+    command(Command::ZoomPrevious),
     Separator,
     MenuEntry::Submenu {
         label: "Grid",

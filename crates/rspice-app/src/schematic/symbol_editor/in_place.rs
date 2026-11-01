@@ -85,6 +85,9 @@ pub(super) fn frame(
         SCHEMATIC_ZOOM_MIN,
         navigation,
     );
+    session
+        .view_history
+        .observe((session.zoom, session.pan), ui.input(|input| input.time));
     let parent = viewport_from_camera(session.pan, session.zoom, rect, ui.ctx().pixels_per_point());
     Some(InPlaceFrame {
         symbol: SymbolViewport::on_sheet(&parent, placement),

@@ -36,6 +36,8 @@ pub struct SymbolInPlace {
     pub zoom: f64,
     /// A zoom a command asked for, carried out on the canvas's next frame.
     pub zoom_request: Option<rspice_schematic_editor::view::navigation::ZoomRequest>,
+    /// The views the session showed before this one, for Zoom previous.
+    pub view_history: rspice_schematic_editor::view::navigation::ViewHistory<(f64, (f64, f64))>,
     /// Whether the symbol had a tab of its own before the session opened it.
     pub symbol_was_open: bool,
     /// The symbol as the session began, or as last saved in it. Leaving with
@@ -340,6 +342,7 @@ impl AppState {
             pan,
             zoom,
             zoom_request: None,
+            view_history: Default::default(),
             symbol_was_open,
             baseline,
             leaving: None,

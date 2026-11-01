@@ -140,6 +140,10 @@ pub fn update_viewport(
         session.pan.0 += delta.x;
         session.pan.1 += delta.y;
     }
+    let time = ui.input(|input| input.time);
+    session
+        .view_history
+        .observe((session.zoom, session.pan), time);
     SymbolViewport::new(rect, session.zoom, vec2(session.pan.0, session.pan.1))
 }
 

@@ -368,6 +368,10 @@ pub fn render_schematic_view(
         canvas_navigation,
     );
     edge_pan::edge_pan(ui, &response, available, state);
+    let editor = &mut state.model.schematic.session.editor;
+    editor
+        .view_history
+        .observe((editor.zoom, editor.pan), ui.input(|input| input.time));
     let viewport = viewport_from_camera(
         state.model.schematic.session.editor.pan,
         state.model.schematic.session.editor.zoom,

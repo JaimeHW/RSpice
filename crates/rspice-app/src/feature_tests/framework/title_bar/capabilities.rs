@@ -115,3 +115,56 @@ fn select_by_kind_is_grey_for_a_kind_the_sheet_lacks() {
         CommandAvailability::Disabled("the sheet has no pins")
     );
 }
+
+/// One frame of the schematic canvas, `time` seconds into the session.
+fn canvas_frame(ctx: &Context, app: &mut RSpiceApp, time: f64) {
+    let _ = ctx.run_ui(
+        egui::RawInput {
+            screen_rect: Some(Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(800.0, 600.0),
+            )),
+            time: Some(time),
+            ..Default::default()
+        },
+        |ui| crate::schematic::view::render_schematic_view(ui, &mut app.state, None),
+    );
+}
+
+/// Zoom previous steps the canvas back through the views it showed, newest
+/// first, and is grey once there is none left to go back to.
+#[test]
+fn zoom_previous_steps_back_through_the_views_the_canvas_showed() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = title_test_app();
+    app.state.workbench.activate(Workspace::Design);
+    let view = |app: &RSpiceApp| {
+        let editor = &app.state.model.schematic.session.editor;
+        (editor.zoom, editor.pan)
+    };
+    let key = Command::ZoomPrevious.key();
+    canvas_frame(&ctx, &mut app, 0.0);
+    let opened = view(&app);
+    assert_eq!(
+        app.availability(key),
+        CommandAvailability::Disabled("the view has not changed yet")
+    );
+
+    app.execute(Command::ZoomIn.key());
+    canvas_frame(&ctx, &mut app, 1.0);
+    let nearer = view(&app);
+    app.execute(Command::ZoomIn.key());
+    canvas_frame(&ctx, &mut app, 2.0);
+    assert_ne!(view(&app), nearer);
+    assert_ne!(nearer, opened);
+
+    assert!(app.is_enabled(key));
+    app.execute(key);
+    canvas_frame(&ctx, &mut app, 3.0);
+    assert_eq!(view(&app), nearer);
+    app.execute(key);
+    canvas_frame(&ctx, &mut app, 4.0);
+    assert_eq!(view(&app), opened);
+    assert!(!app.is_enabled(key));
+}

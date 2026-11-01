@@ -243,6 +243,8 @@ pub struct SymbolEditorSession {
     pub marquee_current: Option<rspice_design_model::Point>,
     pub zoom: f32,
     pub pan: (f32, f32),
+    /// The views the canvas showed before this one, for Zoom previous.
+    pub view_history: crate::view::navigation::ViewHistory<(f32, (f32, f32))>,
     pub needs_fit: bool,
     pub pending_polyline: Vec<rspice_design_model::Point>,
     pub shape_start: Option<rspice_design_model::Point>,
@@ -276,6 +278,7 @@ impl Default for SymbolEditorSession {
             marquee_current: None,
             zoom: 4.0,
             pan: (0.0, 0.0),
+            view_history: Default::default(),
             needs_fit: true,
             pending_polyline: Vec::new(),
             shape_start: None,

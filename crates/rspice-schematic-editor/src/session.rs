@@ -137,6 +137,10 @@ pub struct EditorSession {
     /// The zoom box, while its command has it armed.
     pub zoom_box: crate::view::navigation::ZoomBox,
 
+    /// The views the canvas showed before this one, as `(zoom, pan)`, for
+    /// Zoom previous (runtime state, not persisted).
+    pub view_history: crate::view::navigation::ViewHistory<(f64, (f64, f64))>,
+
     /// Snap engine configuration (runtime state, not persisted)
     /// Controls cursor snapping behavior during wire drawing
     pub snap_engine: SnapEngine,
@@ -190,6 +194,7 @@ impl Default for EditorSession {
             center_request: Default::default(),
             zoom_request: Default::default(),
             zoom_box: Default::default(),
+            view_history: Default::default(),
             snap_engine: Default::default(),
             selection_rect: Default::default(),
             automatic_junctions: true,

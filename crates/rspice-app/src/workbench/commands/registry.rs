@@ -272,6 +272,10 @@ const MIRROR_SELECTION_VERTICAL: &[ShortcutBinding] = &[primary(
 )];
 /// Virtuoso's `z`.
 const ZOOM_BOX: &[ShortcutBinding] = &[primary(chord(Key::Z, false, false, false, "Z"), ALL)];
+/// W alone draws a wire; Shift+W is taken by no other command and by no
+/// browser.
+const ZOOM_PREVIOUS: &[ShortcutBinding] =
+    &[primary(chord(Key::W, false, false, true, "Shift+W"), ALL)];
 const STRETCH_SELECTION: &[ShortcutBinding] =
     &[primary(chord(Key::S, false, false, false, "S"), ALL)];
 const SYMBOL_PIN: &[ShortcutBinding] = &[primary(chord(Key::P, false, false, false, "P"), ALL)];
@@ -436,6 +440,7 @@ impl Command {
             | Self::ZoomFit
             | Self::FitSchematicContent
             | Self::ZoomOneToOne
+            | Self::ZoomPrevious
             | Self::SelectTool => ShortcutContext::EditContext,
             Self::FindInDesign
             | Self::FindReplace
@@ -569,6 +574,7 @@ impl Command {
             Self::ZoomFit => ZOOM_FIT,
             Self::FitSchematicContent => FIT_SCHEMATIC_CONTENT,
             Self::ZoomBox => ZOOM_BOX,
+            Self::ZoomPrevious => ZOOM_PREVIOUS,
             Self::RotateSelection => ROTATE_SELECTION,
             Self::RotateSelectionCounterClockwise => ROTATE_SELECTION_CCW,
             Self::MirrorSelectionHorizontal => MIRROR_SELECTION_HORIZONTAL,
@@ -881,6 +887,12 @@ impl Command {
                 "no placement or edit has run yet"
             }
             Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
+            Self::ZoomPrevious
+                if !super::active_schematic_editor(app) && !super::active_symbol_editor(app) =>
+            {
+                "open a schematic or symbol"
+            }
+            Self::ZoomPrevious => "the view has not changed yet",
             Self::SelectOfKind(_) if !super::active_schematic_editor(app) => {
                 "open a schematic or testbench"
             }
