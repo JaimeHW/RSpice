@@ -597,21 +597,22 @@ impl<'u> FormRows<'u> {
 
     /// A set of independent on/off choices, each its own check box. Items
     /// flow into as many columns as the control column holds at the width of
-    /// the widest, in reading order, so a short set is one line and a long one
-    /// is a grid rather than a ragged run. Returns `true` when any changed.
+    /// the widest, each an equal share of it, in reading order, so a short set
+    /// is one line and a long one is a grid rather than a ragged run, and the
+    /// sets of one form share their columns. Returns `true` when any changed.
     pub fn checks(&mut self, label: &str, items: &mut [(&str, &mut bool)]) -> bool {
         let line_h = mark_line_height(self.ui);
         let trim = mark_block_trim(self.ui, line_h);
         let id = self.ui.id().with(("command-form.checks", label));
         self.block(label, line_h - 2.0 * trim, |ui, width| {
             let words = items.iter().map(|(words, _)| *words).collect::<Vec<_>>();
-            let (columns, column_w) = mark_columns(ui, &words, width);
+            let (columns, pitch) = mark_columns(ui, &words, width);
             let lines = items.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in items.chunks_mut(columns).enumerate() {
                 let mark_line = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, (words, value)) in line.iter_mut().enumerate() {
-                    let left = mark_line.line.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
+                    let left = mark_line.line.left() + column as f32 * pitch;
                     let item = id.with(line_index * columns + column);
                     if mark_control(ui, item, left, mark_line, words, **value, MarkKind::Check)
                         .clicked()
@@ -628,8 +629,9 @@ impl<'u> FormRows<'u> {
     /// A set of on/off choices on one line of the form's grid, each check in
     /// an equal share of the control column. Rows of as many checks line up
     /// column by column, and with a [`Self::segmented_columns`] row of as
-    /// many options. Where a share cannot hold its words, the set flows as
-    /// [`Self::checks`] lays it out. Returns `true` when any changed.
+    /// many options. Where the shares cannot hold the set's widest words, the
+    /// set flows as [`Self::checks`] lays it out. Returns `true` when any
+    /// changed.
     ///
     /// The row is as tall as a field's, so every row of the form keeps one
     /// pitch. Its words, not its line, meet the body's edges: as the first
@@ -637,14 +639,18 @@ impl<'u> FormRows<'u> {
     /// row's top, and it holds back the air under its ink, which the gap to
     /// the next row gives back. The whole line stays each check's target.
     pub fn check_columns(&mut self, label: &str, items: &mut [(&str, &mut bool)]) -> bool {
-        let share =
-            (self.ui.available_width() - self.label_col - LABEL_GAP) / items.len().max(1) as f32;
+        let control_w = self.ui.available_width() - self.label_col - LABEL_GAP;
+        let share = control_w / items.len().max(1) as f32;
         let last = items.len().saturating_sub(1);
-        let fits = !self.stacked
-            && items.iter().enumerate().all(|(index, (words, _))| {
-                let air = if index == last { 0.0 } else { MARK_COLUMN_GAP };
-                MARK_SIDE + MARK_GAP + mark_galley(self.ui, words).size().x + air <= share
-            });
+        let each_fits = items.iter().enumerate().all(|(index, (words, _))| {
+            let air = if index == last { 0.0 } else { MARK_COLUMN_GAP };
+            MARK_SIDE + MARK_GAP + mark_galley(self.ui, words).size().x + air <= share
+        });
+        // A set the flow of [`Self::checks`] would lay on one line, in the
+        // same equal shares, is laid on one line here too.
+        let words = items.iter().map(|(words, _)| *words).collect::<Vec<_>>();
+        let flows_on_one_line = mark_columns(self.ui, &words, control_w).0 == items.len();
+        let fits = !self.stacked && (each_fits || flows_on_one_line);
         if !fits {
             return self.checks(label, items);
         }
@@ -691,14 +697,14 @@ impl<'u> FormRows<'u> {
         let trim = mark_block_trim(self.ui, line_h);
         let id = self.ui.id().with(("command-form.choice", label));
         self.block(label, line_h - 2.0 * trim, |ui, width| {
-            let (columns, column_w) = mark_columns(ui, options, width);
+            let (columns, pitch) = mark_columns(ui, options, width);
             let lines = options.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in options.chunks(columns).enumerate() {
                 let mark_line = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, words) in line.iter().enumerate() {
                     let index = line_index * columns + column;
-                    let left = mark_line.line.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
+                    let left = mark_line.line.left() + column as f32 * pitch;
                     let on = *selected == index;
                     if mark_control(
                         ui,
@@ -1114,15 +1120,19 @@ fn mark_galley(ui: &Ui, words: &str) -> std::sync::Arc<egui::Galley> {
     })
 }
 
-/// How many columns a set of marks takes in `width`, and how wide each is:
-/// as many as fit at the widest item's width, never more than there are items.
+/// How many columns a set of marks takes in `width`, and the pitch between
+/// them: as many as fit at the widest item's width, never more than there
+/// are items, each an equal share of `width`. A set of two then starts its
+/// columns where [`FormRows::check_columns`] starts a row of two, so the
+/// sets of one form line up column by column.
 fn mark_columns(ui: &Ui, words: &[&str], width: f32) -> (usize, f32) {
     let column_w = words
         .iter()
         .map(|words| MARK_SIDE + MARK_GAP + mark_galley(ui, words).size().x)
         .fold(0.0_f32, f32::max);
     let fit = ((width + MARK_COLUMN_GAP) / (column_w + MARK_COLUMN_GAP)).floor() as usize;
-    (fit.clamp(1, words.len().max(1)), column_w)
+    let columns = fit.clamp(1, words.len().max(1));
+    (columns, width / columns as f32)
 }
 
 /// One check box or radio button with its words, from `left` on `line`.
@@ -2142,6 +2152,17 @@ mod tests {
                         top("Discontinuities") > top("Units and ranges"),
                         "{screen:?}: a set wider than its columns wraps to a new line"
                     );
+                    // Each set's second column starts at one x: the sets
+                    // share the control column in equal halves.
+                    let left = |text: &str| painted.rect_of(text).expect(text).left();
+                    for second in ["Fail the compile", "Convergence"] {
+                        assert!(
+                            (left(second) - left("Native x86-64 JIT")).abs() < 0.5,
+                            "{mode:?}: {second} starts at {}, the targets' second column at {}",
+                            left(second),
+                            left("Native x86-64 JIT")
+                        );
+                    }
                 }
             }
         }
