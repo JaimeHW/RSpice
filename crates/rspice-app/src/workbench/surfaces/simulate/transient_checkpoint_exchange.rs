@@ -3,7 +3,10 @@ use super::page_kit::{Tone, note_line, rule_row};
 use crate::io::file_exchange::{self, FileKind};
 use crate::product::{ContentDigest, ProjectId};
 use crate::ui::widgets::Button;
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 use rspice_results::transient_checkpoint::TransientCheckpointEvidence;
 
 pub(super) enum Action {
@@ -38,10 +41,10 @@ struct Owner {
     epoch: u64,
 }
 impl Owner {
-    fn of(state: &AppState) -> Self {
+    fn of(model: &Model) -> Self {
         Self {
-            project: state.model.workspace.content.project.id(),
-            epoch: state.model.design_execution_epoch,
+            project: model.workspace.content.project.id(),
+            epoch: model.design_execution_epoch,
         }
     }
 }
@@ -57,17 +60,17 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
                 limits.max_external_data_bytes,
             ) {
                 Ok(()) => ctx.data_mut(|data| {
-                    data.insert_temp(owner_id(), Owner::of(&app.state));
+                    data.insert_temp(owner_id(), Owner::of(&app.state.model));
                 }),
                 Err(error) => app.state.report_failure("Checkpoint import failed", error),
             }
         }
-        Action::Export(checkpoint) => export(ctx, &mut app.state, &checkpoint),
+        Action::Export(checkpoint) => export(ctx, &mut app.state.model, &checkpoint),
         Action::Inspect(label, checkpoint) => ctx.data_mut(|data| {
             data.insert_temp(
                 inspection_id(),
                 Inspection {
-                    owner: Owner::of(&app.state),
+                    owner: Owner::of(&app.state.model),
                     label,
                     checkpoint,
                 },
@@ -88,7 +91,7 @@ pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
     }
 }
 
-fn export(ctx: &egui::Context, state: &mut AppState, checkpoint: &TransientCheckpointEvidence) {
+fn export(ctx: &egui::Context, model: &mut Model, checkpoint: &TransientCheckpointEvidence) {
     let digest = checkpoint.digest().to_string();
     if let Err(error) = file_exchange::save_file(
         ctx,
@@ -97,7 +100,7 @@ fn export(ctx: &egui::Context, state: &mut AppState, checkpoint: &TransientCheck
         format!("tran-{}.rspice-tran", &digest[..12]),
         checkpoint.bytes().to_vec(),
     ) {
-        state.report_failure("Checkpoint export failed", error);
+        model.report_failure("Checkpoint export failed", error);
     }
 }
 
@@ -109,22 +112,21 @@ struct Inspection {
 }
 
 /// Drain even when the editor closes; a delayed picker cannot target a new design.
-pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(super) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(outcome) = file_exchange::take_opened_binary(ctx, import_id()) {
         let owner = ctx.data_mut(|data| {
             let owner = data.get_temp::<Owner>(owner_id());
             data.remove::<Owner>(owner_id());
             owner
         });
-        if owner.as_ref() == Some(&Owner::of(&app.state)) {
+        if owner.as_ref() == Some(&Owner::of(cx.model)) {
             match outcome {
                 Ok(Some(file)) => {
                     let name = file.name.clone();
                     let result = TransientCheckpointEvidence::from_bytes(file.bytes.into())
                         .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
-                            app.state
-                                .model
+                            cx.model
                                 .simulation
                                 .retained
                                 .imported_transient_checkpoints
@@ -132,36 +134,36 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                         });
                     match result {
                         Ok(inserted) => {
-                            app.invalidate_simulation_preflight();
-                            app.state.prompt(if inserted {
+                            invalidate_preflight(cx);
+                            cx.wb.prompt(if inserted {
                                 format!("Imported {name}; select it under Resume transient.")
                             } else {
                                 format!("{name} is already imported.")
                             });
                         }
-                        Err(error) => app.state.report_failure("Checkpoint import failed", error),
+                        Err(error) => cx.model.report_failure("Checkpoint import failed", error),
                     }
                 }
                 Ok(None) => {}
-                Err(error) => app.state.report_failure("Checkpoint import failed", error),
+                Err(error) => cx.model.report_failure("Checkpoint import failed", error),
             }
         }
     }
     if let Some(outcome) = file_exchange::take_saved(ctx, export_id()) {
         match outcome {
-            Ok(Some(file)) => app.state.prompt(if cfg!(target_arch = "wasm32") {
+            Ok(Some(file)) => cx.wb.prompt(if cfg!(target_arch = "wasm32") {
                 format!("Finish saving {} in your browser.", file.name)
             } else {
                 format!("Saved checkpoint {}", file.name)
             }),
             Ok(None) => {}
-            Err(error) => app.state.report_failure("Checkpoint export failed", error),
+            Err(error) => cx.model.report_failure("Checkpoint export failed", error),
         }
     }
     let Some(inspection) = ctx.data(|data| data.get_temp::<Inspection>(inspection_id())) else {
         return;
     };
-    let mut open = inspection.owner == Owner::of(&app.state);
+    let mut open = inspection.owner == Owner::of(cx.model);
     if open {
         egui::Window::new("Transient checkpoint")
             .id(inspection_id())
@@ -186,7 +188,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                     Tone::Dim,
                 );
                 if Button::new("Export checkpoint…").show(ui).clicked() {
-                    export(ctx, &mut app.state, checkpoint);
+                    export(ctx, cx.model, checkpoint);
                 }
             });
     }

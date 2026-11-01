@@ -38,13 +38,13 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     let path = directory.join("accepted.rspice-tran");
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
     apply(&ctx, &mut app, Action::Export(checkpoint.clone()));
-    poll(&ctx, &mut app);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert_eq!(std::fs::read(&path).unwrap(), checkpoint.bytes());
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
     apply(&ctx, &mut app, Action::Import);
     app.state.model.design_execution_epoch += 1;
-    poll(&ctx, &mut app);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
         app.state
             .model
@@ -69,7 +69,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     for _ in 0..2 {
         file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
         apply(&ctx, &mut app, Action::Import);
-        poll(&ctx, &mut app);
+        poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     }
     let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     assert_ne!(
@@ -111,7 +111,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
         checkpoint.accepted_time()
     );
     app.state.model.design_execution_epoch += 1;
-    poll(&ctx, &mut app);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
         ctx.data(|data| data.get_temp::<Inspection>(inspection_id()))
             .is_none()
@@ -129,7 +129,7 @@ fn transient_checkpoint_file_actions_preserve_binary_identity_owner_and_project(
     std::fs::write(&path, b"wrong checkpoint kind").unwrap();
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path));
     apply(&ctx, &mut app, Action::Import);
-    poll(&ctx, &mut app);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
         app.state
             .model
