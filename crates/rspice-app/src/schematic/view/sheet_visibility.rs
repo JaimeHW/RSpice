@@ -325,7 +325,9 @@ pub(crate) enum SchematicObjectKind {
 }
 
 impl SchematicObjectKind {
-    /// Every kind, in the order Edit ▸ Select ▸ lists them.
+    /// Every kind, in the order Edit ▸ Select ▸ lists them; the tests check
+    /// their fixtures cover each one.
+    #[cfg(test)]
     pub(crate) const ALL: [Self; 6] = [
         Self::Instances,
         Self::Wires,
