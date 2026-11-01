@@ -48,7 +48,7 @@ impl Driven {
 
 fn instance_name(driven: Driven) -> PropertyDefinition {
     PropertyDefinition::new("name")
-        .with_display_name("Instance Name")
+        .with_display_name("Instance name")
         .with_type(PropertyType::String)
         .with_default(PropertyValue::string(driven.default_name()))
         .with_order(0)
@@ -97,7 +97,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("fc")
-                .with_display_name("Carrier Freq (FC)")
+                .with_display_name("Carrier freq (FC)")
                 .with_description("Carrier frequency")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e6))
@@ -108,7 +108,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("mdi")
-                .with_display_name("Mod Index (MDI)")
+                .with_display_name("Mod index (MDI)")
                 .with_description("Modulation index; limited to FC/FM during simulation")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -117,7 +117,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("fm")
-                .with_display_name("Modulating Freq (FM)")
+                .with_display_name("Modulating freq (FM)")
                 .with_description("Signal (modulating) frequency")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e3))
@@ -127,7 +127,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Output is exactly zero before this time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -137,7 +137,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("phasem")
-                .with_display_name("Mod Phase (PHASEM)")
+                .with_display_name("Mod phase (PHASEM)")
                 .with_description("Modulation phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -148,7 +148,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("phasec")
-                .with_display_name("Carrier Phase (PHASEC)")
+                .with_display_name("Carrier phase (PHASEC)")
                 .with_description("Carrier phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -185,7 +185,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vmo")
-                .with_display_name("Mod Offset (VMO)")
+                .with_display_name("Mod offset (VMO)")
                 .with_description("Envelope offset; 0 gives full-depth modulation")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -195,7 +195,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vma")
-                .with_display_name("Mod Amplitude (VMA)")
+                .with_display_name("Mod amplitude (VMA)")
                 .with_description("Envelope swing about the modulation offset")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(driven.full_scale()))
@@ -206,7 +206,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("fm")
-                .with_display_name("Mod Freq (FM)")
+                .with_display_name("Mod freq (FM)")
                 .with_description("Modulating frequency")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e3))
@@ -217,7 +217,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("fc")
-                .with_display_name("Carrier Freq (FC)")
+                .with_display_name("Carrier freq (FC)")
                 .with_description("Carrier frequency")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e6))
@@ -228,7 +228,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Output is exactly zero before this time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -238,7 +238,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("phasem")
-                .with_display_name("Mod Phase (PHASEM)")
+                .with_display_name("Mod phase (PHASEM)")
                 .with_description("Modulation phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -249,7 +249,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("phasec")
-                .with_display_name("Carrier Phase (PHASEC)")
+                .with_display_name("Carrier phase (PHASEC)")
                 .with_description("Carrier phase in degrees")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -275,7 +275,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("vhi")
-                .with_display_name("High Level (VHI)")
+                .with_display_name("High level (VHI)")
                 .with_description("Output for a 1 bit")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(driven.full_scale()))
@@ -286,7 +286,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vlo")
-                .with_display_name("Low Level (VLO)")
+                .with_display_name("Low level (VLO)")
                 .with_description("Output for a 0 bit")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -297,7 +297,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("data")
-                .with_display_name("Bit Pattern (DATA)")
+                .with_display_name("Bit pattern (DATA)")
                 .with_description("B-prefixed bit string, for example b0101")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("b0101"))
@@ -307,7 +307,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tsample")
-                .with_display_name("Bit Interval (TSAMPLE)")
+                .with_display_name("Bit interval (TSAMPLE)")
                 .with_description("Time held per bit; must be greater than zero")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
@@ -318,7 +318,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Delay before the first bit; may be negative")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -328,7 +328,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tr")
-                .with_display_name("Rise Time (TR)")
+                .with_display_name("Rise time (TR)")
                 .with_description("Low-to-high edge duration; must be greater than zero")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
@@ -338,7 +338,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tf")
-                .with_display_name("Fall Time (TF)")
+                .with_display_name("Fall time (TF)")
                 .with_description("High-to-low edge duration; must be greater than zero")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
@@ -348,7 +348,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("repeat_count")
-                .with_display_name("Repeat Count (R)")
+                .with_display_name("Repeat count (R)")
                 .with_description("Extra pattern repetitions; -1 repeats forever")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -387,7 +387,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("na")
-                .with_display_name("White RMS Amplitude")
+                .with_display_name("White RMS amplitude")
                 .with_description("Gaussian white-noise RMS amplitude (0 disables)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1n"))
@@ -397,7 +397,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nt")
-                .with_display_name("Sample Interval")
+                .with_display_name("Sample interval")
                 .with_description("Noise sample timestep (must be > 0 when noise is enabled)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1u"))
@@ -407,7 +407,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nalpha")
-                .with_display_name("1/f Exponent")
+                .with_display_name("1/f exponent")
                 .with_description("Flicker-noise exponent (0 < NALPHA < 2 when 1/f is enabled)")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -416,7 +416,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("namp")
-                .with_display_name("1/f Amplitude")
+                .with_display_name("1/f amplitude")
                 .with_description("Flicker-noise amplitude (0 disables the 1/f term)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -432,7 +432,7 @@ impl PropertyCatalog {
         // all-or-nothing group — see `source_contract::trnoise_findings`.
         sheet.add(
             PropertyDefinition::new("rtsam")
-                .with_display_name("RTS Amplitude")
+                .with_display_name("RTS amplitude")
                 .with_description("Random-telegraph step height (0 disables the RTS term)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -442,7 +442,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("rtscapt")
-                .with_display_name("Capture Mean Time")
+                .with_display_name("Capture mean time")
                 .with_description("Mean dwell in the low state; must pair with the emission time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -452,7 +452,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("rtsemt")
-                .with_display_name("Emission Mean Time")
+                .with_display_name("Emission mean time")
                 .with_description("Mean dwell in the high state; must pair with the capture time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -516,7 +516,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ts")
-                .with_display_name("Sample Interval (TS)")
+                .with_display_name("Sample interval (TS)")
                 .with_description("How long each drawn value is held; must be greater than zero")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1u"))
@@ -527,7 +527,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Drawing starts here; the output holds PARAM2 until then")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -574,17 +574,17 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("file")
-                .with_display_name("Data File")
+                .with_display_name("Data file")
                 .with_description("CSV (time,value rows) or WAV file holding the waveform")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
                 .with_order(10)
-                .with_category("Data File")
+                .with_category("Data file")
                 .required(),
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time")
+                .with_display_name("Delay time")
                 .with_description(
                     "Time delay before the waveform starts; the source is zero until then",
                 )
@@ -592,11 +592,11 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
                 .with_order(11)
-                .with_category("Data File"),
+                .with_category("Data file"),
         );
         sheet.add(
             PropertyDefinition::new("r")
-                .with_display_name("Repeat From")
+                .with_display_name("Repeat from")
                 .with_description(
                     "Source time the waveform repeats from after its last point; 0 repeats the whole file, blank never repeats",
                 )
@@ -604,7 +604,7 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::string(""))
                 .with_unit("s")
                 .with_order(12)
-                .with_category("Data File"),
+                .with_category("Data file"),
         );
 
         // Scaling is applied to the file's own columns as it is read. The
@@ -612,7 +612,7 @@ impl PropertyCatalog {
         // the reader's, not a guess.
         sheet.add(
             PropertyDefinition::new("tscale")
-                .with_display_name("Time Scale")
+                .with_display_name("Time scale")
                 .with_description("Multiplies every time in the file")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -621,7 +621,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vscale")
-                .with_display_name("Value Scale")
+                .with_display_name("Value scale")
                 .with_description("Multiplies every value in the file")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -630,7 +630,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("toffset")
-                .with_display_name("Time Offset")
+                .with_display_name("Time offset")
                 .with_description("Added to every time after scaling")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -640,7 +640,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("voffset")
-                .with_display_name("Value Offset")
+                .with_display_name("Value offset")
                 .with_description("Added to every value after scaling")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))

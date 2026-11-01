@@ -10,7 +10,7 @@ impl PropertyCatalog {
         // Instance category
         diode.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this diode instance")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("D1"))
@@ -33,7 +33,7 @@ impl PropertyCatalog {
         // Geometry category
         diode.add(
             PropertyDefinition::new("area")
-                .with_display_name("Area Factor")
+                .with_display_name("Area factor")
                 .with_description("Junction area relative to model default")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -90,25 +90,25 @@ impl PropertyCatalog {
         for (name, display, description, order) in [
             (
                 "wm",
-                "Metal Width",
+                "Metal width",
                 "Metal overlap width for LEVEL=3 overlap capacitance",
                 25,
             ),
             (
                 "lm",
-                "Metal Length",
+                "Metal length",
                 "Metal overlap length for LEVEL=3 overlap capacitance",
                 26,
             ),
             (
                 "wp",
-                "Poly Width",
+                "Poly width",
                 "Polysilicon overlap width for LEVEL=3 overlap capacitance",
                 27,
             ),
             (
                 "lp",
-                "Poly Length",
+                "Poly length",
                 "Polysilicon overlap length for LEVEL=3 overlap capacitance",
                 28,
             ),
@@ -141,7 +141,7 @@ impl PropertyCatalog {
         );
         diode.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))

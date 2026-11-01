@@ -13,7 +13,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("L1"))
                 .with_order(0)
@@ -35,7 +35,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("model")
-                .with_display_name("Core Model")
+                .with_display_name("Core model")
                 .with_description("Library CORE model name; overrides the magnetics parameters")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -45,7 +45,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("ms")
-                .with_display_name("Saturation Magnetization")
+                .with_display_name("Saturation magnetization")
                 .with_description("Jiles-Atherton saturation magnetization MS")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.4))
@@ -55,7 +55,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("a")
-                .with_display_name("Anhysteretic Shape")
+                .with_display_name("Anhysteretic shape")
                 .with_description("Jiles-Atherton anhysteretic shape parameter A")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(200.0))
@@ -85,7 +85,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("alpha")
-                .with_display_name("Inter-domain Coupling")
+                .with_display_name("Inter-domain coupling")
                 .with_description("Jiles-Atherton mean-field coupling ALPHA")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1e-4))
@@ -95,7 +95,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("area")
-                .with_display_name("Core Area")
+                .with_display_name("Core area")
                 .with_description("Magnetic core cross-sectional area")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1e-4"))
@@ -105,7 +105,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("length")
-                .with_display_name("Path Length")
+                .with_display_name("Path length")
                 .with_description("Mean magnetic path length")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0.1"))

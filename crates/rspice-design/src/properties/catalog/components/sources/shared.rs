@@ -29,7 +29,7 @@ impl PropertyCatalog {
     pub(super) fn add_ac_params(sheet: &mut PropertySheet, unit: &str, ac_default: f64) {
         sheet.add(
             PropertyDefinition::new("ac")
-                .with_display_name("AC Magnitude")
+                .with_display_name("AC magnitude")
                 .with_description("Small-signal AC magnitude for AC analysis")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(ac_default))
@@ -39,7 +39,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("acphase")
-                .with_display_name("AC Phase")
+                .with_display_name("AC phase")
                 .with_description("Small-signal AC phase in degrees")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -57,7 +57,7 @@ impl PropertyCatalog {
     pub(super) fn add_advanced_ac_params(sheet: &mut PropertySheet, unit: &str) {
         sheet.add(
             PropertyDefinition::new("xfmag")
-                .with_display_name("XF Magnitude")
+                .with_display_name("XF magnitude")
                 .with_description("Transfer function (XF) analysis magnitude")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -68,7 +68,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacmag")
-                .with_display_name("PAC Magnitude")
+                .with_display_name("PAC magnitude")
                 .with_description("Periodic AC analysis magnitude")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -79,7 +79,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacdbm")
-                .with_display_name("PAC Power (dBm)")
+                .with_display_name("PAC power (dBm)")
                 .with_description("Periodic AC power in dBm; leave blank to disable")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -90,7 +90,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacphase")
-                .with_display_name("PAC Phase")
+                .with_display_name("PAC phase")
                 .with_description("Periodic AC phase in degrees")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -110,7 +110,7 @@ impl PropertyCatalog {
     pub(super) fn add_distortion_params(sheet: &mut PropertySheet, unit: &str) {
         sheet.add(
             PropertyDefinition::new("distof1_mag")
-                .with_display_name("Distortion F1 Magnitude")
+                .with_display_name("Distortion F1 magnitude")
                 .with_description("Distortion analysis excitation magnitude at the first tone")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -121,7 +121,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("distof1_phase")
-                .with_display_name("Distortion F1 Phase")
+                .with_display_name("Distortion F1 phase")
                 .with_description("Distortion analysis excitation phase at the first tone")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -133,7 +133,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("distof2_mag")
-                .with_display_name("Distortion F2 Magnitude")
+                .with_display_name("Distortion F2 magnitude")
                 .with_description("Distortion analysis excitation magnitude at the second tone")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -144,7 +144,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("distof2_phase")
-                .with_display_name("Distortion F2 Phase")
+                .with_display_name("Distortion F2 phase")
                 .with_description("Distortion analysis excitation phase at the second tone")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -167,7 +167,7 @@ impl PropertyCatalog {
         if include_series_resistance {
             sheet.add(
                 PropertyDefinition::new("rs")
-                    .with_display_name("Series Resistance")
+                    .with_display_name("Series resistance")
                     .with_description("Internal series resistance (0 = ideal)")
                     .with_type(PropertyType::Expression)
                     .with_default(PropertyValue::number(0.0))
@@ -179,7 +179,7 @@ impl PropertyCatalog {
         }
         sheet.add(
             PropertyDefinition::new("rp")
-                .with_display_name("Parallel Resistance")
+                .with_display_name("Parallel resistance")
                 .with_description("Parallel leakage resistance; leave blank for ideal")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -190,7 +190,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("cpar")
-                .with_display_name("Parasitic Capacitance")
+                .with_display_name("Parasitic capacitance")
                 .with_description("Parasitic shunt capacitance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))

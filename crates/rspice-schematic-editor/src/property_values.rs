@@ -1,9 +1,9 @@
 //! Typed value editors for registry rows — mono inputs for numbers,
 //! strings, and expressions; chips for small enums; checks for booleans.
 //!
-//! Every editor fills the width of its grid cell and stands exactly one
-//! control track tall, so a boolean or a small enum carries the same visual
-//! weight as the mono inputs beside it.
+//! Every editor takes the width of its grid cell and stands exactly one
+//! control track tall, so the fields after a boolean or a small enum stay on
+//! the rows of the mono inputs beside it.
 
 use egui::{Sense, Stroke, Ui, pos2, vec2};
 
@@ -12,7 +12,7 @@ use rspice_design::properties::value::{
 };
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_ui_kit::widgets::{chip, mono_input, select_mono_with_response};
+use rspice_ui_kit::widgets::{chip, mono_input, mono_input_with_unit, select_mono_with_response};
 use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertyType, PropertyValue};
 use rspice_vocabulary::quantity::{
     QuantityInputKind, QuantityPresentationPolicy, UiNumberLocale, format_engineering_value,
@@ -21,8 +21,8 @@ use rspice_vocabulary::quantity::{
 /// Whether the editor's own text carries this property's unit.
 ///
 /// The unit-safe parser refuses a bare number for these kinds, so the unit is
-/// part of the value's syntax rather than metadata about it. The caption reads
-/// the same predicate and suppresses its unit chip for them, so the unit is
+/// part of the value's syntax rather than metadata about it. The well reads
+/// the same predicate and states no unit beside such a value, so the unit is
 /// presented exactly once.
 pub fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {
     definition.prop_type == PropertyType::Number
@@ -30,6 +30,15 @@ pub fn unit_is_part_of_value_text(definition: &PropertyDefinition) -> bool {
             definition.unit.as_deref(),
             Some("s" | "Hz" | "°" | "deg" | "rad" | "K" | "°C" | "°F")
         )
+}
+
+/// The unit a field states inside its well's trailing edge: the schema's,
+/// unless the value's own text already carries it.
+pub fn unit_beside_value(definition: &PropertyDefinition) -> Option<&str> {
+    definition
+        .unit
+        .as_deref()
+        .filter(|_| !unit_is_part_of_value_text(definition))
 }
 
 /// Append the unit the value's own syntax must carry, if any.
@@ -172,7 +181,13 @@ fn render_number_editor(
         .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
-    let response = mono_input(ui, &def.display_name, &mut new_text, width);
+    let response = mono_input_with_unit(
+        ui,
+        &def.display_name,
+        &mut new_text,
+        width,
+        unit_beside_value(def),
+    );
 
     if response.changed() && new_text != text {
         return match parse_number_source(def, &new_text, quantity_policy, number_locale) {
@@ -221,7 +236,13 @@ fn render_expression_editor(
         .unwrap_or_else(|| editor_source_text(def, current, quantity_policy, number_locale));
 
     let mut new_text = text.clone();
-    let response = mono_input(ui, &def.display_name, &mut new_text, width);
+    let response = mono_input_with_unit(
+        ui,
+        &def.display_name,
+        &mut new_text,
+        width,
+        unit_beside_value(def),
+    );
 
     if response.changed() && new_text != text {
         return match parse_expression_source(def, &new_text, quantity_policy, number_locale) {
@@ -370,9 +391,17 @@ fn chips_fit(ui: &Ui, options: &[String], width: f32) -> bool {
 /// Horizontal padding `chip` adds around its label.
 const CHIP_WIDTH_PADDING: f32 = 18.0;
 
-/// Boolean editor — a full-cell check control styled as the inset well its
-/// neighboring value inputs use, so a flag never reads as a stray square in
-/// an otherwise empty half-row.
+/// Side of a check box, as the kit's forms draw theirs.
+const CHECK_SIDE: f32 = 14.0;
+
+/// Boolean editor: a check box at the start of the control track, as the
+/// kit's forms draw theirs, under the caption that names it.
+///
+/// It used to be drawn inside an inset well the width of the cell, with the
+/// words `yes` or `no` after the box, which made a flag read as a text field
+/// holding a check box. The box states the value; the caption names it. The
+/// press target is the control track's height square, so the box is as easy
+/// to reach as the wells beside it.
 fn render_boolean_editor(
     ui: &mut Ui,
     def: &PropertyDefinition,
@@ -383,7 +412,14 @@ fn render_boolean_editor(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
 
-    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::click());
+    let (track, _) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::hover());
+    let target =
+        egui::Rect::from_min_size(track.min, vec2(t.metrics.ctl_h.min(width), t.metrics.ctl_h));
+    let response = ui.interact(
+        target,
+        ui.id().with(("property-check", &def.name)),
+        Sense::click(),
+    );
     let mut new_value = value;
     if response.clicked() {
         new_value = !value;
@@ -405,64 +441,34 @@ fn render_boolean_editor(
         )
     });
 
-    if ui.is_rect_visible(rect) {
-        let hover = ui.ctx().animate_bool_with_time(
-            response.id,
-            response.hovered(),
-            ui.style().animation_time,
-        );
+    let mark = egui::Rect::from_center_size(
+        pos2(track.left() + CHECK_SIDE * 0.5, track.center().y),
+        egui::Vec2::splat(CHECK_SIDE),
+    );
+    if ui.is_rect_visible(track) {
+        let border = if ui.is_enabled() && response.hovered() {
+            c.border_strong
+        } else {
+            c.border
+        };
         let painter = ui.painter();
         painter.rect(
-            rect,
-            t.radius,
+            mark,
+            3.0,
             c.bg_inset,
-            Stroke::new(1.0, theme::mix(c.border, c.border_strong, hover)),
-            egui::StrokeKind::Inside,
-        );
-
-        let box_size = 13.0;
-        let box_rect = egui::Rect::from_center_size(
-            pos2(rect.left() + 8.0 + box_size * 0.5, rect.center().y),
-            egui::Vec2::splat(box_size),
-        );
-        painter.rect(
-            box_rect,
-            2.0,
-            if new_value {
-                c.accent
-            } else {
-                egui::Color32::TRANSPARENT
-            },
-            Stroke::new(
-                1.0,
-                if new_value {
-                    c.accent
-                } else {
-                    theme::mix(c.border_strong, c.text_dim, hover)
-                },
-            ),
+            Stroke::new(1.0, border),
             egui::StrokeKind::Inside,
         );
         if new_value {
-            let center = box_rect.center();
+            // A tick on the 14-unit box: down to the base, then up and out.
+            let at = |x: f32, y: f32| pos2(mark.left() + x, mark.top() + y);
             painter.add(egui::Shape::line(
-                vec![
-                    pos2(center.x - 3.2, center.y - 0.2),
-                    pos2(center.x - 0.8, center.y + 2.4),
-                    pos2(center.x + 3.4, center.y - 2.6),
-                ],
-                Stroke::new(1.6, c.accent_ink),
+                vec![at(3.5, 7.2), at(6.0, 9.8), at(10.6, 4.4)],
+                Stroke::new(1.6, c.text),
             ));
         }
-        painter.text(
-            pos2(box_rect.right() + 8.0, rect.center().y),
-            egui::Align2::LEFT_CENTER,
-            PropertyValue::Boolean(new_value).display_string(),
-            theme::mono(tokens::FS_1, FontWeight::Regular),
-            c.text,
-        );
     }
-    theme::paint_focus_ring_outset(ui, &response, rect);
+    theme::paint_focus_ring_outset(ui, &response, mark);
 
     ValueEditorOutput::control(
         response.id,

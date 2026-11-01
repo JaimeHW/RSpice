@@ -14,7 +14,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this current source")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
@@ -28,7 +28,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("dc")
-                .with_display_name("DC Current")
+                .with_display_name("DC current")
                 .with_description("DC current value. Used as operating point for AC analysis.")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -43,7 +43,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("ac")
-                .with_display_name("AC Magnitude")
+                .with_display_name("AC magnitude")
                 .with_description("Small-signal AC magnitude for frequency analysis")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -53,7 +53,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("acphase")
-                .with_display_name("AC Phase")
+                .with_display_name("AC phase")
                 .with_description("Small-signal AC phase angle")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -68,7 +68,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("xfmag")
-                .with_display_name("XF Magnitude")
+                .with_display_name("XF magnitude")
                 .with_description("Transfer function (XF) analysis magnitude")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -79,7 +79,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacmag")
-                .with_display_name("PAC Magnitude")
+                .with_display_name("PAC magnitude")
                 .with_description("Periodic AC analysis magnitude (linear)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -101,7 +101,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacphase")
-                .with_display_name("PAC Phase")
+                .with_display_name("PAC phase")
                 .with_description("Periodic AC phase angle")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -122,7 +122,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("rp")
-                .with_display_name("Parallel Resistance")
+                .with_display_name("Parallel resistance")
                 .with_description("Internal parallel resistance; leave blank for ideal")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -133,7 +133,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("cpar")
-                .with_display_name("Parallel Capacitance")
+                .with_display_name("Parallel capacitance")
                 .with_description("Parasitic shunt capacitance (0 = none)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -170,7 +170,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this AC current source")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
@@ -184,7 +184,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("dc")
-                .with_display_name("DC Offset")
+                .with_display_name("DC offset")
                 .with_description("DC offset current for operating point calculation")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -198,7 +198,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("ac")
-                .with_display_name("AC Magnitude")
+                .with_display_name("AC magnitude")
                 .with_description("Small-signal AC magnitude (primary parameter)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0)) // Default to 1A for AC source
@@ -209,7 +209,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("acphase")
-                .with_display_name("AC Phase")
+                .with_display_name("AC phase")
                 .with_description("Small-signal AC phase angle")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -224,7 +224,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("xfmag")
-                .with_display_name("XF Magnitude")
+                .with_display_name("XF magnitude")
                 .with_description("Transfer function (XF) analysis magnitude")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -235,7 +235,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacmag")
-                .with_display_name("PAC Magnitude")
+                .with_display_name("PAC magnitude")
                 .with_description("Periodic AC analysis magnitude (linear)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -257,7 +257,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pacphase")
-                .with_display_name("PAC Phase")
+                .with_display_name("PAC phase")
                 .with_description("Periodic AC phase angle")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -278,7 +278,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("rp")
-                .with_display_name("Parallel Resistance")
+                .with_display_name("Parallel resistance")
                 .with_description("Internal parallel resistance; leave blank for ideal")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -289,7 +289,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("cpar")
-                .with_display_name("Parallel Capacitance")
+                .with_display_name("Parallel capacitance")
                 .with_description("Parasitic shunt capacitance (0 = none)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))

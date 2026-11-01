@@ -12,7 +12,10 @@ pub use dialog::{
     ComponentPropertyDialogView, ComponentPropertyServices, render_component_property_dialog,
 };
 pub use evidence::provenance_colour;
-pub use form::{PropertyBrowseRequest, render_component_parameters, section_band};
+pub use form::{
+    InstanceIdentity, ParametersPane, PropertyBrowseRequest, render_component_parameters,
+    section_band,
+};
 
 use rspice_design::schematic::component_type::ComponentType;
 use rspice_vocabulary::property::{

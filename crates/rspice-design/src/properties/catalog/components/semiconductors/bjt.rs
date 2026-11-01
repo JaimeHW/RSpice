@@ -43,7 +43,7 @@ impl PropertyCatalog {
         // Instance category
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this BJT instance")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(default_name))
@@ -66,7 +66,7 @@ impl PropertyCatalog {
         // Geometry category
         sheet.add(
             PropertyDefinition::new("area")
-                .with_display_name("Area Factor")
+                .with_display_name("Area factor")
                 .with_description("Emitter area multiplier relative to model default")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -103,7 +103,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -115,12 +115,12 @@ impl PropertyCatalog {
         // Initial Conditions category
         sheet.add(
             PropertyDefinition::new("off")
-                .with_display_name("Initially Off")
+                .with_display_name("Initially off")
                 .with_description("Start in off state for DC operating point")
                 .with_type(PropertyType::Boolean)
                 .with_default(PropertyValue::boolean(false))
                 .with_order(40)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
         // No region hint and no per-junction initial conditions: the BJT
         // instance contract the engine reads is AREA/M/OFF/TEMP/DTEMP only,

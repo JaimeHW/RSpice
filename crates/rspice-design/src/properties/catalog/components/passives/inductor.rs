@@ -10,7 +10,7 @@ impl PropertyCatalog {
         // Instance category
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("L1"))
                 .with_order(0)
@@ -43,7 +43,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("scale")
-                .with_display_name("Scale Factor")
+                .with_display_name("Scale factor")
                 .with_description("Inductance scaling factor")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -55,7 +55,7 @@ impl PropertyCatalog {
         // editor still opens with the inductance focused.
         sheet.add(
             PropertyDefinition::new("model")
-                .with_display_name("Inductor Model")
+                .with_display_name("Inductor model")
                 .with_description(
                     "Library L model card supplying the nominal and temperature terms",
                 )
@@ -71,7 +71,7 @@ impl PropertyCatalog {
         // not read by any device.
         sheet.add(
             PropertyDefinition::new("rser")
-                .with_display_name("Series Resistance")
+                .with_display_name("Series resistance")
                 .with_description("Winding DC resistance inserted through an internal node")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -81,7 +81,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("rpar")
-                .with_display_name("Parallel Resistance")
+                .with_display_name("Parallel resistance")
                 .with_description("Core-loss resistance placed across the inductor")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -91,7 +91,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("cpar")
-                .with_display_name("Parallel Capacitance")
+                .with_display_name("Parallel capacitance")
                 .with_description("Inter-winding capacitance placed across the inductor")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -103,7 +103,7 @@ impl PropertyCatalog {
         // Temperature coefficients
         sheet.add(
             PropertyDefinition::new("tc1")
-                .with_display_name("Temp Coeff 1")
+                .with_display_name("Temp coeff 1")
                 .with_description("First-order temperature coefficient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -113,7 +113,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tc2")
-                .with_display_name("Temp Coeff 2")
+                .with_display_name("Temp coeff 2")
                 .with_description("Second-order temperature coefficient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -123,7 +123,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -147,19 +147,19 @@ impl PropertyCatalog {
         // Initial conditions
         sheet.add(
             PropertyDefinition::new("ic")
-                .with_display_name("Initial Current")
+                .with_display_name("Initial current")
                 .with_description("Initial current through inductor for transient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("A")
                 .with_order(30)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
 
         // Mutual inductance coupling
         sheet.add(
             PropertyDefinition::new("coupling_factor")
-                .with_display_name("Coupling Factor")
+                .with_display_name("Coupling factor")
                 .with_description(
                     "Signed mutual coupling (-1 to 1); negative values reverse mutual polarity",
                 )
@@ -171,7 +171,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("coupled_to")
-                .with_display_name("Coupled To")
+                .with_display_name("Coupled to")
                 .with_description("Name of coupled inductor")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))

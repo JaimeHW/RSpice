@@ -15,7 +15,7 @@ impl PropertyCatalog {
         let mut sheet = PropertySheet::new();
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description(
                     "Names this probe; a stability analysis refers to it by this name",
                 )

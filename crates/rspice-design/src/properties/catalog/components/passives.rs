@@ -30,7 +30,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("T1"))
                 .with_order(0)
@@ -39,7 +39,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("z0")
-                .with_display_name("Characteristic Impedance")
+                .with_display_name("Characteristic impedance")
                 .with_description("Line impedance Z0")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(50.0))
@@ -66,7 +66,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("f")
-                .with_display_name("Reference Frequency")
+                .with_display_name("Reference frequency")
                 .with_description(
                     "Frequency the electrical length is stated at; setting it specifies the line \
                      by length instead of delay",
@@ -79,7 +79,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nl")
-                .with_display_name("Electrical Length")
+                .with_display_name("Electrical length")
                 .with_description(
                     "Line length in wavelengths at the reference frequency; 0.25 when left blank",
                 )
@@ -99,7 +99,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("O1"))
                 .with_order(0)
@@ -108,7 +108,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("model")
-                .with_display_name("Line Model")
+                .with_display_name("Line model")
                 .with_description("Library LTRA/TXL model name; overrides the RLGC parameters")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -117,7 +117,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("kind")
-                .with_display_name("Model Kind")
+                .with_display_name("Model kind")
                 .with_description(
                     "LTRA (convolution, requires G=0) or TXL (lumped approximation, allows G)",
                 )
@@ -131,7 +131,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("r")
-                .with_display_name("Resistance / Length")
+                .with_display_name("Resistance / length")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1"))
                 .with_unit("Ω/m")
@@ -140,7 +140,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("l")
-                .with_display_name("Inductance / Length")
+                .with_display_name("Inductance / length")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("250n"))
                 .with_unit("H/m")
@@ -149,7 +149,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("c")
-                .with_display_name("Capacitance / Length")
+                .with_display_name("Capacitance / length")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("100p"))
                 .with_unit("F/m")
@@ -158,7 +158,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("g")
-                .with_display_name("Conductance / Length")
+                .with_display_name("Conductance / length")
                 .with_description("Shunt loss (TXL only; the native LTRA runtime requires G=0)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -189,7 +189,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("P1"))
                 .with_order(0)
@@ -198,7 +198,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("model")
-                .with_display_name("Line Model")
+                .with_display_name("Line model")
                 .with_description("Library CPL model name; overrides the matrix parameters")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -213,7 +213,7 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::expression(default))
                 .with_unit(unit)
                 .with_order(order)
-                .with_category("Line Matrices")
+                .with_category("Line matrices")
         };
         sheet.add(matrix("l11", "L11 / Length", "H/m", "380n", 10));
         sheet.add(matrix("l12", "L12 / Length", "H/m", "60n", 11));

@@ -31,7 +31,7 @@ impl PropertyCatalog {
         // Instance category
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this JFET instance")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(default_name))
@@ -54,7 +54,7 @@ impl PropertyCatalog {
         // Geometry category
         sheet.add(
             PropertyDefinition::new("area")
-                .with_display_name("Area Factor")
+                .with_display_name("Area factor")
                 .with_description("Device area multiplier")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -99,7 +99,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nf")
-                .with_display_name("# Fingers")
+                .with_display_name("# fingers")
                 .with_description("Number of gate fingers folded into the W/L scaling")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -123,7 +123,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))

@@ -11,7 +11,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("V1"))
                 .with_order(0)
@@ -22,7 +22,7 @@ impl PropertyCatalog {
         // PULSE(V1 V2 TD TR TF PW PER)
         sheet.add(
             PropertyDefinition::new("v1")
-                .with_display_name("Initial Value (V1)")
+                .with_display_name("Initial value (V1)")
                 .with_description("Initial voltage before pulse")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -33,7 +33,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("v2")
-                .with_display_name("Pulsed Value (V2)")
+                .with_display_name("Pulsed value (V2)")
                 .with_description("Voltage during pulse")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -44,7 +44,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Time delay before first pulse")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -54,7 +54,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tr")
-                .with_display_name("Rise Time (TR)")
+                .with_display_name("Rise time (TR)")
                 .with_description("Rise time from V1 to V2")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
@@ -64,7 +64,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tf")
-                .with_display_name("Fall Time (TF)")
+                .with_display_name("Fall time (TF)")
                 .with_description("Fall time from V2 to V1")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
@@ -74,7 +74,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pw")
-                .with_display_name("Pulse Width (PW)")
+                .with_display_name("Pulse width (PW)")
                 .with_description("Duration at V2")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
@@ -94,7 +94,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("np")
-                .with_display_name("Pulse Count (NP)")
+                .with_display_name("Pulse count (NP)")
                 .with_description(
                     "How many periods the train runs for; 0 runs for the whole analysis",
                 )
@@ -121,7 +121,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("V1"))
                 .with_order(0)
@@ -132,7 +132,7 @@ impl PropertyCatalog {
         // SIN(VO VA FREQ TD THETA PHASE)
         sheet.add(
             PropertyDefinition::new("vo")
-                .with_display_name("DC Offset (VO)")
+                .with_display_name("DC offset (VO)")
                 .with_description("DC offset voltage")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -165,7 +165,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_description("Time delay before sinusoid starts")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -210,7 +210,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("V1"))
                 .with_order(0)
@@ -221,7 +221,7 @@ impl PropertyCatalog {
         // PWL data string (time-value pairs)
         sheet.add(
             PropertyDefinition::new("pwl_data")
-                .with_display_name("PWL Data")
+                .with_display_name("PWL data")
                 .with_description("Time-value pairs: t1 v1 t2 v2 ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("0 0 1u 1 2u 0"))
@@ -231,7 +231,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time")
+                .with_display_name("Delay time")
                 .with_description("Time delay before PWL starts")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -265,7 +265,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("V1"))
                 .with_order(0)
@@ -276,7 +276,7 @@ impl PropertyCatalog {
         // EXP(V1 V2 TD1 TAU1 TD2 TAU2)
         sheet.add(
             PropertyDefinition::new("v1")
-                .with_display_name("Initial Value (V1)")
+                .with_display_name("Initial value (V1)")
                 .with_description("Initial voltage")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -287,7 +287,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("v2")
-                .with_display_name("Peak Value (V2)")
+                .with_display_name("Peak value (V2)")
                 .with_description("Target voltage of first exponential")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -298,7 +298,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td1")
-                .with_display_name("Rise Delay (TD1)")
+                .with_display_name("Rise delay (TD1)")
                 .with_description("Time delay for rising exponential")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -308,7 +308,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tau1")
-                .with_display_name("Rise Time Const (TAU1)")
+                .with_display_name("Rise time const (TAU1)")
                 .with_description("Time constant for rising exponential")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
@@ -318,7 +318,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td2")
-                .with_display_name("Fall Delay (TD2)")
+                .with_display_name("Fall delay (TD2)")
                 .with_description("Time delay for falling exponential")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(5e-6))
@@ -328,7 +328,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tau2")
-                .with_display_name("Fall Time Const (TAU2)")
+                .with_display_name("Fall time const (TAU2)")
                 .with_description("Time constant for falling exponential")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))

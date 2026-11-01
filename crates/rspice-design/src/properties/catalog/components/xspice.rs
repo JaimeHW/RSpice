@@ -32,7 +32,7 @@ fn code_model_sheet(parameters: &[rspice_core_xspice::xspice::ParamSpec]) -> Pro
     let mut sheet = PropertySheet::new();
     sheet.add(
         PropertyDefinition::new("name")
-            .with_display_name("Instance Name")
+            .with_display_name("Instance name")
             .with_type(PropertyType::String)
             .with_default(PropertyValue::string("A1"))
             .with_order(0)
@@ -185,53 +185,53 @@ fn code_model_label(name: &str) -> (String, &'static str) {
         ("ic", "Initial State", ""),
         (
             "fraction",
-            "Fractional Range",
+            "Fractional range",
             "Read the smoothing range as a fraction rather than an absolute value",
         ),
         (
             "inertial_delay",
-            "Inertial Delay",
+            "Inertial delay",
             "Cancel a pending transition when the input reverts before the delay elapses",
         ),
         (
             "family",
-            "Logic Family",
+            "Logic family",
             "Named logic family supplying the loading and level defaults",
         ),
         (
             "input_load",
-            "Input Load",
+            "Input load",
             "Capacitive load presented on each input",
         ),
         (
             "enable_load",
-            "Enable Load",
+            "Enable load",
             "Capacitive load presented on the enable input",
         ),
         (
             "data_load",
-            "Data Load",
+            "Data load",
             "Capacitive load on the data input",
         ),
         (
             "clk_load",
-            "Clock Load",
+            "Clock load",
             "Capacitive load on the clock input",
         ),
         ("set_load", "Set Load", "Capacitive load on the set input"),
         (
             "reset_load",
-            "Reset Load",
+            "Reset load",
             "Capacitive load on the reset input",
         ),
         (
             "jk_load",
-            "J/K Load",
+            "J/K load",
             "Capacitive load on the J and K inputs",
         ),
         (
             "sr_load",
-            "S/R Load",
+            "S/R load",
             "Capacitive load on the S and R inputs",
         ),
         ("sr_delay", "S/R Delay", ""),
@@ -246,19 +246,19 @@ fn code_model_label(name: &str) -> (String, &'static str) {
         ("t_fall", "Fall Time", "Output transition time high to low"),
         (
             "in_low",
-            "Input Low Threshold",
+            "Input low threshold",
             "Analog level at or below which the input reads as a digital zero",
         ),
         (
             "in_high",
-            "Input High Threshold",
+            "Input high threshold",
             "Analog level at or above which the input reads as a digital one",
         ),
         ("out_low", "Output Low", "Analog level driven for a zero"),
         ("out_high", "Output High", "Analog level driven for a one"),
         (
             "out_undef",
-            "Output Undefined",
+            "Output undefined",
             "Analog level driven for an unknown state",
         ),
         ("gain", "Gain", ""),

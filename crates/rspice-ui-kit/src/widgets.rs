@@ -52,7 +52,8 @@ pub use dialog::{
 pub use docbar::docbar_at_height;
 pub use form::name_control;
 pub use form::{
-    choice_row, field_label, input_row, kv_row, mono_input, read_only_value, switch_row,
+    choice_row, field_label, input_row, kv_row, mono_input, mono_input_with_unit, read_only_value,
+    switch_row,
 };
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{

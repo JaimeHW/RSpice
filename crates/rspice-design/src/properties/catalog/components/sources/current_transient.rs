@@ -11,7 +11,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
                 .with_order(0)
@@ -22,7 +22,7 @@ impl PropertyCatalog {
         // PULSE parameters for current
         sheet.add(
             PropertyDefinition::new("i1")
-                .with_display_name("Initial Value (I1)")
+                .with_display_name("Initial value (I1)")
                 .with_description("Initial current before pulse")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -33,7 +33,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("i2")
-                .with_display_name("Pulsed Value (I2)")
+                .with_display_name("Pulsed value (I2)")
                 .with_description("Current during pulse")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-3))
@@ -44,7 +44,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time (TD)")
+                .with_display_name("Delay time (TD)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
@@ -53,7 +53,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tr")
-                .with_display_name("Rise Time (TR)")
+                .with_display_name("Rise time (TR)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
                 .with_unit("s")
@@ -62,7 +62,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tf")
-                .with_display_name("Fall Time (TF)")
+                .with_display_name("Fall time (TF)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-9))
                 .with_unit("s")
@@ -71,7 +71,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pw")
-                .with_display_name("Pulse Width (PW)")
+                .with_display_name("Pulse width (PW)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
                 .with_unit("s")
@@ -89,7 +89,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("np")
-                .with_display_name("Pulse Count (NP)")
+                .with_display_name("Pulse count (NP)")
                 .with_description(
                     "How many periods the train runs for; 0 runs for the whole analysis",
                 )
@@ -117,7 +117,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
                 .with_order(0)
@@ -128,7 +128,7 @@ impl PropertyCatalog {
         // SIN parameters for current
         sheet.add(
             PropertyDefinition::new("io")
-                .with_display_name("DC Offset (IO)")
+                .with_display_name("DC offset (IO)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("A")
@@ -158,7 +158,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time")
+                .with_display_name("Delay time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
@@ -200,7 +200,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
                 .with_order(0)
@@ -209,7 +209,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pwl_data")
-                .with_display_name("PWL Data")
+                .with_display_name("PWL data")
                 .with_description("Time-value pairs: t1 i1 t2 i2 ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("0 0 1u 1m 2u 0"))
@@ -219,7 +219,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td")
-                .with_display_name("Delay Time")
+                .with_display_name("Delay time")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
@@ -251,7 +251,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("I1"))
                 .with_order(0)
@@ -262,7 +262,7 @@ impl PropertyCatalog {
         // EXP parameters
         sheet.add(
             PropertyDefinition::new("i1")
-                .with_display_name("Initial Value (I1)")
+                .with_display_name("Initial value (I1)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("A")
@@ -272,7 +272,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("i2")
-                .with_display_name("Peak Value (I2)")
+                .with_display_name("Peak value (I2)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-3))
                 .with_unit("A")
@@ -282,7 +282,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td1")
-                .with_display_name("Rise Delay")
+                .with_display_name("Rise delay")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("s")
@@ -291,7 +291,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tau1")
-                .with_display_name("Rise Time Const")
+                .with_display_name("Rise time const")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
                 .with_unit("s")
@@ -300,7 +300,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("td2")
-                .with_display_name("Fall Delay")
+                .with_display_name("Fall delay")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(5e-6))
                 .with_unit("s")
@@ -309,7 +309,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tau2")
-                .with_display_name("Fall Time Const")
+                .with_display_name("Fall time const")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e-6))
                 .with_unit("s")

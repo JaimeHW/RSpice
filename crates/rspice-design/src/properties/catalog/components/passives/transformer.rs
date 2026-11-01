@@ -13,7 +13,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this transformer")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("T1"))
@@ -24,7 +24,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("lp")
-                .with_display_name("Primary Inductance")
+                .with_display_name("Primary inductance")
                 .with_description("Primary winding inductance in Henries")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1m"))
@@ -36,7 +36,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("turns_ratio")
-                .with_display_name("Turns Ratio")
+                .with_display_name("Turns ratio")
                 .with_description("Secondary-to-primary turns ratio (Ns/Np) used when secondary inductance is not specified")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1"))
@@ -46,7 +46,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ls")
-                .with_display_name("Secondary Inductance")
+                .with_display_name("Secondary inductance")
                 .with_description("Optional explicit secondary inductance override; leave empty to derive from turns ratio")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -57,7 +57,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("k")
-                .with_display_name("Coupling Factor")
+                .with_display_name("Coupling factor")
                 .with_description(
                     "Signed magnetic coupling (-1 to 1); negative values reverse mutual polarity",
                 )
@@ -71,7 +71,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("rp")
-                .with_display_name("Primary Series Resistance")
+                .with_display_name("Primary series resistance")
                 .with_description("Primary winding series resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -81,7 +81,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("icp")
-                .with_display_name("Primary Initial Current")
+                .with_display_name("Primary initial current")
                 .with_description("Initial primary winding current for transient analysis")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -91,7 +91,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("rs")
-                .with_display_name("Secondary Series Resistance")
+                .with_display_name("Secondary series resistance")
                 .with_description("Secondary winding series resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -101,7 +101,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ics")
-                .with_display_name("Secondary Initial Current")
+                .with_display_name("Secondary initial current")
                 .with_description("Initial secondary winding current for transient analysis")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -119,7 +119,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Coupling statement instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("K1"))
@@ -129,7 +129,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("k")
-                .with_display_name("Coupling Coefficient")
+                .with_display_name("Coupling coefficient")
                 .with_description(
                     "Signed mutual coupling (-1 to 1); zero leaves the windings uncoupled",
                 )

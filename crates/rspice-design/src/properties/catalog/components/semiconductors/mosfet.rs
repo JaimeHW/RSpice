@@ -42,7 +42,7 @@ impl PropertyCatalog {
 
             sheet.add(
                 PropertyDefinition::new("name")
-                    .with_display_name("Instance Name")
+                    .with_display_name("Instance name")
                     .with_description("Unique identifier for this power MOSFET instance")
                     .with_type(PropertyType::String)
                     .with_default(PropertyValue::string("M1"))
@@ -61,7 +61,7 @@ impl PropertyCatalog {
             );
             sheet.add(
                 PropertyDefinition::new("w")
-                    .with_display_name("Width Scale")
+                    .with_display_name("Width scale")
                     .with_description("Channel width scale factor")
                     .with_type(PropertyType::Expression)
                     .with_default(PropertyValue::expression("1"))
@@ -70,7 +70,7 @@ impl PropertyCatalog {
             );
             sheet.add(
                 PropertyDefinition::new("l")
-                    .with_display_name("Length Scale")
+                    .with_display_name("Length scale")
                     .with_description("Channel length scale factor")
                     .with_type(PropertyType::Expression)
                     .with_default(PropertyValue::expression("1u"))
@@ -92,28 +92,28 @@ impl PropertyCatalog {
             for (name, display, description, unit, order) in [
                 (
                     "as",
-                    "Source Area",
+                    "Source area",
                     "Source diffusion area for junction capacitance",
                     "m²",
                     23,
                 ),
                 (
                     "ad",
-                    "Drain Area",
+                    "Drain area",
                     "Drain diffusion area for junction capacitance",
                     "m²",
                     24,
                 ),
                 (
                     "ps",
-                    "Source Perimeter",
+                    "Source perimeter",
                     "Source diffusion perimeter for sidewall capacitance",
                     "m",
                     25,
                 ),
                 (
                     "pd",
-                    "Drain Perimeter",
+                    "Drain perimeter",
                     "Drain diffusion perimeter for sidewall capacitance",
                     "m",
                     26,
@@ -144,7 +144,7 @@ impl PropertyCatalog {
             );
             sheet.add(
                 PropertyDefinition::new("dtemp")
-                    .with_display_name("Temp Rise")
+                    .with_display_name("Temp rise")
                     .with_description("Instance temperature rise above ambient")
                     .with_type(PropertyType::Number)
                     .with_default(PropertyValue::number(0.0))
@@ -173,7 +173,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this MOSFET instance")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(default_name))
@@ -234,7 +234,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nf")
-                .with_display_name("# Fingers")
+                .with_display_name("# fingers")
                 .with_description("Number of gate fingers")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -247,7 +247,7 @@ impl PropertyCatalog {
         // allowed set; only the native BSIM4 path reads them.
         sheet.add(
             PropertyDefinition::new("geomod")
-                .with_display_name("Geometry Mode")
+                .with_display_name("Geometry mode")
                 .with_description(
                     "BSIM4 GEOMOD source/drain end-contact selector (0-10); overrides the model card",
                 )
@@ -260,7 +260,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("rgeomod")
-                .with_display_name("Contact Mode")
+                .with_display_name("Contact mode")
                 .with_description(
                     "BSIM4 RGEOMOD source/drain contact-resistance selector (0-8); overrides the model card",
                 )
@@ -273,7 +273,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("min")
-                .with_display_name("Minimize End")
+                .with_display_name("Minimize end")
                 .with_description(
                     "BSIM4 MIN selector: 0 minimizes the drain diffusion, 1 the source",
                 )
@@ -291,7 +291,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("as")
-                .with_display_name("Source Area")
+                .with_display_name("Source area")
                 .with_description("Source diffusion area for junction capacitance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -301,7 +301,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ad")
-                .with_display_name("Drain Area")
+                .with_display_name("Drain area")
                 .with_description("Drain diffusion area for junction capacitance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -311,7 +311,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ps")
-                .with_display_name("Source Perimeter")
+                .with_display_name("Source perimeter")
                 .with_description("Source diffusion perimeter for sidewall capacitance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -321,7 +321,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("pd")
-                .with_display_name("Drain Perimeter")
+                .with_display_name("Drain perimeter")
                 .with_description("Drain diffusion perimeter for sidewall capacitance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -331,7 +331,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nrd")
-                .with_display_name("Drain Squares")
+                .with_display_name("Drain squares")
                 .with_description("Number of squares for drain series resistance")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -340,7 +340,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("nrs")
-                .with_display_name("Source Squares")
+                .with_display_name("Source squares")
                 .with_description("Number of squares for source series resistance")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -352,7 +352,7 @@ impl PropertyCatalog {
             // NRB; a bulk device has no body-contact sheet resistance.
             sheet.add(
                 PropertyDefinition::new("nrb")
-                    .with_display_name("Body Squares")
+                    .with_display_name("Body squares")
                     .with_description("Number of squares for the SOI body-contact resistance")
                     .with_type(PropertyType::Number)
                     .with_default(PropertyValue::number(1.0))
@@ -366,7 +366,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("sa")
-                .with_display_name("SA Distance")
+                .with_display_name("SA distance")
                 .with_description("Distance from gate edge to STI on source side")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -376,7 +376,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("sb")
-                .with_display_name("SB Distance")
+                .with_display_name("SB distance")
                 .with_description("Distance from gate edge to STI on drain side")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -386,7 +386,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("sd")
-                .with_display_name("SD Spacing")
+                .with_display_name("SD spacing")
                 .with_description("Source-drain spacing for multi-finger devices")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -396,7 +396,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("sc")
-                .with_display_name("SC Distance")
+                .with_display_name("SC distance")
                 .with_description("Distance to the nearest well edge for well-proximity effect")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -438,7 +438,7 @@ impl PropertyCatalog {
         // =========================================================================
         sheet.add(
             PropertyDefinition::new("delvto")
-                .with_display_name("Vth Offset")
+                .with_display_name("Vth offset")
                 .with_description("Threshold voltage shift added to this instance only")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -448,7 +448,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("mulu0")
-                .with_display_name("Mobility Factor")
+                .with_display_name("Mobility factor")
                 .with_description("Low-field mobility multiplier applied to this instance only")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -461,17 +461,17 @@ impl PropertyCatalog {
             // model card; NSEG splits the channel for the thermal solve.
             sheet.add(
                 PropertyDefinition::new("rth0")
-                    .with_display_name("Thermal Resistance")
+                    .with_display_name("Thermal resistance")
                     .with_description("Self-heating thermal resistance; defaults to the model RTH0")
                     .with_type(PropertyType::Expression)
                     .with_default(PropertyValue::expression(""))
                     .with_unit("K/W")
                     .with_order(75)
-                    .with_category("Self-Heating"),
+                    .with_category("Self-heating"),
             );
             sheet.add(
                 PropertyDefinition::new("cth0")
-                    .with_display_name("Thermal Capacitance")
+                    .with_display_name("Thermal capacitance")
                     .with_description(
                         "Self-heating thermal capacitance; defaults to the model CTH0",
                     )
@@ -479,11 +479,11 @@ impl PropertyCatalog {
                     .with_default(PropertyValue::expression(""))
                     .with_unit("J/K")
                     .with_order(76)
-                    .with_category("Self-Heating"),
+                    .with_category("Self-heating"),
             );
             sheet.add(
                 PropertyDefinition::new("nseg")
-                    .with_display_name("Channel Segments")
+                    .with_display_name("Channel segments")
                     .with_description(
                         "Number of channel segments used by the distributed body solve",
                     )
@@ -491,16 +491,16 @@ impl PropertyCatalog {
                     .with_default(PropertyValue::number(1.0))
                     .with_range(1.0, 100.0)
                     .with_order(77)
-                    .with_category("Self-Heating"),
+                    .with_category("Self-heating"),
             );
             sheet.add(
                 PropertyDefinition::new("frbody")
-                    .with_display_name("Body Factor")
+                    .with_display_name("Body factor")
                     .with_description("Layout-dependent scaling on the body-resistance network")
                     .with_type(PropertyType::Number)
                     .with_default(PropertyValue::number(1.0))
                     .with_order(78)
-                    .with_category("Self-Heating"),
+                    .with_category("Self-heating"),
             );
         }
 
@@ -521,7 +521,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -545,7 +545,7 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("V")
                 .with_order(92)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
         sheet.add(
             PropertyDefinition::new("ic_vgs")
@@ -555,7 +555,7 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("V")
                 .with_order(93)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
         sheet.add(
             PropertyDefinition::new("ic_vbs")
@@ -565,7 +565,7 @@ impl PropertyCatalog {
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("V")
                 .with_order(94)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
         if bulk == Bulk::Soi {
             // The substrate and body-contact initial conditions exist only
@@ -579,7 +579,7 @@ impl PropertyCatalog {
                     .with_default(PropertyValue::number(0.0))
                     .with_unit("V")
                     .with_order(95)
-                    .with_category("Initial Conditions"),
+                    .with_category("Initial conditions"),
             );
             sheet.add(
                 PropertyDefinition::new("ic_vps")
@@ -589,7 +589,7 @@ impl PropertyCatalog {
                     .with_default(PropertyValue::number(0.0))
                     .with_unit("V")
                     .with_order(96)
-                    .with_category("Initial Conditions"),
+                    .with_category("Initial conditions"),
             );
         }
 

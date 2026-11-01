@@ -3,12 +3,11 @@
 use super::evidence::evidence_pane;
 use super::{
     ComponentEditorContext, ComponentPropertyDialogResult, ComponentPropertyDraft,
-    PropertyBrowseRequest, render_component_parameters,
+    InstanceIdentity, ParametersPane, PropertyBrowseRequest, render_component_parameters,
 };
-use egui::{Align, Layout, Margin, Stroke, Ui};
+use egui::{Align, Layout, Ui};
 use rspice_design::properties::SourceContractFinding;
-use rspice_ui_kit::theme::{self, FontWeight};
-use rspice_ui_kit::tokens::{self, Tokens};
+use rspice_ui_kit::tokens::Tokens;
 use rspice_ui_kit::widgets::{
     Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize,
 };
@@ -36,7 +35,22 @@ pub trait ComponentPropertyServices {
     fn preview_source(&mut self, ui: &mut Ui, draft: &ComponentPropertyDraft);
 }
 
+/// The two-pane surface a source's parameters share with its waveform.
 const DIALOG_SIZE: DialogSize = DialogSize::ComponentEditor;
+/// A form alone: a content-height card, as tall as its fields, narrowed to
+/// them. On the two-pane surface, which is always its full height, a
+/// capacitor's four fields stood over hundreds of points of bare body.
+const FORM_ALONE_SIZE: DialogSize = DialogSize::Transaction;
+
+/// The dialog's title: the instance it edits, by the designator it had when
+/// the editor opened, so renaming it in the form does not retitle the dialog
+/// under the reader.
+fn dialog_title(name: Option<&str>) -> String {
+    match name.map(str::trim).filter(|name| !name.is_empty()) {
+        Some(name) => format!("{name} properties"),
+        None => "Instance properties".to_owned(),
+    }
+}
 
 /// What a screen reader is told this dialog is for.
 ///
@@ -89,13 +103,15 @@ pub fn render_component_property_dialog(
             .or(component_name),
     );
     let evidence = has_evidence(context, show_source_preview);
-    let mut dialog = Dialog::new("Edit instance properties", "OK")
+    let title = dialog_title(component_name);
+    let mut dialog = Dialog::new(&title, "OK")
         .description(&described)
-        .size(DIALOG_SIZE)
-        .fixed_height(680.0)
-        .without_header()
+        .size(if evidence {
+            DIALOG_SIZE
+        } else {
+            FORM_ALONE_SIZE
+        })
         .flush_body()
-        .manual_body_scroll()
         .ghost("Cancel")
         .secondary("Apply")
         .secondary_enabled(dirty && draft.can_apply() && session_error.is_none())
@@ -105,13 +121,47 @@ pub fn render_component_property_dialog(
     if let Some(hint) = footer_hint.as_deref() {
         dialog = dialog.hint(hint).hint_tone(footer_tone);
     }
-    if !evidence {
-        dialog = dialog.width_from_content(PARAMETERS_ONLY_WIDTH);
-    }
+    // A form alone is as tall as its fields and scrolls with the dialog's
+    // body; beside a source's waveform it holds one height, so the panes do
+    // not jump as the waveform's sections open and close.
+    dialog = if evidence {
+        dialog.fixed_height(680.0).manual_body_scroll()
+    } else {
+        dialog
+            .width_from_content(PARAMETERS_ONLY_WIDTH)
+            .overlay_scrollbar()
+    };
+    let identity = InstanceIdentity {
+        name: component_name,
+        device: &context.subtitle,
+        master: &context.library_cell,
+    };
+    let alone = ParametersPane {
+        identity,
+        beside_another: false,
+    };
+    let beside = ParametersPane {
+        identity,
+        beside_another: true,
+    };
 
     let mut side_action = ComponentPropertyDialogResult::None;
     let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-        component_identity_header(ui, draft, component_name, context);
+        // With nothing to show beside them, the parameters are the whole body,
+        // on the dialog's own surface, narrowed to them rather than one with a
+        // pane that holds a divider and no content.
+        if !evidence {
+            return render_component_parameters(
+                ui,
+                draft,
+                sheet,
+                advisories,
+                quantity_policy,
+                number_locale,
+                alone,
+                &mut |request, draft| services.browse(request, draft),
+            );
+        }
         ui.painter().rect_filled(
             ui.available_rect_before_wrap(),
             0.0,
@@ -119,21 +169,7 @@ pub fn render_component_property_dialog(
         );
         let wide = ctx.content_rect().width() > 760.0;
         let first_parameter;
-        // With nothing to show beside them, the parameters are the whole body,
-        // on a surface narrowed to them rather than one with a pane that holds
-        // a divider and no content.
-        if !evidence {
-            clip_to_pane(ui);
-            first_parameter = render_component_parameters(
-                ui,
-                draft,
-                sheet,
-                advisories,
-                quantity_policy,
-                number_locale,
-                &mut |request, draft| services.browse(request, draft),
-            );
-        } else if wide {
+        if wide {
             let (left, divider, right) = split_across(ui.available_rect_before_wrap());
             let mut pane = ui.new_child(pane_builder(left));
             clip_to_pane(&mut pane);
@@ -144,6 +180,7 @@ pub fn render_component_property_dialog(
                 advisories,
                 quantity_policy,
                 number_locale,
+                beside,
                 &mut |request, draft| services.browse(request, draft),
             );
             ui.painter()
@@ -170,6 +207,7 @@ pub fn render_component_property_dialog(
                 advisories,
                 quantity_policy,
                 number_locale,
+                beside,
                 &mut |request, draft| services.browse(request, draft),
             );
             ui.painter()
@@ -230,11 +268,14 @@ const STACKED_PARAMETERS_SHARE: f32 = 0.56;
 
 /// The surface width of an editor that holds its parameters alone.
 ///
-/// The parameters pane of the two-pane surface and the surface's border, so a
-/// field is as wide in a resistor's editor as it is beside a source's
+/// The parameters pane of the two-pane surface and the surface's border, less
+/// what that pane spends and a form alone does not: four points more of side
+/// inset on each side (the pane's band inset against the dialog title's) and
+/// the gutter its scroll bar withholds, where the form alone floats its bar.
+/// So a field is as wide in a resistor's editor as it is beside a source's
 /// waveform. A form on the whole two-pane surface stretched its grid into
 /// wells over 400 points wide, for values such as `1k`.
-const PARAMETERS_ONLY_WIDTH: f32 = 461.0;
+const PARAMETERS_ONLY_WIDTH: f32 = 440.0;
 
 /// A body split into two panes and the rule between them.
 ///
@@ -302,77 +343,6 @@ fn clip_to_pane(ui: &mut Ui) {
 /// its provenance line.
 fn has_evidence(context: &ComponentEditorContext, show_source_preview: bool) -> bool {
     show_source_preview || context.stimulus.is_some()
-}
-
-/// Which instance this form is editing, and what it is.
-///
-/// Two lines and nothing else. The header used to carry a glyph box, the
-/// instance's path, the device family and a provenance chip beside a subtitle
-/// that named the device a third time — `R1  R / Resistor` over
-/// `Resistor · SPICE primitive · lib/amp/schematic/R1`, with `Resistor ·
-/// primitive` flush right. The name is editable, the master is named for an
-/// instance that has one, and what the part is takes one word.
-fn component_identity_header(
-    ui: &mut Ui,
-    draft: &mut ComponentPropertyDraft,
-    component_name: Option<&str>,
-    context: &ComponentEditorContext,
-) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let width = ui.available_width();
-    let frame = egui::Frame::NONE
-        .fill(c.bg_panel_2)
-        .inner_margin(Margin::symmetric(16, 10))
-        .show(ui, |ui| {
-            ui.set_width(width - 32.0);
-            ui.vertical(|ui| {
-                ui.spacing_mut().item_spacing.y = 2.0;
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 7.0;
-                    ui.label(
-                        egui::RichText::new("Instance")
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_dim),
-                    );
-                    let mut name = draft
-                        .get_value("name")
-                        .map(PropertyValue::display_string)
-                        .or_else(|| component_name.map(str::to_owned))
-                        .unwrap_or_default();
-                    let response = ui.add(
-                        egui::TextEdit::singleline(&mut name)
-                            .font(theme::mono(tokens::FS_1, FontWeight::SemiBold))
-                            .desired_width(88.0),
-                    );
-                    if response.changed() {
-                        draft.set_value("name", PropertyValue::String(name));
-                    }
-                    // Empty for a primitive, whose "library" is the engine.
-                    ui.add(
-                        egui::Label::new(
-                            egui::RichText::new(&context.library_cell)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(c.text_faint),
-                        )
-                        .truncate(),
-                    );
-                });
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(&context.subtitle)
-                            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                            .color(c.text_dim),
-                    )
-                    .truncate(),
-                );
-            });
-        });
-    ui.painter().hline(
-        frame.response.rect.x_range(),
-        frame.response.rect.bottom(),
-        Stroke::new(1.0, c.border),
-    );
 }
 
 #[cfg(all(test, not(target_arch = "wasm32")))]
@@ -550,7 +520,7 @@ mod tests {
         }
         (
             draft.show_advanced,
-            find(&shapes, "Distortion F2 Phase").is_some(),
+            find(&shapes, "Distortion F2 phase").is_some(),
         )
     }
 
@@ -572,7 +542,7 @@ mod tests {
         let source = column_pitch(
             ComponentType::VoltageSourceSin,
             true,
-            "DC Offset (VO) *",
+            "DC offset (VO) *",
             "Amplitude (VA) *",
         );
         let alone = column_pitch(ComponentType::Resistor, false, "Resistance *", "Multiplier");

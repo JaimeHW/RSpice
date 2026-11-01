@@ -11,7 +11,7 @@ impl PropertyCatalog {
             // whatever this says, and the canvas skips ground labels. What it
             // does name is the object, in the navigator's instance list.
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Names this symbol in the design navigator; the net is always 0")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("0"))

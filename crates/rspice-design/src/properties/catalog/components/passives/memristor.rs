@@ -24,42 +24,42 @@ type TeamParam = (
 const TEAM_KINETICS: &[TeamParam] = &[
     (
         "kon",
-        "On Rate (KON)",
+        "On rate (KON)",
         "State velocity coefficient below the ON current threshold; negative drives x toward XON",
         "-8e-13",
         Some("m/s"),
     ),
     (
         "koff",
-        "Off Rate (KOFF)",
+        "Off rate (KOFF)",
         "State velocity coefficient above the OFF current threshold",
         "8e-13",
         Some("m/s"),
     ),
     (
         "alphaon",
-        "On Exponent (ALPHAON)",
+        "On exponent (ALPHAON)",
         "Current-overdrive exponent for the ON branch",
         "3",
         None,
     ),
     (
         "alphaoff",
-        "Off Exponent (ALPHAOFF)",
+        "Off exponent (ALPHAOFF)",
         "Current-overdrive exponent for the OFF branch",
         "3",
         None,
     ),
     (
         "ion",
-        "On Threshold (ION)",
+        "On threshold (ION)",
         "Current below which the ON branch drives the state",
         "8.9u",
         Some("A"),
     ),
     (
         "ioff",
-        "Off Threshold (IOFF)",
+        "Off threshold (IOFF)",
         "Current above which the OFF branch drives the state",
         "115u",
         Some("A"),
@@ -69,42 +69,42 @@ const TEAM_KINETICS: &[TeamParam] = &[
 const TEAM_WINDOW: &[TeamParam] = &[
     (
         "d",
-        "Device Thickness (D)",
+        "Device thickness (D)",
         "Film thickness; read by the Joglekar and Biolek windows",
         "115u",
         Some("m"),
     ),
     (
         "p",
-        "Window Exponent (P)",
+        "Window exponent (P)",
         "Window sharpness; read by the Joglekar, Biolek, and Prodromakis windows",
         "115u",
         None,
     ),
     (
         "j",
-        "Window Scale (J)",
+        "Window scale (J)",
         "Prodromakis window scale factor",
         "115u",
         None,
     ),
     (
         "aon",
-        "On Bound (AON)",
+        "On bound (AON)",
         "Lower state bound used by the TEAM window",
         "0",
         Some("m"),
     ),
     (
         "aoff",
-        "Off Bound (AOFF)",
+        "Off bound (AOFF)",
         "Upper state bound used by the TEAM window",
         "3n",
         Some("m"),
     ),
     (
         "wc",
-        "Window Constant (WC)",
+        "Window constant (WC)",
         "TEAM window decay constant",
         "1.07p",
         Some("m"),
@@ -139,7 +139,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("MR1"))
                 .with_order(0)
@@ -157,7 +157,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ron")
-                .with_display_name("On Resistance (RON)")
+                .with_display_name("On resistance (RON)")
                 .with_description("Fully-doped (low) resistance state")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("50"))
@@ -167,7 +167,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("roff")
-                .with_display_name("Off Resistance (ROFF)")
+                .with_display_name("Off resistance (ROFF)")
                 .with_description("Undoped (high) resistance state")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1k"))
@@ -177,7 +177,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ivrelation")
-                .with_display_name("I-V Relation")
+                .with_display_name("I-V relation")
                 .with_description("0 linear drift, 1 Simmons tunnel barrier")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -190,7 +190,7 @@ impl PropertyCatalog {
         // are the two fields that decide which branch a solve starts on.
         sheet.add(
             PropertyDefinition::new("xon")
-                .with_display_name("On State (XON)")
+                .with_display_name("On state (XON)")
                 .with_description("State variable at full conduction")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("0"))
@@ -200,7 +200,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("xoff")
-                .with_display_name("Off State (XOFF)")
+                .with_display_name("Off state (XOFF)")
                 .with_description("State variable at full depletion")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("3n"))
@@ -210,7 +210,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("xscaling")
-                .with_display_name("State Scaling (XSCALING)")
+                .with_display_name("State scaling (XSCALING)")
                 .with_description("Scale applied to the internal state variable")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1"))

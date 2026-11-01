@@ -12,7 +12,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("P1"))
                 .with_order(0)
@@ -21,7 +21,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("port")
-                .with_display_name("Port Number")
+                .with_display_name("Port number")
                 .with_description("S-parameter port index")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -32,7 +32,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("z0")
-                .with_display_name("Reference Impedance")
+                .with_display_name("Reference impedance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(50.0))
                 .with_unit("Ω")
@@ -42,7 +42,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dc")
-                .with_display_name("DC Voltage")
+                .with_display_name("DC voltage")
                 .with_description("Optional DC bias behind Z0 (empty = pure termination)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
@@ -52,7 +52,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ac_mag")
-                .with_display_name("AC Magnitude")
+                .with_display_name("AC magnitude")
                 .with_description("Optional AC excitation magnitude behind Z0")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
@@ -66,7 +66,7 @@ impl PropertyCatalog {
         // driven port unable to express anything but zero degrees.
         sheet.add(
             PropertyDefinition::new("ac_phase")
-                .with_display_name("AC Phase")
+                .with_display_name("AC phase")
                 .with_description("Excitation phase; applied only when a magnitude is set")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
@@ -82,33 +82,33 @@ impl PropertyCatalog {
         // sqrt(4·P·Z0), because there the source drives the plane directly.
         sheet.add(
             PropertyDefinition::new("pwr")
-                .with_display_name("Available Power")
+                .with_display_name("Available power")
                 .with_description("Power delivered into a matched Z0; empty = no RF drive")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
                 .with_unit("W")
                 .with_order(30)
-                .with_category("RF Drive"),
+                .with_category("RF drive"),
         );
         sheet.add(
             PropertyDefinition::new("freq")
-                .with_display_name("Drive Frequency")
+                .with_display_name("Drive frequency")
                 .with_description("Applied only when an available power is set; defaults to 1 GHz")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
                 .with_unit("Hz")
                 .with_order(31)
-                .with_category("RF Drive"),
+                .with_category("RF drive"),
         );
         sheet.add(
             PropertyDefinition::new("phase")
-                .with_display_name("Drive Phase")
+                .with_display_name("Drive phase")
                 .with_description("Applied only when an available power is set")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::string(""))
                 .with_unit("°")
                 .with_order(32)
-                .with_category("RF Drive"),
+                .with_category("RF drive"),
         );
 
         self.sheets.insert(ComponentType::RfPort, sheet);

@@ -48,6 +48,76 @@ pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> R
     response
 }
 
+/// Inset between a well's trailing edge and the unit inside it.
+const UNIT_INSET: f32 = 8.0;
+/// Least air between a value's text and its unit.
+const UNIT_GAP: f32 = 4.0;
+
+/// [`mono_input`] with the value's unit inside the well's trailing edge, as
+/// the inspector's property rows set theirs: in the sans face, which carries
+/// `Ω` where the bundled mono face does not, and in the faint tone. The text
+/// stops short of the unit, so a well keeps the width of the wells beside it
+/// whether or not it has one, and the unit never sits on the label's line.
+pub fn mono_input_with_unit(
+    ui: &mut Ui,
+    label: &str,
+    value: &mut String,
+    width: f32,
+    unit: Option<&str>,
+) -> Response {
+    let Some(unit) = unit.filter(|unit| !unit.trim().is_empty()) else {
+        return mono_input(ui, label, value, width);
+    };
+    let t = Tokens::get(ui.ctx());
+    let value_font = egui::TextStyle::Monospace.resolve(ui.style());
+    let unit_galley = ui.painter().layout_no_wrap(
+        unit.to_owned(),
+        theme::sans(value_font.size, FontWeight::Regular),
+        t.color.text_faint,
+    );
+    let trailing = (UNIT_INSET + unit_galley.size().x + UNIT_GAP).min(f32::from(i8::MAX));
+    let margin = egui::Margin {
+        left: 8,
+        right: trailing as i8,
+        top: 4,
+        bottom: 4,
+    };
+    let response = ui.add_sized(
+        vec2(width, t.metrics.ctl_h),
+        TextEdit::singleline(value)
+            .font(egui::TextStyle::Monospace)
+            .margin(margin),
+    );
+    name_control(ui, &response, label);
+    // On the value's baseline: the well sets its text at its top margin, and
+    // the two faces sit differently in their rows.
+    let probe = ui
+        .painter()
+        .layout_no_wrap("0".to_owned(), value_font, t.color.text);
+    let baseline = response.rect.top() + f32::from(margin.top) + first_baseline(&probe);
+    ui.painter().with_clip_rect(response.rect).galley(
+        egui::pos2(
+            response.rect.right() - UNIT_INSET - unit_galley.size().x,
+            baseline - first_baseline(&unit_galley),
+        ),
+        unit_galley,
+        t.color.text_faint,
+    );
+    response
+}
+
+/// Where a laid-out line's baseline sits below the top of its galley.
+fn first_baseline(galley: &egui::Galley) -> f32 {
+    galley.rows.first().map_or(0.0, |placed| {
+        placed.pos.y
+            + placed
+                .row
+                .glyphs
+                .first()
+                .map_or(placed.row.size.y, |glyph| glyph.pos.y)
+    })
+}
+
 /// An inspector form row: dimmed label in a fixed column, editable mono
 /// value filling the remainder. Returns the edit response.
 pub fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {

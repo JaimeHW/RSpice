@@ -10,7 +10,7 @@ impl PropertyCatalog {
         // Instance category (order 0-9)
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_description("Unique identifier for this resistor")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("R1"))
@@ -44,7 +44,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("scale")
-                .with_display_name("Scale Factor")
+                .with_display_name("Scale factor")
                 .with_description("Resistance scaling factor")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(1.0))
@@ -53,7 +53,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ac")
-                .with_display_name("AC Resistance")
+                .with_display_name("AC resistance")
                 .with_description(
                     "Small-signal resistance used by AC and noise analyses instead of the DC value",
                 )
@@ -65,7 +65,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("noisy")
-                .with_display_name("Generates Noise")
+                .with_display_name("Generates noise")
                 .with_description(
                     "Clear to make this resistor noiseless in noise analysis; on by default",
                 )
@@ -79,7 +79,7 @@ impl PropertyCatalog {
         // editor still opens with the resistance focused.
         sheet.add(
             PropertyDefinition::new("model")
-                .with_display_name("Resistor Model")
+                .with_display_name("Resistor model")
                 .with_description(
                     "Library R model card; enables sheet-resistance geometry and flicker noise",
                 )
@@ -127,7 +127,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("area")
-                .with_display_name("Cross Section")
+                .with_display_name("Cross section")
                 .with_description("Conductor cross-sectional area for the thermal resistor level")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression(""))
@@ -152,7 +152,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tc1")
-                .with_display_name("Temp Coeff 1")
+                .with_display_name("Temp coeff 1")
                 .with_description("First-order temperature coefficient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -162,7 +162,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tc2")
-                .with_display_name("Temp Coeff 2")
+                .with_display_name("Temp coeff 2")
                 .with_description("Second-order temperature coefficient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -172,7 +172,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tce")
-                .with_display_name("Temp Exp Coeff")
+                .with_display_name("Temp exp coeff")
                 .with_description("Exponential temperature coefficient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -182,7 +182,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("dtemp")
-                .with_display_name("Temp Rise")
+                .with_display_name("Temp rise")
                 .with_description("Instance temperature rise above ambient")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -216,28 +216,28 @@ impl PropertyCatalog {
             ),
             (
                 "heatcapacity",
-                "Heat Capacity",
+                "Heat capacity",
                 "Volumetric heat capacity of the conductor",
                 "J/(m³·K)",
                 41,
             ),
             (
                 "thermal_l",
-                "Thermal Length",
+                "Thermal length",
                 "Heat-flow path length of the surrounding thermal body",
                 "m",
                 42,
             ),
             (
                 "thermal_a",
-                "Thermal Cross Section",
+                "Thermal cross section",
                 "Heat-flow cross section of the surrounding thermal body",
                 "m²",
                 43,
             ),
             (
                 "thermal_heatcapacity",
-                "Thermal Heat Capacity",
+                "Thermal heat capacity",
                 "Volumetric heat capacity of the surrounding thermal body",
                 "J/(m³·K)",
                 44,
@@ -251,7 +251,7 @@ impl PropertyCatalog {
                     .with_default(PropertyValue::expression(""))
                     .with_unit(unit)
                     .with_order(order)
-                    .with_category("Self-Heating")
+                    .with_category("Self-heating")
                     .when_set("model")
                     .advanced(),
             );

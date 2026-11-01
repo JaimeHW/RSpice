@@ -8,7 +8,7 @@ use super::*;
 /// writes SMOOTH onto the model card when it carries a value.
 fn smoothness_property(order: i32) -> PropertyDefinition {
     PropertyDefinition::new("smooth")
-        .with_display_name("Transition Smoothness")
+        .with_display_name("Transition smoothness")
         .with_description(
             "Width of the smoothed on/off transition; smaller is steeper and harder to converge",
         )
@@ -37,7 +37,7 @@ impl PropertyCatalog {
         let mut sheet = PropertySheet::new();
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("S1"))
                 .with_order(0)
@@ -46,7 +46,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("control")
-                .with_display_name("Control Expression")
+                .with_display_name("Control expression")
                 .with_description("Expression whose value selects the on/off state")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("0"))
@@ -60,7 +60,7 @@ impl PropertyCatalog {
         // contract the engine reads is ON/OFF/ONH/OFFH/RON/ROFF.
         sheet.add(
             PropertyDefinition::new("on")
-                .with_display_name("On Value")
+                .with_display_name("On value")
                 .with_description("Control-expression value at which the switch is fully closed")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -69,7 +69,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("off")
-                .with_display_name("Off Value")
+                .with_display_name("Off value")
                 .with_description("Control-expression value at which the switch is fully open")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -78,7 +78,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ron")
-                .with_display_name("On Resistance")
+                .with_display_name("On resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
                 .with_unit("Ω")
@@ -87,7 +87,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("roff")
-                .with_display_name("Off Resistance")
+                .with_display_name("Off resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1e12"))
                 .with_unit("Ω")
@@ -98,7 +98,7 @@ impl PropertyCatalog {
         // hysteretic path, so both stay blank until the user opts in.
         sheet.add(
             PropertyDefinition::new("onh")
-                .with_display_name("On Value (Falling)")
+                .with_display_name("On value (falling)")
                 .with_description(
                     "Control value that closes the switch while the control is falling; enables hysteresis",
                 )
@@ -109,7 +109,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("offh")
-                .with_display_name("Off Value (Falling)")
+                .with_display_name("Off value (falling)")
                 .with_description(
                     "Control value that opens the switch while the control is falling; enables hysteresis",
                 )
@@ -120,14 +120,14 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("state")
-                .with_display_name("Initial State")
+                .with_display_name("Initial state")
                 .with_type(PropertyType::Enum)
                 .with_default(PropertyValue::enumeration(
                     "auto",
                     vec!["auto".to_owned(), "on".to_owned(), "off".to_owned()],
                 ))
                 .with_order(20)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
         sheet.add(
             PropertyDefinition::new("model")
@@ -150,7 +150,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("W1"))
                 .with_order(0)
@@ -159,7 +159,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("it")
-                .with_display_name("Threshold Current")
+                .with_display_name("Threshold current")
                 .with_description("Control current at which the switch toggles")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1m"))
@@ -169,7 +169,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ih")
-                .with_display_name("Hysteresis Current")
+                .with_display_name("Hysteresis current")
                 .with_description("Half-width of the hysteresis band around the threshold")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -179,7 +179,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ron")
-                .with_display_name("On Resistance")
+                .with_display_name("On resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
                 .with_unit("Ω")
@@ -188,7 +188,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("roff")
-                .with_display_name("Off Resistance")
+                .with_display_name("Off resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::expression("1meg"))
                 .with_unit("Ω")
@@ -198,7 +198,7 @@ impl PropertyCatalog {
         sheet.add(smoothness_property(15));
         sheet.add(
             PropertyDefinition::new("state")
-                .with_display_name("Initial State")
+                .with_display_name("Initial state")
                 .with_description("DC operating-point starting state hint")
                 .with_type(PropertyType::Enum)
                 .with_default(PropertyValue::enumeration(
@@ -206,7 +206,7 @@ impl PropertyCatalog {
                     vec!["auto".to_string(), "on".to_string(), "off".to_string()],
                 ))
                 .with_order(20)
-                .with_category("Initial Conditions"),
+                .with_category("Initial conditions"),
         );
 
         self.sheets.insert(ComponentType::ISwitch, sheet);
@@ -218,7 +218,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("E1"))
                 .with_order(0)
@@ -227,7 +227,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("gain")
-                .with_display_name("Open-Loop Gain")
+                .with_display_name("Open-loop gain")
                 .with_description("Output voltage / differential input voltage (linear)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(100_000.0))
@@ -241,7 +241,7 @@ impl PropertyCatalog {
         // `limit()` form the VCVS uses, so these carry the identical contract.
         sheet.add(
             PropertyDefinition::new("vmax")
-                .with_display_name("Max Output")
+                .with_display_name("Max output")
                 .with_description("Positive output rail (clipping)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e308))
@@ -251,7 +251,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vmin")
-                .with_display_name("Min Output")
+                .with_display_name("Min output")
                 .with_description("Negative output rail (clipping)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(-1e308))
@@ -269,7 +269,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("B1"))
                 .with_order(0)
@@ -305,7 +305,7 @@ impl PropertyCatalog {
         // parser rejects the whole deck on anything else.
         sheet.add(
             PropertyDefinition::new("tc1")
-                .with_display_name("Linear Temp Coefficient")
+                .with_display_name("Linear temp coefficient")
                 .with_description("First-order temperature coefficient of the output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -315,7 +315,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("tc2")
-                .with_display_name("Quadratic Temp Coefficient")
+                .with_display_name("Quadratic temp coefficient")
                 .with_description("Second-order temperature coefficient of the output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -333,7 +333,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("S1"))
                 .with_order(0)
@@ -342,7 +342,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vt")
-                .with_display_name("Threshold Voltage")
+                .with_display_name("Threshold voltage")
                 .with_description("Control voltage at which the switch toggles")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -353,7 +353,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vh")
-                .with_display_name("Hysteresis Voltage")
+                .with_display_name("Hysteresis voltage")
                 .with_description("Half-width of the hysteresis band around the threshold")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -363,7 +363,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ron")
-                .with_display_name("On Resistance")
+                .with_display_name("On resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
                 .with_unit("Ω")
@@ -372,7 +372,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("roff")
-                .with_display_name("Off Resistance")
+                .with_display_name("Off resistance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e12))
                 .with_unit("Ω")
@@ -391,7 +391,7 @@ impl PropertyCatalog {
         // Instance
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("E1"))
                 .with_order(0)
@@ -402,7 +402,7 @@ impl PropertyCatalog {
         // Electrical - Gain
         sheet.add(
             PropertyDefinition::new("gain")
-                .with_display_name("Voltage Gain")
+                .with_display_name("Voltage gain")
                 .with_description("Output voltage / Input voltage (linear multiplier)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -424,7 +424,7 @@ impl PropertyCatalog {
         // Polynomial coefficients (for nonlinear behavior)
         sheet.add(
             PropertyDefinition::new("poly")
-                .with_display_name("Poly Coefficients")
+                .with_display_name("Poly coefficients")
                 .with_description("Polynomial coefficients: output = c0 + c1*v + c2*v² + ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -435,7 +435,7 @@ impl PropertyCatalog {
         // AC/Small-signal parameters
         sheet.add(
             PropertyDefinition::new("ac_gain")
-                .with_display_name("AC Gain")
+                .with_display_name("AC gain")
                 .with_description("AC analysis gain (if different from DC)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
@@ -444,7 +444,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("ac_phase")
-                .with_display_name("AC Phase")
+                .with_display_name("AC phase")
                 .with_description("AC phase shift")
                 .with_type(PropertyType::Number)
                 .with_default(PropertyValue::number(0.0))
@@ -456,7 +456,7 @@ impl PropertyCatalog {
         // Limiting parameters
         sheet.add(
             PropertyDefinition::new("vmax")
-                .with_display_name("Max Output")
+                .with_display_name("Max output")
                 .with_description("Maximum output voltage (clipping)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e308))
@@ -466,7 +466,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vmin")
-                .with_display_name("Min Output")
+                .with_display_name("Min output")
                 .with_description("Minimum output voltage (clipping)")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(-1e308))
@@ -484,7 +484,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("G1"))
                 .with_order(0)
@@ -516,7 +516,7 @@ impl PropertyCatalog {
         // Polynomial
         sheet.add(
             PropertyDefinition::new("poly")
-                .with_display_name("Poly Coefficients")
+                .with_display_name("Poly coefficients")
                 .with_description("Polynomial: output = c0 + c1*v + c2*v² ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -527,7 +527,7 @@ impl PropertyCatalog {
         // AC parameters
         sheet.add(
             PropertyDefinition::new("ac_gm")
-                .with_display_name("AC Transconductance")
+                .with_display_name("AC transconductance")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(0.0))
                 .with_unit("S")
@@ -538,7 +538,7 @@ impl PropertyCatalog {
         // Limiting
         sheet.add(
             PropertyDefinition::new("imax")
-                .with_display_name("Max Output")
+                .with_display_name("Max output")
                 .with_description("Maximum output current")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e308))
@@ -548,7 +548,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("imin")
-                .with_display_name("Min Output")
+                .with_display_name("Min output")
                 .with_description("Minimum output current")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(-1e308))
@@ -566,7 +566,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("H1"))
                 .with_order(0)
@@ -597,7 +597,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("vref")
-                .with_display_name("Sensing Branch")
+                .with_display_name("Sensing branch")
                 .with_description("Name of voltage source sensing control current")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -608,7 +608,7 @@ impl PropertyCatalog {
         // Polynomial
         sheet.add(
             PropertyDefinition::new("poly")
-                .with_display_name("Poly Coefficients")
+                .with_display_name("Poly coefficients")
                 .with_description("Polynomial: output = c0 + c1*i + c2*i² ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -619,7 +619,7 @@ impl PropertyCatalog {
         // Limiting
         sheet.add(
             PropertyDefinition::new("vmax")
-                .with_display_name("Max Output")
+                .with_display_name("Max output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e308))
                 .with_unit("V")
@@ -628,7 +628,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("vmin")
-                .with_display_name("Min Output")
+                .with_display_name("Min output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(-1e308))
                 .with_unit("V")
@@ -645,7 +645,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("name")
-                .with_display_name("Instance Name")
+                .with_display_name("Instance name")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string("F1"))
                 .with_order(0)
@@ -655,7 +655,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("gain")
-                .with_display_name("Current Gain")
+                .with_display_name("Current gain")
                 .with_description("Output current / Input current")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1.0))
@@ -675,7 +675,7 @@ impl PropertyCatalog {
 
         sheet.add(
             PropertyDefinition::new("vref")
-                .with_display_name("Sensing Branch")
+                .with_display_name("Sensing branch")
                 .with_description("Name of voltage source sensing control current")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -686,7 +686,7 @@ impl PropertyCatalog {
         // Polynomial
         sheet.add(
             PropertyDefinition::new("poly")
-                .with_display_name("Poly Coefficients")
+                .with_display_name("Poly coefficients")
                 .with_description("Polynomial: output = c0 + c1*i + c2*i² ...")
                 .with_type(PropertyType::String)
                 .with_default(PropertyValue::string(""))
@@ -697,7 +697,7 @@ impl PropertyCatalog {
         // Limiting
         sheet.add(
             PropertyDefinition::new("imax")
-                .with_display_name("Max Output")
+                .with_display_name("Max output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(1e308))
                 .with_unit("A")
@@ -706,7 +706,7 @@ impl PropertyCatalog {
         );
         sheet.add(
             PropertyDefinition::new("imin")
-                .with_display_name("Min Output")
+                .with_display_name("Min output")
                 .with_type(PropertyType::Expression)
                 .with_default(PropertyValue::number(-1e308))
                 .with_unit("A")

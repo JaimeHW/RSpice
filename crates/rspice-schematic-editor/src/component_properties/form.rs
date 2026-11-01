@@ -8,7 +8,7 @@ use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertySheet
 use rspice_vocabulary::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 
 use super::ComponentPropertyDraft;
-use crate::property_values::{render_value_editor, unit_is_part_of_value_text};
+use crate::property_values::render_value_editor;
 
 /// A Browse interaction that the host handles before the field's hint is painted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,10 +35,39 @@ const HINT_LINE_H: f32 = 13.0;
 /// Longest hint or validation message rendered before elision.
 const HINT_MAX_ROWS: usize = 2;
 
-/// Render the scrolling parameter form and return its first keyboard-focus target.
+/// Which instance a form edits, for the group that heads it.
+#[derive(Debug, Clone, Copy)]
+pub struct InstanceIdentity<'a> {
+    /// The designator the instance had when the editor opened, for a draft
+    /// that holds no name of its own.
+    pub name: Option<&'a str>,
+    /// What the part is, in one word: the device for a primitive.
+    pub device: &'a str,
+    /// The `library/cell/view` an instance of a master stands for; empty for
+    /// a primitive, which the engine implements and no library holds.
+    pub master: &'a str,
+}
+
+/// How the parameters sit in their dialog.
+#[derive(Debug, Clone, Copy)]
+pub struct ParametersPane<'a> {
+    /// The instance the form edits.
+    pub identity: InstanceIdentity<'a>,
+    /// Whether the parameters share the body with another pane. A shared
+    /// pane is headed with a section band and scrolls on its own; a form
+    /// alone is the whole body, under the dialog's own title, and scrolls
+    /// with it.
+    pub beside_another: bool,
+}
+
+/// Render the parameter form and return its first keyboard-focus target.
 ///
 /// The host handles browse requests synchronously so file selection and model
 /// routing retain their position between draft edits and validation-hint painting.
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the form's inputs, its two presentation policies, its pane and the host's browse handler"
+)]
 pub fn render_component_parameters(
     ui: &mut Ui,
     draft: &mut ComponentPropertyDraft,
@@ -46,13 +75,26 @@ pub fn render_component_parameters(
     advisories: &[SourceContractFinding],
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
+    pane: ParametersPane<'_>,
     browse: &mut impl FnMut(PropertyBrowseRequest<'_>, &mut ComponentPropertyDraft),
 ) -> Option<Id> {
+    if !pane.beside_another {
+        return parameters_contents(
+            ui,
+            draft,
+            sheet,
+            advisories,
+            quantity_policy,
+            number_locale,
+            pane,
+            browse,
+        );
+    }
     let mut first_control = None;
     // Read before the scroll area, which is the last place the pane's own
     // width is legible: inside it every rect has the scrollbar gutter taken
     // off, and the section bands head the pane rather than the content.
-    let pane = ui.max_rect();
+    let pane_rect = ui.max_rect();
     // No fill of its own. The dialog body paints the editor's one surface, and
     // a pane that painted a second coat of the same token came out a shade off
     // the pane beside it, with the base colour showing between them — a seam
@@ -62,10 +104,10 @@ pub fn render_component_parameters(
         .auto_shrink([false, false])
         .show(ui, |ui| {
             // Here rather than inside the contents, which is where the pane's
-            // width would have to be an eighth argument: the band belongs to
+            // width would have to be another argument: the band belongs to
             // the scroll area, so that it scrolls, and to nothing narrower.
             if draft.component_type.is_some() {
-                section_band(ui, "Parameters", pane);
+                section_band(ui, "Parameters", pane_rect);
             }
             first_control = parameters_contents(
                 ui,
@@ -74,12 +116,17 @@ pub fn render_component_parameters(
                 advisories,
                 quantity_policy,
                 number_locale,
+                pane,
                 browse,
             );
         });
     first_control
 }
 
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the form's inputs, its two presentation policies, the instance and the host's browse handler"
+)]
 fn parameters_contents(
     ui: &mut Ui,
     draft: &mut ComponentPropertyDraft,
@@ -87,6 +134,7 @@ fn parameters_contents(
     advisories: &[SourceContractFinding],
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
+    pane: ParametersPane<'_>,
     browse: &mut impl FnMut(PropertyBrowseRequest<'_>, &mut ComponentPropertyDraft),
 ) -> Option<Id> {
     let component_type = draft.component_type?;
@@ -107,19 +155,23 @@ fn parameters_contents(
 
     let mut first_control = None;
     egui::Frame::NONE
-        .inner_margin(Margin::symmetric(16, 10))
+        .inner_margin(Margin::symmetric(
+            if pane.beside_another {
+                PANE_INSET
+            } else {
+                FORM_INSET
+            },
+            10,
+        ))
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            // A single-category sheet is already titled by the section band
-            // above; repeating it would be pure decoration.
-            let show_headings = groups.len() > 1;
-            for (index, (category, definitions)) in groups.iter().enumerate() {
-                if show_headings {
-                    if index > 0 {
-                        ui.add_space(12.0);
-                    }
-                    property_group_heading(ui, category);
-                }
+            // The instance first and unheaded, as the dialog's title names
+            // it; every group of parameters after it is headed, so a single
+            // group is never left for the title alone to stand over.
+            identity_row(ui, draft, pane.identity);
+            for (category, definitions) in &groups {
+                ui.add_space(GROUP_GAP);
+                property_group_heading(ui, category);
                 let control = property_grid(
                     ui,
                     definitions,
@@ -135,7 +187,7 @@ fn parameters_contents(
             if component_type.is_pwl_source() {
                 // No heading here: the point table heads itself, and two
                 // stacked headings over one table read as two tables.
-                ui.add_space(12.0);
+                ui.add_space(GROUP_GAP);
                 let pwl_result = crate::pwl_editor::render_pwl_editor(
                     ui,
                     &mut draft.pwl_editor,
@@ -156,7 +208,7 @@ fn parameters_contents(
             // join their categories in schema order, which reflowed the grid
             // and put whole groups between the switch and what it sat under.
             if !advanced.is_empty() {
-                ui.add_space(12.0);
+                ui.add_space(GROUP_GAP);
                 advanced_disclosure(ui, advanced.len(), &mut draft.show_advanced);
                 if draft.show_advanced {
                     for (index, (category, definitions)) in
@@ -164,7 +216,7 @@ fn parameters_contents(
                     {
                         // The disclosure row carries its own air; the groups
                         // after the first are spaced as the ones above it are.
-                        ui.add_space(if index == 0 { 4.0 } else { 12.0 });
+                        ui.add_space(if index == 0 { 4.0 } else { GROUP_GAP });
                         property_group_heading(ui, &category);
                         let control = property_grid(
                             ui,
@@ -190,7 +242,7 @@ fn parameters_contents(
                 .as_deref()
                 .or(draft.global_error.as_deref())
             {
-                ui.add_space(6.0);
+                ui.add_space(ROW_GAP);
                 let (rect, _) =
                     ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
                 ui.painter().text(
@@ -203,6 +255,127 @@ fn parameters_contents(
             }
         });
     first_control
+}
+
+/// Air above a group's heading, between it and the last row of the group
+/// before.
+const GROUP_GAP: f32 = 22.0;
+/// The form's side inset inside a pane, on its section band's inset.
+const PANE_INSET: i8 = 16;
+/// The form's side inset alone in its dialog, on the dialog title's inset, so
+/// the title, every field and the footer's buttons share one left edge.
+const FORM_INSET: i8 = 12;
+
+/// The instance's own row, on the grid the parameters use: the name,
+/// which the form edits, and what the part is.
+///
+/// It used to be a band of its own above the form, `Instance [R1]` over a
+/// `Resistor` line, standing where the dialog's title belongs and setting the
+/// name in a well a third of a field wide.
+fn identity_row(ui: &mut Ui, draft: &mut ComponentPropertyDraft, identity: InstanceIdentity<'_>) {
+    let available = ui.available_width();
+    let two_columns = available >= MIN_CELL_WIDTH * 2.0 + CELL_GAP;
+    let width = if two_columns {
+        ((available - CELL_GAP) * 0.5).max(MIN_CELL_WIDTH)
+    } else {
+        available.max(MIN_CELL_WIDTH)
+    };
+    let height = CAPTION_H + TRACK_GAP + Tokens::get(ui.ctx()).metrics.ctl_h;
+    let name_cell = |ui: &mut Ui, draft: &mut ComponentPropertyDraft| {
+        ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.y = TRACK_GAP;
+            caption(
+                ui,
+                "Name",
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                draft.is_modified("name"),
+                false,
+                width,
+            );
+            let mut name = draft
+                .get_value("name")
+                .map(PropertyValue::display_string)
+                .or_else(|| identity.name.map(str::to_owned))
+                .unwrap_or_default();
+            if rspice_ui_kit::widgets::mono_input(ui, "Name", &mut name, width).changed() {
+                draft.set_value("name", PropertyValue::String(name));
+            }
+        });
+    };
+    let kind_cell = |ui: &mut Ui| {
+        let (label, value, font) = if identity.master.is_empty() {
+            (
+                "Device",
+                identity.device,
+                theme::sans(tokens::FS_1, FontWeight::Regular),
+            )
+        } else {
+            (
+                "Master",
+                identity.master,
+                theme::mono(tokens::FS_1, FontWeight::Regular),
+            )
+        };
+        ui.allocate_ui_with_layout(vec2(width, height), Layout::top_down(Align::Min), |ui| {
+            ui.spacing_mut().item_spacing.y = TRACK_GAP;
+            caption(
+                ui,
+                label,
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                false,
+                false,
+                width,
+            );
+            fact_value(ui, label, value, font, width);
+        });
+    };
+    if two_columns {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = CELL_GAP;
+            name_cell(ui, draft);
+            kind_cell(ui);
+        });
+    } else {
+        name_cell(ui, draft);
+        ui.add_space(ROW_GAP);
+        kind_cell(ui);
+    }
+}
+
+/// A value the form states and does not edit, on a field's control track: at
+/// the caption's left edge rather than a well's text inset, since no well
+/// surrounds it.
+fn fact_value(ui: &mut Ui, label: &str, value: &str, font: egui::FontId, width: f32) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, t.metrics.ctl_h), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, value));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_label(label);
+        node.set_value(value);
+    });
+    if !ui.is_rect_visible(rect) {
+        return;
+    }
+    let mut job = egui::text::LayoutJob::single_section(
+        value.to_owned(),
+        egui::TextFormat {
+            font_id: font,
+            color: t.color.text,
+            ..Default::default()
+        },
+    );
+    job.wrap = egui::text::TextWrapping {
+        max_width: width,
+        max_rows: 1,
+        overflow_character: Some('…'),
+        ..Default::default()
+    };
+    let galley = ui.fonts_mut(|fonts| fonts.layout_job(job));
+    ui.painter().galley(
+        pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
+        galley,
+        t.color.text,
+    );
 }
 
 /// Partition the visible sheet into its authored categories, keeping both the
@@ -221,7 +394,8 @@ fn group_by_category(properties: &[PropertyDefinition]) -> Vec<(String, Vec<Prop
     groups
 }
 
-/// Lay one category out on the two-column field grid.
+/// Lay one category out on the two-column field grid, from its first row's
+/// top to its last row's bottom.
 ///
 /// Rows are packed first, then measured, so every field block on a row shares
 /// one height and the columns below it stay aligned no matter how long an
@@ -245,7 +419,12 @@ fn property_grid(
     let column_width = ((available - CELL_GAP) * 0.5).max(MIN_CELL_WIDTH);
 
     let mut first_control = None;
-    for row in pack_rows(definitions, columns) {
+    for (index, row) in pack_rows(definitions, columns).into_iter().enumerate() {
+        // Between rows, and not after the last: the space after a group is
+        // its caller's, so the form ends on its last field.
+        if index > 0 {
+            ui.add_space(ROW_GAP);
+        }
         let widths = row
             .iter()
             .map(|definition| {
@@ -290,7 +469,6 @@ fn property_grid(
                 first_control = first_control.or(control);
             }
         });
-        ui.add_space(ROW_GAP);
     }
     first_control
 }
@@ -538,8 +716,7 @@ fn render_property_field(
         browse(request, draft);
     }
 
-    // The unit is presented once, in the caption; repeating it here would be
-    // the only duplicated token on the block.
+    // The unit is presented once, inside the well after the value.
     let hint = field_hint(def, draft, advisories);
     if !hint.is_empty() {
         let hint_height = (ui.available_height() - TRACK_GAP).max(HINT_LINE_H);
@@ -557,11 +734,32 @@ fn render_property_field(
     editor_id
 }
 
-/// The caption track: label, required marker, unsaved-edit dot, and the
-/// schema unit pinned to the right so units align down the column.
+/// The caption track: label, required marker and unsaved-edit dot.
+///
+/// The unit is not here. It used to be pinned to the right of the label's
+/// line, where it read as part of the label and sat a field's height away from
+/// the value it qualifies; the well states it after the value now, as the
+/// inspector's rows do.
 fn field_caption(
     ui: &mut Ui,
     def: &PropertyDefinition,
+    is_modified: bool,
+    invalid: bool,
+    width: f32,
+) {
+    let label = if def.required {
+        format!("{} *", def.display_name)
+    } else {
+        def.display_name.clone()
+    };
+    caption(ui, &label, label_font(def), is_modified, invalid, width);
+}
+
+/// One caption line: `label` in `font`, and the unsaved-edit dot after it.
+fn caption(
+    ui: &mut Ui,
+    label: &str,
+    font: egui::FontId,
     is_modified: bool,
     invalid: bool,
     width: f32,
@@ -573,41 +771,12 @@ fn field_caption(
         return;
     }
 
-    let unit_width = def
-        .unit
-        .as_deref()
-        .filter(|_| !unit_is_part_of_value_text(def))
-        .map(|unit| {
-            let galley = ui.fonts_mut(|fonts| {
-                fonts.layout_no_wrap(
-                    unit.to_owned(),
-                    theme::mono(tokens::FS_0, FontWeight::Regular),
-                    c.text_faint,
-                )
-            });
-            ui.painter().galley(
-                pos2(
-                    rect.right() - galley.size().x,
-                    rect.center().y - galley.size().y * 0.5,
-                ),
-                galley.clone(),
-                c.text_faint,
-            );
-            galley.size().x + 8.0
-        })
-        .unwrap_or(0.0);
-
     let dot_width = if is_modified { 9.0 } else { 0.0 };
-    let label_width = (rect.width() - unit_width - dot_width).max(0.0);
-    let label = if def.required {
-        format!("{} *", def.display_name)
-    } else {
-        def.display_name.clone()
-    };
+    let label_width = (rect.width() - dot_width).max(0.0);
     let mut job = egui::text::LayoutJob::single_section(
-        label,
+        label.to_owned(),
         egui::TextFormat {
-            font_id: label_font(def),
+            font_id: font,
             color: if invalid { c.err } else { c.text_dim },
             ..Default::default()
         },
@@ -706,39 +875,45 @@ pub fn section_band(ui: &mut Ui, title: &str, pane: egui::Rect) {
     );
 }
 
-/// A category rule: the group name followed by a hairline running to the
-/// right edge, so the eye can find where one parameter group ends.
+/// A group of fields inside the form: its name in the kit's subsection face
+/// (the section title's face, in the faint tone) with no band and no rule.
+///
+/// It was a monospace caption with a hairline run out to the right edge, a
+/// second header style beside the section band above it; monospace is for
+/// values and identifiers, not for headings.
 fn property_group_heading(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width();
-    let (rect, _) = ui.allocate_exact_size(vec2(width, 16.0), Sense::hover());
+    let (rect, response) = ui.allocate_exact_size(vec2(width, GROUP_HEADING_H), Sense::hover());
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, true, label));
+    ui.ctx().accesskit_node_builder(response.id, |node| {
+        node.set_role(egui::accesskit::Role::Heading);
+        node.set_label(label);
+        node.set_level(4);
+    });
     if ui.is_rect_visible(rect) {
         let galley = ui.fonts_mut(|fonts| {
             fonts.layout_no_wrap(
                 label.to_owned(),
-                theme::mono(tokens::FS_0, FontWeight::Medium),
+                theme::sans(tokens::FS_0, FontWeight::SemiBold),
                 t.color.text_faint,
             )
         });
-        let text_width = galley.size().x;
         ui.painter().galley(
             pos2(rect.left(), rect.center().y - galley.size().y * 0.5),
             galley,
             t.color.text_faint,
         );
-        let rule_start = rect.left() + text_width + 8.0;
-        if rule_start < rect.right() {
-            ui.painter().hline(
-                rule_start..=rect.right(),
-                rect.center().y,
-                Stroke::new(1.0, t.color.border),
-            );
-        }
     }
-    ui.add_space(5.0);
+    ui.add_space(GROUP_HEADING_GAP);
 }
 
-/// The head of the advanced section: a category rule that opens and closes
+/// The height of a group's heading line.
+const GROUP_HEADING_H: f32 = 16.0;
+/// Air between a group's heading and its first row of fields.
+const GROUP_HEADING_GAP: f32 = 5.0;
+
+/// The head of the advanced section: a group heading that opens and closes
 /// the fields under it, with how many it holds.
 ///
 /// It was a switch row reading "Show advanced properties" at the foot of the
@@ -806,7 +981,7 @@ fn advanced_disclosure(ui: &mut Ui, count: usize, open: &mut bool) {
     let title = ui.fonts_mut(|fonts| {
         fonts.layout_no_wrap(
             "Advanced".to_owned(),
-            theme::mono(tokens::FS_0, FontWeight::Medium),
+            theme::sans(tokens::FS_0, FontWeight::SemiBold),
             ink,
         )
     });
@@ -816,21 +991,16 @@ fn advanced_disclosure(ui: &mut Ui, count: usize, open: &mut bool) {
     let tally = ui.fonts_mut(|fonts| {
         fonts.layout_no_wrap(
             count.to_string(),
-            theme::mono(tokens::FS_0, FontWeight::Regular),
+            theme::sans(tokens::FS_0, FontWeight::Regular),
             c.text_faint,
         )
     });
     let tally_left = title_right + 6.0;
-    let tally_right = tally_left + tally.size().x;
     painter.galley(
         pos2(tally_left, cy - tally.size().y * 0.5),
         tally,
         c.text_faint,
     );
-    let rule_start = tally_right + 8.0;
-    if rule_start < rect.right() {
-        painter.hline(rule_start..=rect.right(), cy, Stroke::new(1.0, c.border));
-    }
     if focus_visible {
         theme::paint_focus_ring(ui, &response, rect);
     }
@@ -906,6 +1076,14 @@ mod tests {
                         &[],
                         QuantityPresentationPolicy::default(),
                         UiNumberLocale::default(),
+                        ParametersPane {
+                            identity: InstanceIdentity {
+                                name: Some("X1"),
+                                device: "Device",
+                                master: "",
+                            },
+                            beside_another: true,
+                        },
                         &mut |_, _| {},
                     );
                 });
@@ -987,7 +1165,7 @@ mod tests {
                 .map(|(_, rect)| rect.right())
                 .fold(f32::NEG_INFINITY, f32::max)
         };
-        // AC Resistance, above the model row; Temp Coeff 1, below it.
+        // AC resistance, above the model row; Temp coeff 1, below it.
         let above = right_edge("Ω");
         let below = right_edge("1/°C");
         assert!(
@@ -1047,7 +1225,7 @@ mod tests {
             .filter(|(text, _)| !closed.iter().any(|(other, _)| other == text))
             .collect::<Vec<_>>();
         assert!(
-            revealed.iter().any(|(text, _)| text == "PAC Magnitude"),
+            revealed.iter().any(|(text, _)| text == "PAC magnitude"),
             "the section shows the source's periodic AC fields: {revealed:?}"
         );
         assert!(
