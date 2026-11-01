@@ -270,3 +270,39 @@ fn xyce_final_native_diode_route_diagnoses_effective_unknown_parameters() {
         assert!(diagnostic.message.contains(expected_parameter));
     }
 }
+
+#[test]
+fn xyce_resistor_model_warns_for_each_resistance_spelling_xyce_ignores() {
+    let source = "resistor model spellings\n\
+R1 1 0 RMOD\n\
+.MODEL RMOD R(RESISTANCE=2k R=3 RES=4)\n\
+.OP\n\
+.END\n";
+    let warnings = |netlist: &Netlist| {
+        netlist
+            .diagnostics
+            .iter()
+            .filter(|diagnostic| diagnostic.code == "xyce-unknown-resistor-model-parameter")
+            .map(|diagnostic| (diagnostic.line, diagnostic.message.clone()))
+            .collect::<Vec<_>>()
+    };
+
+    let xyce = Netlist::parse_with_options(source, xyce_options()).expect("deck parses");
+    assert_eq!(
+        warnings(&xyce),
+        [
+            (
+                3,
+                "No model parameter RESISTANCE found for model RMOD of type R, parameter ignored."
+                    .to_string()
+            ),
+            (
+                3,
+                "No model parameter RES found for model RMOD of type R, parameter ignored."
+                    .to_string()
+            ),
+        ]
+    );
+    let default = Netlist::parse(source).expect("deck parses");
+    assert!(warnings(&default).is_empty());
+}

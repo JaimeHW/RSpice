@@ -334,8 +334,7 @@ fn queue_unknown_xyce_diode_model_parameter_warnings(
     pending: &mut Vec<PendingXyceDiodeModelWarning>,
 ) {
     if params.expression_dialect() != ExpressionDialect::Xyce
-        || !(model.model_type.eq_ignore_ascii_case("D")
-            || model.model_type.eq_ignore_ascii_case("DIODE"))
+        || !(is_xyce_diode_model(model) || is_xyce_resistor_model(model))
     {
         return;
     }
@@ -349,6 +348,47 @@ fn queue_unknown_xyce_diode_model_parameter_warnings(
         origin: origin.clone(),
         parameter_order,
     });
+}
+
+fn is_xyce_diode_model(model: &ModelDef) -> bool {
+    model.model_type.eq_ignore_ascii_case("D") || model.model_type.eq_ignore_ascii_case("DIODE")
+}
+
+fn is_xyce_resistor_model(model: &ModelDef) -> bool {
+    model.model_type.eq_ignore_ascii_case("R") || model.model_type.eq_ignore_ascii_case("RES")
+}
+
+/// Warn for each resistance spelling Xyce's resistor model does not have.
+///
+/// Xyce names the model multiplier R and nothing else (N_DEV_Resistor.C:254),
+/// so it ignores RES, R0, VALUE and RESISTANCE with this warning, at every
+/// LEVEL; the other dialects read them as R.
+fn push_unknown_xyce_resistor_model_parameter_warnings(
+    model: &ModelDef,
+    model_name: &str,
+    parameter_order: &[String],
+    origin: &NetlistSourceLocation,
+    diagnostics: &mut Vec<ParseDiagnostic>,
+) {
+    let mut seen = HashSet::new();
+    for name in parameter_order {
+        let canonical_name = name.to_ascii_uppercase();
+        if !matches!(
+            canonical_name.as_str(),
+            "RES" | "R0" | "VALUE" | "RESISTANCE"
+        ) || !model_has_parameter(model, name)
+            || !seen.insert(canonical_name.clone())
+        {
+            continue;
+        }
+        diagnostics.push(ParseDiagnostic::warning_at(
+            origin.clone(),
+            "xyce-unknown-resistor-model-parameter",
+            format!(
+                "No model parameter {canonical_name} found for model {model_name} of type R, parameter ignored."
+            ),
+        ));
+    }
 }
 
 fn uses_generated_xyce_diode_model(model: &ModelDef) -> bool {
@@ -478,10 +518,11 @@ pub(super) fn emit_pending_xyce_diode_model_parameter_warnings_with_abort(
             .models
             .get(warning.model_index)
             .is_some_and(|model| {
-                model
-                    .expr_params
-                    .iter()
-                    .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
+                is_xyce_diode_model(model)
+                    && model
+                        .expr_params
+                        .iter()
+                        .any(|(name, _)| name.eq_ignore_ascii_case("LEVEL"))
             })
     });
     let mut native_scoped_models = HashSet::new();
@@ -531,6 +572,16 @@ pub(super) fn emit_pending_xyce_diode_model_parameter_warnings_with_abort(
         let Some(model) = models.get(warning.model_index) else {
             continue;
         };
+        if is_xyce_resistor_model(model) {
+            push_unknown_xyce_resistor_model_parameter_warnings(
+                model,
+                &warning.model_name,
+                &warning.parameter_order,
+                &warning.origin,
+                diagnostics,
+            );
+            continue;
+        }
         let level_is_deferred = model
             .expr_params
             .iter()

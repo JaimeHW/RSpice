@@ -803,11 +803,15 @@ fn resolve_resistor_parameters(
         };
 
     if let Some(model_def) = model_def {
-        let model_resistance = resolve_model_param(
-            model_def,
-            &["R", "RES", "R0", "VALUE", "RESISTANCE"],
-            eval_ctx,
-        )?;
+        // Xyce's resistor model names its multiplier R and nothing else
+        // (N_DEV_Resistor.C:254); the parser warns that Xyce ignores the
+        // other spellings.
+        let model_resistance_names: &[&str] = if spice_dialect == SpiceDialect::Xyce {
+            &["R"]
+        } else {
+            &["R", "RES", "R0", "VALUE", "RESISTANCE"]
+        };
+        let model_resistance = resolve_model_param(model_def, model_resistance_names, eval_ctx)?;
 
         if resistor_level != Some(2) {
             let geometry_resistance = if resistance.is_none() {
@@ -1630,6 +1634,20 @@ R4 a 0 rmod
             "R4",
         );
         assert_eq!(safety_default, 1.0e-3);
+    }
+
+    #[test]
+    fn xyce_ignores_model_resistance_spellings_other_than_r() {
+        // Xyce 7.10 warns "No model parameter RESISTANCE found for model RMOD
+        // of type R, parameter ignored." and uses its 1 kOhm default.
+        for model in ["RESISTANCE=2k", "RES=2k", "R0=2k", "VALUE=2k"] {
+            let source = format!("model alias\nR1 a 0 rmod\n.model rmod R {model}\n.end\n");
+            assert_eq!(
+                resolve_xyce_resistor_from_source(&source, "R1"),
+                1_000.0,
+                "Xyce R for {model}"
+            );
+        }
     }
 
     #[test]
