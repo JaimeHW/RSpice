@@ -12,21 +12,17 @@
 #![cfg_attr(not(test), deny(clippy::unwrap_used, clippy::expect_used))]
 #![cfg_attr(not(test), deny(clippy::panic, clippy::unreachable))]
 
-use egui::{Context, Grid, RichText, ScrollArea, Ui};
+use egui::{Context, ScrollArea, Ui};
 
 use crate::state::ProjectSourceLanguage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::design_system::inspector::muted_inspector_copy;
-use crate::workbench::design_system::{
-    code_inspector_section, panel_body, property_row, property_row_combo, section_block_gap,
-};
 use crate::workbench::documents::code_workspace::{
-    self, CodeSourceSearchResults, CodeSourceSearchScope, SOURCE_SEARCH_RESULT_LIMIT,
+    self, CodeSourceSearchResults, CodeSourceSearchScope, CodeSourceSearchState,
+    SOURCE_SEARCH_RESULT_LIMIT,
 };
 use crate::workbench::{MessageCatalog, MessageId};
 
@@ -67,11 +63,71 @@ fn scope_label(messages: MessageCatalog, scope: CodeSourceSearchScope) -> String
     )
 }
 
+/// The height of one match in the results list.
+const RESULT_ROW_HEIGHT: f32 = 24.0;
+/// How tall the results list grows before it scrolls.
+const RESULT_LIST_MAX_HEIGHT: f32 = 168.0;
+/// Below this width the labels stack over their fields.
+const COMPACT_FIELDS_WIDTH: f32 = 360.0;
+
 /// What the body asked for, applied after rendering.
 enum FindAction {
     None,
     Replace,
     Reveal(String, usize),
+}
+
+/// The footer's one status line: why the search failed, what it needs, or
+/// what it found.
+fn find_status(
+    messages: MessageCatalog,
+    search: &CodeSourceSearchState,
+    failure: Option<&str>,
+    blocked: Option<&str>,
+    found: &CodeSourceSearchResults,
+    replaceable: bool,
+) -> (String, DialogHintTone) {
+    if let Some(error) = failure {
+        return (error.to_owned(), DialogHintTone::Error);
+    }
+    if search.query.is_empty() {
+        // Before anything is found, say why there is no Replace when the
+        // bundle's files are held.
+        return match blocked {
+            Some(reason) => (reason.to_owned(), DialogHintTone::Warn),
+            None => (
+                messages.text(MessageId::NetlistFindEnterTextHint),
+                DialogHintTone::Neutral,
+            ),
+        };
+    }
+    if found.total_matches == 0 {
+        return (
+            messages.text(MessageId::CodeSearchNoMatches),
+            DialogHintTone::Neutral,
+        );
+    }
+    let count = found.total_matches.to_string();
+    let text = if replaceable && found.read_only_matches > 0 {
+        // Replace all skips these, so the count it acts on is not the total.
+        messages.format(
+            MessageId::CodeSearchMatchesReadOnly,
+            &[
+                ("count", &count),
+                ("read_only", &found.read_only_matches.to_string()),
+            ],
+        )
+    } else {
+        messages.format(
+            if found.total_matches == 1 {
+                MessageId::CodeSearchMatchSingular
+            } else {
+                MessageId::CodeSearchMatches
+            },
+            &[("count", &count)],
+        )
+    };
+    (text, DialogHintTone::Neutral)
 }
 
 impl RSpiceApp {
@@ -83,7 +139,7 @@ impl RSpiceApp {
         let _opening_input =
             crate::ui::input::InputScope::enter(ctx, code_workspace::source_search_query_id());
         // Read the search once, run it once, and render from that. Re-running
-        // per section would let two parts of one dialog state different counts.
+        // per part would let two parts of one dialog state different counts.
         let Some(search) = self.state.code.code_workspace.source_search.clone() else {
             return;
         };
@@ -98,46 +154,66 @@ impl RSpiceApp {
             );
 
         let messages = self.state.workbench.messages();
-        let mut dialog = Dialog::new(
-            messages.text(MessageId::CodeSearchTitle),
-            messages.text(MessageId::CommonClose),
-        )
-        .description(messages.text(MessageId::CodeSearchDescription))
-        .size(DialogSize::SimulationWorkflow)
-        .initial_height(580.0)
-        .primary_on_enter(false)
-        .initial_focus(DialogInitialFocus::Control(
-            code_workspace::source_search_query_id(),
-        ));
         let failure = search
             .error
             .clone()
             .or_else(|| results.as_ref().err().cloned());
-        if let Some(error) = failure.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                messages.text(MessageId::CodeSearchCannotRun),
-                error,
-            );
-        } else if let Some(reason) = blocked {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                messages.text(MessageId::CodeSearchReplacementHeld),
-                reason,
-            );
+        let found = results.unwrap_or_default();
+        let (status, tone) = find_status(
+            messages,
+            &search,
+            failure.as_deref(),
+            blocked,
+            &found,
+            replaceable,
+        );
+        // A document nothing may be written to is searched, never replaced
+        // in: it has no Replace field and no Replace all, and Close is all
+        // its footer offers.
+        let (title, primary) = if replaceable {
+            (
+                MessageId::NetlistFindTitle,
+                MessageId::NetlistFindReplaceAll,
+            )
+        } else {
+            (MessageId::CodeSearchTitle, MessageId::CommonClose)
+        };
+        let mut dialog = Dialog::new(messages.text(title), messages.text(primary))
+            .description(messages.text(MessageId::CodeSearchDescription))
+            .size(DialogSize::Transaction)
+            // The fields end where the footer's buttons do, not a bar's width in.
+            .overlay_scrollbar()
+            // Enter in the Find field searches as it types; it must never
+            // replace every match.
+            .primary_on_enter(false)
+            .initial_focus(DialogInitialFocus::Control(
+                code_workspace::source_search_query_id(),
+            ))
+            .hint(status)
+            .hint_tone(tone);
+        if replaceable {
+            dialog = dialog
+                .primary_enabled(
+                    failure.is_none() && !search.query.is_empty() && found.editable_matches > 0,
+                )
+                .ghost(messages.text(MessageId::CommonClose));
         }
 
-        let found = results.unwrap_or_default();
         let mut action = FindAction::None;
         let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
             action = find_body(ui, &mut self.state, &found, replaceable);
             Some(code_workspace::source_search_query_id())
         });
+        let close = match choice {
+            DialogChoice::Primary if replaceable => {
+                action = FindAction::Replace;
+                false
+            }
+            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => true,
+            DialogChoice::Secondary | DialogChoice::None => false,
+        };
         self.apply_find_action(action, ctx);
-        if matches!(
-            choice,
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
-        ) {
+        if close {
             self.state.code.code_workspace.source_search = None;
         }
     }
@@ -187,245 +263,227 @@ impl RSpiceApp {
     }
 }
 
+/// Find, Replace when the document takes one, and Scope on the label grid,
+/// the options under them, and the matches under a rule once there are any.
 fn find_body(
     ui: &mut Ui,
     state: &mut crate::workbench::app_state::AppState,
     found: &CodeSourceSearchResults,
     replaceable: bool,
 ) -> FindAction {
-    let t = Tokens::get(ui.ctx());
     let messages = state.workbench.messages();
-    let mut action = FindAction::None;
-    ScrollArea::vertical()
-        .id_salt("source-find")
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            panel_body(ui, |ui| {
-                let Some(search) = state.code.code_workspace.source_search.as_mut() else {
-                    return;
-                };
-                let has_selection = search.selection_char_range.is_some();
-                code_inspector_section(
-                    ui,
-                    &messages.text(MessageId::CodeSearchQuery),
-                    None,
-                    None,
-                    |ui| {
-                        property_row(
-                            ui,
-                            &messages.text(MessageId::CodeSearchActiveDocument),
-                            &search.active_path,
-                        );
-                        crate::workbench::design_system::property_row_text_edit(
-                            ui,
-                            &messages.text(MessageId::CommonFind),
-                            egui::TextEdit::singleline(&mut search.query)
-                                .id(code_workspace::source_search_query_id()),
-                            false,
-                        );
-                        let replace_with = messages.text(MessageId::CodeSearchReplaceWith);
-                        if replaceable {
-                            crate::workbench::design_system::property_row_input(
-                                ui,
-                                &replace_with,
-                                &mut search.replacement,
-                                false,
-                            );
-                        } else {
-                            property_row(
-                                ui,
-                                &replace_with,
-                                &messages.text(MessageId::CodeSearchReplaceUnavailable),
-                            );
-                        }
-                        let options = SCOPES
-                            .iter()
-                            // Offering a scope the search will refuse is worse than
-                            // not offering it, so Selection appears only when the
-                            // editor captured one.
-                            .filter(|(scope, _)| {
-                                has_selection || *scope != CodeSourceSearchScope::Selection
-                            })
-                            .map(|(_, id)| (messages.text(*id), messages.text(*id)))
-                            .collect::<Vec<_>>();
-                        let mut chosen = scope_label(messages, search.scope);
-                        if property_row_combo(
-                            ui,
-                            &messages.text(MessageId::CommonScope),
-                            "source-find-scope",
-                            &mut chosen,
-                            &options,
-                            true,
-                        ) && let Some((scope, _)) =
-                            SCOPES.iter().find(|(_, id)| messages.text(*id) == chosen)
-                        {
-                            search.scope = *scope;
-                        }
-                        section_block_gap(ui);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = egui::vec2(12.0, 4.0);
-                            ui.checkbox(
-                                &mut search.match_case,
-                                messages.text(MessageId::CodeSearchMatchCase),
-                            );
-                            ui.checkbox(
-                                &mut search.whole_symbol,
-                                messages.text(MessageId::CodeSearchWholeSymbol),
-                            );
-                            ui.checkbox(
-                                &mut search.regular_expression,
-                                messages.text(MessageId::CodeSearchRegularExpression),
-                            );
-                            ui.checkbox(
-                                &mut search.include_comments,
-                                messages.text(MessageId::CodeSearchIncludeComments),
-                            );
-                            ui.add_enabled(
-                                search.scope == CodeSourceSearchScope::ActiveLanguageProject,
-                                egui::Checkbox::new(
-                                    &mut search.include_generated_references,
-                                    messages.text(MessageId::CodeSearchIncludeGenerated),
-                                ),
-                            )
-                            .on_disabled_hover_text(
-                                messages.text(MessageId::CodeSearchIncludeGeneratedHint),
-                            );
-                        });
-                    },
-                );
-
+    let Some(search) = state.code.code_workspace.source_search.as_mut() else {
+        return FindAction::None;
+    };
+    let has_selection = search.selection_char_range.is_some();
+    let compact_fields = ui.ctx().content_rect().width() < COMPACT_FIELDS_WIDTH;
+    // A field is a control's height, as tall as the Scope select beside it
+    // and a finger's target in a touch shell.
+    let field_size = |ui: &Ui| {
+        egui::vec2(
+            ui.available_width().max(180.0),
+            Tokens::get(ui.ctx()).metrics.ctl_h,
+        )
+    };
+    let find_field = |ui: &mut Ui, query: &mut String| {
+        ui.add_sized(
+            field_size(ui),
+            egui::TextEdit::singleline(query)
+                .id(code_workspace::source_search_query_id())
+                .vertical_align(egui::Align::Center)
+                .hint_text(messages.text(MessageId::NetlistFindExpressionHint)),
+        );
+    };
+    let replace_field = |ui: &mut Ui, replacement: &mut String| {
+        ui.add_sized(
+            field_size(ui),
+            egui::TextEdit::singleline(replacement).vertical_align(egui::Align::Center),
+        );
+    };
+    if compact_fields {
+        ui.label(messages.text(MessageId::CommonFind));
+        find_field(ui, &mut search.query);
+        if replaceable {
+            ui.label(messages.text(MessageId::CommonReplace));
+            replace_field(ui, &mut search.replacement);
+        }
+        ui.label(messages.text(MessageId::CommonScope));
+        scope_select(ui, search, has_selection, messages);
+    } else {
+        egui::Grid::new("source-find-fields")
+            .num_columns(2)
+            .spacing([10.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(messages.text(MessageId::CommonFind));
+                find_field(ui, &mut search.query);
+                ui.end_row();
                 if replaceable {
-                    section_block_gap(ui);
-                    if Button::new(&messages.text(MessageId::CodeSearchReplaceAllEligible))
-                        .accent()
-                        .enabled(!search.query.is_empty() && found.editable_matches > 0)
-                        .show(ui)
-                        .clicked()
-                    {
-                        action = FindAction::Replace;
-                    }
-                    if found.read_only_matches > 0 {
-                        muted_inspector_copy(
-                            ui,
-                            &messages.format(
-                                if found.read_only_matches == 1 {
-                                    MessageId::CodeSearchReadOnlyMatchSingular
-                                } else {
-                                    MessageId::CodeSearchReadOnlyMatches
-                                },
-                                &[("count", &found.read_only_matches.to_string())],
-                            ),
-                        );
-                    }
+                    ui.label(messages.text(MessageId::CommonReplace));
+                    replace_field(ui, &mut search.replacement);
+                    ui.end_row();
                 }
-
-                if let Some(reveal) = results_table(ui, found, &t, messages) {
-                    action = FindAction::Reveal(reveal.0, reveal.1);
-                }
-            })
-        });
-    action
+                ui.label(messages.text(MessageId::CommonScope));
+                scope_select(ui, search, has_selection, messages);
+                ui.end_row();
+            });
+    }
+    ui.horizontal_wrapped(|ui| {
+        ui.checkbox(
+            &mut search.match_case,
+            messages.text(MessageId::CodeSearchMatchCase),
+        );
+        ui.checkbox(
+            &mut search.whole_symbol,
+            messages.text(MessageId::CodeSearchWholeSymbol),
+        );
+        ui.checkbox(
+            &mut search.regular_expression,
+            messages.text(MessageId::CodeSearchRegularExpression),
+        );
+        ui.checkbox(
+            &mut search.include_comments,
+            messages.text(MessageId::CodeSearchIncludeComments),
+        );
+        ui.add_enabled(
+            search.scope == CodeSourceSearchScope::ActiveLanguageProject,
+            egui::Checkbox::new(
+                &mut search.include_generated_references,
+                messages.text(MessageId::CodeSearchIncludeGenerated),
+            ),
+        )
+        .on_disabled_hover_text(messages.text(MessageId::CodeSearchIncludeGeneratedHint));
+    });
+    if found.matches.is_empty() {
+        return FindAction::None;
+    }
+    ui.separator();
+    match results_list(ui, found, messages) {
+        Some((path, line)) => FindAction::Reveal(path, line),
+        None => FindAction::None,
+    }
 }
 
-fn results_table(
+/// The scope as the kit's select, in the order the search widens. Offering a
+/// scope the search will refuse is worse than not offering it, so Selection
+/// appears only when the editor captured one.
+fn scope_select(
+    ui: &mut Ui,
+    search: &mut CodeSourceSearchState,
+    has_selection: bool,
+    messages: MessageCatalog,
+) {
+    let offered = SCOPES
+        .iter()
+        .filter(|(scope, _)| has_selection || *scope != CodeSourceSearchScope::Selection)
+        .collect::<Vec<_>>();
+    let labels = offered
+        .iter()
+        .map(|(_, id)| messages.text(*id))
+        .collect::<Vec<_>>();
+    if let Some(picked) = crate::ui::widgets::select(
+        ui,
+        "source-find-scope",
+        &messages.text(MessageId::CommonScope),
+        &scope_label(messages, search.scope),
+        &labels,
+        ui.available_width().max(180.0),
+    ) && let Some((scope, _)) = offered.get(picked)
+    {
+        search.scope = *scope;
+    }
+}
+
+/// One row per match: its path, its position and the line it sits on, the
+/// row a reader clicks to reveal it. Returns the match clicked.
+fn results_list(
     ui: &mut Ui,
     found: &CodeSourceSearchResults,
-    t: &Tokens,
     messages: MessageCatalog,
 ) -> Option<(String, usize)> {
-    let summary = messages.format(
-        if found.total_matches == 1 {
-            MessageId::CodeSearchMatchSingular
-        } else {
-            MessageId::CodeSearchMatches
-        },
-        &[("count", &found.total_matches.to_string())],
-    );
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
     let mut reveal = None;
-    code_inspector_section(
-        ui,
-        &messages.text(MessageId::CodeSearchMatchesHeading),
-        Some(&summary),
-        None,
-        |ui| {
-            if found.matches.is_empty() {
-                muted_inspector_copy(ui, &messages.text(MessageId::CodeSearchNoMatches));
-                return;
-            }
-            Grid::new("source-find-results")
-                .num_columns(3)
-                .spacing(egui::vec2(14.0, 3.0))
-                .striped(true)
-                .show(ui, |ui| {
-                    for row in &found.matches {
-                        // Only the path cell is focusable, and a match is its
-                        // path, its position, and the line it sits on. Announce
-                        // the row rather than the one cell that takes focus.
-                        let response = ui.selectable_label(
-                            false,
-                            RichText::new(&row.logical_path)
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-                        );
-                        let announced = messages.format(
-                            if row.editable {
-                                MessageId::CodeSearchResultAccessible
-                            } else {
-                                MessageId::CodeSearchResultAccessibleReadOnly
-                            },
-                            &[
-                                ("path", &row.logical_path),
-                                ("line", &row.line.to_string()),
-                                ("column", &row.column.to_string()),
-                                ("preview", row.line_preview.trim()),
-                            ],
-                        );
-                        response.widget_info(|| {
-                            egui::WidgetInfo::labeled(
-                                egui::WidgetType::SelectableLabel,
-                                true,
-                                &announced,
-                            )
-                        });
-                        if response.clicked() {
-                            reveal = Some((row.logical_path.clone(), row.line));
-                        }
-                        ui.label(
-                            RichText::new(format!("{}:{}", row.line, row.column))
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(t.color.text_dim),
-                        );
-                        ui.label(
-                            RichText::new(row.line_preview.trim())
-                                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                                .color(if row.editable {
-                                    t.color.text
-                                } else {
-                                    t.color.text_dim
-                                }),
-                        );
-                        ui.end_row();
-                    }
-                });
-            // Silence about a cap reads as "this is everything". Say what was
-            // dropped and why the number on screen is not the total.
-            if found.display_truncated {
-                muted_inspector_copy(
-                    ui,
-                    &messages.format(
-                        if found.truncated {
-                            MessageId::CodeSearchShowingFirstStreamStopped
-                        } else {
-                            MessageId::CodeSearchShowingFirst
-                        },
-                        &[
-                            ("limit", &SOURCE_SEARCH_RESULT_LIMIT.to_string()),
-                            ("count", &found.total_matches.to_string()),
-                        ],
-                    ),
+    ScrollArea::vertical()
+        .id_salt("source-find-results")
+        .auto_shrink([false, true])
+        .max_height(RESULT_LIST_MAX_HEIGHT)
+        .show_rows(ui, RESULT_ROW_HEIGHT, found.matches.len(), |ui, rows| {
+            for index in rows {
+                let Some(row) = found.matches.get(index) else {
+                    continue;
+                };
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), RESULT_ROW_HEIGHT),
+                    egui::Sense::click(),
                 );
+                if response.hovered() {
+                    ui.painter().rect_filled(rect, 3.0, t.color.bg_hover);
+                }
+                let text = format!(
+                    "{}  {}:{}  {}",
+                    row.logical_path,
+                    row.line,
+                    row.column,
+                    row.line_preview.trim()
+                );
+                let galley = ui.painter().layout_no_wrap(
+                    text,
+                    font.clone(),
+                    // A match in a read-only source is found, not replaced.
+                    if row.editable {
+                        t.color.text
+                    } else {
+                        t.color.text_dim
+                    },
+                );
+                ui.painter().with_clip_rect(rect).galley(
+                    egui::pos2(rect.left() + 6.0, rect.center().y - galley.size().y * 0.5),
+                    galley,
+                    t.color.text,
+                );
+                // The row is a match, not a file name: announce all of it.
+                let announced = messages.format(
+                    if row.editable {
+                        MessageId::CodeSearchResultAccessible
+                    } else {
+                        MessageId::CodeSearchResultAccessibleReadOnly
+                    },
+                    &[
+                        ("path", &row.logical_path),
+                        ("line", &row.line.to_string()),
+                        ("column", &row.column.to_string()),
+                        ("preview", row.line_preview.trim()),
+                    ],
+                );
+                response.widget_info(|| {
+                    egui::WidgetInfo::labeled(egui::WidgetType::Button, true, &announced)
+                });
+                if response
+                    .on_hover_cursor(egui::CursorIcon::PointingHand)
+                    .clicked()
+                {
+                    reveal = Some((row.logical_path.clone(), row.line));
+                }
             }
-        },
-    );
+        });
+    // Silence about a cap reads as "this is everything". Say what was
+    // dropped and why the number on screen is not the total.
+    if found.display_truncated {
+        muted_inspector_copy(
+            ui,
+            &messages.format(
+                if found.truncated {
+                    MessageId::CodeSearchShowingFirstStreamStopped
+                } else {
+                    MessageId::CodeSearchShowingFirst
+                },
+                &[
+                    ("limit", &SOURCE_SEARCH_RESULT_LIMIT.to_string()),
+                    ("count", &found.total_matches.to_string()),
+                ],
+            ),
+        );
+    }
     reveal
 }
 
@@ -522,6 +580,89 @@ mod tests {
                     Some(scope)
                 );
             }
+        }
+    }
+
+    /// Find in a Verilog-A or Automation source has the shape of Find on the
+    /// netlist page: Find, Replace and Scope on the label grid, the options
+    /// under them, one status in the footer, and Replace all as the footer's
+    /// primary. It was an inspector sheet: a "Query" section over an "Active
+    /// document" row, a raw dropdown, a "Replace all eligible" button in the
+    /// body and a "Matches" section in a dialog held 580 points tall, its
+    /// fields ending a scroll bar's width short of the footer's buttons.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn find_in_source_is_a_label_grid_whose_fields_end_at_the_footer() {
+        use egui::accesskit::{Node, Role};
+
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page = CodeWorkspacePage::Automation;
+        code_workspace::open_active_source_search(&mut app)
+            .expect("the Automation page owns a searchable bundle");
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| app.render_source_find_dialog(ctx),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let named = |text: &str| {
+            nodes
+                .values()
+                .any(|node| node.label() == Some(text) || node.value() == Some(text))
+        };
+        for row in ["Find", "Replace", "Scope", "Enter text to search"] {
+            assert!(named(row), "the dialog names no {row:?}");
+        }
+        for gone in [
+            "Query",
+            "Active document",
+            "Matches",
+            "Replace all eligible",
+        ] {
+            assert!(!named(gone), "the dialog still names {gone:?}");
+        }
+        let replace_all = nodes
+            .values()
+            .find(|node| node.role() == Role::Button && node.label() == Some("Replace all"))
+            .expect("Replace all is the footer's primary");
+        assert!(
+            replace_all.is_disabled(),
+            "Replace all is offered with nothing to replace"
+        );
+        let footer_right = replace_all.bounds().expect("a laid out button").x1;
+        let fields = nodes
+            .values()
+            .filter(|node| matches!(node.role(), Role::TextInput | Role::ComboBox))
+            .filter_map(Node::bounds)
+            .collect::<Vec<_>>();
+        assert_eq!(fields.len(), 3, "Find, Replace and Scope");
+        let height = |field: &egui::accesskit::Rect| field.y1 - field.y0;
+        for field in &fields {
+            assert!(
+                (field.x1 - footer_right).abs() <= 1.0,
+                "a field ends at {} and the footer at {footer_right}",
+                field.x1
+            );
+            // The text fields are as tall as the select; they were shorter.
+            assert!(
+                (height(field) - height(&fields[0])).abs() <= 1.0,
+                "fields of {} and {} points",
+                height(field),
+                height(&fields[0])
+            );
         }
     }
 
