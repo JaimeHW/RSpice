@@ -59,8 +59,9 @@ pub struct SimulationConfig {
     /// Minimum timestep for transient
     pub min_timestep: f64,
 
-    /// Maximum timestep for transient
-    pub max_timestep: f64,
+    /// Maximum timestep for transient. Unset, the `.TRAN` card and the
+    /// dialect's rule own the ceiling, as in ngspice and Xyce.
+    pub max_timestep: Option<f64>,
 
     /// Enable waveform compression by default
     pub compress_waveforms: bool,
@@ -183,7 +184,7 @@ impl Default for SimulationConfig {
             // failing timepoints grind a thousand times longer through the
             // dt-cut ladder before the rescue machinery fires.
             min_timestep: 1e-12,
-            max_timestep: 1e-3,
+            max_timestep: None,
             compress_waveforms: false,
             compression_tolerance: 1e-4,
             convergence_mode: "default".to_string(),
@@ -273,7 +274,10 @@ impl Config {
             temperature: self.simulation.temperature + 273.15,
             max_iterations: self.simulation.max_iterations,
             min_timestep: self.simulation.min_timestep,
-            max_timestep: self.simulation.max_timestep,
+            max_timestep: self
+                .simulation
+                .max_timestep
+                .unwrap_or(rspice_core::constants::MAX_TIMESTEP),
             tolerance: self.simulation.reltol,
             convergence_config: rspice_core::ConvergenceConfig {
                 voltage_reltol: self.simulation.reltol,
@@ -404,7 +408,7 @@ impl Config {
             self.simulation.min_timestep = v;
         }
         if let Some(v) = sim.max_timestep {
-            self.simulation.max_timestep = v;
+            self.simulation.max_timestep = Some(v);
         }
         if let Some(v) = sim.compress_waveforms {
             self.simulation.compress_waveforms = v;
@@ -564,16 +568,15 @@ impl Config {
             self.simulation.residual_reltol,
         )?;
         validate_positive("simulation.min_timestep", self.simulation.min_timestep)?;
-        validate_positive("simulation.max_timestep", self.simulation.max_timestep)?;
-        if self.simulation.min_timestep > self.simulation.max_timestep {
-            return Err(ConfigError::InvalidValue {
-                field: "simulation.min_timestep".to_string(),
-                value: self.simulation.min_timestep.to_string(),
-                message: format!(
-                    "must be <= simulation.max_timestep ({})",
-                    self.simulation.max_timestep
-                ),
-            });
+        if let Some(max_timestep) = self.simulation.max_timestep {
+            validate_positive("simulation.max_timestep", max_timestep)?;
+            if self.simulation.min_timestep > max_timestep {
+                return Err(ConfigError::InvalidValue {
+                    field: "simulation.min_timestep".to_string(),
+                    value: self.simulation.min_timestep.to_string(),
+                    message: format!("must be <= simulation.max_timestep ({max_timestep})"),
+                });
+            }
         }
         validate_positive(
             "simulation.compression_tolerance",
