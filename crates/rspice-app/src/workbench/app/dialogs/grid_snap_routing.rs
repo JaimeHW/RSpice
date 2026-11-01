@@ -9,8 +9,8 @@ use egui::Context;
 
 use crate::state::{GridStyle, SchematicWireRoutingStyle, WireRoutingMode};
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app_state::{AppState, Model};
 
 /// Governed snap-spacing choices shown by the upgraded schematic toolbar
 /// transaction. `Free` disables snapping without replacing the document's
@@ -105,7 +105,7 @@ impl GridSnapRoutingDialogState {
     }
 }
 
-const TITLE: &str = "Grid, snap and wire routing";
+pub(crate) const TITLE: &str = "Grid, snap and wire routing";
 const PRIMARY: &str = "Apply canvas settings";
 const DESCRIPTION: &str = "Grid display is what you see; snap pitch and snap targets are what the cursor commits to. They are set separately because a coarse grid with fine snapping is a normal way to work.";
 const GRID_STYLES: [GridStyle; 3] = [GridStyle::Dots, GridStyle::Lines, GridStyle::Off];
@@ -140,7 +140,7 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
             .wire_drawing
             .routing_mode
         {
-            mode if mode.is_orthogonal() || angled_routing_allowed(state) => mode,
+            mode if mode.is_orthogonal() || angled_routing_allowed(&state.model) => mode,
             _ => WireRoutingMode::HorizontalFirst,
         },
     };
@@ -149,56 +149,48 @@ pub(crate) fn open_grid_snap_routing_dialog(state: &mut AppState) -> bool {
     true
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_grid_snap_routing_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.grid_snap_routing.open {
-            return;
-        }
-
-        let read_only = self.state.schematic_edit_read_only();
-        let angled_routing = angled_routing_allowed(&self.state);
-        let validation_error = self.state.design.grid_snap_routing.validation_error.clone();
-        let transaction = &mut self.state.design.grid_snap_routing;
-        let mut spacing_id = None;
-        let choice = CommandForm::new(TITLE, PRIMARY)
-            .describe(DESCRIPTION)
-            // A refusal is known only once Apply is pressed.
-            .status(validation_error.as_deref().map_or(Ok(None), Err))
-            .show(ctx, |rows| {
-                let (grid, spacing) =
-                    grid_snap_routing_rows(rows, transaction, read_only, angled_routing);
-                spacing_id = Some(spacing);
-                Some(grid)
-            });
-        if let Some(GridSnapRoutingFocusTarget::SnapSpacing) = transaction.focus_target.take()
-            && let Some(id) = spacing_id
-        {
-            ctx.memory_mut(|memory| memory.request_focus(id));
-        }
-
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) = commit_grid_snap_routing(&mut self.state) {
-                    self.state.design.grid_snap_routing.validation_error = Some(error.message);
-                    self.state.design.grid_snap_routing.focus_target = error.focus_target;
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.grid_snap_routing.close();
-            }
-            DialogChoice::Secondary | DialogChoice::None => {}
-        }
+/// Draw Grid, snap and wire routing over its draft and what the model
+/// allows; what the reader chose.
+pub(in crate::workbench) fn show_grid_snap_routing_form(
+    transaction: &mut GridSnapRoutingDialogState,
+    model: &Model,
+    ctx: &Context,
+) -> DialogChoice {
+    let read_only = model.schematic_edit_read_only();
+    let angled_routing = angled_routing_allowed(model);
+    let validation_error = transaction.validation_error.clone();
+    let mut spacing_id = None;
+    let choice = CommandForm::new(TITLE, PRIMARY)
+        .describe(DESCRIPTION)
+        // A refusal is known only once Apply is pressed.
+        .status(validation_error.as_deref().map_or(Ok(None), Err))
+        .show(ctx, |rows| {
+            let (grid, spacing) =
+                grid_snap_routing_rows(rows, transaction, read_only, angled_routing);
+            spacing_id = Some(spacing);
+            Some(grid)
+        });
+    if let Some(GridSnapRoutingFocusTarget::SnapSpacing) = transaction.focus_target.take()
+        && let Some(id) = spacing_id
+    {
+        ctx.memory_mut(|memory| memory.request_focus(id));
     }
+
+    choice
 }
 
+/// Why Apply refused, and the field the refusal belongs to.
 #[derive(Debug)]
-struct GridSnapRoutingCommitError {
-    message: String,
-    focus_target: Option<GridSnapRoutingFocusTarget>,
+pub(crate) struct GridSnapRoutingCommitError {
+    pub(crate) message: String,
+    pub(crate) focus_target: Option<GridSnapRoutingFocusTarget>,
 }
 
 impl GridSnapRoutingCommitError {
-    fn new(message: impl Into<String>, focus_target: Option<GridSnapRoutingFocusTarget>) -> Self {
+    pub(crate) fn new(
+        message: impl Into<String>,
+        focus_target: Option<GridSnapRoutingFocusTarget>,
+    ) -> Self {
         Self {
             message: message.into(),
             focus_target,
@@ -206,96 +198,7 @@ impl GridSnapRoutingCommitError {
     }
 }
 
-fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingCommitError> {
-    let transaction = state.design.grid_snap_routing.clone();
-    if state.model.schematic.canvas_settings_change_blocked() {
-        return Err(GridSnapRoutingCommitError::new(
-            "Finish or cancel the active canvas authoring gesture before applying snap or routing settings.",
-            None,
-        ));
-    }
-    let authority = transaction.authority.as_ref().ok_or_else(|| {
-        GridSnapRoutingCommitError::new("The canvas-settings authority is missing.", None)
-    })?;
-    authority
-        .validate_presentation(state, TITLE)
-        .map_err(|message| GridSnapRoutingCommitError::new(message, None))?;
-
-    let requested_pitch = transaction.draft.snap_spacing.pitch();
-    let pitch_changed = requested_pitch
-        .is_some_and(|pitch| pitch != state.model.schematic.document().document_policy.grid_pitch);
-    if pitch_changed && state.schematic_edit_read_only() {
-        return Err(GridSnapRoutingCommitError::new(
-            "Snap spacing is project-owned and cannot be changed in this read-only view.",
-            Some(GridSnapRoutingFocusTarget::SnapSpacing),
-        ));
-    }
-    if requested_pitch.is_some() && !any_snap_target_enabled(&transaction.draft.snap_engine) {
-        return Err(GridSnapRoutingCommitError::new(
-            "Enable at least one snap target, or choose Free snap spacing.",
-            Some(GridSnapRoutingFocusTarget::SnapTargets),
-        ));
-    }
-
-    // Finish the complete candidate before mutating any owner. `Free` disables
-    // snapping while retaining the governed document pitch for later reuse.
-    let mut snap_engine = transaction.draft.snap_engine.clone();
-    snap_engine.enabled = requested_pitch.is_some();
-    snap_engine.grid_size = requested_pitch
-        .unwrap_or(state.model.schematic.document().document_policy.grid_pitch)
-        .canvas_grid_size();
-    let routing_mode = canonical_routing_mode(
-        transaction.draft.wire_routing,
-        state
-            .model
-            .schematic
-            .session
-            .editor
-            .wire_drawing
-            .routing_mode,
-    );
-    if !routing_mode.is_orthogonal() && !angled_routing_allowed(state) {
-        return Err(GridSnapRoutingCommitError::new(ANGLED_ROUTING_REASON, None));
-    }
-
-    if let Some(pitch) = requested_pitch.filter(|_| pitch_changed) {
-        let changed = state.model.schematic.change_grid_pitch(pitch);
-        if !changed {
-            return Err(GridSnapRoutingCommitError::new(
-                "The schematic grid pitch could not be changed.",
-                Some(GridSnapRoutingFocusTarget::SnapSpacing),
-            ));
-        }
-    }
-
-    state.design.set_grid_style(transaction.draft.grid_style);
-    state.model.schematic.session.editor.snap_engine = snap_engine.clone();
-    state.design.schematic_snap = snap_engine;
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .wire_drawing
-        .set_routing_mode(routing_mode);
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .bus_drawing
-        .routing_mode = routing_mode;
-    state.design.schematic_routing_mode = routing_mode;
-    state.design.schematic_visibility.wire_routing = routing_style(routing_mode);
-    if pitch_changed {
-        state.sync_active_schematic_to_workspace();
-    }
-    state.design.grid_snap_routing.close();
-    state.prompt("Grid, snap and routing settings applied.");
-    Ok(())
-}
-
-const fn any_snap_target_enabled(snap: &crate::state::SnapEngine) -> bool {
+pub(crate) const fn any_snap_target_enabled(snap: &crate::state::SnapEngine) -> bool {
     snap.snap_to_grid
         || snap.snap_to_terminals
         || snap.snap_to_junctions
@@ -304,22 +207,20 @@ const fn any_snap_target_enabled(snap: &crate::state::SnapEngine) -> bool {
 }
 
 /// Why 45° and free routing are unavailable under an orthogonal policy.
-const ANGLED_ROUTING_REASON: &str = "45\u{00b0} and free routing need the any-angle junction policy; \
+pub(crate) const ANGLED_ROUTING_REASON: &str = "45\u{00b0} and free routing need the any-angle junction policy; \
      this document keeps its wiring and junctions orthogonal.";
 
 /// Angled wires are drawn only where the document's junction policy keeps
 /// dots at angled joins too.
-fn angled_routing_allowed(state: &AppState) -> bool {
-    state
-        .model
-        .schematic
-        .document()
-        .document_policy
-        .wire_junctions
+pub(crate) fn angled_routing_allowed(model: &Model) -> bool {
+    model.schematic.document().document_policy.wire_junctions
         == crate::state::WireJunctionPolicy::AnyAngle
 }
 
-fn canonical_routing_mode(requested: WireRoutingMode, current: WireRoutingMode) -> WireRoutingMode {
+pub(crate) fn canonical_routing_mode(
+    requested: WireRoutingMode,
+    current: WireRoutingMode,
+) -> WireRoutingMode {
     if requested.is_orthogonal() && current.is_orthogonal() {
         current
     } else if requested.is_orthogonal() {
@@ -442,6 +343,22 @@ mod tests {
     use super::*;
     use crate::state::write_policy::LocalSafeModeOptions;
     use crate::state::{SchematicGridPitch, SchematicWireRoutingStyle, Tool};
+    use crate::workbench::app::RSpiceApp;
+
+    /// Apply, over the slot, the model and the session.
+    fn commit_grid_snap_routing(state: &mut AppState) -> Result<(), GridSnapRoutingCommitError> {
+        state
+            .design
+            .commit_grid_snap_routing(&mut state.model, &mut state.workbench)
+    }
+
+    /// Draw the dialog as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        let state = &mut app.state;
+        state
+            .design
+            .render_grid_snap_routing_dialog(&mut state.model, &mut state.workbench, ctx);
+    }
 
     #[test]
     fn open_captures_an_isolated_exact_draft_and_models_free_without_fake_pitch() {
@@ -905,7 +822,7 @@ mod tests {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ctx| app.render_grid_snap_routing_dialog(ctx),
+                |ctx| render(&mut app, ctx),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -964,7 +881,7 @@ mod tests {
                         )),
                         ..egui::RawInput::default()
                     },
-                    |ctx| app.render_grid_snap_routing_dialog(ctx),
+                    |ctx| render(&mut app, ctx),
                 )
                 .shapes;
         }

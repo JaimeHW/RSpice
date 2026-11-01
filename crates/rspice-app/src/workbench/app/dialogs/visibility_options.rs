@@ -17,7 +17,6 @@ use crate::state::{
 };
 use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
-use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 
 /// Transient, device-local recovery point for a visibility-policy change.
@@ -83,184 +82,30 @@ pub(crate) fn open_schematic_visibility_options(state: &mut AppState) -> bool {
     open_display_options(state)
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_schematic_visibility_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.schematic_visibility_dialog.open {
-            return;
-        }
-
-        let recovery_available = visibility_recovery_available(&self.state);
-        let mut form = CommandForm::new(TITLE, PRIMARY).describe(DESCRIPTION);
-        if recovery_available {
-            form = form.secondary("Undo last change");
-        }
-        let dialog_state = &mut self.state.design.schematic_visibility_dialog;
-        let choice = form.show(ctx, |rows| {
-            Some(display_options_rows(
-                rows,
-                &mut dialog_state.draft,
-                &mut dialog_state.layers_draft,
-            ))
-        });
-
-        match choice {
-            DialogChoice::Primary => apply_display_options(&mut self.state),
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.schematic_visibility_dialog.close();
-            }
-            DialogChoice::Secondary => match restore_visibility_recovery(&mut self.state) {
-                Ok(()) => {
-                    self.state.design.schematic_visibility_dialog.close();
-                    self.state
-                        .prompt("Restored the previous schematic visibility on this device.");
-                }
-                Err(error) => {
-                    self.state.prompt(error);
-                }
-            },
-            DialogChoice::None => {}
-        }
+/// Draw Display options over its drafts, offering Undo last change when the
+/// reader has one here; what the reader chose.
+pub(in crate::workbench) fn show_display_options(
+    dialog: &mut SchematicVisibilityDialogState,
+    recovery_available: bool,
+    ctx: &Context,
+) -> DialogChoice {
+    let mut form = CommandForm::new(TITLE, PRIMARY).describe(DESCRIPTION);
+    if recovery_available {
+        form = form.secondary("Undo last change");
     }
+    form.show(ctx, |rows| {
+        Some(display_options_rows(
+            rows,
+            &mut dialog.draft,
+            &mut dialog.layers_draft,
+        ))
+    })
 }
 
-/// Publish both drafts together and close.
-fn apply_display_options(state: &mut AppState) {
-    let policy = state.design.schematic_visibility_dialog.draft;
-    if policy != state.design.schematic_visibility {
-        let recovery = capture_visibility_recovery(state);
-        state.design.schematic_visibility_recovery = Some(recovery);
-    }
-    publish_visibility_policy(state, policy);
-    state.design.drawing_sheet_layers = state.design.schematic_visibility_dialog.layers_draft;
-    state.design.schematic_visibility_dialog.close();
-    state.prompt("Display options applied on this device; the design is unchanged.");
-}
-
-fn capture_visibility_recovery(state: &AppState) -> SchematicVisibilityRecovery {
-    SchematicVisibilityRecovery {
-        view_path: state.model.workspace.content.active_view.display_path(),
-        policy: state.design.schematic_visibility,
-        routing_mode: state.design.schematic_routing_mode,
-        net_highlight: state.model.schematic.session.editor.net_highlight.clone(),
-        selection: state.model.schematic.session.editor.selection.clone(),
-    }
-}
-
-fn visibility_recovery_available(state: &AppState) -> bool {
-    state
-        .design
-        .schematic_visibility_recovery
-        .as_ref()
-        .is_some_and(|recovery| {
-            recovery.view_path == state.model.workspace.content.active_view.display_path()
-        })
-}
-
-fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
-    let recovery = state
-        .design
-        .schematic_visibility_recovery
-        .clone()
-        .ok_or_else(|| "No prior schematic visibility state is available.".to_owned())?;
-    if recovery.view_path != state.model.workspace.content.active_view.display_path() {
-        return Err(
-            "The active cell/view changed; its prior visibility state was not applied.".to_owned(),
-        );
-    }
-    state.design.schematic_visibility = recovery.policy;
-    state.design.schematic_routing_mode = recovery.routing_mode;
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .wire_drawing
-        .routing_mode = recovery.routing_mode;
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .bus_drawing
-        .routing_mode = recovery.routing_mode;
-    state.model.schematic.session.editor.net_highlight = recovery.net_highlight;
-    state.model.schematic.session.editor.selection = recovery.selection;
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
-    if let Some(mut buffer) = state.model.workspace.schematic_editor_mut(&active_key) {
-        buffer.editor.session.editor.selection =
-            state.model.schematic.session.editor.selection.clone();
-    }
-    state.design.schematic_visibility_recovery = None;
-    Ok(())
-}
-
-pub(crate) fn publish_visibility_policy(state: &mut AppState, policy: SchematicVisibilityPolicy) {
-    let current = state
-        .model
-        .schematic
-        .session
-        .editor
-        .wire_drawing
-        .routing_mode;
-    let routing_mode = routing_mode_for(policy.wire_routing, current);
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .wire_drawing
-        .routing_mode = routing_mode;
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .bus_drawing
-        .routing_mode = routing_mode;
-    state.design.schematic_routing_mode = routing_mode;
-    if !policy.net_highlighting.lights_selected_net() {
-        state.model.schematic.session.editor.net_highlight.clear();
-    }
-    let selectable_note_ids = state
-        .model
-        .schematic
-        .document()
-        .design_notes
-        .iter()
-        .filter(|note| {
-            if note.kind != crate::state::DesignNoteKind::ReviewNote {
-                return true;
-            }
-            match policy.review_markers {
-                SchematicReviewMarkerVisibility::Hidden => false,
-                SchematicReviewMarkerVisibility::All => true,
-                SchematicReviewMarkerVisibility::OpenAndAssigned => {
-                    note.review.as_ref().is_some_and(|review| {
-                        review.state == crate::state::DesignReviewState::Open
-                            || review.assignee.is_some()
-                    })
-                }
-            }
-        })
-        .map(|note| note.id)
-        .collect::<std::collections::HashSet<_>>();
-    state
-        .model
-        .schematic
-        .session
-        .editor
-        .selection
-        .design_notes
-        .retain(|id| selectable_note_ids.contains(id));
-    state.design.schematic_visibility = policy;
-}
-
-fn routing_mode_for(style: SchematicWireRoutingStyle, current: WireRoutingMode) -> WireRoutingMode {
+pub(crate) fn routing_mode_for(
+    style: SchematicWireRoutingStyle,
+    current: WireRoutingMode,
+) -> WireRoutingMode {
     match style {
         SchematicWireRoutingStyle::Orthogonal if current.is_orthogonal() => current,
         SchematicWireRoutingStyle::Orthogonal => WireRoutingMode::HorizontalFirst,
@@ -433,6 +278,37 @@ const fn review_marker_label(value: SchematicReviewMarkerVisibility) -> &'static
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::app::RSpiceApp;
+
+    /// Draw the dialog as its dialog step does.
+    fn render(app: &mut RSpiceApp, ctx: &Context) {
+        let state = &mut app.state;
+        state.design.render_schematic_visibility_dialog(
+            &mut state.model,
+            &mut state.workbench,
+            ctx,
+        );
+    }
+
+    fn apply_display_options(state: &mut AppState) {
+        state
+            .design
+            .apply_display_options(&mut state.model, &mut state.workbench);
+    }
+
+    fn capture_visibility_recovery(state: &AppState) -> SchematicVisibilityRecovery {
+        state.design.capture_visibility_recovery(&state.model)
+    }
+
+    fn restore_visibility_recovery(state: &mut AppState) -> Result<(), String> {
+        state.design.restore_visibility_recovery(&mut state.model)
+    }
+
+    fn publish_visibility_policy(state: &mut AppState, policy: SchematicVisibilityPolicy) {
+        state
+            .design
+            .publish_visibility_policy(&mut state.model, policy);
+    }
 
     /// The visibility and the drawing-sheet-layers commands open one
     /// dialog, which applies both together and offers no wire routing: that
@@ -454,7 +330,7 @@ mod tests {
         let mut labels = String::new();
         for _ in 0..2 {
             let output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                app.render_schematic_visibility_dialog(ui.ctx());
+                render(&mut app, ui.ctx());
             });
             if let Some(update) = output.platform_output.accesskit_update {
                 for text in update

@@ -121,4 +121,22 @@ impl DesignFeature {
             ctx,
         );
     }
+
+    /// Grid, snap and wire routing.
+    pub(in crate::workbench) fn render_grid_snap_routing_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        cx.state
+            .render_grid_snap_routing_dialog(cx.model, cx.wb, ctx);
+    }
+
+    /// Display options.
+    pub(in crate::workbench) fn render_schematic_visibility_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        cx.state
+            .render_schematic_visibility_dialog(cx.model, cx.wb, ctx);
+    }
 }

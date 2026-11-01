@@ -5,7 +5,11 @@
 
 use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
-use crate::state::{GridStyle, SchematicVisibilityPolicy};
+use crate::state::{DesignNoteKind, DesignReviewState, GridStyle, SchematicVisibilityPolicy};
+use crate::ui::widgets::DialogChoice;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app::dialogs::grid_snap_routing::{self, GridSnapRoutingCommitError};
+use crate::workbench::app::dialogs::visibility_options::{self, SchematicVisibilityRecovery};
 use crate::workbench::app::{
     ConnectivityManagerDialogState, CreateModelBoundSymbolDialogState,
     DesignReviewCommentsDialogState, SelectionBulkEditDialogState, SymbolImportDialogState,
@@ -13,6 +17,7 @@ use crate::workbench::app::{
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::{CanvasGesturePort, DesignPort};
+use crate::workbench::state::WorkbenchSession;
 
 /// What the design feature keeps open between frames.
 #[derive(Debug, Clone, Default)]
@@ -272,6 +277,268 @@ impl DesignState {
         self.selected_stimulus_definition = None;
         self.stimulus_editor.clear();
         self.stimulus_browser.clear();
+    }
+}
+
+/// Grid, snap and wire routing: what the canvas snaps to and how wires route.
+impl DesignState {
+    /// Draw Grid, snap and wire routing and carry out what its reader chose.
+    pub(crate) fn render_grid_snap_routing_dialog(
+        &mut self,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        ctx: &egui::Context,
+    ) {
+        if !self.grid_snap_routing.open {
+            return;
+        }
+
+        let choice =
+            grid_snap_routing::show_grid_snap_routing_form(&mut self.grid_snap_routing, model, ctx);
+        match choice {
+            DialogChoice::Primary => {
+                if let Err(error) = self.commit_grid_snap_routing(model, workbench) {
+                    self.grid_snap_routing.validation_error = Some(error.message);
+                    self.grid_snap_routing.focus_target = error.focus_target;
+                }
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.grid_snap_routing.close();
+            }
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
+    /// Apply Grid, snap and wire routing: check the whole draft, then set the
+    /// grid, the snap and the routing on the slot and the open schematic
+    /// together.
+    pub(crate) fn commit_grid_snap_routing(
+        &mut self,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+    ) -> Result<(), GridSnapRoutingCommitError> {
+        let transaction = self.grid_snap_routing.clone();
+        if model.schematic.canvas_settings_change_blocked() {
+            return Err(GridSnapRoutingCommitError::new(
+                "Finish or cancel the active canvas authoring gesture before applying snap or routing settings.",
+                None,
+            ));
+        }
+        let authority = transaction.authority.as_ref().ok_or_else(|| {
+            GridSnapRoutingCommitError::new("The canvas-settings authority is missing.", None)
+        })?;
+        authority
+            .validate_presentation(&*model, grid_snap_routing::TITLE)
+            .map_err(|message| GridSnapRoutingCommitError::new(message, None))?;
+
+        let requested_pitch = transaction.draft.snap_spacing.pitch();
+        let pitch_changed = requested_pitch
+            .is_some_and(|pitch| pitch != model.schematic.document().document_policy.grid_pitch);
+        if pitch_changed && model.schematic_edit_read_only() {
+            return Err(GridSnapRoutingCommitError::new(
+                "Snap spacing is project-owned and cannot be changed in this read-only view.",
+                Some(grid_snap_routing::GridSnapRoutingFocusTarget::SnapSpacing),
+            ));
+        }
+        if requested_pitch.is_some()
+            && !grid_snap_routing::any_snap_target_enabled(&transaction.draft.snap_engine)
+        {
+            return Err(GridSnapRoutingCommitError::new(
+                "Enable at least one snap target, or choose Free snap spacing.",
+                Some(grid_snap_routing::GridSnapRoutingFocusTarget::SnapTargets),
+            ));
+        }
+
+        // Finish the complete candidate before mutating any owner. `Free` disables
+        // snapping while retaining the governed document pitch for later reuse.
+        let mut snap_engine = transaction.draft.snap_engine.clone();
+        snap_engine.enabled = requested_pitch.is_some();
+        snap_engine.grid_size = requested_pitch
+            .unwrap_or(model.schematic.document().document_policy.grid_pitch)
+            .canvas_grid_size();
+        let routing_mode = grid_snap_routing::canonical_routing_mode(
+            transaction.draft.wire_routing,
+            model.schematic.session.editor.wire_drawing.routing_mode,
+        );
+        if !routing_mode.is_orthogonal() && !grid_snap_routing::angled_routing_allowed(model) {
+            return Err(GridSnapRoutingCommitError::new(
+                grid_snap_routing::ANGLED_ROUTING_REASON,
+                None,
+            ));
+        }
+
+        if let Some(pitch) = requested_pitch.filter(|_| pitch_changed) {
+            let changed = model.schematic.change_grid_pitch(pitch);
+            if !changed {
+                return Err(GridSnapRoutingCommitError::new(
+                    "The schematic grid pitch could not be changed.",
+                    Some(grid_snap_routing::GridSnapRoutingFocusTarget::SnapSpacing),
+                ));
+            }
+        }
+
+        self.set_grid_style(transaction.draft.grid_style);
+        model.schematic.session.editor.snap_engine = snap_engine.clone();
+        self.schematic_snap = snap_engine;
+        model
+            .schematic
+            .session
+            .editor
+            .wire_drawing
+            .set_routing_mode(routing_mode);
+        model.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
+        self.schematic_routing_mode = routing_mode;
+        self.schematic_visibility.wire_routing = grid_snap_routing::routing_style(routing_mode);
+        if pitch_changed {
+            sync_active_schematic(model, workbench);
+        }
+        self.grid_snap_routing.close();
+        workbench.prompt("Grid, snap and routing settings applied.");
+        Ok(())
+    }
+}
+
+/// Display options: the schematic visibility, the drawing-sheet layers and
+/// the recovery point a change leaves.
+impl DesignState {
+    /// Draw Display options and carry out what its reader chose.
+    pub(crate) fn render_schematic_visibility_dialog(
+        &mut self,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+        ctx: &egui::Context,
+    ) {
+        if !self.schematic_visibility_dialog.open {
+            return;
+        }
+
+        let recovery_available = self.visibility_recovery_available(model);
+        let choice = visibility_options::show_display_options(
+            &mut self.schematic_visibility_dialog,
+            recovery_available,
+            ctx,
+        );
+        match choice {
+            DialogChoice::Primary => self.apply_display_options(model, workbench),
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.schematic_visibility_dialog.close();
+            }
+            DialogChoice::Secondary => match self.restore_visibility_recovery(model) {
+                Ok(()) => {
+                    self.schematic_visibility_dialog.close();
+                    workbench.prompt("Restored the previous schematic visibility on this device.");
+                }
+                Err(error) => {
+                    workbench.prompt(error);
+                }
+            },
+            DialogChoice::None => {}
+        }
+    }
+
+    /// Publish both drafts together and close.
+    pub(crate) fn apply_display_options(
+        &mut self,
+        model: &mut Model,
+        workbench: &mut WorkbenchSession,
+    ) {
+        let policy = self.schematic_visibility_dialog.draft;
+        if policy != self.schematic_visibility {
+            let recovery = self.capture_visibility_recovery(model);
+            self.schematic_visibility_recovery = Some(recovery);
+        }
+        self.publish_visibility_policy(model, policy);
+        self.drawing_sheet_layers = self.schematic_visibility_dialog.layers_draft;
+        self.schematic_visibility_dialog.close();
+        workbench.prompt("Display options applied on this device; the design is unchanged.");
+    }
+
+    pub(crate) fn capture_visibility_recovery(&self, model: &Model) -> SchematicVisibilityRecovery {
+        SchematicVisibilityRecovery {
+            view_path: model.workspace.content.active_view.display_path(),
+            policy: self.schematic_visibility,
+            routing_mode: self.schematic_routing_mode,
+            net_highlight: model.schematic.session.editor.net_highlight.clone(),
+            selection: model.schematic.session.editor.selection.clone(),
+        }
+    }
+
+    fn visibility_recovery_available(&self, model: &Model) -> bool {
+        self.schematic_visibility_recovery
+            .as_ref()
+            .is_some_and(|recovery| {
+                recovery.view_path == model.workspace.content.active_view.display_path()
+            })
+    }
+
+    pub(crate) fn restore_visibility_recovery(&mut self, model: &mut Model) -> Result<(), String> {
+        let recovery = self
+            .schematic_visibility_recovery
+            .clone()
+            .ok_or_else(|| "No prior schematic visibility state is available.".to_owned())?;
+        if recovery.view_path != model.workspace.content.active_view.display_path() {
+            return Err(
+                "The active cell/view changed; its prior visibility state was not applied."
+                    .to_owned(),
+            );
+        }
+        self.schematic_visibility = recovery.policy;
+        self.schematic_routing_mode = recovery.routing_mode;
+        model.schematic.session.editor.wire_drawing.routing_mode = recovery.routing_mode;
+        model.schematic.session.editor.bus_drawing.routing_mode = recovery.routing_mode;
+        model.schematic.session.editor.net_highlight = recovery.net_highlight;
+        model.schematic.session.editor.selection = recovery.selection;
+        let active_key = model.workspace.content.active_schematic_reference().key();
+        if let Some(mut buffer) = model.workspace.schematic_editor_mut(&active_key) {
+            buffer.editor.session.editor.selection =
+                model.schematic.session.editor.selection.clone();
+        }
+        self.schematic_visibility_recovery = None;
+        Ok(())
+    }
+
+    pub(crate) fn publish_visibility_policy(
+        &mut self,
+        model: &mut Model,
+        policy: SchematicVisibilityPolicy,
+    ) {
+        let current = model.schematic.session.editor.wire_drawing.routing_mode;
+        let routing_mode = visibility_options::routing_mode_for(policy.wire_routing, current);
+        model.schematic.session.editor.wire_drawing.routing_mode = routing_mode;
+        model.schematic.session.editor.bus_drawing.routing_mode = routing_mode;
+        self.schematic_routing_mode = routing_mode;
+        if !policy.net_highlighting.lights_selected_net() {
+            model.schematic.session.editor.net_highlight.clear();
+        }
+        let selectable_note_ids = model
+            .schematic
+            .document()
+            .design_notes
+            .iter()
+            .filter(|note| {
+                if note.kind != DesignNoteKind::ReviewNote {
+                    return true;
+                }
+                match policy.review_markers {
+                    SchematicReviewMarkerVisibility::Hidden => false,
+                    SchematicReviewMarkerVisibility::All => true,
+                    SchematicReviewMarkerVisibility::OpenAndAssigned => {
+                        note.review.as_ref().is_some_and(|review| {
+                            review.state == DesignReviewState::Open || review.assignee.is_some()
+                        })
+                    }
+                }
+            })
+            .map(|note| note.id)
+            .collect::<std::collections::HashSet<_>>();
+        model
+            .schematic
+            .session
+            .editor
+            .selection
+            .design_notes
+            .retain(|id| selectable_note_ids.contains(id));
+        self.schematic_visibility = policy;
     }
 }
 

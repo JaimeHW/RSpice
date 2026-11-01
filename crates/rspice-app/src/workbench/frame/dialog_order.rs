@@ -126,7 +126,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.grid_snap_routing"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.grid_snap_routing.open),
-        render: |app, ctx| app.render_grid_snap_routing_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_grid_snap_routing_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_overflow"),
@@ -142,7 +144,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.schematic_visibility"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.schematic_visibility_dialog.open),
-        render: |app, ctx| app.render_schematic_visibility_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_schematic_visibility_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.descend_hierarchy"),

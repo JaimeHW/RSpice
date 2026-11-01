@@ -171,3 +171,19 @@ fn shared_properties_open_and_draw_in_the_frame() {
     assert!(draws_dialog(&mut app, "Properties"));
     assert!(app.state.design.shared_properties.open);
 }
+
+#[test]
+fn grid_snap_and_routing_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    Command::GridSnapRouting.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Grid, snap and wire routing"));
+    assert!(app.state.design.grid_snap_routing.open);
+}
+
+#[test]
+fn display_options_open_and_draw_in_the_frame() {
+    let mut app = design_app();
+    Command::VisibilityOptions.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Display options"));
+    assert!(app.state.design.schematic_visibility_dialog.open);
+}
