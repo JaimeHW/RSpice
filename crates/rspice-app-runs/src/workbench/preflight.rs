@@ -60,6 +60,16 @@ use super::app_state::run_preflight::PreflightCheck;
 /// permit, the controller still refuses the snapshot if anything it was
 /// prepared from has moved. While the engine builds the decks, the run is
 /// queued when [`poll`] finds that they authorize it, and not before.
+/// Drop what the last check authorised, as any edit to what a run reads
+/// does: the check's verdict, and the run the controller prepared from it.
+pub fn invalidate(
+    preflight: &mut super::app_state::run_preflight::PreflightDialogState,
+    controller: &mut SimulationController,
+) {
+    preflight.invalidate();
+    controller.clear_prepared_run();
+}
+
 pub fn start(state: &mut impl RunHost, controller: &mut SimulationController, queue: bool) {
     if queue {
         let execution = &state.model().simulation.execution;

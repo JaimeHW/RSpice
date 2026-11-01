@@ -1,6 +1,7 @@
 //! Checkpoint exchange tests preserve project ownership and stored file identity.
 
 use super::*;
+use crate::workbench::AppState;
 
 #[test]
 #[cfg(not(target_arch = "wasm32"))]
@@ -15,15 +16,15 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
     std::fs::create_dir(&directory).unwrap();
     let path = directory.join("trials.rspice-mc");
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
-    begin_export(&ctx, &mut app.state, &checkpoint);
-    poll(&ctx, &mut app);
+    begin_export(&ctx, &mut app.state.model, &checkpoint);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     let exported = std::fs::read_to_string(&path).unwrap();
     assert_eq!(checkpoint_file::decode(&exported).unwrap(), checkpoint);
 
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path.clone()));
-    begin_import(&ctx, &mut app.state);
+    begin_import(&ctx, &mut app.state.model);
     app.state.model.design_execution_epoch += 1;
-    poll(&ctx, &mut app);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     assert!(
         app.state
             .model
@@ -37,8 +38,8 @@ fn monte_carlo_checkpoint_file_actions_preserve_owner_and_project_storage() {
 
     let before = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     file_exchange::script_next_choice(file_exchange::ScriptedChoice::Chose(path));
-    begin_import(&ctx, &mut app.state);
-    poll(&ctx, &mut app);
+    begin_import(&ctx, &mut app.state.model);
+    poll(&ctx, &mut crate::workbench::features::cx(&mut app));
     let after = crate::workbench::lifecycle::project_lifecycle::snapshot(&app.state).unwrap();
     assert_ne!(
         before.file.simulation_results, after.file.simulation_results,

@@ -6,7 +6,10 @@ use crate::io::file_exchange::{self, FileKind};
 use crate::product::ProjectId;
 use crate::state::MonteCarloCheckpointEvidence;
 use crate::ui::widgets::Button;
-use crate::workbench::{AppState, RSpiceApp};
+use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::{SimulateFeature, invalidate_preflight};
 
 pub(super) enum Action {
     Transient(super::transient_checkpoint_exchange::Action),
@@ -18,9 +21,9 @@ pub(super) enum Action {
 pub(super) fn apply(ctx: &egui::Context, app: &mut RSpiceApp, action: Action) {
     match action {
         Action::Transient(action) => super::transient_checkpoint_exchange::apply(ctx, app, action),
-        Action::Import => begin_import(ctx, &mut app.state),
-        Action::Export(checkpoint) => begin_export(ctx, &mut app.state, &checkpoint),
-        Action::Inspect(label, checkpoint) => inspect(ctx, &mut app.state, label, checkpoint),
+        Action::Import => begin_import(ctx, &mut app.state.model),
+        Action::Export(checkpoint) => begin_export(ctx, &mut app.state.model, &checkpoint),
+        Action::Inspect(label, checkpoint) => inspect(ctx, &mut app.state.model, label, checkpoint),
         Action::Remove(digest) => {
             if app
                 .state
@@ -61,28 +64,28 @@ struct Owner {
     epoch: u64,
 }
 impl Owner {
-    fn of(state: &AppState) -> Self {
+    fn of(model: &Model) -> Self {
         Self {
-            project: state.model.workspace.content.project.id(),
-            epoch: state.model.design_execution_epoch,
+            project: model.workspace.content.project.id(),
+            epoch: model.design_execution_epoch,
         }
     }
 }
 
-pub(super) fn begin_import(ctx: &egui::Context, state: &mut AppState) {
+pub(super) fn begin_import(ctx: &egui::Context, model: &mut Model) {
     match file_exchange::open_file(ctx, import_id(), KIND, checkpoint_file::size_limit()) {
         Ok(()) => {
             ctx.data_mut(|data| {
-                data.insert_temp(owner_id(), Owner::of(state));
+                data.insert_temp(owner_id(), Owner::of(model));
             });
         }
-        Err(error) => state.report_failure("Checkpoint import failed", error),
+        Err(error) => model.report_failure("Checkpoint import failed", error),
     }
 }
 
 pub(super) fn begin_export(
     ctx: &egui::Context,
-    state: &mut AppState,
+    model: &mut Model,
     checkpoint: &MonteCarloCheckpointEvidence,
 ) {
     let result = checkpoint_file::encode(checkpoint)
@@ -98,7 +101,7 @@ pub(super) fn begin_export(
             )
         });
     if let Err(error) = result {
-        state.report_failure("Checkpoint export failed", error);
+        model.report_failure("Checkpoint export failed", error);
     }
 }
 
@@ -111,7 +114,7 @@ struct Inspection {
 }
 pub(super) fn inspect(
     ctx: &egui::Context,
-    state: &mut AppState,
+    model: &mut Model,
     label: String,
     checkpoint: MonteCarloCheckpointEvidence,
 ) {
@@ -126,35 +129,34 @@ pub(super) fn inspect(
             data.insert_temp(
                 inspection_id(),
                 Inspection {
-                    owner: Owner::of(state),
+                    owner: Owner::of(model),
                     label,
                     checkpoint,
                     summary: std::sync::Arc::new(journal.inspection()),
                 },
             );
         }),
-        Err(error) => state.report_failure("Checkpoint inspection failed", error.to_string()),
+        Err(error) => model.report_failure("Checkpoint inspection failed", error.to_string()),
     }
 }
 
 /// Hosted every frame, even when the user closes the analysis editor or changes
 /// workspace. Taking stale picker results releases their bounded mailbox.
-pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
+pub(super) fn poll(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
     if let Some(outcome) = file_exchange::take_opened(ctx, import_id()) {
         let owner = ctx.data_mut(|data| {
             let owner = data.get_temp::<Owner>(owner_id());
             data.remove::<Owner>(owner_id());
             owner
         });
-        if owner.as_ref() == Some(&Owner::of(&app.state)) {
+        if owner.as_ref() == Some(&Owner::of(cx.model)) {
             match outcome {
                 Ok(Some(file)) => {
                     let name = file.name.clone();
                     let result = checkpoint_file::decode(&file.text)
                         .map_err(|error| error.to_string())
                         .and_then(|checkpoint| {
-                            app.state
-                                .model
+                            cx.model
                                 .simulation
                                 .retained
                                 .imported_monte_carlo_checkpoints
@@ -162,8 +164,8 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                         });
                     match result {
                         Ok(inserted) => {
-                            app.invalidate_simulation_preflight();
-                            app.state.prompt(if inserted {
+                            invalidate_preflight(cx);
+                            cx.wb.prompt(if inserted {
                                 format!(
                                     "Imported {name}; select it under Resume previous trials \
                                      to reuse it."
@@ -172,25 +174,25 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                                 format!("{name} is already imported.")
                             });
                         }
-                        Err(error) => app.state.report_failure("Checkpoint import failed", error),
+                        Err(error) => cx.model.report_failure("Checkpoint import failed", error),
                     }
                 }
                 Ok(None) => {}
-                Err(error) => app.state.report_failure("Checkpoint import failed", error),
+                Err(error) => cx.model.report_failure("Checkpoint import failed", error),
             }
         }
     }
     if let Some(outcome) = file_exchange::take_saved(ctx, export_id()) {
         match outcome {
-            Ok(Some(file)) => app.state.prompt(format!("Saved checkpoint {}", file.name)),
+            Ok(Some(file)) => cx.wb.prompt(format!("Saved checkpoint {}", file.name)),
             Ok(None) => {}
-            Err(error) => app.state.report_failure("Checkpoint export failed", error),
+            Err(error) => cx.model.report_failure("Checkpoint export failed", error),
         }
     }
     let Some(inspection) = ctx.data(|data| data.get_temp::<Inspection>(inspection_id())) else {
         return;
     };
-    let mut open = inspection.owner == Owner::of(&app.state);
+    let mut open = inspection.owner == Owner::of(cx.model);
     if open {
         egui::Window::new("Monte Carlo checkpoint")
             .id(inspection_id())
@@ -244,7 +246,7 @@ pub(super) fn poll(ctx: &egui::Context, app: &mut RSpiceApp) {
                     Tone::Dim,
                 );
                 if Button::new("Export checkpoint…").show(ui).clicked() {
-                    begin_export(ctx, &mut app.state, &inspection.checkpoint);
+                    begin_export(ctx, cx.model, &inspection.checkpoint);
                 }
             });
     }

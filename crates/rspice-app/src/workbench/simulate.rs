@@ -172,6 +172,15 @@ impl CommandSet for SimulateCommand {
     }
 }
 
+/// Drop what the last preflight check authorised, as any edit to what a
+/// run reads does: the check's verdict, and the run it prepared.
+pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature>) {
+    rspice_app_runs::workbench::preflight::invalidate(
+        &mut cx.runs.preflight,
+        cx.handles.run_controller,
+    );
+}
+
 /// Show the run history on its own route.
 fn open_jobs_manager(wb: &mut WorkbenchSession) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);

@@ -337,8 +337,10 @@ impl RSpiceApp {
     /// mutable simulation input. Call this at the same commit boundary as
     /// plan, PVT, solver-option, model, variable, output, or topology edits.
     pub(crate) fn invalidate_simulation_preflight(&mut self) {
-        self.state.runs.preflight.invalidate();
-        self.simulation_controller.clear_prepared_run();
+        rspice_app_runs::workbench::preflight::invalidate(
+            &mut self.state.runs.preflight,
+            &mut self.simulation_controller,
+        );
     }
 
     fn invalidate_simulation_preflight_after_frame_edit(&mut self, before: &FrameSimulationInput) {

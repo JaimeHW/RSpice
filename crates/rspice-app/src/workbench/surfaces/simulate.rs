@@ -392,7 +392,7 @@ fn settle_surface_scroll(ui: &Ui, state: &mut AppState, offset_y: f32) {
 /// Escape on. A host that runs once a frame wherever the reader is standing
 /// cannot arm an overlay that no pass draws.
 pub(in crate::workbench) fn show_workflow_dialogs(ctx: &egui::Context, app: &mut RSpiceApp) {
-    checkpoint_exchange::poll(ctx, app);
+    checkpoint_exchange::poll(ctx, &mut crate::workbench::features::cx(app));
     transient_checkpoint_exchange::poll(ctx, app);
     simulation_workflow_dialog(ctx, app);
     analysis_catalog(ctx, app);
