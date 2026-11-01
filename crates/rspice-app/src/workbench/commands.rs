@@ -262,7 +262,6 @@ impl Command {
             | Self::ZoomOneToOne
             | Self::ZoomToSelection
             | Self::ZoomBox
-            | Self::ResetActiveView
             | Self::ToggleFullScreen
             | Self::RevertActiveDocument
             | Self::CloseActiveDocument
@@ -632,14 +631,6 @@ impl Command {
                     app.state.exit_full_screen_presentation();
                 } else {
                     app.state.enter_full_screen_presentation();
-                }
-            }
-            Self::ResetActiveView => {
-                if reset_active_view_available(app.state.workbench.workspace) {
-                    let workspace = app.state.workbench.workspace;
-                    reset_active_view(app);
-                    app.state
-                        .prompt(format!("{} view reset.", workspace.label()));
                 }
             }
             Self::EngineeringTableView => {
@@ -1182,12 +1173,12 @@ impl Command {
 
 mod command_helpers;
 
+pub(crate) use command_helpers::menu_label;
 use command_helpers::*;
 pub(in crate::workbench) use command_helpers::{
     active_schematic_editor, answer_project_request, file_action, open_project_dialog,
     run_project_file_action,
 };
-pub(crate) use command_helpers::{menu_label, reset_active_view};
 
 #[cfg(test)]
 pub(crate) mod tests;

@@ -252,9 +252,9 @@ fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 
 /// The workbench commands the results workspace answers for itself: Copy
 /// takes the cursor readout, the zooms and Fit move the active sheet's
-/// viewport, Cancel lets go of the placed cursors, and Reset active view
-/// forgets the sheet's view. Each is the workspace's wherever Results is in
-/// front, Cancel only while a cursor is placed.
+/// viewport, and Cancel lets go of the placed cursors. Each is the
+/// workspace's wherever Results is in front, Cancel only while a cursor is
+/// placed.
 const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     RoutedCommand {
         key: ids::COPY,
@@ -288,12 +288,6 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
         enabled: |_| true,
         execute: |cx| cx.state.results.session.clear_cursors(),
     },
-    RoutedCommand {
-        key: ids::RESET_ACTIVE_VIEW,
-        takes: in_results,
-        enabled: |_| true,
-        execute: reset_active_view,
-    },
 ];
 
 /// Whether the results workspace is the one in front.
@@ -305,22 +299,6 @@ fn in_results(reads: &Reads<'_, ResultsFeature>) -> bool {
 fn copy_cursor_readout(cx: &mut Cx<'_, ResultsFeature>) {
     if let Some(text) = copy_cursor_text(&mut results_parts(cx)) {
         cx.wb.outbox().push(ClipboardText(text));
-    }
-}
-
-/// Forget the active sheet's view: its viewports, its cursors, its pinned
-/// RF marker and, on Waves, the strips hidden or maximized.
-fn reset_active_view(cx: &mut Cx<'_, ResultsFeature>) {
-    let session = &mut cx.state.results.session;
-    let viewer = session.viewer;
-    session
-        .views
-        .retain(|(candidate, _, _), _| *candidate != viewer);
-    session.clear_cursors();
-    session.rf_pin.remove(&viewer);
-    if viewer == ResultViewer::Waves {
-        session.hidden_strips.clear();
-        session.maximized_strip = None;
     }
 }
 

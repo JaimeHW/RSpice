@@ -427,20 +427,8 @@ fn escape_lets_go_of_an_armed_zoom_box() {
 #[test]
 fn only_exactly_implemented_reset_actions_are_discoverable() {
     let searchable = command_catalog().collect::<Vec<_>>();
-    assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetActiveView));
-    assert!(searchable.contains(&Command::ResetActiveView));
     assert!(vocabulary::COMMAND_REGISTRY.contains(&Command::ResetLayout));
     assert!(searchable.contains(&Command::ResetLayout));
-}
-
-#[test]
-fn every_workspace_exposes_the_mockup_reset_active_view_workflow() {
-    for workspace in Workspace::ALL {
-        assert!(
-            reset_active_view_available(workspace),
-            "{workspace:?} has implemented reset behavior"
-        );
-    }
 }
 
 #[test]
@@ -470,69 +458,4 @@ fn take_full_screen_request(app: &mut RSpiceApp) -> Option<bool> {
         .outbox
         .take::<FullScreen>()
         .map(|FullScreen(enabled)| enabled)
-}
-
-#[test]
-fn reset_active_view_command_resets_and_reports_in_the_same_frame() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Design);
-
-    Command::ResetActiveView.execute(&mut app);
-
-    assert!(!app.state.dialog_modal_open());
-    assert_eq!(app.state.prompt_text(), Some("Design view reset."));
-}
-
-#[test]
-fn resetting_the_simulation_view_clears_the_narrowing_and_not_the_plan() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Simulate);
-    app.state.simulate.saved_output_filter = "db20".to_owned();
-    app.state.simulate.specification_filter = "bw(".to_owned();
-    app.state.simulate.specification_evidence_filter =
-        crate::workbench::state::SpecificationEvidenceFilter::Failing;
-    app.state.simulate.selected_specification = Some("bw(vout)".to_owned());
-
-    super::reset_active_view(&mut app);
-
-    assert!(app.state.simulate.saved_output_filter.is_empty());
-    assert!(app.state.simulate.specification_filter.is_empty());
-    assert_eq!(
-        app.state.simulate.specification_evidence_filter,
-        crate::workbench::state::SpecificationEvidenceFilter::All
-    );
-    // A view reset restores what the reader can see, not what the plan says
-    // or which record they were reading.
-    assert_eq!(
-        app.state.simulate.selected_specification.as_deref(),
-        Some("bw(vout)")
-    );
-}
-
-#[test]
-fn resetting_the_verification_view_lets_go_of_the_specification_it_reads() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Verify);
-    app.state.simulate.saved_output_filter = "db20".to_owned();
-    app.state.simulate.selected_specification = Some("bw(vout)".to_owned());
-
-    super::reset_active_view(&mut app);
-
-    assert_eq!(app.state.simulate.selected_specification, None);
-    assert_eq!(app.state.simulate.saved_output_filter, "db20");
-}
-
-#[test]
-fn resetting_one_view_leaves_every_other_workspace_navigator_filter_alone() {
-    let mut app = RSpiceApp::test_instance();
-    app.state.workbench.activate(Workspace::Design);
-    app.state.workbench.set_navigator_filter("vout");
-    app.state.workbench.activate(Workspace::Models);
-    app.state.workbench.set_navigator_filter("nch");
-
-    super::reset_active_view(&mut app);
-
-    assert!(app.state.workbench.navigator_filter().is_empty());
-    app.state.workbench.activate(Workspace::Design);
-    assert_eq!(app.state.workbench.navigator_filter(), "vout");
 }

@@ -1009,7 +1009,6 @@ mod tests {
                 ids::PROJECT_WORKSPACE,
                 Command::OpenWorkspace(Workspace::Project),
             ),
-            (ids::RESET_ACTIVE_VIEW, Command::ResetActiveView),
             (ids::RESET_LAYOUT, Command::ResetLayout),
             (
                 ids::RESULTS_WORKSPACE,

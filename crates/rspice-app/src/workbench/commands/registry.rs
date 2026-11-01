@@ -850,7 +850,6 @@ impl Command {
                 "the project is open read-only"
             }
             Self::NewVerilogADevice => "no library can be written",
-            Self::ResetActiveView => "the active view cannot be reset while this workflow is open",
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),
             Self::StimulusNewDefinition | Self::StimulusValidateLibrary => {
                 "open the Stimulus Library"

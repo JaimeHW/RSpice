@@ -262,7 +262,6 @@ impl Command {
                 active_schematic_editor(app) && schematic_selection_has_live_object(&state.model.schematic)
             }
             Self::ZoomBox => active_schematic_editor(app),
-            Self::ResetActiveView => reset_active_view_available(state.workbench.workspace),
             Self::EngineeringTableView => active_schematic_editor(app),
             Self::NewApplicationWindow
             | Self::DetachDocument

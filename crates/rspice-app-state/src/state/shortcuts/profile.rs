@@ -42,6 +42,11 @@ pub const RETIRED_COMMAND_IDS: &[&str] = &[
     // Opened a Help Center page of schema numbers and generic steps; a
     // project of an older version is migrated when it opens.
     "migration-guide",
+    // Cleared a different set of state in each workspace under one name, and
+    // in the Stimulus Library it discarded the drafts open behind the
+    // definition being read; the zooms, Fit and each filter's own clear
+    // button restore what a reader sees.
+    "reset-active-view",
 ];
 
 /// Persisted user shortcut profile. Command entries remain raw until they are

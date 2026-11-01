@@ -78,7 +78,6 @@ pub enum Command {
     GridSnapRouting,
     VisibilityOptions,
     ToggleFullScreen,
-    ResetActiveView,
     EngineeringTableView,
     ToggleNavigator,
     ToggleInspector,
@@ -343,7 +342,6 @@ impl Command {
                 spec("visibility-options", "Display options\u{2026}", "View")
             }
             Self::ToggleFullScreen => spec("full-screen", "Enter full screen", "View"),
-            Self::ResetActiveView => spec("reset-active-view", "Reset active view", "View"),
             Self::EngineeringTableView => spec(
                 "engineering-table-manager",
                 "Object table\u{2026}",
@@ -728,7 +726,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::GridSnapRouting,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
-    Command::ResetActiveView,
     Command::EngineeringTableView,
     Command::ToggleNavigator,
     Command::ToggleInspector,
@@ -959,7 +956,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     SheetsCommand::DrawingSheetLayers.key(),
     Command::VisibilityOptions.key(),
     Command::ToggleFullScreen.key(),
-    Command::ResetActiveView.key(),
     Command::EngineeringTableView.key(),
     Command::ToggleNavigator.key(),
     Command::ToggleInspector.key(),

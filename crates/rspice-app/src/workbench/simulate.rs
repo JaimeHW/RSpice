@@ -6,14 +6,13 @@ mod run_host;
 
 use crate::state::SimulationPage;
 use crate::workbench::app_state::Model;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads, RoutedCommand,
+    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
-    SimulationPlanManagerDraft, SimulationWorkflowDialog, SpecificationEvidenceFilter,
-    WorkbenchSession, Workspace,
+    SimulationPlanManagerDraft, SimulationWorkflowDialog, WorkbenchSession, Workspace,
 };
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 use commands::SimulateCommand;
@@ -28,7 +27,6 @@ impl Feature for SimulateFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SimulateCommand>();
-        registry.routed(ROUTED);
     }
 }
 
@@ -49,32 +47,6 @@ impl SimulateFeature {
         ctx: &egui::Context,
     ) {
         cx.state.plan_removal_refusal.process(ctx);
-    }
-}
-
-/// The shell's commands the feature takes a part in: Reset Active View is
-/// the Simulate and Verify workspaces' own wherever either is in front.
-const ROUTED: &[RoutedCommand<SimulateFeature>] = &[RoutedCommand {
-    key: ids::RESET_ACTIVE_VIEW,
-    takes: |reads| matches!(reads.wb.workspace, Workspace::Simulate | Workspace::Verify),
-    enabled: |_| true,
-    execute: reset_active_view,
-}];
-
-/// Forget how the workspace in front narrows what it shows. On the Simulate
-/// workspace that is the studio's view state, which narrows its two
-/// registries; everything else on those pages is the plan itself, which a
-/// view reset has no business touching. On the Verify workspace it is the
-/// specification the reader is reading.
-fn reset_active_view(cx: &mut Cx<'_, SimulateFeature>) {
-    match cx.wb.workspace {
-        Workspace::Simulate => {
-            cx.state.saved_output_filter.clear();
-            cx.state.specification_filter.clear();
-            cx.state.specification_evidence_filter = SpecificationEvidenceFilter::All;
-        }
-        Workspace::Verify => cx.state.selected_specification = None,
-        _ => {}
     }
 }
 

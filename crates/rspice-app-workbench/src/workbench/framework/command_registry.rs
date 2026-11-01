@@ -350,7 +350,6 @@ pub mod ids {
         PROJECT_LAUNCHER = "project-launcher";
         PROJECT_RECOVERY = "project-recovery";
         PROJECT_WORKSPACE = "project";
-        RESET_ACTIVE_VIEW = "reset-active-view";
         RESET_LAYOUT = "reset-workspace-layout";
         RESULTS_WORKSPACE = "results";
         RESULT_OPERATING_POINT = "result-operating-point";
