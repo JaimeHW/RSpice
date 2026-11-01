@@ -652,6 +652,22 @@ pub fn reset_for_new_project(state: &mut dyn LifecycleSourceMut) {
         .project_lifecycle
         .publish_open(&mut state.model.project_open);
     let _ = refresh_registry(state);
+    mark_pristine(state);
+}
+
+/// Remember the open, never-saved project's content as what it started
+/// from, so that replacing, closing or leaving it untouched asks nothing.
+/// Called where a project is made new: New project, and the session a first
+/// start opens on.
+pub fn mark_pristine(state: &mut dyn LifecycleSourceMut) {
+    let state = &mut state.lifecycle_parts();
+    if let Ok(snapshot) = capture_snapshot(state, SnapshotContent::Current) {
+        state
+            .platform
+            .project_lifecycle
+            .authority
+            .mark_pristine(&snapshot.file);
+    }
 }
 
 /// Close the open project's lifecycle. The features' own state for the

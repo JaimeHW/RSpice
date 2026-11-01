@@ -205,6 +205,9 @@ pub(in crate::workbench) fn default_app_state() -> AppState {
         state.code.code_workspace.automation.manifest = Some(manifest);
         state.code.code_workspace.automation.runtime_snapshot = Some(runtime_snapshot);
     }
+    // A first start opens on this untitled project: until it is edited,
+    // New project, Close project and Exit have nothing of it to save.
+    crate::workbench::lifecycle::project_lifecycle::mark_pristine(&mut state);
     state
 }
 

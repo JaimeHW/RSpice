@@ -223,6 +223,38 @@ mod tests {
         }
     }
 
+    /// A project nobody has touched since it was made, by a first start or by
+    /// New project, has nothing to save: New project goes straight to its
+    /// form. Once it is edited, New project asks first.
+    #[test]
+    fn an_untouched_project_is_replaced_without_asking_to_save() {
+        let mut state = AppState::default();
+        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo);
+        assert!(!state.workbench.confirmation_dialog.visible, "first start");
+
+        state
+            .create_new_project_with(
+                &crate::workbench::workflows::project_workflow::NewProjectParams {
+                    name: "amp".to_owned(),
+                    root_library: "amp".to_owned(),
+                    top_cell: "top".to_owned(),
+                },
+            )
+            .expect("new project");
+        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo);
+        assert!(!state.workbench.confirmation_dialog.visible, "new project");
+
+        state
+            .model
+            .workspace
+            .content
+            .project
+            .rename("amp2")
+            .expect("valid name");
+        dispatch_file_menu_action(&mut state, FileMenuAction::NewProject, &NoIo);
+        assert!(state.workbench.confirmation_dialog.visible, "edited project");
+    }
+
     #[test]
     fn netlist_import_only_prompts_for_source_bytes_it_will_replace() {
         let mut state = AppState::default();

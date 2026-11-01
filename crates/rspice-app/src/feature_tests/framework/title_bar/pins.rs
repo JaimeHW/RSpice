@@ -225,7 +225,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "---",
             "Save | save-project | Ctrl+S | on",
             "Save as… | save-project-as | Ctrl+Alt+Shift+S | on",
-            "Save all | save-all | Ctrl+Shift+S | on",
+            "Save all | save-all | Ctrl+Shift+S | off: no unsaved project changes",
             "Revert to saved… | revert-document |  | off: active document has no changes to revert",
             "Revision history… | revision-history |  | on",
             "---",

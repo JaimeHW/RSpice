@@ -113,6 +113,9 @@ pub struct ProjectLifecycle {
     transaction: Option<LifecycleTransaction>,
     accepted_generation: u64,
     accepted: Option<Arc<AcceptedProject>>,
+    /// What a project never saved started from: until its first save,
+    /// content that still equals this has nothing a save would keep.
+    pristine: Option<ContentDigest>,
     registry: DocumentRegistry,
     result_fingerprints: ResultFingerprintCache,
     browser_operation_generation: u64,
@@ -128,6 +131,7 @@ impl Default for ProjectLifecycle {
             transaction: None,
             accepted_generation: 0,
             accepted: None,
+            pristine: None,
             registry: DocumentRegistry::default(),
             result_fingerprints: ResultFingerprintCache::default(),
             browser_operation_generation: 1,
@@ -180,12 +184,23 @@ impl ProjectLifecycle {
     /// Install one immutable baseline and advance its review/callback identity
     /// together. Lifecycle clones share that content and its cached fingerprints.
     pub fn accept_content(&mut self, baseline: ProjectFile) {
+        self.pristine = None;
         self.accepted = Some(Arc::new(AcceptedProject::new(baseline)));
         self.accepted_generation = self.accepted_generation.wrapping_add(1).max(1);
     }
 
     pub fn accepted(&self) -> Option<&AcceptedProject> {
         self.accepted.as_deref()
+    }
+
+    /// Remember `content` as what this never-saved project started from, so
+    /// that New project, Close project or Exit over it, untouched, asks
+    /// nothing. A project with an accepted baseline compares with that.
+    pub fn mark_pristine(&mut self, content: &ProjectFile) {
+        self.pristine = self
+            .working_fingerprints(content)
+            .ok()
+            .map(|fingerprints| fingerprints.content_digest());
     }
 
     /// A first canonical save requires the complete working set. A platform

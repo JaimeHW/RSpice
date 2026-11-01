@@ -161,6 +161,14 @@ fn close_project_discards_onto_the_no_project_landing_not_the_launcher() {
     state
         .workbench
         .activate(crate::workbench::state::Workspace::Results);
+    // An untouched project closes without asking; an edited one is reviewed.
+    state
+        .model
+        .workspace
+        .content
+        .project
+        .rename("edited")
+        .expect("valid name");
 
     assert!(request_close_project(&mut state));
     assert!(matches!(

@@ -20,6 +20,16 @@ impl ProjectLifecycle {
             .map_err(ProjectLifecycleError::InvalidState)
     }
 
+    /// Whether this never-saved project still holds what it started from:
+    /// see [`ProjectLifecycle::mark_pristine`].
+    fn is_pristine(&self, capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>) -> bool {
+        self.pristine.is_some_and(|pristine| {
+            capture()
+                .and_then(|current| self.working_fingerprints(&current))
+                .is_ok_and(|current| current.content_digest() == pristine)
+        })
+    }
+
     pub fn has_unsaved_changes(
         &self,
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
@@ -28,7 +38,7 @@ impl ProjectLifecycle {
             return false;
         }
         let Some(accepted) = self.accepted() else {
-            return true;
+            return !self.is_pristine(capture);
         };
         match capture()
             .and_then(|current| self.working_fingerprints(&current))
@@ -48,7 +58,7 @@ impl ProjectLifecycle {
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> bool {
         if self.accepted().is_none() {
-            return self.is_open();
+            return self.is_open() && !self.is_pristine(capture);
         }
         self.current_registry(capture)
             .map(|registry| registry.is_dirty(&document()))
@@ -62,7 +72,7 @@ impl ProjectLifecycle {
         capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
     ) -> Vec<ProjectDocumentId> {
         if self.accepted().is_none() {
-            return if self.is_open() {
+            return if self.is_open() && !self.is_pristine(capture) {
                 vec![ProjectDocumentId::ProjectConfiguration]
             } else {
                 Vec::new()
