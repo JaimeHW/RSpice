@@ -660,14 +660,6 @@ const MODELS_CONTRIBUTIONS: &[Step] = &[
            }"],
     ),
     (
-        "PDK technology administration route",
-        &["== super::SurfaceId::PdkTechnologyAdmin\
-           {\
-           ModelsFeature::show_pdk_technology_admin(&mut features::cx(app), ui);\
-           return;\
-           }"],
-    ),
-    (
         "workspace surface",
         &[
             "Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),",

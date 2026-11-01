@@ -48,11 +48,10 @@ const FRAMES: u32 = 6;
 const FRAME_SECONDS: f64 = 0.25;
 
 /// The surfaces a route shows in place of the active workspace.
-const ROUTE_SURFACES: [SurfaceId; 5] = [
+const ROUTE_SURFACES: [SurfaceId; 4] = [
     SurfaceId::ReportAuthoring,
     SurfaceId::ModelEditor,
     SurfaceId::ModelCorrelation,
-    SurfaceId::PdkTechnologyAdmin,
     SurfaceId::LibraryCellviewManager,
 ];
 

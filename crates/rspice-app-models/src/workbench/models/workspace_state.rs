@@ -664,17 +664,6 @@ impl ModelHubFacet {
     }
 }
 
-/// Recoverable working state for the application-owned unsigned PDK draft.
-/// Runtime authority remains in `PdkConfig`; this record protects only edits
-/// that have not yet completed the explicit durable Save draft transaction.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct PdkTechnologyAuthoringRecovery {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(crate) working_draft: Option<crate::state::pdk_config::PdkTechnologyDraft>,
-    #[serde(default)]
-    pub dirty: bool,
-}
-
 /// Corpus projection selected in the Models & PDKs catalog. This is
 /// presentation state only: attaching a source or adding a project model is a
 /// separate guarded engineering transaction.

@@ -1909,7 +1909,6 @@ const OVERSIZED_FILES: &[(&str, usize)] = &[
     // interactions moved to `viewer_state.rs`; the ceiling now follows the
     // remaining source exactly and may not grow during the crate split.
     ("workbench/documents/result_document.rs", 4_601),
-    ("workbench/surfaces/pdk_technology_admin.rs", 5_115),
 ];
 
 #[test]

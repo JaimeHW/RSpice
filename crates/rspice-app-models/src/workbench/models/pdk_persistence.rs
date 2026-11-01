@@ -1,9 +1,8 @@
 //! Browser PDK persistence transaction owner.
 //!
 //! IndexedDB is asynchronous, so browser configuration candidates remain
-//! staged until exact durable readback completes. No administration surface
-//! may mutate live PDK authority while startup hydration or a publication is
-//! pending.
+//! staged until exact durable readback completes. Nothing may mutate live
+//! PDK authority while startup hydration or a publication is pending.
 
 use std::collections::VecDeque;
 
@@ -35,8 +34,6 @@ struct BrowserPdkOwner {
     phase: BrowserPdkPhase,
     operation_generation: u64,
     receipt: Option<BrowserPdkConfigReceipt>,
-    storage_status: BrowserPdkStorageStatus,
-    last_error: Option<String>,
 }
 
 impl Default for BrowserPdkOwner {
@@ -45,21 +42,11 @@ impl Default for BrowserPdkOwner {
             phase: BrowserPdkPhase::Dormant,
             operation_generation: 0,
             receipt: None,
-            storage_status: BrowserPdkStorageStatus::default(),
-            last_error: None,
         }
     }
 }
 
-/// Work the caller wants run once the commit has actually landed, in the
-/// frame that observes it.
-type AfterBrowserPdkCommit = Option<Box<dyn FnOnce(&Context)>>;
-
 enum BrowserPdkPublicationIntent {
-    Administration {
-        message: String,
-        after_commit: AfterBrowserPdkCommit,
-    },
     Settings(Box<BrowserPdkSettingsIntent>),
 }
 
@@ -142,22 +129,6 @@ fn start_restore(ctx: &Context) {
     );
 }
 
-pub(crate) fn start_browser_pdk_administration_publication(
-    ctx: &Context,
-    candidate: PdkConfig,
-    message: impl Into<String>,
-    after_commit: impl FnOnce(&Context) + 'static,
-) -> Result<(), String> {
-    start_publication(
-        ctx,
-        candidate,
-        BrowserPdkPublicationIntent::Administration {
-            message: message.into(),
-            after_commit: Some(Box::new(after_commit)),
-        },
-    )
-}
-
 pub(crate) fn start_browser_pdk_settings_publication(
     ctx: &Context,
     previous: &PdkConfig,
@@ -174,56 +145,6 @@ pub(crate) fn start_browser_pdk_settings_publication(
             loaded,
         })),
     )
-}
-
-pub(crate) fn browser_pdk_persistence_ready() -> bool {
-    BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Ready)
-}
-
-pub(crate) fn browser_pdk_persistence_retryable() -> bool {
-    BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed)
-}
-
-pub(crate) fn browser_pdk_persistence_degraded() -> bool {
-    BROWSER_PDK_OWNER.with(|owner| {
-        let owner = owner.borrow();
-        owner.phase == BrowserPdkPhase::Ready
-            && owner.storage_status.durability != BrowserPdkStorageDurability::Persistent
-    })
-}
-
-pub(crate) fn browser_pdk_persistence_status_message() -> String {
-    BROWSER_PDK_OWNER.with(|owner| {
-        let owner = owner.borrow();
-        match owner.phase {
-            BrowserPdkPhase::Dormant => "Browser PDK storage has not been initialized.".to_owned(),
-            BrowserPdkPhase::Loading => owner.last_error.as_ref().map_or_else(
-                || "Loading and validating browser PDK storage…".to_owned(),
-                |error| {
-                    format!(
-                        "Reloading authoritative browser PDK state after a storage failure: {error}"
-                    )
-                },
-            ),
-            BrowserPdkPhase::Publishing => {
-                "Publishing and reading back the browser PDK transaction…".to_owned()
-            }
-            BrowserPdkPhase::Failed => owner.last_error.as_ref().map_or_else(
-                || "Browser PDK storage is unavailable.".to_owned(),
-                |error| format!("Browser PDK storage is unavailable: {error}"),
-            ),
-            BrowserPdkPhase::Ready => storage_status_message(owner.storage_status),
-        }
-    })
-}
-
-pub(crate) fn retry_browser_pdk_persistence(ctx: &Context) -> Result<(), String> {
-    let retryable = BROWSER_PDK_OWNER.with(|owner| owner.borrow().phase == BrowserPdkPhase::Failed);
-    if !retryable {
-        return Err("browser PDK storage is not in a retryable failed state".to_owned());
-    }
-    start_restore(ctx);
-    Ok(())
 }
 
 pub(in crate::workbench) fn poll_browser_pdk_persistence(
@@ -300,8 +221,6 @@ fn finish_browser_pdk_restore(
             BROWSER_PDK_OWNER.with(|owner| {
                 let mut owner = owner.borrow_mut();
                 owner.receipt = restored.receipt;
-                owner.storage_status = storage_status;
-                owner.last_error = None;
                 owner.phase = BrowserPdkPhase::Ready;
             });
 
@@ -342,7 +261,6 @@ fn finish_browser_pdk_restore(
             BROWSER_PDK_OWNER.with(|owner| {
                 let mut owner = owner.borrow_mut();
                 owner.phase = BrowserPdkPhase::Failed;
-                owner.last_error = Some(error.clone());
             });
             parts.model.record(
                 LogSeverity::Error,
@@ -377,20 +295,6 @@ fn finish_browser_pdk_publication(
         Ok(receipt) => {
             let storage_status = receipt.storage_status;
             match intent {
-                BrowserPdkPublicationIntent::Administration {
-                    message,
-                    after_commit,
-                } => {
-                    accept_browser_pdk_receipt(receipt);
-                    parts.model.pdk_config = candidate;
-                    emit_browser_pdk_storage_warning(parts, ctx, storage_status);
-                    if let Some(after_commit) = after_commit {
-                        after_commit(ctx);
-                    }
-                    parts
-                        .model
-                        .record(LogSeverity::Info, LogSource::Studio, message);
-                }
                 BrowserPdkPublicationIntent::Settings(settings) => {
                     let BrowserPdkSettingsIntent {
                         previous,
@@ -416,9 +320,7 @@ fn finish_browser_pdk_publication(
                             previous,
                             error.clone(),
                         ) {
-                            fail_browser_pdk_owner(format!(
-                                "{error}; browser storage rollback could not start: {rollback_error}"
-                            ));
+                            fail_browser_pdk_owner();
                             parts.model.record(
                                 LogSeverity::Error,
                                 LogSource::Studio,
@@ -450,7 +352,6 @@ fn finish_browser_pdk_publication(
             BROWSER_PDK_OWNER.with(|owner| {
                 let mut owner = owner.borrow_mut();
                 owner.phase = BrowserPdkPhase::Failed;
-                owner.last_error = Some(error.clone());
             });
             let _ = intent;
             parts.model.record(
@@ -500,7 +401,7 @@ fn finish_rejected_browser_pdk_settings_rollback(
                 "the project could not take them: {publication_error}; browser storage \
                  rollback failed: {rollback_error}"
             );
-            fail_browser_pdk_owner(failure.clone());
+            fail_browser_pdk_owner();
             parts.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
@@ -517,19 +418,13 @@ fn finish_rejected_browser_pdk_settings_rollback(
 fn accept_browser_pdk_receipt(receipt: BrowserPdkConfigReceipt) {
     BROWSER_PDK_OWNER.with(|owner| {
         let mut owner = owner.borrow_mut();
-        owner.storage_status = receipt.storage_status;
         owner.receipt = Some(receipt);
-        owner.last_error = None;
         owner.phase = BrowserPdkPhase::Ready;
     });
 }
 
-fn fail_browser_pdk_owner(error: String) {
-    BROWSER_PDK_OWNER.with(|owner| {
-        let mut owner = owner.borrow_mut();
-        owner.phase = BrowserPdkPhase::Failed;
-        owner.last_error = Some(error);
-    });
+fn fail_browser_pdk_owner() {
+    BROWSER_PDK_OWNER.with(|owner| owner.borrow_mut().phase = BrowserPdkPhase::Failed);
 }
 
 fn emit_browser_pdk_storage_warning(
@@ -631,27 +526,6 @@ fn start_publication(
         return Err(error.to_string());
     }
     Ok(())
-}
-
-fn storage_status_message(status: BrowserPdkStorageStatus) -> String {
-    let durability = match status.durability {
-        BrowserPdkStorageDurability::Persistent => "durable storage granted",
-        BrowserPdkStorageDurability::BestEffort => {
-            "best-effort storage only; the browser may evict PDK data under storage pressure"
-        }
-        BrowserPdkStorageDurability::Unknown => {
-            "durability status unavailable; the browser did not expose a persistence decision"
-        }
-    };
-    status.available_bytes().map_or_else(
-        || format!("Browser PDK storage is ready; {durability}."),
-        |available| {
-            format!(
-                "Browser PDK storage is ready; {durability}; approximately {} available.",
-                rspice_simulation_contract::run_set::format_bytes(available)
-            )
-        },
-    )
 }
 
 fn storage_durability_warning(status: BrowserPdkStorageStatus) -> Option<&'static str> {

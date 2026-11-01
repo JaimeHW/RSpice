@@ -132,7 +132,7 @@ macro_rules! define_surface_catalog {
         impl SurfaceId {
             /// Every canonical surface in exact registry order.
             #[cfg(any(test, feature = "test-support"))]
-            pub const ALL: [Self; 28] = [$(Self::$variant),+];
+            pub const ALL: [Self; 27] = [$(Self::$variant),+];
 
             #[must_use]
             pub const fn metadata(self) -> SurfaceMetadata {
@@ -261,7 +261,6 @@ define_surface_catalog! {
     ReportAuthoring => { id: "report-authoring", label: "Verification report", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=report-authoring" },
     ModelEditor => { id: "model-editor", label: "Device model editor", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=model-editor" },
     ModelCorrelation => { id: "model-correlation", label: "Measurement correlation", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=model-correlation" },
-    PdkTechnologyAdmin => { id: "pdk-technology-admin", label: "PDK technology administration", archetype: SpecialistWorkspace, tier: Preview, status: Preview, deep_link: "?surface=pdk-technology-admin" },
     LibraryCellviewManager => { id: "library-cellview-manager", label: "Library, cellview, symbol and form authoring", archetype: SpecialistWorkspace, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=library-cellview-manager" },
     ProjectLauncher => { id: "project-launcher", label: "Project launcher", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=project-launcher" },
     Preferences => { id: "preferences", label: "Preferences", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=preferences" },
@@ -340,7 +339,7 @@ mod tests {
 
     #[test]
     fn catalog_has_exact_count_and_unique_contract_values() {
-        assert_eq!(SurfaceId::ALL.len(), 28);
+        assert_eq!(SurfaceId::ALL.len(), 27);
 
         let ids = SurfaceId::ALL
             .iter()
@@ -355,9 +354,9 @@ mod tests {
             .map(|surface| surface.deep_link())
             .collect::<HashSet<_>>();
 
-        assert_eq!(ids.len(), 28);
-        assert_eq!(labels.len(), 28);
-        assert_eq!(deep_links.len(), 28);
+        assert_eq!(ids.len(), 27);
+        assert_eq!(labels.len(), 27);
+        assert_eq!(deep_links.len(), 27);
     }
 
     #[test]
@@ -369,7 +368,7 @@ mod tests {
                 .count()
         };
         assert_eq!(count_status(ReleaseStatus::ReleaseScope), 19);
-        assert_eq!(count_status(ReleaseStatus::Preview), 8);
+        assert_eq!(count_status(ReleaseStatus::Preview), 7);
         assert_eq!(count_status(ReleaseStatus::InternalOnly), 1);
 
         let count_archetype = |archetype| {
@@ -379,7 +378,7 @@ mod tests {
                 .count()
         };
         assert_eq!(count_archetype(SurfaceArchetype::PrimaryWorkspace), 8);
-        assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 6);
+        assert_eq!(count_archetype(SurfaceArchetype::SpecialistWorkspace), 5);
         assert_eq!(count_archetype(SurfaceArchetype::Manager), 8);
         assert_eq!(count_archetype(SurfaceArchetype::Modal), 2);
         assert_eq!(count_archetype(SurfaceArchetype::Overlay), 3);
@@ -388,10 +387,14 @@ mod tests {
 
     #[test]
     fn models_and_pdk_commercial_tiers_match_the_governed_mockup_contract() {
-        for surface in [SurfaceId::ModelCorrelation, SurfaceId::PdkTechnologyAdmin] {
-            assert_eq!(surface.canonical_tier(), CanonicalTier::Preview);
-            assert_eq!(surface.release_status(), ReleaseStatus::Preview);
-        }
+        assert_eq!(
+            SurfaceId::ModelCorrelation.canonical_tier(),
+            CanonicalTier::Preview
+        );
+        assert_eq!(
+            SurfaceId::ModelCorrelation.release_status(),
+            ReleaseStatus::Preview
+        );
         for surface in [SurfaceId::ModelEditor, SurfaceId::LibraryCellviewManager] {
             assert_eq!(surface.canonical_tier(), CanonicalTier::ReleaseTarget);
             assert_eq!(surface.release_status(), ReleaseStatus::ReleaseScope);

@@ -134,7 +134,6 @@ pub mod workbench {
         pub mod model_correlation_controller;
         pub mod model_editor;
         pub mod models;
-        pub mod pdk_technology_admin;
     }
     pub(crate) mod workflows {
         pub(crate) use rspice_app_services::workbench::workflows::export_workflow;

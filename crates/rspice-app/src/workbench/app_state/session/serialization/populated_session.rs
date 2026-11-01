@@ -322,7 +322,6 @@ fn populate_workbench(state: &mut AppState, operating_point: crate::product::Ana
     workbench.command_query = "probe".to_owned();
     state.hardcopy.report_authoring.selected_document =
         Some(crate::product::ResultDocumentId::new());
-    state.models.pdk_technology_authoring.dirty = true;
 }
 
 /// `state` as a restore leaves it before anything else is read back.

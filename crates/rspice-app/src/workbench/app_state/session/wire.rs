@@ -27,9 +27,7 @@ use crate::workbench::app_state::AppState;
 use crate::workbench::documents::model_editor::ModelEditorRecoveryDraft;
 use crate::workbench::lifecycle::session::normalize_autosave_minutes;
 use crate::workbench::lifecycle::window_session::WindowSessionRegistry;
-use crate::workbench::models::workspace_state::{
-    ModelsWorkbenchViewState, PdkTechnologyAuthoringRecovery,
-};
+use crate::workbench::models::workspace_state::ModelsWorkbenchViewState;
 use crate::workbench::preferences::UserPreferences;
 use crate::workbench::project::workspace_state::{LibraryCellviewPage, ProjectPage};
 use crate::workbench::slots::{
@@ -361,8 +359,8 @@ pub(in crate::workbench) struct WorkbenchWire {
     report_authoring: ReportAuthoringState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_editor_recovery: Option<ModelEditorRecoveryDraft>,
-    #[serde(default)]
-    pdk_technology_authoring: PdkTechnologyAuthoringRecovery,
+    // A `pdk_technology_authoring` block from older sessions is ignored: it
+    // recovered the retired PDK technology administrator's unsaved draft.
 }
 
 /// What a session keeps of [`WorkbenchSession`], as it is written: borrowed, so
@@ -464,8 +462,6 @@ pub(in crate::workbench) struct WorkbenchWireRef<'a> {
     report_authoring: &'a ReportAuthoringState,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     model_editor_recovery: Option<&'a ModelEditorRecoveryDraft>,
-    #[serde(default)]
-    pdk_technology_authoring: &'a PdkTechnologyAuthoringRecovery,
 }
 
 impl<'a> WorkbenchWireRef<'a> {
@@ -591,7 +587,6 @@ impl<'a> WorkbenchWireRef<'a> {
             command_query,
             report_authoring: &hardcopy.report_authoring,
             model_editor_recovery: models.model_editor_recovery.as_ref(),
-            pdk_technology_authoring: &models.pdk_technology_authoring,
         }
     }
 
@@ -643,7 +638,6 @@ impl<'a> WorkbenchWireRef<'a> {
             command_query: self.command_query.clone(),
             report_authoring: self.report_authoring.clone(),
             model_editor_recovery: self.model_editor_recovery.cloned(),
-            pdk_technology_authoring: self.pdk_technology_authoring.clone(),
         }
     }
 }
@@ -696,7 +690,6 @@ impl<'a> From<&'a WorkbenchWire> for WorkbenchWireRef<'a> {
             command_query: &wire.command_query,
             report_authoring: &wire.report_authoring,
             model_editor_recovery: wire.model_editor_recovery.as_ref(),
-            pdk_technology_authoring: &wire.pdk_technology_authoring,
         }
     }
 }
@@ -823,7 +816,6 @@ impl WorkbenchWire {
         *command_query = self.command_query;
         state.hardcopy.report_authoring = self.report_authoring;
         state.models.model_editor_recovery = self.model_editor_recovery;
-        state.models.pdk_technology_authoring = self.pdk_technology_authoring;
     }
 }
 
@@ -1406,6 +1398,68 @@ mod workbench_session_tests {
                 "{retired}"
             );
         }
+    }
+
+    /// A session saved on the PDK technology administrator, with an unsaved
+    /// draft in its recovery block, still loads after the administrator is
+    /// retired: the block is ignored, and the route, current and the
+    /// window's, is dropped with one diagnostic and the session opens on
+    /// Design.
+    #[test]
+    fn session_saved_on_the_retired_pdk_administrator_still_restores() {
+        let mut state = AppState::default();
+        state.workbench.activate(Workspace::Results);
+        let primary = state.workbench.window_session.primary();
+        state
+            .workbench
+            .window_session
+            .state_mut(primary)
+            .expect("the primary window")
+            .route = state.workbench.current_route();
+        let saved =
+            ron::to_string(&WorkbenchWireRef::capture(&state)).expect("workbench serializes");
+        let saved = saved.replace("\"?view=results\"", "\"?surface=pdk-technology-admin\"");
+        for quit_on in ["current:", "route:"] {
+            assert!(
+                saved.contains(&format!("{quit_on}\"?surface=pdk-technology-admin\"")),
+                "the session must have quit on the administrator ({quit_on}) for this to prove anything"
+            );
+        }
+        assert!(
+            "pdk-technology-admin".parse::<SurfaceId>().is_err(),
+            "the administrator is still a surface"
+        );
+        let saved = format!(
+            "{},pdk_technology_authoring:(dirty:true))",
+            saved
+                .strip_suffix(')')
+                .expect("a workbench session is a RON struct")
+        );
+
+        let mut restored = restore(
+            ron::from_str(&saved).expect("a session that kept the administrator's draft restores"),
+        );
+        restored.workbench.reconcile_restored_navigation();
+
+        assert_eq!(
+            restored.workbench.current_route(),
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
+        assert!(
+            restored
+                .workbench
+                .take_route_diagnostic()
+                .is_some_and(|message| message.contains("Malformed routes"))
+        );
+        assert_eq!(
+            restored
+                .workbench
+                .window_session
+                .state(primary)
+                .expect("the primary window")
+                .route,
+            SurfaceRoute::surface(SurfaceId::Design)
+        );
     }
 
     #[test]

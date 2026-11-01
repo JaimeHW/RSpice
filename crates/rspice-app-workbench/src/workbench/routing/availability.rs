@@ -94,10 +94,6 @@ pub const fn surface_availability(surface: SurfaceId) -> SurfaceExecutionAvailab
             executor: "rspice-ui project-owned measurement-correlation workspace",
             evidence_boundary: "Read-only CSV measurement sets, the source and simulation each comparison came from, unit-aware alignment and metrics, saved residuals, outlier decisions that can only be added to, independent review records, and handoff to qualification all work against the project history. Correlation results never promote a model or turn a failed qualification vector into a pass.",
         },
-        SurfaceId::PdkTechnologyAdmin => SurfaceExecutionAvailability::Available {
-            executor: "rspice-ui signed PDK technology-package administrator",
-            evidence_boundary: "Checking Ed25519 manifest signatures, artifact digests and sizes, layer-purpose and stream-map completeness, connectivity, callback capabilities, platform requirements, and recognition and extraction definitions; comparing trusted signed revisions; the read-only display profiles a package ships; installed revisions; publisher trust; active bindings; saved configuration; trust keys an administrator adds or revokes on this computer (a revocation cannot be undone); and a tamper-evident log of trust, install, activation, and rollback steps all work. A package's SPICE model files are decoded, resolved with their includes, narrowed to the selected process section, and given to the simulator only when a project is pinned to that trusted archive; activating a package does not change which models a project uses. Signed callback modules (schema 3) are checked when installed and run for a pinned project in a sandboxed interpreter with fixed fuel and memory limits and no file or network access; each run's inputs, outputs, and identities are recorded with the project. No product engine uses callback output yet, and rule decks are not run. Display profiles are stored but not used by a layout renderer; project and organization display-profile repositories are not available. The local trust file is not an operating-system or organization trust service, packages never change pinned projects on their own, and package checks do not run or qualify layout recognition, parasitic extraction, PCells, migration, or sign-off.",
-        },
         SurfaceId::LibraryCellviewManager => SurfaceExecutionAvailability::Available {
             executor: "rspice-ui project-owned library, cellview, symbol, and component-form authoring workspace",
             evidence_boundary: "The three-column project library browser, checked cell and view edits, a selection shared with the rest of RSpice, symbol preview, terminal and parameter-form inspection, opening the symbol editor, creating or importing model-bound symbols, form editing, edit-lock inspection, audit history, and versioned project-library publication records all work. Old or invalid symbol metadata is reported and blocks use; the workspace does not provide PCells, layout, extraction, characterization, protected IP, remote collaboration, or sign-off.",
@@ -179,7 +175,6 @@ mod tests {
                 SurfaceId::ReportAuthoring,
                 SurfaceId::ModelEditor,
                 SurfaceId::ModelCorrelation,
-                SurfaceId::PdkTechnologyAdmin,
                 SurfaceId::LibraryCellviewManager,
                 SurfaceId::ProjectLauncher,
                 SurfaceId::Preferences,
@@ -250,21 +245,6 @@ mod tests {
     }
 
     #[test]
-    fn pdk_administration_has_an_explicit_signed_package_executor_boundary() {
-        let availability = surface_availability(SurfaceId::PdkTechnologyAdmin);
-        assert!(availability.can_open());
-        assert!(matches!(
-            availability,
-            SurfaceExecutionAvailability::Available {
-                executor: "rspice-ui signed PDK technology-package administrator",
-                ..
-            }
-        ));
-        require_available(SurfaceRoute::surface(SurfaceId::PdkTechnologyAdmin))
-            .expect("PDK technology administrator route executor is registered");
-    }
-
-    #[test]
     fn library_cellview_manager_has_an_explicit_shared_project_domain_boundary() {
         let availability = surface_availability(SurfaceId::LibraryCellviewManager);
         assert!(matches!(
@@ -283,7 +263,6 @@ mod tests {
         for surface in [
             SurfaceId::ModelEditor,
             SurfaceId::ModelCorrelation,
-            SurfaceId::PdkTechnologyAdmin,
             SurfaceId::LibraryCellviewManager,
         ] {
             assert!(

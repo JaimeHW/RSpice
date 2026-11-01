@@ -102,12 +102,6 @@ impl Host for RSpiceApp {
                     return;
                 }
                 if app.state.workbench.current_route().surface_id()
-                    == super::SurfaceId::PdkTechnologyAdmin
-                {
-                    ModelsFeature::show_pdk_technology_admin(&mut features::cx(app), ui);
-                    return;
-                }
-                if app.state.workbench.current_route().surface_id()
                     == super::SurfaceId::LibraryCellviewManager
                 {
                     library_cellview_manager::show(ui, app);

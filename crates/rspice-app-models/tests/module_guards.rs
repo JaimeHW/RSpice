@@ -28,7 +28,6 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "models"),
     ("lib.rs", "navigator"),
     ("lib.rs", "pdk_settings"),
-    ("lib.rs", "pdk_technology_admin"),
     ("lib.rs", "services"),
     ("lib.rs", "session"),
     ("lib.rs", "slots"),

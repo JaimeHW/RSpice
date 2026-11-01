@@ -1,6 +1,6 @@
 //! The models feature's session: the Models & PDKs workspace's page and
-//! catalog view, the device-model editor and its recovery, unsigned PDK
-//! authoring and measurement correlation.
+//! catalog view, the device-model editor and its recovery, and measurement
+//! correlation.
 
 /// What the models feature keeps between frames.
 #[derive(Debug, Clone, Default)]
@@ -20,10 +20,6 @@ pub struct ModelsState {
     /// it is allowed back into the runtime editor.
     pub model_editor_recovery:
         Option<crate::workbench::documents::model_editor::ModelEditorRecoveryDraft>,
-    /// Application-owned recovery for unsigned PDK authoring edits that have
-    /// not completed the explicit durable PDK configuration transaction.
-    pub pdk_technology_authoring:
-        crate::workbench::models::workspace_state::PdkTechnologyAuthoringRecovery,
     /// Runtime-only selection and transactional drafts for measurement
     /// correlation. Committed suites and evidence remain in the project-owned
     /// model-library domain.
@@ -116,7 +112,7 @@ impl ModelsState {
 
     #[must_use]
     pub(crate) fn has_unsaved_authoring_changes(&self) -> bool {
-        self.model_editor_has_unsaved_changes() || self.pdk_technology_authoring.dirty
+        self.model_editor_has_unsaved_changes()
     }
 
     pub fn clear_project_model_editor(&mut self) {

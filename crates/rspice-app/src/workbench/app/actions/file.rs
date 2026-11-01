@@ -56,9 +56,6 @@ impl RSpiceApp {
                     ) {
                         self.state.models.clear_project_model_editor();
                     }
-                    if action == ConfirmationAction::Exit {
-                        self.state.models.pdk_technology_authoring = Default::default();
-                    }
                     self.execute_pending_action(
                         action,
                         pending_path,

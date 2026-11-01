@@ -1393,7 +1393,6 @@ mod tests {
                 "surfaces/models/manager/qualification_page.rs",
                 "surfaces/models/manager/shelf.rs",
                 "surfaces/models/manager/symbols.rs",
-                "surfaces/pdk_technology_admin.rs",
             ],
             &[],
         ),
