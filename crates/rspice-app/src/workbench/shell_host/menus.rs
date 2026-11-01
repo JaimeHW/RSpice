@@ -4,6 +4,7 @@
 
 use crate::state::ComponentType;
 use crate::state::ModelsPage;
+use crate::state::SimulationPage;
 use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
@@ -461,35 +462,53 @@ const ARRANGE_MENU: &[MenuEntry] = &[
     command(Command::JoinCollinearWires),
 ];
 
+/// Simulate: choose and fill the active plan, set it up, check and run it,
+/// then read the operating point back onto the schematic.
 const SIMULATE_MENU: &[MenuEntry] = &[
     // The manager owns which plan is active, and every row below it acts on
-    // that plan - "Run active plan", "Stop active run", its job history, its
-    // preflight checks. Choosing the plan therefore reads above the actions
-    // taken on it, in the same group they belong to.
+    // that plan. Filling the chosen plan reads directly under choosing it;
+    // the navigator, the catalogue's other route, is a panel a reader can
+    // collapse.
     simulate(SimulateCommand::ManagePlans),
-    // Filling the chosen plan reads directly under choosing it, and above the
-    // actions that dispatch what it holds. It is here because the navigator is
-    // the only other route to the catalogue, and the navigator is a panel a
-    // reader can collapse.
     simulate(SimulateCommand::AddAnalysis),
-    simulate(SimulateCommand::Run),
-    simulate(SimulateCommand::Stop),
-    simulate(SimulateCommand::JobsManager),
-    simulate(SimulateCommand::Preflight),
     Separator,
-    command_as(
-        Command::OpenWorkspace(Workspace::Simulate),
-        "Simulation Studio",
+    MenuEntry::Submenu {
+        label: "Setup",
+        entries: SETUP_MENU,
+    },
+    Separator,
+    simulate(SimulateCommand::Preflight),
+    MenuEntry::command_as(SimulateCommand::Run.key(), "Run"),
+    MenuEntry::command_as(SimulateCommand::Stop.key(), "Stop"),
+    command(Command::GenerateNetlist),
+    simulate(SimulateCommand::JobsManager),
+    Separator,
+    command_as(Command::PlaceProbe, "Probe"),
+    command(Command::AnnotateOperatingPoint),
+    MenuEntry::command_as(
+        ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
+        "Operating-point table",
     ),
-    // Beside the studio, because a definition is what the studio's
-    // excitations read: the mockup's Simulate menu lists the two together.
+];
+
+/// The Simulation Studio's pages in the order a plan is authored, then what
+/// the plan draws on from outside it.
+const SETUP_MENU: &[MenuEntry] = &[
+    simulate(SimulateCommand::Page(SimulationPage::Analyses)),
+    simulate(SimulateCommand::Page(SimulationPage::Excitations)),
+    simulate(SimulateCommand::Page(SimulationPage::Variables)),
+    simulate(SimulateCommand::Page(SimulationPage::Outputs)),
+    simulate(SimulateCommand::Page(SimulationPage::Specifications)),
+    simulate(SimulateCommand::Page(SimulationPage::RunSet)),
+    simulate(SimulateCommand::Page(SimulationPage::Models)),
+    simulate(SimulateCommand::Page(SimulationPage::Solver)),
+    simulate(SimulateCommand::Page(SimulationPage::Save)),
+    Separator,
+    command(Command::ConfigurationSets),
     command_as(
         Command::OpenWorkspace(Workspace::Stimulus),
-        "Stimulus Library",
+        "Stimulus library",
     ),
-    simulate(SimulateCommand::Options),
-    command(Command::GenerateNetlist),
-    results(ResultsCommand::EditSpecifications),
 ];
 
 const RESULTS_MENU: &[MenuEntry] = &[

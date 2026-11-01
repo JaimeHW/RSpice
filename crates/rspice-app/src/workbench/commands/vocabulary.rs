@@ -73,6 +73,8 @@ pub enum Command {
     CycleGrid,
     /// Draw the grid in one style.
     SetGridStyle(crate::state::GridStyle),
+    /// Show or hide the DC operating point on the schematic.
+    AnnotateOperatingPoint,
     GridSnapRouting,
     VisibilityOptions,
     ToggleFullScreen,
@@ -435,7 +437,11 @@ impl Command {
                 "Design",
             ),
             Self::SelectionBulkEdit => spec("design-bulk-tools", "Bulk edit\u{2026}", "Edit"),
-            Self::ConfigurationSets => spec("configuration-sets", "Configurations", "Design"),
+            Self::ConfigurationSets => spec(
+                "configuration-sets",
+                "Configuration sets\u{2026}",
+                "Simulate",
+            ),
             Self::RuleSetup => spec("design-rule-setup", "Design rule setup\u{2026}", "Design"),
             Self::ReviewComments => spec("review-comments", "Review comments\u{2026}", "Design"),
             Self::DesignSpecialistWorkspaces => spec(
@@ -557,6 +563,11 @@ impl Command {
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
             Self::NextViolation => spec("next-violation", "Next violation", "Design"),
             Self::PreviousViolation => spec("previous-violation", "Previous violation", "Design"),
+            Self::AnnotateOperatingPoint => spec(
+                "annotate-operating-point",
+                "Annotate DC operating point",
+                "Simulate",
+            ),
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
@@ -737,6 +748,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SetGridStyle(crate::state::GridStyle::Dots),
     Command::SetGridStyle(crate::state::GridStyle::Lines),
     Command::SetGridStyle(crate::state::GridStyle::Off),
+    Command::AnnotateOperatingPoint,
     Command::GridSnapRouting,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
@@ -972,6 +984,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SetGridStyle(crate::state::GridStyle::Dots).key(),
     Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
     Command::SetGridStyle(crate::state::GridStyle::Off).key(),
+    Command::AnnotateOperatingPoint.key(),
     Command::GridSnapRouting.key(),
     SheetsCommand::DrawingSheetLayers.key(),
     Command::VisibilityOptions.key(),

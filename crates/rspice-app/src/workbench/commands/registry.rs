@@ -884,7 +884,7 @@ impl Command {
             Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
             Self::NextViolation | Self::PreviousViolation => "the last check found no violations",
             Self::ClearChecks => "no check has run",
-            Self::SetGridStyle(_) => "open a schematic or testbench",
+            Self::SetGridStyle(_) | Self::AnnotateOperatingPoint => "open a schematic or testbench",
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",
             Self::PreviousDocument | Self::NextDocument => "only one document is open",

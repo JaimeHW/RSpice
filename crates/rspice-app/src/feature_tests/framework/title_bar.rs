@@ -1165,16 +1165,17 @@ fn simulate_menu_puts_the_plan_manager_above_the_actions_on_the_active_plan() {
         labels,
         [
             "Manage simulation plans\u{2026}",
-            "Add analysis or workflow\u{2026}",
-            "Run active plan",
-            "Stop active run",
-            "Run history\u{2026}",
-            "Preflight checks",
-            "Simulation Studio",
-            "Stimulus Library",
-            "Global solver & convergence",
+            "Add analysis\u{2026}",
+            "Setup",
+            "Check and netlist",
+            "Run",
+            "Stop",
             "Open generated netlist",
-            "Edit specification matrix",
+            "Run history\u{2026}",
+            // Annotate DC operating point reads as a check box, not a
+            // plain item, so this list of menu items leaves it out.
+            "Probe",
+            "Operating-point table",
         ]
     );
     // The rows are the commands', not look-alikes: their labels are the ones
@@ -1451,6 +1452,30 @@ fn design_follows_the_view_in_front() {
     );
 }
 
+/// Annotate DC operating point shows the operating point on the schematic
+/// while checked and leaves only the violations drawn while not.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn annotate_dc_operating_point_switches_the_schematic_annotation() {
+    use crate::state::SchematicAnnotationVisibility;
+    let mut app = title_test_app();
+    app.state.workbench.activate(Workspace::Design);
+    let key = Command::AnnotateOperatingPoint.key();
+    assert!(app.is_enabled(key));
+    assert_eq!(app.checked(key), Some(true));
+    app.execute(key);
+    assert_eq!(
+        app.state.design.schematic_visibility.annotations,
+        SchematicAnnotationVisibility::ViolationsOnly
+    );
+    assert_eq!(app.checked(key), Some(false));
+    app.execute(key);
+    assert_eq!(
+        app.state.design.schematic_visibility.annotations,
+        SchematicAnnotationVisibility::OperatingPoint
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn source_editor_app() -> RSpiceApp {
     let mut app = title_test_app();
@@ -1599,9 +1624,8 @@ fn a_grey_run_row_says_a_run_is_already_in_progress() {
     );
     let rows = menu_pin(application_menu_entries(ApplicationMenu::Simulate), &app);
     assert!(
-        rows.iter().any(
-            |row| row == "Run active plan | start-run | F5 | off: a run is already in progress"
-        ),
+        rows.iter()
+            .any(|row| row == "Run | start-run | F5 | off: a run is already in progress"),
         "{rows:?}"
     );
 }
@@ -2553,17 +2577,31 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
         ApplicationMenu::Simulate,
         &[
             "Manage simulation plans… | manage-simulation-plans |  | on",
-            "Add analysis or workflow… | add-analysis |  | on",
-            "Run active plan | start-run | F5 | on",
-            "Stop active run | stop-run | Shift+F5 | off: no simulation is running",
-            "Run history… | jobs-manager |  | on",
-            "Preflight checks | check | Ctrl+E | on",
+            "Add analysis… | add-analysis |  | on",
             "---",
-            "Simulation Studio | simulate | Alt+3 | on",
-            "Stimulus Library | stimulus | Alt+8 | on",
-            "Global solver & convergence | solver |  | on",
+            "Setup >",
+            "  Analyses | simulation-analyses |  | on",
+            "  Excitations | simulation-excitations |  | on",
+            "  Design variables | simulation-variables |  | on",
+            "  Outputs & expressions | simulation-outputs |  | on",
+            "  Requirements & specifications | simulation-specifications |  | on",
+            "  PVT, sweeps & variation | simulation-run-set |  | on",
+            "  Models & sections | simulation-models |  | on",
+            "  Simulator options | simulation-solver |  | on",
+            "  Save, streaming & retention policy | simulation-save-policy |  | on",
+            "  ---",
+            "  Configuration sets… | configuration-sets |  | on",
+            "  Stimulus library | stimulus | Alt+8 | on",
+            "---",
+            "Check and netlist | check |  | on",
+            "Run | start-run | F5 | on",
+            "Stop | stop-run | Shift+F5 | off: no simulation is running",
             "Open generated netlist | generated-netlist | Ctrl+L | on",
-            "Edit specification matrix | specifications |  | on",
+            "Run history… | jobs-manager |  | on",
+            "---",
+            "Probe | place-probe | P | on",
+            "Annotate DC operating point | annotate-operating-point |  | on | checked",
+            "Operating-point table | result-operating-point |  | off: Requires the active analysis to be a DC operating-point result carrying a node DC solution, a device operating-point report, or a retained operating-point payload",
         ],
     ),
     (
@@ -2752,69 +2790,69 @@ const PINNED_NO_PROJECT_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
 const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
     ApplicationMenu::Design,
     &[
-            "Descend | descend-selected-instance | Shift+E | off: open a schematic or testbench",
-            "Descend with options… | descend-hierarchy | H | off: open a schematic or testbench",
-            "Return to parent | ascend-hierarchy | Shift+H | off: open a schematic or testbench",
-            "Return to parent schematic | exit-symbol-in-place | Enter | off: no symbol is being edited in place",
-            "Create hierarchy… | create-hierarchy |  | off: open an editable schematic or testbench",
-            "Create symbol from schematic… | create-symbol-from-schematic |  | off: open a schematic or testbench",
-            "---",
-            "Place >",
-            "  Pin | symbol-pin-tool | P | on",
-            "  Line | symbol-line-tool | L | on",
-            "  Rectangle | symbol-rectangle-tool | R | on",
-            "  Circle | symbol-circle-tool | C | on",
-            "  Arc | symbol-arc-tool | A | on",
-            "  Polygon | symbol-polygon-tool | G | on",
-            "  Text | symbol-text-tool | T | on",
-            "  ---",
-            "  Rotate selected pin to next side | symbol-rotate-pin | Ctrl+R | off: command is unavailable in this context",
-            "  Mirror selected pin across body | symbol-mirror-pin | Ctrl+M | off: command is unavailable in this context",
-            "  Update pins from contract | update-pins-from-contract |  | off: command is unavailable in this context",
-            "Arrange >",
-            "  Rotate clockwise | rotate-selection | Ctrl+R | off: open an editable schematic or testbench",
-            "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: open an editable schematic or testbench",
-            "  Mirror about vertical axis | mirror-selection-horizontal | Ctrl+M | off: open an editable schematic or testbench",
-            "  Mirror about horizontal axis | mirror-selection-vertical | Ctrl+Shift+M | off: open an editable schematic or testbench",
-            "  ---",
-            "  Align left | align-selection-left |  | off: command is unavailable in this context",
-            "  Align horizontal centers | align-selection-horizontal-centers |  | off: command is unavailable in this context",
-            "  Align right | align-selection-right |  | off: command is unavailable in this context",
-            "  Align top | align-selection-top |  | off: command is unavailable in this context",
-            "  Align vertical centers | align-selection-vertical-centers |  | off: command is unavailable in this context",
-            "  Align bottom | align-selection-bottom |  | off: command is unavailable in this context",
-            "  ---",
-            "  Distribute horizontally | distribute-selection-horizontal |  | off: command is unavailable in this context",
-            "  Distribute vertically | distribute-selection-vertical |  | off: command is unavailable in this context",
-            "  ---",
-            "  Snap selection to grid | snap-selection-to-grid |  | off: open an editable schematic or testbench",
-            "  Join collinear wires | join-collinear-wires |  | off: open an editable schematic or testbench",
-            "Sheet >",
-            "  Previous sheet | previous-sheet | PageUp | off: open a schematic or testbench",
-            "  Next sheet | next-sheet | PageDown | off: open a schematic or testbench",
-            "  New sheet | new-sheet |  | off: open an editable schematic or testbench",
-            "  Delete… | delete-sheet |  | off: open an editable schematic or testbench",
-            "  ---",
-            "  Sheet properties | page-setup | Ctrl+Alt+Shift+P | off: open an editable schematic or testbench drawing sheet",
-            "  Sheet formats… | sheet-format-manager |  | off: open an editable schematic or testbench drawing sheet",
-            "  Sheet defaults… | sheet-defaults |  | off: command is unavailable in this context",
-            "---",
-            "Variants… | design-variants |  | off: open an editable schematic",
-            "Annotate reference designators… | annotate-reference-designators |  | off: open an editable schematic",
-            "Connectivity and buses… | design-connectivity-tools |  | off: open a schematic or testbench",
-            "Review comments… | review-comments |  | off: open a schematic project",
-            "Object table… | engineering-table-manager | Ctrl+Shift+T | off: command is unavailable in this context",
-            "---",
-            "Check cellview | check-cellview | Ctrl+E | on",
-            "Check design | check-design |  | on",
-            "Validate and save symbol | save-symbol |  | on",
-            "Violations >",
-            "  Next violation | next-violation | ] | off: the last check found no violations",
-            "  Previous violation | previous-violation | [ | off: the last check found no violations",
-            "  ---",
-            "  Clear check results | clear-checks |  | off: no check has run",
-            "Design rule setup… | design-rule-setup |  | on",
-        ],
+        "Descend | descend-selected-instance | Shift+E | off: open a schematic or testbench",
+        "Descend with options… | descend-hierarchy | H | off: open a schematic or testbench",
+        "Return to parent | ascend-hierarchy | Shift+H | off: open a schematic or testbench",
+        "Return to parent schematic | exit-symbol-in-place | Enter | off: no symbol is being edited in place",
+        "Create hierarchy… | create-hierarchy |  | off: open an editable schematic or testbench",
+        "Create symbol from schematic… | create-symbol-from-schematic |  | off: open a schematic or testbench",
+        "---",
+        "Place >",
+        "  Pin | symbol-pin-tool | P | on",
+        "  Line | symbol-line-tool | L | on",
+        "  Rectangle | symbol-rectangle-tool | R | on",
+        "  Circle | symbol-circle-tool | C | on",
+        "  Arc | symbol-arc-tool | A | on",
+        "  Polygon | symbol-polygon-tool | G | on",
+        "  Text | symbol-text-tool | T | on",
+        "  ---",
+        "  Rotate selected pin to next side | symbol-rotate-pin | Ctrl+R | off: command is unavailable in this context",
+        "  Mirror selected pin across body | symbol-mirror-pin | Ctrl+M | off: command is unavailable in this context",
+        "  Update pins from contract | update-pins-from-contract |  | off: command is unavailable in this context",
+        "Arrange >",
+        "  Rotate clockwise | rotate-selection | Ctrl+R | off: open an editable schematic or testbench",
+        "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: open an editable schematic or testbench",
+        "  Mirror about vertical axis | mirror-selection-horizontal | Ctrl+M | off: open an editable schematic or testbench",
+        "  Mirror about horizontal axis | mirror-selection-vertical | Ctrl+Shift+M | off: open an editable schematic or testbench",
+        "  ---",
+        "  Align left | align-selection-left |  | off: command is unavailable in this context",
+        "  Align horizontal centers | align-selection-horizontal-centers |  | off: command is unavailable in this context",
+        "  Align right | align-selection-right |  | off: command is unavailable in this context",
+        "  Align top | align-selection-top |  | off: command is unavailable in this context",
+        "  Align vertical centers | align-selection-vertical-centers |  | off: command is unavailable in this context",
+        "  Align bottom | align-selection-bottom |  | off: command is unavailable in this context",
+        "  ---",
+        "  Distribute horizontally | distribute-selection-horizontal |  | off: command is unavailable in this context",
+        "  Distribute vertically | distribute-selection-vertical |  | off: command is unavailable in this context",
+        "  ---",
+        "  Snap selection to grid | snap-selection-to-grid |  | off: open an editable schematic or testbench",
+        "  Join collinear wires | join-collinear-wires |  | off: open an editable schematic or testbench",
+        "Sheet >",
+        "  Previous sheet | previous-sheet | PageUp | off: open a schematic or testbench",
+        "  Next sheet | next-sheet | PageDown | off: open a schematic or testbench",
+        "  New sheet | new-sheet |  | off: open an editable schematic or testbench",
+        "  Delete… | delete-sheet |  | off: open an editable schematic or testbench",
+        "  ---",
+        "  Sheet properties | page-setup | Ctrl+Alt+Shift+P | off: open an editable schematic or testbench drawing sheet",
+        "  Sheet formats… | sheet-format-manager |  | off: open an editable schematic or testbench drawing sheet",
+        "  Sheet defaults… | sheet-defaults |  | off: command is unavailable in this context",
+        "---",
+        "Variants… | design-variants |  | off: open an editable schematic",
+        "Annotate reference designators… | annotate-reference-designators |  | off: open an editable schematic",
+        "Connectivity and buses… | design-connectivity-tools |  | off: open a schematic or testbench",
+        "Review comments… | review-comments |  | off: open a schematic project",
+        "Object table… | engineering-table-manager | Ctrl+Shift+T | off: command is unavailable in this context",
+        "---",
+        "Check cellview | check-cellview | Ctrl+E | on",
+        "Check design | check-design |  | on",
+        "Validate and save symbol | save-symbol |  | on",
+        "Violations >",
+        "  Next violation | next-violation | ] | off: the last check found no violations",
+        "  Previous violation | previous-violation | [ | off: the last check found no violations",
+        "  ---",
+        "  Clear check results | clear-checks |  | off: no check has run",
+        "Design rule setup… | design-rule-setup |  | on",
+    ],
 )];
 
 #[cfg(not(target_arch = "wasm32"))]

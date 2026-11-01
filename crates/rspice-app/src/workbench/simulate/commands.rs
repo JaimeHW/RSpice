@@ -91,7 +91,6 @@ const STOP: &[ShortcutBinding] = &[
         HOST,
     ),
 ];
-const PREFLIGHT: &[ShortcutBinding] = &[primary(chord(Key::E, true, false, false, "Ctrl+E"), ALL)];
 
 impl SimulateCommand {
     /// Every command the registry lists, in the feature's own order.
@@ -191,16 +190,17 @@ impl SimulateCommand {
             Self::JobsManager => (
                 "Run history\u{2026}",
                 "Simulate",
-                palette,
+                open,
                 ShortcutContext::Global,
                 NONE,
             ),
+            // No key of its own: Ctrl+E checks the cellview.
             Self::Preflight => (
-                "Preflight checks",
+                "Check and netlist",
                 "Simulate",
                 navigates,
                 ShortcutContext::SimulationWorkspace,
-                PREFLIGHT,
+                NONE,
             ),
             // Deliberately global, unlike the Simulate workspace's own
             // commands: the plan chip that owns this action lives in the
@@ -215,7 +215,7 @@ impl SimulateCommand {
                 NONE,
             ),
             Self::AddAnalysis => (
-                "Add analysis or workflow\u{2026}",
+                "Add analysis\u{2026}",
                 "Simulate",
                 open,
                 ShortcutContext::Global,
@@ -268,7 +268,7 @@ const fn simulation_page_label(page: SimulationPage) -> &'static str {
         SimulationPage::Specifications => "Requirements & specifications",
         SimulationPage::RunSet => "PVT, sweeps & variation",
         SimulationPage::Models => "Models & sections",
-        SimulationPage::Solver => "Solver & convergence",
+        SimulationPage::Solver => "Simulator options",
         SimulationPage::Save => "Save, streaming & retention policy",
     }
 }

@@ -357,6 +357,7 @@ impl Command {
             | Self::FitSchematicContent
             | Self::CycleGrid
             | Self::SetGridStyle(_)
+            | Self::AnnotateOperatingPoint
             | Self::GridSnapRouting
             | Self::VisibilityOptions
             | Self::EngineeringTableView
@@ -609,6 +610,17 @@ impl Command {
             }
             Self::CycleGrid => cycle_canvas_grid(app),
             Self::SetGridStyle(style) => app.state.design.set_grid_style(style),
+            // Off leaves the violations on the drawing: hiding them as well
+            // is the visibility dialog's choice.
+            Self::AnnotateOperatingPoint => {
+                use crate::state::SchematicAnnotationVisibility;
+                let annotations = &mut app.state.design.schematic_visibility.annotations;
+                *annotations = if *annotations == SchematicAnnotationVisibility::OperatingPoint {
+                    SchematicAnnotationVisibility::ViolationsOnly
+                } else {
+                    SchematicAnnotationVisibility::OperatingPoint
+                };
+            }
             Self::GridSnapRouting => {
                 crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
             }
