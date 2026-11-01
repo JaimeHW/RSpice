@@ -126,6 +126,11 @@ impl ApplicationWindowBounds {
 pub struct ApplicationWindowState {
     pub title: String,
     pub workspace: Workspace,
+    // The primary window copies the current route every frame, so a session
+    // that quit on a surface a later build retired names it here. Read
+    // through `deserialize_route`, such a window opens on Design instead of
+    // the whole session failing to load.
+    #[serde(deserialize_with = "deserialize_route")]
     pub route: SurfaceRoute,
     // Both read through `retired_documents`, so a window restored from a
     // session that named a document this build no longer has opens on the
@@ -195,6 +200,18 @@ impl Default for ApplicationWindowState {
             console_maximized: false,
         }
     }
+}
+
+/// A window's route as a session wrote it. One this build cannot read, such
+/// as a retired surface's, is Design, as the navigation history reads it.
+fn deserialize_route<'de, D>(deserializer: D) -> Result<SurfaceRoute, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let route = String::deserialize(deserializer)?;
+    Ok(route
+        .parse()
+        .unwrap_or(SurfaceRoute::surface(SurfaceId::Design)))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -783,5 +800,28 @@ mod tests {
                 .documents
                 .contains(&document)
         );
+    }
+
+    /// A session that quit on a surface a later build retired names it in
+    /// the primary window's route. The window opens on Design and the rest
+    /// of the registry still loads.
+    #[test]
+    fn a_window_saved_on_a_retired_surface_restores_on_design() {
+        let mut registry = WindowSessionRegistry::default();
+        let primary = registry.primary();
+        registry
+            .state_mut(primary)
+            .expect("the primary window")
+            .route = SurfaceRoute::surface(SurfaceId::Results);
+        let saved = ron::to_string(&registry).expect("the registry serializes");
+        let saved = saved.replace("\"?view=results\"", "\"?surface=retired-surface\"");
+        assert!(saved.contains("?surface=retired-surface"), "{saved}");
+
+        let restored: WindowSessionRegistry =
+            ron::from_str(&saved).expect("a window on a retired surface restores");
+
+        let window = restored.state(primary).expect("the primary window");
+        assert_eq!(window.route, SurfaceRoute::surface(SurfaceId::Design));
+        assert_eq!(window.title, "RSpice primary window");
     }
 }
