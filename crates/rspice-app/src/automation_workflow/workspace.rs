@@ -1638,9 +1638,9 @@ mod tests {
                 AutomationStarterFile::PythonEntry => {
                     format!("{}# changed\n", changed.python)
                 }
-                AutomationStarterFile::RunPlan => changed
-                    .run_plan
-                    .replace("Default plan", "Changed plan"),
+                AutomationStarterFile::RunPlan => {
+                    changed.run_plan.replace("Default plan", "Changed plan")
+                }
                 AutomationStarterFile::EnvironmentLock => {
                     format!("{}# changed\n", changed.environment_lock)
                 }
@@ -1739,8 +1739,7 @@ plan = project . run_plans . load (
     'plans/selected.yaml'
 )
 "#;
-        let decoy_plan =
-            DEFAULT_AUTOMATION_RUN_PLAN.replace("Default plan", "Decoy plan");
+        let decoy_plan = DEFAULT_AUTOMATION_RUN_PLAN.replace("Default plan", "Decoy plan");
         let documents = [
             AutomationSourceDocument {
                 path: "flows/qualified.py",

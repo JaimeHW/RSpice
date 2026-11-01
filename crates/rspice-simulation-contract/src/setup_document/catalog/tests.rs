@@ -24,10 +24,7 @@ fn plan_names_are_trimmed_validated_and_case_insensitively_unique() {
 
     let mut setup = new_setup();
     let error = setup
-        .clone_active_plan(
-            "DEFAULT PLAN",
-            SimulationPlanCloneOptions::default(),
-        )
+        .clone_active_plan("DEFAULT PLAN", SimulationPlanCloneOptions::default())
         .expect_err("names are unique without ASCII-case ambiguity");
     assert!(matches!(
         error,
