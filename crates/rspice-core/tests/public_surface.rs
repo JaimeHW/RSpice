@@ -522,9 +522,13 @@ const MAX_PUBLIC_ITEMS: usize = 5236;
 // reads `X1:R1:R` as one name. The census is 1,606.
 // `Mosfet::set_ngspice_convergence_test` adds one: the builder (`rspice-core`
 // engine/builder.rs) selects ngspice's current-only convergence test for
-// classic MOS instances outside the Xyce dialect. The census is 1,607, with
-// no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1607;
+// classic MOS instances outside the Xyce dialect. The census is 1,607.
+// `Mosfet::set_xyce_initial_fix` and `Mosfet::begin_operating_point_load` add
+// two: the builder (`rspice-core` engine/builder.rs) holds a Xyce-dialect
+// `OFF` instance through Xyce's initFixFlag, and the circuit store (circuit/
+// storage/nonlinear.rs) begins each classic MOS load with it. The census is
+// 1,609, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1609;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
