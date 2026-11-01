@@ -46,8 +46,8 @@ pub use chip::chip;
 pub(crate) use command_form::middle_elided;
 pub use command_form::{CommandForm, FieldLine, FormRows, ListEdit, ListWords, TableColumn};
 pub use dialog::{
-    Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse, DialogSize,
-    DialogTransactionTone, focus_is_within_modal,
+    DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse,
+    DialogSize, DialogTransactionTone, band_header, focus_is_within_modal,
 };
 pub use docbar::docbar_at_height;
 pub use form::name_control;

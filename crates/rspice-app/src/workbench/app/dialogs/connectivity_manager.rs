@@ -22,7 +22,7 @@ use crate::ui::widgets::{
     Button, CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
     DialogTransactionTone, FieldLine,
 };
-use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
+use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use rspice_design::connectivity::summary::{DesignNet, NetClass, projection_nets};
 use rspice_design::drc::{
     CheckReach, DrcLocation, DrcResult, DrcSeverity, DrcViolation, DrcViolationType,

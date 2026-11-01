@@ -1375,7 +1375,7 @@ impl<'a> Dialog<'a> {
                                 .inner_margin(if self.flush_body {
                                     Margin::same(0)
                                 } else {
-                                    Margin::same(12)
+                                    Margin::same(DIALOG_BODY_INSET as i8)
                                 })
                                 .show(ui, |ui| {
                                     ui.spacing_mut().item_spacing.y =
@@ -1416,7 +1416,7 @@ impl<'a> Dialog<'a> {
                             .inner_margin(if self.flush_body {
                                 Margin::same(0)
                             } else {
-                                Margin::same(12)
+                                Margin::same(DIALOG_BODY_INSET as i8)
                             })
                             .show(ui, |ui| {
                                 ui.spacing_mut().item_spacing.y =
@@ -2181,6 +2181,46 @@ fn restore_dialog_focus(
     });
     if let Some(prior) = restorable {
         keyboard::resume_focus(ctx, prior);
+    }
+}
+
+/// Where a dialog's rows start: its title and footer sit this far in from
+/// the frame, and so does everything between them. A body that is not flush
+/// is inset by it; a flush body insets its own rows by it.
+pub const DIALOG_BODY_INSET: f32 = 12.0;
+
+/// A section's band across a flush dialog body or one pane of it: its title
+/// on the body's left edge, an optional count at its right. A dialog wears
+/// this one header style for every section it has.
+pub fn band_header(ui: &mut Ui, title: &str, meta: Option<&str>) {
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(
+        vec2(ui.available_width(), crate::panels::PANEL_SECTION_H),
+        Sense::hover(),
+    );
+    let spoken = meta.map_or_else(|| title.to_owned(), |meta| format!("{title}, {meta}"));
+    response.widget_info(|| WidgetInfo::labeled(WidgetType::Label, true, &spoken));
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        Stroke::new(1.0, t.color.border),
+    );
+    ui.painter().text(
+        rect.left_center() + vec2(DIALOG_BODY_INSET, 0.0),
+        egui::Align2::LEFT_CENTER,
+        title,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
+    );
+    if let Some(meta) = meta {
+        ui.painter().text(
+            rect.right_center() - vec2(DIALOG_BODY_INSET, 0.0),
+            egui::Align2::RIGHT_CENTER,
+            meta,
+            theme::mono(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
     }
 }
 

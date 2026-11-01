@@ -25,7 +25,7 @@ use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
 };
-use crate::workbench::app::dialogs::review_primitives::{DIALOG_BODY_INSET, band_header};
+use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
