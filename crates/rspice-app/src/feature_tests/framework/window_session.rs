@@ -2,6 +2,7 @@
 
 use crate::workbench::RSpiceApp;
 use crate::workbench::app::dialogs::window_session::*;
+use crate::workbench::state::{Workspace, WorkspaceLayoutState};
 use egui::Context;
 
 /// The Windows page lists the windows and the actions on them. Two
@@ -147,4 +148,140 @@ fn the_window_workflows_are_command_forms_without_a_monitor_row() {
             "Esc closes {workflow:?}"
         );
     }
+}
+
+/// Two detached windows, the second one off screen, with `workflow` open.
+fn app_with_detached_windows(workflow: WindowWorkflow) -> RSpiceApp {
+    let mut app = RSpiceApp::test_instance();
+    let session = &mut app.state.workbench.window_session;
+    for title in ["Review bench", "Plots"] {
+        let id = session.create_window(
+            title,
+            Workspace::Design,
+            WorkspaceLayoutState::default(),
+            false,
+        );
+        if title == "Plots" {
+            session
+                .state_mut(id)
+                .expect("the window just created")
+                .bounds
+                .recovery_pending = true;
+        }
+    }
+    open_window_workflow(&mut app, workflow);
+    app
+}
+
+/// Every label and value the window session dialog exposes after three
+/// frames at the desktop size.
+fn window_dialog_texts(ctx: &Context, app: &mut RSpiceApp) -> Vec<String> {
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| render_window_session_dialog(app, ctx),
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    nodes
+        .values()
+        .flat_map(|node| [node.label(), node.value()])
+        .flatten()
+        .map(str::to_owned)
+        .collect()
+}
+
+/// Consolidate and monitor recovery are command forms over the detached
+/// windows. Each opened on a paragraph that said the same thing every
+/// time, over a striped table with a constant "remove detached window"
+/// column, and a refusal printed under the table in red.
+#[test]
+fn consolidate_and_recovery_are_command_forms_without_explainers() {
+    for (workflow, rows) in [
+        (
+            WindowWorkflow::ConsolidateWindows,
+            ["Windows", "Review bench, Plots", "Documents"],
+        ),
+        (
+            WindowWorkflow::MonitorRecovery,
+            [
+                "Review bench",
+                "Plots \u{00b7} off screen",
+                "Keep restored windows on screen",
+            ],
+        ),
+    ] {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = app_with_detached_windows(workflow);
+        let texts = window_dialog_texts(&ctx, &mut app);
+        for row in rows {
+            assert!(
+                texts.iter().any(|text| text == row),
+                "{workflow:?} has no {row}: {texts:?}"
+            );
+        }
+        assert!(texts.iter().any(|text| text == "Cancel"));
+        for explainer in [
+            "All detached documents return",
+            "Recovery changes window geometry only",
+            "remove detached window",
+        ] {
+            assert!(
+                !texts.iter().any(|text| text.contains(explainer)),
+                "{workflow:?} explains itself: {explainer}"
+            );
+        }
+
+        let escape = egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let _ = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                events: vec![escape],
+                ..egui::RawInput::default()
+            },
+            |ctx| render_window_session_dialog(&mut app, ctx),
+        );
+        assert!(
+            !app.state.workbench.window_session_dialog.open,
+            "Esc closes {workflow:?}"
+        );
+    }
+}
+
+/// With nothing detached there is nothing to consolidate, and the footer
+/// says so before the primary runs into an error.
+#[test]
+fn consolidate_with_nothing_detached_refuses_before_running() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    open_window_workflow(&mut app, WindowWorkflow::ConsolidateWindows);
+    let texts = window_dialog_texts(&ctx, &mut app);
+    assert!(
+        texts
+            .iter()
+            .any(|text| text == "No detached window is open to consolidate."),
+        "no refusal in the footer: {texts:?}"
+    );
 }

@@ -298,6 +298,12 @@ fn render_window_workflow(app: &mut impl WorkbenchHost, ctx: &Context, workflow:
                 error.as_deref(),
             );
             let dialog = &mut app.workbench_mut().window_session_dialog;
+            if selected != dialog.recovery_selected
+                || recover_future != dialog.recover_all_future_windows
+            {
+                // A refusal from the last attempt is about the draft it was made on.
+                dialog.error = None;
+            }
             dialog.recovery_selected = selected;
             dialog.recover_all_future_windows = recover_future;
             choice
@@ -909,7 +915,27 @@ fn show_window_form(
     choice
 }
 
-/// Consolidate and monitor recovery act on a list of windows.
+/// What consolidate or recovery refuses, in the words the footer states it
+/// in. `None` when its primary can run.
+fn window_list_refusal(
+    workflow: WindowWorkflow,
+    detached: bool,
+    selected: bool,
+) -> Option<&'static str> {
+    match workflow {
+        WindowWorkflow::ConsolidateWindows if !detached => {
+            Some("No detached window is open to consolidate.")
+        }
+        WindowWorkflow::MonitorRecovery if !detached => {
+            Some("No other application window is open.")
+        }
+        WindowWorkflow::MonitorRecovery if !selected => Some("Select a window to recover."),
+        _ => None,
+    }
+}
+
+/// Consolidate and monitor recovery: a command form over the windows other
+/// than the main one.
 fn show_window_list_workflow(
     ctx: &Context,
     workflow: WindowWorkflow,
@@ -919,101 +945,70 @@ fn show_window_list_workflow(
     error: Option<&str>,
 ) -> DialogChoice {
     let (title, primary) = workflow_copy(workflow);
-    Dialog::new(title, primary)
-        .description(workflow_description(workflow))
-        .secondary("Cancel")
-        .size(DialogSize::Manager)
-        .show(ctx, |ui| {
-            if workflow == WindowWorkflow::MonitorRecovery {
-                render_monitor_recovery_workflow(ui, app, selected, recover_future);
+    let detached = app
+        .workbench()
+        .window_session
+        .windows()
+        .filter(|(id, _)| !id.is_primary())
+        .map(|(id, window)| {
+            let lost = window.bounds.is_off_screen() || window.bounds.recovery_pending;
+            let label = if lost && workflow == WindowWorkflow::MonitorRecovery {
+                format!("{} \u{00b7} off screen", window.title)
             } else {
-                render_consolidate_workflow(ui, app);
-            }
-            if let Some(error) = error {
-                ui.add_space(8.0);
-                ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-            }
+                window.title.clone()
+            };
+            (id, label, window.documents.len())
         })
-}
-
-fn render_consolidate_workflow(ui: &mut egui::Ui, app: &impl WorkbenchHost) {
-    ui.label(
-        "All detached documents return to their owning workspaces in the main window. Active jobs, selections, and saved results are unchanged.",
-    );
-    Grid::new("window-session.consolidate")
-        .num_columns(4)
-        .striped(true)
-        .show(ui, |ui| {
-            ui.strong("Window");
-            ui.strong("Documents");
-            ui.strong("Destination");
-            ui.strong("Restore state");
-            ui.end_row();
-            for (id, window) in app.workbench().window_session.windows() {
-                if id.is_primary() {
-                    continue;
-                }
-                ui.label(&window.title);
-                ui.label(window.documents.len().to_string());
-                ui.label(format!("Main \u{00b7} {}", window.workspace.label()));
-                ui.label("remove detached window");
-                ui.end_row();
-            }
-        });
-}
-
-fn render_monitor_recovery_workflow(
-    ui: &mut egui::Ui,
-    app: &impl WorkbenchHost,
-    selected: &mut std::collections::BTreeSet<ApplicationWindowId>,
-    recover_future: &mut bool,
-) {
-    ui.label(
-        "Recovery changes window geometry only. Engineering documents and application state are unchanged.",
-    );
-    Grid::new("window-session.monitor-recovery")
-        .num_columns(4)
-        .striped(true)
-        .show(ui, |ui| {
-            ui.strong("Recover");
-            ui.strong("Window");
-            ui.strong("Saved monitor");
-            ui.strong("Current visibility");
-            ui.end_row();
-            for (id, window) in app.workbench().window_session.windows() {
-                if id.is_primary() {
-                    continue;
-                }
-                let mut checked = selected.contains(&id);
-                if ui.checkbox(&mut checked, "").changed() {
-                    if checked {
-                        selected.insert(id);
-                    } else {
-                        selected.remove(&id);
+        .collect::<Vec<_>>();
+    let refusal = window_list_refusal(workflow, !detached.is_empty(), !selected.is_empty());
+    let status = match (error, refusal) {
+        (Some(error), _) => Err(error),
+        (None, Some(refusal)) => Err(refusal),
+        (None, None) => Ok(None),
+    };
+    CommandForm::new(title, primary)
+        .describe(workflow_description(workflow))
+        .primary_enabled(refusal.is_none())
+        .status(status)
+        .show(ctx, |rows| {
+            match workflow {
+                WindowWorkflow::MonitorRecovery if !detached.is_empty() => {
+                    let mut checked = detached
+                        .iter()
+                        .map(|(id, _, _)| selected.contains(id))
+                        .collect::<Vec<_>>();
+                    let mut items = detached
+                        .iter()
+                        .zip(checked.iter_mut())
+                        .map(|((_, label, _), checked)| (label.as_str(), checked))
+                        .collect::<Vec<_>>();
+                    rows.checks("Windows", &mut items);
+                    for ((id, _, _), checked) in detached.iter().zip(&checked) {
+                        if *checked {
+                            selected.insert(*id);
+                        } else {
+                            selected.remove(id);
+                        }
                     }
+                    rows.checks(
+                        "Options",
+                        &mut [("Keep restored windows on screen", recover_future)],
+                    );
                 }
-                ui.label(&window.title);
-                ui.label(
-                    window
-                        .bounds
-                        .monitor_size
-                        .map(|size| format!("{:.0} \u{00d7} {:.0}", size[0], size[1]))
-                        .unwrap_or_else(|| "Unavailable".to_owned()),
-                );
-                ui.label(
-                    if window.bounds.is_off_screen() || window.bounds.recovery_pending {
-                        "off-screen or topology changed"
-                    } else {
-                        "visible"
-                    },
-                );
-                ui.end_row();
+                WindowWorkflow::ConsolidateWindows if !detached.is_empty() => {
+                    let titles = detached
+                        .iter()
+                        .map(|(_, label, _)| label.as_str())
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    let documents = detached.iter().map(|(_, _, count)| count).sum::<usize>();
+                    rows.value("Windows", &titles);
+                    rows.value("Documents", &documents.to_string());
+                }
+                _ => {}
             }
-        });
-    ui.checkbox(
-        recover_future,
-        "Clamp all future restored windows to available work areas",
-    );
+            None
+        })
 }
 
 fn layout_for_choice(choice: WindowLayoutChoice) -> WorkspaceLayoutState {
