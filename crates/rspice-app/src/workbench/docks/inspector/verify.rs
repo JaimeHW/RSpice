@@ -7,7 +7,8 @@ use rspice_ui_kit::panels::{Problem, panel_inset, section_header};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::VerificationSessionState;
 
 use super::super::super::design_system::property_row;
 use super::compact_readout;
@@ -17,11 +18,19 @@ use crate::state::VerificationPage;
 /// run's definition and worst samples, a corner run that failed, and the
 /// tuning session's uncommitted or invalid values. The other pages already
 /// show everything there is to say about them.
-pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
-    match app.state.simulate.verification_page {
-        VerificationPage::Yield => yield_details(ui, app),
+/// What the Verify workspace's inspector reads: the model, the flow in front
+/// and the verification session.
+pub(in crate::workbench) struct VerifyInspector<'a> {
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) page: VerificationPage,
+    pub(in crate::workbench) verification: &'a VerificationSessionState,
+}
+
+pub(in crate::workbench) fn verify(ui: &mut Ui, inspector: &VerifyInspector<'_>) {
+    match inspector.page {
+        VerificationPage::Yield => yield_details(ui, inspector.model),
         VerificationPage::Corners => {
-            let failed = app.state.model.simulation.active_run().and_then(|run| {
+            let failed = inspector.model.simulation.active_run().and_then(|run| {
                 run.analyses.iter().find(|analysis| {
                     analysis.analysis_type == crate::state::AnalysisType::Corner
                         && !analysis.success
@@ -36,7 +45,7 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
             }
         }
         VerificationPage::Tuning => {
-            let session = &app.state.simulate.verification;
+            let session = inspector.verification;
             let dirty_count = session
                 .tuning_variables
                 .iter()
@@ -68,14 +77,10 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 }
 
-fn yield_details(ui: &mut Ui, app: &RSpiceApp) {
-    let run = app.state.model.simulation.active_run();
-    let evidence = app
-        .state
-        .model
-        .simulation
-        .yield_results_for_active_dataset();
-    let provenance = evidence.and(app.state.model.simulation.retained.yield_provenance());
+fn yield_details(ui: &mut Ui, model: &Model) {
+    let run = model.simulation.active_run();
+    let evidence = model.simulation.yield_results_for_active_dataset();
+    let provenance = evidence.and(model.simulation.retained.yield_provenance());
     let results = evidence.unwrap_or_default();
 
     section_header(ui, "Monte Carlo", None);

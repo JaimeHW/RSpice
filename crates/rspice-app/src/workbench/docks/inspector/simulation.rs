@@ -4,12 +4,11 @@
 
 use egui::Ui;
 
+use crate::product::AnalysisInstanceId;
 use crate::state::{SimulationRun, SimulationRunLifecycle};
 use crate::ui::plot::fmt_si_significant;
 use crate::ui::widgets::problem_line;
-use crate::workbench::RSpiceApp;
-use crate::workbench::commands::vocabulary::Command;
-use crate::workbench::state::Workspace;
+use crate::workbench::app_state::Model;
 
 use super::super::super::design_system::{
     property_row, property_row_problem, section_header, section_header_action,
@@ -33,10 +32,10 @@ struct LastRun {
 /// The newest retained run that ran analysis `instance`: by the provenance of
 /// a result it produced, or by the prepared task when it produced none.
 fn last_run_of(
-    app: &RSpiceApp,
+    model: &Model,
     instance: crate::product::AnalysisInstanceId,
 ) -> Option<&SimulationRun> {
-    app.state.model.simulation.retained.runs.iter().find(|run| {
+    model.simulation.retained.runs.iter().find(|run| {
         run.analyses.iter().any(|analysis| {
             analysis
                 .provenance()
@@ -85,20 +84,30 @@ fn run_outcome(
     }
 }
 
-pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let selected = app
-        .state
+/// What the Simulate workspace's inspector reads and writes: the model, and
+/// the analysis it inspects, which it keeps selected by identity.
+pub(in crate::workbench) struct SimulateInspector<'a> {
+    pub(in crate::workbench) model: &'a mut Model,
+    pub(in crate::workbench) active_analysis: &'a mut usize,
+    pub(in crate::workbench) active_analysis_instance: &'a mut Option<AnalysisInstanceId>,
+}
+
+/// Draw the selected analysis and its last run. Whether the reader opened
+/// that run's results: the feature raises the command once it has drawn.
+pub(in crate::workbench) fn simulate(ui: &mut Ui, inspector: &mut SimulateInspector<'_>) -> bool {
+    let mut open_results = false;
+    let selected = inspector
         .model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .and_then(|plan| {
             let legacy_kind = crate::simulation::plan::AnalysisKind::from_legacy_index(
-                app.state.simulate.active_analysis,
+                *inspector.active_analysis,
             );
             plan.instances()
                 .iter()
-                .find(|instance| Some(instance.id()) == app.state.simulate.active_analysis_instance)
+                .find(|instance| Some(instance.id()) == *inspector.active_analysis_instance)
                 .or_else(|| {
                     legacy_kind.and_then(|kind| {
                         plan.instances()
@@ -118,17 +127,16 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         });
     let Some((id, kind, name, draft)) = selected else {
         muted_inspector_copy(ui, "Add an analysis to start.");
-        return;
+        return false;
     };
-    app.state.simulate.active_analysis_instance = Some(id);
-    app.state.simulate.active_analysis = kind.legacy_index();
+    *inspector.active_analysis_instance = Some(id);
+    *inspector.active_analysis = kind.legacy_index();
 
-    let validation_error = app
-        .state
+    let validation_error = inspector
         .model
         .sim_setup
         .analysis_draft_validation_error(&draft);
-    let last_run = last_run_of(app, id).map(|run| {
+    let last_run = last_run_of(inspector.model, id).map(|run| {
         let (status, problem, message) = run_outcome(run, id);
         LastRun {
             sequence: run.id,
@@ -157,14 +165,14 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
         if let Some(error) = validation_error {
             problem_line(ui, Problem::Failure, &error);
         }
-        return;
+        return false;
     };
     if !has_results {
         section_header(ui, &name, None);
     } else if section_header_action(ui, &name, "Open results", true).clicked()
-        && app.state.model.simulation.select_run_by_sequence(sequence)
+        && inspector.model.simulation.select_run_by_sequence(sequence)
     {
-        Command::OpenWorkspace(Workspace::Results).execute(app);
+        open_results = true;
     }
     property_row_problem(ui, "Status", status, problem);
     if let Some(message) = message {
@@ -176,6 +184,7 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     if let Some(error) = validation_error {
         problem_line(ui, Problem::Failure, &error);
     }
+    open_results
 }
 
 #[cfg(test)]

@@ -5,7 +5,8 @@ use egui::Ui;
 
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::Problem;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::VerificationSessionState;
 
 use super::super::super::design_system::{property_row, section_header};
 use super::flow_row;
@@ -19,20 +20,30 @@ pub(in crate::workbench) fn verification_navigator_requires_scroll(available_hei
     available_height < flow_height + HISTORY_COVERAGE_HEIGHT
 }
 
-pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
-    let query = app
-        .state
-        .workbench
-        .navigator_filter()
-        .trim()
-        .to_ascii_lowercase();
+/// What the Verify workspace's navigator reads: the model, the verification
+/// session, the flow in front and the navigator's filter.
+pub(in crate::workbench) struct VerifyNavigator<'a> {
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) verification: &'a VerificationSessionState,
+    pub(in crate::workbench) page: VerificationPage,
+    pub(in crate::workbench) filter: &'a str,
+}
+
+/// Draw the flows, and the flow the reader opened, if one.
+pub(in crate::workbench) fn verify(
+    ui: &mut Ui,
+    navigator: &VerifyNavigator<'_>,
+) -> Option<VerificationPage> {
+    let mut opened = None;
+    let mut active = navigator.page;
+    let query = navigator.filter.trim().to_ascii_lowercase();
     ui.painter().hline(
         ui.max_rect().x_range(),
         ui.cursor().top(),
         egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
     );
     for page in VerificationPage::NAVIGATION {
-        let flow = verification_flow_presentation(app, page);
+        let flow = verification_flow_presentation(navigator.model, navigator.verification, page);
         let label = &flow.label;
         let detail = &flow.detail;
         let status = &flow.status;
@@ -43,14 +54,15 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         {
             continue;
         }
-        if flow_row(ui, &flow, app.state.simulate.verification_page == page) {
-            app.state.simulate.verification_page = page;
+        if flow_row(ui, &flow, active == page) {
+            active = page;
+            opened = Some(page);
         }
     }
     // The one coverage number a designer acts on, and what is missing from
     // it. Full coverage is the normal state and says nothing.
     section_header(ui, "Specifications", None);
-    let coverage = verification_coverage(app);
+    let coverage = verification_coverage(navigator.model);
     if coverage.total > 0 {
         property_row(
             ui,
@@ -66,6 +78,7 @@ pub(in crate::workbench) fn verify(ui: &mut Ui, app: &mut RSpiceApp) {
         ui.cursor().top(),
         egui::Stroke::new(1.0, Tokens::get(ui.ctx()).color.border),
     );
+    opened
 }
 
 /// One verification flow's row: what it is, what it holds, and its state,
@@ -104,15 +117,15 @@ const fn verification_flow_glyph(page: VerificationPage) -> &'static str {
 }
 
 pub(super) fn verification_flow_presentation(
-    app: &RSpiceApp,
+    model: &Model,
+    verification: &VerificationSessionState,
     page: VerificationPage,
 ) -> VerificationFlowPresentation {
-    let active_run = app.state.model.simulation.active_run();
+    let active_run = model.simulation.active_run();
     match page {
         VerificationPage::Yield => {
             let evidence = active_run.and_then(|run| {
-                app.state
-                    .model
+                model
                     .simulation
                     .retained
                     .yield_provenance()
@@ -124,8 +137,7 @@ pub(super) fn verification_flow_presentation(
             });
             let results = evidence
                 .and_then(|(run, _)| {
-                    app.state
-                        .model
+                    model
                         .simulation
                         .retained
                         .yield_results_for_dataset(run.dataset_id)
@@ -182,18 +194,13 @@ pub(super) fn verification_flow_presentation(
             }
         }
         VerificationPage::Tuning => {
-            let variable_count = app
-                .state
-                .model
+            let variable_count = model
                 .sim_setup
                 .stable_analysis_plan()
                 .ok()
-                .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
+                .and_then(|plan| model.workspace.content.plan_data(plan.id()))
                 .map_or(0, |payload| payload.design_variables.len());
-            let dirty_count = app
-                .state
-                .simulate
-                .verification
+            let dirty_count = verification
                 .tuning_variables
                 .iter()
                 .filter(|draft| draft.is_dirty())
@@ -264,9 +271,7 @@ pub(super) fn verification_flow_presentation(
             }
         }
         VerificationPage::Regression => {
-            let retained_runs = app
-                .state
-                .model
+            let retained_runs = model
                 .simulation
                 .retained
                 .runs
@@ -310,12 +315,10 @@ pub(super) struct VerificationCoverage {
     pub(super) status: String,
 }
 
-pub(super) fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
-    let run = app.state.model.simulation.active_run();
-    let total = app.state.model.workspace.content.specs.len();
-    let values = app
-        .state
-        .model
+pub(super) fn verification_coverage(model: &Model) -> VerificationCoverage {
+    let run = model.simulation.active_run();
+    let total = model.workspace.content.specs.len();
+    let values = model
         .workspace
         .content
         .specs
@@ -348,9 +351,7 @@ pub(super) fn verification_coverage(app: &RSpiceApp) -> VerificationCoverage {
         })
         .collect::<Vec<_>>();
     let executed = values.iter().filter(|value| value.is_some()).count();
-    let passed = app
-        .state
-        .model
+    let passed = model
         .workspace
         .content
         .specs

@@ -197,7 +197,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     let mut app = RSpiceApp::test_instance();
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused", None, 0),
+        simulate_nav_meta(&app.state.model, SimulationPage::Models, "unused", None, 0),
         None,
         "globally available libraries are not owned by the active simulation plan",
     );
@@ -211,7 +211,7 @@ fn simulation_models_meta_counts_only_active_plan_bindings() {
     );
 
     assert_eq!(
-        simulate_nav_meta(&app, SimulationPage::Models, "unused", None, 0),
+        simulate_nav_meta(&app.state.model, SimulationPage::Models, "unused", None, 0),
         Some("1".to_owned()),
     );
 }
@@ -394,7 +394,7 @@ fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
         });
     app.state.model.simulation.view.active_run_idx = None;
 
-    let coverage = verification_coverage(&app);
+    let coverage = verification_coverage(&app.state.model);
 
     assert_eq!(coverage.total, 1);
     assert_eq!(coverage.passed, 0);
@@ -404,7 +404,7 @@ fn specification_mapping_does_not_claim_execution_without_an_active_dataset() {
 #[test]
 fn empty_specification_set_is_neutral_not_healthy() {
     let app = RSpiceApp::test_instance();
-    let coverage = verification_coverage(&app);
+    let coverage = verification_coverage(&app.state.model);
 
     assert_eq!(coverage.total, 0);
     assert_eq!(coverage.status, "No specs");
@@ -445,7 +445,7 @@ fn finite_goal_miss_counts_as_executed_but_not_passed() {
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
 
-    let coverage = verification_coverage(&app);
+    let coverage = verification_coverage(&app.state.model);
     // Measured, so nothing is missing; missed its goal, so it does not pass.
     assert_eq!(coverage.status, "");
     assert_eq!(coverage.passed, 0);
@@ -491,8 +491,11 @@ fn the_device_safety_flow_states_the_retained_soa_verdict() {
     app.state.model.simulation.retained.runs = vec![run].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
 
-    let flow =
-        super::super::verify::verification_flow_presentation(&app, VerificationPage::DeviceSafety);
+    let flow = super::super::verify::verification_flow_presentation(
+        &app.state.model,
+        &app.state.simulate.verification,
+        VerificationPage::DeviceSafety,
+    );
     assert_eq!(flow.status, "9.1% margin");
 }
 

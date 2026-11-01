@@ -2,6 +2,7 @@
 //! analyses a run is made from, and the runs themselves.
 
 pub(crate) mod commands;
+mod docks;
 mod run_host;
 
 use crate::state::SimulationPage;
@@ -9,7 +10,7 @@ use crate::state::command_catalog::CommandKey;
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
 use crate::workbench::framework::feature::{
-    CommandSet, Cx, Feature, FeatureRegistry, NoHandles, Reads,
+    CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
 use crate::workbench::slots::SimulateState;
 use crate::workbench::state::{
@@ -34,6 +35,14 @@ impl Feature for SimulateFeature {
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<SimulateCommand>();
+        registry.navigator(FeatureNavigator {
+            show: docks::show_navigator,
+        });
+        registry.inspector(FeatureInspector {
+            show: docks::show_inspector,
+            // Nothing the section draws holds an edit for the shell to commit.
+            commit_pending_edit: |_, _| {},
+        });
     }
 }
 

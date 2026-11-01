@@ -673,15 +673,19 @@ const MODELS_CONTRIBUTIONS: &[Step] = &[
     ),
     (
         "navigator",
-        &["Workspace::Verify => verify(ui, app),\
+        &[
+            "Workspace::Verify => features::show_navigator::<SimulateFeature>(app, ui),\
            Workspace::Models => features::show_navigator::<ModelsFeature>(app, ui),\
-           }"],
+           }",
+        ],
     ),
     (
         "workspace inspector",
-        &["Workspace::Verify => verify(ui, app),\
+        &[
+            "Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),\
            Workspace::Models => features::show_inspector::<ModelsFeature>(app, ui),\
-           Workspace::Netlist =>"],
+           Workspace::Netlist =>",
+        ],
     ),
 ];
 
@@ -704,7 +708,35 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
            design::show(ui, app);\
            app.after_contribution();\
            }\
-           Workspace::Simulate => simulation::simulate(ui, app),"],
+           Workspace::Simulate => {"],
+    ),
+];
+
+/// The shell's `contribute`, at the simulate feature's docks: the navigator
+/// and the inspector draw in the feature's context on both its workspaces.
+/// On Simulate each has the command it raised answered once it has drawn,
+/// before the next point draws; on Verify they raise nothing, so they answer
+/// nothing where they draw.
+const SIMULATE_CONTRIBUTIONS: &[Step] = &[
+    (
+        "navigator",
+        &[
+            "Workspace::Simulate => {\
+           features::show_navigator::<SimulateFeature>(app, ui);\
+           app.after_contribution();\
+           }",
+            "Workspace::Verify => features::show_navigator::<SimulateFeature>(app, ui),",
+        ],
+    ),
+    (
+        "workspace inspector",
+        &[
+            "Workspace::Simulate => {\
+           features::show_inspector::<SimulateFeature>(app, ui);\
+           app.after_contribution();\
+           }",
+            "Workspace::Verify => features::show_inspector::<SimulateFeature>(app, ui),",
+        ],
     ),
 ];
 
@@ -718,7 +750,7 @@ const PROJECT_CONTRIBUTIONS: &[Step] = &[
         "navigator",
         &[
             "Workspace::Project => features::show_navigator::<ProjectFeature>(app, ui),\
-           Workspace::Simulate => simulate(ui, app),",
+           Workspace::Simulate => {",
         ],
     ),
     (
@@ -1368,6 +1400,15 @@ fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),
         DESIGN_CONTRIBUTIONS,
+    );
+}
+
+#[test]
+fn a_simulate_dock_has_the_command_it_raised_answered_once_it_draws() {
+    assert_runs_in_order(
+        "RSpiceApp::contribute",
+        &body(SHELL_HOST, "fn contribute("),
+        SIMULATE_CONTRIBUTIONS,
     );
 }
 

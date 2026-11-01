@@ -6,12 +6,12 @@ use egui::{ScrollArea, Ui, Vec2};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Button;
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 
 use super::super::super::design_system::{WorkbenchIcon, section_header};
 use super::{nav_matches, nav_row};
 use crate::state::SimulationPage;
-use crate::workbench::framework::host::Host;
+use crate::workbench::framework::feature::CommandSet;
 use crate::workbench::simulate::commands::SimulateCommand;
 
 // Mirrors the mockup's `.section-body { padding-inline: 10px; }` contract so
@@ -39,15 +39,33 @@ const NAV_AXIS_VALUE_LIMIT: usize = 5;
 const SIMULATION_CREATOR_GAP: f32 = 6.0;
 const SIMULATION_CREATOR_EXTRA_HEIGHT: f32 = 8.0;
 
-pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let enabled = app.state.model.sim_setup.enabled_analysis_instance_count();
-    let total = app
-        .state
+/// What the Simulate workspace's navigator reads: the model, the route in
+/// front and the navigator's filter.
+pub(in crate::workbench) struct SimulateNavigator<'a> {
+    pub(in crate::workbench) model: &'a Model,
+    pub(in crate::workbench) page: SimulationPage,
+    pub(in crate::workbench) filter: &'a str,
+}
+
+/// What the reader asked of the Simulate navigator while it drew: a setup
+/// route to open, and whether to add an analysis.
+#[derive(Default)]
+pub(in crate::workbench) struct SimulateNavigatorAsked {
+    pub(in crate::workbench) open: Option<SimulationPage>,
+    pub(in crate::workbench) add_analysis: bool,
+}
+
+pub(in crate::workbench) fn simulate(
+    ui: &mut Ui,
+    navigator: &SimulateNavigator<'_>,
+) -> SimulateNavigatorAsked {
+    let enabled = navigator.model.sim_setup.enabled_analysis_instance_count();
+    let total = navigator
         .model
         .sim_setup
         .stable_analysis_plan()
         .map_or(0, |plan| plan.instances().len());
-    let query = app.state.workbench.navigator_filter().trim().to_lowercase();
+    let query = navigator.filter.trim().to_lowercase();
     // One validation for the whole rail. The Run set row states the point
     // count and the Run set card below states it again, and each asked the run
     // set for it — which validates the declaration and expands the space, so
@@ -55,7 +73,7 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // places. The forecast's point count does not depend on how many analyses
     // are enabled; only its task count does, so one validation answers both.
     let run_set_validation =
-        rspice_simulation_contract::run_set::validate(&app.state.model.sim_setup.run_set, enabled);
+        rspice_simulation_contract::run_set::validate(&navigator.model.sim_setup.run_set, enabled);
     let declared_points = run_set_validation
         .errors
         .is_empty()
@@ -65,9 +83,9 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     // digests every cell view and walks the configured hierarchy; nine rows
     // each asking would pay for it nine times to print one number once.
     let placed_sources = crate::simulation::placed_sources::whole_design_source_count(
-        &app.state.model.library_manager,
-        &app.state.model.workspace,
-        &app.state.model.schematic,
+        &navigator.model.library_manager,
+        &navigator.model.workspace,
+        &navigator.model.schematic,
     );
     // The nine routes are resolved before the head is drawn, because the head
     // is that section's own and a header over nothing is a claim the rail
@@ -81,11 +99,12 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
     if !routes.is_empty() {
         section_header(ui, "Setup", None);
     }
+    let mut asked = SimulateNavigatorAsked::default();
     ScrollArea::vertical()
         .id_salt("workbench.simulation.navigator")
         .auto_shrink([false, true])
         .show(ui, |ui| {
-            let active = app.state.simulate.simulation_page;
+            let active = navigator.page;
             // Enabled over total. The previous wording called the total
             // "active", which is what `enabled` means, so a one-analysis plan
             // read "1 active · 1 enabled".
@@ -93,8 +112,13 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
             let mut requested = None;
             for page in routes {
                 let label = page.label();
-                let meta =
-                    simulate_nav_meta(app, page, &analyses_meta, declared_points, placed_sources);
+                let meta = simulate_nav_meta(
+                    navigator.model,
+                    page,
+                    &analyses_meta,
+                    declared_points,
+                    placed_sources,
+                );
                 if nav_row(
                     ui,
                     simulate_nav_icon(page),
@@ -105,18 +129,15 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                     requested = Some(page);
                 }
             }
-            if let Some(page) = requested {
-                app.state.simulate.simulation_page = page;
-                app.state.workbench.close_drawer();
-            }
-            simulation_plan_creator(ui, app);
+            asked.open = requested;
+            asked.add_analysis = simulation_plan_creator(ui);
             // One row per declared axis, because the card is a read of the run
             // set and the run set is its axes. The reference point it named
             // instead is one point of that space: with three axes enabled the
             // rail reported a single process corner and a single temperature
             // while the plan was going to run twenty-seven points over four
             // dimensions, and nothing on the rail said so.
-            let run_set = &app.state.model.sim_setup.run_set;
+            let run_set = &navigator.model.sim_setup.run_set;
             // An axis answers for its own name, which is what the row states.
             // Matching the values instead would leave a row on screen for a
             // query the reader cannot see the reason for. Only the axes the
@@ -161,6 +182,7 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
                 nav_property(ui, &dimension.name, &value);
             }
         });
+    asked
 }
 
 /// The panel's one creating action, at the foot of the tree it adds to.
@@ -173,19 +195,17 @@ pub(in crate::workbench) fn simulate(ui: &mut Ui, app: &mut RSpiceApp) {
 /// setup routes, and it was writing the catalogue's four palette fields itself
 /// while only the Analyses route drew the catalogue. Routing through
 /// `SimulateCommand::AddAnalysis` puts the arming and the drawing under one owner.
-fn simulation_plan_creator(ui: &mut Ui, app: &mut RSpiceApp) {
+/// Whether it was pressed: the feature raises the command.
+fn simulation_plan_creator(ui: &mut Ui) -> bool {
     ui.add_space(SIMULATION_CREATOR_GAP);
     let width = ui.available_width();
-    if Button::new(app.label(SimulateCommand::AddAnalysis.key()))
+    Button::new(SimulateCommand::AddAnalysis.spec().label)
         .accent()
         .min_width(width)
         .min_height(Tokens::get(ui.ctx()).metrics.row_h + SIMULATION_CREATOR_EXTRA_HEIGHT)
         .square()
         .show(ui)
         .clicked()
-    {
-        app.execute_command_key(SimulateCommand::AddAnalysis.key());
-    }
 }
 
 const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
@@ -206,20 +226,18 @@ const fn simulate_nav_icon(page: SimulationPage) -> WorkbenchIcon {
 /// page edits. A page whose owner is empty shows nothing rather than a zero,
 /// so the column does not fill with noise before a plan has been authored.
 pub(super) fn simulate_nav_meta(
-    app: &RSpiceApp,
+    model: &Model,
     page: SimulationPage,
     analyses: &str,
     points: Option<usize>,
     placed_sources: usize,
 ) -> Option<String> {
-    let payload = app
-        .state
-        .model
+    let payload = model
         .sim_setup
         .stable_analysis_plan()
         .ok()
         .map(|plan| plan.id())
-        .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id));
+        .and_then(|plan_id| model.workspace.content.plan_data(plan_id));
     let count = |value: usize| (value > 0).then(|| value.to_string());
     match page {
         SimulationPage::Analyses => Some(analyses.to_owned()),
@@ -238,11 +256,11 @@ pub(super) fn simulate_nav_meta(
         SimulationPage::Save => None,
         SimulationPage::Specifications => count(payload.map_or(0, |data| data.specs.len())),
         SimulationPage::RunSet => points.map(|points| format!("{points} pt")),
-        SimulationPage::Models => count(app.state.model.sim_setup.model_bindings.len()),
+        SimulationPage::Models => count(model.sim_setup.model_bindings.len()),
         // The active numerical policy, not a count — the tree's job is to say
         // what each route currently holds, and for the solver that is which
         // preset the effective options match.
-        SimulationPage::Solver => Some(app.state.model.sim_setup.options.preset_label()),
+        SimulationPage::Solver => Some(model.sim_setup.options.preset_label()),
     }
 }
 
