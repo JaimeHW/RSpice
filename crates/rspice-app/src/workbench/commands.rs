@@ -240,6 +240,7 @@ impl Command {
             | Self::RepeatLastCommand
             | Self::KeyboardShortcuts
             | Self::HelpCenter
+            | Self::Examples
             | Self::ReleaseNotes
             | Self::MigrationGuide
             | Self::SystemDiagnostics
@@ -1157,6 +1158,7 @@ impl Command {
             Self::HelpCenter => {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)
             }
+            Self::Examples => app.state.project.open_examples(),
             Self::ReleaseNotes => open_help_center(
                 &mut app.state,
                 crate::workbench::app::HelpCenterPage::ReleaseNotes,

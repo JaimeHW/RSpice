@@ -676,15 +676,18 @@ const LAYOUT_MENU: &[MenuEntry] = &[
     command(Command::ResetLayout),
 ];
 
+/// Help: reading about RSpice and learning it from examples, getting help
+/// with a problem and the licence, then the notices and the version.
 const HELP_MENU: &[MenuEntry] = &[
     command(Command::HelpCenter),
     command(Command::KeyboardShortcuts),
+    command(Command::Examples),
     command(Command::ReleaseNotes),
-    command(Command::MigrationGuide),
-    command(Command::SystemDiagnostics),
-    command(Command::SupportBundle),
-    command(Command::LegalPrivacy),
     Separator,
+    command(Command::SystemDiagnostics),
+    cloud(CloudCommand::License),
+    Separator,
+    command(Command::LegalPrivacy),
     command(Command::About),
 ];
 

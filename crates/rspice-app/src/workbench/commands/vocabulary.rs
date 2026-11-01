@@ -230,6 +230,7 @@ pub enum Command {
     KeyboardShortcuts,
     SpecialistToolBrowser,
     HelpCenter,
+    Examples,
     ReleaseNotes,
     MigrationGuide,
     SystemDiagnostics,
@@ -633,30 +634,25 @@ impl Command {
             ),
             Self::AutomationConsole => spec("automation", "Scripts", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
-            Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
+            Self::KeyboardShortcuts => spec("command-reference", "Keyboard shortcuts", "Help"),
             Self::SpecialistToolBrowser => spec(
                 "specialist-tool-browser",
                 "Specialist tool browser…",
                 "Navigate",
             ),
             Self::HelpCenter => spec("help-center", "RSpice Help", "Help"),
-            Self::ReleaseNotes => spec(
-                "release-notes",
-                "Release notes and compatibility changes\u{2026}",
-                "Help",
-            ),
+            Self::Examples => spec("examples", "Examples\u{2026}", "Help"),
+            Self::ReleaseNotes => spec("release-notes", "Release notes", "Help"),
             Self::MigrationGuide => {
                 spec("migration-guide", "Project migration guide\u{2026}", "Help")
             }
-            Self::SystemDiagnostics => spec(
-                "system-diagnostics",
-                "System diagnostics and log locations\u{2026}",
-                "Help",
-            ),
+            Self::SystemDiagnostics => {
+                spec("system-diagnostics", "Report a problem\u{2026}", "Help")
+            }
             Self::SupportBundle => spec("support-bundle", "Create support bundle\u{2026}", "Help"),
             Self::LegalPrivacy => spec(
                 "legal-privacy-center",
-                "Legal, privacy and notices\u{2026}",
+                "Third-party notices and privacy",
                 "Help",
             ),
             Self::About => spec("about", "About RSpice", "Help"),
@@ -870,6 +866,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::KeyboardShortcuts,
     Command::SpecialistToolBrowser,
     Command::HelpCenter,
+    Command::Examples,
     Command::ReleaseNotes,
     Command::MigrationGuide,
     Command::SystemDiagnostics,
@@ -1183,6 +1180,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     ResultsCommand::AddVisualizationPane.key(),
     ResultsCommand::VisualizationDocumentProperties.key(),
     Command::HelpCenter.key(),
+    Command::Examples.key(),
     Command::ReleaseNotes.key(),
     Command::MigrationGuide.key(),
     Command::SystemDiagnostics.key(),

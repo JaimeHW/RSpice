@@ -88,8 +88,6 @@ const TOPIC_LINE_GAP: f32 = 2.0;
 #[derive(Debug, Clone, Copy)]
 enum HelpAction {
     Command(Command),
-    /// The Examples dialog, until the menus offer it.
-    Examples,
 }
 
 /// One command reference row: the command's shortcut, empty for a command
@@ -202,16 +200,9 @@ impl RSpiceApp {
             return;
         }
 
-        match action {
-            Some(HelpAction::Command(command)) => {
-                self.close_help_center_route();
-                command.execute(self);
-            }
-            Some(HelpAction::Examples) => {
-                self.close_help_center_route();
-                self.state.project.open_examples();
-            }
-            None => {}
+        if let Some(HelpAction::Command(command)) = action {
+            self.close_help_center_route();
+            command.execute(self);
         }
     }
 
@@ -315,7 +306,7 @@ impl RSpiceApp {
         let hint = format!("{shown} of {total} commands");
 
         let filter_text = &mut self.state.shell.shortcuts_filter;
-        let choice = Dialog::new("Command reference", "Close")
+        let choice = Dialog::new("Keyboard shortcuts", "Close")
             .description(
                 "Search every discoverable command by name, stable identity, category, or shortcut.",
             )
@@ -468,11 +459,8 @@ fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<H
     });
     ui.add_space(10.0);
     ui.horizontal(|ui| {
-        if ui.button("Command reference").clicked() {
+        if ui.button("Keyboard shortcuts").clicked() {
             *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
-        }
-        if ui.button("Examples\u{2026}").clicked() {
-            *action = Some(HelpAction::Examples);
         }
     });
 }
@@ -828,6 +816,29 @@ mod tests {
             .into_iter()
             .map(|shown| shown.text)
             .collect()
+    }
+
+    /// Examples… is a Help menu row: it opens the Examples dialog on its
+    /// first circuit, and the Help Center no longer offers a button of its
+    /// own. The button beside it names the reference it opens as the menu
+    /// does.
+    #[test]
+    fn examples_open_from_the_help_menu_and_not_from_the_help_center() {
+        let mut app = RSpiceApp::test_instance();
+        Command::Examples.execute(&mut app);
+        assert_eq!(app.state.project.examples_selection, Some(0));
+
+        let mut app = RSpiceApp::test_instance();
+        Command::HelpCenter.execute(&mut app);
+        let shown = shown_texts(app);
+        assert!(
+            !shown.iter().any(|text| text == "Examples\u{2026}"),
+            "{shown:?}"
+        );
+        assert!(
+            shown.iter().any(|text| text == "Keyboard shortcuts"),
+            "{shown:?}"
+        );
     }
 
     /// About says what the build, its engine and this machine's license are
