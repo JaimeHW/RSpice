@@ -641,7 +641,7 @@ impl Command {
                 "Build settings\u{2026}",
                 "Design",
             ),
-            Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
+            Self::AutomationConsole => spec("automation", "Scripts", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
             Self::SpecialistToolBrowser => spec(

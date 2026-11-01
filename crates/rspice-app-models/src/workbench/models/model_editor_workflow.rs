@@ -50,11 +50,11 @@ pub fn selected_project_model_for_editor<'a>(
         .model_library_manager
         .selected_library
         .as_deref()
-        .ok_or("select one model in Model & library catalog")?;
+        .ok_or("select one model in the library manager")?;
     let model_name = reads
         .selected_model
         .as_deref()
-        .ok_or("select one model in Model & library catalog")?;
+        .ok_or("select one model in the library manager")?;
     let library = reads
         .model
         .model_library_manager
@@ -99,11 +99,11 @@ pub(super) fn selected_model_for_project_copy<'a>(
         .model_library_manager
         .selected_library
         .as_deref()
-        .ok_or("select one external or built-in model in Model & library catalog")?;
+        .ok_or("select one external or built-in model in the library manager")?;
     let model_name = reads
         .selected_model
         .as_deref()
-        .ok_or("select one external or built-in model in Model & library catalog")?;
+        .ok_or("select one external or built-in model in the library manager")?;
     let library = reads
         .model
         .model_library_manager

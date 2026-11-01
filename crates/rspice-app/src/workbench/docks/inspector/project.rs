@@ -342,7 +342,7 @@ fn project_dependency(
 
     section_header(ui, "Actions", None);
     let mut action = None;
-    if inspector_action(ui, "Model & library catalog") {
+    if inspector_action(ui, "Library manager") {
         action = Some(ProjectInspectorAction::Execute(ids::MODELS_CATALOG));
     }
     if inspector_action(ui, "PDK and model paths\u{2026}") {

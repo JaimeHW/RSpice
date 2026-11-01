@@ -89,7 +89,7 @@ impl ModelsCommand {
         let open = CommandFlags::PALETTE_VISIBLE.with(CommandFlags::REQUIRES_OPEN_PROJECT, true);
         let writes = open.with(CommandFlags::BLOCKED_BY_PROJECT_OPERATION, true);
         let (label, flags) = match self {
-            Self::Page(ModelsPage::Models) => ("Model & library catalog", page),
+            Self::Page(ModelsPage::Models) => ("Library manager", page),
             Self::Page(ModelsPage::Symbols) => ("Symbols & CDF", page),
             Self::Page(ModelsPage::Corners) => ("Corners & sections", page),
             Self::Page(ModelsPage::Bins) => ("Bins & geometry", page),
@@ -97,7 +97,7 @@ impl ModelsCommand {
             Self::Page(ModelsPage::Qualification) => ("Model qualification", page),
             Self::ModelBrowser => ("Model browser…", open),
             Self::ModelCreateProjectCopy => ("Create editable project copy", writes),
-            Self::ModelEditor => ("Device model and parameter editor…", writes),
+            Self::ModelEditor => ("Edit model…", writes),
             Self::ModelCorrelation => ("Measurement correlation…", CommandFlags::PALETTE_VISIBLE),
             Self::ModelSaveRevision => ("Save model revision", writes),
             Self::ModelValidate => ("Validate model", open),

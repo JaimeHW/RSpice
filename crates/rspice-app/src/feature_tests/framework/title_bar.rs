@@ -409,16 +409,7 @@ fn the_full_bar_lists_every_menu_in_order() {
     assert_eq!(
         labels(MenuProjection::All),
         [
-            "File",
-            "Edit",
-            "View",
-            "Design",
-            "Simulate",
-            "Results",
-            "Verify",
-            "Models",
-            "Automation",
-            "Window",
+            "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Tools", "Window",
             "Help"
         ]
     );

@@ -22,7 +22,7 @@ fn model_editor_command_has_fail_closed_selection_authority() {
     app.state.selected_model = None;
     assert_eq!(
         app.availability(ModelsCommand::ModelEditor.key()),
-        CommandAvailability::Disabled("select one model in Model & library catalog")
+        CommandAvailability::Disabled("select one model in the library manager")
     );
 
     let mut built_in = ModelLibrary::new("command-editor-built-in");

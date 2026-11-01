@@ -192,7 +192,7 @@ fn every_menu_shows_exactly_its_pinned_rows() {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
-const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
+const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
     (
         ApplicationMenu::File,
         &[
@@ -459,18 +459,19 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
         ],
     ),
     (
-        ApplicationMenu::Models,
+        ApplicationMenu::Tools,
         &[
-            "Model & library catalog | models-catalog |  | on",
-            "Device model and parameter editor… | model-editor |  | off: select one model in Model & library catalog",
-            "Measurement correlation… | model-correlation |  | off: select one model in Model & library catalog",
+            "Library manager | models-catalog |  | on",
+            "Model browser… | model-browser |  | on",
+            "Edit model… | model-editor |  | off: select one model in the library manager",
+            "Create editable project copy | model-create-project-copy |  | off: select one external or built-in model in the library manager",
+            "Measurement correlation… | model-correlation |  | off: select one model in the library manager",
+            "PDK and model paths… | pdk-settings |  | on",
+            "Rescan model libraries | rescan-model-libraries |  | on",
             "---",
-            "Verilog-A/AMS compiler | veriloga |  | off: open a Verilog-A cell view in Design",
+            "Netlist and script editor | netlist | Alt+7 | on",
+            "Scripts | automation | Ctrl+` | on",
         ],
-    ),
-    (
-        ApplicationMenu::Automation,
-        &["Automation workspace | automation | Ctrl+` | on"],
     ),
     (
         ApplicationMenu::Window,
@@ -683,7 +684,7 @@ const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
 )];
 
 #[cfg(not(target_arch = "wasm32"))]
-const PINNED_COMPACT_MENU: [&str; 11] = [
+const PINNED_COMPACT_MENU: [&str; 10] = [
     "File >",
     "Edit >",
     "View >",
@@ -691,8 +692,7 @@ const PINNED_COMPACT_MENU: [&str; 11] = [
     "Simulate >",
     "Results >",
     "Verify >",
-    "Models >",
-    "Automation >",
+    "Tools >",
     "Window >",
     "Help >",
 ];

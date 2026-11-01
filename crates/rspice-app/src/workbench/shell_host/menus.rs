@@ -85,8 +85,7 @@ pub(in crate::workbench) const fn application_menu_entries(
         ApplicationMenu::Simulate => SIMULATE_MENU,
         ApplicationMenu::Results => RESULTS_MENU,
         ApplicationMenu::Verify => VERIFY_MENU,
-        ApplicationMenu::Models => MODELS_MENU,
-        ApplicationMenu::Automation => AUTOMATION_MENU,
+        ApplicationMenu::Tools => TOOLS_MENU,
         ApplicationMenu::Window => WINDOW_MENU,
         ApplicationMenu::Help => HELP_MENU,
     }
@@ -590,21 +589,23 @@ const VERIFY_MENU: &[MenuEntry] = &[
     simulate(SimulateCommand::Verify(VerificationPage::Regression)),
 ];
 
-const MODELS_MENU: &[MenuEntry] = &[
-    MenuEntry::command_as(
-        ModelsCommand::Page(ModelsPage::Models).key(),
-        "Model & library catalog",
-    ),
+/// Tools: the libraries and models a design draws on, then the editors for
+/// netlists and scripts.
+const TOOLS_MENU: &[MenuEntry] = &[
+    models(ModelsCommand::Page(ModelsPage::Models)),
+    models(ModelsCommand::ModelBrowser),
     models(ModelsCommand::ModelEditor),
+    models(ModelsCommand::ModelCreateProjectCopy),
     models(ModelsCommand::ModelCorrelation),
+    models(ModelsCommand::PdkSettings),
+    models(ModelsCommand::RescanModelLibraries),
     Separator,
-    command_as(Command::CompileVerilogA, "Verilog-A/AMS compiler"),
+    command_as(
+        Command::OpenWorkspace(Workspace::Netlist),
+        "Netlist and script editor",
+    ),
+    command(Command::AutomationConsole),
 ];
-
-const AUTOMATION_MENU: &[MenuEntry] = &[command_as(
-    Command::AutomationConsole,
-    "Automation workspace",
-)];
 
 const WINDOW_MENU: &[MenuEntry] = &[
     command(Command::NewApplicationWindow),
@@ -644,8 +645,7 @@ pub(in crate::workbench) const COMPACT_MENU: &[MenuEntry] = &[
     compact_submenu(ApplicationMenu::Simulate),
     compact_submenu(ApplicationMenu::Results),
     compact_submenu(ApplicationMenu::Verify),
-    compact_submenu(ApplicationMenu::Models),
-    compact_submenu(ApplicationMenu::Automation),
+    compact_submenu(ApplicationMenu::Tools),
     compact_submenu(ApplicationMenu::Window),
     compact_submenu(ApplicationMenu::Help),
 ];

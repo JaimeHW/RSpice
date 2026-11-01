@@ -58,18 +58,8 @@ const ROUTE_SURFACES: [SurfaceId; 5] = [
 
 /// The application menus, by the names their triggers carry, in the bar's
 /// order.
-const APPLICATION_MENUS: [&str; 11] = [
-    "File",
-    "Edit",
-    "View",
-    "Design",
-    "Simulate",
-    "Results",
-    "Verify",
-    "Models",
-    "Automation",
-    "Window",
-    "Help",
+const APPLICATION_MENUS: [&str; 10] = [
+    "File", "Edit", "View", "Design", "Simulate", "Results", "Verify", "Tools", "Window", "Help",
 ];
 
 /// The command palette's search scopes, by the names their chips carry.

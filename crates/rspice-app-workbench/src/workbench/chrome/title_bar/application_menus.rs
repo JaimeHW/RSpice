@@ -14,8 +14,7 @@ pub enum ApplicationMenu {
     Simulate,
     Results,
     Verify,
-    Models,
-    Automation,
+    Tools,
     Window,
     Help,
 }
@@ -30,15 +29,14 @@ impl ApplicationMenu {
             Self::Simulate => "Simulate",
             Self::Results => "Results",
             Self::Verify => "Verify",
-            Self::Models => "Models",
-            Self::Automation => "Automation",
+            Self::Tools => "Tools",
             Self::Window => "Window",
             Self::Help => "Help",
         }
     }
 }
 
-pub const ALL_MENUS: [ApplicationMenu; 11] = [
+pub const ALL_MENUS: [ApplicationMenu; 10] = [
     ApplicationMenu::File,
     ApplicationMenu::Edit,
     ApplicationMenu::View,
@@ -46,8 +44,7 @@ pub const ALL_MENUS: [ApplicationMenu; 11] = [
     ApplicationMenu::Simulate,
     ApplicationMenu::Results,
     ApplicationMenu::Verify,
-    ApplicationMenu::Models,
-    ApplicationMenu::Automation,
+    ApplicationMenu::Tools,
     ApplicationMenu::Window,
     ApplicationMenu::Help,
 ];
