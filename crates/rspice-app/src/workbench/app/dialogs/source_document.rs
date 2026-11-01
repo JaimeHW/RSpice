@@ -2228,7 +2228,9 @@ mod tests {
 
     /// An Automation or Verilog-A document states its path, role, line
     /// endings and, when stale, its validation. Its twelve-digit identity,
-    /// line and byte count and bundle digest are gone.
+    /// line and byte count and bundle digest are gone, and its includes are
+    /// said in plain words: not "Recorded includes" over "no recorded
+    /// include edge in either direction".
     #[test]
     fn a_source_document_states_its_properties_without_identity_jargon() {
         let ctx = Context::default();
@@ -2261,7 +2263,15 @@ mod tests {
         };
         assert!(says("Path"), "the path row is missing");
         assert!(says("Line endings"), "the line endings row is missing");
-        for jargon in ["Identity", " bytes", "Bundle"] {
+        assert!(says("Includes"), "the includes section is missing");
+        for jargon in [
+            "Identity",
+            " bytes",
+            "Bundle",
+            "Recorded",
+            "include edge",
+            "either direction",
+        ] {
             assert!(!says(jargon), "the dialog states {jargon:?}");
         }
     }
