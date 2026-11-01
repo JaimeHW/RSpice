@@ -1,6 +1,6 @@
 //! Universal engineering-table view manager.
 
-use egui::{ComboBox, Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
+use egui::{Context, Grid, RichText, ScrollArea, TextEdit, Ui, Vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::engineering_table::active_schematic_dataset;
@@ -12,7 +12,8 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton, select,
+    Button, CommandForm, Dialog, DialogChoice, DialogInitialFocus, DialogSize, IconButton,
+    TableColumn, select,
 };
 use crate::workbench::workflows::export_workflow::{
     ExportWorkflowIo, NativeExportWorkflowIo, SaveDialogConfig,
@@ -215,81 +216,256 @@ impl RSpiceApp {
         }
 
         let page = self.state.design.engineering_table.page;
-        let (title, primary) = match page {
-            EngineeringTableDialogPage::Manager => ("Engineering table view", "Apply table view"),
-            EngineeringTableDialogPage::SaveView => ("Save engineering table view", "Save view"),
-            EngineeringTableDialogPage::SavedViews => ("Saved engineering table views", "Close"),
-            EngineeringTableDialogPage::Export => ("Export engineering table", "Export table"),
+        // What a page asks before it acts is a command form of its own;
+        // the manager and its saved views are the two surfaces with lists.
+        match page {
+            EngineeringTableDialogPage::SaveView => return self.save_view_form(ctx, &dataset),
+            EngineeringTableDialogPage::Export => return self.export_form(ctx, &dataset),
             EngineeringTableDialogPage::RowDetails => {
-                ("Engineering table row details", "Cross-probe source object")
+                return self.row_details_form(ctx, &dataset);
             }
+            EngineeringTableDialogPage::Manager | EngineeringTableDialogPage::SavedViews => {}
+        }
+        let (title, primary) = if page == EngineeringTableDialogPage::Manager {
+            ("Engineering table view", "Apply table view")
+        } else {
+            ("Saved engineering table views", "Done")
         };
         let mut action = None;
-        let choice = Dialog::new(title, primary)
+        let mut dialog = Dialog::new(title, primary)
             .description("Choose the table's columns and their order, sort and filter its rows, and copy or export them.")
             .size(DialogSize::WideWorkflow)
             .overlay_scrollbar()
-            .ghost(if page == EngineeringTableDialogPage::Manager {
-                "Cancel"
-            } else {
-                "Back"
-            })
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .show_with_initial_body_focus(ctx, |ui| {
-                action = match page {
-                    EngineeringTableDialogPage::Manager => manager_body(
-                        ui,
-                        &dataset,
-                        &mut self.state.design.engineering_table,
-                        &self.state.design.engineering_table_views.saved,
-                        &self.state.model.workspace.content.engineering_table_views.saved,
-                    ),
-                    EngineeringTableDialogPage::SaveView => {
-                        save_view_body(ui, &mut self.state.design.engineering_table)
-                    }
-                    EngineeringTableDialogPage::SavedViews => saved_views_body(
-                        ui,
-                        &dataset,
-                        &mut self.state.design.engineering_table,
-                        &self.state.design.engineering_table_views.saved,
-                        &self.state.model.workspace.content.engineering_table_views.saved,
-                    ),
-                    EngineeringTableDialogPage::Export => {
-                        export_body(ui, &dataset, &mut self.state.design.engineering_table)
-                    }
-                    EngineeringTableDialogPage::RowDetails => row_details_body(
-                        ui,
-                        &dataset,
-                        &mut self.state.design.engineering_table,
-                    ),
-                };
-                Some(ui.make_persistent_id(("engineering-table-first", page)))
-            });
+            .initial_focus(DialogInitialFocus::BodyControl);
+        // Saved views has one way back to the table, its primary.
+        if page == EngineeringTableDialogPage::Manager {
+            dialog = dialog.ghost("Cancel");
+        }
+        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+            action = match page {
+                EngineeringTableDialogPage::Manager => manager_body(
+                    ui,
+                    &dataset,
+                    &mut self.state.design.engineering_table,
+                    &self.state.design.engineering_table_views.saved,
+                    &self
+                        .state
+                        .model
+                        .workspace
+                        .content
+                        .engineering_table_views
+                        .saved,
+                ),
+                EngineeringTableDialogPage::SavedViews => saved_views_body(
+                    ui,
+                    &dataset,
+                    &mut self.state.design.engineering_table,
+                    &self.state.design.engineering_table_views.saved,
+                    &self
+                        .state
+                        .model
+                        .workspace
+                        .content
+                        .engineering_table_views
+                        .saved,
+                ),
+                EngineeringTableDialogPage::SaveView
+                | EngineeringTableDialogPage::Export
+                | EngineeringTableDialogPage::RowDetails => None,
+            };
+            Some(ui.make_persistent_id(("engineering-table-first", page)))
+        });
 
         if let Some(action) = action {
             self.handle_engineering_table_body_action(action, &dataset);
         }
 
         match choice {
-            DialogChoice::Primary => match page {
-                EngineeringTableDialogPage::Manager => self.apply_engineering_table_view(&dataset),
-                EngineeringTableDialogPage::SaveView => self.save_engineering_table_view(&dataset),
-                EngineeringTableDialogPage::SavedViews => {
-                    self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
-                }
-                EngineeringTableDialogPage::Export => self.export_engineering_table(&dataset),
-                EngineeringTableDialogPage::RowDetails => {
-                    self.cross_probe_engineering_row();
-                }
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                if page == EngineeringTableDialogPage::Manager {
-                    self.state.design.engineering_table.close();
-                } else {
-                    self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
-                    self.state.design.engineering_table.error = None;
-                }
+            DialogChoice::Primary if page == EngineeringTableDialogPage::Manager => {
+                self.apply_engineering_table_view(&dataset);
             }
+            DialogChoice::Ghost | DialogChoice::Cancelled
+                if page == EngineeringTableDialogPage::Manager =>
+            {
+                self.state.design.engineering_table.close();
+            }
+            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.leave_engineering_table_page();
+            }
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
+    /// Back from a page to the manager it was opened from.
+    fn leave_engineering_table_page(&mut self) {
+        self.state.design.engineering_table.page = EngineeringTableDialogPage::Manager;
+        self.state.design.engineering_table.error = None;
+    }
+
+    /// Save view: the current view's name, where it is kept, and whether
+    /// the grid opens on it.
+    fn save_view_form(&mut self, ctx: &Context, dataset: &EngineeringDataset) {
+        let state = &mut self.state.design.engineering_table;
+        let scopes = EngineeringViewScope::ALL.map(|scope| scope.label().to_owned());
+        let named = !state.save_name.trim().is_empty();
+        let error = state.error.clone();
+        let status = match (error.as_deref(), named) {
+            (Some(error), _) => Err(error),
+            (None, false) => Err("Enter a name for the view."),
+            (None, true) => Ok(None),
+        };
+        let choice = CommandForm::new("Save engineering table view", "Save view")
+            .describe("Keep the table's columns, sort and filters as a named view of this grid.")
+            .primary_enabled(named)
+            .status(status)
+            .show(ctx, |rows| {
+                let name = egui::Id::new("engineering-table-save-name");
+                if rows.text("Name", name, &mut state.save_name, "").changed() {
+                    state.error = None;
+                }
+                if let Some(index) = rows.select(
+                    "Scope",
+                    "engineering-table-save-scope",
+                    state.save_scope.label(),
+                    &scopes,
+                ) {
+                    state.save_scope = EngineeringViewScope::ALL[index];
+                    state.error = None;
+                }
+                rows.derived(match state.save_scope {
+                    EngineeringViewScope::Personal => "Kept on this device only.",
+                    EngineeringViewScope::Project => "Saved with the project.",
+                });
+                rows.check_columns(
+                    "Default",
+                    &mut [("The grid opens on this view", &mut state.save_as_default)],
+                );
+                Some(name)
+            });
+        match choice {
+            DialogChoice::Primary => self.save_engineering_table_view(dataset),
+            DialogChoice::Ghost | DialogChoice::Cancelled => self.leave_engineering_table_page(),
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
+    /// Export: which rows, in which format, with what beside the values.
+    fn export_form(&mut self, ctx: &Context, dataset: &EngineeringDataset) {
+        let state = &mut self.state.design.engineering_table;
+        let scopes = EngineeringTableExportScope::ALL.map(|scope| scope.label().to_owned());
+        let formats = EngineeringTableExportFormat::ALL.map(|format| format.label().to_owned());
+        let rows_out = match state.export_scope {
+            EngineeringTableExportScope::CurrentView => state
+                .draft
+                .as_ref()
+                .map(|view| dataset.project(view).rows.len())
+                .unwrap_or_default(),
+            EngineeringTableExportScope::SelectedRows => state.selected_row_ids.len(),
+            EngineeringTableExportScope::CompleteDataset => dataset.rows.len(),
+        };
+        let refusal = (state.export_scope == EngineeringTableExportScope::SelectedRows
+            && state.selected_row_ids.is_empty())
+        .then_some("Select rows in the table first.");
+        let error = state.error.clone();
+        let status = match (error.as_deref(), refusal) {
+            (Some(error), _) | (None, Some(error)) => Err(error),
+            (None, None) => Ok(None),
+        };
+        let counted = format!("{rows_out} row{}", if rows_out == 1 { "" } else { "s" });
+        let choice = CommandForm::new("Export engineering table", "Export table")
+            .wide()
+            .describe("Write the table's rows to a file, with the headers, units and view details chosen here.")
+            .primary_enabled(refusal.is_none())
+            .status(status)
+            .show(ctx, |rows| {
+                rows.value_mono("Grid", &dataset.id);
+                let scope = rows.select_with_response(
+                    "Scope",
+                    "engineering-table-export-scope",
+                    state.export_scope.label(),
+                    &scopes,
+                );
+                if let Some(index) = scope.picked {
+                    state.export_scope = EngineeringTableExportScope::ALL[index];
+                    state.error = None;
+                }
+                rows.derived(&counted);
+                if let Some(index) = rows.select(
+                    "Format",
+                    "engineering-table-export-format",
+                    state.export_format.label(),
+                    &formats,
+                ) {
+                    state.export_format = EngineeringTableExportFormat::ALL[index];
+                }
+                rows.checks(
+                    "Include",
+                    &mut [
+                        ("Column headers", &mut state.export_headers),
+                        ("Units in headers", &mut state.export_units),
+                        ("Filter, sort and manifest", &mut state.export_metadata),
+                        ("Hidden columns", &mut state.export_hidden_columns),
+                    ],
+                );
+                Some(scope.response.id)
+            });
+        match choice {
+            DialogChoice::Primary => self.export_engineering_table(dataset),
+            DialogChoice::Ghost | DialogChoice::Cancelled => self.leave_engineering_table_page(),
+            DialogChoice::Secondary | DialogChoice::None => {}
+        }
+    }
+
+    /// Row details: every field of one row, and the way to its source
+    /// object.
+    fn row_details_form(&mut self, ctx: &Context, dataset: &EngineeringDataset) {
+        let state = &self.state.design.engineering_table;
+        let source = state.row_details_id.clone().unwrap_or_default();
+        let fields = dataset
+            .rows
+            .iter()
+            .find(|row| row.stable_id == source)
+            .map(|row| {
+                dataset
+                    .columns
+                    .iter()
+                    .map(|column| {
+                        vec![
+                            column.label.clone(),
+                            row.cells
+                                .get(&column.id)
+                                .map(|cell| cell.display.clone())
+                                .unwrap_or_default(),
+                            column.unit.clone().unwrap_or_default(),
+                        ]
+                    })
+                    .collect::<Vec<_>>()
+            });
+        let error = state.error.clone();
+        let status = match (error.as_deref(), fields.is_some()) {
+            (Some(error), _) => Err(error),
+            (None, false) => Err("The row is no longer in the table."),
+            (None, true) => Ok(None),
+        };
+        let revision = dataset.source_revision.to_string();
+        let choice = CommandForm::new("Engineering table row details", "Cross-probe source object")
+            .wide()
+            .describe(
+                "Read every field of one table row, and select its source object in the schematic.",
+            )
+            .primary_enabled(fields.is_some())
+            .status(status)
+            .show(ctx, |rows| {
+                rows.value_mono("Source", &source);
+                rows.value("Source revision", &revision);
+                if let Some(fields) = &fields {
+                    rows.table(&ROW_DETAIL_COLUMNS, fields);
+                }
+                None
+            });
+        match choice {
+            DialogChoice::Primary => self.cross_probe_engineering_row(),
+            DialogChoice::Ghost | DialogChoice::Cancelled => self.leave_engineering_table_page(),
             DialogChoice::Secondary | DialogChoice::None => {}
         }
     }
@@ -1045,6 +1221,22 @@ impl RSpiceApp {
     }
 }
 
+/// The columns of a row's details: each field, its value, and its unit.
+const ROW_DETAIL_COLUMNS: [TableColumn<'static>; 3] = [
+    TableColumn {
+        header: "Field",
+        mono: false,
+    },
+    TableColumn {
+        header: "Value",
+        mono: true,
+    },
+    TableColumn {
+        header: "Unit",
+        mono: false,
+    },
+];
+
 /// Width of the label column on the manager's label/value rows.
 const LABEL_WIDTH: f32 = 84.0;
 
@@ -1603,38 +1795,14 @@ fn engineering_grid_preview(
     action
 }
 
-fn save_view_body(ui: &mut Ui, state: &mut EngineeringTableDialogState) -> Option<BodyAction> {
-    ui.label("Name");
-    ui.add(
-        TextEdit::singleline(&mut state.save_name)
-            .desired_width(f32::INFINITY)
-            .hint_text("Saved view name"),
-    );
-    ComboBox::from_label("Scope")
-        .selected_text(state.save_scope.label())
-        .show_ui(ui, |ui| {
-            for scope in EngineeringViewScope::ALL {
-                ui.selectable_value(&mut state.save_scope, scope, scope.label());
-            }
-        });
-    ui.checkbox(
-        &mut state.save_as_default,
-        "Default for this grid in the selected scope",
-    );
-    ui.small(match state.save_scope {
-        EngineeringViewScope::Personal => {
-            "Personal views are device preferences and do not modify the project."
-        }
-        EngineeringViewScope::Project => {
-            "Project views are versioned project metadata and participate in Save/Revert."
-        }
-    });
-    if let Some(error) = &state.error {
-        ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-    }
-    None
-}
+/// Width of a saved view's name on the saved views list.
+const SAVED_NAME_WIDTH: f32 = 240.0;
 
+/// Width of a saved view's scope, default and revision on the list.
+const SAVED_FACT_WIDTH: f32 = 88.0;
+
+/// Saved views: this grid's views, kept on this device or in the project,
+/// each with what can be done to it, and where a view file is imported to.
 fn saved_views_body(
     ui: &mut Ui,
     dataset: &EngineeringDataset,
@@ -1642,220 +1810,230 @@ fn saved_views_body(
     personal: &[crate::state::SavedEngineeringTableView],
     project: &[crate::state::SavedEngineeringTableView],
 ) -> Option<BodyAction> {
+    let tokens = Tokens::get(ui.ctx());
     let mut action = None;
+    let scopes = EngineeringViewScope::ALL.map(|scope| scope.label().to_owned());
     ui.horizontal(|ui| {
-        if ui.button("New from current").clicked() {
-            action = Some(BodyAction::Save);
-        }
-        if ui.button("Import…").clicked() {
-            action = Some(BodyAction::ImportSaved);
-        }
-        let selected = state
-            .selected_saved_id
-            .as_deref()
-            .and_then(|id| personal.iter().chain(project).find(|saved| saved.id == id));
-        if ui
-            .add_enabled(selected.is_some(), egui::Button::new("Export…"))
-            .clicked()
-            && let Some(selected) = selected
-        {
-            action = Some(BodyAction::ExportSaved(selected.id.clone(), selected.scope));
-        }
-        ComboBox::from_id_salt("saved-view-import-scope")
-            .selected_text(format!("Import to {}", state.save_scope.label()))
-            .show_ui(ui, |ui| {
-                for scope in EngineeringViewScope::ALL {
-                    ui.selectable_value(&mut state.save_scope, scope, scope.label());
-                }
-            });
-        ui.separator();
-        ui.label("Saved view");
-        ui.add(
+        row_label(ui, "Filter");
+        ui.add_sized(
+            [SELECT_WIDTH, tokens.metrics.ctl_h],
             TextEdit::singleline(&mut state.saved_query)
-                .hint_text("Filter saved views…")
-                .desired_width(260.0),
+                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .hint_text("View name"),
         );
-    });
-    ui.separator();
-    let query = state.saved_query.trim().to_lowercase();
-    for saved in personal.iter().chain(project).filter(|saved| {
-        saved.definition.grid_id == dataset.id
-            && (query.is_empty() || saved.name.to_lowercase().contains(&query))
-    }) {
-        ui.horizontal(|ui| {
-            let editing = state.saved_edit_id.as_deref() == Some(&saved.id);
-            if editing {
-                ui.add(
-                    TextEdit::singleline(&mut state.saved_edit_name)
-                        .desired_width(180.0)
-                        .hint_text("View name"),
-                );
-                if ui.button("Save name").clicked() {
-                    action = Some(BodyAction::CommitRename(saved.id.clone(), saved.scope));
-                }
-                if ui.button("Cancel rename").clicked() {
-                    state.saved_edit_id = None;
-                    state.saved_edit_name.clear();
-                }
-            } else {
-                ui.strong(&saved.name);
-            }
-            ui.label(saved.scope.label());
-            ui.monospace(&saved.definition.grid_id);
-            if saved.is_default {
-                ui.colored_label(Tokens::get(ui.ctx()).color.text_dim, "default");
-            }
-            ui.label(format!("revision {}", saved.revision));
-            if ui.button("Use").clicked() {
-                action = Some(BodyAction::UseSaved(saved.id.clone(), saved.scope));
-            }
-            if !saved.is_default && ui.button("Make default").clicked() {
-                action = Some(BodyAction::MakeDefault(saved.id.clone(), saved.scope));
-            }
-            if !editing && ui.button("Rename").clicked() {
-                action = Some(BodyAction::BeginRename(
-                    saved.id.clone(),
-                    saved.name.clone(),
-                ));
-            }
-            if ui.button("Duplicate").clicked() {
-                action = Some(BodyAction::DuplicateSaved(
-                    saved.id.clone(),
-                    saved.scope,
-                    saved.name.clone(),
-                ));
-            }
-            if ui.button("Export").clicked() {
-                action = Some(BodyAction::ExportSaved(saved.id.clone(), saved.scope));
-            }
-            if ui.button("Delete").clicked() {
-                action = Some(BodyAction::DeleteSaved(saved.id.clone(), saved.scope));
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if Button::new("New from current\u{2026}").show(ui).clicked() {
+                action = Some(BodyAction::Save);
             }
         });
-        ui.separator();
-    }
-    if personal
+    });
+    ui.horizontal(|ui| {
+        row_label(ui, "Import into");
+        if let Some(index) = select(
+            ui,
+            "engineering-table-import-scope",
+            "Import into",
+            state.save_scope.label(),
+            &scopes,
+            SELECT_WIDTH,
+        ) {
+            state.save_scope = EngineeringViewScope::ALL[index];
+        }
+        if Button::new("Import\u{2026}").show(ui).clicked() {
+            action = Some(BodyAction::ImportSaved);
+        }
+    });
+    ui.add_space(SECTION_GAP);
+
+    let query = state.saved_query.trim().to_lowercase();
+    let views = personal
         .iter()
         .chain(project)
-        .all(|saved| saved.definition.grid_id != dataset.id)
-    {
-        ui.label("No saved views exist for this grid.");
+        .filter(|saved| saved.definition.grid_id == dataset.id)
+        .collect::<Vec<_>>();
+    let shown = views
+        .iter()
+        .filter(|saved| query.is_empty() || saved.name.to_lowercase().contains(&query))
+        .collect::<Vec<_>>();
+    if shown.is_empty() {
+        ui.label(
+            RichText::new(if views.is_empty() {
+                "This table has no saved views yet."
+            } else {
+                "No saved view matches the filter."
+            })
+            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .color(tokens.color.text_dim),
+        );
+        return action;
+    }
+    ui.horizontal(|ui| {
+        let heading = |text: &str| {
+            RichText::new(text)
+                .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                .color(tokens.color.text_dim)
+        };
+        list_cell(ui, SAVED_NAME_WIDTH, heading("Name"));
+        list_cell(ui, SAVED_FACT_WIDTH, heading("Scope"));
+        list_cell(ui, SAVED_FACT_WIDTH, heading("Default"));
+        list_cell(ui, SAVED_FACT_WIDTH, heading("Revision"));
+    });
+    for saved in shown {
+        ui.horizontal(|ui| {
+            let fact = |text: String| {
+                RichText::new(text)
+                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .color(tokens.color.text)
+            };
+            let editing = state.saved_edit_id.as_deref() == Some(&saved.id);
+            if editing {
+                ui.add_sized(
+                    [SAVED_NAME_WIDTH, tokens.metrics.ctl_h],
+                    TextEdit::singleline(&mut state.saved_edit_name)
+                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .hint_text("View name"),
+                );
+            } else {
+                list_cell(
+                    ui,
+                    SAVED_NAME_WIDTH,
+                    RichText::new(&saved.name)
+                        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+                        .color(tokens.color.text),
+                );
+            }
+            list_cell(ui, SAVED_FACT_WIDTH, fact(saved.scope.label().to_owned()));
+            list_cell(
+                ui,
+                SAVED_FACT_WIDTH,
+                fact(if saved.is_default { "Yes" } else { "" }.to_owned()),
+            );
+            list_cell(ui, SAVED_FACT_WIDTH, fact(saved.revision.to_string()));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if editing {
+                    if Button::new("Cancel").compact().show(ui).clicked() {
+                        state.saved_edit_id = None;
+                        state.saved_edit_name.clear();
+                    }
+                    if Button::new("Save name").compact().show(ui).clicked() {
+                        action = Some(BodyAction::CommitRename(saved.id.clone(), saved.scope));
+                    }
+                    return;
+                }
+                if Button::new("Delete").compact().show(ui).clicked() {
+                    action = Some(BodyAction::DeleteSaved(saved.id.clone(), saved.scope));
+                }
+                if Button::new("Export\u{2026}").compact().show(ui).clicked() {
+                    action = Some(BodyAction::ExportSaved(saved.id.clone(), saved.scope));
+                }
+                if Button::new("Duplicate").compact().show(ui).clicked() {
+                    action = Some(BodyAction::DuplicateSaved(
+                        saved.id.clone(),
+                        saved.scope,
+                        saved.name.clone(),
+                    ));
+                }
+                if Button::new("Rename").compact().show(ui).clicked() {
+                    action = Some(BodyAction::BeginRename(
+                        saved.id.clone(),
+                        saved.name.clone(),
+                    ));
+                }
+                if Button::new("Make default")
+                    .compact()
+                    .enabled(!saved.is_default)
+                    .show(ui)
+                    .clicked()
+                {
+                    action = Some(BodyAction::MakeDefault(saved.id.clone(), saved.scope));
+                }
+                if Button::new("Use").compact().show(ui).clicked() {
+                    action = Some(BodyAction::UseSaved(saved.id.clone(), saved.scope));
+                }
+            });
+        });
     }
     action
 }
 
-fn export_body(
-    ui: &mut Ui,
-    dataset: &EngineeringDataset,
-    state: &mut EngineeringTableDialogState,
-) -> Option<BodyAction> {
-    ComboBox::from_label("Scope")
-        .selected_text(state.export_scope.label())
-        .show_ui(ui, |ui| {
-            for scope in EngineeringTableExportScope::ALL {
-                ui.selectable_value(&mut state.export_scope, scope, scope.label());
-            }
-        });
-    ComboBox::from_label("Format")
-        .selected_text(state.export_format.label())
-        .show_ui(ui, |ui| {
-            for format in EngineeringTableExportFormat::ALL {
-                ui.selectable_value(&mut state.export_format, format, format.label());
-            }
-        });
-    ui.checkbox(&mut state.export_headers, "Include column headers");
-    ui.checkbox(
-        &mut state.export_units,
-        "Include engineering units and quantity types in headers",
+/// One cell of the saved views list, exactly `width` wide, its text elided
+/// to it.
+fn list_cell(ui: &mut Ui, width: f32, text: RichText) {
+    let size = Vec2::new(width, Tokens::get(ui.ctx()).metrics.ctl_h);
+    ui.allocate_ui_with_layout(
+        size,
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_min_size(size);
+            ui.add(egui::Label::new(text).truncate());
+        },
     );
-    ui.checkbox(
-        &mut state.export_metadata,
-        "Include filter, sort, source revision, and manifest metadata",
-    );
-    ui.checkbox(&mut state.export_hidden_columns, "Include hidden columns");
-    let current_rows = state
-        .draft
-        .as_ref()
-        .map(|view| dataset.project(view).rows.len())
-        .unwrap_or_default();
-    Grid::new("engineering-export-summary")
-        .num_columns(2)
-        .show(ui, |ui| {
-            ui.label("Grid");
-            ui.monospace(&dataset.id);
-            ui.end_row();
-            ui.label("Logical rows");
-            ui.strong(dataset.rows.len().to_string());
-            ui.end_row();
-            ui.label("Current rows");
-            ui.strong(current_rows.to_string());
-            ui.end_row();
-            ui.label("Selected rows");
-            ui.strong(state.selected_row_ids.len().to_string());
-            ui.end_row();
-            ui.label("Source revision");
-            ui.monospace(dataset.source_revision.to_string());
-            ui.end_row();
-        });
-    if let Some(error) = &state.error {
-        ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-    }
-    None
-}
-
-fn row_details_body(
-    ui: &mut Ui,
-    dataset: &EngineeringDataset,
-    state: &mut EngineeringTableDialogState,
-) -> Option<BodyAction> {
-    let row = state
-        .row_details_id
-        .as_deref()
-        .and_then(|id| dataset.rows.iter().find(|row| row.stable_id == id));
-    let Some(row) = row else {
-        ui.colored_label(
-            Tokens::get(ui.ctx()).color.err,
-            "The source row no longer exists in the active engineering dataset.",
-        );
-        return None;
-    };
-    ui.label("Stable source identity");
-    ui.monospace(&row.stable_id);
-    ui.separator();
-    Grid::new("engineering-row-details")
-        .num_columns(3)
-        .striped(true)
-        .show(ui, |ui| {
-            ui.strong("Field");
-            ui.strong("Value");
-            ui.strong("Unit");
-            ui.end_row();
-            for column in &dataset.columns {
-                ui.label(&column.label);
-                ui.monospace(
-                    row.cells
-                        .get(&column.id)
-                        .map(|cell| cell.display.as_str())
-                        .unwrap_or_default(),
-                );
-                ui.label(column.unit.as_deref().unwrap_or("—"));
-                ui.end_row();
-            }
-        });
-    ui.small(format!(
-        "Source revision {} · cross-probe selects the matching schematic object without changing it.",
-        dataset.source_revision
-    ));
-    if let Some(error) = &state.error {
-        ui.colored_label(Tokens::get(ui.ctx()).color.err, error);
-    }
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::state::{ComponentType, Point};
+
+    /// The pages that ask before they act are command forms: a card of the
+    /// form's width, every label on one edge and every control on one grid.
+    /// They were raw combo boxes with their labels after them, labels above
+    /// fields, and a row of facts in a second grid.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_pages_that_ask_first_are_command_forms() {
+        for (page, labels, width) in [
+            (
+                EngineeringTableDialogPage::SaveView,
+                &["Name", "Scope", "Default"][..],
+                420.0,
+            ),
+            (
+                EngineeringTableDialogPage::Export,
+                &["Grid", "Scope", "Format", "Include"][..],
+                480.0,
+            ),
+            (
+                EngineeringTableDialogPage::RowDetails,
+                &["Source", "Source revision", "Field"][..],
+                480.0,
+            ),
+        ] {
+            let mut app = RSpiceApp::test_instance();
+            app.state
+                .model
+                .schematic
+                .add_component(ComponentType::Resistor, Point::new(10, 20));
+            assert!(open_engineering_table_dialog(&mut app.state));
+            let dataset = active_schematic_dataset(&app.state.model.schematic);
+            let table = &mut app.state.design.engineering_table;
+            table.page = page;
+            table.save_name = "Review".to_owned();
+            table.row_details_id = Some(dataset.rows[0].stable_id.clone());
+            let painted = crate::ui::widgets::painted_runs::painted_runs(
+                egui::vec2(1440.0, 900.0),
+                crate::ui::tokens::Mode::Light,
+                3,
+                |ctx| app.render_engineering_table_dialog(ctx),
+            );
+            assert_eq!(painted.surface.width(), width, "{page:?}");
+            let left = |text: &str| {
+                painted
+                    .rect_of(text)
+                    .unwrap_or_else(|| panic!("{page:?}: {text} is painted"))
+                    .left()
+            };
+            for label in labels {
+                assert!(
+                    (left(label) - left(labels[0])).abs() < 0.5,
+                    "{page:?}: {label} starts at {}, {} at {}",
+                    left(label),
+                    labels[0],
+                    left(labels[0])
+                );
+            }
+        }
+    }
 
     #[test]
     fn opening_manager_captures_truthful_active_schematic_revision() {
