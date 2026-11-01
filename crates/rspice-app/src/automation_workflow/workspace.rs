@@ -1609,7 +1609,7 @@ mod tests {
     #[test]
     fn canonical_workspace_compiles_to_one_exact_plan_and_manifest() {
         let (plan, manifest) = compile_automation_workspace(sources()).unwrap();
-        assert_eq!(plan.project_name(), "Lab characterization");
+        assert_eq!(plan.project_name(), "Default plan");
         assert_eq!(plan.target(), "local");
         assert_eq!(plan.required_specs(), "release");
         assert_eq!(plan.artifacts().count(), 3);
@@ -1640,7 +1640,7 @@ mod tests {
                 }
                 AutomationStarterFile::RunPlan => changed
                     .run_plan
-                    .replace("Lab characterization", "Changed characterization"),
+                    .replace("Default plan", "Changed plan"),
                 AutomationStarterFile::EnvironmentLock => {
                     format!("{}# changed\n", changed.environment_lock)
                 }
@@ -1740,7 +1740,7 @@ plan = project . run_plans . load (
 )
 "#;
         let decoy_plan =
-            DEFAULT_AUTOMATION_RUN_PLAN.replace("Lab characterization", "Decoy characterization");
+            DEFAULT_AUTOMATION_RUN_PLAN.replace("Default plan", "Decoy plan");
         let documents = [
             AutomationSourceDocument {
                 path: "flows/qualified.py",
@@ -1789,7 +1789,7 @@ plan = project . run_plans . load (
         let (_, manifest) =
             compile_automation_documents("flows/qualified.py", &documents, &roles).unwrap();
         assert_eq!(manifest.run_plan_path, "plans/selected.yaml");
-        assert_eq!(manifest.name, "Lab characterization");
+        assert_eq!(manifest.name, "Default plan");
     }
 
     #[test]

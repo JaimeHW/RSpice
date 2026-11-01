@@ -642,7 +642,7 @@ impl AutomationStarterFile {
 }
 
 pub const DEFAULT_AUTOMATION_PYTHON: &str = "from rspice import Project, ArtifactFormat\nproject = Project.open(\".\")\nplan = project.run_plans.load(\"runplan.rspice.yaml\")\npreview = plan.validate(target=\"local\", fail_closed=True)\nrun = preview.execute()\nrun.requirements.evaluate(profile=\"release\")\nrun.compare(baseline=\"main\", waveforms=True)\nrun.export([ArtifactFormat.JUNIT, ArtifactFormat.JSON, ArtifactFormat.PDF])\n";
-pub const DEFAULT_AUTOMATION_RUN_PLAN: &str = "schema: rspice.run-plan/v1\nname: Lab characterization\nsource: top.sp\nanalyses: [op, tran, ac, noise]\ncorners: all-qualified\nrequirements: release\nartifacts: [junit, summary-json, verification-pdf]\n";
+pub const DEFAULT_AUTOMATION_RUN_PLAN: &str = "schema: rspice.run-plan/v1\nname: Default plan\nsource: top.sp\nanalyses: [op, tran, ac, noise]\ncorners: all-qualified\nrequirements: release\nartifacts: [junit, summary-json, verification-pdf]\n";
 pub const DEFAULT_ENVIRONMENT_LOCK: &str = "format = \"rspice-python-lock/v3\"\npython = \">=3.14.0,<3.15.0\"\nrspice-api = \">=1.0.0,<2.0.0\"\nbrowser-runtime = \"=314.0.2\"\nenvironment_digest = \"sha256:d445b1443965be4e6b1b191ee023176dbd35430ac3cd00603458384ea03b8518\"\n";
 pub const DEFAULT_AUTOMATION_PERMISSIONS: &str = "project_files = \"read\"\nartifact_directory = \"write\"\nnetwork = \"deny\"\nprocess_spawn = \"deny\"\nenvironment = [\"RSPICE_LICENSE_TOKEN\"]\nsecret_logging = \"redact\"\n";
 

@@ -205,8 +205,8 @@ mod tests {
             "Simulation plan Automotive temperature sweep; \
              manage and switch simulation plans"
         );
-        assert!(!copy.title.contains("Lab characterization"));
-        assert!(!copy.accessibility.contains("Lab characterization"));
+        assert!(!copy.title.contains("Default plan"));
+        assert!(!copy.accessibility.contains("Default plan"));
         // The live half of the chip is unchanged by the rename, and one
         // analysis is one analysis.
         assert!(copy.summary.ends_with(" analysis") || copy.summary.ends_with(" analyses"));

@@ -11,7 +11,10 @@ use std::fmt;
 use rspice_vocabulary::product::{AnalysisInstanceId, ObjectRevision, SimulationPlanId};
 use serde::{Deserialize, Deserializer, Serialize};
 
-const DEFAULT_PLAN_NAME: &str = "Lab characterization";
+/// A new project's plan, until its owner names it. It was
+/// "Lab characterization", a name nobody chose, carried into the plan
+/// chip, the plan manager and every run in the history.
+const DEFAULT_PLAN_NAME: &str = "Default plan";
 const MAX_PLAN_NAME_CHARACTERS: usize = 96;
 
 /// Failure to normalize a user-visible simulation-plan name.

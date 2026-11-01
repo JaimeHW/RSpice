@@ -462,7 +462,7 @@ fn schema_four_promotes_the_single_stable_plan_into_the_named_catalog() {
     );
     assert_eq!(
         restored.simulation_plan.active_plan_name().as_str(),
-        "Lab characterization"
+        "Default plan"
     );
     assert_eq!(restored.simulation_plan.plan_count(), 1);
     assert_eq!(
