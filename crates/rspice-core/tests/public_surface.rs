@@ -377,7 +377,9 @@ use rspice_core::analysis::harmonic_balance::{
 // `analysis::transient::resolve_dialect_transient_maximum_step` adds one: the
 // CLI's transient run and the engine adapter resolve the Xyce dialect's
 // default TMAX through it. The census is 5,235, with no slack.
-const MAX_PUBLIC_ITEMS: usize = 5235;
+// `ControlSession::quit_status`, the status ngspice -b exits with, brings it
+// to 5,236.
+const MAX_PUBLIC_ITEMS: usize = 5236;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
