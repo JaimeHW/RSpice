@@ -225,7 +225,7 @@ SLICE_RULES = [
     # Tools, workflows, lifecycle and the rest of workbench/.
     (W + r"tools/(examples_browser|project_launcher)", "project"),
     (W + r"tools/jobs_manager", "simulate"),
-    (W + r"tools/(notification_center|specialist_tool_browser)", "framework"),
+    (W + r"tools/notification_center", "framework"),
     (W + r"tools\.rs$", "shell"),
     (W + r"workflows/(file_workflow|project_workflow)", "project"),
     (W + r"workflows/export_workflow", "services"),
