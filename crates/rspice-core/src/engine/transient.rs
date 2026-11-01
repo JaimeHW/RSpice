@@ -1028,7 +1028,7 @@ mod step_proposal;
 use step_proposal::{
     PhysicalStepWindow, StepProposal, XYCE_FINISH_TOLERANCE, canonical_transient_step_time,
     canonical_transient_step_time_with_device_event, fit_physical_event_approach,
-    fit_roundoff_stop_approach,
+    fit_roundoff_stop_approach, transient_horizon_reached,
 };
 mod truncation;
 use truncation::{
@@ -7710,7 +7710,7 @@ impl Engine {
                 }
             };
         }
-        while t < tstop {
+        while !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
             let attempt_top_start = DiagnosticTimer::start(diagnostic_timing_enabled);
             mosfet_caps_valid = false;
             capacitor_accepted_states_valid = false;
@@ -8278,12 +8278,16 @@ impl Engine {
             // repeated additions of one step can stop a few ulps short of the
             // horizon, a remainder Xyce never solves: its run is finished once
             // the clock is that close (`XYCE_FINISH_TOLERANCE`). Avoid a
-            // separate near-zero solve for accumulated clock roundoff.
-            let xyce_finish_tolerance = if self.config.spice_dialect == SpiceDialect::Xyce {
-                XYCE_FINISH_TOLERANCE * tstop.abs()
-            } else {
-                0.0
-            };
+            // separate near-zero solve for accumulated clock roundoff. A retry
+            // after a rejected step is never stretched back onto the stop:
+            // Xyce accepts the shortened step, and a clock inside that window
+            // has finished the run.
+            let xyce_finish_tolerance =
+                if self.config.spice_dialect == SpiceDialect::Xyce && retry_count == 0 {
+                    XYCE_FINISH_TOLERANCE * tstop.abs()
+                } else {
+                    0.0
+                };
             if (has_exact_transient_history || xyce_finish_tolerance > 0.0)
                 && locked_grid.is_none()
                 && let Some(fitted) = fit_roundoff_stop_approach(
@@ -8422,7 +8426,8 @@ impl Engine {
                 veriloga_refinement_approach_step.get_or_insert(proposal_before_event_cut);
             }
             let analysis_initial_step = false;
-            let analysis_final_step = step_time == tstop;
+            let analysis_final_step =
+                transient_horizon_reached(self.config.spice_dialect, step_time, tstop);
             let retry_floor_source_activity_delta =
                 Self::startup_source_activity_delta_for_retry_floor(
                     &circuit,
@@ -13070,7 +13075,7 @@ impl Engine {
             total_tail_nanos += tail_phase_start.elapsed().as_nanos();
         }
 
-        if t < tstop {
+        if !transient_horizon_reached(self.config.spice_dialect, t, tstop) {
             log::error!(
                 "Transient terminated early at t={:.6e}s / {:.6e}s after {} step attempts",
                 t,

@@ -427,3 +427,64 @@ fn xyce_nlnearconv_accepts_the_mos2_nand_near_converged_edge() {
     assert_eq!(result.time.last().copied(), Some(100.0e-9));
     assert_eq!(engine.convergence_quality().force_accepted_points, 0);
 }
+
+/// Run a Xyce regression deck in the Xyce dialect under its own options, at
+/// Xyce's default ceiling of a tenth of the window.
+fn run_xyce_regression_deck(
+    relative: &str,
+    tstop: f64,
+) -> Result<rspice_core::engine::TransientResult, SimulationError> {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../tests/xyce/Netlists")
+        .join(relative);
+    let netlist = Netlist::parse_file(&path).expect("Xyce regression deck parses");
+    let engine = Engine::new(rspice_core::engine::resolve_simulation_config(
+        &SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..SimulationConfig::default()
+        },
+        Some(&netlist.options),
+        &Default::default(),
+    ));
+    engine.run_tran(&netlist, tstop, 0.1 * tstop)
+}
+
+fn node_series<'a>(result: &'a rspice_core::engine::TransientResult, node: &str) -> &'a [f64] {
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .unwrap_or_else(|| panic!("node {node} not found in {:?}", result.node_names));
+    &result.voltages[index]
+}
+
+/// POWER's `5*SQRT(V(sine))` outputs have an infinite slope where the sine
+/// returns to zero at the 100 ms stop, so no step that ends on the stop passes
+/// the error test. Xyce 7.10 never takes one: its run is finished once the
+/// clock is within 1e-10 of the span (`StepErrorControl::isFinished`,
+/// N_TIA_StepErrorControl.h:158-163), and its last point is
+/// 0.0999999999905671622 s, 210 steps with 35 rejected. Stretching every
+/// retry back onto the stop exhausted LTE recovery at t = 0.1 s, dt = 4.5e-16.
+#[test]
+fn a_xyce_run_finishes_inside_its_finish_window_short_of_a_singular_stop() {
+    let result = run_xyce_regression_deck("POWER/power_polarity_b_e_f_g_h_trap.cir", 0.1)
+        .expect("the run finishes before the singular stop");
+    let last = *result.time.last().unwrap();
+    assert!(
+        last < 0.1 && 0.1 - last < 1.0e-10 * 0.1,
+        "the run ended at {last:e}, not inside Xyce's finish window"
+    );
+    // EV1 = 5*SQRT(V(bv1_1)) with BV1 = 2*sin(10*pi*t): resistive, so exact.
+    let ev1 = node_series(&result, "ev1_1");
+    for (index, &time) in result.time.iter().enumerate().step_by(7) {
+        let exact = 5.0
+            * (2.0 * (10.0 * std::f64::consts::PI * time).sin())
+                .max(0.0)
+                .sqrt();
+        assert!(
+            (ev1[index] - exact).abs() <= 1.0e-6 + 1.0e-6 * exact,
+            "V(ev1_1) at {time:e} s is {}, exact {exact}",
+            ev1[index]
+        );
+    }
+}

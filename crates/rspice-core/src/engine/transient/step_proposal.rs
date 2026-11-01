@@ -143,6 +143,15 @@ pub(super) fn fit_physical_event_approach(
 /// N_TIA_StepErrorControl.h), so it never solves a remainder that small.
 pub(super) const XYCE_FINISH_TOLERANCE: Value = 1.0e-10;
 
+/// Whether an accepted (or candidate) clock ends the transient. The Xyce
+/// dialect also ends a run whose clock is within `XYCE_FINISH_TOLERANCE` of
+/// the span short of the stop (`StepErrorControl::isFinished`), so a step that
+/// a rejection at the stop shortened into that window is the run's last.
+pub(super) fn transient_horizon_reached(dialect: SpiceDialect, time: Value, stop: Value) -> bool {
+    time >= stop
+        || (dialect == SpiceDialect::Xyce && stop - time < XYCE_FINISH_TOLERANCE * stop.abs())
+}
+
 /// Fit a rounding-sized final remainder before solving an exact-history step.
 /// Such histories cannot use the ordinary post-solve breakpoint snap: that
 /// would label state evaluated at another clock as the requested endpoint.
