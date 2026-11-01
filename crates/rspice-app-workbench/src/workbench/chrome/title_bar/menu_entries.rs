@@ -11,7 +11,6 @@ use egui::os::OperatingSystem;
 
 use super::*;
 use crate::state::command_catalog::{CommandKey, CommandPlatform};
-use crate::workbench::framework::command_registry::ids;
 
 /// One entry of a menu, as the menu is written down.
 #[derive(Clone, Copy)]
@@ -47,9 +46,6 @@ pub struct MenuCommand {
     label: MenuLabel,
     /// `None` shows the command's own key; `Some(key)` shows `key`.
     shortcut: Option<&'static str>,
-    /// The row opens the command palette narrowed to this scope instead of
-    /// running the command.
-    palette_scope: Option<&'static str>,
     /// The row is one of a group of which exactly one is on.
     radio: bool,
     /// The row is left out, rather than greyed, while it cannot run.
@@ -127,7 +123,6 @@ impl MenuEntry {
             command: key,
             label: MenuLabel::Command,
             shortcut: None,
-            palette_scope: None,
             radio: false,
             offered_only: false,
         })
@@ -139,7 +134,6 @@ impl MenuEntry {
             command: key,
             label: MenuLabel::Fixed(label),
             shortcut: None,
-            palette_scope: None,
             radio: false,
             offered_only: false,
         })
@@ -152,7 +146,6 @@ impl MenuEntry {
             command: key,
             label: MenuLabel::Fixed(label),
             shortcut: None,
-            palette_scope: None,
             radio: false,
             offered_only: true,
         })
@@ -165,23 +158,10 @@ impl MenuEntry {
             command: key,
             label: MenuLabel::Fixed(label),
             shortcut: None,
-            palette_scope: None,
             radio: true,
             offered_only: false,
         })
     }
-}
-
-/// A row that opens the command palette narrowed to `scope`.
-pub const fn palette_scope(label: &'static str, scope: &'static str) -> MenuEntry {
-    MenuEntry::Command(MenuCommand {
-        command: ids::COMMAND_PALETTE,
-        label: MenuLabel::Fixed(label),
-        shortcut: Some("Ctrl+K"),
-        palette_scope: Some(scope),
-        radio: false,
-        offered_only: false,
-    })
 }
 
 /// Every key `entries` hold, in order and whatever context their blocks show
@@ -224,7 +204,6 @@ pub struct CommandRow {
     pub radio: bool,
     /// The icon the row wears where it shows no check mark.
     icon: Option<WorkbenchIcon>,
-    palette_scope: Option<&'static str>,
     /// What choosing the row does when it is not running `command`.
     pub action: Option<MenuAction>,
 }
@@ -277,7 +256,6 @@ fn push_menu_rows(
                 checked: app.checked(item.command),
                 radio: item.radio,
                 icon: app.command_icon(item.command),
-                palette_scope: item.palette_scope,
                 action: None,
             })),
             MenuEntry::Submenu { label, entries } => rows.push(MenuRow::Submenu {
@@ -301,7 +279,6 @@ fn push_menu_rows(
                         checked: None,
                         radio: false,
                         icon: None,
-                        palette_scope: None,
                         action: Some(MenuAction::OpenRecent(recent.clone())),
                     })
                 }));
@@ -328,7 +305,6 @@ fn recent_file_name(recent: &crate::services::recent_files::RecentFile) -> Strin
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MenuChoice {
     command: CommandKey,
-    palette_scope: Option<&'static str>,
     action: Option<MenuAction>,
 }
 
@@ -337,7 +313,6 @@ impl MenuChoice {
     pub(super) fn for_row(row: &CommandRow) -> Self {
         Self {
             command: row.command,
-            palette_scope: row.palette_scope,
             action: row.action.clone(),
         }
     }
@@ -345,8 +320,6 @@ impl MenuChoice {
     pub(super) fn run(self, app: &mut impl WorkbenchHost) {
         if let Some(MenuAction::OpenRecent(recent)) = self.action {
             app.open_recent_file(recent);
-        } else if let Some(scope) = self.palette_scope {
-            app.workbench_mut().command_palette.open_in_scope(scope);
         } else {
             app.execute(self.command);
         }
