@@ -1185,6 +1185,58 @@ mod tests {
     }
 
     #[test]
+    fn level3_weak_inversion_conductances_match_the_current_slope() {
+        // Below VON the strong-inversion current is taken at VON and scaled
+        // down, so the drain-conductance seed takes its overdrive from VON
+        // too (N_DEV_MOSFET3.C:2164, mos3load.c:693). The raw gate bias left
+        // the linear-region dId/dVds wrong in both dialects, and in the Xyce
+        // dialect, whose seed also feeds saturation, turned an OFF latch
+        // transistor's transconductance negative.
+        let mut mos = mos3_capacitance_fixture();
+        mos.mos2_substrate_doping = 1.0e16;
+        let vbs = 0.0;
+        let von = mos.mos3_state(0.0, 0.01, vbs).von;
+        let vgs = von - 0.1;
+        let slope = |mos: &Mosfet, vds: Value| {
+            let h = vds * 1.0e-4;
+            (mos.mos3_state(vgs, vds + h, vbs).ids - mos.mos3_state(vgs, vds - h, vbs).ids)
+                / (2.0 * h)
+        };
+        for model in [
+            MosBodyJunctionModel::XyceClassicLinearizedReverse,
+            MosBodyJunctionModel::NgspiceReverseClamp,
+        ] {
+            mos.body_junction_model = model;
+            for vds in [1.0e-3, 1.0e-2] {
+                let state = mos.mos3_state(vgs, vds, vbs);
+                assert!(
+                    vgs < state.von && vds < state.vdsat,
+                    "{vds} V must be weak and linear"
+                );
+                let expected = slope(&mos, vds);
+                assert!(
+                    (state.gds - expected).abs() <= 1.0e-4 * expected.abs(),
+                    "{model:?} vds={vds}: gds {} vs dId/dVds {expected}",
+                    state.gds
+                );
+            }
+        }
+        mos.body_junction_model = MosBodyJunctionModel::XyceClassicLinearizedReverse;
+        let vds = 2.0;
+        let state = mos.mos3_state(vgs, vds, vbs);
+        assert!(vds > state.vdsat, "{vds} V must be saturated");
+        let h = 1.0e-6;
+        let expected = (mos.mos3_state(vgs + h, vds, vbs).ids
+            - mos.mos3_state(vgs - h, vds, vbs).ids)
+            / (2.0 * h);
+        assert!(
+            state.gm > 0.0 && (state.gm - expected).abs() <= 0.1 * expected,
+            "Xyce weak-inversion saturation gm {} vs dId/dVgs {expected}",
+            state.gm
+        );
+    }
+
+    #[test]
     fn level3_transient_meyer_uses_xyce_weak_inversion_partition() {
         let mut mos = mos3_capacitance_fixture();
         mos.body_junction_model = MosBodyJunctionModel::XyceClassicLinearizedReverse;

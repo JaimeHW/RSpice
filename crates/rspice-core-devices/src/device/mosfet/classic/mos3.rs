@@ -243,9 +243,13 @@ impl Mosfet {
         // both linear and velocity-saturated regions.  The velocity-
         // saturation correction is applied below through `dfddvd`; replacing
         // this with only the DIBL term in saturation drops the
-        // overdrive/body contribution from `dId/dVds`.
+        // overdrive/body contribution from `dId/dVds`. The overdrive is the
+        // one the current uses, from `vgsx` (N_DEV_MOSFET3.C:2164,
+        // mos3load.c:693): below VON the strong-inversion current is taken at
+        // VON and scaled down, so the raw gate bias would leave the weak-
+        // inversion `dId/dVds` with the wrong sign.
         let gds_seed = if xyce_semantics || lvds <= vdsat {
-            lvgs - vth - (1.0 + fbody + dvtdvd) * vdsx
+            overdrive - (1.0 + fbody + dvtdvd) * vdsx
         } else {
             -dvtdvd * vdsx
         };
