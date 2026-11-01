@@ -852,3 +852,104 @@ fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
     set(&mut circuit, "noacct").unwrap();
     assert!(circuit.settings().suppress_initial_listing);
 }
+
+/// Run a script to its first failure, returning what it presented and that
+/// failure's message.
+fn run_until_error(source: &str) -> (Vec<ControlPresentation>, Option<String>) {
+    let engine = Engine::new(SimulationConfig::default());
+    let program =
+        ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort).unwrap();
+    let netlist = Netlist::parse(program.declarative_source()).unwrap();
+    let mut session = program.start(netlist.params.clone());
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    let mut presentation = Vec::new();
+    loop {
+        let command = match session.next_command(&mut circuit, &NoAbort) {
+            Ok(Some(command)) => command,
+            Ok(None) => return (presentation, None),
+            Err(error) => return (presentation, Some(error.to_string())),
+        };
+        match circuit.execute(&engine, &command, session.variables(), &NoAbort) {
+            Ok(ControlCommandEffect::Presentation(request)) => presentation.push(request),
+            Ok(_) => {}
+            Err(error) => return (presentation, Some(error.to_string())),
+        }
+    }
+}
+
+fn printed(request: &ControlPresentation) -> &[rspice_core::engine::ControlTrace] {
+    match &request.kind {
+        ControlPresentationKind::Print(traces) => traces,
+        other => panic!("expected a print, got {other:?}"),
+    }
+}
+
+/// ngspice com_let.c binds a vector in the current plot (vectors.c vec_get
+/// reads the current plot, then the constants plot), with the source's scale;
+/// evaluate.c doop pads the shorter operand with its last element.
+#[test]
+fn let_binds_vectors_per_plot_and_print_reads_them_as_ngspice_does() {
+    let source = "let vectors\nV1 in 0 PULSE(2 4 1u 1u 1u 5u 20u)\nR1 in out 1k\n\
+        R2 out 0 3k\nC1 out 0 1n\n.control\nlet a = 2*3\necho $a\nop\nlet x = v(out)\n\
+        let y = i(v1) * a\nprint x y\nif x > 1.4\necho over\nend\ntran 0.1u 4u\n\
+        let z = v(out) * 2 + v(in)\nlet q = op1.x + z\nprint z q v(out) v(in)\n\
+        let x = op1.x - 1\nprint x op1.x\nlet a = 1\necho $a\nprint v(x)\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    let text = |index: usize| match &presented[index].kind {
+        ControlPresentationKind::Text(text) => text.clone(),
+        other => panic!("expected text, got {other:?}"),
+    };
+    // A `let` that reads no vector stays a session parameter, as before.
+    assert_eq!(text(0), format!("{:.17e}\n", 6.0));
+    let op = printed(&presented[1]);
+    assert_eq!(op[0].y.expression, "x");
+    assert_eq!(op[0].y.samples.len(), 1);
+    assert!((op[0].y.samples[0].re - 1.5).abs() < 1e-9);
+    assert_eq!(op[0].y.unit, SignalUnit::Volt);
+    assert!((op[1].y.samples[0].re + 3e-3).abs() < 1e-12);
+    assert_eq!(text(2), "over\n");
+    let tran = printed(&presented[3]);
+    let (z, q, vout, vin) = (&tran[0], &tran[1], &tran[2], &tran[3]);
+    assert!(vout.y.samples.len() > 10);
+    assert_eq!(z.y.samples.len(), vout.y.samples.len());
+    assert_eq!(q.y.samples.len(), vout.y.samples.len());
+    assert_eq!(z.x.expression, "time");
+    assert_eq!(z.x.samples, vout.x.samples);
+    assert_eq!(q.x.samples, vout.x.samples);
+    for row in 0..vout.y.samples.len() {
+        let expected = vout.y.samples[row] * 2.0 + vin.y.samples[row];
+        assert!((z.y.samples[row] - expected).norm() < 1e-12, "z[{row}]");
+        let padded = op[0].y.samples[0] + expected;
+        assert!((q.y.samples[row] - padded).norm() < 1e-12, "q[{row}]");
+    }
+    // `x` was bound in op1; the new `x` belongs to tran1.
+    let rebound = printed(&presented[4]);
+    assert!((rebound[0].y.samples[0].re - 0.5).abs() < 1e-9);
+    assert!((rebound[1].y.samples[0].re - 1.5).abs() < 1e-9);
+    assert_eq!(text(5), format!("{:.17e}\n", 1.0));
+    // ngspice reads v(x) as the vector x.
+    assert_eq!(printed(&presented[6])[0].y.samples, rebound[0].y.samples);
+
+    // A vector of another plot is not in scope, and a vector is not a shell
+    // variable: `$y` cannot expand it.
+    let base = "let scope\nV1 in 0 2\nR1 in 0 1k\n.control\nop\nlet y = v(in)\n";
+    let (_, error) = run_until_error(&format!("{base}tran 1u 2u\nprint y\n.endc\n.end\n"));
+    assert!(error.unwrap().contains("'Y' is unavailable"));
+    let (_, error) = run_until_error(&format!("{base}echo $y\n.endc\n.end\n"));
+    assert!(error.unwrap().contains("names a vector"));
+    // A scalar `let` of the same name replaces the vector.
+    let (presented, error) =
+        run_until_error(&format!("{base}let y = 7\necho $y\nprint y\n.endc\n.end\n"));
+    assert_eq!(error, None);
+    assert!(
+        matches!(&presented[0].kind, ControlPresentationKind::Text(text) if text.starts_with("7.0"))
+    );
+    assert_eq!(printed(&presented[1])[0].y.samples[0].re, 7.0);
+    // A condition reads one element; a longer vector is no scalar.
+    let (_, error) = run_until_error(
+        "let long\nV1 in 0 2\nR1 in 0 1k\n.control\ntran 1u 4u\nlet w = v(in)\nif w > 1\n\
+         end\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("where a scalar is required"));
+}

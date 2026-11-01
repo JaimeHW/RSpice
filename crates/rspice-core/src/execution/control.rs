@@ -10,7 +10,7 @@ pub use crate::control_protocol::{
 };
 use crate::netlist::expr::{ParamContext, eval_expression_complex_with_abort, is_real};
 use crate::{ComplexValue, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 pub(crate) mod shell;
 
@@ -333,6 +333,7 @@ impl ControlProgram {
             program: self,
             variables,
             words: BTreeMap::new(),
+            vectors: BTreeSet::new(),
             loops: Vec::new(),
             pc: 0,
             steps: 0,
@@ -366,6 +367,8 @@ pub struct ControlSession<'a> {
     program: &'a ControlProgram,
     variables: ParamContext,
     words: BTreeMap<String, String>,
+    /// Lowercase names the host bound as vectors (`let` of a vector value).
+    vectors: BTreeSet<String>,
     loops: Vec<LoopFrame>,
     pc: usize,
     steps: usize,
@@ -410,15 +413,7 @@ impl ControlSession<'_> {
     ) -> Result<ComplexValue, ControlError> {
         let expression = self.substitute(expression, line, abort)?;
         let value = evaluator.evaluate_scalar(&expression, &self.variables, line, abort)?;
-        if value.re.is_finite() && value.im.is_finite() {
-            Ok(value)
-        } else {
-            Err(ControlError::new(
-                line,
-                ControlErrorKind::Expression,
-                "scalar expression is nonfinite",
-            ))
-        }
+        finite(value, line)
     }
 
     fn advance(
@@ -441,8 +436,20 @@ impl ControlSession<'_> {
             )?;
             match &instruction.op {
                 Op::Let { name, expression } => {
-                    let value = self.scalar(expression, line, evaluator, abort)?;
-                    self.variables.set_complex(name, value);
+                    let expression = self.substitute(expression, line, abort)?;
+                    let key = name.to_ascii_lowercase();
+                    match evaluator.evaluate_let(name, &expression, &self.variables, line, abort)? {
+                        Some(value) => {
+                            finite(value, line)?;
+                            self.vectors.remove(&key);
+                            self.variables.set_complex(name, value);
+                        }
+                        // The host bound a vector; a scalar of the same name
+                        // left in the parameters is stale from here on.
+                        None => {
+                            self.vectors.insert(key);
+                        }
+                    }
                     self.pc += 1;
                 }
                 Op::If {
@@ -641,6 +648,16 @@ impl ControlSession<'_> {
                 }
             }
             require_identifier(&name, line)?;
+            if !existence
+                && (scalar || !self.words.contains_key(&name))
+                && self.vectors.contains(&name.to_ascii_lowercase())
+            {
+                return Err(ControlError::new(
+                    line,
+                    ControlErrorKind::Expression,
+                    format!("'${name}' names a vector; a control variable cannot expand it"),
+                ));
+            }
             if existence {
                 output.push(
                     if self.words.contains_key(&name)
@@ -819,6 +836,18 @@ fn check_limit(actual: usize, limit: usize, line: usize, name: &str) -> Result<(
         ))
     } else {
         Ok(())
+    }
+}
+
+fn finite(value: ComplexValue, line: usize) -> Result<ComplexValue, ControlError> {
+    if value.re.is_finite() && value.im.is_finite() {
+        Ok(value)
+    } else {
+        Err(ControlError::new(
+            line,
+            ControlErrorKind::Expression,
+            "scalar expression is nonfinite",
+        ))
     }
 }
 

@@ -9,6 +9,7 @@ mod pole_zero;
 mod sensitivity;
 mod stability;
 mod transfer;
+mod vectors;
 use crate::ComplexValue;
 use crate::engine::SensitivityCardResult;
 use crate::netlist::expr::{
@@ -17,6 +18,7 @@ use crate::netlist::expr::{
 };
 use crate::signal_unit::SignalUnit;
 pub(super) use pole_zero::resolve_function as resolve_root_function;
+pub(super) use vectors::{VectorStore, VectorValue};
 
 pub(super) fn resolve_scalar(
     circuit: &ControlCircuit,
@@ -801,6 +803,27 @@ impl ControlCircuit {
                 } else {
                     None
                 };
+                if self.names_user_vector(&y)
+                    || x.as_ref().is_some_and(|(x, _)| self.names_user_vector(x))
+                {
+                    let trace = self.vector_trace(
+                        (&y, &label),
+                        x.as_ref().map(|(x, label)| (x, label.as_str())),
+                        variables,
+                        line,
+                        abort,
+                    )?;
+                    resolver.charge(
+                        trace
+                            .x
+                            .samples
+                            .len()
+                            .saturating_add(trace.y.samples.len())
+                            .saturating_mul(2),
+                    )?;
+                    traces.push(trace);
+                    continue;
+                }
                 if command.name == "print"
                     && x.is_none()
                     // Preserve scalar determinations without broadcasting a

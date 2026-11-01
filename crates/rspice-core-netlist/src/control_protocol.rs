@@ -77,4 +77,19 @@ pub trait ControlScalarEvaluator {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError>;
+
+    /// `let name = expression`. Returns the scalar the session binds as a
+    /// parameter, or `None` once a host that keeps vectors has bound `name`
+    /// as one of its own. Hosts without vectors evaluate a scalar.
+    fn evaluate_let(
+        &mut self,
+        _name: &str,
+        expression: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<ComplexValue>, ControlError> {
+        self.evaluate_scalar(expression, variables, line, abort)
+            .map(Some)
+    }
 }

@@ -9,7 +9,7 @@ use crate::control_protocol::{
     ControlCommand, ControlError, ControlErrorKind, ControlScalarEvaluator,
 };
 use crate::netlist::expr::{
-    ExpressionEvaluationError, ParamContext, eval_expression_complex_with_abort,
+    Expr, ParamContext, eval_expression_complex_with_abort,
     evaluate_complex_with_functions_and_abort, is_real, parse_control_expression_with_abort,
 };
 use crate::netlist::{AnalysisCommand, Netlist};
@@ -23,6 +23,7 @@ mod presentation;
 mod transient;
 pub use options::ControlSettings;
 pub(super) use options::apply_runtime_options;
+use presentation::VectorValue;
 pub use presentation::{
     ControlCurrentSource, ControlPlotOptions, ControlPresentation, ControlPresentationKind,
     ControlScalar, ControlTrace, ControlVector, ControlVectorId, ControlVoltageSource,
@@ -162,6 +163,11 @@ pub struct ControlCircuit {
     vector_units: BTreeMap<ControlVectorId, crate::signal_unit::SignalUnit>,
     settings: ControlSettings,
     runtime_options: crate::netlist::SimulationOptions,
+    /// Vectors bound by `let`, per plot.
+    vectors: presentation::VectorStore,
+    /// The engine's result-value ceiling, which `let` vectors share with the
+    /// retained datasets. Refreshed from the engine on every command.
+    value_limit: usize,
 }
 
 impl ControlCircuit {
@@ -178,6 +184,8 @@ impl ControlCircuit {
             vector_units: BTreeMap::new(),
             settings: ControlSettings::default(),
             runtime_options: crate::netlist::SimulationOptions::default(),
+            vectors: presentation::VectorStore::default(),
+            value_limit: crate::resource::ResourceLimits::default().max_result_values,
         })
     }
 
@@ -219,6 +227,7 @@ impl ControlCircuit {
             engine.config().resource_limits.max_netlist_bytes,
         )
         .map_err(|error| simulation_error(line, error.into()))?;
+        self.value_limit = engine.config().resource_limits.max_result_values;
         if command.arguments.contains(['\r', '\n']) {
             return Err(command_error(
                 line,
@@ -702,6 +711,73 @@ impl ControlCircuit {
     }
 }
 
+impl ControlCircuit {
+    /// Scalar evaluation as it was before `let` kept vectors: parameters,
+    /// completed analyses' scalars and root functions.
+    fn scalar_value(
+        &self,
+        expression: &Expr,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<ComplexValue, ControlError> {
+        evaluate_complex_with_functions_and_abort(
+            expression,
+            variables,
+            &mut |name| presentation::resolve_scalar(self, name),
+            &mut |name, args| presentation::resolve_root_function(self, name, args),
+            abort,
+        )
+        .map_err(|error| ControlError::evaluation(line, error))
+    }
+
+    /// An expression that names a `let` vector is a vector expression. Any
+    /// other is evaluated as a scalar first, exactly as before; only when
+    /// that fails to evaluate is it retried as a vector expression, and if
+    /// the retry fails too the scalar diagnostic stands.
+    fn vector_or_scalar(
+        &self,
+        expression: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Evaluated, ControlError> {
+        let parsed = parse_control_expression_with_abort(expression, abort)
+            .map_err(|error| ControlError::evaluation(line, error.into()))?;
+        let scalar = if self.names_user_vector(&parsed) {
+            None
+        } else {
+            match self.scalar_value(&parsed, variables, line, abort) {
+                Ok(value) => return Ok(Evaluated::Scalar(value)),
+                Err(error) if error.kind == ControlErrorKind::Expression => Some(error),
+                Err(error) => return Err(error),
+            }
+        };
+        match self.evaluate_vector(&parsed, variables, line, abort) {
+            Ok(value) => Ok(Evaluated::Vector { value, scalar }),
+            Err(error)
+                if matches!(
+                    error.kind,
+                    ControlErrorKind::Expression | ControlErrorKind::Host
+                ) =>
+            {
+                Err(scalar.unwrap_or(error))
+            }
+            Err(error) => Err(error),
+        }
+    }
+}
+
+enum Evaluated {
+    Scalar(ComplexValue),
+    /// A vector value, with the scalar evaluation's diagnostic when the
+    /// expression names no `let` vector and was tried as a scalar first.
+    Vector {
+        value: VectorValue,
+        scalar: Option<ControlError>,
+    },
+}
+
 impl ControlScalarEvaluator for ControlCircuit {
     fn evaluate_scalar(
         &mut self,
@@ -710,18 +786,44 @@ impl ControlScalarEvaluator for ControlCircuit {
         line: usize,
         abort: &dyn AbortSignal,
     ) -> Result<ComplexValue, ControlError> {
-        parse_control_expression_with_abort(expression, abort)
-            .map_err(ExpressionEvaluationError::from)
-            .and_then(|expression| {
-                evaluate_complex_with_functions_and_abort(
-                    &expression,
-                    variables,
-                    &mut |name| presentation::resolve_scalar(self, name),
-                    &mut |name, args| presentation::resolve_root_function(self, name, args),
-                    abort,
-                )
-            })
-            .map_err(|error| ControlError::evaluation(line, error))
+        match self.vector_or_scalar(expression, variables, line, abort)? {
+            Evaluated::Scalar(value) => Ok(value),
+            Evaluated::Vector { value, scalar } => match value.samples.as_slice() {
+                [value] => Ok(*value),
+                samples => Err(scalar.unwrap_or_else(|| {
+                    ControlError::new(
+                        line,
+                        ControlErrorKind::Expression,
+                        format!(
+                            "'{expression}' is a vector of {} values where a scalar is required",
+                            samples.len()
+                        ),
+                    )
+                })),
+            },
+        }
+    }
+
+    /// ngspice `com_let` binds a vector; a value that evaluates as a scalar
+    /// without reading any vector stays a session parameter.
+    fn evaluate_let(
+        &mut self,
+        name: &str,
+        expression: &str,
+        variables: &ParamContext,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<ComplexValue>, ControlError> {
+        match self.vector_or_scalar(expression, variables, line, abort)? {
+            Evaluated::Scalar(value) => {
+                self.unbind_vector(name);
+                Ok(Some(value))
+            }
+            Evaluated::Vector { value, .. } => {
+                self.bind_vector(name, value, line)?;
+                Ok(None)
+            }
+        }
     }
 }
 

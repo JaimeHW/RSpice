@@ -52,7 +52,7 @@ impl ControlNamedDataset {
         }
     }
 
-    fn is_complex(&self) -> bool {
+    pub(super) fn is_complex(&self) -> bool {
         matches!(
             self.result,
             ControlAnalysisResult::Ac(_)
