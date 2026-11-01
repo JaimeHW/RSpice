@@ -7,6 +7,9 @@
 
 use super::*;
 use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
+use crate::workbench::slots::SimulateState;
 
 use crate::state::{
     SavedOutput, SavedOutputCompatibility, SavedOutputKind, SavedOutputPolicy,
@@ -27,13 +30,21 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
                 draft,
             );
         }
-        SimulationWorkflowDialog::ClonePlan(draft) => clone_plan_dialog(ctx, app, draft),
-        SimulationWorkflowDialog::DesignVariable(draft) => design_variable_dialog(ctx, app, draft),
-        SimulationWorkflowDialog::SavedOutput(draft) => saved_output_dialog(ctx, app, draft),
-        SimulationWorkflowDialog::RenameAnalysis(draft) => {
-            rename_analysis_dialog(ctx, app, draft);
+        SimulationWorkflowDialog::ClonePlan(draft) => {
+            clone_plan_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
         }
-        SimulationWorkflowDialog::CaptureGroup(draft) => capture_group_dialog(ctx, app, draft),
+        SimulationWorkflowDialog::DesignVariable(draft) => {
+            design_variable_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
+        }
+        SimulationWorkflowDialog::SavedOutput(draft) => {
+            saved_output_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
+        }
+        SimulationWorkflowDialog::RenameAnalysis(draft) => {
+            rename_analysis_dialog(ctx, &mut crate::workbench::features::cx(app), draft);
+        }
+        SimulationWorkflowDialog::CaptureGroup(draft) => {
+            capture_group_dialog(ctx, &mut crate::workbench::features::cx(app), draft)
+        }
         SimulationWorkflowDialog::AnalysisRunPoints(draft) => {
             super::participation::analysis_run_points_dialog(ctx, app, draft);
         }
@@ -51,11 +62,11 @@ pub(super) fn simulation_workflow_dialog(ctx: &egui::Context, app: &mut RSpiceAp
 /// preview is a courtesy, and the plan remains the only authority.
 pub(super) fn rename_analysis_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: RenameAnalysisDraft,
 ) {
     let (validation_error, clear_refusal, default_label, shown_as) =
-        match app.state.model.sim_setup.stable_analysis_plan() {
+        match cx.model.sim_setup.stable_analysis_plan() {
             Ok(plan) => (
                 plan.instance_name_refusal(draft.instance_id, &draft.name)
                     .map(|refusal| refusal.to_string()),
@@ -151,29 +162,28 @@ pub(super) fn rename_analysis_dialog(
     // field. `finish_workflow_choice` treats a secondary press as "stay open",
     // which is why this is answered before delegating to it.
     if matches!(choice, DialogChoice::Secondary) {
-        match commit_clear_analysis_name(app, &draft) {
+        match commit_clear_analysis_name(cx, &draft) {
             Ok(message) => {
-                app.state.simulate.simulation_workflow = None;
-                app.state.prompt(message);
+                cx.state.simulation_workflow = None;
+                cx.wb.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);
-                app.state.simulate.simulation_workflow = Some(draft.into());
+                cx.state.simulation_workflow = Some(draft.into());
             }
         }
         return;
     }
-    finish_workflow_choice(app, choice, draft, commit_rename_analysis);
+    finish_workflow_choice(cx, choice, draft, commit_rename_analysis);
 }
 
 /// Return the analysis to its kind label, through the same funnel a rename
 /// uses, so both earn a receipt and both invalidate preflight identically.
 fn commit_clear_analysis_name(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &RenameAnalysisDraft,
 ) -> Result<String, String> {
-    let receipt = app
-        .state
+    let receipt = cx
         .model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -181,19 +191,18 @@ fn commit_clear_analysis_name(
             plan.clear_instance_name(draft.instance_id)
                 .map_err(|error| error.to_string())
         })?;
-    super::lifecycle::refresh_analysis_projections(app);
-    app.state.simulate.active_analysis_instance = Some(draft.instance_id);
+    super::lifecycle::refresh_analysis_projections_in(cx);
+    cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    super::lifecycle::record_receipt(&mut app.state, &receipt);
+    crate::workbench::simulate::record_plan_receipt(cx, super::lifecycle::receipt_line(&receipt));
     Ok(message)
 }
 
 fn commit_rename_analysis(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &RenameAnalysisDraft,
 ) -> Result<String, String> {
-    let receipt = app
-        .state
+    let receipt = cx
         .model
         .sim_setup
         .stable_analysis_plan_mut()
@@ -201,24 +210,24 @@ fn commit_rename_analysis(
             plan.set_instance_name(draft.instance_id, &draft.name)
                 .map_err(|error| error.to_string())
         })?;
-    super::lifecycle::refresh_analysis_projections(app);
+    super::lifecycle::refresh_analysis_projections_in(cx);
     // Selection is held by identity, and a rename does not mint one, so the
     // renamed analysis stays selected. Saying so here is what keeps a later
     // change from quietly moving selection to a position instead.
-    app.state.simulate.active_analysis_instance = Some(draft.instance_id);
+    cx.state.active_analysis_instance = Some(draft.instance_id);
     let message = receipt.detail().to_owned();
-    super::lifecycle::record_receipt(&mut app.state, &receipt);
+    crate::workbench::simulate::record_plan_receipt(cx, super::lifecycle::receipt_line(&receipt));
     Ok(message)
 }
 
 pub(super) fn clone_plan_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: ClonePlanDraft,
 ) {
-    draft.validation_error = validate_clone_plan_draft(&app.state.model, &draft).err();
+    draft.validation_error = validate_clone_plan_draft(cx.model, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let source = simulation_plan_catalog_entry(&app.state.model.sim_setup, draft.source_plan_id)
+    let source = simulation_plan_catalog_entry(&cx.model.sim_setup, draft.source_plan_id)
         .map_or_else(
             || format!("missing plan {}", draft.source_plan_id),
             |(name, revision, _, _)| format!("{name} · revision {}", revision.get()),
@@ -289,18 +298,18 @@ pub(super) fn clone_plan_dialog(
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(app, choice, draft, commit_clone_plan);
+    finish_workflow_choice(cx, choice, draft, commit_clone_plan);
 }
 
 pub(super) fn design_variable_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: DesignVariableDraft,
 ) {
-    draft.validation_error = validate_design_variable_draft(app, &draft).err();
+    draft.validation_error = validate_design_variable_draft(cx, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let consumer_summary = design_variable_consumers(app, &draft);
-    let resolved_value = design_variable_from_draft(app, &draft)
+    let consumer_summary = design_variable_consumers(cx, &draft);
+    let resolved_value = design_variable_from_draft(cx.model, cx.state, &draft)
         .and_then(|variable| variable.resolved_value_si())
         .map_or_else(
             |_| "unresolved".to_owned(),
@@ -390,26 +399,27 @@ pub(super) fn design_variable_dialog(
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(app, choice, draft, commit_design_variable);
+    finish_workflow_choice(cx, choice, draft, commit_design_variable);
 }
 
 pub(super) fn saved_output_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: SavedOutputDraft,
 ) {
-    draft.validation_error = validate_saved_output_draft(app, &draft).err();
+    draft.validation_error = validate_saved_output_draft(cx, &draft).err();
     let enabled = draft.validation_error.is_none();
-    let candidate = saved_output_from_draft(app, &draft).ok();
+    let candidate = saved_output_from_draft(cx, &draft).ok();
     let preflight = candidate.as_ref().map(|output| {
-        app.simulation_controller
-            .saved_output_preflight(&app.state.model, output)
+        cx.handles
+            .run_controller
+            .saved_output_preflight(cx.model, output)
     });
     let inferred_unit = candidate.as_ref().map_or_else(
         || inferred_output_unit(&draft.expression),
         |output| output.inferred_unit(),
     );
-    let consumers = saved_output_consumers(app, &draft);
+    let consumers = saved_output_consumers(cx, &draft);
     let expression_validity = preflight.as_ref().map_or_else(
         || {
             draft
@@ -501,7 +511,7 @@ pub(super) fn saved_output_dialog(
         });
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(app, choice, draft, commit_saved_output);
+    finish_workflow_choice(cx, choice, draft, commit_saved_output);
 }
 
 // --------------------------------------------------------------- capture group
@@ -593,13 +603,13 @@ fn optional_choice_field(
 /// preview is a courtesy and the workspace remains the only authority.
 pub(super) fn capture_group_dialog(
     ctx: &egui::Context,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     mut draft: CaptureGroupDraft,
 ) {
-    draft.validation_error = capture_group_from_draft(&app.state.model, &draft).err();
+    draft.validation_error = capture_group_from_draft(cx.model, &draft).err();
     let enabled = draft.validation_error.is_none();
     let editing = draft.group.is_some();
-    let claimed = capture_group_claim_preview(&app.state.model, &draft);
+    let claimed = capture_group_claim_preview(cx.model, &draft);
     let kind_options = SavedOutputKind::ALL
         .iter()
         .map(|kind| kind.label())
@@ -751,7 +761,7 @@ pub(super) fn capture_group_dialog(
         );
         workflow_validation_message(ui, draft.validation_error.as_deref());
     });
-    finish_workflow_choice(app, choice, draft, commit_capture_group);
+    finish_workflow_choice(cx, choice, draft, commit_capture_group);
 }
 
 /// Build the candidate group the draft describes, or say why it is not one yet.
@@ -893,19 +903,19 @@ fn claim_preview_sentence(matched: usize, rules: usize) -> String {
 }
 
 pub(super) fn commit_capture_group(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &CaptureGroupDraft,
 ) -> Result<String, String> {
-    let group = capture_group_from_draft(&app.state.model, draft)?;
+    let group = capture_group_from_draft(cx.model, draft)?;
     let name = group.name.clone();
     let editing = draft.group.is_some();
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
+    let plan_id = cx.model.sim_setup.stable_analysis_plan()?.id();
     let detail = if editing {
         format!("Updated capture group {name}.")
     } else {
         format!("Added capture group {name}.")
     };
-    let committed = commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+    let committed = commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
         if let Some(id) = draft.group {
             workspace
                 .content
@@ -924,17 +934,12 @@ pub(super) fn commit_capture_group(
         // `commit_plan_change` already reported the refusal on the lifecycle
         // channel; the dialog needs it too so it stays open on the field that
         // caused it.
-        return Err(app
-            .state
-            .simulate
-            .analysis_lifecycle_status
-            .message()
-            .to_owned());
+        return Err(cx.state.analysis_lifecycle_status.message().to_owned());
     }
     Ok(format!(
         "{} capture group {name} in plan {}.",
         if editing { "Updated" } else { "Added" },
-        app.state.model.sim_setup.active_plan_name()
+        cx.model.sim_setup.active_plan_name()
     ))
 }
 
@@ -977,12 +982,12 @@ pub(super) fn validate_clone_plan_draft(
 }
 
 pub(super) fn commit_clone_plan(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &ClonePlanDraft,
 ) -> Result<String, String> {
-    validate_clone_plan_draft(&app.state.model, draft)?;
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    validate_clone_plan_draft(cx.model, draft)?;
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let current_plan_id = setup.stable_analysis_plan()?.id();
     workspace.content.migrate_active_plan_data(current_plan_id);
     if current_plan_id != draft.source_plan_id {
@@ -1023,19 +1028,22 @@ pub(super) fn commit_clone_plan(
         .instances()
         .first()
         .map(|instance| instance.id());
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.state.simulate.active_analysis_instance = first_instance;
-    app.invalidate_simulation_preflight();
-    app.state.record_plan_receipt(format!(
-        "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
-        outcome.cloned_plan_id,
-        outcome.source_plan_id,
-        outcome.source_revision.get()
-    ));
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    cx.state.active_analysis_instance = first_instance;
+    crate::workbench::simulate::invalidate_preflight(cx);
+    crate::workbench::simulate::record_plan_receipt(
+        cx,
+        format!(
+            "Cloned plan {} from {} at revision {}; result manifests were not duplicated.",
+            outcome.cloned_plan_id,
+            outcome.source_plan_id,
+            outcome.source_revision.get()
+        ),
+    );
     Ok(format!(
         "Created and activated '{}' with independent plan identity {}.",
-        app.state.model.sim_setup.active_plan_name(),
+        cx.model.sim_setup.active_plan_name(),
         outcome.cloned_plan_id
     ))
 }
@@ -1069,10 +1077,11 @@ pub(super) fn simulation_plan_catalog_entry(
 }
 
 pub(super) fn design_variable_from_draft(
-    app: &RSpiceApp,
+    model: &Model,
+    simulate: &SimulateState,
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, String> {
-    design_variable_from_draft_categorized(app, draft).map_err(|(_, message)| message)
+    design_variable_from_draft_categorized(model, simulate, draft).map_err(|(_, message)| message)
 }
 
 /// [`design_variable_from_draft`], with the failed contract named beside the
@@ -1084,7 +1093,8 @@ pub(super) fn design_variable_from_draft(
 /// half-written allowed range is a bound; everything past the conversion is
 /// [`DesignVariable::validate_defect`]'s answer, unchanged.
 pub(super) fn design_variable_from_draft_categorized(
-    app: &RSpiceApp,
+    model: &Model,
+    simulate: &SimulateState,
     draft: &DesignVariableDraft,
 ) -> Result<crate::state::DesignVariable, (crate::state::DesignVariableDefect, String)> {
     use crate::state::{
@@ -1101,10 +1111,10 @@ pub(super) fn design_variable_from_draft_categorized(
         0 => DesignVariableScope::Testbench,
         1 => DesignVariableScope::Project,
         2 => DesignVariableScope::SelectedCell {
-            cell: app.state.model.workspace.content.active_view.clone(),
+            cell: model.workspace.content.active_view.clone(),
         },
         3 => DesignVariableScope::SelectedAnalysis {
-            analysis_id: app.state.simulate.active_analysis_instance.ok_or_else(|| {
+            analysis_id: simulate.active_analysis_instance.ok_or_else(|| {
                 record("Select an analysis before using analysis-only scope.".to_owned())
             })?,
         },
@@ -1158,12 +1168,12 @@ pub(super) fn parse_design_variable_range(
 }
 
 pub(super) fn validate_design_variable_draft(
-    app: &RSpiceApp,
+    cx: &Cx<'_, SimulateFeature>,
     draft: &DesignVariableDraft,
 ) -> Result<(), String> {
-    let variable = design_variable_from_draft(app, draft)?;
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    let mut workspace = app.state.model.workspace.clone();
+    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
+    let plan_id = cx.model.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = cx.model.workspace.clone();
     workspace
         .content
         .add_design_variable(plan_id, variable)
@@ -1175,13 +1185,13 @@ pub(super) fn validate_design_variable_draft(
 }
 
 pub(super) fn commit_design_variable(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &DesignVariableDraft,
 ) -> Result<String, String> {
-    let variable = design_variable_from_draft(app, draft)?;
+    let variable = design_variable_from_draft(cx.model, cx.state, draft)?;
     let variable_name = variable.name.clone();
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
         .content
@@ -1196,18 +1206,18 @@ pub(super) fn commit_design_variable(
             "Created design variable {variable_name}."
         ))
         .map_err(|error| error.to_string())?;
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.invalidate_simulation_preflight();
-    app.state.record_plan_receipt(receipt.status_line());
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    crate::workbench::simulate::invalidate_preflight(cx);
+    crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
     Ok(format!(
         "Created design variable {variable_name} in plan {}.",
-        app.state.model.sim_setup.active_plan_name()
+        cx.model.sim_setup.active_plan_name()
     ))
 }
 
 pub(super) fn saved_output_from_draft(
-    app: &RSpiceApp,
+    cx: &Cx<'_, SimulateFeature>,
     draft: &SavedOutputDraft,
 ) -> Result<crate::state::SavedOutput, String> {
     use crate::state::{
@@ -1217,7 +1227,7 @@ pub(super) fn saved_output_from_draft(
         .get(draft.kind)
         .copied()
         .ok_or_else(|| "Output kind selection is invalid.".to_owned())?;
-    let compatible_analyses = saved_output_compatibility(app, draft.compatible_analyses)?;
+    let compatible_analyses = saved_output_compatibility(cx, draft.compatible_analyses)?;
     let save_policy = SavedOutputPolicy::ALL
         .get(draft.save_policy)
         .copied()
@@ -1242,18 +1252,19 @@ pub(super) fn saved_output_from_draft(
 }
 
 pub(super) fn validate_saved_output_draft(
-    app: &RSpiceApp,
+    cx: &Cx<'_, SimulateFeature>,
     draft: &SavedOutputDraft,
 ) -> Result<(), String> {
-    let output = saved_output_from_draft(app, draft)?;
-    let report = app
-        .simulation_controller
-        .saved_output_preflight(&app.state.model, &output);
+    let output = saved_output_from_draft(cx, draft)?;
+    let report = cx
+        .handles
+        .run_controller
+        .saved_output_preflight(cx.model, &output);
     if let SavedOutputSemanticStatus::Invalid { reason } = report.semantic_status() {
         return Err(reason.clone());
     }
-    let plan_id = app.state.model.sim_setup.stable_analysis_plan()?.id();
-    let mut workspace = app.state.model.workspace.clone();
+    let plan_id = cx.model.sim_setup.stable_analysis_plan()?.id();
+    let mut workspace = cx.model.workspace.clone();
     workspace
         .content
         .add_saved_output(plan_id, output)
@@ -1266,14 +1277,14 @@ pub(super) fn validate_saved_output_draft(
 }
 
 pub(super) fn commit_saved_output(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &SavedOutputDraft,
 ) -> Result<String, String> {
-    validate_saved_output_draft(app, draft)?;
-    let output = saved_output_from_draft(app, draft)?;
+    validate_saved_output_draft(cx, draft)?;
+    let output = saved_output_from_draft(cx, draft)?;
     let output_name = output.name.clone();
-    let mut setup = app.state.model.sim_setup.clone();
-    let mut workspace = app.state.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let mut workspace = cx.model.workspace.clone();
     let plan_id = setup.stable_analysis_plan()?.id();
     workspace
         .content
@@ -1286,13 +1297,13 @@ pub(super) fn commit_saved_output(
     let receipt = setup
         .commit_active_plan_configuration_change(format!("Added saved output {output_name}."))
         .map_err(|error| error.to_string())?;
-    app.state.model.sim_setup = setup;
-    app.state.model.workspace = workspace;
-    app.invalidate_simulation_preflight();
-    app.state.record_plan_receipt(receipt.status_line());
+    cx.model.sim_setup = setup;
+    cx.model.workspace = workspace;
+    crate::workbench::simulate::invalidate_preflight(cx);
+    crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
     Ok(format!(
         "Added saved output {output_name} to plan {}.",
-        app.state.model.sim_setup.active_plan_name()
+        cx.model.sim_setup.active_plan_name()
     ))
 }
 
@@ -1313,7 +1324,7 @@ pub(super) fn commit_saved_output(
 /// rule each page had to remember; re-resolving here means an output cannot
 /// change hands without the receipt for that edit saying so.
 pub(super) fn commit_plan_change(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     plan_id: crate::product::SimulationPlanId,
     detail: &str,
     change: impl FnOnce(
@@ -1321,9 +1332,9 @@ pub(super) fn commit_plan_change(
         crate::product::SimulationPlanId,
     ) -> Result<(), String>,
 ) -> bool {
-    let mut workspace = app.state.model.workspace.clone();
-    let mut setup = app.state.model.sim_setup.clone();
-    let before = plan_capture_state(&app.state.model.workspace, plan_id);
+    let mut workspace = cx.model.workspace.clone();
+    let mut setup = cx.model.sim_setup.clone();
+    let before = plan_capture_state(&cx.model.workspace, plan_id);
     let outcome = change(&mut workspace, plan_id)
         .and_then(|()| {
             workspace
@@ -1339,14 +1350,14 @@ pub(super) fn commit_plan_change(
         });
     match outcome {
         Ok(receipt) => {
-            app.state.model.workspace = workspace;
-            app.state.model.sim_setup = setup;
-            app.invalidate_simulation_preflight();
-            app.state.record_plan_receipt(receipt.status_line());
+            cx.model.workspace = workspace;
+            cx.model.sim_setup = setup;
+            crate::workbench::simulate::invalidate_preflight(cx);
+            crate::workbench::simulate::record_plan_receipt(cx, receipt.status_line());
             true
         }
         Err(error) => {
-            app.state.record_plan_refusal(error);
+            crate::workbench::simulate::record_plan_refusal(cx, error);
             false
         }
     }
@@ -1462,10 +1473,13 @@ pub(super) fn unique_copy_name(base: &str, taken: impl Fn(&str) -> bool) -> Stri
         .unwrap_or(first)
 }
 
-pub(super) fn design_variable_consumers(app: &RSpiceApp, draft: &DesignVariableDraft) -> String {
+pub(super) fn design_variable_consumers(
+    cx: &Cx<'_, SimulateFeature>,
+    draft: &DesignVariableDraft,
+) -> String {
     design_variable_consumers_scoped(
-        &app.state.model,
-        (draft.scope == 3).then_some(app.state.simulate.active_analysis_instance),
+        cx.model,
+        (draft.scope == 3).then_some(cx.state.active_analysis_instance),
     )
 }
 
@@ -1504,9 +1518,12 @@ pub(super) fn design_variable_consumers_scoped(
     }
 }
 
-pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) -> String {
-    match saved_output_compatibility(app, draft.compatible_analyses) {
-        Ok(compatibility) => saved_output_consumers_of(&app.state.model, &compatibility),
+pub(super) fn saved_output_consumers(
+    cx: &Cx<'_, SimulateFeature>,
+    draft: &SavedOutputDraft,
+) -> String {
+    match saved_output_compatibility(cx, draft.compatible_analyses) {
+        Ok(compatibility) => saved_output_consumers_of(cx.model, &compatibility),
         // The draft names a scope this plan cannot supply -- an analysis-only
         // output with no analysis selected -- so nothing would write it.
         Err(_) => "no compatible enabled analyses".to_owned(),
@@ -1520,19 +1537,18 @@ pub(super) fn saved_output_consumers(app: &RSpiceApp, draft: &SavedOutputDraft) 
 /// output it commits, and the consumers either of them is previewed with
 /// cannot disagree about what position two means.
 fn saved_output_compatibility(
-    app: &RSpiceApp,
+    cx: &Cx<'_, SimulateFeature>,
     selection: usize,
 ) -> Result<SavedOutputCompatibility, String> {
     match selection {
         0 => Ok(SavedOutputCompatibility::OpTranAc),
         1 => Ok(SavedOutputCompatibility::AllCompatibleAnalyses),
-        2 => {
-            Ok(SavedOutputCompatibility::SelectedAnalysis {
-                analysis_id: app.state.simulate.active_analysis_instance.ok_or_else(|| {
-                    "Select an analysis before using analysis-only scope.".to_owned()
-                })?,
-            })
-        }
+        2 => Ok(SavedOutputCompatibility::SelectedAnalysis {
+            analysis_id: cx
+                .state
+                .active_analysis_instance
+                .ok_or_else(|| "Select an analysis before using analysis-only scope.".to_owned())?,
+        }),
         _ => Err("Compatible analyses selection is invalid.".to_owned()),
     }
 }
@@ -1639,29 +1655,29 @@ pub(super) fn saved_output_storage_summary(
 }
 
 pub(super) fn finish_workflow_choice<D>(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     choice: DialogChoice,
     mut draft: D,
-    commit: fn(&mut RSpiceApp, &D) -> Result<String, String>,
+    commit: fn(&mut Cx<'_, SimulateFeature>, &D) -> Result<String, String>,
 ) where
     D: Clone + Into<SimulationWorkflowDialog> + WorkflowDraft,
 {
     match choice {
-        DialogChoice::Primary => match commit(app, &draft) {
+        DialogChoice::Primary => match commit(cx, &draft) {
             Ok(message) => {
-                app.state.simulate.simulation_workflow = None;
-                app.state.prompt(message);
+                cx.state.simulation_workflow = None;
+                cx.wb.prompt(message);
             }
             Err(error) => {
                 set_workflow_error(&mut draft, error);
-                app.state.simulate.simulation_workflow = Some(draft.into());
+                cx.state.simulation_workflow = Some(draft.into());
             }
         },
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.simulate.simulation_workflow = None;
+            cx.state.simulation_workflow = None;
         }
         DialogChoice::None | DialogChoice::Secondary => {
-            app.state.simulate.simulation_workflow = Some(draft.into());
+            cx.state.simulation_workflow = Some(draft.into());
         }
     }
 }

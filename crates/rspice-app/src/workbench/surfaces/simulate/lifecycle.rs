@@ -10,6 +10,8 @@ use super::*;
 
 use crate::simulation::plan::AnalysisPlanError;
 use crate::workbench::app::{PlanRemovalConsequence, PlanRemovalTarget, PlanRemovalTone};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 
 pub(super) fn resolve_active_analysis_instance(app: &mut AppState) -> Result<(), String> {
     let current = app.simulate.active_analysis_instance;
@@ -791,11 +793,13 @@ fn removal_refusal_naming_instances(app: &RSpiceApp, error: &AnalysisPlanError) 
 }
 
 pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
-    app.state
-        .model
-        .sim_setup
-        .refresh_legacy_analysis_projections();
-    app.invalidate_simulation_preflight();
+    refresh_analysis_projections_in(&mut crate::workbench::features::cx(app));
+}
+
+/// [`refresh_analysis_projections`] in the simulate feature's context.
+pub(super) fn refresh_analysis_projections_in(cx: &mut Cx<'_, SimulateFeature>) {
+    cx.model.sim_setup.refresh_legacy_analysis_projections();
+    crate::workbench::simulate::invalidate_preflight(cx);
 }
 
 /// Both of these only announce an outcome — the lifecycle status line and the
@@ -803,10 +807,19 @@ pub(super) fn refresh_analysis_projections(app: &mut RSpiceApp) {
 /// take the session aggregate rather than the application. A handler that took
 /// the whole app could mutate every subsystem to announce an outcome.
 pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleReceipt) {
+    state.record_plan_receipt(receipt_line(receipt));
+}
+
+pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
+    state.record_plan_refusal(failure_line(action, error));
+}
+
+/// The line [`record_receipt`] announces for `receipt`.
+pub(super) fn receipt_line(receipt: &AnalysisLifecycleReceipt) -> String {
     let related = receipt
         .related_instance_id()
         .map_or_else(String::new, |id| format!(" · related instance {id}"));
-    state.record_plan_receipt(format!(
+    format!(
         "Receipt #{} · {} committed for instance {}{related} · revision {} to {} · outcome {}. {}",
         receipt.sequence(),
         lifecycle_command_label(receipt.command()),
@@ -815,13 +828,12 @@ pub(super) fn record_receipt(state: &mut AppState, receipt: &AnalysisLifecycleRe
         receipt.committed_revision().get(),
         receipt.outcome(),
         receipt.detail(),
-    ));
+    )
 }
 
-pub(super) fn record_failure(state: &mut AppState, action: &str, error: &str) {
-    state.record_plan_refusal(format!(
-        "{action} rejected fail-closed: {error}. The stable plan is unchanged."
-    ));
+/// The line [`record_failure`] announces for `action` refused with `error`.
+pub(super) fn failure_line(action: &str, error: &str) -> String {
+    format!("{action} rejected fail-closed: {error}. The stable plan is unchanged.")
 }
 
 pub(super) const fn lifecycle_command_label(command: AnalysisLifecycleCommand) -> &'static str {

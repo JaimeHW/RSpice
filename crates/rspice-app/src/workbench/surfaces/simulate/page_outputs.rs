@@ -392,13 +392,18 @@ fn registry(
             });
             let detail = format!("Duplicated saved output {name} as {copy}.");
             let committed = copy.clone();
-            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-                workspace
-                    .content
-                    .duplicate_saved_output(plan_id, output_id, copy)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            }) {
+            if commit_plan_change(
+                &mut crate::workbench::features::cx(app),
+                plan_id,
+                &detail,
+                move |workspace, plan_id| {
+                    workspace
+                        .content
+                        .duplicate_saved_output(plan_id, output_id, copy)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                },
+            ) {
                 // Selecting the copy is what makes duplicating useful: every
                 // capture decision is already carried over, so the record
                 // editor opens on the one field the copy exists to change.
@@ -430,13 +435,18 @@ fn registry(
         // A refused removal leaves the record in the registry, so the
         // selection has to survive with it — clearing regardless would
         // close the editor on a row that is still there.
-        if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-            workspace
-                .content
-                .remove_saved_output(plan_id, output_id)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }) && app.state.simulate.selected_saved_output.as_deref() == Some(name.as_str())
+        if commit_plan_change(
+            &mut crate::workbench::features::cx(app),
+            plan_id,
+            &detail,
+            move |workspace, plan_id| {
+                workspace
+                    .content
+                    .remove_saved_output(plan_id, output_id)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            },
+        ) && app.state.simulate.selected_saved_output.as_deref() == Some(name.as_str())
         {
             app.state.simulate.selected_saved_output = None;
         }
@@ -1035,12 +1045,17 @@ fn selected_record(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPay
                     output.name
                 ),
             };
-            commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-                workspace
-                    .content
-                    .set_capture_group_member(plan_id, target, output_id, named)
-                    .map_err(|error| error.to_string())
-            });
+            commit_plan_change(
+                &mut crate::workbench::features::cx(app),
+                plan_id,
+                &detail,
+                move |workspace, plan_id| {
+                    workspace
+                        .content
+                        .set_capture_group_member(plan_id, target, output_id, named)
+                        .map_err(|error| error.to_string())
+                },
+            );
         }
     } else if let Some(edit) = edit.take() {
         let detail = edit.detail(&output.name, &scopes);
@@ -1480,13 +1495,18 @@ fn replace_output(
         return false;
     };
     apply(&mut replacement);
-    commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
-        workspace
-            .content
-            .replace_saved_output(plan_id, output_id, replacement)
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    })
+    commit_plan_change(
+        &mut crate::workbench::features::cx(app),
+        plan_id,
+        detail,
+        move |workspace, plan_id| {
+            workspace
+                .content
+                .replace_saved_output(plan_id, output_id, replacement)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// What a run will retain.

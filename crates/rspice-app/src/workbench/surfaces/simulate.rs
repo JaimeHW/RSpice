@@ -341,7 +341,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
                     // this one scroll, on one resolution of the plan's
                     // participation as on the split route.
                     workspace_title_row(ui, |ui| plan_heading(ui, app, surface_width));
-                    let participation = participation::PlanParticipation::resolve(&app.state);
+                    let participation = participation::PlanParticipation::resolve(&app.state.model);
                     ordered_instance_stack(ui, app, &participation);
                     pages::dispatch_contract(ui, app);
                     ui.add_space(STACKED_WORKSPACE_GAP);
@@ -414,7 +414,7 @@ fn analysis_catalog(ctx: &egui::Context, app: &mut RSpiceApp) {
     if !app.state.model.sim_setup.session.palette_open {
         return;
     }
-    let participation = participation::PlanParticipation::resolve(&app.state);
+    let participation = participation::PlanParticipation::resolve(&app.state.model);
     let rows = analysis_stack_rows(app, &participation).unwrap_or_default();
     let Some(kind) = analysis_catalog_window(ctx, &mut app.state.model.sim_setup, &rows) else {
         return;
@@ -452,7 +452,7 @@ fn split_analysis_route(
     // participation its run-points control reads. One expansion answers both,
     // and it is the same one, so the two columns cannot report a different
     // space on the same frame.
-    let participation = participation::PlanParticipation::resolve(&app.state);
+    let participation = participation::PlanParticipation::resolve(&app.state.model);
     let body = ui.available_rect_before_wrap();
     let (stack_width, _) = analysis_split_widths(surface_width, responsive_width);
     let stack_rect = Rect::from_min_size(body.min, vec2(stack_width, body.height()));
@@ -1738,7 +1738,11 @@ fn analysis_editor(
     if let Some(asked) = participation_action {
         match asked {
             participation::ParticipationAction::Set(run_at) => {
-                let _ = participation::commit_run_at(app, selected.id, run_at);
+                let _ = participation::commit_run_at(
+                    &mut crate::workbench::features::cx(app),
+                    selected.id,
+                    run_at,
+                );
             }
             participation::ParticipationAction::ChoosePoints => {
                 participation::open_point_picker(&mut app.state, selected.id);

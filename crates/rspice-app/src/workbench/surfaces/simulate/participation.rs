@@ -22,6 +22,9 @@ use crate::state::SpecPointScope;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, Problem, problem_line};
+use crate::workbench::app_state::Model;
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::AnalysisRunPointsDraft;
 use crate::workbench::{AppState, RSpiceApp};
 use rspice_simulation_contract::analysis_run_at::AnalysisRunAt;
@@ -81,10 +84,10 @@ impl PlanParticipation {
     /// Takes the application state rather than the application: nothing here
     /// reads a frame, a controller or a document, and a resolver that took the
     /// whole app could not be called from a place holding only the state.
-    pub(super) fn resolve(app: &AppState) -> Self {
+    pub(super) fn resolve(model: &Model) -> Self {
         let points: Vec<RunSetPoint<'_>> =
-            run_set::resolve(&app.model.sim_setup.run_set).unwrap_or_default();
-        Self::from_points(app, &points)
+            run_set::resolve(&model.sim_setup.run_set).unwrap_or_default();
+        Self::from_points(model, &points)
     }
 
     /// The same report, against points the caller has already expanded.
@@ -93,9 +96,9 @@ impl PlanParticipation {
     /// that has one list in hand must not pay for another. The Run Set page
     /// composes once for its point table and hands the retained half here;
     /// [`Self::resolve`] is this with that expansion done for the caller.
-    pub(super) fn from_points(app: &AppState, points: &[RunSetPoint<'_>]) -> Self {
-        let state = &app.model.sim_setup.run_set;
-        let reference = app.model.sim_setup.reference_pvt;
+    pub(super) fn from_points(model: &Model, points: &[RunSetPoint<'_>]) -> Self {
+        let state = &model.sim_setup.run_set;
+        let reference = model.sim_setup.reference_pvt;
         let has_axes = state.enabled_dimensions().next().is_some();
         let point_keys: Vec<String> = points.iter().map(RunSetPoint::point_key).collect();
         let nominal_key = run_set::nominal_point_key(points, reference);
@@ -115,8 +118,7 @@ impl PlanParticipation {
                 (point.point_key(), corner)
             })
             .collect();
-        let instances = app
-            .model
+        let instances = model
             .sim_setup
             .enabled_analysis_instances()
             .map(|instance| {
@@ -305,7 +307,7 @@ pub(super) const fn picker_columns(points: usize) -> usize {
 
 /// Open the picker on one instance, pre-ticked with the points it visits.
 pub(super) fn open_point_picker(app: &mut AppState, id: AnalysisInstanceId) {
-    let resolved = PlanParticipation::resolve(app);
+    let resolved = PlanParticipation::resolve(&app.model);
     let selected = resolved
         .for_instance(id)
         .filter(|entry| entry.refusal.is_none())
@@ -327,11 +329,11 @@ pub(super) fn open_point_picker(app: &mut AppState, id: AnalysisInstanceId) {
 /// cannot be followed by a narrowing and then a dispatch of a queue nothing
 /// checked.
 pub(super) fn commit_run_at(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     id: AnalysisInstanceId,
     run_at: AnalysisRunAt,
 ) -> Result<(), String> {
-    let result = match app.state.model.sim_setup.stable_analysis_plan_mut() {
+    let result = match cx.model.sim_setup.stable_analysis_plan_mut() {
         Ok(plan) => plan
             .set_run_at(id, run_at)
             .map_err(|error| error.to_string()),
@@ -339,12 +341,18 @@ pub(super) fn commit_run_at(
     };
     match result {
         Ok(receipt) => {
-            super::lifecycle::refresh_analysis_projections(app);
-            super::lifecycle::record_receipt(&mut app.state, &receipt);
+            super::lifecycle::refresh_analysis_projections_in(cx);
+            crate::workbench::simulate::record_plan_receipt(
+                cx,
+                super::lifecycle::receipt_line(&receipt),
+            );
             Ok(())
         }
         Err(error) => {
-            super::lifecycle::record_failure(&mut app.state, "Run-set participation", &error);
+            crate::workbench::simulate::record_plan_refusal(
+                cx,
+                super::lifecycle::failure_line("Run-set participation", &error),
+            );
             Err(error)
         }
     }
@@ -352,14 +360,14 @@ pub(super) fn commit_run_at(
 
 /// Adopt a point selection from the picker.
 pub(super) fn commit_point_selection(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &crate::workbench::state::AnalysisRunPointsDraft,
 ) -> Result<String, String> {
     // Re-resolved at commit rather than trusted from the draft: the run set is
     // editable on another page while this dialog is open, and a key that has
     // stopped existing must be refused here rather than stored and refused at
     // every later preflight.
-    let declared: HashSet<String> = PlanParticipation::resolve(&app.state)
+    let declared: HashSet<String> = PlanParticipation::resolve(cx.model)
         .point_keys
         .into_iter()
         .collect();
@@ -379,7 +387,7 @@ pub(super) fn commit_point_selection(
     } else {
         AnalysisRunAt::SelectedPoints(draft.selected.clone())
     };
-    commit_run_at(app, draft.instance, run_at)?;
+    commit_run_at(cx, draft.instance, run_at)?;
     Ok(format!(
         "This analysis now runs at {count} of {total} run-set points. The run set keeps every \
          point it declares, and every other instance keeps its own scope."
@@ -398,7 +406,7 @@ pub(super) fn analysis_run_points_dialog(
     app: &mut RSpiceApp,
     mut draft: AnalysisRunPointsDraft,
 ) {
-    let resolved = PlanParticipation::resolve(&app.state);
+    let resolved = PlanParticipation::resolve(&app.state.model);
     let points = resolved.point_keys.clone();
     let labels = point_labels(app);
     let over_limit = points.len() > POINT_PICKER_LIMIT;
@@ -473,7 +481,12 @@ pub(super) fn analysis_run_points_dialog(
             picker_note(ui, &selection_note);
             super::workflows::workflow_validation_message(ui, draft.validation_error.as_deref());
         });
-    super::workflows::finish_workflow_choice(app, choice, draft, commit_point_selection);
+    super::workflows::finish_workflow_choice(
+        &mut crate::workbench::features::cx(app),
+        choice,
+        draft,
+        commit_point_selection,
+    );
 }
 
 /// What a point selection buys, in points and in tasks.

@@ -125,7 +125,8 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
             scope: "/x2".to_owned(),
             kind: None,
         });
-    commit_capture_group(&mut app, &draft).expect("the edited group commits");
+    commit_capture_group(&mut crate::workbench::features::cx(&mut app), &draft)
+        .expect("the edited group commits");
 
     let committed = stored_group(&app, id);
     assert_eq!(committed.rules.len(), 3, "{committed:?}");
@@ -149,7 +150,8 @@ fn the_group_editor_edits_every_rule_of_a_disjunction() {
     let mut draft = group_draft(&committed);
     draft.rules.swap(0, 1);
     draft.rules.remove(2);
-    commit_capture_group(&mut app, &draft).expect("the reordered group commits");
+    commit_capture_group(&mut crate::workbench::features::cx(&mut app), &draft)
+        .expect("the reordered group commits");
 
     let reordered = stored_group(&app, id);
     assert_eq!(reordered.rules.len(), 2, "{reordered:?}");
@@ -316,7 +318,7 @@ fn adding_an_output_inside_a_rule_receipts_the_group_it_joined() {
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             id,
             "Added saved output core_m.",
             move |workspace, plan_id| {
@@ -360,7 +362,7 @@ fn an_edit_that_moves_nothing_receipts_only_what_it_changed() {
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             id,
             "Moved capture group Core rails later in resolution order.",
             move |workspace, plan_id| {
@@ -467,7 +469,7 @@ fn naming_an_output_into_a_group_outranks_the_rule_that_had_it() {
 
     assert!(
         super::super::workflows::commit_plan_change(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             id,
             "Named saved output core_n into capture group Watchlist.",
             move |workspace, plan_id| {
@@ -554,7 +556,11 @@ fn editing_a_group_keeps_the_rules_and_members_the_form_never_showed() {
 
     let mut draft = super::super::workflows::group_draft(&group);
     draft.name = "Renamed".to_owned();
-    super::super::workflows::commit_capture_group(&mut app, &draft).expect("the edit commits");
+    super::super::workflows::commit_capture_group(
+        &mut crate::workbench::features::cx(&mut app),
+        &draft,
+    )
+    .expect("the edit commits");
 
     let stored = app
         .state

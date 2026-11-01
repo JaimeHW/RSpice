@@ -164,7 +164,7 @@ fn the_per_point_task_cells_price_participation_and_rate() {
     // other point costs one.
     scope_to_the_nominal_point(&mut app.state, AnalysisKind::Pss);
 
-    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
     let workload = super::workload::PlanWorkload::resolve(&app).expect("the plan prices");
     let nominal = participation
         .nominal_key
@@ -584,7 +584,7 @@ fn the_worst_point_is_priced_at_a_point_the_plan_actually_has() {
     scope_to_points(&mut app.state, AnalysisKind::OperatingPoint, &[0]);
     scope_to_points(&mut app.state, AnalysisKind::Pss, &[1, 2]);
 
-    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
     let workload = super::workload::PlanWorkload::resolve_with(&app, &participation)
         .expect("the split plan prices");
     let per_point: Vec<usize> = participation

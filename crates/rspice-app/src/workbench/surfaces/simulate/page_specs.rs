@@ -464,7 +464,7 @@ fn registry(ui: &mut Ui, app: &mut RSpiceApp, payload: &SimulationPlanPayload) {
     let declared = declared_process_corners(app);
     // Resolved once for the registry rather than per row: each resolution
     // re-expands the declared space, and this page draws every frame.
-    let resolved = super::participation::PlanParticipation::resolve(&app.state);
+    let resolved = super::participation::PlanParticipation::resolve(&app.state.model);
     let query = app.state.simulate.specification_filter.clone();
     let class = app.state.simulate.specification_evidence_filter;
     let mut passing = 0usize;
@@ -1088,17 +1088,22 @@ pub(super) fn commit_scope(app: &mut RSpiceApp, measurement: &str, scope: SpecPo
         scope_label(&scope).to_lowercase()
     );
     let measurement = measurement.to_owned();
-    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-        let mut specs = workspace.content.active_specs(plan_id).to_vec();
-        let target = specs
-            .iter_mut()
-            .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
-            .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
-        target.scope = scope;
-        target.validate()?;
-        workspace.content.replace_active_specs(plan_id, specs);
-        Ok(())
-    });
+    commit_plan_change(
+        &mut crate::workbench::features::cx(app),
+        plan_id,
+        &detail,
+        move |workspace, plan_id| {
+            let mut specs = workspace.content.active_specs(plan_id).to_vec();
+            let target = specs
+                .iter_mut()
+                .find(|spec| spec.measurement.eq_ignore_ascii_case(&measurement))
+                .ok_or_else(|| format!("specification {measurement} no longer exists"))?;
+            target.scope = scope;
+            target.validate()?;
+            workspace.content.replace_active_specs(plan_id, specs);
+            Ok(())
+        },
+    );
 }
 
 /// How much of the dataset the reported value speaks for.
@@ -1363,15 +1368,20 @@ pub(super) fn commit_specification_policy(app: &mut RSpiceApp, policy: Specifica
             RegressionSpecificationPolicy::LimitOnly => "checks limits only",
         }
     );
-    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-        policy.validate()?;
-        let payload = workspace
-            .content
-            .plan_data_mut(plan_id)
-            .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
-        payload.specification_policy = policy;
-        Ok(())
-    });
+    commit_plan_change(
+        &mut crate::workbench::features::cx(app),
+        plan_id,
+        &detail,
+        move |workspace, plan_id| {
+            policy.validate()?;
+            let payload = workspace
+                .content
+                .plan_data_mut(plan_id)
+                .ok_or_else(|| format!("simulation plan {plan_id} has no active payload"))?;
+            payload.specification_policy = policy;
+            Ok(())
+        },
+    );
 }
 
 #[cfg(test)]

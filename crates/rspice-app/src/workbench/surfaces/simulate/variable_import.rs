@@ -39,6 +39,8 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogSize, select};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::simulate::SimulateFeature;
 use crate::workbench::state::{
     DesignVariableDraft, DesignVariableImportDraft, DesignVariableImportRow,
     SimulationWorkflowDialog, VariableImportRefusal,
@@ -377,11 +379,13 @@ fn resolve_rows(app: &RSpiceApp, plan_id: SimulationPlanId, draft: &mut DesignVa
         });
         let (row_draft, refusal) = match resolved {
             Ok(row_draft) => {
-                let refusal = design_variable_from_draft_categorized(app, &row_draft)
-                    .err()
-                    .map(|(defect, detail)| {
-                        refusal_for_defect(defect, *line, &row_draft.name, detail)
-                    });
+                let refusal = design_variable_from_draft_categorized(
+                    &app.state.model,
+                    &app.state.simulate,
+                    &row_draft,
+                )
+                .err()
+                .map(|(defect, detail)| refusal_for_defect(defect, *line, &row_draft.name, detail));
                 (row_draft, refusal)
             }
             Err(refusal) => (DesignVariableDraft::default(), Some(refusal.at_line(*line))),
@@ -593,7 +597,12 @@ pub(super) fn design_variable_import_dialog(
     if changed {
         resolve_rows(app, plan_id, &mut draft);
     }
-    finish_workflow_choice(app, choice, draft, commit_selected_rows);
+    finish_workflow_choice(
+        &mut crate::workbench::features::cx(app),
+        choice,
+        draft,
+        commit_selected_rows,
+    );
 }
 
 /// One line per declared column, naming which of the sheet's own columns
@@ -866,7 +875,7 @@ fn import_note(ui: &mut Ui, text: &str) {
 
 /// Adopt the ticked rows as one plan transaction.
 fn commit_selected_rows(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     draft: &DesignVariableImportDraft,
 ) -> Result<String, String> {
     // The same question the primary control is disabled on, asked again here.
@@ -875,8 +884,7 @@ fn commit_selected_rows(
     if let Some(refusal) = import_refusal(draft) {
         return Err(refusal);
     }
-    let plan_id = app
-        .state
+    let plan_id = cx
         .model
         .sim_setup
         .stable_analysis_plan()
@@ -885,9 +893,10 @@ fn commit_selected_rows(
 
     let mut variables = Vec::new();
     for row in draft.accepted_rows() {
-        let variable = design_variable_from_draft_categorized(app, &row.draft).map_err(
-            |(defect, detail)| refusal_for_defect(defect, row.line, &row.name, detail).message(),
-        )?;
+        let variable = design_variable_from_draft_categorized(cx.model, cx.state, &row.draft)
+            .map_err(|(defect, detail)| {
+                refusal_for_defect(defect, row.line, &row.name, detail).message()
+            })?;
         variables.push(variable);
     }
     let count = variables.len();
@@ -896,14 +905,14 @@ fn commit_selected_rows(
         "Imported {count} design variable{} from {source_name}.",
         if count == 1 { "" } else { "s" }
     );
-    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
+    commit_plan_change(cx, plan_id, &detail, move |workspace, plan_id| {
         workspace
             .content
             .add_design_variables(plan_id, variables)
             .map_err(|error| error.to_string())
     });
 
-    let status = &app.state.simulate.analysis_lifecycle_status;
+    let status = &cx.state.analysis_lifecycle_status;
     if status.is_refusal() {
         return Err(status.message().to_owned());
     }
@@ -1169,7 +1178,8 @@ mod tests {
             "the file's own line, not the row index"
         );
 
-        commit_selected_rows(&mut app, &draft).expect("a clean sheet adopts");
+        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
+            .expect("a clean sheet adopts");
 
         assert_eq!(registry(&app, plan_id), ["RLOAD", "CFILT", "VBIAS"]);
         // One transaction, so one revision.
@@ -1227,7 +1237,8 @@ mod tests {
             plan_id,
             "name,quantity,expression\nRLOAD,Resistance,10 kohm\n",
         );
-        commit_selected_rows(&mut app, &seed).expect("the plan owns RLOAD");
+        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &seed)
+            .expect("the plan owns RLOAD");
 
         // A sheet that fails four ways at once reports all four, in place.
         let draft = open(
@@ -1302,7 +1313,9 @@ mod tests {
 
         let before =
             serde_json::to_value(&app.state.model.workspace).expect("workspace serializes");
-        assert!(commit_selected_rows(&mut app, &draft).is_err());
+        assert!(
+            commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft).is_err()
+        );
         assert_eq!(
             serde_json::to_value(&app.state.model.workspace).expect("workspace still serializes"),
             before,
@@ -1333,7 +1346,8 @@ mod tests {
 
         assert_eq!(row_ids(&draft), [None, None]);
         assert_eq!(draft.accepted_count(), 1);
-        commit_selected_rows(&mut app, &draft).expect("one of the two adopts");
+        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
+            .expect("one of the two adopts");
         assert_eq!(registry(&app, plan_id), ["RLOAD"]);
     }
 
@@ -1431,7 +1445,8 @@ mod tests {
         resolve_rows(&app, plan_id, &mut draft);
 
         assert!(draft.rows.iter().all(|row| row.draft.scope == 1));
-        commit_selected_rows(&mut app, &draft).expect("the sheet adopts at the chosen scope");
+        commit_selected_rows(&mut crate::workbench::features::cx(&mut app), &draft)
+            .expect("the sheet adopts at the chosen scope");
         assert!(
             app.state
                 .model

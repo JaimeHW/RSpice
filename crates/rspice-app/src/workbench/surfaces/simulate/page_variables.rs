@@ -251,13 +251,18 @@ fn registry(
             });
             let detail = format!("Duplicated design variable {name} as {copy}.");
             let committed = copy.clone();
-            if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-                workspace
-                    .content
-                    .duplicate_design_variable(plan_id, id, copy)
-                    .map(|_| ())
-                    .map_err(|error| error.to_string())
-            }) {
+            if commit_plan_change(
+                &mut crate::workbench::features::cx(app),
+                plan_id,
+                &detail,
+                move |workspace, plan_id| {
+                    workspace
+                        .content
+                        .duplicate_design_variable(plan_id, id, copy)
+                        .map(|_| ())
+                        .map_err(|error| error.to_string())
+                },
+            ) {
                 // The copy carries the original's whole typed contract, so the
                 // record editor should open on it — that is the field the copy
                 // exists to change.
@@ -285,13 +290,18 @@ fn registry(
         // A refused removal leaves the variable in the registry, so the
         // selection has to survive with it — clearing regardless would
         // close the editor on a row that is still there.
-        if commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-            workspace
-                .content
-                .remove_design_variable(plan_id, id)
-                .map(|_| ())
-                .map_err(|error| error.to_string())
-        }) && app.state.simulate.selected_design_variable.as_deref() == Some(name.as_str())
+        if commit_plan_change(
+            &mut crate::workbench::features::cx(app),
+            plan_id,
+            &detail,
+            move |workspace, plan_id| {
+                workspace
+                    .content
+                    .remove_design_variable(plan_id, id)
+                    .map(|_| ())
+                    .map_err(|error| error.to_string())
+            },
+        ) && app.state.simulate.selected_design_variable.as_deref() == Some(name.as_str())
         {
             app.state.simulate.selected_design_variable = None;
         }
@@ -736,13 +746,18 @@ fn commit_replacement(
     replacement: crate::state::DesignVariable,
     detail: &str,
 ) -> bool {
-    commit_plan_change(app, plan_id, detail, move |workspace, plan_id| {
-        workspace
-            .content
-            .replace_design_variable(plan_id, variable_id, replacement)
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    })
+    commit_plan_change(
+        &mut crate::workbench::features::cx(app),
+        plan_id,
+        detail,
+        move |workspace, plan_id| {
+            workspace
+                .content
+                .replace_design_variable(plan_id, variable_id, replacement)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// Replace one variable's expression as a single validated transaction.
@@ -768,13 +783,18 @@ fn commit_expression(
     };
     let detail = format!("Updated design variable {name} to {expression}.");
     let expression = expression.to_owned();
-    commit_plan_change(app, plan_id, &detail, move |workspace, plan_id| {
-        workspace
-            .content
-            .update_design_variable_expression(plan_id, variable_id, expression)
-            .map(|_| ())
-            .map_err(|error| error.to_string())
-    })
+    commit_plan_change(
+        &mut crate::workbench::features::cx(app),
+        plan_id,
+        &detail,
+        move |workspace, plan_id| {
+            workspace
+                .content
+                .update_design_variable_expression(plan_id, variable_id, expression)
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        },
+    )
 }
 
 /// What the Change impact card says about who resolves these values.

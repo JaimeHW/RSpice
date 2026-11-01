@@ -1071,8 +1071,11 @@ fn design_variable_workflow_commits_to_the_active_plan_atomically() {
         .plan_data(plan_id)
         .map_or(0, |payload| payload.design_variables.len());
 
-    commit_design_variable(&mut app, &DesignVariableDraft::default())
-        .expect("valid variable commits");
+    commit_design_variable(
+        &mut crate::workbench::features::cx(&mut app),
+        &DesignVariableDraft::default(),
+    )
+    .expect("valid variable commits");
 
     let payload = app
         .state
@@ -1128,7 +1131,7 @@ fn invalid_design_variable_workflow_leaves_authoritative_state_unchanged() {
     let mut draft = DesignVariableDraft::default();
     draft.allowed_range = "20 kohm … 30 kohm".to_owned();
 
-    assert!(commit_design_variable(&mut app, &draft).is_err());
+    assert!(commit_design_variable(&mut crate::workbench::features::cx(&mut app), &draft).is_err());
     assert_eq!(
         app.state
             .model
@@ -1168,7 +1171,11 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
         .plan_data(plan_id)
         .map_or(0, |payload| payload.saved_outputs.len());
 
-    commit_saved_output(&mut app, &named_saved_output_draft()).expect("valid output commits");
+    commit_saved_output(
+        &mut crate::workbench::features::cx(&mut app),
+        &named_saved_output_draft(),
+    )
+    .expect("valid output commits");
 
     let output = app
         .state
@@ -1199,8 +1206,16 @@ fn saved_output_workflow_commits_a_typed_plan_contract() {
 fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
-    commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
+    commit_design_variable(
+        &mut crate::workbench::features::cx(&mut app),
+        &DesignVariableDraft::default(),
+    )
+    .expect("source variable");
+    commit_saved_output(
+        &mut crate::workbench::features::cx(&mut app),
+        &named_saved_output_draft(),
+    )
+    .expect("source output");
     let source_id = app
         .state
         .model
@@ -1236,7 +1251,7 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
     );
     draft.name = "Independent characterization".to_owned();
 
-    commit_clone_plan(&mut app, &draft).expect("valid clone");
+    commit_clone_plan(&mut crate::workbench::features::cx(&mut app), &draft).expect("valid clone");
 
     let clone_id = app
         .state
@@ -1284,8 +1299,16 @@ fn clone_workflow_creates_fresh_plan_and_payload_identities_without_results() {
 fn plan_manager_export_import_remaps_all_local_identities() {
     let mut app = RSpiceApp::test_instance();
     app.state.provision_test_project_technology_contract();
-    commit_design_variable(&mut app, &DesignVariableDraft::default()).expect("source variable");
-    commit_saved_output(&mut app, &named_saved_output_draft()).expect("source output");
+    commit_design_variable(
+        &mut crate::workbench::features::cx(&mut app),
+        &DesignVariableDraft::default(),
+    )
+    .expect("source variable");
+    commit_saved_output(
+        &mut crate::workbench::features::cx(&mut app),
+        &named_saved_output_draft(),
+    )
+    .expect("source output");
     let source_plan = app
         .state
         .model
@@ -1372,7 +1395,12 @@ fn cancelling_a_simulation_workflow_never_invokes_its_commit() {
     app.state.simulate.simulation_workflow =
         Some(SimulationWorkflowDialog::ClonePlan(draft.clone()));
 
-    finish_workflow_choice(&mut app, DialogChoice::Cancelled, draft, commit_clone_plan);
+    finish_workflow_choice(
+        &mut crate::workbench::features::cx(&mut app),
+        DialogChoice::Cancelled,
+        draft,
+        commit_clone_plan,
+    );
 
     assert!(app.state.simulate.simulation_workflow.is_none());
     assert_eq!(
@@ -1406,7 +1434,12 @@ fn a_committed_simulation_workflow_answers_on_the_status_bar() {
     );
     draft.name = "Committed clone".to_owned();
 
-    finish_workflow_choice(&mut app, DialogChoice::Primary, draft, commit_clone_plan);
+    finish_workflow_choice(
+        &mut crate::workbench::features::cx(&mut app),
+        DialogChoice::Primary,
+        draft,
+        commit_clone_plan,
+    );
     app.state.drain_notices(&egui::Context::default());
 
     assert!(app.state.simulate.simulation_workflow.is_none());

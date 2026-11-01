@@ -182,6 +182,30 @@ pub(in crate::workbench) fn invalidate_preflight(cx: &mut Cx<'_, SimulateFeature
     );
 }
 
+/// [`AnalysisLifecycleOutcome::announce_receipt`] in the feature's context.
+///
+/// [`AnalysisLifecycleOutcome::announce_receipt`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_receipt
+pub(in crate::workbench) fn record_plan_receipt(
+    cx: &mut Cx<'_, SimulateFeature>,
+    message: impl Into<String>,
+) {
+    cx.state
+        .analysis_lifecycle_status
+        .announce_receipt(&mut cx.model.log_buffer, message);
+}
+
+/// [`AnalysisLifecycleOutcome::announce_refusal`] in the feature's context.
+///
+/// [`AnalysisLifecycleOutcome::announce_refusal`]: crate::workbench::state::AnalysisLifecycleOutcome::announce_refusal
+pub(in crate::workbench) fn record_plan_refusal(
+    cx: &mut Cx<'_, SimulateFeature>,
+    message: impl Into<String>,
+) {
+    cx.state
+        .analysis_lifecycle_status
+        .announce_refusal(&mut cx.model.log_buffer, cx.wb, message);
+}
+
 /// Show the run history on its own route.
 fn open_jobs_manager(wb: &mut WorkbenchSession) {
     let route = SurfaceRoute::surface(SurfaceId::JobsManager);

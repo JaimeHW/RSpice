@@ -130,7 +130,7 @@ impl RunSetFrame {
             .and_then(|points| run_set::retained(state, points))
             .unwrap_or_default();
         let participation =
-            super::participation::PlanParticipation::from_points(&app.state, &retained);
+            super::participation::PlanParticipation::from_points(&app.state.model, &retained);
         let workload = super::workload::PlanWorkload::resolve_with(app, &participation);
         let validation = plan_run_set_validation_from(app, &workload);
         let composed = composed.map(|points| {
@@ -1932,7 +1932,13 @@ fn commit(app: &mut RSpiceApp, action: RunSetAction) {
     };
     let mut pruned = Vec::with_capacity(prunes.len());
     for prune in prunes {
-        if super::participation::commit_run_at(app, prune.id, prune.kept).is_ok() {
+        if super::participation::commit_run_at(
+            &mut crate::workbench::features::cx(app),
+            prune.id,
+            prune.kept,
+        )
+        .is_ok()
+        {
             pruned.push(prune.receipt_line);
         }
     }
@@ -2006,7 +2012,7 @@ pub(super) fn exact_plan_task_count(app: &RSpiceApp) -> Result<Option<usize>, St
 /// second answer — a second way of asking for the one below.
 #[cfg(test)]
 pub(super) fn worst_point_task_cost(app: &RSpiceApp) -> Option<usize> {
-    let participation = super::participation::PlanParticipation::resolve(&app.state);
+    let participation = super::participation::PlanParticipation::resolve(&app.state.model);
     let workload = super::workload::PlanWorkload::resolve_with(app, &participation).ok()?;
     worst_point_task_cost_of(&participation, &workload)
 }

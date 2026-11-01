@@ -543,7 +543,7 @@ pub(super) fn apply_group_command(
             };
             let detail = format!("Removed capture group {}.", named(id));
             if super::super::workflows::commit_plan_change(
-                app,
+                &mut crate::workbench::features::cx(app),
                 plan_id,
                 &detail,
                 move |workspace, plan_id| {
@@ -574,7 +574,7 @@ pub(super) fn apply_group_command(
                 if toward_front { "earlier" } else { "later" }
             );
             super::super::workflows::commit_plan_change(
-                app,
+                &mut crate::workbench::features::cx(app),
                 plan_id,
                 &detail,
                 move |workspace, plan_id| {
