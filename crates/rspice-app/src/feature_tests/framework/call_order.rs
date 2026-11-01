@@ -346,7 +346,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "design",
     ),
     ("render_create_hierarchy_dialog", "design"),
-    ("render_check_and_save_dialog", "project"),
+    ("ProjectFeature::render_check_and_save_dialog", "project"),
     ("render_connectivity_manager_dialog", "design"),
     ("features::render_dialog", "sheets"),
     ("ProjectFeature::render_design_management_dialog", "project"),
@@ -592,10 +592,6 @@ const AFTER_CONTRIBUTION: &[Step] = &[
     (
         "22",
         &["|app, action: ProjectFileAction| run_project_file_action(app, action)"],
-    ),
-    (
-        "23",
-        &["|app, dialog: OpenProjectDialog| open_project_dialog(app, dialog)"],
     ),
 ];
 
@@ -1337,8 +1333,8 @@ fn a_feature_command_has_what_it_raised_answered_in_the_same_dispatch() {
     assert_runs_in_order("RSpiceApp::after_contribution", &after, AFTER_CONTRIBUTION);
     assert_eq!(
         after.matches("requests::drain(").count(),
-        23,
-        "`after_contribution` answers exactly the twenty-three requests it lists"
+        22,
+        "`after_contribution` answers exactly the twenty-two requests it lists"
     );
 }
 
@@ -1754,6 +1750,53 @@ fn the_design_management_dialog_draws_in_the_project_context_and_what_it_raises_
         "answer_project_request",
         &body(&shipped, "fn answer_project_request("),
         CREATE_HIERARCHY_OPENED,
+    );
+}
+
+/// What Check and save hands the shell is saving the validated revision the
+/// dialog reviewed, carried out as the dialog once carried it out in place.
+const CHECK_AND_SAVE_COMMITTED: &[Step] = &[(
+    "CommitCheckAndSave",
+    &["ProjectRequest::CommitCheckAndSave => app.commit_check_and_save(),"],
+)];
+
+/// Check and save opens in the project feature's context, inside the call
+/// of the command that asks for it, raising nothing; it draws there, and the
+/// save it hands over is answered straight after it draws, in the step that
+/// drew it.
+#[test]
+fn the_check_and_save_dialog_draws_in_the_project_context_and_what_it_raises_is_answered_as_it_returns()
+ {
+    let execute = body(PROJECT, "fn execute(self, cx: &mut Cx<'_, ProjectFeature>)");
+    let opens = without_whitespace(
+        "Self::CheckAndSave => open_check_and_save_dialog(&mut check_and_save_parts(cx)),",
+    );
+    assert!(
+        without_whitespace(&execute).contains(&opens),
+        "Check and save opens in the project feature's context, in the command's own call"
+    );
+
+    let order = without_whitespace(DIALOG_ORDER);
+    let check_and_save = order
+        .split("DialogSpec{")
+        .find(|spec| spec.contains("DialogKey(\"project.check_and_save\")"))
+        .expect("the shell's dialog order draws Check and save");
+    assert!(
+        check_and_save.contains(&without_whitespace(
+            "render: |app, ctx| {
+                ProjectFeature::render_check_and_save_dialog(&mut features::cx(app), ctx);
+                app.after_contribution();
+            },"
+        )),
+        "Check and save draws in the project feature's context, and what it raises is answered \
+         straight after"
+    );
+
+    let shipped = crate::source_guard::without_test_items(COMMAND_HELPERS);
+    assert_runs_in_order(
+        "answer_project_request",
+        &body(&shipped, "fn answer_project_request("),
+        CHECK_AND_SAVE_COMMITTED,
     );
 }
 

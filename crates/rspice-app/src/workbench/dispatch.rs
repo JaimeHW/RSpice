@@ -27,7 +27,7 @@ use crate::workbench::commands::dispatch_probe;
 use crate::workbench::commands::vocabulary::{Command, legacy_command};
 use crate::workbench::commands::{
     active_schematic_editor, answer_project_request, command_edits_schematic, file_action,
-    open_project_dialog, run_project_file_action,
+    run_project_file_action,
 };
 use crate::workbench::features;
 use crate::workbench::framework::command_registry::{
@@ -37,10 +37,9 @@ use crate::workbench::framework::feature::{Execute, held_back};
 use crate::workbench::framework::requests::{
     self, ApplyWaveformDefaults, ArmPartPlacement, BindComponentModel, CloseForLiveMirror,
     ConfirmPackAttach, ExportDataset, FollowSchematicGrid, MarkFailureSites, OpenInDesign,
-    OpenProjectDialog, OpenSymbolAuthoring, PrintActiveView, ProjectFileAction,
-    PromptAfterCommands, RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter,
-    ShowProjectModels, ShowSchematicAnnotations, ShowWaveforms, SourceEditorRequest,
-    SubcircuitSymbolSource,
+    OpenSymbolAuthoring, PrintActiveView, ProjectFileAction, PromptAfterCommands,
+    RevealExecutedDeck, RevealModel, SelectAnalysisInstance, SetFamilyFilter, ShowProjectModels,
+    ShowSchematicAnnotations, ShowWaveforms, SourceEditorRequest, SubcircuitSymbolSource,
 };
 use crate::workbench::hardcopy;
 use crate::workbench::menu_bar::FileMenuAction;
@@ -188,8 +187,8 @@ impl RSpiceApp {
     /// opens its viewer or form on, the annotations a result viewer shows on
     /// the schematic it locates something on, and the failure sites the
     /// results failure banner marks there, the close that makes room for a
-    /// live session's mirror, and last the project's file commands and the
-    /// project dialogs the shell opens for them.
+    /// live session's mirror, and last what the project feature hands over
+    /// and the project's file commands.
     pub(crate) fn after_contribution(&mut self) {
         requests::drain(
             self,
@@ -421,11 +420,6 @@ impl RSpiceApp {
             self,
             |app| &mut app.state.workbench.outbox,
             |app, action: ProjectFileAction| run_project_file_action(app, action),
-        );
-        requests::drain(
-            self,
-            |app| &mut app.state.workbench.outbox,
-            |app, dialog: OpenProjectDialog| open_project_dialog(app, dialog),
         );
     }
 }

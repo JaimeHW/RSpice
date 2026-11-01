@@ -360,6 +360,8 @@ pub(crate) enum ProjectRequest {
     /// Open Create hierarchy, which design owns, over the selection Design
     /// management handed on when a move asked for a new child cell.
     OpenCreateHierarchy,
+    /// Save the validated revision the open Check and save dialog reviewed.
+    CommitCheckAndSave,
     /// Go on with leaving the project once the configuration edits held
     /// for it are settled: ask about the project's unsaved work, or carry
     /// out `action`, with the recent project an Open recent asked for.

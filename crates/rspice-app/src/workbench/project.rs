@@ -15,6 +15,7 @@ pub(crate) mod workspace_state;
 use rspice_app_models::veriloga_library::builtin_veriloga_model;
 
 use crate::state::ViewType;
+use crate::workbench::app::dialogs::check_and_save::CheckAndSaveParts;
 use crate::workbench::app::dialogs::design_management::{
     DesignManagementParts, DesignManagementTab, open_design_management_on,
     render_design_management_dialog,
@@ -25,7 +26,7 @@ use crate::workbench::app::dialogs::project::configuration::{
 use crate::workbench::app::dialogs::project::configuration_dialogs::{
     ConfigurationDialogParts, render_configuration_dialog,
 };
-use crate::workbench::app::open_design_management_dialog;
+use crate::workbench::app::{open_check_and_save_dialog, open_design_management_dialog};
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
@@ -33,9 +34,7 @@ use crate::workbench::framework::command_registry::{CommandAvailability, Command
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Reads,
 };
-use crate::workbench::framework::requests::{
-    FocusProjectLauncherSearch, OpenProjectDialog, ProjectFileAction,
-};
+use crate::workbench::framework::requests::{FocusProjectLauncherSearch, ProjectFileAction};
 use crate::workbench::lifecycle::project_lifecycle::{LifecycleView, has_unsaved_changes};
 use crate::workbench::slots::ProjectState;
 use crate::workbench::state::{WorkbenchSession, Workspace};
@@ -130,6 +129,36 @@ impl ProjectFeature {
             },
             ctx,
         );
+    }
+
+    /// Draw Check and save over what the feature's context lends it. Saving
+    /// the validated revision is asked of the shell, which carries it out as
+    /// the dialog returns.
+    pub(in crate::workbench) fn render_check_and_save_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &egui::Context,
+    ) {
+        check_and_save_parts(cx).render_check_and_save_dialog(ctx);
+    }
+}
+
+/// What Check and save is lent of the project feature's context: its dialog,
+/// the model, the session and the platform state, what the design checks
+/// read of the run tier and design, and what its report reads of the results
+/// workspace, design and code.
+fn check_and_save_parts<'c>(cx: &'c mut Cx<'_, ProjectFeature>) -> CheckAndSaveParts<'c> {
+    CheckAndSaveParts {
+        dialog: &mut cx.state.check_and_save,
+        model: &mut *cx.model,
+        platform: &*cx.platform,
+        wb: &mut *cx.wb,
+        facts: SlotFacts {
+            preflight_report_retained: cx.runs.preflight.report.is_some(),
+            review_markers: cx.peers.design().review_markers(),
+        },
+        presentation: cx.peers.results().saved_presentation(),
+        design: cx.peers.design(),
+        code: cx.peers.code(),
     }
 }
 
@@ -413,10 +442,9 @@ impl CommandSet for ProjectCommand {
         }
     }
 
-    /// The file commands are the shell's file workflow's, and Check and save,
-    /// which runs the design checks beyond the feature's context, is opened
-    /// by the shell; each is raised for the shell to take as soon as the
-    /// command returns.
+    /// The file commands are the shell's file workflow's, each raised for
+    /// the shell to take as soon as the command returns. Check and save opens
+    /// in the feature's context, over what the other features show.
     fn execute(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
             Self::ProjectLauncher => open_all_projects(cx.state, cx.wb, cx.platform),
@@ -465,7 +493,7 @@ impl CommandSet for ProjectCommand {
                 cx.model,
                 cx.platform,
             ),
-            Self::CheckAndSave => cx.wb.outbox.push(OpenProjectDialog::CheckAndSave),
+            Self::CheckAndSave => open_check_and_save_dialog(&mut check_and_save_parts(cx)),
         }
     }
 }

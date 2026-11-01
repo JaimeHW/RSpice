@@ -6,7 +6,7 @@ use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
-use crate::workbench::framework::requests::{OpenProjectDialog, ProjectFileAction};
+use crate::workbench::framework::requests::ProjectFileAction;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
 use crate::workbench::project::workspace_state::ProjectPage;
 use crate::workbench::session::project_transactions::{
@@ -347,16 +347,6 @@ pub(in crate::workbench) fn run_project_file_action(
     );
 }
 
-/// Open the project dialog `dialog` over the whole application, for the
-/// project feature's command that asked for it.
-pub(in crate::workbench) fn open_project_dialog(app: &mut RSpiceApp, dialog: OpenProjectDialog) {
-    match dialog {
-        OpenProjectDialog::CheckAndSave => {
-            crate::workbench::app::open_check_and_save_dialog(&mut app.state);
-        }
-    }
-}
-
 /// Carry out what the project feature handed over, as the feature did in
 /// place: the Configurations command, opening the selected view where it is
 /// edited, and what a library catalog change or a created or deleted
@@ -475,6 +465,7 @@ pub(in crate::workbench) fn answer_project_request(app: &mut RSpiceApp, request:
         ProjectRequest::OpenCreateHierarchy => {
             crate::workbench::app::open_create_hierarchy_dialog(&mut app.state);
         }
+        ProjectRequest::CommitCheckAndSave => app.commit_check_and_save(),
         ProjectRequest::GoOnLeaving { action, recent } => {
             if let Some((action, path, kind)) =
                 go_on_leaving(&mut app.state, Leaving { action, recent })

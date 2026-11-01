@@ -213,7 +213,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("project.check_and_save"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.check_and_save.open),
-        render: |app, ctx| app.render_check_and_save_dialog(ctx),
+        render: |app, ctx| {
+            ProjectFeature::render_check_and_save_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("design.connectivity_manager"),

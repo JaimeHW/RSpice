@@ -433,19 +433,6 @@ impl Request for ProjectFileAction {
     const DRAIN: Drain = Drain::AfterContribution;
 }
 
-/// A project dialog the shell opens over the whole application, for the
-/// project feature's command that opens it: Check and save runs the
-/// design checks and reads the code workspace beyond what the feature's
-/// context holds. Taken straight after the command returns.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum OpenProjectDialog {
-    CheckAndSave,
-}
-
-impl Request for OpenProjectDialog {
-    const DRAIN: Drain = Drain::AfterContribution;
-}
-
 /// Arm the schematic's placement tool with a part a model pack placed.
 /// Raised by the models feature, which names the armed part in its own
 /// receipt, and taken straight after the call that raised it.

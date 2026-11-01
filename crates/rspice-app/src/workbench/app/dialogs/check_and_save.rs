@@ -15,10 +15,14 @@ use crate::workbench::workflows::project_workflow::{
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::{
-    CheckAndSaveValidationReport, ValidationReads, run_design_checks_in,
+    CheckAndSaveValidationReport, ValidationReads, run_design_checks, run_design_checks_in,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model, PlatformState, SlotFacts};
 use crate::workbench::commands::vocabulary::Command;
+use crate::workbench::framework::feature::{CodePort, DesignPort};
+use crate::workbench::lifecycle::project_lifecycle::ResultPresentationSource;
+use crate::workbench::project::commands::ProjectRequest;
+use crate::workbench::state::WorkbenchSession;
 
 /// Retained state for the Check and save form.
 /// Validation evidence is frozen when the dialog opens and re-derived before
@@ -144,27 +148,44 @@ fn checks_summary(report: &CheckAndSaveValidationReport) -> String {
     )
 }
 
-pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
-    if !state.platform.project_lifecycle.is_open() {
-        state.prompt("Check and save needs an open project.");
+/// What Check and save reads and writes: its dialog, the model and the
+/// session it prompts on, the platform services' state, what the model's
+/// design checks read of the features, and what its report reads of the
+/// results workspace, design and code.
+pub(crate) struct CheckAndSaveParts<'a> {
+    pub(crate) dialog: &'a mut CheckAndSaveDialogState,
+    pub(crate) model: &'a mut Model,
+    pub(crate) platform: &'a PlatformState,
+    pub(crate) wb: &'a mut WorkbenchSession,
+    pub(crate) facts: SlotFacts,
+    pub(crate) presentation: &'a dyn ResultPresentationSource,
+    pub(crate) design: &'a dyn DesignPort,
+    pub(crate) code: &'a dyn CodePort,
+}
+
+pub(crate) fn open_check_and_save_dialog(parts: &mut CheckAndSaveParts<'_>) {
+    if !parts.platform.project_lifecycle.is_open() {
+        parts.wb.prompt("Check and save needs an open project.");
         return;
     }
     // Check and save is greyed on a read-only project or schematic.
-    if state.model.schematic.session.read_only
-        || state.active_view_read_only()
-        || state.model.safe_mode.project_read_only()
+    if parts.model.schematic.session.read_only
+        || parts.model.active_view_read_only()
+        || parts.model.safe_mode.project_read_only()
     {
         return;
     }
-    state.sync_active_schematic_to_workspace();
-    run_design_checks_in(state);
-    match CheckAndSaveValidationReport::collect_in(state) {
+    if let Some(prompt) = parts.model.sync_active_schematic_to_workspace() {
+        parts.wb.prompt(prompt);
+    }
+    parts.run_design_checks();
+    match CheckAndSaveValidationReport::collect(&parts.reads()) {
         Ok(report) => {
             // One line for the check. The dialog lists every finding, and
             // Problems lists the design-check ones where they can be visited.
             let blockers = report.blockers().len();
             let advisories = report.advisories().len();
-            state.record(
+            parts.model.record(
                 if blockers == 0 {
                     LogSeverity::Info
                 } else {
@@ -177,10 +198,10 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
                     if advisories == 1 { "y" } else { "ies" }
                 ),
             );
-            state.project.check_and_save.open(report);
+            parts.dialog.open(report);
         }
         Err(error) => {
-            state.record(
+            parts.model.record(
                 LogSeverity::Error,
                 LogSource::Studio,
                 format!("Check and save could not complete its checks: {error}"),
@@ -189,18 +210,38 @@ pub(crate) fn open_check_and_save_dialog(state: &mut AppState) {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_check_and_save_dialog(&mut self, ctx: &Context) {
-        if !self.state.project.check_and_save.open {
+impl CheckAndSaveParts<'_> {
+    /// What the report reads, as the parts stand now.
+    fn reads(&self) -> ValidationReads<'_> {
+        ValidationReads {
+            model: &*self.model,
+            platform: self.platform,
+            facts: self.facts,
+            workspace: self.wb.workspace,
+            presentation: self.presentation,
+            design: self.design,
+            code: self.code,
+        }
+    }
+
+    /// Run the design checks the report decides from.
+    fn run_design_checks(&mut self) {
+        run_design_checks(self.model, self.platform, self.facts, self.wb);
+    }
+
+    /// Draw the dialog. Saving the validated revision is asked of the shell,
+    /// which carries it out as the dialog's step returns.
+    pub(crate) fn render_check_and_save_dialog(&mut self, ctx: &Context) {
+        if !self.dialog.open {
             return;
         }
-        let Some(report) = self.state.project.check_and_save.report.clone() else {
-            self.state.project.check_and_save.validation_error = Some(
+        let Some(report) = self.dialog.report.clone() else {
+            self.dialog.validation_error = Some(
                 "Validation results are unavailable; close and reopen Check and save.".to_owned(),
             );
             return;
         };
-        let dialog = &self.state.project.check_and_save;
+        let dialog = &*self.dialog;
         let pending = dialog.is_pending();
         let note_error = revision_note_error(&dialog.revision_note);
         let save_error = dialog.validation_error.clone();
@@ -211,7 +252,7 @@ impl RSpiceApp {
             first_blocker: first_blocker.as_deref(),
             note_error: note_error.as_deref(),
             note_touched: dialog.revision_note_touched,
-            checks_current: report.source_is_current(&ValidationReads::of(&self.state)),
+            checks_current: report.source_is_current(&self.reads()),
         });
         let primary_enabled = !pending && report.can_save() && note_error.is_none();
         let checks = checks_summary(&report);
@@ -250,17 +291,12 @@ impl RSpiceApp {
                 }
                 rows.value("Documents", report.document_scope_label());
                 note_changed = rows
-                    .text(
-                        "Revision note",
-                        note,
-                        &mut self.state.project.check_and_save.revision_note,
-                        "",
-                    )
+                    .text("Revision note", note, &mut self.dialog.revision_note, "")
                     .changed();
                 Some(note)
             });
         if note_changed {
-            self.state.project.check_and_save.mark_edited();
+            self.dialog.mark_edited();
         }
         if let Some(instance) = repair_instance.filter(|_| repair_requested) {
             self.repair_stale_instance_interface(&instance);
@@ -268,15 +304,15 @@ impl RSpiceApp {
         if show_problems {
             // The findings are visited on the Problems page, which the modal
             // would otherwise cover.
-            self.state.project.check_and_save.close();
-            self.state.show_problem_findings();
+            self.dialog.close();
+            self.wb.show_problem_findings();
             return;
         }
         match choice {
-            DialogChoice::Primary => self.commit_check_and_save(),
+            DialogChoice::Primary => self.wb.outbox.push(ProjectRequest::CommitCheckAndSave),
             // A save in flight cannot be abandoned half-done; Esc waits.
             DialogChoice::Ghost | DialogChoice::Cancelled if !pending => {
-                self.state.project.check_and_save.close();
+                self.dialog.close();
             }
             DialogChoice::Ghost
             | DialogChoice::Cancelled
@@ -291,7 +327,6 @@ impl RSpiceApp {
     /// receipt is re-derived because it described the design before it ran.
     fn repair_stale_instance_interface(&mut self, instance: &str) {
         let Some(component_id) = self
-            .state
             .model
             .schematic
             .document()
@@ -300,40 +335,40 @@ impl RSpiceApp {
             .find(|component| component.name.eq_ignore_ascii_case(instance))
             .map(|component| component.id)
         else {
-            self.state.prompt(format!(
+            self.wb.prompt(format!(
                 "Instance '{instance}' is no longer in the active schematic."
             ));
             return;
         };
-        self.state
-            .model
+        self.model
             .schematic
             .session
             .editor
             .selection
             .select_only_component(component_id);
-        let outcome = self
-            .state
-            .model
-            .schematic
-            .update_selected_instance_interface(
-                &self.state.model.library_manager,
-                &self.state.model.workspace.content.schematic_buffers,
-            );
-        self.state.prompt(match outcome {
+        let outcome = self.model.schematic.update_selected_instance_interface(
+            &self.model.library_manager,
+            &self.model.workspace.content.schematic_buffers,
+        );
+        self.wb.prompt(match outcome {
             Ok(summary) => summary,
             Err(error) => error.to_string(),
         });
-        run_design_checks_in(&mut self.state);
-        match CheckAndSaveValidationReport::collect_in(&self.state) {
-            Ok(report) => self.state.project.check_and_save.report = Some(report),
+        self.run_design_checks();
+        match CheckAndSaveValidationReport::collect(&self.reads()) {
+            Ok(report) => self.dialog.report = Some(report),
             Err(error) => {
-                self.state.project.check_and_save.validation_error = Some(error);
+                self.dialog.validation_error = Some(error);
             }
         }
     }
+}
 
-    fn commit_check_and_save(&mut self) {
+impl RSpiceApp {
+    /// Save the validated revision the open dialog reviewed, once its report
+    /// is re-derived as the reader reviewed it.
+    // The shell runs this until the save runs over the lifecycle's parts.
+    pub(in crate::workbench) fn commit_check_and_save(&mut self) {
         // A cancelled destination, a transient publication failure, or a stale
         // validation receipt must remain retryable without forcing the user to
         // manufacture an edit to the revision note first.
@@ -801,7 +836,9 @@ mod tests {
             "RC Lowpass Filter",
             &mut app.state.model.schematic,
         );
-        open_check_and_save_dialog(&mut app.state);
+        app.execute_command_key(
+            crate::workbench::project::commands::ProjectCommand::CheckAndSave.key(),
+        );
         assert!(app.state.project.check_and_save.open);
 
         let mut render = || {
