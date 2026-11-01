@@ -142,7 +142,7 @@ pub(super) fn library_body(
                 "No custom sizes match this filter"
             },
             if presets.is_empty() {
-                "Create a project or personal preset, or import a reviewed schema-1 package."
+                "Create a project or personal size, or import one from a file."
             } else {
                 "Change the filter to return to the library."
             },
@@ -1335,10 +1335,13 @@ fn notice(ui: &mut Ui, message: &str, tone: NoticeTone) {
         });
 }
 
+/// An empty library's message, centred on the dialog's own surface. It was
+/// filled with the schematic canvas's colour, which follows the engineering
+/// canvas palette rather than the theme: on the light theme over the default
+/// dark canvas it was a near-black band under dark text.
 fn empty_state(ui: &mut Ui, title: &str, detail: &str) {
     let t = Tokens::get(ui.ctx());
     egui::Frame::new()
-        .fill(t.color.canvas_bg)
         .inner_margin(egui::Margin::same(18))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());

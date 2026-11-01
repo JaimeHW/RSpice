@@ -333,3 +333,62 @@ fn drawing_sheet_preset_import_receipt_retains_reviewed_outcomes() {
             && skip.reason == DrawingSheetPresetImportSkipReason::ExplicitlySkipped
     }));
 }
+
+/// An empty library on the light theme reads as the rest of the dialog. Its
+/// message used to sit on the schematic canvas's colour, which follows the
+/// engineering canvas palette rather than the theme: a near-black band under
+/// the default palette, with the light theme's dark text on it.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn an_empty_library_is_light_on_the_light_theme() {
+    use crate::workbench::preferences::TogglePreference;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .model
+        .preferences
+        .set_toggle(TogglePreference::ReducedMotion, true);
+    app.state.open_project_session();
+    app.state.workbench.theme.mode = crate::ui::Mode::Light;
+    assert!(open_custom_sheet_size_library(
+        &mut app.state.sheets.drawing_sheet_presets,
+        &app.state.model
+    ));
+    let size = egui::vec2(1440.0, 900.0);
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut output = None;
+    for index in 0..4u32 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                time: Some(f64::from(index) * 0.25),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+        ));
+    }
+    let output = output.expect("frames ran");
+    let message = output
+        .shapes
+        .iter()
+        .find_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) if text.galley.text() == "No custom sheet sizes" => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            _ => None,
+        })
+        .expect("the empty library says it is empty");
+    let canvas = crate::ui::raster::rasterize(&ctx, size, &output);
+    // Either side of the message, on the band it sits on.
+    let y = message.center().y as usize;
+    for x in [message.left() - 120.0, message.right() + 120.0] {
+        let pixel = canvas.pixel(x as usize, y).expect("on the canvas");
+        assert!(
+            pixel.r() > 160 && pixel.g() > 160 && pixel.b() > 160,
+            "the band beside the message is {pixel:?} at x = {x}"
+        );
+    }
+}
