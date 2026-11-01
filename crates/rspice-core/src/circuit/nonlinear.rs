@@ -1287,8 +1287,9 @@ impl CircuitData {
         self.update_nonlinear_impl(voltages, None, true);
     }
 
-    /// Start the next operating-point solve from a solved bias: no device
-    /// replays its MODEINITJCT startup state.
+    /// Start the next operating-point solve from a solved bias, or leave the
+    /// operating point for the transient: no device replays its MODEINITJCT
+    /// startup state.
     pub(crate) fn skip_operating_point_startup(&mut self) {
         for mosfet in &mut self.mosfets.devices {
             mosfet.enter_operating_point(true);

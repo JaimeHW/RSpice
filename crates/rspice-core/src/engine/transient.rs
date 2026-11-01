@@ -6433,6 +6433,13 @@ impl Engine {
         // checkpoint so resume and uninterrupted execution start identically.
         circuit.set_b3soi_operating_point_mode(false);
         circuit.set_xyce_memristor_operating_point_mode(false);
+        // Xyce's initJctFlag and initFixFlag hold only while dcopFlag is set
+        // (N_DEV_SolverState.C:386-422), so no classic MOS startup state, the
+        // `OFF` hold that lasts its operating point among them, reaches a
+        // transient load.
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            circuit.skip_operating_point_startup();
+        }
 
         // Seed transient line bookkeeping before checkpoint injection. A
         // supported scalar lossless checkpoint replaces the seed with its

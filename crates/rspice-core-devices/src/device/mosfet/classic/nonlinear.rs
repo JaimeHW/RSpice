@@ -51,7 +51,9 @@ impl Mosfet {
     /// An `OFF` instance an operating-point solve primed keeps its zero bias
     /// through MODEINITFIX, which ngspice leaves only once the circuit solved
     /// without it converges (niiter.c:344-349). That is the whole lever OFF
-    /// has on which state of a latch the solve picks.
+    /// has on which state of a latch the solve picks. In the Xyce dialect the
+    /// hold lasts the solve, and Xyce's initFixFlag decides each load whether
+    /// it applies (see `begin_operating_point_load`).
     fn holds_through_initial_fix(&self) -> bool {
         self.initial_off
             && self.operating_point_startup().is_some()
@@ -67,6 +69,9 @@ impl Mosfet {
     /// transient load releases an operating-point startup outright.
     fn advance_startup_state(&mut self, vgs: Value, vds: Value, vbs: Value, transient: bool) {
         if self.holds_through_initial_fix() && !transient {
+            if self.xyce_initial_fix {
+                return;
+            }
             self.initial_off_seed_evaluations = self.initial_off_seed_evaluations.wrapping_add(1);
             if self
                 .operating_point_startup()
@@ -196,7 +201,7 @@ impl Mosfet {
         vbs: Value,
         constants: Option<&ClassicMosTransientConstants>,
     ) {
-        if self.pending_startup_bias().is_some() {
+        if self.pending_startup_bias().is_some() || self.holds_through_initial_fix() {
             self.advance_startup_state(vgs, vds, vbs, constants.is_some());
         }
         let (eval_vgs, eval_vds, eval_vbs, junction_limited) =
@@ -323,7 +328,7 @@ impl NonlinearDevice for Mosfet {
     }
 
     fn is_converged(&self, criteria: NonlinearConvergenceCriteria) -> bool {
-        if self.holds_through_initial_fix() {
+        if self.holds_through_initial_fix() && !self.xyce_initial_fix {
             return self.initial_fix_check(criteria);
         }
         // Every voltage, channel-current, and previous-junction field below

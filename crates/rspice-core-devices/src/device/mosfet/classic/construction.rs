@@ -193,6 +193,7 @@ impl Mosfet {
             junction_limited: false,
             native_xyce_transient_convergence: false,
             ngspice_convergence_test: true,
+            xyce_initial_fix: false,
             indices: MosfetIndices::default(),
         }
     }
@@ -1796,6 +1797,80 @@ mod tests {
         mos.enter_operating_point(false);
         mos.update(&[3.0, 3.0, 0.0, 0.0]);
         assert_ne!((mos.eval_vgs, mos.eval_vds), (0.0, 0.0));
+    }
+
+    #[test]
+    fn a_xyce_dialect_off_instance_holds_only_after_a_limited_load() {
+        use crate::device::NonlinearDevice;
+
+        // Xyce's initFixFlag zeroes an OFF instance's bias on the first load
+        // and on each load after one where any instance limited a junction
+        // (N_DEV_SolverState.C:416-422, N_DEV_MOSFET3.C:1695-1700). Every
+        // other load evaluates the iterate, and the two updates of one
+        // iterate share one decision.
+        let held = |mos: &Mosfet| (mos.eval_vgs, mos.eval_vds, mos.eval_vbs) == (0.0, 0.0, 0.0);
+        let mut off = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        off.set_initially_off(true);
+        // Its bulk on node 5 forward-biases this one's body junction.
+        let other = Mosfet::new_nmos("m2".to_string(), 1, 2, 3, 5);
+        let mut devices = vec![off, other];
+        for mos in &mut devices {
+            mos.set_xyce_initial_fix(true);
+            mos.enter_operating_point(false);
+        }
+        let mut last_iterate = Vec::new();
+        let mut load = |devices: &mut [Mosfet], iterate: &[Value]| {
+            Mosfet::begin_operating_point_load(devices, iterate, &mut last_iterate);
+            for mos in devices.iter_mut() {
+                mos.update(iterate);
+            }
+        };
+
+        let start = [0.0; 5];
+        load(&mut devices, &start);
+        load(&mut devices, &start);
+        assert!(held(&devices[0]), "the first load is initJct");
+
+        load(&mut devices, &[5.0, 4.0, 0.0, 0.0, 0.0]);
+        assert!(
+            !held(&devices[0]),
+            "nothing limited, so the iterate is evaluated"
+        );
+        assert!(!devices[1].junction_limited);
+
+        let forward = [5.0, 4.0, 0.0, 0.0, 3.0];
+        load(&mut devices, &forward);
+        assert!(
+            devices[1].junction_limited,
+            "pnjlim limits the 3 V body step"
+        );
+        assert!(!held(&devices[0]), "the decision reads the load before");
+
+        let next = [5.0, 4.5, 0.0, 0.0, 0.0];
+        load(&mut devices, &next);
+        assert!(held(&devices[0]), "a limited load re-engages the hold");
+        assert!(!devices[1].junction_limited);
+        load(&mut devices, &next);
+        assert!(
+            held(&devices[0]),
+            "the second update of an iterate keeps it"
+        );
+
+        load(&mut devices, &[5.0, 4.4, 0.0, 0.0, 0.0]);
+        assert!(!held(&devices[0]));
+
+        // The ngspice rule still holds the instance until its terminals settle.
+        let mut ngspice = Mosfet::new_nmos("m3".to_string(), 1, 2, 3, 4);
+        ngspice.set_initially_off(true);
+        ngspice.enter_operating_point(false);
+        let mut devices = vec![ngspice];
+        let mut last_iterate = Vec::new();
+        for iterate in [[0.0; 4], [5.0, 4.0, 0.0, 0.0]] {
+            Mosfet::begin_operating_point_load(&devices, &iterate, &mut last_iterate);
+            devices[0].update(&iterate);
+            assert!(held(&devices[0]));
+        }
+        assert!(last_iterate.is_empty(), "nothing follows initFixFlag");
     }
 
     #[test]

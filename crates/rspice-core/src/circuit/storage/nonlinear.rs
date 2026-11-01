@@ -366,6 +366,9 @@ pub(crate) struct Mosfets {
     /// True only when every device's latest collection-wide update evaluated
     /// its raw candidate without voltage limiting.
     last_update_all_is_physical: bool,
+    /// The iterate of the last operating-point load, while an `OFF` instance
+    /// follows Xyce's initFixFlag (see [`Mosfet::begin_operating_point_load`]).
+    initial_fix_iterate: Vec<Value>,
 }
 
 impl Mosfets {
@@ -433,6 +436,7 @@ impl Mosfets {
     /// Update all MOSFETs with current solution
     pub(crate) fn update_all(&mut self, voltages: &[Value]) {
         use crate::device::NonlinearDevice;
+        Mosfet::begin_operating_point_load(&self.devices, voltages, &mut self.initial_fix_iterate);
         let mut all_physical = true;
         for d in &mut self.devices {
             d.update(voltages);
@@ -449,6 +453,7 @@ impl Mosfets {
         use crate::device::NonlinearDevice;
         use rayon::prelude::*;
 
+        Mosfet::begin_operating_point_load(&self.devices, voltages, &mut self.initial_fix_iterate);
         // One Rayon item per very small classic-MOS evaluation lets every
         // thread in a large host pool contend for this memory-bound array.
         // Submit only the independently useful number of coarse tasks. This

@@ -522,6 +522,9 @@ pub struct Mosfet {
     /// (the ngspice and default dialects), not on the Xyce dialect's
     /// branch-voltage step test.
     ngspice_convergence_test: bool,
+    /// Hold an `OFF` instance through Xyce's initFixFlag (the Xyce dialect)
+    /// instead of ngspice's MODEINITFIX.
+    xyce_initial_fix: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -606,6 +609,11 @@ pub(crate) struct InitialFixHold {
     /// A convergence check found the circuit settled around the held `OFF`
     /// instance; the next load releases it.
     pub(crate) release_requested: bool,
+    /// Under Xyce's initFixFlag: the operating-point loads begun so far.
+    pub(crate) xyce_loads: u8,
+    /// Under Xyce's initFixFlag: this load evaluates the iterate, as no
+    /// instance limited a junction on the load before it.
+    pub(crate) xyce_released: bool,
 }
 
 impl OperatingPointStartup {
@@ -753,6 +761,67 @@ impl Mosfet {
         self.ngspice_convergence_test = enabled;
     }
 
+    /// Hold an `OFF` instance through Xyce's initFixFlag instead of ngspice's
+    /// MODEINITFIX (see [`Self::begin_operating_point_load`]). The engine sets
+    /// it in the Xyce dialect.
+    #[doc(hidden)]
+    pub fn set_xyce_initial_fix(&mut self, enabled: bool) {
+        self.xyce_initial_fix = enabled;
+    }
+
+    /// Begin one operating-point load of a classic MOS population. Under
+    /// Xyce's initFixFlag an `OFF` instance holds its zero bias at the first
+    /// load (initJct) and at every later one that follows a load in which any
+    /// instance limited a junction: initFixFlag is `!all_devices_converged`
+    /// past the first Newton iterate (N_DEV_SolverState.C:416-422), a MOSFET
+    /// converges as `!limitedFlag` (N_DEV_MOSFET3.h:650, set from pnjlim's
+    /// `Check` at N_DEV_MOSFET3.C:1769), and the flag zeroes an `OFF`
+    /// instance's bias (N_DEV_MOSFET3.C:1695-1700). Every other load evaluates
+    /// the iterate. `last_iterate` keeps the iterate of the last load, so the
+    /// second update of one iterate keeps its decision.
+    #[doc(hidden)]
+    pub fn begin_operating_point_load(
+        devices: &[Mosfet],
+        iterate: &[Value],
+        last_iterate: &mut Vec<Value>,
+    ) {
+        if !devices.iter().any(Mosfet::follows_xyce_initial_fix) {
+            last_iterate.clear();
+            return;
+        }
+        if last_iterate.len() == iterate.len()
+            && last_iterate
+                .iter()
+                .zip(iterate)
+                .all(|(last, next)| last.to_bits() == next.to_bits())
+        {
+            return;
+        }
+        last_iterate.clear();
+        last_iterate.extend_from_slice(iterate);
+        let initial_fix = devices.iter().any(|mosfet| mosfet.junction_limited);
+        for mosfet in devices
+            .iter()
+            .filter(|mosfet| mosfet.follows_xyce_initial_fix())
+        {
+            if let Some(startup) = mosfet.operating_point_startup() {
+                let mut hold = startup.hold();
+                hold.xyce_released = hold.xyce_loads > 0 && !initial_fix;
+                hold.xyce_loads = hold.xyce_loads.saturating_add(1);
+                startup.set_hold(hold);
+            }
+        }
+    }
+
+    /// An `OFF` instance an operating-point solve primed, held through Xyce's
+    /// initFixFlag.
+    fn follows_xyce_initial_fix(&self) -> bool {
+        self.xyce_initial_fix
+            && self.initial_off
+            && self.initial_off_seed_pending
+            && self.operating_point_startup().is_some()
+    }
+
     /// The deck marked this instance `OFF`, so its first Newton evaluation
     /// starts from the zero-junction state of mos1load.c's MODEINITJCT arm.
     pub(crate) fn set_initially_off(&mut self, off: bool) {
@@ -805,7 +874,11 @@ impl Mosfet {
             return None;
         }
         if self.initial_off {
-            return Some((0.0, 0.0, 0.0));
+            let released = self.xyce_initial_fix
+                && self
+                    .operating_point_startup()
+                    .is_some_and(|startup| startup.hold().xyce_released);
+            return (!released).then_some((0.0, 0.0, 0.0));
         }
         // An instance `IC=` vector would be ngspice's seed instead; those
         // instances keep starting from the Newton iterate.
