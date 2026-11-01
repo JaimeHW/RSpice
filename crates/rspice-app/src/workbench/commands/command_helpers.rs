@@ -431,6 +431,25 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                 form.error = Some(error);
             }
         }
+        CodeRequest::SaveVerilogABuildSettings { compile } => {
+            match crate::workbench::app::dialogs::veriloga_build_settings::save_veriloga_build_settings(
+                app,
+            ) {
+                Ok(_) if compile => {
+                    if let Err(error) =
+                        crate::workbench::documents::code_workspace::request_veriloga_compile(app)
+                    {
+                        app.state.prompt(error);
+                    }
+                }
+                Ok(_) => {}
+                Err(error) => {
+                    if let Some(draft) = app.state.code.veriloga_build_settings.as_mut() {
+                        draft.error = Some(error);
+                    }
+                }
+            }
+        }
         CodeRequest::ReplaceVerilogASource => {
             if let Err(error) =
                 crate::workbench::documents::code_workspace::commit_veriloga_source_replacement(app)

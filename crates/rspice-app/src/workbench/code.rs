@@ -14,6 +14,7 @@ use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
 };
 use crate::workbench::app::dialogs::library::veriloga_import;
+use crate::workbench::app::dialogs::veriloga_build_settings;
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
 };
@@ -353,6 +354,24 @@ impl CodeFeature {
             ctx,
         ) {
             cx.wb.outbox.push(CodeRequest::CreateVerilogADevice);
+        }
+    }
+
+    /// Build settings.
+    pub(in crate::workbench) fn render_veriloga_build_settings(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        let messages = cx.wb.messages();
+        if let Some(compile) = veriloga_build_settings::render_veriloga_build_settings(
+            &mut cx.state.veriloga_build_settings,
+            cx.model,
+            &messages,
+            ctx,
+        ) {
+            cx.wb
+                .outbox
+                .push(CodeRequest::SaveVerilogABuildSettings { compile });
         }
     }
 

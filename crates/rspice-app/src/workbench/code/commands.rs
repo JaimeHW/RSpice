@@ -87,9 +87,10 @@ pub(crate) enum CodeCommand {
 /// the caret, the Verilog-A compile, its build settings and the symbol of
 /// the module it compiles; and, from the feature's dialogs, creating the
 /// device New Verilog-A device drafted, importing the cells Import
-/// Verilog-A planned, and replacing the source Replace source from file
-/// confirmed. Each command or dialog step that raises one raises one. Taken
-/// straight after the call that raised it.
+/// Verilog-A planned, replacing the source Replace source from file
+/// confirmed, and saving Build settings, then compiling when the reader
+/// asked for both. Each command or dialog step that raises one raises one.
+/// Taken straight after the call that raised it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CodeRequest {
     OpenNetlist,
@@ -113,6 +114,7 @@ pub(crate) enum CodeRequest {
     CreateVerilogADevice,
     ImportVerilogACells,
     ReplaceVerilogASource,
+    SaveVerilogABuildSettings { compile: bool },
 }
 
 impl Request for CodeRequest {

@@ -487,7 +487,10 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.veriloga_build_settings"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.code.veriloga_build_settings.is_some()),
-        render: |app, ctx| app.render_veriloga_build_settings(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_veriloga_build_settings(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("project.copy_cell"),

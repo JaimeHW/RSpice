@@ -455,78 +455,65 @@ fn refusal_line(rows: &mut FormRows<'_>, field: Id, refusal: Option<&String>) {
     }
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_veriloga_build_settings(&mut self, ctx: &Context) {
-        let Some(mut draft) = self.state.code.veriloga_build_settings.take() else {
-            return;
-        };
-        // The form belongs to one source. If that source is gone, so is the
-        // form: there is nothing left for it to save to.
-        if self
-            .state
-            .model
-            .workspace
-            .content
-            .project_sources
-            .get_bundle(draft.source.bundle().id())
-            .is_none()
-        {
-            return;
-        }
-        let messages = self.state.workbench.messages();
-        let read_only = self.state.model.safe_mode.project_read_only();
-        let refusals = FieldRefusals::of(&draft, &messages);
-        let can_save = !read_only && !refusals.any();
-        let status = if read_only {
-            Some(messages.text(MessageId::VerilogABuildSettingsReadOnly))
-        } else {
-            draft.error.clone()
-        };
-        let title = messages.text(MessageId::VerilogABuildSettingsTitle);
-        let primary = messages.text(MessageId::VerilogABuildSettingsPrimary);
-        let save = messages.text(MessageId::VerilogABuildSettingsSave);
-        let description = messages.text(MessageId::VerilogABuildSettingsDescription);
+/// Draw Build settings while it is open, over its draft, the model and the
+/// reader's messages. Returns `Some(compile)` when the reader saved a draft
+/// that can be saved, with the draft kept open for the save: `compile` when
+/// they asked to save and compile.
+pub(in crate::workbench) fn render_veriloga_build_settings(
+    build_settings: &mut Option<VerilogABuildSettingsDraft>,
+    model: &Model,
+    messages: &MessageCatalog,
+    ctx: &Context,
+) -> Option<bool> {
+    let mut draft = build_settings.take()?;
+    // The form belongs to one source. If that source is gone, so is the
+    // form: there is nothing left for it to save to.
+    model
+        .workspace
+        .content
+        .project_sources
+        .get_bundle(draft.source.bundle().id())?;
+    let read_only = model.safe_mode.project_read_only();
+    let refusals = FieldRefusals::of(&draft, messages);
+    let can_save = !read_only && !refusals.any();
+    let status = if read_only {
+        Some(messages.text(MessageId::VerilogABuildSettingsReadOnly))
+    } else {
+        draft.error.clone()
+    };
+    let title = messages.text(MessageId::VerilogABuildSettingsTitle);
+    let primary = messages.text(MessageId::VerilogABuildSettingsPrimary);
+    let save = messages.text(MessageId::VerilogABuildSettingsSave);
+    let description = messages.text(MessageId::VerilogABuildSettingsDescription);
 
-        let mut edited = false;
-        let choice = CommandForm::new(&title, &primary)
-            .describe(&description)
-            .secondary(&save)
-            .label_column(LABEL_COLUMN)
-            .primary_enabled(can_save)
-            .secondary_enabled(can_save)
-            .fields_enabled(!read_only)
-            .status(match status.as_deref() {
-                Some(message) => Err(message),
-                None => Ok(None),
-            })
-            .show(ctx, |rows| {
-                edited = form_body(rows, &mut draft, &refusals, &messages);
-                None
-            });
-        if edited {
-            draft.error = None;
+    let mut edited = false;
+    let choice = CommandForm::new(&title, &primary)
+        .describe(&description)
+        .secondary(&save)
+        .label_column(LABEL_COLUMN)
+        .primary_enabled(can_save)
+        .secondary_enabled(can_save)
+        .fields_enabled(!read_only)
+        .status(match status.as_deref() {
+            Some(message) => Err(message),
+            None => Ok(None),
+        })
+        .show(ctx, |rows| {
+            edited = form_body(rows, &mut draft, &refusals, messages);
+            None
+        });
+    if edited {
+        draft.error = None;
+    }
+    match choice {
+        DialogChoice::Primary | DialogChoice::Secondary if can_save => {
+            *build_settings = Some(draft);
+            Some(choice == DialogChoice::Primary)
         }
-        match choice {
-            DialogChoice::Primary | DialogChoice::Secondary if can_save => {
-                self.state.code.veriloga_build_settings = Some(draft);
-                match save_veriloga_build_settings(self) {
-                    Ok(_) if choice == DialogChoice::Primary => {
-                        if let Err(error) = code_workspace::request_veriloga_compile(self) {
-                            self.state.prompt(error);
-                        }
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        if let Some(draft) = self.state.code.veriloga_build_settings.as_mut() {
-                            draft.error = Some(error);
-                        }
-                    }
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {}
-            DialogChoice::None | DialogChoice::Primary | DialogChoice::Secondary => {
-                self.state.code.veriloga_build_settings = Some(draft);
-            }
+        DialogChoice::Ghost | DialogChoice::Cancelled => None,
+        DialogChoice::None | DialogChoice::Primary | DialogChoice::Secondary => {
+            *build_settings = Some(draft);
+            None
         }
     }
 }

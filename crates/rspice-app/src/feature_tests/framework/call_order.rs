@@ -390,7 +390,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("CodeFeature::render_new_veriloga_device_form", "code"),
     ("CodeFeature::render_veriloga_import_dialog", "code"),
     ("CodeFeature::render_veriloga_replace_dialog", "code"),
-    ("render_veriloga_build_settings", "code"),
+    ("CodeFeature::render_veriloga_build_settings", "code"),
     ("ProjectFeature::process_copy_cell_dialog", "project"),
     ("ProjectFeature::process_rename_cell_dialog", "project"),
     (
