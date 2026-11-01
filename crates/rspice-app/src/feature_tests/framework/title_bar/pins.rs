@@ -420,6 +420,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "---",
             "Probe | place-probe | P | on",
             "Annotate DC operating point | annotate-operating-point |  | on | checked",
+            "Annotate transient voltages | annotate-transient-voltages |  | on | unchecked",
             "Operating-point table | result-operating-point |  | off: Requires the active analysis to be a DC operating-point result carrying a node DC solution, a device operating-point report, or a retained operating-point payload",
         ],
     ),

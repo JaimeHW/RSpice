@@ -291,3 +291,38 @@ fn copy_as_image_draws_the_selection_or_else_the_view() {
         ))
     );
 }
+
+/// Annotate transient voltages is a check-mark row beside the DC one: it
+/// takes the DC operating point's place on the canvas, says in the status bar
+/// which instant it reads (or why there is none), and turns off again.
+#[test]
+fn annotate_transient_voltages_takes_the_operating_points_place() {
+    let mut app = title_test_app();
+    let transient = Command::AnnotateTransientVoltages;
+    let dc = Command::AnnotateOperatingPoint;
+    assert!(app.is_enabled(transient.key()));
+    assert_eq!(
+        (transient.checked(&app), dc.checked(&app)),
+        (Some(false), Some(true))
+    );
+
+    app.execute(transient.key());
+    assert_eq!(
+        (transient.checked(&app), dc.checked(&app)),
+        (Some(true), Some(false))
+    );
+    assert_eq!(
+        app.state
+            .workbench
+            .prompt
+            .as_ref()
+            .map(|prompt| &*prompt.text),
+        Some("No transient result is selected: run a transient analysis to annotate its voltages.")
+    );
+
+    app.execute(transient.key());
+    assert_eq!(
+        (transient.checked(&app), dc.checked(&app)),
+        (Some(false), Some(false))
+    );
+}

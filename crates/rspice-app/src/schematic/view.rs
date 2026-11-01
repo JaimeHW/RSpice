@@ -60,6 +60,7 @@ use self::keyboard_navigation::handle_keyboard_object_navigation;
 use self::navigation::handle_viewport_navigation;
 use self::preview::{draw_interaction_previews, draw_shelf_drag_preview};
 use self::scene::draw_scene;
+pub(crate) use self::scene::transient_annotation_status;
 use self::shelf_drag::{
     ShelfDropOutcome, can_accept_shelf_drop, commit_shelf_drop, handle_placement_transform_keys,
 };

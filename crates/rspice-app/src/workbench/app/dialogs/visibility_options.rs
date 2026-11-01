@@ -289,14 +289,16 @@ fn display_options_rows(
         annotation_label(draft.annotations),
         &options(&[
             "OP voltages + selected currents",
+            "Transient voltages at cursor A",
             "Violations only",
             "Hidden",
         ]),
     );
     if let Some(index) = annotation.picked {
         draft.annotations = match index {
-            1 => SchematicAnnotationVisibility::ViolationsOnly,
-            2 => SchematicAnnotationVisibility::Hidden,
+            1 => SchematicAnnotationVisibility::TransientVoltages,
+            2 => SchematicAnnotationVisibility::ViolationsOnly,
+            3 => SchematicAnnotationVisibility::Hidden,
             _ => SchematicAnnotationVisibility::OperatingPoint,
         };
     }
@@ -387,6 +389,7 @@ fn display_options_rows(
 const fn annotation_label(value: SchematicAnnotationVisibility) -> &'static str {
     match value {
         SchematicAnnotationVisibility::OperatingPoint => "OP voltages + selected currents",
+        SchematicAnnotationVisibility::TransientVoltages => "Transient voltages at cursor A",
         SchematicAnnotationVisibility::ViolationsOnly => "Violations only",
         SchematicAnnotationVisibility::Hidden => "Hidden",
     }

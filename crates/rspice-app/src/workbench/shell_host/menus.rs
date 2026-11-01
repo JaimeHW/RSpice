@@ -523,6 +523,7 @@ const SIMULATE_MENU: &[MenuEntry] = &[
     Separator,
     command_as(Command::PlaceProbe, "Probe"),
     command(Command::AnnotateOperatingPoint),
+    command(Command::AnnotateTransientVoltages),
     MenuEntry::command_as(
         ResultsCommand::ResultViewer(crate::workbench::ResultViewer::Op).key(),
         "Operating-point table",

@@ -80,6 +80,9 @@ pub enum Command {
     SetGridStyle(crate::state::GridStyle),
     /// Show or hide the DC operating point on the schematic.
     AnnotateOperatingPoint,
+    /// Show or hide the transient's voltages at results cursor A on the
+    /// schematic.
+    AnnotateTransientVoltages,
     GridSnapRouting,
     VisibilityOptions,
     ToggleFullScreen,
@@ -570,6 +573,11 @@ impl Command {
                 "Annotate DC operating point",
                 "Simulate",
             ),
+            Self::AnnotateTransientVoltages => spec(
+                "annotate-transient-voltages",
+                "Annotate transient voltages",
+                "Simulate",
+            ),
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
@@ -739,6 +747,7 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::SetGridStyle(crate::state::GridStyle::Lines),
     Command::SetGridStyle(crate::state::GridStyle::Off),
     Command::AnnotateOperatingPoint,
+    Command::AnnotateTransientVoltages,
     Command::GridSnapRouting,
     Command::VisibilityOptions,
     Command::ToggleFullScreen,
@@ -974,6 +983,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::SetGridStyle(crate::state::GridStyle::Lines).key(),
     Command::SetGridStyle(crate::state::GridStyle::Off).key(),
     Command::AnnotateOperatingPoint.key(),
+    Command::AnnotateTransientVoltages.key(),
     Command::GridSnapRouting.key(),
     SheetsCommand::DrawingSheetLayers.key(),
     Command::VisibilityOptions.key(),

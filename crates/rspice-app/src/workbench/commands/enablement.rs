@@ -336,7 +336,9 @@ impl Command {
                     .any(|document| document.open && document.closable)
             }
             Self::CycleGrid => active_symbol_editor(app) || active_schematic_editor(app),
-            Self::SetGridStyle(_) | Self::AnnotateOperatingPoint => active_schematic_editor(app),
+            Self::SetGridStyle(_)
+            | Self::AnnotateOperatingPoint
+            | Self::AnnotateTransientVoltages => active_schematic_editor(app),
             Self::GridSnapRouting => active_schematic_editor(app),
             Self::VisibilityOptions => active_schematic_editor(app),
             Self::SelectTool => active_symbol_editor(app) || active_schematic_editor(app),
@@ -544,6 +546,10 @@ impl Command {
             Self::AnnotateOperatingPoint => Some(
                 app.state.design.schematic_visibility.annotations
                     == crate::state::SchematicAnnotationVisibility::OperatingPoint,
+            ),
+            Self::AnnotateTransientVoltages => Some(
+                app.state.design.schematic_visibility.annotations
+                    == crate::state::SchematicAnnotationVisibility::TransientVoltages,
             ),
             _ => None,
         }

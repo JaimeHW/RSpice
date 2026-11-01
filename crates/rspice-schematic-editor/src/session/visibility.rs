@@ -45,6 +45,9 @@ impl Default for DrawingSheetLayerVisibility {
 pub enum SchematicAnnotationVisibility {
     #[default]
     OperatingPoint,
+    /// The selected run's transient voltages and currents at results cursor
+    /// A, or at the run's last time point while A is not on the run.
+    TransientVoltages,
     ViolationsOnly,
     Hidden,
 }

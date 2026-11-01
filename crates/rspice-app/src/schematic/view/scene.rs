@@ -505,17 +505,22 @@ fn occurrence_net_points<'a>(
 /// Annotations come only from the explicitly selected analysis, and only for
 /// the occurrence the active tab is editing. The retained cross-probe point map
 /// is replaced for each dispatch, so pairing it with any other result would
-/// falsely attach values to a different solve.
+/// falsely attach values to a different solve. Transient voltages are the
+/// selected run's transient read at one instant ([`transient_operating_point`]),
+/// annotated as an operating point is.
 fn annotated_operating_point(
     state: &AppState,
 ) -> Option<(
-    &crate::state::DcOpResult,
+    std::borrow::Cow<'_, crate::state::DcOpResult>,
     Option<crate::state::OperatingPointAnnotationEvidence>,
     Option<&rspice_core::circuit::DeviceOpReport>,
 )> {
-    if state.design.schematic_visibility.annotations
-        != SchematicAnnotationVisibility::OperatingPoint
-        || !state.model.simulation.source.cross_probe.is_populated()
+    let annotations = state.design.schematic_visibility.annotations;
+    if !matches!(
+        annotations,
+        SchematicAnnotationVisibility::OperatingPoint
+            | SchematicAnnotationVisibility::TransientVoltages
+    ) || !state.model.simulation.source.cross_probe.is_populated()
         || !state.model.simulation.source.cross_probe.is_current_for(
             &state.model.workspace.content.active_view,
             state.model.schematic.topology_version(),
@@ -523,8 +528,12 @@ fn annotated_operating_point(
     {
         return None;
     }
+    if annotations == SchematicAnnotationVisibility::TransientVoltages {
+        let (dc_op, _) = transient_operating_point(state)?;
+        return Some((std::borrow::Cow::Owned(dc_op), None, None));
+    }
     let analysis = state.model.simulation.active_analysis()?;
-    let dc_op = analysis.dc_op.as_ref()?;
+    let dc_op = std::borrow::Cow::Borrowed(analysis.dc_op.as_ref()?);
     let retained = match analysis.result_payload.as_ref() {
         Some(crate::state::AnalysisResultPayload::OperatingPoint { annotation, .. }) => {
             Some(*annotation)
@@ -536,6 +545,95 @@ fn annotated_operating_point(
         retained,
         analysis.device_op.as_ref(),
     ))
+}
+
+/// The selected run's transient: the selected analysis when it is one, else
+/// the run's first. A stepped transient has a value per step at any instant,
+/// which one badge cannot hold, so it has none.
+fn annotated_transient(state: &AppState) -> Option<&crate::state::AnalysisResult> {
+    let is_transient = |analysis: &&crate::state::AnalysisResult| {
+        analysis.analysis_type == crate::state::AnalysisType::Transient
+            && analysis.family_metadata.is_none()
+    };
+    state
+        .model
+        .simulation
+        .active_analysis()
+        .filter(is_transient)
+        .or_else(|| {
+            state
+                .model
+                .simulation
+                .active_run()?
+                .analyses
+                .iter()
+                .find(is_transient)
+        })
+}
+
+/// The instant transient voltages are read at: results cursor A where it lies
+/// on the transient's time span, else the transient's last time point; with
+/// whether it is the cursor's.
+fn transient_annotation_time(
+    analysis: &crate::state::AnalysisResult,
+    cursor: Option<f64>,
+) -> Option<(f64, bool)> {
+    let times = &analysis.waveforms.first()?.x;
+    let (first, last) = (*times.first()?, *times.last()?);
+    Some(
+        cursor
+            .filter(|time| (first..=last).contains(time))
+            .map_or((last, false), |time| (time, true)),
+    )
+}
+
+/// The selected run's transient read at one instant
+/// ([`transient_annotation_time`]) as an operating point: every voltage,
+/// current and power it retained, linearly interpolated between the time
+/// points either side; with the instant.
+fn transient_operating_point(state: &AppState) -> Option<(crate::state::DcOpResult, f64)> {
+    let analysis = annotated_transient(state)?;
+    let (time, _) = transient_annotation_time(analysis, state.results.results.session.cursors.a)?;
+    let mut dc_op = crate::state::DcOpResult::default();
+    for trace in &analysis.waveforms {
+        let (values, unit) = if wrapped_signal_name(&trace.name, 'V').is_some() {
+            (&mut dc_op.node_voltages, "V")
+        } else if wrapped_signal_name(&trace.name, 'I').is_some() {
+            (&mut dc_op.branch_currents, "A")
+        } else if wrapped_signal_name(&trace.name, 'P').is_some() {
+            (&mut dc_op.power_dissipation, "W")
+        } else {
+            continue;
+        };
+        values.push(crate::state::OperatingPointValue {
+            name: trace.name.clone(),
+            value: rspice_results::sampling::sample_at(&trace.x, &trace.y, time),
+            unit: trace.unit.clone().unwrap_or_else(|| unit.to_owned()),
+        });
+    }
+    Some((dc_op, time))
+}
+
+/// What the status bar says as transient voltages are turned on: the instant
+/// the canvas reads, or why it shows none.
+pub(crate) fn transient_annotation_status(state: &AppState) -> String {
+    let Some(analysis) = annotated_transient(state) else {
+        return "No transient result is selected: run a transient analysis to annotate its voltages."
+            .to_owned();
+    };
+    let Some((time, at_cursor)) =
+        transient_annotation_time(analysis, state.results.results.session.cursors.a)
+    else {
+        return "The selected transient retained no waveforms to annotate.".to_owned();
+    };
+    let time = badge_quantity(time, "s");
+    if at_cursor {
+        format!("Transient voltages at {time}, cursor A.")
+    } else {
+        format!(
+            "Transient voltages at {time}, the end of the run. Place cursor A to choose another instant."
+        )
+    }
 }
 
 /// A fingerprint of everything the voltage badges are read from, hashed by
@@ -702,7 +800,7 @@ pub(super) fn refresh_voltage_badges(state: &mut AppState) {
     let Some((dc_op, _, _)) = annotated_operating_point(state) else {
         return;
     };
-    let fingerprint = voltage_badge_fingerprint(state, dc_op);
+    let fingerprint = voltage_badge_fingerprint(state, &dc_op);
     if state
         .model
         .schematic
@@ -713,7 +811,8 @@ pub(super) fn refresh_voltage_badges(state: &mut AppState) {
     {
         return;
     }
-    let badges = std::sync::Arc::new(voltage_badges(state, dc_op));
+    let badges = std::sync::Arc::new(voltage_badges(state, &dc_op));
+    drop(dc_op);
     state
         .model
         .schematic
@@ -765,8 +864,8 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
         .schematic
         .session
         .operating_point_badges
-        .current(voltage_badge_fingerprint(state, dc_op))
-        .map_or_else(|| voltage_badges(state, dc_op), |badges| badges.to_vec());
+        .current(voltage_badge_fingerprint(state, &dc_op))
+        .map_or_else(|| voltage_badges(state, &dc_op), |badges| badges.to_vec());
     let back_annotation = state.design.schematic_visibility.back_annotation;
 
     let retained_currents = retained_annotation.is_none_or(|annotation| {
@@ -825,7 +924,7 @@ pub(super) fn operating_point_annotations(state: &AppState) -> Vec<OperatingPoin
             );
         }
         if back_annotation == SchematicBackAnnotationContent::VoltagesCurrentsAndPower
-            && let Some(power) = device_power(dc_op, &component.name)
+            && let Some(power) = device_power(&dc_op, &component.name)
         {
             lines.push(format!(
                 "{} = {}",
@@ -1520,7 +1619,7 @@ mod tests {
                 .schematic
                 .session
                 .operating_point_badges
-                .current(voltage_badge_fingerprint(state, dc_op))
+                .current(voltage_badge_fingerprint(state, &dc_op))
         };
         assert!(held(&state).is_none());
         refresh_voltage_badges(&mut state);
@@ -1700,5 +1799,61 @@ mod tests {
         let nominal = operating_point_annotations(&state);
         assert!(text(&nominal[0]).contains("1.25"));
         assert!(text(&nominal[1]).contains("2 mA"));
+    }
+
+    /// Transient voltages badge the nets and the selected device as the DC
+    /// operating point does, from the run's transient read at results cursor
+    /// A, linearly between time points, and at the run's last time point
+    /// while A is off the run; never from the DC operating point beside it.
+    #[test]
+    fn transient_voltages_annotate_the_transient_at_cursor_a() {
+        let mut state = state_with_operating_point();
+        state.model.simulation.retained.runs[0].add_analysis(
+            AnalysisResult::new(2, AnalysisType::Transient, "TRAN").with_waveforms(vec![
+                crate::state::RetainedTrace::new(
+                    "V(out)",
+                    vec![0.0, 1.0e-3, 2.0e-3],
+                    vec![0.0, 1.0, 3.0],
+                    "#ffbd2e",
+                ),
+                crate::state::RetainedTrace::new(
+                    "I(vbias)",
+                    vec![0.0, 1.0e-3, 2.0e-3],
+                    vec![0.0, -1.0e-3, -3.0e-3],
+                    "#4fc1ff",
+                ),
+            ]),
+        );
+        state.design.schematic_visibility.annotations =
+            SchematicAnnotationVisibility::TransientVoltages;
+        let read = |state: &AppState| {
+            operating_point_annotations(state)
+                .iter()
+                .map(text)
+                .collect::<Vec<_>>()
+        };
+
+        assert_eq!(read(&state), ["out 3 V", "I(vbias) = -3 mA"]);
+        assert_eq!(
+            transient_annotation_status(&state),
+            "Transient voltages at 2 ms, the end of the run. Place cursor A to choose another instant."
+        );
+
+        state.results.results.session.cursors.a = Some(1.5e-3);
+        assert_eq!(read(&state), ["out 2 V", "I(vbias) = -2 mA"]);
+        assert_eq!(
+            transient_annotation_status(&state),
+            "Transient voltages at 1.5 ms, cursor A."
+        );
+
+        state.results.results.session.cursors.a = Some(5.0);
+        assert_eq!(read(&state), ["out 3 V", "I(vbias) = -3 mA"]);
+
+        state.model.simulation.retained.runs[0].analyses.truncate(1);
+        assert!(read(&state).is_empty());
+        assert_eq!(
+            transient_annotation_status(&state),
+            "No transient result is selected: run a transient analysis to annotate its voltages."
+        );
     }
 }

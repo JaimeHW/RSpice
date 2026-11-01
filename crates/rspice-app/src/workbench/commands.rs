@@ -358,6 +358,7 @@ impl Command {
             | Self::CycleGrid
             | Self::SetGridStyle(_)
             | Self::AnnotateOperatingPoint
+            | Self::AnnotateTransientVoltages
             | Self::GridSnapRouting
             | Self::VisibilityOptions
             | Self::EngineeringTableView
@@ -641,6 +642,18 @@ impl Command {
                 } else {
                     SchematicAnnotationVisibility::OperatingPoint
                 };
+            }
+            // On, the status bar says which instant the badges read.
+            Self::AnnotateTransientVoltages => {
+                use crate::state::SchematicAnnotationVisibility;
+                let annotations = &mut app.state.design.schematic_visibility.annotations;
+                if *annotations == SchematicAnnotationVisibility::TransientVoltages {
+                    *annotations = SchematicAnnotationVisibility::ViolationsOnly;
+                } else {
+                    *annotations = SchematicAnnotationVisibility::TransientVoltages;
+                    let status = crate::schematic::view::transient_annotation_status(&app.state);
+                    app.state.workbench.prompt(status);
+                }
             }
             Self::GridSnapRouting => {
                 crate::workbench::app::open_grid_snap_routing_dialog(&mut app.state);
