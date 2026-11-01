@@ -1,6 +1,7 @@
 //! Resolve control output against immutable, named analysis datasets.
 
 use super::*;
+mod batch;
 mod dcmatch;
 mod distortion;
 mod noise;
@@ -103,6 +104,16 @@ pub enum ControlPresentationKind {
         vectors: Vec<ControlVectorId>,
         unit: SignalUnit,
     },
+    /// Text the script prints on standard output, exactly as given:
+    /// `echo`, `display` and the plot list of a bare `setplot`.
+    Text(String),
+    /// `listing`: the presentation host prints the deck source.
+    Listing,
+    /// `rusage`: the presentation host reports its own resource use.
+    ResourceUsage,
+    /// A command ngspice -b accepts with no batch effect. The host reports
+    /// this reason and the script continues.
+    Ignored(String),
 }
 
 #[derive(Debug, Clone)]
@@ -465,8 +476,7 @@ impl ControlCircuit {
         {
             return Ok((dataset, rest));
         }
-        self.datasets
-            .last()
+        self.current_dataset()
             .map(|dataset| (dataset, name))
             .ok_or_else(|| command_error(line, "output requires a completed analysis dataset"))
     }
@@ -1165,7 +1175,7 @@ impl<'a> Resolver<'a> {
             .or(inputs.first())
             .map(|input| input.dataset)
             .or(preferred)
-            .or_else(|| self.circuit.datasets.last())
+            .or_else(|| self.circuit.current_dataset())
             .ok_or_else(|| {
                 command_error(self.line, "output requires a completed analysis dataset")
             })?;
@@ -1342,34 +1352,36 @@ fn parse_option(
     match name.as_str() {
         "title" => {
             word(input, line)?;
-            let title = if let Some(quote @ ('\'' | '"')) = input.chars().next() {
-                let rest = &input[1..];
-                let end = rest
-                    .find(quote)
-                    .ok_or_else(|| command_error(line, "unterminated plot title"))?;
-                let title = rest[..end].to_string();
-                let remaining = &rest[end + 1..];
-                if !remaining.is_empty() && !remaining.starts_with(char::is_whitespace) {
-                    return Err(command_error(
-                        line,
-                        "plot title must end at an argument boundary",
-                    ));
-                }
-                *input = remaining.trim_start();
-                title
-            } else {
-                word(input, line)?.to_string()
-            };
-            options.title = Some(title);
+            options.title = Some(label(input, &name, line)?);
         }
-        "xlimit" | "ylimit" => {
+        // ngspice plotit.c reads these for its window and grid only; they
+        // select neither the plotted vectors nor their values.
+        "xlabel" | "ylabel" => {
+            word(input, line)?;
+            label(input, &name, line)?;
+        }
+        "xdelta" | "xdel" | "ydelta" | "ydel" | "xcompress" | "xcomp" | "sgraphid" => {
+            word(input, line)?;
+            word(input, line)?;
+        }
+        "xindices" | "xind" => {
+            word(input, line)?;
+            word(input, line)?;
+            word(input, line)?;
+        }
+        "combplot" | "digitop" | "kicad" | "lingrid" | "linplot" | "nogrid" | "nointerp"
+        | "plainplot" | "pointplot" | "polar" | "retraceplot" | "samep" | "smith" | "smithgrid"
+        | "xycontour" => {
+            word(input, line)?;
+        }
+        "xlimit" | "xl" | "ylimit" | "yl" => {
             word(input, line)?;
             let low = scalar(word(input, line)?, variables, line, abort)?;
             let high = scalar(word(input, line)?, variables, line, abort)?;
             if low >= high {
                 return Err(command_error(line, "plot limits must be increasing"));
             }
-            if name == "xlimit" {
+            if name.starts_with('x') {
                 options.x_limits = Some([low, high])
             } else {
                 options.y_limits = Some([low, high])
@@ -1383,6 +1395,28 @@ fn parse_option(
         _ => return Ok(false),
     }
     Ok(true)
+}
+
+/// A plot `title`, `xlabel` or `ylabel` value: one word, or a quoted string.
+fn label(input: &mut &str, name: &str, line: usize) -> Result<String, ControlError> {
+    if let Some(quote @ ('\'' | '"')) = input.chars().next() {
+        let rest = &input[1..];
+        let end = rest
+            .find(quote)
+            .ok_or_else(|| command_error(line, format!("unterminated plot {name}")))?;
+        let text = rest[..end].to_string();
+        let remaining = &rest[end + 1..];
+        if !remaining.is_empty() && !remaining.starts_with(char::is_whitespace) {
+            return Err(command_error(
+                line,
+                format!("plot {name} must end at an argument boundary"),
+            ));
+        }
+        *input = remaining.trim_start();
+        Ok(text)
+    } else {
+        Ok(word(input, line)?.to_string())
+    }
 }
 
 fn validate_log_limits(options: &ControlPlotOptions, line: usize) -> Result<(), ControlError> {

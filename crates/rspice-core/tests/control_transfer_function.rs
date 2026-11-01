@@ -210,7 +210,11 @@ fn unbounded_impedance_is_a_printable_ordered_scalar_determination() {
     }
     let printed = presentation(&mut circuit, &engine, "print", "input_impedance");
     assert_eq!(printed.scalars.len(), 1);
-    assert!(execute(&mut circuit, &engine, "plot", "input_impedance").is_err());
+    // An unbounded scalar has no finite trace, so the batch plot is not drawn.
+    assert!(matches!(
+        presentation(&mut circuit, &engine, "plot", "input_impedance").kind,
+        ControlPresentationKind::Ignored(_)
+    ));
     assert_eq!(circuit.datasets().len(), 1);
 }
 

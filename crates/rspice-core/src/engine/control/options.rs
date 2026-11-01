@@ -100,35 +100,98 @@ impl ControlCircuit {
         variables: &ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<(), ControlExecutionError> {
-        let text = command.arguments.trim();
-        if text.eq_ignore_ascii_case("noinit") {
-            // ngspice frontend/options.c sets ft_noinitprint. It does not
-            // change the circuit, charge state, or .TRAN UIC flag.
-            self.settings.suppress_initial_listing = true;
-            return Ok(());
+        use crate::execution::control::shell::{SetValue, assignments};
+        let assignments = assignments(&command.arguments, command.line)?;
+        if assignments.is_empty() {
+            return Err(command_error(command.line, "set requires a variable").into());
         }
-        let split = text
-            .find(|character: char| character.is_whitespace() || character == '=')
-            .unwrap_or(text.len());
-        let name = text.get(..split).unwrap_or_default();
-        let value = text.get(split..).unwrap_or_default().trim();
-        let value = value.strip_prefix('=').unwrap_or(value).trim();
-        if !name.eq_ignore_ascii_case("num_threads") {
-            return Err(command_error(
-                command.line,
-                format!("set variable '{name}' has no control-host handler"),
-            )
-            .into());
+        // Validate every assignment before applying any, so a refused
+        // variable leaves the session's settings as they were.
+        let mut settings = self.settings.clone();
+        for assignment in &assignments {
+            let name = assignment.name.to_ascii_lowercase();
+            if name == "noinit" {
+                // ngspice frontend/options.c sets ft_noinitprint. It does not
+                // change the circuit, charge state, or .TRAN UIC flag.
+                settings.suppress_initial_listing = true;
+            } else if name == "num_threads" {
+                let SetValue::Word(value) = &assignment.value else {
+                    return Err(command_error(
+                        command.line,
+                        "num_threads requires a positive representable integer",
+                    )
+                    .into());
+                };
+                let count = scalar(&value.text, variables, command.line, abort)?;
+                if count < 1.0 || count.fract() != 0.0 || count >= usize::MAX as Value {
+                    return Err(command_error(
+                        command.line,
+                        "num_threads requires a positive representable integer",
+                    )
+                    .into());
+                }
+                settings.maximum_parallel_workers = Some(count as usize);
+            } else if !presentation_variable(&name) {
+                return Err(command_error(
+                    command.line,
+                    format!(
+                        "set variable '{}' has no control-host handler",
+                        assignment.name
+                    ),
+                )
+                .into());
+            }
         }
-        let count = scalar(value, variables, command.line, abort)?;
-        if count < 1.0 || count.fract() != 0.0 || count >= usize::MAX as Value {
-            return Err(command_error(
-                command.line,
-                "num_threads requires a positive representable integer",
-            )
-            .into());
-        }
-        self.settings.maximum_parallel_workers = Some(count as usize);
+        self.settings = settings;
         Ok(())
     }
+}
+
+/// Variables that only steer interactive use, plotting or hardcopy. A batch
+/// run has no window, printer or prompt, so ngspice -b accepts them with no
+/// effect on any result (manual section 17.7, "Variables").
+fn presentation_variable(name: &str) -> bool {
+    const NAMES: &[&str] = &[
+        "askquit",
+        "noaskquit",
+        "nolegend",
+        "nogrid",
+        "gridstyle",
+        "gridsize",
+        "plotstyle",
+        "pointchars",
+        "ticmarks",
+        "ticlist",
+        "ticchar",
+        "pensize",
+        "xbrushwidth",
+        "xgridwidth",
+        "xfont",
+        "xfont_size",
+        "wfont",
+        "wfont_size",
+        "x11lineararcs",
+        "plotwinwidth",
+        "plotwinheight",
+        "plotwininfo",
+        "device",
+        "term",
+        "lprplot",
+        "lprps",
+        "editor",
+        "prompt",
+        "history",
+        "moremode",
+        "nomoremode",
+        "interactive",
+        "controlswait",
+        "curplottitle",
+    ];
+    NAMES.contains(&name)
+        || ["hcopy", "gnuplot_", "svg_"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        || name
+            .strip_prefix("color")
+            .is_some_and(|index| !index.is_empty() && index.bytes().all(|b| b.is_ascii_digit()))
 }

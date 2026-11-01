@@ -198,7 +198,7 @@ fn substitutions_roundtrip_subnormal_and_maximum_finite_components() {
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]
 #[cfg_attr(not(target_arch = "wasm32"), test)]
-fn complex_plot_limits_are_rejected_without_replacing_retained_data() {
+fn complex_plot_limits_are_not_drawn_and_keep_retained_data() {
     let program = program("let z = 2+1e-300j\nop\nplot v(in) ylimit 0 z");
     let mut circuit = circuit(&program);
     let mut session = program.start(ParamContext::new());
@@ -214,10 +214,19 @@ fn complex_plot_limits_are_rejected_without_replacing_retained_data() {
         .next_command(&mut circuit, &NoAbort)
         .unwrap()
         .unwrap();
-    let error = circuit
+    // ngspice -b ignores plot, so a plot it cannot draw does not stop the run.
+    let effect = circuit
         .execute(&Engine::default(), &plot, session.variables(), &NoAbort)
-        .unwrap_err();
-    assert!(error.to_string().contains("real value"), "{error}");
+        .unwrap();
+    assert!(
+        matches!(
+            &effect,
+            ControlCommandEffect::Presentation(request)
+                if matches!(&request.kind, ControlPresentationKind::Ignored(reason)
+                    if reason.contains("real value"))
+        ),
+        "{effect:?}"
+    );
     assert_eq!(circuit.datasets().len(), 1);
     assert_eq!(circuit.datasets()[0].analysis_id, identity);
 }

@@ -12,6 +12,8 @@ use crate::netlist::expr::{ParamContext, eval_expression_complex_with_abort, is_
 use crate::{ComplexValue, Value};
 use std::collections::BTreeMap;
 
+pub(crate) mod shell;
+
 #[derive(Debug, Clone, Copy)]
 pub struct ControlLimits {
     pub max_source_bytes: usize,
@@ -84,7 +86,10 @@ enum Op {
     },
     Break,
     Continue,
-    Quit,
+    /// ngspice `quit [status]`; the argument is substituted when it runs.
+    Quit {
+        argument: String,
+    },
     Command {
         name: String,
         arguments: String,
@@ -277,10 +282,9 @@ impl ControlProgram {
                         Op::Continue
                     }
                 }
-                "quit" => {
-                    require_empty(rest, line)?;
-                    Op::Quit
-                }
+                "quit" => Op::Quit {
+                    argument: rest.to_owned(),
+                },
                 _ => Op::Command {
                     name: head.to_ascii_lowercase(),
                     arguments: rest.to_owned(),
@@ -333,6 +337,7 @@ impl ControlProgram {
             pc: 0,
             steps: 0,
             failed: false,
+            quit_status: None,
         }
     }
 }
@@ -365,11 +370,18 @@ pub struct ControlSession<'a> {
     pc: usize,
     steps: usize,
     failed: bool,
+    quit_status: Option<i32>,
 }
 
 impl ControlSession<'_> {
     pub fn variables(&self) -> &ParamContext {
         &self.variables
+    }
+
+    /// The status an executed `quit` requested, or `None` when the script
+    /// ended without one. ngspice exits a batch run with this status.
+    pub fn quit_status(&self) -> Option<i32> {
+        self.quit_status
     }
 
     /// Yield the next host command. A host failure must stop the session; it
@@ -584,7 +596,9 @@ impl ControlSession<'_> {
                         .ok_or_else(|| syntax(line, "continue without an active loop"))?;
                     self.pc = frame.end;
                 }
-                Op::Quit => {
+                Op::Quit { argument } => {
+                    let argument = self.substitute(argument, line, abort)?;
+                    self.quit_status = Some(quit_status(&argument));
                     self.pc = self.program.instructions.len();
                     return Ok(None);
                 }
@@ -696,6 +710,25 @@ fn control_body(text: &str) -> &str {
         }
     }
     text
+}
+
+/// ngspice `com_quit` (frontend/misccoms.c) reads the status with `%d`
+/// from the first word; any other word, `noask` included, exits normally.
+fn quit_status(argument: &str) -> i32 {
+    let word = argument.split_whitespace().next().unwrap_or_default();
+    let (sign, digits) = match word.strip_prefix('-') {
+        Some(rest) => (-1i64, rest),
+        None => (1, word.strip_prefix('+').unwrap_or(word)),
+    };
+    let digits: String = digits.chars().take_while(char::is_ascii_digit).collect();
+    if digits.is_empty() {
+        return 0;
+    }
+    digits
+        .parse::<i64>()
+        .ok()
+        .and_then(|value| i32::try_from(sign * value).ok())
+        .unwrap_or(i32::MAX)
 }
 
 fn split_head(text: &str) -> (&str, &str) {

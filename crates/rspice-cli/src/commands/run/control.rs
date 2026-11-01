@@ -3,6 +3,7 @@
 use super::*;
 use rspice_core::engine::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlExecutionError,
+    ControlPresentationKind,
 };
 use rspice_core::execution::control::{ControlError, ControlErrorKind};
 use rspice_core::netlist::ControlScriptSource;
@@ -226,18 +227,28 @@ pub(super) fn run(
                         published.extend(ctx.published.into_inner());
                     }
                 }
-                ControlCommandEffect::Presentation(request) => {
-                    presentation_ordinal += 1;
-                    outputs.extend(output::present(
-                        &request,
-                        &circuit,
-                        args,
-                        config,
-                        run_label,
-                        presentation_ordinal,
-                        quiet,
-                    )?);
-                }
+                ControlCommandEffect::Presentation(request) => match &request.kind {
+                    ControlPresentationKind::Text(_)
+                    | ControlPresentationKind::Listing
+                    | ControlPresentationKind::ResourceUsage
+                    | ControlPresentationKind::Ignored(_) => {
+                        output::batch_text(&request.kind, netlist, args, quiet, started)?;
+                    }
+                    ControlPresentationKind::Plot { .. }
+                    | ControlPresentationKind::Print(_)
+                    | ControlPresentationKind::UnitsChanged { .. } => {
+                        presentation_ordinal += 1;
+                        outputs.extend(output::present(
+                            &request,
+                            &circuit,
+                            args,
+                            config,
+                            run_label,
+                            presentation_ordinal,
+                            quiet,
+                        )?);
+                    }
+                },
             }
         }
         let ran_transient = circuit
@@ -294,6 +305,18 @@ pub(super) fn run(
         Ok(()) => {
             if let Some(transaction) = transaction {
                 transaction.commit()?;
+            }
+            // ngspice -b exits with the status `quit` names; the suites use a
+            // nonzero status as the deck's own failed check. The run itself
+            // completed, so its outputs stay published.
+            if let Some(status) = session.quit_status().filter(|status| *status != 0) {
+                let failure = CliError::VerificationFailed {
+                    message: format!("the control script quit with status {status}"),
+                };
+                let mut details = failure.details();
+                details.exit_status = Some(status);
+                error_details = Some(details);
+                error = Some(failure.to_string());
             }
         }
         Err(failure) => {

@@ -164,3 +164,33 @@ fn control_empty_infinite_loop_is_bounded_and_cancellation_is_typed() {
         .is_err()
     );
 }
+
+#[test]
+fn quit_records_the_status_ngspice_reads_with_percent_d_and_stops_the_script() {
+    for (quit, status) in [
+        ("quit 1", Some(1)),
+        ("quit", Some(0)),
+        ("quit noask", Some(0)),
+        ("quit -2", Some(-2)),
+        ("quit 3x", Some(3)),
+        // The substituted scalar is `4.00000000000000000e0`; %d reads 4.
+        ("quit $&code", Some(4)),
+        ("echo no quit", None),
+    ] {
+        let source = format!("quit\n.control\nlet code = 4\n{quit}\necho after\n.endc\n.end\n");
+        let program =
+            ControlProgram::parse_deck_with_abort(&source, ControlLimits::default(), &NoAbort)
+                .unwrap();
+        let mut session = program.start(ParamContext::new());
+        let mut commands = Vec::new();
+        while let Some(command) = session
+            .next_command(&mut ParameterScalarEvaluator, &NoAbort)
+            .unwrap()
+        {
+            commands.push(command.arguments);
+        }
+        assert_eq!(session.quit_status(), status, "{quit}");
+        let ran_after = commands.iter().any(|arguments| arguments == "after");
+        assert_eq!(ran_after, status.is_none(), "{quit}");
+    }
+}

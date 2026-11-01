@@ -465,7 +465,11 @@ impl ExecutionRunner {
                         let traces = match &request.kind {
                             ControlPresentationKind::Plot { traces, .. }
                             | ControlPresentationKind::Print(traces) => traces.as_slice(),
-                            ControlPresentationKind::UnitsChanged { .. } => &[],
+                            ControlPresentationKind::UnitsChanged { .. }
+                            | ControlPresentationKind::Text(_)
+                            | ControlPresentationKind::Listing
+                            | ControlPresentationKind::ResourceUsage
+                            | ControlPresentationKind::Ignored(_) => &[],
                         };
                         if traces.iter().any(|trace| {
                             trace.x.samples.is_empty()

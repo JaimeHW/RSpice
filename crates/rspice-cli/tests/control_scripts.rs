@@ -308,7 +308,7 @@ fn included_control_commands_keep_source_locations_and_publish_atomically() {
 
     std::fs::write(
         &child,
-        script.replace("print op1.v(out) op2.v(out)", "plot v(missing)"),
+        script.replace("print op1.v(out) op2.v(out)", "print v(missing)"),
     )
     .unwrap();
     let existing = dir.join("failed.op-001.csv");
@@ -326,4 +326,72 @@ fn included_control_commands_keep_source_locations_and_publish_atomically() {
         "previous result\n"
     );
     assert!(!dir.join("failed.op-002.csv").exists());
+}
+
+#[test]
+fn quit_status_and_batch_commands_run_as_ngspice_b_runs_them() {
+    let dir = test_dir("control-batch-quit");
+    let body = "batch quit\nV1 in 0 dc 2\nR1 in out 1k\nR2 out 0 3k\n.control\n\
+                set noaskquit xbrushwidth=2 color0=white\nop\necho first \"two  words\"\n\
+                plot v(missing) ylabel 'x'\ngnuplot g v(out)\nlisting\nrusage\ndisplay\n";
+    let deck = |name: &str, quit: &str| {
+        let path = dir.join(name);
+        std::fs::write(
+            &path,
+            format!("{body}{quit}\necho after-quit\n.endc\n.end\n"),
+        )
+        .unwrap();
+        path
+    };
+    let failing = deck("fail.cir", "quit 1");
+    let summary = dir.join("fail.json");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&failing)
+        .arg("-o")
+        .arg(dir.join("fail.csv"))
+        .arg("--summary")
+        .arg(&summary)
+        .output()
+        .unwrap();
+    // A nonzero `quit` is the deck's own failed check: exit 3, status kept.
+    assert_eq!(output.status.code(), Some(3), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stdout.contains("first two  words\n"), "{stdout}");
+    assert!(!stdout.contains("\nafter-quit\n"), "{stdout}");
+    assert!(
+        stdout.contains("\tbatch quit\n\n     1 : batch quit\n"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("    14 : quit 1\n"), "{stdout}");
+    assert!(
+        stdout.contains("Total elapsed time (seconds) = "),
+        "{stdout}"
+    );
+    assert!(
+        stdout.contains("    v1#branch           : current, real, 1 long\n"),
+        "{stdout}"
+    );
+    assert!(stderr.contains("Warning: plot not drawn"), "{stderr}");
+    assert!(
+        stderr.contains("Warning: command 'gnuplot' is not available"),
+        "{stderr}"
+    );
+    assert!(stderr.contains("quit with status 1"), "{stderr}");
+    let report = std::fs::read_to_string(&summary).unwrap();
+    let report: serde_json::Value = serde_json::from_str(&report).unwrap();
+    assert_eq!(
+        report["runs"][0]["error_details"]["exit_status"], 1,
+        "{report}"
+    );
+    assert!(dir.join("fail.op-001.csv").is_file());
+    // com_quit reads the status with %d: `noask` and `0` both exit normally.
+    for (name, quit) in [("noask.cir", "quit noask"), ("zero.cir", "quit 0")] {
+        passed(&run(
+            &deck(name, quit),
+            &dir.join(format!("{name}.csv")),
+            &[],
+        ));
+    }
 }

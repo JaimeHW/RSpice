@@ -468,8 +468,22 @@ fn control_vectors_preserve_probe_spelling_and_refuse_misaligned_or_unavailable_
     ] {
         assert!(
             circuit
-                .execute(&engine, &command("plot", text), &variables, &NoAbort)
+                .execute(&engine, &command("print", text), &variables, &NoAbort)
                 .is_err(),
+            "{text}"
+        );
+        // ngspice -b never draws, so a plot of such data is not drawn and the
+        // script continues; it is never drawn on a wrong grid either.
+        assert!(
+            matches!(
+                circuit
+                    .execute(&engine, &command("plot", text), &variables, &NoAbort)
+                    .unwrap(),
+                ControlCommandEffect::Presentation(ControlPresentation {
+                    kind: ControlPresentationKind::Ignored(_),
+                    ..
+                })
+            ),
             "{text}"
         );
     }
@@ -693,4 +707,143 @@ fn control_voltage_expressions_retain_unique_node_and_dataset_provenance() {
     assert_eq!(names, ["out", "ref"]);
     assert!(traces[0].x.voltage_sources.is_empty());
     assert!(vector.samples.iter().all(|value| value.norm() < 1e-12));
+}
+
+#[test]
+fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
+    let netlist =
+        Netlist::parse("batch deck\nV1 in 0 dc 2\nR1 in out 1k\nR2 out 0 3k\n.end\n").unwrap();
+    let variables = netlist.params.clone();
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let command = |name: &str, arguments: &str| ControlCommand {
+        line: 9,
+        name: name.into(),
+        arguments: arguments.into(),
+    };
+    let kind = |circuit: &mut ControlCircuit, name: &str, arguments: &str| match circuit
+        .execute(&engine, &command(name, arguments), &variables, &NoAbort)
+        .unwrap()
+    {
+        ControlCommandEffect::Presentation(request) => Some(request.kind),
+        _ => None,
+    };
+    let text = |kind: Option<ControlPresentationKind>| match kind {
+        Some(ControlPresentationKind::Text(text)) => text,
+        other => panic!("expected batch text, got {other:?}"),
+    };
+    assert_eq!(
+        text(kind(&mut circuit, "display", "")),
+        "There are no vectors currently active.\n"
+    );
+    kind(&mut circuit, "op", "");
+    // com_echo.c: words unquoted and joined by one space; -n drops the newline.
+    assert_eq!(
+        text(kind(&mut circuit, "echo", "hello   \"a  b\" 'c'")),
+        "hello a  b c\n"
+    );
+    assert_eq!(text(kind(&mut circuit, "echo", "-n x")), "x");
+    assert_eq!(text(kind(&mut circuit, "echo", "")), "\n");
+    // pvec.c: "    %-20s: type, real, N long", sorted by name.
+    assert_eq!(
+        text(kind(&mut circuit, "display", "")),
+        "Here are the vectors currently active:\n\nTitle: batch deck\n\
+         Name: op1 (Operating Point)\n\n\
+         \x20   in                  : voltage, real, 1 long\n\
+         \x20   out                 : voltage, real, 1 long\n\
+         \x20   v1#branch           : current, real, 1 long\n"
+    );
+    kind(&mut circuit, "dc", "v1 0 1 0.5");
+    assert_eq!(
+        text(kind(&mut circuit, "setplot", "")),
+        "List of plots available:\n\nCurrent dc1\tbatch deck (DC transfer characteristic)\n\
+         \top1\tbatch deck (Operating Point)\n"
+    );
+    // setplot selects the plot unqualified names resolve against.
+    assert!(kind(&mut circuit, "setplot", "op1").is_none());
+    let Some(ControlPresentationKind::Print(traces)) = kind(&mut circuit, "print", "v(out)") else {
+        panic!("expected a print")
+    };
+    assert_eq!(traces[0].y.dataset, "op1");
+    assert_eq!(traces[0].y.samples.len(), 1);
+    assert!(
+        circuit
+            .execute(&engine, &command("setplot", "tran9"), &variables, &NoAbort)
+            .is_err()
+    );
+    assert!(matches!(
+        kind(&mut circuit, "listing", ""),
+        Some(ControlPresentationKind::Listing)
+    ));
+    assert!(matches!(
+        kind(&mut circuit, "rusage", "all"),
+        Some(ControlPresentationKind::ResourceUsage)
+    ));
+    // ngspice -b ignores what has no batch meaning, and so does a plot it
+    // cannot resolve, since com_plot.c never evaluates it in batch mode.
+    for (name, arguments) in [
+        ("gnuplot", "out v(out)"),
+        ("hardcopy", "out.ps v(out)"),
+        ("shell", "rm -rf out"),
+        ("edit", ""),
+        ("plot", "v(missing)"),
+    ] {
+        assert!(
+            matches!(
+                kind(&mut circuit, name, arguments),
+                Some(ControlPresentationKind::Ignored(_))
+            ),
+            "{name}"
+        );
+    }
+    // Every ngspice plot keyword is accepted, and the plot is still drawn.
+    let Some(ControlPresentationKind::Plot { options, traces }) = kind(
+        &mut circuit,
+        "plot",
+        "v(out) ylabel 'Output voltage' xlabel volts xl 0 1 nogrid xdelta 0.1 title out",
+    ) else {
+        panic!("expected a plot")
+    };
+    assert_eq!(options.title.as_deref(), Some("out"));
+    assert_eq!(options.x_limits, Some([0.0, 1.0]));
+    assert_eq!(traces.len(), 1);
+    // Analysis commands rspice cannot run still refuse.
+    assert!(
+        circuit
+            .execute(&engine, &command("pss", "1k"), &variables, &NoAbort)
+            .is_err()
+    );
+}
+
+#[test]
+fn set_accepts_presentation_variables_and_applies_assignments_atomically() {
+    let netlist = Netlist::parse("set deck\nV1 in 0 1\nR1 in 0 1k\n.end\n").unwrap();
+    let variables = netlist.params.clone();
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    let engine = Engine::new(SimulationConfig::default());
+    let set = |circuit: &mut ControlCircuit, arguments: &str| {
+        circuit.execute(
+            &engine,
+            &ControlCommand {
+                line: 3,
+                name: "set".into(),
+                arguments: arguments.into(),
+            },
+            &variables,
+            &NoAbort,
+        )
+    };
+    let error = set(&mut circuit, "noinit num_threads=2 units=degrees").unwrap_err();
+    assert!(error.to_string().contains("'units'"), "{error}");
+    assert!(!circuit.settings().suppress_initial_listing);
+    assert_eq!(circuit.settings().maximum_parallel_workers, None);
+    set(
+        &mut circuit,
+        "noaskquit xbrushwidth=2 color0=white color2=\"#ee82ee\" hcopydevtype = postscript \
+         nolegend gnuplot_terminal=png noinit num_threads = 2",
+    )
+    .unwrap();
+    assert!(circuit.settings().suppress_initial_listing);
+    assert_eq!(circuit.settings().maximum_parallel_workers, Some(2));
+    assert!(set(&mut circuit, "colorx=red").is_err());
 }

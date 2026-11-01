@@ -94,18 +94,45 @@ enum CommandKind {
     Analysis,
     Run,
     Presentation,
+    Echo,
+    Display,
+    Listing,
+    ResourceUsage,
+    SetPlot,
+    /// A command ngspice -b accepts with no batch effect.
+    Ignored(Ignored),
+}
+
+#[derive(Clone, Copy)]
+enum Ignored {
+    /// Plotting and hardcopy devices: a batch run has no window or printer.
+    Device,
+    /// Interactive editors, help and history.
+    Interactive,
+    /// Commands that would start another program on the host.
+    HostProgram,
 }
 
 impl CommandKind {
     fn parse(command: &ControlCommand) -> Result<Self, ControlError> {
         Ok(match command.name.as_str() {
             "option" | "options" => Self::Options,
-            "set" => Self::Set,
+            "set" | "setcs" => Self::Set,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
+            "echo" => Self::Echo,
+            "display" => Self::Display,
+            "listing" => Self::Listing,
+            "rusage" => Self::ResourceUsage,
+            "setplot" => Self::SetPlot,
+            "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
+                Self::Ignored(Ignored::Device)
+            }
+            "edit" | "help" | "history" => Self::Ignored(Ignored::Interactive),
+            "shell" => Self::Ignored(Ignored::HostProgram),
             _ => {
                 return Err(command_error(
                     command.line,
@@ -127,6 +154,9 @@ impl CommandKind {
 pub struct ControlCircuit {
     netlist: Netlist,
     datasets: Vec<ControlNamedDataset>,
+    /// The dataset unqualified vector names resolve against: the newest,
+    /// unless `setplot` selected another (ngspice `plot_cur`).
+    current: Option<usize>,
     ordinals: BTreeMap<&'static str, usize>,
     retained_values: usize,
     vector_units: BTreeMap<ControlVectorId, crate::signal_unit::SignalUnit>,
@@ -142,6 +172,7 @@ impl ControlCircuit {
         Ok(Self {
             netlist,
             datasets: Vec::new(),
+            current: None,
             ordinals: BTreeMap::new(),
             retained_values: 0,
             vector_units: BTreeMap::new(),
@@ -160,6 +191,10 @@ impl ControlCircuit {
 
     pub fn datasets(&self) -> &[ControlNamedDataset] {
         &self.datasets
+    }
+
+    fn current_dataset(&self) -> Option<&ControlNamedDataset> {
+        self.current.and_then(|index| self.datasets.get(index))
     }
 
     /// Consume the completed session for publication without cloning results.
@@ -271,13 +306,93 @@ impl ControlCircuit {
                 }
                 Ok(PreparedCommand::Analyses(analyses))
             }
-            CommandKind::Presentation => {
-                self.present(engine, command, variables, abort)
-                    .map(|request| {
-                        PreparedCommand::Complete(ControlCommandEffect::Presentation(request))
-                    })
+            CommandKind::Presentation => match self.present(engine, command, variables, abort) {
+                Ok(request) => Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::Presentation(request),
+                )),
+                // ngspice -b never draws, so a plot it cannot resolve does not
+                // stop its run; an rspice plot file is a convenience on top.
+                Err(ControlExecutionError::Command(error))
+                    if command.name == "plot"
+                        && !matches!(
+                            error.kind,
+                            ControlErrorKind::Aborted | ControlErrorKind::ResourceLimit
+                        ) =>
+                {
+                    Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Ignored(format!(
+                            "plot not drawn: {}",
+                            error.message
+                        )),
+                    ))
+                }
+                Err(error) => Err(error),
+            },
+            CommandKind::Echo => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(Self::echo(command)),
+            )),
+            CommandKind::Display => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(self.display(command)?),
+            )),
+            CommandKind::Listing => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Listing,
+            )),
+            CommandKind::ResourceUsage => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::ResourceUsage,
+            )),
+            CommandKind::SetPlot => {
+                let words = crate::execution::control::shell::words(&command.arguments);
+                let [name] = words.as_slice() else {
+                    if words.is_empty() {
+                        return Ok(Self::batch_output(
+                            command,
+                            ControlPresentationKind::Text(self.plot_list()),
+                        ));
+                    }
+                    return Err(command_error(line, "setplot takes one plot name").into());
+                };
+                let index = self
+                    .datasets
+                    .iter()
+                    .position(|dataset| dataset.name.eq_ignore_ascii_case(&name.text))
+                    .ok_or_else(|| {
+                        command_error(line, format!("setplot: no plot named '{}'", name.text))
+                    })?;
+                self.current = Some(index);
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Ignored(kind) => {
+                let reason = match kind {
+                    Ignored::Device | Ignored::Interactive => format!(
+                        "command '{}' is not available during batch simulation, ignored",
+                        command.name
+                    ),
+                    Ignored::HostProgram => format!(
+                        "command '{}' would start a host program; a control script cannot, ignored",
+                        command.name
+                    ),
+                };
+                Ok(Self::batch_output(
+                    command,
+                    ControlPresentationKind::Ignored(reason),
+                ))
             }
         }
+    }
+
+    fn batch_output(command: &ControlCommand, kind: ControlPresentationKind) -> PreparedCommand {
+        PreparedCommand::Complete(ControlCommandEffect::Presentation(ControlPresentation {
+            command: command.clone(),
+            kind,
+            scalars: Vec::new(),
+        }))
     }
 
     fn run_analysis<E, F>(
@@ -501,6 +616,7 @@ impl ControlCircuit {
             command: analysis,
             result,
         });
+        self.current = Some(self.datasets.len() - 1);
         self.ordinals.insert(kind, ordinal);
         self.retained_values = retained_values;
         Ok(name)

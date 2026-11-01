@@ -21,7 +21,11 @@ pub(super) fn present(
     let (traces, options) = match &request.kind {
         ControlPresentationKind::Plot { traces, options } => (traces.as_slice(), Some(options)),
         ControlPresentationKind::Print(traces) => (traces.as_slice(), None),
-        ControlPresentationKind::UnitsChanged { .. } => return Ok(Vec::new()),
+        ControlPresentationKind::UnitsChanged { .. }
+        | ControlPresentationKind::Text(_)
+        | ControlPresentationKind::Listing
+        | ControlPresentationKind::ResourceUsage
+        | ControlPresentationKind::Ignored(_) => return Ok(Vec::new()),
     };
     let summary_stdout = args.summary.as_deref() == Some(Path::new("-"));
     if options.is_none() && !summary_stdout {
@@ -171,6 +175,75 @@ pub(super) fn present(
         }
     }
     Ok(paths)
+}
+
+/// Batch output of `echo`, `display`, `setplot`, `listing` and `rusage`, and
+/// the warning for a command ngspice -b ignores. Script text is output even
+/// under --quiet, as an authored print is; it yields stdout to a summary.
+pub(super) fn batch_text(
+    kind: &ControlPresentationKind,
+    netlist: &Netlist,
+    args: &RunArgs,
+    quiet: bool,
+    started: Instant,
+) -> Result<(), CliError> {
+    let text = match kind {
+        ControlPresentationKind::Text(text) => text.clone(),
+        ControlPresentationKind::Listing => listing(netlist, args),
+        // ngspice prints its own CPU and memory figures here; the elapsed time
+        // is the one this host measures for the whole script.
+        ControlPresentationKind::ResourceUsage => format!(
+            "\nTotal elapsed time (seconds) = {:.3} \n",
+            started.elapsed().as_secs_f64()
+        ),
+        ControlPresentationKind::Ignored(reason) => {
+            if !quiet {
+                crate::console::diagnostic_line(format_args!("Warning: {reason}"));
+            }
+            return Ok(());
+        }
+        _ => return Ok(()),
+    };
+    if args.summary.as_deref() == Some(Path::new("-")) {
+        return Ok(());
+    }
+    crate::console::bytes(text.as_bytes())
+}
+
+/// ngspice `listing` (frontend/inp.c `inp_list`, logical form): the title,
+/// then each non-comment logical line under its line number, then `.end`.
+fn listing(netlist: &Netlist, args: &RunArgs) -> String {
+    let mut text = format!("\t{}\n\n", netlist.title);
+    let source = (args.input.as_os_str() != "-")
+        .then(|| std::fs::read_to_string(&args.input).ok())
+        .flatten()
+        .unwrap_or_default();
+    let mut lines: Vec<(usize, String)> = Vec::new();
+    for (index, line) in source.lines().enumerate() {
+        let trimmed = line.trim();
+        if let Some(rest) = trimmed.strip_prefix('+')
+            && let Some((_, logical)) = lines.last_mut()
+        {
+            logical.push(' ');
+            logical.push_str(rest.trim());
+            continue;
+        }
+        let lower = trimmed.to_ascii_lowercase();
+        if trimmed.is_empty()
+            || trimmed.starts_with('*')
+            || (lower.starts_with(".end")
+                && !lower[4..].starts_with(|c: char| c.is_ascii_alphabetic()))
+        {
+            continue;
+        }
+        lines.push((index + 1, trimmed.to_owned()));
+    }
+    let end = lines.last().map_or(1, |(number, _)| number + 1);
+    for (number, line) in lines {
+        text.push_str(&format!("{number:6} : {line}\n"));
+    }
+    text.push_str(&format!("{end:6} : .end\n"));
+    text
 }
 
 #[derive(Serialize)]

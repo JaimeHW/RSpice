@@ -1,0 +1,202 @@
+//! Batch-mode text for commands that change no circuit and no dataset:
+//! `echo`, `display` and the plot list of `setplot` (ngspice frontend
+//! com_echo.c, com_display.c and plotting/pvec.c, postcoms.c `com_splot`).
+
+use super::*;
+
+impl ControlNamedDataset {
+    fn node_names(&self) -> &[String] {
+        match &self.result {
+            ControlAnalysisResult::TransferFunction(_)
+            | ControlAnalysisResult::PoleZero(_)
+            | ControlAnalysisResult::Sensitivity(_)
+            | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::DcMatch(_) => &[],
+            ControlAnalysisResult::DcSweep(result) => result
+                .points
+                .first()
+                .map_or(&[], |point| &point.result.node_names),
+            ControlAnalysisResult::Noise(points)
+            | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => {
+                points.first().map_or(&[], |point| &point.node_names)
+            }
+            ControlAnalysisResult::Distortion(result) => result
+                .points
+                .first()
+                .map_or(&[], |point| &point.fundamental_f1.node_names),
+            ControlAnalysisResult::OperatingPoint(result) => &result.node_names,
+            ControlAnalysisResult::Ac(points)
+            | ControlAnalysisResult::AcTable(FrequencyDataResult { points, .. }) => {
+                points.first().map_or(&[], |point| &point.node_names)
+            }
+            ControlAnalysisResult::Transient(result) => &result.node_names,
+        }
+    }
+
+    /// The plot name ngspice gives the analysis (`pl_name`).
+    fn plot_title(&self) -> &'static str {
+        match &self.result {
+            ControlAnalysisResult::OperatingPoint(_) => "Operating Point",
+            ControlAnalysisResult::Ac(_) | ControlAnalysisResult::AcTable(_) => "AC Analysis",
+            ControlAnalysisResult::Distortion(_) => "Distortion Analysis",
+            ControlAnalysisResult::Stability(_) => "Stability Analysis",
+            ControlAnalysisResult::Noise(_) | ControlAnalysisResult::NoiseTable(_) => {
+                "Noise Spectral Density Curves"
+            }
+            ControlAnalysisResult::DcSweep(_) => "DC transfer characteristic",
+            ControlAnalysisResult::TransferFunction(_) => "Transfer Function",
+            ControlAnalysisResult::PoleZero(_) => "Pole-Zero Analysis",
+            ControlAnalysisResult::Sensitivity(_) => "Sensitivity Analysis",
+            ControlAnalysisResult::DcMatch(_) => "DC Match Analysis",
+            ControlAnalysisResult::Transient(_) => "Transient Analysis",
+        }
+    }
+
+    fn is_complex(&self) -> bool {
+        matches!(
+            self.result,
+            ControlAnalysisResult::Ac(_)
+                | ControlAnalysisResult::AcTable(_)
+                | ControlAnalysisResult::Distortion(_)
+                | ControlAnalysisResult::Stability(_)
+        )
+    }
+
+    /// The scale vector's name; a one-point result has none.
+    fn scale_vector(&self) -> Option<String> {
+        (!matches!(
+            self.result,
+            ControlAnalysisResult::OperatingPoint(_)
+                | ControlAnalysisResult::TransferFunction(_)
+                | ControlAnalysisResult::PoleZero(_)
+        ))
+        .then(|| self.scale_name().to_ascii_lowercase())
+    }
+
+    /// `(name, type)` for every retained raw vector; ground is no vector.
+    fn vectors(&self, is_ground: impl Fn(&str) -> bool) -> Vec<(String, &'static str)> {
+        let mut vectors: Vec<_> = self
+            .scale_vector()
+            .map(|name| (name, type_name(&self.scale_unit())))
+            .into_iter()
+            .collect();
+        vectors.extend(
+            self.node_names()
+                .iter()
+                .map(|name| name.to_ascii_lowercase())
+                .filter(|name| !is_ground(name))
+                .map(|name| (name, "voltage")),
+        );
+        vectors.extend(
+            self.branch_names()
+                .iter()
+                .map(|name| (format!("{}#branch", name.to_ascii_lowercase()), "current")),
+        );
+        vectors
+    }
+}
+
+/// ngspice `ft_typenames` for the units a raw vector can carry.
+fn type_name(unit: &SignalUnit) -> &'static str {
+    match unit {
+        SignalUnit::Volt => "voltage",
+        SignalUnit::Ampere => "current",
+        SignalUnit::Second => "time",
+        SignalUnit::Hertz => "frequency",
+        SignalUnit::Ohm => "impedance",
+        SignalUnit::Siemens => "admittance",
+        _ => "notype",
+    }
+}
+
+impl ControlCircuit {
+    /// `echo [-n] words...`: the words after substitution, unquoted and
+    /// joined by single spaces.
+    pub(in crate::engine) fn echo(command: &ControlCommand) -> String {
+        let mut words: Vec<_> = crate::execution::control::shell::words(&command.arguments)
+            .into_iter()
+            .map(|word| word.text)
+            .collect();
+        let newline = if words.first().is_some_and(|word| word == "-n") {
+            words.remove(0);
+            ""
+        } else {
+            "\n"
+        };
+        format!("{}{newline}", words.join(" "))
+    }
+
+    /// `display [vectors...]` on the current dataset.
+    pub(in crate::engine) fn display(
+        &self,
+        command: &ControlCommand,
+    ) -> Result<String, ControlError> {
+        let Some(dataset) = self.current_dataset() else {
+            return Ok("There are no vectors currently active.\n".into());
+        };
+        let length = dataset.length();
+        let numeric = if dataset.is_complex() {
+            "complex"
+        } else {
+            "real"
+        };
+        let scale = dataset.scale_vector();
+        let line = |name: &str, kind: &str| {
+            let mark = if Some(name) == scale.as_deref() {
+                " [default scale]"
+            } else {
+                ""
+            };
+            format!("    {name:<20}: {kind}, {numeric}, {length} long{mark}\n")
+        };
+        let policy = self.netlist.ground_policy();
+        let mut vectors = dataset.vectors(|name| policy.is_ground(name));
+        let requested = crate::execution::control::shell::words(&command.arguments);
+        if !requested.is_empty() {
+            let mut text = String::new();
+            for word in requested {
+                let name = word.text.to_ascii_lowercase();
+                let (_, kind) = vectors
+                    .iter()
+                    .find(|(vector, _)| *vector == name)
+                    .ok_or_else(|| {
+                        command_error(command.line, format!("no such vector as {name}"))
+                    })?;
+                text.push_str(&line(&name, kind));
+            }
+            return Ok(text);
+        }
+        // com_display.c sorts by name unless `nosort` is set.
+        vectors.sort();
+        let mut text = format!(
+            "Here are the vectors currently active:\n\nTitle: {}\nName: {} ({})\n\n",
+            self.netlist.title,
+            dataset.name,
+            dataset.plot_title()
+        );
+        for (name, kind) in &vectors {
+            text.push_str(&line(name, kind));
+        }
+        Ok(text)
+    }
+
+    /// `setplot` with no plot name: ngspice lists the plots, newest first.
+    pub(in crate::engine) fn plot_list(&self) -> String {
+        let mut text = String::from("List of plots available:\n\n");
+        let current = self.current_dataset().map(|dataset| dataset.name.as_str());
+        for dataset in self.datasets.iter().rev() {
+            let prefix = if Some(dataset.name.as_str()) == current {
+                "Current "
+            } else {
+                "\t"
+            };
+            text.push_str(&format!(
+                "{prefix}{}\t{} ({})\n",
+                dataset.name,
+                self.netlist.title,
+                dataset.plot_title()
+            ));
+        }
+        text
+    }
+}
