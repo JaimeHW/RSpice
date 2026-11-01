@@ -225,16 +225,12 @@ impl CommandSet for SheetsCommand {
                     )
                 },
             ),
+            // A drawing with no sheet catalog yet is offered too: managing
+            // its format is the first use, which creates the catalog.
             Self::SheetFormatManager => {
-                let has_active_sheet = model
-                    .workspace
-                    .content
-                    .design_management
-                    .sheet_catalog(&model.workspace.content.active_key())
-                    .is_some_and(|catalog| catalog.active().is_some());
                 let manager_open = state.drawing_sheet_support.manager.open;
                 available_or(
-                    editable && !read_only && !manager_open && has_active_sheet,
+                    editable && !read_only && !manager_open,
                     if read_only {
                         CommandAvailability::Disabled("the active schematic is read-only")
                     } else if !editable {
@@ -243,10 +239,6 @@ impl CommandSet for SheetsCommand {
                         )
                     } else if manager_open {
                         CommandAvailability::Disabled("Sheet Format Manager is already open")
-                    } else if !has_active_sheet {
-                        CommandAvailability::Disabled(
-                            "give the open sheet a property of its own in Sheet properties first",
-                        )
                     } else {
                         UNAVAILABLE
                     },

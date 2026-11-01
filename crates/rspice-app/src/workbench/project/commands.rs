@@ -45,6 +45,12 @@ pub(crate) enum ProjectCommand {
     /// Open the Project workspace on one of its pages.
     Page(ProjectPage),
     DesignManagement,
+    /// Design management opened on its Variants tab.
+    Variants,
+    /// Design management opened on its Annotation tab.
+    Annotate,
+    /// New View on the cell in front, preset to a symbol.
+    CreateSymbol,
     RevisionHistory,
     CheckAndSave,
 }
@@ -125,7 +131,7 @@ const CHECK_AND_SAVE: &[ShortcutBinding] = &[primary(
 
 impl ProjectCommand {
     /// Every command of the feature.
-    pub(crate) const ALL: [Self; 19] = [
+    pub(crate) const ALL: [Self; 22] = [
         Self::ProjectLauncher,
         Self::RecentProjects,
         Self::OpenProject,
@@ -143,6 +149,9 @@ impl ProjectCommand {
         Self::Page(ProjectPage::Dependencies),
         Self::Page(ProjectPage::Recovery),
         Self::DesignManagement,
+        Self::Variants,
+        Self::Annotate,
+        Self::CreateSymbol,
         Self::RevisionHistory,
         Self::CheckAndSave,
     ];
@@ -169,6 +178,9 @@ impl ProjectCommand {
             Self::Page(ProjectPage::Dependencies) => CommandKey::new("project-dependencies"),
             Self::Page(ProjectPage::Recovery) => ids::PROJECT_RECOVERY,
             Self::DesignManagement => CommandKey::new("design-management"),
+            Self::Variants => CommandKey::new("design-variants"),
+            Self::Annotate => CommandKey::new("annotate-reference-designators"),
+            Self::CreateSymbol => CommandKey::new("create-symbol-from-schematic"),
             Self::RevisionHistory => CommandKey::new("revision-history"),
             Self::CheckAndSave => CommandKey::new("check-and-save"),
         }
@@ -247,8 +259,29 @@ impl ProjectCommand {
                 design,
                 NONE,
             ),
-            Self::RevisionHistory => ("Revision history\u{2026}", "Design", open, design, NONE),
-            Self::CheckAndSave => ("Check and save", "Design", edits, design, CHECK_AND_SAVE),
+            Self::Variants => ("Variants\u{2026}", "Design", edits, design, NONE),
+            Self::Annotate => (
+                "Annotate reference designators\u{2026}",
+                "Design",
+                edits,
+                design,
+                NONE,
+            ),
+            Self::CreateSymbol => (
+                "Create symbol from schematic\u{2026}",
+                "Design",
+                open,
+                design,
+                NONE,
+            ),
+            Self::RevisionHistory => ("Revision history\u{2026}", "File", open, global, NONE),
+            Self::CheckAndSave => (
+                "Check and save\u{2026}",
+                "Design",
+                edits,
+                design,
+                CHECK_AND_SAVE,
+            ),
         };
         CommandSpec {
             key: self.key(),

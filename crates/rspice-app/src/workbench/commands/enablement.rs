@@ -138,6 +138,7 @@ impl Command {
                     && crate::workbench::app::rename_selection_available(state)
             }
             Self::RotateSelection
+            | Self::RotateSelectionCounterClockwise
             | Self::MirrorSelectionHorizontal
             | Self::MirrorSelectionVertical
                 if active_symbol_editor(app) =>

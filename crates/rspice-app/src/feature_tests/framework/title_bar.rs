@@ -589,7 +589,7 @@ fn occurrence_specific_shortcuts_can_be_suppressed_or_overridden() {
     );
     assert_eq!(
         Command::DescendHierarchy.spec().label,
-        "Descend into selected instance…"
+        "Descend with options…"
     );
 }
 
@@ -753,11 +753,6 @@ const DESIGN_SHEET_COMMANDS: [SheetsCommand; 4] = [
     SheetsCommand::NewSheet,
     SheetsCommand::DeleteSheet,
 ];
-
-#[test]
-fn design_placement_menu_matches_the_mockup_order() {
-    assert_menu_lists(ApplicationMenu::Design, &keys(DESIGN_PLACEMENT_COMMANDS));
-}
 
 /// The panels around the drawing are switched from View, beside what is
 /// drawn over it; Window keeps the windows and the documents in them.
@@ -1023,7 +1018,7 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         .iter()
         .map(|command| command_registry().label(*command))
         .collect();
-    assert_eq!(arrange_labels.len(), 13);
+    assert_eq!(arrange_labels.len(), 14);
     let before = app.state.model.schematic.document().components[1].pos;
     let mut frame = |events| {
         menu_items_after_frame(&ctx, events, |ui| {
@@ -1078,11 +1073,6 @@ fn the_design_menu_arrange_submenu_reaches_every_arrange_command() {
         before,
         "Rotate clockwise turned the selection"
     );
-}
-
-#[test]
-fn design_management_menu_matches_the_upgraded_governed_group() {
-    assert_menu_lists(ApplicationMenu::Design, &DESIGN_MANAGEMENT_COMMANDS);
 }
 
 #[test]
@@ -1365,6 +1355,102 @@ fn no_project_app() -> RSpiceApp {
     app
 }
 
+/// The application with the Design workspace showing a symbol view.
+#[cfg(not(target_arch = "wasm32"))]
+fn symbol_view_app() -> RSpiceApp {
+    use crate::state::{
+        Cell, CellViewRef, Library, Point, SymbolDocument, SymbolShape, View, ViewType,
+    };
+    let mut app = title_test_app();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("amp");
+    cell.add_view(View::new("schematic", ViewType::Schematic));
+    let mut view = View::new("symbol", ViewType::Symbol);
+    SymbolDocument {
+        body: vec![SymbolShape::Dot {
+            center: Point::new(20, 0),
+            radius: 2,
+        }],
+        ..SymbolDocument::default()
+    }
+    .store_in_view(&mut view)
+    .expect("a symbol stores");
+    cell.add_view(view);
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(CellViewRef::new("work", "amp", "symbol"));
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// The application with the Design workspace showing a Verilog-A view.
+#[cfg(not(target_arch = "wasm32"))]
+fn veriloga_view_app() -> RSpiceApp {
+    use crate::state::{Cell, CellViewRef, Library, View, ViewType};
+    let mut app = title_test_app();
+    let mut library = Library::new("work");
+    let mut cell = Cell::new("gain");
+    let mut view = View::new("veriloga", ViewType::VerilogA);
+    view.metadata
+        .insert("veriloga.module".to_owned(), "gain".to_owned());
+    cell.add_view(view);
+    library.add_cell(cell);
+    app.state.model.library_manager.add_library(library);
+    app.state
+        .open_workspace_view(CellViewRef::new("work", "gain", "veriloga"));
+    app.state.workbench.activate(Workspace::Design);
+    app
+}
+
+/// With a symbol in front, Design places the symbol's own shapes, offers the
+/// way back out of a symbol edited in place and saves the symbol; with a
+/// Verilog-A view in front, it compiles. Rotate counter-clockwise turns a
+/// symbol's selection as Rotate clockwise does: it was grey in every symbol.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn design_follows_the_view_in_front() {
+    let veriloga = shown_rows(ApplicationMenu::Design, &veriloga_view_app())
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect::<Vec<_>>();
+    assert!(
+        veriloga.ends_with(&["Compile Verilog-A".to_owned(), "Build settings…".to_owned()]),
+        "{veriloga:?}"
+    );
+    let schematic = shown_rows(ApplicationMenu::Design, &title_test_app())
+        .into_iter()
+        .map(|(label, _)| label)
+        .collect::<Vec<_>>();
+    assert!(
+        !schematic.iter().any(|label| label == "Compile Verilog-A"),
+        "{schematic:?}"
+    );
+
+    let mut app = symbol_view_app();
+    let rotate_ccw = Command::RotateSelectionCounterClockwise.key();
+    assert!(!app.is_enabled(rotate_ccw), "nothing is selected yet");
+    app.execute(Command::SelectAll.key());
+    assert!(
+        app.is_enabled(rotate_ccw),
+        "Rotate counter-clockwise turns the symbol's selection"
+    );
+    app.execute(rotate_ccw);
+    let turned = app
+        .state
+        .model
+        .load_active_symbol_document()
+        .expect("the symbol loads");
+    assert_eq!(
+        turned.body,
+        [crate::state::SymbolShape::Dot {
+            center: crate::state::Point::new(0, -20),
+            radius: 2,
+        }],
+        "a quarter counter-clockwise about the origin"
+    );
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn source_editor_app() -> RSpiceApp {
     let mut app = title_test_app();
@@ -1408,6 +1494,13 @@ fn every_menu_shows_exactly_its_pinned_rows() {
         check(
             &format!("{} with a source editor", menu.label()),
             menu_pin(application_menu_entries(menu), &source_editor_app()),
+            expected,
+        );
+    }
+    for (menu, expected) in PINNED_SYMBOL_MENUS {
+        check(
+            &format!("{} with a symbol open", menu.label()),
+            menu_pin(application_menu_entries(menu), &symbol_view_app()),
             expected,
         );
     }
@@ -2385,26 +2478,37 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
     (
         ApplicationMenu::Design,
         &[
-            "Open active schematic | design | Alt+2 | on",
-            "Ascend hierarchy | ascend-hierarchy | Shift+H | off: already at top hierarchy",
-            "Descend into selected instance… | descend-hierarchy | H | off: select one hierarchical instance",
+            "Descend | descend-selected-instance | Shift+E | off: select one hierarchical or Verilog-A instance",
+            "Descend with options… | descend-hierarchy | H | off: select one hierarchical instance",
+            "Return to parent | ascend-hierarchy | Shift+H | off: already at top hierarchy",
+            "Edit symbol in place | edit-symbol-in-place |  | off: select one instance",
+            "Create hierarchy… | create-hierarchy |  | off: select an editable object",
+            "Create symbol from schematic… | create-symbol-from-schematic |  | on",
             "---",
-            "Place instance… | place-instance | Shift+I | on",
-            "Draw wire | place-wire | W | on",
-            "Draw bus | place-bus | B | on",
-            "Place bus tap | place-bus-tap | T | on",
-            "Place junction | place-junction | J | on",
-            "Place net label | place-label | N | on",
-            "Place probe | place-probe | P | on",
-            "Create pins… | place-pin | Shift+P | on",
-            "Place text or note… | place-text | Shift+T | on",
-            "Draw documentation shape… | place-shape |  | on",
-            "---",
+            "Place >",
+            "  Instance… | place-instance | Shift+I | on",
+            "  Wire | place-wire | W | on",
+            "  Bus | place-bus | B | on",
+            "  Bus tap | place-bus-tap | T | on",
+            "  Net label | place-label | N | on",
+            "  Off-sheet connector | place-off-sheet-connector |  | on",
+            "  Pins… | place-pin | Shift+P | on",
+            "  Junction | place-junction | J | on",
+            "  Text or note… | place-text | Shift+T | on",
+            "  Documentation shape… | place-shape |  | on",
+            "  ---",
+            "  Resistor | place-resistor | R | on",
+            "  Capacitor | place-capacitor | C | on",
+            "  Inductor | place-inductor | L | on",
+            "  Diode | place-diode | D | on",
+            "  Voltage source | place-voltage-source | V | on",
+            "  Current source | place-current-source | I | on",
+            "  Ground | place-ground | Shift+G | on",
             "Arrange >",
             "  Rotate clockwise | rotate-selection | Ctrl+R | off: select an editable object",
             "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: select an editable object",
             "  Mirror about vertical axis | mirror-selection-horizontal | Ctrl+M | off: select an editable object",
-            "  Mirror vertically | mirror-selection-vertical | Ctrl+Shift+M | off: select an editable object",
+            "  Mirror about horizontal axis | mirror-selection-vertical | Ctrl+Shift+M | off: select an editable object",
             "  ---",
             "  Align left | align-selection-left |  | off: command is unavailable in this context",
             "  Align horizontal centers | align-selection-horizontal-centers |  | off: command is unavailable in this context",
@@ -2417,30 +2521,32 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 11] = [
             "  Distribute vertically | distribute-selection-vertical |  | off: command is unavailable in this context",
             "  ---",
             "  Snap selection to grid | snap-selection-to-grid |  | off: select an editable object",
-            "Join collinear wires | join-collinear-wires |  | on",
+            "  Join collinear wires | join-collinear-wires |  | on",
+            "Sheet >",
+            "  Previous sheet | previous-sheet | PageUp | off: the active cell view has a single sheet",
+            "  Next sheet | next-sheet | PageDown | off: the active cell view has a single sheet",
+            "  New sheet | new-sheet |  | on",
+            "  Delete… | delete-sheet |  | off: the active cell view has a single sheet",
+            "  ---",
+            "  Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
+            "  Sheet formats… | sheet-format-manager |  | on",
+            "  Sheet defaults… | sheet-defaults |  | on",
             "---",
-            "Previous sheet | previous-sheet | PageUp | off: the active cell view has a single sheet",
-            "Next sheet | next-sheet | PageDown | off: the active cell view has a single sheet",
-            "New sheet | new-sheet |  | on",
-            "Delete active sheet | delete-sheet |  | off: the active cell view has a single sheet",
-            "Sheet properties | page-setup | Ctrl+Alt+Shift+P | on",
-            "Sheet formats across this document… | sheet-format-manager |  | off: give the open sheet a property of its own in Sheet properties first",
-            "Sheet defaults… | sheet-defaults |  | on",
-            "---",
-            "Create hierarchy from selection… | create-hierarchy |  | off: select an editable object",
-            "Sheets, variants and annotation… | design-management |  | on",
-            "Connectivity and bus manager… | design-connectivity-tools |  | on",
-            "Configurations | configuration-sets |  | on",
-            "Design rule setup… | design-rule-setup |  | on",
+            "Variants… | design-variants |  | on",
+            "Annotate reference designators… | annotate-reference-designators |  | on",
+            "Connectivity and buses… | design-connectivity-tools |  | on",
             "Review comments… | review-comments |  | on",
-            "---",
-            "Specialist workspaces… | specialist-tools-design |  | on",
+            "Object table… | engineering-table-manager | Ctrl+Shift+T | on",
             "---",
             "Check cellview | check-cellview | Ctrl+E | on",
             "Check design | check-design |  | on",
-            "Check and save | check-and-save | Ctrl+Shift+E | on",
-            "---",
-            "Browse all design commands… | command-palette | Ctrl+K | on",
+            "Check and save… | check-and-save | Ctrl+Shift+E | on",
+            "Violations >",
+            "  Next violation | next-violation | ] | off: the last check found no violations",
+            "  Previous violation | previous-violation | [ | off: the last check found no violations",
+            "  ---",
+            "  Clear check results | clear-checks |  | off: no check has run",
+            "Design rule setup… | design-rule-setup |  | on",
         ],
     ),
     (
@@ -2640,6 +2746,75 @@ const PINNED_NO_PROJECT_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
         "---",
         "Exit | exit-rspice | Alt+F4 | on",
     ],
+)];
+
+#[cfg(not(target_arch = "wasm32"))]
+const PINNED_SYMBOL_MENUS: [(ApplicationMenu, &[&str]); 1] = [(
+    ApplicationMenu::Design,
+    &[
+            "Descend | descend-selected-instance | Shift+E | off: open a schematic or testbench",
+            "Descend with options… | descend-hierarchy | H | off: open a schematic or testbench",
+            "Return to parent | ascend-hierarchy | Shift+H | off: open a schematic or testbench",
+            "Return to parent schematic | exit-symbol-in-place | Enter | off: no symbol is being edited in place",
+            "Create hierarchy… | create-hierarchy |  | off: open an editable schematic or testbench",
+            "Create symbol from schematic… | create-symbol-from-schematic |  | off: open a schematic or testbench",
+            "---",
+            "Place >",
+            "  Pin | symbol-pin-tool | P | on",
+            "  Line | symbol-line-tool | L | on",
+            "  Rectangle | symbol-rectangle-tool | R | on",
+            "  Circle | symbol-circle-tool | C | on",
+            "  Arc | symbol-arc-tool | A | on",
+            "  Polygon | symbol-polygon-tool | G | on",
+            "  Text | symbol-text-tool | T | on",
+            "  ---",
+            "  Rotate selected pin to next side | symbol-rotate-pin | Ctrl+R | off: command is unavailable in this context",
+            "  Mirror selected pin across body | symbol-mirror-pin | Ctrl+M | off: command is unavailable in this context",
+            "  Update pins from contract | update-pins-from-contract |  | off: command is unavailable in this context",
+            "Arrange >",
+            "  Rotate clockwise | rotate-selection | Ctrl+R | off: open an editable schematic or testbench",
+            "  Rotate counter-clockwise | rotate-selection-ccw | Ctrl+Shift+R | off: open an editable schematic or testbench",
+            "  Mirror about vertical axis | mirror-selection-horizontal | Ctrl+M | off: open an editable schematic or testbench",
+            "  Mirror about horizontal axis | mirror-selection-vertical | Ctrl+Shift+M | off: open an editable schematic or testbench",
+            "  ---",
+            "  Align left | align-selection-left |  | off: command is unavailable in this context",
+            "  Align horizontal centers | align-selection-horizontal-centers |  | off: command is unavailable in this context",
+            "  Align right | align-selection-right |  | off: command is unavailable in this context",
+            "  Align top | align-selection-top |  | off: command is unavailable in this context",
+            "  Align vertical centers | align-selection-vertical-centers |  | off: command is unavailable in this context",
+            "  Align bottom | align-selection-bottom |  | off: command is unavailable in this context",
+            "  ---",
+            "  Distribute horizontally | distribute-selection-horizontal |  | off: command is unavailable in this context",
+            "  Distribute vertically | distribute-selection-vertical |  | off: command is unavailable in this context",
+            "  ---",
+            "  Snap selection to grid | snap-selection-to-grid |  | off: open an editable schematic or testbench",
+            "  Join collinear wires | join-collinear-wires |  | off: open an editable schematic or testbench",
+            "Sheet >",
+            "  Previous sheet | previous-sheet | PageUp | off: open a schematic or testbench",
+            "  Next sheet | next-sheet | PageDown | off: open a schematic or testbench",
+            "  New sheet | new-sheet |  | off: open an editable schematic or testbench",
+            "  Delete… | delete-sheet |  | off: open an editable schematic or testbench",
+            "  ---",
+            "  Sheet properties | page-setup | Ctrl+Alt+Shift+P | off: open an editable schematic or testbench drawing sheet",
+            "  Sheet formats… | sheet-format-manager |  | off: open an editable schematic or testbench drawing sheet",
+            "  Sheet defaults… | sheet-defaults |  | off: command is unavailable in this context",
+            "---",
+            "Variants… | design-variants |  | off: open an editable schematic",
+            "Annotate reference designators… | annotate-reference-designators |  | off: open an editable schematic",
+            "Connectivity and buses… | design-connectivity-tools |  | off: open a schematic or testbench",
+            "Review comments… | review-comments |  | off: open a schematic project",
+            "Object table… | engineering-table-manager | Ctrl+Shift+T | off: command is unavailable in this context",
+            "---",
+            "Check cellview | check-cellview | Ctrl+E | on",
+            "Check design | check-design |  | on",
+            "Validate and save symbol | save-symbol |  | on",
+            "Violations >",
+            "  Next violation | next-violation | ] | off: the last check found no violations",
+            "  Previous violation | previous-violation | [ | off: the last check found no violations",
+            "  ---",
+            "  Clear check results | clear-checks |  | off: no check has run",
+            "Design rule setup… | design-rule-setup |  | on",
+        ],
 )];
 
 #[cfg(not(target_arch = "wasm32"))]

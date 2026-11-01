@@ -104,8 +104,8 @@ impl SheetsCommand {
                 SHEET_PROPERTIES,
             ),
             Self::SheetFormatManager => (
-                "Sheet formats across this document…",
-                "File",
+                "Sheet formats…",
+                "Design",
                 PROJECT_COMMAND,
                 ShortcutContext::DesignWorkspace,
                 NONE,
@@ -119,7 +119,7 @@ impl SheetsCommand {
             ),
             Self::SheetDefaults => (
                 "Sheet defaults…",
-                "File",
+                "Design",
                 PROJECT_COMMAND,
                 ShortcutContext::DesignWorkspace,
                 NONE,

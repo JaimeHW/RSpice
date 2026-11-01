@@ -2,12 +2,13 @@
 //! renderer draws and a test can read. The source editor's right-click menu
 //! is written the same way.
 
+use crate::state::ComponentType;
 use crate::state::ModelsPage;
 use crate::state::VerificationPage;
 use crate::state::command_catalog::CommandKey;
 use crate::workbench::chrome::title_bar::application_menus::ApplicationMenu;
 use crate::workbench::chrome::title_bar::menu_entries::MenuEntry::Separator;
-use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry, palette_scope};
+use crate::workbench::chrome::title_bar::menu_entries::{MenuContext, MenuEntry};
 use crate::workbench::cloud::commands::CloudCommand;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::WorkbenchIcon;
@@ -299,60 +300,143 @@ const FOLDING_MENU: &[MenuEntry] = &[
     command(Command::UnfoldAll),
 ];
 
+/// Design: move through the hierarchy, place, arrange and lay out sheets,
+/// manage the design, then check it. A symbol view places its own shapes,
+/// and a Verilog-A view compiles.
 const DESIGN_MENU: &[MenuEntry] = &[
-    command_as(
-        Command::OpenWorkspace(Workspace::Design),
-        "Open active schematic",
-    ),
-    command(Command::AscendHierarchy),
+    command(Command::DescendHierarchyDirect),
     command(Command::DescendHierarchy),
+    command(Command::AscendHierarchy),
+    // Inside a symbol edited in place, the way back out stands where the
+    // way in did.
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[command(Command::EditSymbolInPlace)],
+    ),
+    MenuEntry::Only(
+        MenuContext::SymbolView,
+        &[command(Command::ExitSymbolInPlace)],
+    ),
+    command(Command::CreateHierarchy),
+    project(ProjectCommand::CreateSymbol),
     Separator,
-    command(Command::PlaceInstance),
-    command(Command::PlaceWire),
-    command(Command::PlaceBus),
-    command(Command::PlaceBusTap),
-    command(Command::PlaceJunction),
-    command(Command::PlaceLabel),
-    command(Command::PlaceProbe),
-    command(Command::PlacePin),
-    command(Command::PlaceText),
-    command(Command::PlaceShape),
-    Separator,
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[MenuEntry::Submenu {
+            label: "Place",
+            entries: PLACE_MENU,
+        }],
+    ),
+    MenuEntry::Only(
+        MenuContext::SymbolView,
+        &[MenuEntry::Submenu {
+            label: "Place",
+            entries: SYMBOL_PLACE_MENU,
+        }],
+    ),
     MenuEntry::Submenu {
         label: "Arrange",
         entries: ARRANGE_MENU,
     },
-    command(Command::JoinCollinearWires),
+    MenuEntry::Submenu {
+        label: "Sheet",
+        entries: SHEET_MENU,
+    },
     Separator,
-    // The sheets of the active drawing, in the order the strip shows them:
-    // navigate first, then author.
-    sheets(SheetsCommand::PreviousSheet),
-    sheets(SheetsCommand::NextSheet),
-    sheets(SheetsCommand::NewSheet),
-    sheets(SheetsCommand::DeleteSheet),
-    sheets(SheetsCommand::SheetProperties),
-    sheets(SheetsCommand::SheetFormatManager),
-    sheets(SheetsCommand::SheetDefaults),
-    Separator,
-    command(Command::CreateHierarchy),
-    project(ProjectCommand::DesignManagement),
+    project(ProjectCommand::Variants),
+    project(ProjectCommand::Annotate),
     command(Command::ConnectivityManager),
-    command(Command::ConfigurationSets),
-    command(Command::RuleSetup),
     command(Command::ReviewComments),
-    Separator,
-    command_as(
-        Command::DesignSpecialistWorkspaces,
-        "Specialist workspaces\u{2026}",
-    ),
+    command(Command::EngineeringTableView),
     Separator,
     // The design checks, narrowest first: the cellview in front of the
     // reader, the whole design, and the check that gates a save.
     command(Command::CheckCellview),
     command(Command::CheckDesign),
-    project(ProjectCommand::CheckAndSave),
+    MenuEntry::Only(
+        MenuContext::NotSymbolView,
+        &[project(ProjectCommand::CheckAndSave)],
+    ),
+    MenuEntry::Only(MenuContext::SymbolView, &[command(Command::SymbolSave)]),
+    MenuEntry::Submenu {
+        label: "Violations",
+        entries: VIOLATIONS_MENU,
+    },
+    command(Command::RuleSetup),
+    MenuEntry::Only(
+        MenuContext::VerilogAView,
+        &[
+            Separator,
+            command(Command::CompileVerilogA),
+            command(Command::VerilogABuildSettings),
+        ],
+    ),
+];
+
+/// What a schematic places: the tools, then a part of each kind the
+/// one-key placements put down.
+const PLACE_MENU: &[MenuEntry] = &[
+    command_as(Command::PlaceInstance, "Instance\u{2026}"),
+    command_as(Command::PlaceWire, "Wire"),
+    command_as(Command::PlaceBus, "Bus"),
+    command_as(Command::PlaceBusTap, "Bus tap"),
+    command_as(Command::PlaceLabel, "Net label"),
+    command_as(Command::PlaceOffSheetConnector, "Off-sheet connector"),
+    command_as(Command::PlacePin, "Pins\u{2026}"),
+    command_as(Command::PlaceJunction, "Junction"),
+    command_as(Command::PlaceText, "Text or note\u{2026}"),
+    command_as(Command::PlaceShape, "Documentation shape\u{2026}"),
     Separator,
-    palette_scope("Browse all design commands\u{2026}", "Design"),
+    command_as(Command::Place(ComponentType::Resistor), "Resistor"),
+    command_as(Command::Place(ComponentType::Capacitor), "Capacitor"),
+    command_as(Command::Place(ComponentType::Inductor), "Inductor"),
+    command_as(Command::Place(ComponentType::Diode), "Diode"),
+    command_as(
+        Command::Place(ComponentType::VoltageSource),
+        "Voltage source",
+    ),
+    command_as(
+        Command::Place(ComponentType::CurrentSource),
+        "Current source",
+    ),
+    command_as(Command::Place(ComponentType::Ground), "Ground"),
+];
+
+/// What a symbol view places: its drawing tools, then the edits to one pin.
+const SYMBOL_PLACE_MENU: &[MenuEntry] = &[
+    command_as(Command::SymbolPinTool, "Pin"),
+    command_as(Command::SymbolPolylineTool, "Line"),
+    command_as(Command::SymbolRectangleTool, "Rectangle"),
+    command_as(Command::SymbolCircleTool, "Circle"),
+    command_as(Command::SymbolArcTool, "Arc"),
+    command_as(Command::SymbolPolygonTool, "Polygon"),
+    command_as(Command::SymbolTextTool, "Text"),
+    Separator,
+    command(Command::SymbolRotatePin),
+    command(Command::SymbolMirrorPin),
+    command(Command::SymbolUpdatePinsFromContract),
+];
+
+/// The sheets of the active drawing, in the order the strip shows them:
+/// navigate, then add and remove, then the sheet's own setup in the order
+/// it is done.
+const SHEET_MENU: &[MenuEntry] = &[
+    sheets(SheetsCommand::PreviousSheet),
+    sheets(SheetsCommand::NextSheet),
+    sheets(SheetsCommand::NewSheet),
+    MenuEntry::command_as(SheetsCommand::DeleteSheet.key(), "Delete\u{2026}"),
+    Separator,
+    sheets(SheetsCommand::SheetProperties),
+    sheets(SheetsCommand::SheetFormatManager),
+    sheets(SheetsCommand::SheetDefaults),
+];
+
+/// The findings the checks left: step through them, or clear them.
+const VIOLATIONS_MENU: &[MenuEntry] = &[
+    command(Command::NextViolation),
+    command(Command::PreviousViolation),
+    Separator,
+    command(Command::ClearChecks),
 ];
 
 /// The Design menu's Arrange submenu, group by group: turn and flip, line
@@ -374,6 +458,7 @@ const ARRANGE_MENU: &[MenuEntry] = &[
     command(Command::DistributeSelectionVertical),
     Separator,
     command(Command::SnapSelectionToGrid),
+    command(Command::JoinCollinearWires),
 ];
 
 const SIMULATE_MENU: &[MenuEntry] = &[

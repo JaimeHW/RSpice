@@ -14,7 +14,8 @@ pub(crate) mod workspace_state;
 
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::design_management::{
-    DesignManagementParts, render_design_management_dialog,
+    DesignManagementParts, DesignManagementTab, open_design_management_on,
+    render_design_management_dialog,
 };
 use crate::workbench::app::dialogs::project::configuration::{
     ConfigurationTransaction, commit_configuration,
@@ -308,11 +309,28 @@ fn open_design_management(
     model: &mut Model,
     platform: &PlatformState,
     wb: &mut WorkbenchSession,
+    tab: DesignManagementTab,
 ) {
     let route = SurfaceRoute::surface(SurfaceId::DesignManagement);
     match wb.navigate(route, RouteTransitionSource::User) {
-        Ok(_) => open_design_management_dialog(&mut project.design_management, model, platform, wb),
+        Ok(_) => {
+            open_design_management_on(&mut project.design_management, model, platform, wb, tab)
+        }
         Err(error) => wb.prompt(error.to_string()),
+    }
+}
+
+/// Open New View on the cell whose schematic is in front, preset to a
+/// symbol; why it cannot open there is stated on the status bar.
+fn open_create_symbol_dialog(project: &mut ProjectState, model: &Model, wb: &mut WorkbenchSession) {
+    let reference = model.workspace.content.active_schematic_reference();
+    if let Err(error) = project.open_new_view_dialog(
+        model,
+        &reference.library,
+        &reference.cell,
+        Some(ViewType::Symbol),
+    ) {
+        wb.prompt(error);
     }
 }
 
@@ -367,9 +385,13 @@ impl CommandSet for ProjectCommand {
                 new_view_target(reads.model).is_some(),
                 "select a cell in a writable library",
             ),
-            Self::DesignManagement => (
+            Self::DesignManagement | Self::Variants | Self::Annotate => (
                 schematic_in_front(reads) && open && !reads.model.schematic_edit_read_only(),
                 "open an editable schematic",
+            ),
+            Self::CreateSymbol => (
+                schematic_in_front(reads) && open,
+                "open a schematic or testbench",
             ),
             Self::RevisionHistory => (open, "open a project"),
             Self::CheckAndSave if !schematic_in_front(reads) => {
@@ -419,9 +441,28 @@ impl CommandSet for ProjectCommand {
                 cx.wb.activate(Workspace::Project);
                 cx.state.project_page = page;
             }
-            Self::DesignManagement => {
-                open_design_management(cx.state, cx.model, cx.platform, cx.wb);
-            }
+            Self::DesignManagement => open_design_management(
+                cx.state,
+                cx.model,
+                cx.platform,
+                cx.wb,
+                DesignManagementTab::Sheets,
+            ),
+            Self::Variants => open_design_management(
+                cx.state,
+                cx.model,
+                cx.platform,
+                cx.wb,
+                DesignManagementTab::Variants,
+            ),
+            Self::Annotate => open_design_management(
+                cx.state,
+                cx.model,
+                cx.platform,
+                cx.wb,
+                DesignManagementTab::Annotation,
+            ),
+            Self::CreateSymbol => open_create_symbol_dialog(cx.state, cx.model, cx.wb),
             Self::RevisionHistory => open_project_revision_history(
                 &mut cx.state.project_revision_history,
                 cx.model,

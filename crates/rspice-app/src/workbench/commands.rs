@@ -889,6 +889,9 @@ impl Command {
             Self::RotateSelection if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::Rotate);
             }
+            Self::RotateSelectionCounterClockwise if active_symbol_editor(app) => {
+                app.transform_selected_symbol_item(SymbolTransform::RotateCounterClockwise);
+            }
             Self::MirrorSelectionHorizontal if active_symbol_editor(app) => {
                 app.transform_selected_symbol_item(SymbolTransform::MirrorHorizontal);
             }

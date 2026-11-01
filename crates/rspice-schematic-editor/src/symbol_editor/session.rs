@@ -350,6 +350,16 @@ pub fn rotate_point_cw_about(
     origin + rspice_design_model::Point::new(-relative.y, relative.x)
 }
 
+/// `point` turned a quarter counter-clockwise about `origin`: the inverse
+/// of [`rotate_point_cw_about`].
+pub fn rotate_point_ccw_about(
+    point: rspice_design_model::Point,
+    origin: rspice_design_model::Point,
+) -> rspice_design_model::Point {
+    let relative = point - origin;
+    origin + rspice_design_model::Point::new(relative.y, -relative.x)
+}
+
 pub fn mirror_point_h_about(
     point: rspice_design_model::Point,
     origin: rspice_design_model::Point,
@@ -371,6 +381,19 @@ pub fn rotate_shape_cw_about(
     origin: rspice_design_model::Point,
 ) {
     translate_shape_to_origin(shape, origin);
+    shape.rotate_cw();
+    shape.translate(origin);
+}
+
+/// `shape` turned a quarter counter-clockwise about `origin`: three
+/// clockwise quarters.
+pub fn rotate_shape_ccw_about(
+    shape: &mut rspice_design::symbol::SymbolShape,
+    origin: rspice_design_model::Point,
+) {
+    translate_shape_to_origin(shape, origin);
+    shape.rotate_cw();
+    shape.rotate_cw();
     shape.rotate_cw();
     shape.translate(origin);
 }
@@ -521,5 +544,6 @@ mod tests {
         let point = rotate_point_cw_about(Point::new(20, 10), origin);
 
         assert_eq!(point, Point::new(10, 20));
+        assert_eq!(rotate_point_ccw_about(point, origin), Point::new(20, 10));
     }
 }

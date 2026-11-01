@@ -81,6 +81,12 @@ pub enum MenuContext {
     ProjectOpen,
     /// No project is open: the start screen.
     NoProject,
+    /// The Design workspace shows a symbol view.
+    SymbolView,
+    /// The Design workspace shows anything but a symbol view.
+    NotSymbolView,
+    /// The Design workspace shows a Verilog-A view.
+    VerilogAView,
 }
 
 impl MenuContext {
@@ -99,8 +105,17 @@ impl MenuContext {
             Self::ExitInFileMenu => file_menu_shows_exit(platform) && os != OperatingSystem::Mac,
             Self::ProjectOpen => app.platform().project_lifecycle.is_open(),
             Self::NoProject => !app.platform().project_lifecycle.is_open(),
+            Self::SymbolView => design_view_is(app, crate::state::ViewType::Symbol),
+            Self::NotSymbolView => !design_view_is(app, crate::state::ViewType::Symbol),
+            Self::VerilogAView => design_view_is(app, crate::state::ViewType::VerilogA),
         }
     }
+}
+
+/// Whether the Design workspace is in front showing a view of `view_type`.
+fn design_view_is(app: &impl WorkbenchHost, view_type: crate::state::ViewType) -> bool {
+    app.workbench().workspace == crate::workbench::state::Workspace::Design
+        && app.model().workspace.content.active_view_type() == view_type
 }
 
 impl MenuEntry {

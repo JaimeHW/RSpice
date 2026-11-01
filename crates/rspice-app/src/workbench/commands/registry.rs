@@ -175,9 +175,11 @@ const ZOOM_ONE_TO_ONE: &[ShortcutBinding] = &[primary(
     chord(Key::Num0, true, false, false, "Ctrl+0"),
     DESKTOP,
 )];
+// The browser reopens a closed tab on Ctrl+Shift+T, so the key is the
+// desktop's only.
 const ENGINEERING_TABLE_VIEW: &[ShortcutBinding] = &[primary(
     chord(Key::T, true, false, true, "Ctrl+Shift+T"),
-    ALL,
+    DESKTOP,
 )];
 const TOGGLE_NAVIGATOR: &[ShortcutBinding] =
     &[primary(chord(Key::B, true, false, false, "Ctrl+B"), ALL)];
@@ -880,6 +882,8 @@ impl Command {
                 "no placement or edit has run yet"
             }
             Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
+            Self::NextViolation | Self::PreviousViolation => "the last check found no violations",
+            Self::ClearChecks => "no check has run",
             Self::SetGridStyle(_) => "open a schematic or testbench",
             Self::CloseOtherDocuments => "no other closable document is open",
             Self::CloseAllDocuments => "no closable document is open",

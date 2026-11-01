@@ -23,7 +23,7 @@ fn drawing_sheet_file_commands_keep_the_canonical_palette_identities() {
         (
             SheetsCommand::SheetFormatManager,
             "sheet-format-manager",
-            "Sheet formats across this document…",
+            "Sheet formats…",
         ),
         (
             SheetsCommand::CustomSheetSizes,

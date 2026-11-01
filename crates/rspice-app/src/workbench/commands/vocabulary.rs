@@ -349,8 +349,8 @@ impl Command {
             Self::ResetActiveView => spec("reset-active-view", "Reset active view", "View"),
             Self::EngineeringTableView => spec(
                 "engineering-table-manager",
-                "Engineering table view\u{2026}",
-                "View",
+                "Object table\u{2026}",
+                "Design",
             ),
             Self::ToggleNavigator => spec("toggle-navigator", "Toggle navigator", "Window"),
             Self::ToggleInspector => spec("toggle-inspector", "Toggle inspector", "Window"),
@@ -428,14 +428,10 @@ impl Command {
                 "Update instance interface",
                 "Design",
             ),
-            Self::CreateHierarchy => spec(
-                "create-hierarchy",
-                "Create hierarchy from selection\u{2026}",
-                "Design",
-            ),
+            Self::CreateHierarchy => spec("create-hierarchy", "Create hierarchy\u{2026}", "Design"),
             Self::ConnectivityManager => spec(
                 "design-connectivity-tools",
-                "Connectivity and bus manager\u{2026}",
+                "Connectivity and buses\u{2026}",
                 "Design",
             ),
             Self::SelectionBulkEdit => spec("design-bulk-tools", "Bulk edit\u{2026}", "Edit"),
@@ -508,9 +504,11 @@ impl Command {
                 "Mirror about vertical axis",
                 "Design",
             ),
-            Self::MirrorSelectionVertical => {
-                spec("mirror-selection-vertical", "Mirror vertically", "Design")
-            }
+            Self::MirrorSelectionVertical => spec(
+                "mirror-selection-vertical",
+                "Mirror about horizontal axis",
+                "Design",
+            ),
             Self::AlignSelectionLeft => spec("align-selection-left", "Align left", "Design"),
             Self::AlignSelectionCenter => spec(
                 "align-selection-horizontal-centers",
@@ -542,27 +540,23 @@ impl Command {
                 spec("join-collinear-wires", "Join collinear wires", "Design")
             }
             Self::Cancel => spec("cancel-active-command", "Cancel active command", "Design"),
-            Self::AscendHierarchy => spec("ascend-hierarchy", "Ascend hierarchy", "Design"),
+            Self::AscendHierarchy => spec("ascend-hierarchy", "Return to parent", "Design"),
             // Two gestures, two rows: this one opens the descend dialog, and
             // the direct gesture below goes straight to the master. Sharing one
             // title made them indistinguishable everywhere the palette, the
             // shortcut editor and the command reference list them side by side.
             Self::DescendHierarchy => spec(
                 "descend-hierarchy",
-                "Descend into selected instance…",
+                "Descend with options\u{2026}",
                 "Design",
             ),
-            Self::DescendHierarchyDirect => spec(
-                "descend-selected-instance",
-                "Open selected instance master",
-                "Design",
-            ),
+            Self::DescendHierarchyDirect => spec("descend-selected-instance", "Descend", "Design"),
             Self::ShowInNetlist => spec("show-in-netlist", "Show in netlist", "Design"),
             Self::CheckCellview => spec("check-cellview", "Check cellview", "Design"),
             Self::CheckDesign => spec("check-design", "Check design", "Design"),
             Self::ClearChecks => spec("clear-checks", "Clear check results", "Design"),
-            Self::NextViolation => spec("next-violation", "Next violation", "Verify"),
-            Self::PreviousViolation => spec("previous-violation", "Previous violation", "Verify"),
+            Self::NextViolation => spec("next-violation", "Next violation", "Design"),
+            Self::PreviousViolation => spec("previous-violation", "Previous violation", "Design"),
             Self::GenerateNetlist => {
                 spec("generated-netlist", "Open generated netlist", "Simulate")
             }
@@ -630,10 +624,12 @@ impl Command {
                 "Show adopter on schematic",
                 "Stimulus",
             ),
-            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Models"),
-            Self::VerilogABuildSettings => {
-                spec("veriloga-build-settings", "Build settings", "Models")
-            }
+            Self::CompileVerilogA => spec("veriloga", "Compile Verilog-A", "Design"),
+            Self::VerilogABuildSettings => spec(
+                "veriloga-build-settings",
+                "Build settings\u{2026}",
+                "Design",
+            ),
             Self::AutomationConsole => spec("automation", "Automation workspace", "Automation"),
             Self::CommandPalette => spec("command-palette", "Command palette", "Navigate"),
             Self::KeyboardShortcuts => spec("command-reference", "Command reference", "Help"),
@@ -1023,7 +1019,10 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::ReplaceInstance.key(),
     Command::UpdateInstanceInterface.key(),
     Command::CreateHierarchy.key(),
+    ProjectCommand::CreateSymbol.key(),
     ProjectCommand::DesignManagement.key(),
+    ProjectCommand::Variants.key(),
+    ProjectCommand::Annotate.key(),
     Command::SelectionBulkEdit.key(),
     Command::ConnectivityManager.key(),
     Command::ConfigurationSets.key(),

@@ -3,8 +3,8 @@
 use super::interaction::{SymbolEditCapabilities, SymbolEditOutcome, SymbolRequestSource};
 use super::session::{
     SymbolClipboard, SymbolEditorSession, SymbolSelection, SymbolTool, mirror_point_h_about,
-    mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about, rotate_point_cw_about,
-    rotate_shape_cw_about,
+    mirror_point_v_about, mirror_shape_h_about, mirror_shape_v_about, rotate_point_ccw_about,
+    rotate_point_cw_about, rotate_shape_ccw_about, rotate_shape_cw_about,
 };
 use rspice_design::symbol::{
     SymbolAttributeKind, SymbolDocument, SymbolEditorMetadata, SymbolShape,
@@ -14,6 +14,7 @@ use rspice_design_model::{Point, symbol_pin::SymbolPinSide};
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SymbolTransform {
     Rotate,
+    RotateCounterClockwise,
     MirrorHorizontal,
     MirrorVertical,
 }
@@ -84,6 +85,14 @@ pub fn apply_edit(
                         &selection,
                         rotate_point_cw_about,
                         rotate_shape_cw_about,
+                        &mut outcome,
+                    ),
+                    SymbolTransform::RotateCounterClockwise => transform_selection(
+                        document,
+                        metadata,
+                        &selection,
+                        rotate_point_ccw_about,
+                        rotate_shape_ccw_about,
                         &mut outcome,
                     ),
                     SymbolTransform::MirrorHorizontal => transform_selection(
