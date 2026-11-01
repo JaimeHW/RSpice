@@ -784,7 +784,7 @@ pub(super) fn refresh_printer_catalog(parts: &mut HardcopyParts<'_>) {
         parts.dialog.printer_capabilities = None;
         parts.dialog.clear_printer();
         parts.dialog.error =
-            Some("Native printer discovery is available on Windows only.".to_owned());
+            Some("System printers are available on Windows, macOS and Linux only.".to_owned());
         return;
     }
     if parts.dialog.printer_discovery_busy {

@@ -696,7 +696,7 @@ fn display_units_change_the_fields_and_nothing_the_page_can_see() {
 /// The printer identity and its authenticated job are one atomic setting, and
 /// they only reach a render target on the platform whose dialog offers them.
 #[test]
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn the_selected_printer_reaches_the_sealed_render_target() {
     let job = |media, dpi, duplex, copies, collate| {
         PrinterJobSettings::try_new(

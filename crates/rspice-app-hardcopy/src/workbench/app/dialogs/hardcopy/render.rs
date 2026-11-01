@@ -35,7 +35,7 @@ use rspice_hardcopy_contract::{
     PrintRedundancy, PrinterJobSettings, ResolvedOrientation, ScaleMode, SchematicHardcopyExtent,
     SchematicHardcopySetup, StandardPaper, TilingMode, Watermark,
 };
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 use rspice_hardcopy_contract::{DuplexMode, PrinterMediaSource};
 
 use super::{
@@ -2134,7 +2134,7 @@ fn format_length_local(length: Length, unit: LengthUnit) -> String {
     super::format_length(length, unit)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn apply_printer_job(
     draft: &mut HardcopyDialogState,
     capabilities: &crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot,

@@ -11,13 +11,13 @@ use rspice_hardcopy_contract::PrintMappingSaveScope;
 
 pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
     ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     let mut action = BodyAction::None;
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     let action = BodyAction::None;
     dialog_split(ui, |ui, column| match column {
         0 => {
-            #[cfg(target_os = "windows")]
+            #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
             {
                 let selected_name = draft
                     .printer_capabilities
@@ -131,7 +131,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     }
                 }
             }
-            #[cfg(not(target_os = "windows"))]
+            #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
             ui.label("Printer selection and properties are owned by the browser print dialog.");
         }
         _ => {

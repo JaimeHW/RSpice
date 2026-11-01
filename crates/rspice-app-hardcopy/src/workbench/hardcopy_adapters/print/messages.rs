@@ -8,7 +8,7 @@ pub(super) const fn platform_unavailable_text(
 ) -> &'static str {
     match reason {
         HardcopyPlatformUnavailableReason::NativePrintingIsWindowsOnly => {
-            "system printers are supported on Windows only"
+            "system printers are supported on Windows, macOS and Linux only"
         }
         HardcopyPlatformUnavailableReason::BrowserPrintingRequiresWebAssembly => {
             "browser printing is available in the web app only"

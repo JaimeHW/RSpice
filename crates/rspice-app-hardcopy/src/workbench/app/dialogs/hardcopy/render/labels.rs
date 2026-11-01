@@ -279,7 +279,7 @@ fn format_millimetres(value: Length) -> String {
     value
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 pub(super) fn duplex_label(value: DuplexMode) -> &'static str {
     match value {
         DuplexMode::Off => "Off",
@@ -288,7 +288,7 @@ pub(super) fn duplex_label(value: DuplexMode) -> &'static str {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 pub(super) fn media_label(value: &PrinterMediaSource) -> String {
     match value {
         PrinterMediaSource::AutomaticCompatibleTray => "Automatic compatible tray".to_owned(),

@@ -259,7 +259,10 @@ pub enum HardcopyDialogError {
     Contract(#[from] HardcopyError),
     #[error("select a printer and resolve its current capabilities before printing")]
     #[cfg(not(target_arch = "wasm32"))]
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(
+        not(any(target_os = "windows", target_os = "macos", target_os = "linux")),
+        allow(dead_code)
+    )]
     MissingPrinterCapabilities,
     #[error("{field} must be an unsigned integer from 1 through 65535")]
     InvalidUnsignedInteger { field: &'static str },
@@ -1185,7 +1188,7 @@ fn with_current_form_ink(
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn runtime_print_target(
     printer_id: &str,
     job: Option<&PrinterJobSettings>,
@@ -1198,7 +1201,7 @@ fn runtime_print_target(
     })
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 fn runtime_print_target(
     _printer_id: &str,
     _job: Option<&PrinterJobSettings>,
@@ -1206,12 +1209,12 @@ fn runtime_print_target(
     Ok(RenderTarget::BrowserPrintDialog)
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 const fn runtime_print_format() -> OutputFormat {
     OutputFormat::NativePrinter
 }
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
 const fn runtime_print_format() -> OutputFormat {
     OutputFormat::BrowserPrintDocument
 }
@@ -1358,17 +1361,18 @@ mod tests {
         assert!(draft.error.is_some());
     }
 
-    /// The printer identity this asserts is a Windows contract.
+    /// The printer identity this asserts is the contract of a host with
+    /// system printers: Windows, and macOS and Linux through CUPS.
     ///
-    /// `RenderTarget::SystemPrinter` is produced by the `target_os = "windows"`
+    /// `RenderTarget::SystemPrinter` is produced by those hosts'
     /// `runtime_print_target` alone; every other host returns
     /// `BrowserPrintDialog` and reads neither the identity nor the job. And
-    /// `NativePrinter` is only that host's `runtime_print_format`, so run
+    /// `NativePrinter` is only those hosts' `runtime_print_format`, so run
     /// anywhere else this fixture never reaches the contract at all: both
     /// `build_setup` calls fail as an incompatible export target, and the
     /// refusal half passes for a reason that has nothing to do with printers.
     #[test]
-    #[cfg(target_os = "windows")]
+    #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
     fn print_workflow_requires_a_real_printer_identity() {
         let mut draft = HardcopyDialogState::default();
         draft.workflow = HardcopyWorkflow::Print;
@@ -1407,10 +1411,10 @@ mod tests {
         assert_eq!(setup.render().format(), OutputFormat::PdfVector);
     }
 
-    /// The counterpart contract on every host without native printing.
+    /// The counterpart contract on every host without system printers.
     ///
-    /// macOS, Linux and wasm32 all take the `not(target_os = "windows")`
-    /// `runtime_print_target`, which hands off to the browser print dialog and
+    /// wasm32 takes the `runtime_print_target` of a host without system
+    /// printers, which hands off to the browser print dialog and
     /// reads neither the printer identity nor the job. So this asserts the
     /// inverse of the Windows fixture above: printing compiles with no printer
     /// identity at all, and demanding one would be the defect.
@@ -1422,7 +1426,7 @@ mod tests {
     /// already covered above — passing the target assertion is what proves the
     /// print branch was reached.
     #[test]
-    #[cfg(not(target_os = "windows"))]
+    #[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
     fn browser_print_uses_the_browser_handoff_contract() {
         let mut draft = HardcopyDialogState::default();
         draft.workflow = HardcopyWorkflow::Print;

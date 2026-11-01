@@ -701,14 +701,18 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     action
 }
 
-/// Whether this host has a driver boundary the dialog can open at all. The
-/// browser selects tray, duplex and collation in its own print dialog, and the
-/// other desktops have a driver RSpice does not yet speak to — so on both there
-/// is nothing behind this row. Where it leads nowhere it is absent rather than
+/// Whether this host has system printers whose properties the dialog can set:
+/// Windows through its drivers, and macOS and Linux through CUPS. The browser
+/// selects tray, duplex and collation in its own print dialog, so there is
+/// nothing behind this row. Where it leads nowhere it is absent rather than
 /// dimmed: a row advertising capabilities the host does not have reads as a
 /// feature withheld instead of one that was never there.
 const fn printer_properties_reachable() -> bool {
-    cfg!(target_os = "windows")
+    cfg!(any(
+        target_os = "windows",
+        target_os = "macos",
+        target_os = "linux"
+    ))
 }
 
 fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
@@ -722,7 +726,7 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             .selected_text(format_label(draft.format))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
-                #[cfg(target_os = "windows")]
+                #[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
                 if draft.workflow != HardcopyWorkflow::Export {
                     ui.selectable_value(
                         &mut draft.format,
@@ -738,7 +742,12 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                         "Browser print dialog",
                     );
                 }
-                #[cfg(all(not(target_arch = "wasm32"), not(target_os = "windows")))]
+                #[cfg(not(any(
+                    target_arch = "wasm32",
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "linux"
+                )))]
                 if draft.workflow != HardcopyWorkflow::Export {
                     ui.selectable_value(
                         &mut draft.format,

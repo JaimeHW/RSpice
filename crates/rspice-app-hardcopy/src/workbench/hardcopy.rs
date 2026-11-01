@@ -172,13 +172,17 @@ impl CommandSet for HardcopyCommand {
             }
             Self::ReportAuthoring => true,
             Self::PrintHardcopy => {
-                cfg!(any(target_os = "windows", target_arch = "wasm32"))
-                    && active_app_hardcopy_source_available(
-                        &reads.state.report_authoring,
-                        reads.model,
-                        reads.wb,
-                        reads.results,
-                    )
+                cfg!(any(
+                    target_os = "windows",
+                    target_os = "macos",
+                    target_os = "linux",
+                    target_arch = "wasm32"
+                )) && active_app_hardcopy_source_available(
+                    &reads.state.report_authoring,
+                    reads.model,
+                    reads.wb,
+                    reads.results,
+                )
             }
             Self::ExportActiveView => active_app_hardcopy_source_available(
                 &reads.state.report_authoring,
