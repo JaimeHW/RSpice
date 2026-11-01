@@ -337,7 +337,7 @@ fn restored_route_reconciliation_is_idempotent_across_two_passes() {
     state.navigation = serde_json::from_str(
         r#"{
                 "current":"?view=design",
-                "back":["?surface=rf-workbench","?surface=not-a-surface"],
+                "back":["?surface=release-cockpit","?surface=not-a-surface"],
                 "forward":[],
                 "recent":[]
             }"#,
@@ -363,7 +363,7 @@ fn unavailable_history_removal_is_reported_once_without_malformed_flag() {
     state.navigation = serde_json::from_str(
         r#"{
                 "current":"?view=design",
-                "back":["?surface=rf-workbench"],
+                "back":["?surface=release-cockpit"],
                 "forward":[],
                 "recent":[]
             }"#,
