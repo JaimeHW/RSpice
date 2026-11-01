@@ -284,9 +284,10 @@ M1 3 1 0 0 NM L=2u W=10u
 
     #[test]
     fn a_transient_prints_each_static_instance_parameter_at_every_point() {
-        // Xyce 7.10 prints R1:R 2, C1:C 1u, L1:L 1m, V1:DCV0 1, M1:L 2u and
-        // M1:W 10u at each of its 33 time points.
-        let netlist = xyce_deck(".TRAN 0 1u\n.PRINT TRAN R1:R C1:C L1:L V1:DCV0 M1:L M1:W\n");
+        // Xyce 7.10 prints R1:R 2, C1:C 1u, L1:L 1m, V1:DCV0 1, M1:L 2u,
+        // M1:W 10u and {R1:R*2} 4 at each of its 33 time points.
+        let netlist =
+            xyce_deck(".TRAN 0 1u\n.PRINT TRAN R1:R C1:C L1:L V1:DCV0 M1:L M1:W {R1:R*2}\n");
         let result = xyce_engine()
             .run_tran(&netlist, 1e-6, 1e-7)
             .expect("transient runs");
@@ -309,6 +310,7 @@ M1 3 1 0 0 NM L=2u W=10u
                 ("V1:DCV0", &constant(1.0)),
                 ("M1:L", &constant(2e-6)),
                 ("M1:W", &constant(1e-5)),
+                ("{R1:R*2}", &constant(4.0)),
             ],
         );
     }
@@ -316,8 +318,8 @@ M1 3 1 0 0 NM L=2u W=10u
     #[test]
     fn a_dc_sweep_prints_each_static_instance_parameter_at_its_point() {
         // Xyce 7.10: V1:DCV0 follows the sweep (1, 2); the others are the
-        // installed values.
-        let netlist = xyce_deck(".DC V1 1 2 1\n.PRINT DC V1:DCV0 C1:C L1:L M1:L M1:W\n");
+        // installed values, and {C1:C*2} is 2u.
+        let netlist = xyce_deck(".DC V1 1 2 1\n.PRINT DC V1:DCV0 C1:C L1:L M1:L M1:W {C1:C*2}\n");
         let sweep = xyce_engine()
             .run_dc_sweep(&netlist, "V1", 1.0, 2.0, 1.0)
             .expect("sweep runs");
@@ -332,6 +334,7 @@ M1 3 1 0 0 NM L=2u W=10u
                 ("L1:L", &[1e-3, 1e-3]),
                 ("M1:L", &[2e-6, 2e-6]),
                 ("M1:W", &[1e-5, 1e-5]),
+                ("{C1:C*2}", &[2e-6, 2e-6]),
             ],
         );
     }

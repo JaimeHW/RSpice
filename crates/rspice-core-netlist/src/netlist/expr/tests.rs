@@ -2946,6 +2946,37 @@ fn control_quoted_vectors_preserve_regular_strings_and_ternary_separators() {
 }
 
 #[test]
+fn xyce_expressions_read_a_colon_inside_a_name_as_part_of_it() {
+    // Xyce's lexer (ExpressionLexer.l ID) takes ':' into a name, so
+    // {X1:R1:R*2} names the device parameter X1:R1:R; a ternary's ':' needs
+    // whitespace before it, and a number cannot start a name.
+    let abort = crate::abort_signal::NoAbort;
+    let mut variables = ParamContext::new();
+    variables.set("X1:R1:R", 3.0);
+    variables.set("A", 4.0);
+    variables.set("B", 5.0);
+    for (source, expected) in [
+        ("X1:R1:R*2", 6.0),
+        ("1 ? A : B", 4.0),
+        ("0?1:2", 2.0),
+        ("0 ? A :B", 5.0),
+    ] {
+        let expression = parse_xyce_expression_with_abort(source, &abort).unwrap();
+        assert_eq!(
+            evaluate_complex(&expression, &variables).unwrap(),
+            expected.into(),
+            "{source}"
+        );
+    }
+    // Every other dialect keeps the ternary reading.
+    assert!(parse_expression("X1:R1:R*2").is_err());
+    assert_eq!(
+        evaluate_complex(&parse_expression("1?A:B").unwrap(), &variables).unwrap(),
+        4.0.into()
+    );
+}
+
+#[test]
 fn model_temperature_dependency_inspection_visits_function_graph_once() {
     use crate::abort_signal::CountingAbort;
     let mut context = ParamContext::new();

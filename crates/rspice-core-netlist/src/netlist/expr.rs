@@ -50,7 +50,7 @@ use parser::ExprParser;
 pub use api::{
     ParseExpressionWithAbortError, eval_expression_complex_with_abort,
     parse_control_expression_prefix_with_abort, parse_control_expression_with_abort,
-    parse_expression_with_abort,
+    parse_expression_with_abort, parse_xyce_expression_with_abort,
 };
 pub use api::{eval_expression, eval_expression_complex, eval_simple, parse_expression};
 pub(crate) use api::{eval_expression_complex_with_probe_and_abort, needs_forward_reference_probe};

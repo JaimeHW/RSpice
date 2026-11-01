@@ -38,6 +38,22 @@ pub fn parse_expression_with_abort(
     }
 }
 
+/// Parse an expression under Xyce's lexer, which reads `:` inside a name as
+/// part of it: `{X1:R1:R*2}` names the device parameter `X1:R1:R`.
+#[doc(hidden)]
+pub fn parse_xyce_expression_with_abort(
+    input: &str,
+    abort: &dyn crate::abort_signal::AbortSignal,
+) -> Result<Expr, ParseExpressionWithAbortError> {
+    let mut parser = ExprParser::with_abort(input, abort).with_colon_identifiers();
+    let result = parser.parse();
+    if parser.was_aborted() {
+        Err(ParseExpressionWithAbortError::Aborted)
+    } else {
+        result.map_err(ParseExpressionWithAbortError::Parse)
+    }
+}
+
 #[doc(hidden)]
 pub fn parse_control_expression_prefix_with_abort(
     input: &str,

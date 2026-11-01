@@ -21,6 +21,7 @@ pub(in crate::netlist::expr) struct ExprParser<'a> {
     aborted: bool,
     parse_depth: usize,
     control_vectors: bool,
+    colon_identifiers: bool,
 }
 
 impl<'a> ExprParser<'a> {
@@ -32,6 +33,7 @@ impl<'a> ExprParser<'a> {
             aborted: false,
             parse_depth: 0,
             control_vectors: false,
+            colon_identifiers: false,
         }
     }
 
@@ -46,7 +48,16 @@ impl<'a> ExprParser<'a> {
             aborted: false,
             parse_depth: 0,
             control_vectors: false,
+            colon_identifiers: false,
         }
+    }
+
+    /// Read a `:` inside a name as part of it, as Xyce's expression lexer does
+    /// (`ExpressionLexer.l` `ID`), so `X1:R1:R` is one device-parameter name.
+    /// A ternary's `:` then needs whitespace before it.
+    pub(in crate::netlist::expr) fn with_colon_identifiers(mut self) -> Self {
+        self.colon_identifiers = true;
+        self
     }
 
     pub(in crate::netlist::expr) fn was_aborted(&self) -> bool {
@@ -644,7 +655,13 @@ impl<'a> ExprParser<'a> {
 
         self.advance();
         while let Some(c) = self.peek() {
-            if is_expr_ident_continue(c) {
+            let colon_name = self.colon_identifiers
+                && c == ':'
+                && self.input[self.pos + 1..]
+                    .chars()
+                    .next()
+                    .is_some_and(is_expr_ident_continue);
+            if is_expr_ident_continue(c) || colon_name {
                 if self.advance().is_none() {
                     break;
                 }

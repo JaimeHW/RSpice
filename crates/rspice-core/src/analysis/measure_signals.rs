@@ -2656,15 +2656,20 @@ pub(crate) fn evaluate_output_operand(
                     (None, detail).into()
                 }
             })?;
-            let parsed = crate::netlist::expr::parse_expression_with_abort(&expanded, abort)
-                .map_err(|error| match error {
-                    crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
-                        OutputOperandEvaluationError::Aborted
-                    }
-                    crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
-                        (None, format!("failed to parse expression: {error}")).into()
-                    }
-                })?;
+            // Xyce reads `{X1:R1:R}` as one device-parameter name.
+            let parse = if params.expression_dialect() == crate::config::ExpressionDialect::Xyce {
+                crate::netlist::expr::parse_xyce_expression_with_abort
+            } else {
+                crate::netlist::expr::parse_expression_with_abort
+            };
+            let parsed = parse(&expanded, abort).map_err(|error| match error {
+                crate::netlist::expr::ParseExpressionWithAbortError::Aborted => {
+                    OutputOperandEvaluationError::Aborted
+                }
+                crate::netlist::expr::ParseExpressionWithAbortError::Parse(error) => {
+                    (None, format!("failed to parse expression: {error}")).into()
+                }
+            })?;
             let column_kind = expression_output_column_kind(&parsed, signal_index);
             let mut prepared = LivePreparedExpression::compile_with_abort(&parsed, params, abort)
                 .map_err(|error| match error {
