@@ -189,7 +189,6 @@ pub enum Command {
     FindCodeDocument,
     ValidateCodeDocument,
     ManageSourceDocument,
-    SourceLanguageTools,
     /// The source editor's line, navigation and folding commands. Each acts
     /// on the source editor the page on screen shows as its document, and
     /// only there.
@@ -556,11 +555,6 @@ impl Command {
                 "Manage source document\u{2026}",
                 "Code",
             ),
-            Self::SourceLanguageTools => spec(
-                "source-language-tools",
-                "Source navigation and language tools\u{2026}",
-                "Code",
-            ),
             Self::ToggleLineComment => spec("toggle-line-comment", "Toggle line comment", "Edit"),
             Self::IndentLines => spec("indent-lines", "Indent lines", "Edit"),
             Self::OutdentLines => spec("outdent-lines", "Outdent lines", "Edit"),
@@ -806,7 +800,6 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::FindCodeDocument,
     Command::ValidateCodeDocument,
     Command::ManageSourceDocument,
-    Command::SourceLanguageTools,
     Command::ToggleLineComment,
     Command::IndentLines,
     Command::OutdentLines,
@@ -1053,7 +1046,6 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::FindCodeDocument.key(),
     Command::ValidateCodeDocument.key(),
     Command::ManageSourceDocument.key(),
-    Command::SourceLanguageTools.key(),
     Command::ToggleLineComment.key(),
     Command::IndentLines.key(),
     Command::OutdentLines.key(),

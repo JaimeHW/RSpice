@@ -25,26 +25,12 @@ use egui::{Context, Id};
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::AppState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::documents::code_workspace;
 
 const RENAME_TITLE: &str = "Rename symbol";
 const RENAME_PRIMARY: &str = "Rename";
 const NEW_NAME_FIELD: &str = "workbench.rename-symbol.new-name";
-
-/// The row that opened the language-tools dialog. The dialog is deleted, so
-/// the row has nothing to open: it stays unavailable until it leaves the
-/// menus and the toolbar. Rename symbol, Go to definition, Find references
-/// and Format document each act on their own.
-pub(crate) fn language_tools_are_available(_state: &AppState) -> bool {
-    false
-}
-
-/// See [`language_tools_are_available`]: nothing opens.
-pub(crate) fn open_active_language_tools(_app: &mut RSpiceApp) -> Result<(), String> {
-    Err("Use Rename symbol, Go to definition or Find references from the source editor.".to_owned())
-}
 
 /// Go to definition, Find references and Rename symbol from the caret of the
 /// source editor on screen.
@@ -310,21 +296,6 @@ impl RSpiceApp {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    use crate::workbench::documents::code_workspace::CodeWorkspacePage;
-
-    /// The language-tools dialog is deleted: the row that opened it opens
-    /// nothing, on any page.
-    #[test]
-    fn the_language_tools_row_opens_nothing() {
-        let mut app = RSpiceApp::test_instance();
-        for page in [CodeWorkspacePage::Automation, CodeWorkspacePage::Netlist] {
-            app.state.code.code_workspace.page = page;
-            assert!(!language_tools_are_available(&app.state));
-            assert!(open_active_language_tools(&mut app).is_err());
-            assert!(app.state.code.code_workspace.language_tools.is_none());
-        }
-    }
 
     /// `resolve_veriloga_compile` was written to gate the compile command and
     /// never attached to it, so the button stayed enabled while a compile was

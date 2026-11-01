@@ -51,6 +51,9 @@ pub const RETIRED_COMMAND_IDS: &[&str] = &[
     // that, but for the few the menus open, this build cannot open.
     "specialist-tool-browser",
     "specialist-tools-design",
+    // Opened a nine-tab dialog of language-service views that is deleted;
+    // Rename symbol, Go to definition and Find references act on their own.
+    "source-language-tools",
 ];
 
 /// Persisted user shortcut profile. Command entries remain raw until they are

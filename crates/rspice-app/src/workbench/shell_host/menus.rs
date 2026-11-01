@@ -774,7 +774,6 @@ pub(in crate::workbench) fn command_icon(command: Command) -> Option<WorkbenchIc
         Command::CycleGrid => WorkbenchIcon::Grid,
         Command::VerilogABuildSettings => WorkbenchIcon::Sliders,
         Command::FindCodeDocument => WorkbenchIcon::Search,
-        Command::SourceLanguageTools => WorkbenchIcon::Target,
         Command::CompareGeneratedRevisions => WorkbenchIcon::Compare,
         Command::ExportNetlist(crate::io::NetlistFormat::Spice) => WorkbenchIcon::Export,
         Command::AutomationConsole => WorkbenchIcon::Terminal,

@@ -427,10 +427,6 @@ impl Command {
                 code_document_is_visible(state)
                     && crate::workbench::app::source_document_dialog_is_available(state)
             }
-            Self::SourceLanguageTools => {
-                code_document_is_visible(state)
-                    && crate::workbench::app::language_tools_are_available(state)
-            }
             // With a source editor on screen these were answered above.
             Self::ToggleLineComment
             | Self::IndentLines

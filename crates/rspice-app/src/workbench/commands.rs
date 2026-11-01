@@ -375,7 +375,6 @@ impl Command {
             | Self::FindCodeDocument
             | Self::ValidateCodeDocument
             | Self::ManageSourceDocument
-            | Self::SourceLanguageTools
             | Self::ToggleLineComment
             | Self::IndentLines
             | Self::OutdentLines
@@ -1045,11 +1044,6 @@ impl Command {
                 if let Err(error) =
                     crate::workbench::app::open_source_document_dialog(&mut app.state)
                 {
-                    app.state.prompt(error);
-                }
-            }
-            Self::SourceLanguageTools => {
-                if let Err(error) = crate::workbench::app::open_active_language_tools(app) {
                     app.state.prompt(error);
                 }
             }
