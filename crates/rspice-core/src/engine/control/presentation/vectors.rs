@@ -155,13 +155,15 @@ impl ControlCircuit {
 
     /// Whether only the vector evaluator can evaluate the expression: it
     /// reads a `let` vector or a constant, or calls a function the dataset
-    /// resolver lacks.
+    /// resolver lacks, or a plot `setplot new` made is current, where the
+    /// dataset resolver has no dataset to read.
     pub(in crate::engine::control) fn needs_vector_path(
         &self,
         expression: &Expr,
         variables: &ParamContext,
     ) -> bool {
-        self.names_user_vector(expression)
+        self.vectors.current_plot().is_some()
+            || self.names_user_vector(expression)
             || self.names_constant(expression, variables)
             || needs_vector_functions(expression, variables)
     }

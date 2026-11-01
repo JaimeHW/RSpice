@@ -1334,6 +1334,16 @@ fn a_scalar_let_is_also_a_vector_of_its_plot() {
     let qualified = printed(&presented[1]);
     assert_eq!(qualified[0].y.samples, one(1000.0));
     assert_eq!(qualified[1].y.samples, one(3.0));
+    // In a plot `setplot new` made, ngspice-46 prints
+    // `const.i1 = 1.000000e+03` and `op1.op1.v(in) = 2.000000e+00`.
+    let (presented, error) = run_until_error(
+        "user plot\nV1 in 0 2\nR1 in 0 1k\n.control\nlet i1 = 1k\nop\nsetplot new\n\
+         print i1 op1.v(in)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let traces = printed(&presented[0]);
+    assert_eq!(traces[0].y.samples, one(1000.0));
+    assert_eq!(traces[1].y.samples, one(2.0));
     // The plot copy follows a later scalar `let` of the name.
     let (presented, error) = run_until_error(
         "rebind\nV1 in 0 2\nR1 in 0 1k\n.control\nop\nlet a = 3\nlet a = a + 1\nprint op1.a\n\
