@@ -13,10 +13,26 @@ pub(super) fn menu_pin(entries: &[MenuEntry], app: &RSpiceApp) -> Vec<String> {
     menu_pin_on(entries, app, egui::os::OperatingSystem::Windows)
 }
 
-/// `entries` as rows read on `os`, a submenu's rows under its row, indented.
+/// `entries` as rows read on the desktop on `os`, a submenu's rows under
+/// its row, indented.
 pub(super) fn menu_pin_on(
     entries: &[MenuEntry],
     app: &RSpiceApp,
+    os: egui::os::OperatingSystem,
+) -> Vec<String> {
+    menu_pin_for(
+        entries,
+        app,
+        crate::state::command_catalog::CommandPlatform::Desktop,
+        os,
+    )
+}
+
+/// `entries` as rows read on `platform` and `os`.
+pub(super) fn menu_pin_for(
+    entries: &[MenuEntry],
+    app: &RSpiceApp,
+    platform: crate::state::command_catalog::CommandPlatform,
     os: egui::os::OperatingSystem,
 ) -> Vec<String> {
     fn pin(rows: &[menu_entries::MenuRow], indent: &str, out: &mut Vec<String>) {
@@ -52,12 +68,7 @@ pub(super) fn menu_pin_on(
     }
     let mut out = Vec::new();
     pin(
-        &menu_entries::resolve_menu_rows(
-            entries,
-            app,
-            crate::state::command_catalog::CommandPlatform::Desktop,
-            os,
-        ),
+        &menu_entries::resolve_menu_rows(entries, app, platform, os),
         "",
         &mut out,
     );
@@ -476,19 +487,30 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
     (
         ApplicationMenu::Window,
         &[
-            "New application window… | new-application-window | Ctrl+Alt+Shift+N | on",
-            "Detach active document… | detach-document |  | on",
-            "Move active document to window… | move-document-window |  | off: create another application window before moving this document",
-            "Reattach active document | reattach-document |  | off: the active document is already in the main window",
-            "Consolidate all windows… | consolidate-windows |  | off: there are no detached application windows",
+            "New window… | new-application-window | Ctrl+Alt+Shift+N | on",
+            "Move document to >",
+            "  New window… | detach-document |  | on",
+            "  Another window… | move-document-window |  | off: create another application window before moving this document",
+            "Reattach document | reattach-document |  | off: the active document is already in the main window",
+            "Merge all windows… | consolidate-windows |  | off: there are no detached application windows",
             "Recover off-screen windows… | monitor-recovery |  | off: there are no secondary application windows to recover",
             "---",
+            "Workspace >",
+            "  Project | project | Alt+1 | on",
+            "  Design | design | Alt+2 | on",
+            "  Simulate | simulate | Alt+3 | on",
+            "  Results | results | Alt+4 | on",
+            "  Verify | verify | Alt+5 | on",
+            "  Models | models | Alt+6 | on",
+            "  Netlist and script editor | netlist | Alt+7 | on",
+            "  Stimulus library | stimulus | Alt+8 | on",
             "Previous document | previous-document | Ctrl+Shift+Tab | off: only one document is open",
             "Next document | next-document | Ctrl+Tab | off: only one document is open",
             "---",
-            "Workspace layouts… | workspace-layouts |  | on",
-            "Windows, documents and session… | window-manager |  | on",
-            "Reset workspace layout… | reset-workspace-layout |  | on",
+            "Layout >",
+            "  Saved layouts… | workspace-layouts |  | on",
+            "  Reset layout | reset-workspace-layout |  | on",
+            "Windows… | window-manager |  | on",
         ],
     ),
     (

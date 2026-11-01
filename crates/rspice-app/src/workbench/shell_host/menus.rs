@@ -607,19 +607,72 @@ const TOOLS_MENU: &[MenuEntry] = &[
     command(Command::AutomationConsole),
 ];
 
+/// Window: the application's windows and the document in front, the
+/// workspaces and the documents in turn, then how the panels are laid out.
 const WINDOW_MENU: &[MenuEntry] = &[
     command(Command::NewApplicationWindow),
-    command(Command::DetachDocument),
-    command(Command::MoveDocumentToWindow),
+    MenuEntry::Submenu {
+        label: "Move document to",
+        entries: MOVE_DOCUMENT_MENU,
+    },
     command(Command::ReattachDocument),
-    command(Command::ConsolidateWindows),
-    command(Command::MonitorRecovery),
+    // Gathering windows back and finding ones left off screen are a desktop
+    // application's: the browser and a tablet show one window.
+    MenuEntry::Only(
+        MenuContext::DesktopApplication,
+        &[
+            command(Command::ConsolidateWindows),
+            command(Command::MonitorRecovery),
+        ],
+    ),
     Separator,
+    MenuEntry::Submenu {
+        label: "Workspace",
+        entries: WORKSPACE_MENU,
+    },
     command(Command::PreviousDocument),
     command(Command::NextDocument),
     Separator,
-    settings(SettingsCommand::WorkspaceLayouts),
-    command(Command::WindowManager),
+    MenuEntry::Submenu {
+        label: "Layout",
+        entries: LAYOUT_MENU,
+    },
+    command_as(Command::WindowManager, "Windows\u{2026}"),
+];
+
+/// Where the document in front goes: a window of its own, or one of the
+/// windows already open, chosen in the dialog.
+const MOVE_DOCUMENT_MENU: &[MenuEntry] = &[
+    command_as(Command::DetachDocument, "New window\u{2026}"),
+    command_as(Command::MoveDocumentToWindow, "Another window\u{2026}"),
+];
+
+/// The eight workspaces in the order of their keys, Alt+1 to Alt+8: the
+/// Stimulus library, fourth on the rail, kept the key it was given last.
+const WORKSPACE_MENU: &[MenuEntry] = &[
+    command_as(Command::OpenWorkspace(Workspace::Project), "Project"),
+    command_as(Command::OpenWorkspace(Workspace::Design), "Design"),
+    command_as(Command::OpenWorkspace(Workspace::Simulate), "Simulate"),
+    command_as(Command::OpenWorkspace(Workspace::Results), "Results"),
+    command_as(Command::OpenWorkspace(Workspace::Verify), "Verify"),
+    command_as(Command::OpenWorkspace(Workspace::Models), "Models"),
+    command_as(
+        Command::OpenWorkspace(Workspace::Netlist),
+        "Netlist and script editor",
+    ),
+    command_as(
+        Command::OpenWorkspace(Workspace::Stimulus),
+        "Stimulus library",
+    ),
+];
+
+/// The saved panel layouts, chosen in their dialog, and the way back to
+/// the workspace's own.
+const LAYOUT_MENU: &[MenuEntry] = &[
+    MenuEntry::command_as(
+        SettingsCommand::WorkspaceLayouts.key(),
+        "Saved layouts\u{2026}",
+    ),
     command(Command::ResetLayout),
 ];
 

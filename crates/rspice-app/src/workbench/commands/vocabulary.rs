@@ -365,34 +365,24 @@ impl Command {
             }
             Self::ClearConsole => spec("console-clear", "Clear console output", "Window"),
             Self::ToggleFocusMode => spec("toggle-focus-mode", "Focus workspace", "Window"),
-            Self::ResetLayout => spec(
-                "reset-workspace-layout",
-                "Reset workspace layout…",
-                "Window",
-            ),
-            Self::NewApplicationWindow => spec(
-                "new-application-window",
-                "New application window\u{2026}",
-                "Window",
-            ),
+            Self::ResetLayout => spec("reset-workspace-layout", "Reset layout", "Window"),
+            Self::NewApplicationWindow => {
+                spec("new-application-window", "New window\u{2026}", "Window")
+            }
             Self::DetachDocument => spec(
                 "detach-document",
-                "Detach active document\u{2026}",
+                "Move document to new window\u{2026}",
                 "Window",
             ),
             Self::MoveDocumentToWindow => spec(
                 "move-document-window",
-                "Move active document to window\u{2026}",
+                "Move document to another window\u{2026}",
                 "Window",
             ),
-            Self::ReattachDocument => {
-                spec("reattach-document", "Reattach active document", "Window")
+            Self::ReattachDocument => spec("reattach-document", "Reattach document", "Window"),
+            Self::ConsolidateWindows => {
+                spec("consolidate-windows", "Merge all windows\u{2026}", "Window")
             }
-            Self::ConsolidateWindows => spec(
-                "consolidate-windows",
-                "Consolidate all windows\u{2026}",
-                "Window",
-            ),
             Self::MonitorRecovery => spec(
                 "monitor-recovery",
                 "Recover off-screen windows\u{2026}",

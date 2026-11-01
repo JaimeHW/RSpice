@@ -34,7 +34,9 @@ use crate::workbench::state::Workspace;
 mod pins;
 
 #[cfg(not(target_arch = "wasm32"))]
-use pins::{menu_pin, menu_pin_on, source_editor_app, symbol_view_app, veriloga_view_app};
+use pins::{
+    menu_pin, menu_pin_for, menu_pin_on, source_editor_app, symbol_view_app, veriloga_view_app,
+};
 
 #[cfg(not(target_arch = "wasm32"))]
 fn title_test_app() -> RSpiceApp {
@@ -1422,6 +1424,47 @@ fn annotate_dc_operating_point_switches_the_schematic_annotation() {
         app.state.design.schematic_visibility.annotations,
         SchematicAnnotationVisibility::OperatingPoint
     );
+}
+
+/// Merge all windows and Recover off-screen windows are a desktop
+/// application's: the browser and a tablet show one window, so Window
+/// leaves them out there. Workspace reaches all eight workspaces, each by
+/// its Alt digit, in the digits' order.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn window_gathers_windows_only_on_the_desktop_and_reaches_every_workspace() {
+    use crate::state::command_catalog::CommandPlatform;
+    let app = title_test_app();
+    let window = application_menu_entries(ApplicationMenu::Window);
+    let gathers = |rows: &[String]| {
+        rows.iter().any(|row| {
+            row.starts_with("Merge all windows\u{2026} |")
+                || row.starts_with("Recover off-screen windows\u{2026} |")
+        })
+    };
+    let os = egui::os::OperatingSystem::Windows;
+    assert!(gathers(&menu_pin_for(
+        window,
+        &app,
+        CommandPlatform::Desktop,
+        os
+    )));
+    for platform in [CommandPlatform::Browser, CommandPlatform::Tablet] {
+        let rows = menu_pin_for(window, &app, platform, os);
+        assert!(!gathers(&rows), "{}: {rows:?}", platform.label());
+    }
+
+    let rows = menu_pin(window, &app);
+    let workspaces = rows
+        .iter()
+        .skip_while(|row| *row != "Workspace >")
+        .skip(1)
+        .take_while(|row| row.starts_with("  "))
+        .collect::<Vec<_>>();
+    assert_eq!(workspaces.len(), 8, "{rows:?}");
+    for (digit, row) in (1..).zip(&workspaces) {
+        assert!(row.contains(&format!("| Alt+{digit} |")), "{row}");
+    }
 }
 
 /// Exit ends the File menu on Windows and Linux; on macOS the application
