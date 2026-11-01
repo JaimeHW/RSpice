@@ -180,11 +180,56 @@ impl ControlCircuit {
         Ok(text)
     }
 
+    /// ngspice `destroy [all | plot ...]` (frontend/postcoms.c:891): the
+    /// plots leave the plot list with their vectors, and `destroy` alone
+    /// takes the current plot. The constants plot stays. A destroyed
+    /// dataset's results stay published; when it was current, the newest
+    /// remaining dataset is.
+    pub(in crate::engine) fn destroy(
+        &mut self,
+        command: &ControlCommand,
+    ) -> Result<(), ControlError> {
+        let line = command.line;
+        let words = crate::execution::control::shell::words(&command.arguments);
+        let names: Vec<String> = match words.as_slice() {
+            [] => vec![self.plot_name()],
+            [all] if all.text.eq_ignore_ascii_case("all") => (0..self.datasets.len())
+                .filter(|index| !self.destroyed.contains(index))
+                .map(|index| self.datasets[index].name.clone())
+                .chain(self.vectors.plot_names())
+                .collect(),
+            words => words.iter().map(|word| word.text.clone()).collect(),
+        };
+        for name in names {
+            if name.eq_ignore_ascii_case("const") {
+                return Err(command_error(line, "destroy: the constants plot stays"));
+            }
+            if let Some(index) = self.dataset_index(&name) {
+                self.destroyed.insert(index);
+                self.vectors.remove_vectors_of(&name);
+                if self.current == Some(index) {
+                    self.current = (0..self.datasets.len())
+                        .rev()
+                        .find(|index| !self.destroyed.contains(index));
+                }
+            } else if !self.vectors.remove_plot(&name) {
+                return Err(command_error(
+                    line,
+                    format!("destroy: no plot named '{name}'"),
+                ));
+            }
+        }
+        Ok(())
+    }
+
     /// `setplot` with no plot name: ngspice lists the plots, newest first.
     pub(in crate::engine) fn plot_list(&self) -> String {
         let mut text = String::from("List of plots available:\n\n");
         let current = self.current_dataset().map(|dataset| dataset.name.as_str());
-        for dataset in self.datasets.iter().rev() {
+        for (index, dataset) in self.datasets.iter().enumerate().rev() {
+            if self.destroyed.contains(&index) {
+                continue;
+            }
             let prefix = if Some(dataset.name.as_str()) == current {
                 "Current "
             } else {

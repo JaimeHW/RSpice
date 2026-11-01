@@ -465,9 +465,14 @@ impl Selected<'_> {
 
 impl ControlCircuit {
     fn dataset(&self, name: &str) -> Option<&ControlNamedDataset> {
-        self.datasets
-            .iter()
-            .find(|dataset| dataset.name.eq_ignore_ascii_case(name))
+        self.dataset_index(name).map(|index| &self.datasets[index])
+    }
+
+    /// The dataset of this plot name, unless `destroy` removed it.
+    pub(super) fn dataset_index(&self, name: &str) -> Option<usize> {
+        (0..self.datasets.len()).find(|index| {
+            !self.destroyed.contains(index) && self.datasets[*index].name.eq_ignore_ascii_case(name)
+        })
     }
 
     fn qualified<'a, 'b>(

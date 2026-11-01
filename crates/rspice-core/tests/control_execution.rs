@@ -1389,6 +1389,38 @@ fn shell_variables_expand_as_ngspice_does() {
     assert!(error.unwrap().contains("simulator option"));
 }
 
+/// ngspice `destroy` (frontend/postcoms.c:891) takes plots out of the plot
+/// list: the newest remaining plot becomes current, and `destroy all` leaves
+/// only the constants plot. ngspice-46 prints `v(out) = 1.500000e+00` of op1
+/// and echoes `op1` then `const` for the same script.
+#[test]
+fn destroy_removes_plots_as_ngspice_does() {
+    let source = "destroy\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\ndestroy all\nop\n\
+        tran 1u 2u\nlet a = v(out)\ndestroy tran1\nprint v(out)\nsetplot new\nlet b = 1\n\
+        destroy unknown1\necho $curplot\ndestroy all\necho $curplot\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    let traces = printed(&presented[0]);
+    assert_eq!(traces[0].y.samples.len(), 1);
+    assert!((traces[0].y.samples[0].re - 1.5).abs() < 1e-9);
+    assert_eq!(texts(&presented), ["op1", "const"]);
+    for (script, message) in [
+        ("op\ndestroy tran1", "no plot named 'tran1'"),
+        ("op\ndestroy op1\nsetplot op1", "no plot named 'op1'"),
+        (
+            "op\ntran 1u 2u\nlet a = v(out)\ndestroy tran1\nprint tran1.a",
+            "TRAN1.A",
+        ),
+        ("destroy", "constants plot"),
+    ] {
+        let (_, error) = run_until_error(&format!(
+            "destroy\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\n{script}\n.endc\n.end\n"
+        ));
+        let error = error.unwrap();
+        assert!(error.contains(message), "{script}: {error}");
+    }
+}
+
 /// ngspice `save` narrows what a later analysis keeps; every vector it
 /// names stays readable here, as in ngspice-46, which prints
 /// `v(out) = 1.500000e+00` for the same script.

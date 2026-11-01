@@ -74,6 +74,40 @@ impl VectorStore {
         index.is_some()
     }
 
+    /// The plots `setplot new` made, oldest first.
+    pub(in crate::engine::control) fn plot_names(&self) -> Vec<String> {
+        self.plots.iter().map(|plot| plot.name.clone()).collect()
+    }
+
+    /// Drop the vectors bound in a plot.
+    pub(in crate::engine::control) fn remove_vectors_of(&mut self, plot: &str) {
+        self.vectors.retain(|vector| {
+            !vector
+                .plot
+                .as_deref()
+                .is_some_and(|owner| owner.eq_ignore_ascii_case(plot))
+        });
+    }
+
+    /// `destroy` of a plot `setplot new` made; false when there is none.
+    pub(in crate::engine::control) fn remove_plot(&mut self, name: &str) -> bool {
+        let Some(index) = self
+            .plots
+            .iter()
+            .position(|plot| plot.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let plot = self.plots.remove(index);
+        self.remove_vectors_of(&plot.name);
+        self.current = match self.current {
+            Some(current) if current == index => None,
+            Some(current) if current > index => Some(current - 1),
+            current => current,
+        };
+        true
+    }
+
     fn plot(&self, name: &str) -> Option<&str> {
         self.plots
             .iter()

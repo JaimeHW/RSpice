@@ -15,7 +15,7 @@ use crate::netlist::expr::{
 use crate::netlist::{AnalysisCommand, Netlist};
 use crate::resource::{ResourceKind, ResourceLimitError};
 use crate::{AbortSignal, ComplexValue, Value};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 mod analysis;
 mod options;
@@ -93,6 +93,7 @@ enum CommandKind {
     Set,
     Unset,
     Save,
+    Destroy,
     Alter,
     Analysis,
     Run,
@@ -124,6 +125,7 @@ impl CommandKind {
             "set" | "setcs" => Self::Set,
             "unset" => Self::Unset,
             "save" => Self::Save,
+            "destroy" => Self::Destroy,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" => Self::Analysis,
@@ -164,6 +166,9 @@ pub struct ControlCircuit {
     /// The dataset unqualified vector names resolve against: the newest,
     /// unless `setplot` selected another (ngspice `plot_cur`).
     current: Option<usize>,
+    /// Datasets `destroy` took out of the plot list. Their results stay
+    /// retained for publication; no name reads them.
+    destroyed: BTreeSet<usize>,
     ordinals: BTreeMap<&'static str, usize>,
     retained_values: usize,
     vector_units: BTreeMap<ControlVectorId, crate::signal_unit::SignalUnit>,
@@ -185,6 +190,7 @@ impl ControlCircuit {
             netlist,
             datasets: Vec::new(),
             current: None,
+            destroyed: BTreeSet::new(),
             ordinals: BTreeMap::new(),
             retained_values: 0,
             vector_units: BTreeMap::new(),
@@ -269,6 +275,12 @@ impl ControlCircuit {
             CommandKind::Save => Ok(PreparedCommand::Complete(
                 ControlCommandEffect::CircuitChanged,
             )),
+            CommandKind::Destroy => {
+                self.destroy(command)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
             CommandKind::Alter => {
                 self.alter(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
@@ -397,11 +409,7 @@ impl ControlCircuit {
                         .ok_or_else(|| command_error(line, "plot ordinal overflow"))?;
                     self.ordinals.insert("unknown", ordinal);
                     self.vectors.new_plot(format!("unknown{ordinal}"));
-                } else if let Some(index) = self
-                    .datasets
-                    .iter()
-                    .position(|dataset| dataset.name.eq_ignore_ascii_case(&name.text))
-                {
+                } else if let Some(index) = self.dataset_index(&name.text) {
                     self.current = Some(index);
                     self.vectors.leave_plot();
                 } else if !self.vectors.select_plot(&name.text) {
