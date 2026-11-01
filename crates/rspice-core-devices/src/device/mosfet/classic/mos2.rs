@@ -754,8 +754,11 @@ impl Mosfet {
             if denom.value.is_finite() && denom.value > 1.0e-12 {
                 clfact = punch_through_width / denom / effective_length;
                 if let Some(derivative) = &mut channel_length_derivatives {
-                    let dfact =
-                        xleff.value * xleff.value / (punch_through_width * punch_through_width);
+                    // N_DEV_MOSFET2.C:2452-2457 scales the sensitivities by
+                    // the square of the punch-through-limited length.
+                    let limited_length = effective_length * clfact.value;
+                    let dfact = limited_length * limited_length
+                        / (punch_through_width * punch_through_width);
                     derivative.iter_mut().for_each(|value| *value *= dfact);
                     clfact.derivative = *derivative;
                 }
@@ -1415,6 +1418,53 @@ mod tests {
             mcnc_weak_inversion_nmos().level2_operating_point(0.761, 0.0, -1.0);
         assert_eq!((id, gm), (0.0, 0.0));
         assert_relative(gds, 2.60101e-6, 2.0e-3);
+    }
+
+    fn mos2_punch_through_nmos() -> Mosfet {
+        let mut params = HashMap::new();
+        for (name, value) in [
+            ("LEVEL", 2.0),
+            ("VTO", 0.779),
+            ("KP", 3.52e-5),
+            ("GAMMA", 1.04),
+            ("PHI", 0.6),
+            ("TOX", 5.0e-8),
+            ("NSUB", 1.0e16),
+            ("NSS", 0.0),
+            ("NFS", 1.306e11),
+            ("TPG", 1.0),
+            ("XJ", 3.85e-8),
+            ("LD", 1.0e-7),
+            ("UO", 400.0),
+            ("UCRIT", 999000.0),
+            ("UEXP", 0.001001),
+            ("VMAX", 32585.3),
+            ("NEFF", 0.01001),
+            ("DELTA", 1.33),
+        ] {
+            params.insert(name.to_string(), value);
+        }
+
+        Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(1.8e-5, 3.0e-6)
+    }
+
+    #[test]
+    fn level2_punch_through_output_conductance_matches_centered_difference() {
+        // At vgs=5, vds=4.414 the shortened channel falls under the
+        // punch-through width, so clfact becomes xwb/(1+(deltal-xld)/xwb)/leff.
+        // N_DEV_MOSFET2.C:2452-2457 and mos2load.c scale the channel-length
+        // sensitivities by the square of that limited length; scaling them
+        // by the unlimited one gave gds=1.6e-5 against a difference of 2.3e-2.
+        let mos = mos2_punch_through_nmos();
+        let (vgs, vds, vbs) = (5.0, 4.414, 0.0);
+        let (_, _, _, gds, _, _) = mos.level2_operating_point(vgs, vds, vbs);
+        let step = 1.0e-6;
+        let finite_difference = (mos.level2_evaluate(vgs, vds + step, vbs).id
+            - mos.level2_evaluate(vgs, vds - step, vbs).id)
+            / (2.0 * step);
+        assert_relative(gds, finite_difference, 1.0e-3);
     }
 
     fn assert_relative(actual: Value, expected: Value, tolerance: Value) {
