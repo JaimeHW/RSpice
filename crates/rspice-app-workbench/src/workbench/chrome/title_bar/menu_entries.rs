@@ -800,10 +800,7 @@ fn handle_submenu_keyboard(
     rows: &[MenuRowRecord],
 ) -> Option<MenuChoice> {
     let focused = ctx.memory(|memory| memory.focused());
-    let Some(focused_index) = focused.and_then(|id| rows.iter().position(|row| row.id == id))
-    else {
-        return None;
-    };
+    let focused_index = focused.and_then(|id| rows.iter().position(|row| row.id == id))?;
     claim_menu_keys(ctx, rows[focused_index].id);
     if ctx.input_mut(|input| {
         input.consume_key(Modifiers::NONE, Key::ArrowLeft)
