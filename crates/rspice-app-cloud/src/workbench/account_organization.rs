@@ -554,6 +554,8 @@ pub fn show(ctx: &egui::Context, parts: &mut AccountConsoleParts<'_>) -> Option<
         .secondary(AccountAction::PersonalPreferences.label())
         .secondary_leading()
         .flush_body()
+        // The sections end where the footer's buttons do, not a bar's width in.
+        .overlay_scrollbar()
         .show(ctx, |ui| {
             identity_section(ui, &model.identity, &mut requested_action);
             section_rule(ui);

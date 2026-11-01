@@ -443,7 +443,9 @@ fn typed_command_and_rendered_surface_disclose_the_same_offline_boundary() {
 /// so nothing is scrolled out of view. It used to end on an About section
 /// (version, platform, Help center, support bundle) that Help > About
 /// already states, which ran under the fold into an inner scroll, and em
-/// dashes stood in for words ("None, nothing is sent" with a dash).
+/// dashes stood in for words ("None, nothing is sent" with a dash). The
+/// body's actions end where the footer's do; the body withheld a scroll
+/// bar's gutter it never needed, so they ended 13 points short.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_console_fits_a_desktop_frame_without_about_or_dashes() {
@@ -496,6 +498,19 @@ fn the_console_fits_a_desktop_frame_without_about_or_dashes() {
         last_row.y1,
         close.y0
     );
+    for action in ["Activate license\u{2026}", "Legal and privacy\u{2026}"] {
+        let bounds = nodes
+            .values()
+            .find(|node| node.label() == Some(action))
+            .and_then(|node| node.bounds())
+            .unwrap_or_else(|| panic!("no {action}"));
+        assert!(
+            (bounds.x1 - close.x1).abs() <= 1.0,
+            "{action} ends at {} and the footer's Close at {}",
+            bounds.x1,
+            close.x1
+        );
+    }
     for text in nodes
         .values()
         .flat_map(|node| [node.label(), node.value()])
