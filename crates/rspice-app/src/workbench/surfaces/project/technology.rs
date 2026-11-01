@@ -8,6 +8,7 @@
 
 use super::*;
 use crate::state::pdk_config::{diff_area_label, diff_impact_label};
+use crate::workbench::app_state::Model;
 
 #[derive(Debug, Clone)]
 pub(super) struct TechnologyCandidate {
@@ -57,9 +58,9 @@ pub(super) const fn technology_primary_state(
     }
 }
 
-pub(super) fn technology_candidates(app: &RSpiceApp) -> TechnologyCandidateCatalog {
+pub(super) fn technology_candidates(model: &Model) -> TechnologyCandidateCatalog {
     let mut catalog = TechnologyCandidateCatalog::default();
-    for library in app.state.model.model_library_manager.libraries_sorted() {
+    for library in model.model_library_manager.libraries_sorted() {
         match ProjectTechnologyBinding::from_model_library(library) {
             Ok(binding) => {
                 let option_label = format!(
@@ -129,11 +130,10 @@ fn signed_package_label(
     )
 }
 
-pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
-    let catalog = technology_candidates(app);
+pub(super) fn open_technology_attachment_dialog(cx: &mut Cx<'_, ProjectFeature>) {
+    let catalog = technology_candidates(cx.model);
     let candidates = &catalog.candidates;
-    let current_library = app
-        .state
+    let current_library = cx
         .model
         .workspace
         .content
@@ -151,14 +151,8 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
                 .first()
                 .map(|candidate| candidate.binding.model_library().to_owned())
         });
-    let packages = app
-        .state
-        .model
-        .pdk_config
-        .technology_registry
-        .validated_packages();
-    let current_pin = app
-        .state
+    let packages = cx.model.pdk_config.technology_registry.validated_packages();
+    let current_pin = cx
         .model
         .workspace
         .content
@@ -179,16 +173,14 @@ pub(super) fn open_technology_attachment_dialog(app: &mut RSpiceApp) {
                 .map(signed_package_key)
         })
         .or_else(|| {
-            app.state
-                .model
+            cx.model
                 .pdk_config
                 .technology_registry
                 .active_package()
                 .map(signed_package_key)
         })
         .or_else(|| packages.first().map(signed_package_key));
-    app.state
-        .project
+    cx.state
         .technology_attachment
         .open(selected_library, selected_signed_package);
 }
@@ -198,7 +190,7 @@ pub(in crate::workbench) fn show_technology_attachment_dialog(ctx: &Context, app
         return;
     }
 
-    let catalog = technology_candidates(app);
+    let catalog = technology_candidates(&app.state.model);
     let candidates = &catalog.candidates;
     let packages = app
         .state

@@ -9,7 +9,6 @@ use serde::Serialize;
 
 use super::*;
 use crate::state::model_library::ModelSourceAuthority;
-use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::property_row_toned;
 
 const DEPENDENCY_SPLIT_BREAKPOINT: f32 = 640.0;
@@ -71,16 +70,16 @@ struct DependencyRow {
     status: String,
 }
 
-pub(super) fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
+pub(super) fn dependencies(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     // One projection of live authority per frame, read by the strip, the
     // ledger and the exported manifest alike.
-    let rows = dependency_rows(&app.state);
-    dependency_context_strip(ui, &mut app.state, &rows);
+    let rows = dependency_rows(cx);
+    dependency_context_strip(ui, cx, &rows);
     let width = visible_workspace_width(ui);
     if width < DEPENDENCY_SPLIT_BREAKPOINT {
         dependency_pane(ui, width, 0.0, |ui| {
-            technology_binding_panel(ui, app);
-            dependency_inventory(ui, &mut app.state, &rows, width, 0.0);
+            technology_binding_panel(ui, cx);
+            dependency_inventory(ui, cx, &rows, width, 0.0);
         });
         return;
     }
@@ -90,10 +89,10 @@ pub(super) fn dependencies(ui: &mut Ui, app: &mut RSpiceApp) {
     let shown = ui.horizontal_top(|ui| {
         ui.spacing_mut().item_spacing.x = 1.0;
         dependency_pane(ui, left_width, pane_height, |ui| {
-            technology_binding_panel(ui, app);
+            technology_binding_panel(ui, cx);
         });
         dependency_pane(ui, right_width, pane_height, |ui| {
-            dependency_inventory(ui, &mut app.state, &rows, right_width, pane_height);
+            dependency_inventory(ui, cx, &rows, right_width, pane_height);
         });
     });
     ui.painter().vline(
@@ -118,9 +117,9 @@ fn dependency_pane(ui: &mut Ui, width: f32, height: f32, content: impl FnOnce(&m
     });
 }
 
-fn dependency_context_strip(ui: &mut Ui, state: &mut AppState, rows: &[DependencyRow]) {
+fn dependency_context_strip(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, rows: &[DependencyRow]) {
     let t = Tokens::get(ui.ctx());
-    let filter = dependency_filter(state);
+    let filter = dependency_filter(cx);
     let visible = rows.iter().filter(|row| row_matches(row, &filter)).count();
     let resolved = rows.iter().filter(|row| row_is_resolved(row)).count();
     let review = rows.len().saturating_sub(resolved);
@@ -139,7 +138,7 @@ fn dependency_context_strip(ui: &mut Ui, state: &mut AppState, rows: &[Dependenc
             if band < DEPENDENCY_STRIP_ONE_LINE {
                 // A phone-width strip gives the field its own line and drops
                 // the facts under it, rather than breaking one mid-value.
-                dependency_filter_field(ui, state, band);
+                dependency_filter_field(ui, cx, band);
                 ui.horizontal(|ui| {
                     dependency_context_facts(ui, resolved, review, visible, rows.len(), &filter);
                 });
@@ -147,17 +146,17 @@ fn dependency_context_strip(ui: &mut Ui, state: &mut AppState, rows: &[Dependenc
             }
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 10.0;
-                dependency_filter_field(ui, state, (band * 0.38).clamp(180.0, 340.0));
+                dependency_filter_field(ui, cx, (band * 0.38).clamp(180.0, 340.0));
                 ui.separator();
                 dependency_context_facts(ui, resolved, review, visible, rows.len(), &filter);
             });
         });
 }
 
-fn dependency_filter_field(ui: &mut Ui, state: &mut AppState, width: f32) {
+fn dependency_filter_field(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, width: f32) {
     let search = ui.add_sized(
         [width, Tokens::get(ui.ctx()).metrics.ctl_h],
-        egui::TextEdit::singleline(&mut state.project.project_dependency_filter)
+        egui::TextEdit::singleline(&mut cx.state.project_dependency_filter)
             .hint_text("Dependency, type, source, version\u{2026}"),
     );
     ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -237,18 +236,17 @@ fn dependency_panel_free_height(ui: &Ui, pane_height: f32, top: f32) -> f32 {
     pane_height - (ui.cursor().top() - top) - dependency_action_bar_height(ui)
 }
 
-fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
+fn technology_binding_panel(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     let t = Tokens::get(ui.ctx());
     ui.spacing_mut().item_spacing.y = 0.0;
-    let binding = app
-        .state
+    let binding = cx
         .model
         .workspace
         .content
         .project
         .technology_binding()
         .cloned();
-    let contract = app.state.model.validate_project_technology_contract();
+    let contract = cx.model.validate_project_technology_contract();
     let contract_ok = binding.is_some() && contract.is_ok();
     // A pinned binding is the ordinary binding, so the header names only the
     // one that has to be looked at.
@@ -328,8 +326,8 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         property_row_toned(ui, "Signed package", "Not attached", t.color.text_faint);
     }
-    let libraries = app.state.model.model_library_manager.library_count();
-    let models = app.state.model.model_library_manager.total_model_count();
+    let libraries = cx.model.model_library_manager.library_count();
+    let models = cx.model.model_library_manager.total_model_count();
     property_row(
         ui,
         "Model catalog",
@@ -355,10 +353,10 @@ fn technology_binding_panel(ui: &mut Ui, app: &mut RSpiceApp) {
             .show(ui)
             .clicked()
         {
-            open_technology_attachment_dialog(app);
+            open_technology_attachment_dialog(cx);
         }
         if Button::new("Model paths\u{2026}").show(ui).clicked() {
-            app.execute_command_key(ids::PDK_SETTINGS);
+            cx.execute(ids::PDK_SETTINGS);
         }
     });
     // The panel ends here rather than at the floor of the pane, so close it.
@@ -393,14 +391,14 @@ fn technology_contract_note(ui: &mut Ui, message: &str) {
 
 fn dependency_inventory(
     ui: &mut Ui,
-    state: &mut AppState,
+    cx: &mut Cx<'_, ProjectFeature>,
     rows: &[DependencyRow],
     pane_width: f32,
     pane_height: f32,
 ) {
     let top = ui.cursor().top();
     ui.spacing_mut().item_spacing.y = 0.0;
-    let filter = dependency_filter(state);
+    let filter = dependency_filter(cx);
     let visible = rows
         .iter()
         .filter(|row| row_matches(row, &filter))
@@ -452,7 +450,7 @@ fn dependency_inventory(
     let mut selected = None;
     for row in &visible {
         let kind = WorkspaceRowKind::body(
-            state.project.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
+            cx.state.project_dependency_selection.as_deref() == Some(row.identity.as_str()),
         );
         let status = status_label(&row.status);
         let problem = status_problem(&row.status);
@@ -509,7 +507,7 @@ fn dependency_inventory(
         }
     }
     if let Some(identity) = selected {
-        state.project.project_dependency_selection = Some(identity);
+        cx.state.project_dependency_selection = Some(identity);
     }
     if compact {
         ledger_grid_floor(ui, width, pane_height, top, LEDGER_COMPACT_FRACTIONS);
@@ -518,7 +516,7 @@ fn dependency_inventory(
     }
     dependency_action_bar(ui, |ui| {
         if Button::new("Export manifest\u{2026}").show(ui).clicked() {
-            export_dependency_manifest(state);
+            export_dependency_manifest(cx);
         }
     });
 }
@@ -548,9 +546,8 @@ fn ledger_grid_floor<const N: usize>(
     }
 }
 
-fn dependency_filter(state: &AppState) -> String {
-    state
-        .project
+fn dependency_filter(cx: &Cx<'_, ProjectFeature>) -> String {
+    cx.state
         .project_dependency_filter
         .trim()
         .to_ascii_lowercase()
@@ -594,9 +591,9 @@ fn unset_columns<const N: usize>(cells: &[&str; N]) -> Vec<usize> {
         .collect()
 }
 
-fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
+fn dependency_rows(cx: &Cx<'_, ProjectFeature>) -> Vec<DependencyRow> {
     let mut rows = Vec::new();
-    for library in state.model.library_manager.libraries_sorted() {
+    for library in cx.model.library_manager.libraries_sorted() {
         rows.push(DependencyRow {
             identity: library.name.clone(),
             resource_type: "Design library".to_owned(),
@@ -618,7 +615,7 @@ fn dependency_rows(state: &AppState) -> Vec<DependencyRow> {
             },
         });
     }
-    for library in state.model.model_library_manager.libraries_sorted() {
+    for library in cx.model.model_library_manager.libraries_sorted() {
         let authority = match library.source_authority {
             ModelSourceAuthority::BuiltIn => "Built-in catalog",
             ModelSourceAuthority::External => "External source",
@@ -692,8 +689,8 @@ fn display_path(path: &std::path::Path) -> String {
     path.display().to_string()
 }
 
-fn dependency_manifest(state: &AppState) -> DependencyManifest {
-    let technology = state
+fn dependency_manifest(cx: &Cx<'_, ProjectFeature>) -> DependencyManifest {
+    let technology = cx
         .model
         .workspace
         .content
@@ -708,18 +705,18 @@ fn dependency_manifest(state: &AppState) -> DependencyManifest {
         });
     DependencyManifest {
         schema_version: 1,
-        project_id: state.model.workspace.content.project.id().to_string(),
-        project_revision: state.model.workspace.content.project.revision().get(),
+        project_id: cx.model.workspace.content.project.id().to_string(),
+        project_revision: cx.model.workspace.content.project.revision().get(),
         technology,
-        resources: dependency_rows(state),
+        resources: dependency_rows(cx),
     }
 }
 
-fn export_dependency_manifest(state: &mut AppState) {
-    let contents = match serde_json::to_vec_pretty(&dependency_manifest(state)) {
+fn export_dependency_manifest(cx: &mut Cx<'_, ProjectFeature>) {
+    let contents = match serde_json::to_vec_pretty(&dependency_manifest(cx)) {
         Ok(contents) => contents,
         Err(error) => {
-            state.report_failure(
+            cx.model.report_failure(
                 "Manifest export failed",
                 format!("Dependency manifest serialization failed: {error}"),
             );
@@ -728,8 +725,7 @@ fn export_dependency_manifest(state: &mut AppState) {
     };
     let filename = format!(
         "{}-dependencies.json",
-        state
-            .model
+        cx.model
             .workspace
             .content
             .project
@@ -747,9 +743,9 @@ fn export_dependency_manifest(state: &mut AppState) {
     match crate::workbench::workflows::export_workflow::publish_project_manifest(
         &filename, &contents,
     ) {
-        Ok(Some(exported)) => state.prompt(exported),
+        Ok(Some(exported)) => cx.wb.prompt(exported),
         Ok(None) => {}
-        Err(error) => state.report_failure("Manifest export failed", error),
+        Err(error) => cx.model.report_failure("Manifest export failed", error),
     }
 }
 

@@ -165,7 +165,9 @@ pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
                 .id_salt(("workbench.project.surface", page))
                 .auto_shrink([false, false])
                 .show(ui, |ui| match page {
-                    ProjectPage::Dependencies => dependencies::dependencies(ui, app),
+                    ProjectPage::Dependencies => {
+                        dependencies::dependencies(ui, &mut features::cx(app))
+                    }
                     ProjectPage::Overview
                     | ProjectPage::Library
                     | ProjectPage::Configuration
@@ -1071,35 +1073,40 @@ mod tests {
         )
     }
 
-    /// The configuration chip opens the Configuration page in the frame it
-    /// was clicked in: the band beside it drops the Library page's action and
-    /// the page below it is the Configuration page.
-    #[test]
-    fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
+    /// The Project workspace on `page`, drawn until its layout settles.
+    fn settled_on(page: ProjectPage) -> (egui::Context, RSpiceApp, egui::FullOutput) {
         let ctx = egui::Context::default();
         crate::ui::Theme::default().apply(&ctx);
         ctx.enable_accesskit();
         let mut app = RSpiceApp::test_instance();
-        app.state.project.project_page = ProjectPage::Library;
+        app.state.project.project_page = page;
         let mut settled = project_frame(&ctx, &mut app, Vec::new());
         for _ in 0..2 {
             settled = project_frame(&ctx, &mut app, Vec::new());
         }
-        assert!(painted_text(&settled).contains("Attach library\u{2026}"));
-        let nodes = settled
+        (ctx, app, settled)
+    }
+
+    /// Press and release the pointer in the middle of the control the
+    /// settled frame announced as `label`, and return the frame that took
+    /// the click.
+    fn click_announced(
+        ctx: &egui::Context,
+        app: &mut RSpiceApp,
+        settled: egui::FullOutput,
+        label: &str,
+    ) -> egui::FullOutput {
+        let bounds = settled
             .platform_output
             .accesskit_update
             .expect("the settled frame publishes its tree")
-            .nodes;
-        let chip = nodes
+            .nodes
             .iter()
-            .find_map(|(_, node)| {
-                (node.label()? == "Configuration used for runs: Default").then_some(node.bounds()?)
-            })
-            .expect("the Library page's chrome offers the configuration chip");
+            .find_map(|(_, node)| (node.label()? == label).then_some(node.bounds()?))
+            .unwrap_or_else(|| panic!("the settled frame announces `{label}`"));
         let at = pos2(
-            ((chip.x0 + chip.x1) / 2.0) as f32,
-            ((chip.y0 + chip.y1) / 2.0) as f32,
+            ((bounds.x0 + bounds.x1) / 2.0) as f32,
+            ((bounds.y0 + bounds.y1) / 2.0) as f32,
         );
         let click = vec![
             egui::Event::PointerMoved(at),
@@ -1116,8 +1123,23 @@ mod tests {
                 modifiers: Modifiers::default(),
             },
         ];
+        project_frame(ctx, app, click)
+    }
 
-        let clicked = project_frame(&ctx, &mut app, click);
+    /// The configuration chip opens the Configuration page in the frame it
+    /// was clicked in: the band beside it drops the Library page's action and
+    /// the page below it is the Configuration page.
+    #[test]
+    fn the_configuration_chip_opens_its_page_in_the_frame_it_was_clicked_in() {
+        let (ctx, mut app, settled) = settled_on(ProjectPage::Library);
+        assert!(painted_text(&settled).contains("Attach library\u{2026}"));
+
+        let clicked = click_announced(
+            &ctx,
+            &mut app,
+            settled,
+            "Configuration used for runs: Default",
+        );
 
         assert_eq!(app.state.project.project_page, ProjectPage::Configuration);
         let painted = painted_text(&clicked);
@@ -1132,6 +1154,20 @@ mod tests {
             .filter_map(|(_, node)| node.label().map(str::to_owned))
             .collect::<Vec<_>>();
         assert_eq!(panels, ["Project Configuration"]);
+    }
+
+    /// Model paths… on the Dependencies page is answered as the page returns,
+    /// inside the stage's step of the frame: PDK settings is open before the
+    /// frame's dialogs draw, so it shows in the frame it was asked for in.
+    #[test]
+    fn model_paths_opens_pdk_settings_before_the_frame_draws_its_dialogs() {
+        let pdk_settings = crate::workbench::framework::dialogs::DialogKey("models.pdk_settings");
+        let (ctx, mut app, settled) = settled_on(ProjectPage::Dependencies);
+        assert!(!features::dialog_open(&app.state, pdk_settings));
+
+        click_announced(&ctx, &mut app, settled, "Model paths\u{2026}");
+
+        assert!(features::dialog_open(&app.state, pdk_settings));
     }
 
     /// Of the steps every command passes through, the configuration chip
