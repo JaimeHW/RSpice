@@ -491,7 +491,10 @@ impl Command {
             }
             Self::DeselectAll => deselect_all(app),
             Self::SelectOfKind(kind) => {
-                app.state.select_schematic_objects_of_kind(kind);
+                crate::workbench::app::dialogs::selection::commands::select_schematic_objects_of_kind(
+                    &mut app.state,
+                    kind,
+                );
             }
             Self::RenameSelection => {
                 crate::workbench::app::open_selected_object_rename(&mut app.state);

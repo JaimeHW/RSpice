@@ -46,6 +46,24 @@ fn replace_schematic_selection(state: &mut AppState, selection: Selection) {
     }
 }
 
+/// Select every object of `kind` on the active sheet in place of what was
+/// selected: Edit ▸ Select ▸. Returns whether the sheet had any.
+pub(in crate::workbench) fn select_schematic_objects_of_kind(
+    state: &mut AppState,
+    kind: SchematicObjectKind,
+) -> bool {
+    let selection = objects_of_kind_on_active_sheet(state, kind);
+    let count = selection.count();
+    if count == 0 {
+        let absent = kind.absent();
+        state.prompt(format!("{}{}.", absent[..1].to_uppercase(), &absent[1..]));
+        return false;
+    }
+    replace_schematic_selection(state, selection);
+    state.prompt(format!("Selected {}.", kind.counted(count)));
+    true
+}
+
 impl AppState {
     /// Delete what is selected on the active sheet.
     ///
@@ -267,21 +285,6 @@ impl AppState {
         }
         replace_schematic_selection(state, selection);
         state.prompt(format!("Selected {}.", object_count(count)));
-        true
-    }
-
-    /// Select every object of `kind` on the active sheet in place of what was
-    /// selected: Edit ▸ Select ▸. Returns whether the sheet had any.
-    pub(crate) fn select_schematic_objects_of_kind(&mut self, kind: SchematicObjectKind) -> bool {
-        let selection = objects_of_kind_on_active_sheet(self, kind);
-        let count = selection.count();
-        if count == 0 {
-            let absent = kind.absent();
-            self.prompt(format!("{}{}.", absent[..1].to_uppercase(), &absent[1..]));
-            return false;
-        }
-        replace_schematic_selection(self, selection);
-        self.prompt(format!("Selected {}.", kind.counted(count)));
         true
     }
 
