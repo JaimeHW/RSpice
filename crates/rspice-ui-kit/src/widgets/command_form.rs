@@ -548,11 +548,11 @@ impl<'u> FormRows<'u> {
             let lines = items.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in items.chunks_mut(columns).enumerate() {
-                let line_rect = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
+                let mark_line = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, (words, value)) in line.iter_mut().enumerate() {
-                    let left = line_rect.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
+                    let left = mark_line.line.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
                     let item = id.with(line_index * columns + column);
-                    if mark_control(ui, item, left, line_rect, words, **value, MarkKind::Check)
+                    if mark_control(ui, item, left, mark_line, words, **value, MarkKind::Check)
                         .clicked()
                     {
                         **value = !**value;
@@ -576,16 +576,16 @@ impl<'u> FormRows<'u> {
             let lines = options.len().div_ceil(columns);
             let mut changed = false;
             for (line_index, line) in options.chunks(columns).enumerate() {
-                let line_rect = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
+                let mark_line = allocate_mark_line(ui, width, line_h, trim, line_index, lines);
                 for (column, words) in line.iter().enumerate() {
                     let index = line_index * columns + column;
-                    let left = line_rect.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
+                    let left = mark_line.line.left() + column as f32 * (column_w + MARK_COLUMN_GAP);
                     let on = *selected == index;
                     if mark_control(
                         ui,
                         id.with(index),
                         left,
-                        line_rect,
+                        mark_line,
                         words,
                         on,
                         MarkKind::Radio,
@@ -881,10 +881,19 @@ fn mark_block_trim(ui: &Ui, line_h: f32) -> f32 {
     ((line_h - ink) * 0.5).floor().max(0.0)
 }
 
+/// One laid-out line of a set of marks.
+#[derive(Clone, Copy)]
+struct MarkLine {
+    /// The whole line, centred where it would be untrimmed: what its mark and
+    /// words are placed in.
+    line: Rect,
+    /// What the layout gave the line. The mark answers to this and no more,
+    /// so a trimmed outer line never reaches into the gap to the next row.
+    span: Rect,
+}
+
 /// Lay out line `index` of a set of `lines` marks: `line_h` tall where it
-/// meets another line, less `trim` at the set's outer edges. Returns the
-/// whole line, centred where it would be untrimmed, for its mark and words
-/// to be placed in.
+/// meets another line, less `trim` at the set's outer edges.
 fn allocate_mark_line(
     ui: &mut Ui,
     width: f32,
@@ -892,12 +901,15 @@ fn allocate_mark_line(
     trim: f32,
     index: usize,
     lines: usize,
-) -> Rect {
+) -> MarkLine {
     let top = if index == 0 { trim } else { 0.0 };
     let bottom = if index + 1 == lines { trim } else { 0.0 };
-    let (rect, _) =
+    let (span, _) =
         ui.allocate_exact_size(vec2(width, line_h - top - bottom), egui::Sense::hover());
-    Rect::from_min_size(pos2(rect.left(), rect.top() - top), vec2(width, line_h))
+    MarkLine {
+        line: Rect::from_min_size(pos2(span.left(), span.top() - top), vec2(width, line_h)),
+        span,
+    }
 }
 
 /// The words of one mark, as they are painted.
@@ -932,7 +944,7 @@ fn mark_control(
     ui: &mut Ui,
     id: Id,
     left: f32,
-    line: Rect,
+    MarkLine { line, span }: MarkLine,
     words: &str,
     on: bool,
     kind: MarkKind,
@@ -940,10 +952,10 @@ fn mark_control(
     let t = Tokens::get(ui.ctx());
     let galley = mark_galley(ui, words);
     let hit = Rect::from_min_max(
-        pos2(left, line.top()),
+        pos2(left, span.top()),
         pos2(
             (left + MARK_SIDE + MARK_GAP + galley.size().x).min(line.right()),
-            line.bottom(),
+            span.bottom(),
         ),
     );
     let response = ui.interact(hit, id, egui::Sense::click());
