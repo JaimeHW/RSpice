@@ -840,7 +840,7 @@ fn show_window_form(
                             };
                         }
                     }
-                    rows.checks(
+                    rows.check_columns(
                         "Options",
                         &mut [("Restore on next launch", &mut draft.restore_on_launch)],
                     );
@@ -986,7 +986,7 @@ fn show_window_list_workflow(
                             selected.remove(id);
                         }
                     }
-                    rows.checks(
+                    rows.check_columns(
                         "Options",
                         &mut [("Keep restored windows on screen", recover_future)],
                     );

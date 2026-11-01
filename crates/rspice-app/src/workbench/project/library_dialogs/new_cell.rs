@@ -72,6 +72,7 @@ impl ProjectFeature {
         );
         let mut name_changed = false;
         let choice = CommandForm::new("New cell", "Create")
+            .option_columns()
             .describe("Create a named cell in a writable library with the selected initial views.")
             .primary_enabled(
                 catalog_current
@@ -98,7 +99,7 @@ impl ProjectFeature {
                     &mut dialogs.new_cell_description,
                     "",
                 );
-                rows.checks(
+                rows.check_columns(
                     "Views",
                     &mut [
                         ("Schematic", &mut dialogs.new_cell_create_schematic),
@@ -327,8 +328,9 @@ mod tests {
         );
     }
 
-    /// New cell is the 420-point command form: the views are checks on the
-    /// grid under one label, with no kicker over them and no switches.
+    /// New cell is the command form with option columns: the four views
+    /// are checks on one line of the grid under one label, each in an equal
+    /// share, with no kicker over them and no switches.
     #[cfg(not(target_arch = "wasm32"))]
     #[test]
     fn the_new_cell_form_puts_its_views_on_the_grid() {
@@ -345,11 +347,19 @@ mod tests {
                 })
             },
         );
-        assert_eq!(painted.surface.width(), 420.0);
+        assert_eq!(painted.surface.width(), 520.0);
         assert!(painted.rect_of("VIEWS TO CREATE").is_none());
         let views = painted.rect_of("Views").expect("the Views row");
         let library = painted.rect_of("Library").expect("the Library row");
         assert!((views.left() - library.left()).abs() < 0.5);
+        // One line, and the views' words level with the row's label.
+        for view in ["Schematic", "Symbol", "Testbench", "Verilog-A"] {
+            let rect = painted.rect_of(view).expect(view);
+            assert!(
+                (rect.center().y - views.center().y).abs() < 1.0,
+                "{view} is not on the Views line"
+            );
+        }
         assert!(painted.rect_of("Enter a name for the cell.").is_some());
     }
 

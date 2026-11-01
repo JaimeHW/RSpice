@@ -268,6 +268,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
         &messages.text(MessageId::NetlistExportTitle),
         &messages.text(MessageId::NetlistExportDeck),
     )
+    .option_columns()
     .describe(&messages.text(MessageId::NetlistExportDescription))
     .primary_enabled(refusal.is_none())
     .status(status)
@@ -296,7 +297,7 @@ pub(super) fn export_generated_dialog_window(ctx: &egui::Context, app: &mut RSpi
             items.push((source_map_label.as_str(), &mut dialog.include_source_map));
         }
         if !items.is_empty() {
-            rows.checks("Include", &mut items);
+            rows.check_columns("Include", &mut items);
         }
         if let Some(bundled) = &bundled_includes {
             rows.derived(bundled);

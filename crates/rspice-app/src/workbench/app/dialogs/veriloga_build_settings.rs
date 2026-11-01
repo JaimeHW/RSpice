@@ -561,7 +561,7 @@ fn form_body(
         text(MessageId::VerilogABuildSettingsGeneratedRust),
         text(MessageId::VerilogABuildSettingsNativeJit),
     );
-    edited |= rows.checks(
+    edited |= rows.check_columns(
         &text(MessageId::VerilogABuildSettingsTargets),
         &mut [
             (generated.as_str(), &mut draft.generated_rust),
