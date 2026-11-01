@@ -15,6 +15,8 @@
 
 use crate::state::model_library::ModelLibraryManager;
 use crate::state::{PreflightReport, ProjectWorkspace, SchematicState};
+use rspice_app_state::workbench::app_state::design_checks::DesignCheckStatus;
+use rspice_app_state::workbench::app_state::model::{Model, SlotFacts};
 use rspice_app_state::workbench::app_state::sim_setup::SimSetupState;
 use rspice_design::drc::DrcResult;
 use rspice_simulation::preparation::technology_demand;
@@ -114,6 +116,48 @@ pub fn run_preflight_block_reason(
         ));
     }
     None
+}
+
+/// The user-facing reason the Run command is blocked: an execution already
+/// active, then [`simulation_run_preflight_block_reason`].
+pub fn simulation_run_block_reason(model: &Model, facts: SlotFacts) -> Option<String> {
+    if model.simulation.execution.has_active_execution() {
+        return Some("A simulation execution is already active".to_string());
+    }
+    simulation_run_preflight_block_reason(model, facts)
+}
+
+/// The user-facing preflight reason a new run cannot start, excluding the
+/// transient "already running" state so queued re-runs can share it: the
+/// static rule over the model, then the technology gate.
+pub fn simulation_run_preflight_block_reason(model: &Model, facts: SlotFacts) -> Option<String> {
+    run_preflight_block_reason(
+        &model.sim_setup,
+        &model.workspace,
+        &model.schematic,
+        &model.model_library_manager,
+        current_blocking_drc_result(model, facts),
+    )
+    .or_else(|| {
+        model
+            .technology_inputs()
+            .technology_gate_block_reason()
+            .err()
+    })
+}
+
+/// The current error-level schematic DRC result that blocks generated runs.
+/// Only an exact, current receipt for the active cell/view can block. The
+/// legacy dialog projection is presentation state and is never execution
+/// authority. Manual deck runs use `manual_deck_run_block_reason` instead.
+pub fn current_blocking_drc_result(model: &Model, facts: SlotFacts) -> Option<&DrcResult> {
+    match model.active_design_check_status(facts) {
+        DesignCheckStatus::Current(receipt) if receipt.result.has_errors() => Some(&receipt.result),
+        DesignCheckStatus::NotRun
+        | DesignCheckStatus::Current(_)
+        | DesignCheckStatus::Stale(_)
+        | DesignCheckStatus::Unavailable { .. } => None,
+    }
 }
 
 /// Transient state for the simulation-preflight pass: the report it produced

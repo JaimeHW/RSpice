@@ -422,25 +422,15 @@ impl AppState {
         self.simulation_run_block_reason().is_none()
     }
 
-    /// User-facing reason the Run command is currently blocked.
+    /// [`run_preflight::simulation_run_block_reason`] for the session's model.
     pub fn simulation_run_block_reason(&self) -> Option<String> {
-        if self.model.simulation.execution.has_active_execution() {
-            return Some("A simulation execution is already active".to_string());
-        }
-        self.simulation_run_preflight_block_reason()
+        run_preflight::simulation_run_block_reason(&self.model, self.slot_facts())
     }
 
-    /// User-facing preflight reason a new run cannot start, excluding the
-    /// transient "already running" state so queued re-runs can share it.
+    /// [`run_preflight::simulation_run_preflight_block_reason`] for the
+    /// session's model.
     pub fn simulation_run_preflight_block_reason(&self) -> Option<String> {
-        run_preflight::run_preflight_block_reason(
-            &self.model.sim_setup,
-            &self.model.workspace,
-            &self.model.schematic,
-            &self.model.model_library_manager,
-            self.current_blocking_drc_result(),
-        )
-        .or_else(|| self.technology_gate_block_reason().err())
+        run_preflight::simulation_run_preflight_block_reason(&self.model, self.slot_facts())
     }
 
     /// User-facing reason the Netlist workspace cannot run the current deck.
@@ -515,20 +505,9 @@ impl AppState {
         }
     }
 
-    /// Current error-level schematic DRC result that blocks generated runs.
-    /// Only an exact, current receipt for the active cell/view can block. The
-    /// legacy dialog projection is presentation state and is never execution
-    /// authority. Manual deck runs use `manual_deck_run_block_reason` instead.
+    /// [`run_preflight::current_blocking_drc_result`] for the session's model.
     pub fn current_blocking_drc_result(&self) -> Option<&rspice_design::drc::DrcResult> {
-        match self.active_design_check_status() {
-            DesignCheckStatus::Current(receipt) if receipt.result.has_errors() => {
-                Some(&receipt.result)
-            }
-            DesignCheckStatus::NotRun
-            | DesignCheckStatus::Current(_)
-            | DesignCheckStatus::Stale(_)
-            | DesignCheckStatus::Unavailable { .. } => None,
-        }
+        run_preflight::current_blocking_drc_result(&self.model, self.slot_facts())
     }
 
     /// Whether this project is intentionally owned by an authored or imported
