@@ -2262,7 +2262,7 @@ fn reconcile_native_printer_job(draft: &mut HardcopyDialogState) -> bool {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(any(target_os = "windows", target_os = "macos", target_os = "linux"))]
 fn apply_suggested_paper(
     draft: &mut HardcopyDialogState,
     capabilities: &crate::workbench::hardcopy_adapters::print::PrinterCapabilitySnapshot,
