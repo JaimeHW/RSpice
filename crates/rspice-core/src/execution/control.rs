@@ -90,6 +90,10 @@ enum Op {
     Quit {
         argument: String,
     },
+    /// ngspice `define name(arguments) body`, substituted when it runs.
+    Define {
+        text: String,
+    },
     Command {
         name: String,
         arguments: String,
@@ -284,6 +288,9 @@ impl ControlProgram {
                 }
                 "quit" => Op::Quit {
                     argument: rest.to_owned(),
+                },
+                "define" => Op::Define {
+                    text: rest.to_owned(),
                 },
                 _ => Op::Command {
                     name: head.to_ascii_lowercase(),
@@ -609,6 +616,14 @@ impl ControlSession<'_> {
                     self.pc = self.program.instructions.len();
                     return Ok(None);
                 }
+                Op::Define { text } => {
+                    let text = self.substitute(text, line, abort)?;
+                    let (name, arguments, body) = definition(&text, line)?;
+                    // Expressions call it through the parameters, as they
+                    // call a deck's .func; a later definition replaces it.
+                    self.variables.define_function(name, arguments, body);
+                    self.pc += 1;
+                }
                 Op::Command { name, arguments } => {
                     let command = ControlCommand {
                         line,
@@ -747,6 +762,46 @@ fn quit_status(argument: &str) -> i32 {
         .and_then(|value| i32::try_from(sign * value).ok())
         .unwrap_or(i32::MAX)
 }
+
+/// ngspice `com_define` (frontend/define.c:62): the head runs to the first
+/// `)` with its spaces removed, and the rest of the line is the body.
+fn definition(text: &str, line: usize) -> Result<(&str, Vec<String>, &str), ControlError> {
+    let malformed = || syntax(line, "define requires name(arguments) and a body");
+    let close = text.find(')').ok_or_else(malformed)?;
+    let (name, arguments) = text[..close].split_once('(').ok_or_else(malformed)?;
+    let body = text[close + 1..].trim();
+    if body.is_empty() {
+        return Err(malformed());
+    }
+    let name = name.trim();
+    require_identifier(name, line)?;
+    let arguments: Vec<String> = if arguments.trim().is_empty() {
+        Vec::new()
+    } else {
+        arguments
+            .split(',')
+            .map(|argument| argument.trim().to_owned())
+            .collect()
+    };
+    for argument in &arguments {
+        require_identifier(argument, line)?;
+    }
+    // define.c:98 refuses the name of a built-in vector function.
+    if PREDEFINED_FUNCTIONS
+        .split_whitespace()
+        .any(|function| function.eq_ignore_ascii_case(name))
+    {
+        return Err(syntax(line, format!("{name} is a predefined function")));
+    }
+    Ok((name, arguments, body))
+}
+
+/// ngspice `ft_funcs` (frontend/parse.c:324).
+const PREDEFINED_FUNCTIONS: &str = "mag magnitude cph cphase unwrap ph phase j real re imag \
+    im conj db log log10 ln exp abs sqrt sin cos tan sinh cosh tanh atan atanh sortorder norm \
+    rnd sunif poisson exponential sgauss pos nint floor ceil mean stddev avg m3avg group_delay \
+    vector cvector unitvec length vecmin minimum vecmax maximum vecd interpolate deriv integ fft \
+    ifft mtimeavg v minus not";
 
 fn split_head(text: &str) -> (&str, &str) {
     text.split_once(char::is_whitespace)

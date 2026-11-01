@@ -803,9 +803,11 @@ impl ControlCircuit {
                 } else {
                     None
                 };
-                if self.names_user_vector(&y)
-                    || x.as_ref().is_some_and(|(x, _)| self.names_user_vector(x))
-                {
+                let vector = |expression: &Expr| {
+                    self.names_user_vector(expression)
+                        || vectors::calls_user_function(expression, variables)
+                };
+                if vector(&y) || x.as_ref().is_some_and(|(x, _)| vector(x)) {
                     let trace = self.vector_trace(
                         (&y, &label),
                         x.as_ref().map(|(x, label)| (x, label.as_str())),

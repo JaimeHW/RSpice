@@ -174,6 +174,8 @@ impl ControlCircuit {
             .saturating_sub(self.retained_values)
             .saturating_sub(self.vectors.values());
         let mut bound = expression.clone();
+        let mut nodes = MAX_INLINED_NODES;
+        inline_functions(&mut bound, variables, 0, &mut nodes, line, abort)?;
         let mut leaves = Vec::new();
         let shape =
             self.bind_leaves(&mut bound, &mut leaves, &mut budget, variables, line, abort)?;
@@ -443,6 +445,143 @@ impl ControlCircuit {
                 voltage_sources: Vec::new(),
             },
         })
+    }
+}
+
+/// Calls of user functions nest at most this deep, and their expansion holds
+/// at most this many expression nodes.
+const MAX_INLINE_DEPTH: usize = 64;
+const MAX_INLINED_NODES: usize = 1 << 16;
+
+/// Whether the expression calls a user function (`define` or `.func`).
+pub(in crate::engine::control) fn calls_user_function(
+    expression: &Expr,
+    variables: &ParamContext,
+) -> bool {
+    match expression {
+        Expr::FnCall { name, args } => {
+            variables.has_function(name)
+                || args.iter().any(|arg| calls_user_function(arg, variables))
+        }
+        Expr::BinOp { left, right, .. } => {
+            calls_user_function(left, variables) || calls_user_function(right, variables)
+        }
+        Expr::UnaryOp { operand, .. } => calls_user_function(operand, variables),
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::Param(_) | Expr::StringLiteral(_) => false,
+    }
+}
+
+/// Expand each call of a user function in place. ngspice substitutes the
+/// argument trees for the formals (frontend/define.c:299 `trcopy`), so an
+/// argument stays the whole vector it is.
+fn inline_functions(
+    expression: &mut Expr,
+    variables: &ParamContext,
+    depth: usize,
+    nodes: &mut usize,
+    line: usize,
+    abort: &dyn AbortSignal,
+) -> Result<(), ControlError> {
+    aborted(abort, line)?;
+    match expression {
+        Expr::FnCall { name, args } => {
+            for arg in args.iter_mut() {
+                inline_functions(arg, variables, depth, nodes, line, abort)?;
+            }
+            let Some(function) = variables.get_function(name) else {
+                return Ok(());
+            };
+            if depth >= MAX_INLINE_DEPTH {
+                return Err(command_error(
+                    line,
+                    format!("user function '{name}' nests deeper than {MAX_INLINE_DEPTH} calls"),
+                ));
+            }
+            if function.args.len() != args.len() {
+                return Err(command_error(
+                    line,
+                    format!(
+                        "user function '{name}' takes {} arguments, not {}",
+                        function.args.len(),
+                        args.len()
+                    ),
+                ));
+            }
+            let text = function.body.trim();
+            let text = text
+                .strip_prefix('{')
+                .and_then(|text| text.strip_suffix('}'))
+                .unwrap_or(text);
+            let mut body = parse_control_expression_with_abort(text, abort)
+                .map_err(|error| ControlError::evaluation(line, error.into()))?;
+            substitute_formals(&mut body, &function.args, args, nodes, line)?;
+            inline_functions(&mut body, variables, depth + 1, nodes, line, abort)?;
+            body.ensure_stack_safe_depth()
+                .map_err(|error| command_error(line, error.to_string()))?;
+            *expression = body;
+        }
+        Expr::BinOp { left, right, .. } => {
+            inline_functions(left, variables, depth, nodes, line, abort)?;
+            inline_functions(right, variables, depth, nodes, line, abort)?;
+        }
+        Expr::UnaryOp { operand, .. } => {
+            inline_functions(operand, variables, depth, nodes, line, abort)?
+        }
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::Param(_) | Expr::StringLiteral(_) => {}
+    }
+    Ok(())
+}
+
+fn substitute_formals(
+    body: &mut Expr,
+    formals: &[String],
+    actuals: &[Expr],
+    nodes: &mut usize,
+    line: usize,
+) -> Result<(), ControlError> {
+    *nodes = nodes
+        .checked_sub(1)
+        .ok_or_else(|| command_error(line, "user function expansion exceeds its size limit"))?;
+    match body {
+        Expr::Param(name) => {
+            if let Some(index) = formals
+                .iter()
+                .position(|formal| formal.eq_ignore_ascii_case(name))
+            {
+                let actual = actuals[index].clone();
+                *nodes = nodes.checked_sub(node_count(&actual)).ok_or_else(|| {
+                    command_error(line, "user function expansion exceeds its size limit")
+                })?;
+                *body = actual;
+            }
+        }
+        Expr::FnCall { args, .. } => {
+            for arg in args {
+                substitute_formals(arg, formals, actuals, nodes, line)?;
+            }
+        }
+        Expr::BinOp { left, right, .. } => {
+            substitute_formals(left, formals, actuals, nodes, line)?;
+            substitute_formals(right, formals, actuals, nodes, line)?;
+        }
+        Expr::UnaryOp { operand, .. } => {
+            substitute_formals(operand, formals, actuals, nodes, line)?
+        }
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::StringLiteral(_) => {}
+    }
+    Ok(())
+}
+
+fn node_count(expression: &Expr) -> usize {
+    match expression {
+        Expr::FnCall { args, .. } => args
+            .iter()
+            .fold(1usize, |count, arg| count.saturating_add(node_count(arg))),
+        Expr::BinOp { left, right, .. } => node_count(left)
+            .saturating_add(node_count(right))
+            .saturating_add(1),
+        Expr::UnaryOp { operand, .. } => node_count(operand).saturating_add(1),
+        Expr::Number(_) | Expr::ComplexNumber(_) | Expr::Param(_) | Expr::StringLiteral(_) => 1,
     }
 }
 

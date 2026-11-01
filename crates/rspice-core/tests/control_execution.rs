@@ -953,3 +953,47 @@ fn let_binds_vectors_per_plot_and_print_reads_them_as_ngspice_does() {
     );
     assert!(error.unwrap().contains("where a scalar is required"));
 }
+
+/// ngspice com_define (frontend/define.c:41) binds a user function; a call
+/// substitutes the argument trees for its formals (define.c:299 trcopy), and
+/// a later definition of the name replaces it.
+#[test]
+fn define_binds_user_functions_for_scalars_conditions_and_vectors() {
+    let source = "define\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\n\
+        define mismatch(a,b,err) abs(a-b)>err\ndefine sq(x) x*x\nop\nlet s = sq(3)\necho $s\n\
+        let w = sq(v(out))\nprint w sq(v(out)) mismatch(v(out),1,0.1)\n\
+        if mismatch(v(out), 1.5, 1e-9)\necho bad\nelse\necho good\nend\n\
+        define sq ( x ) x*x*x\nprint sq(v(out))\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    let text = |index: usize| match &presented[index].kind {
+        ControlPresentationKind::Text(text) => text.clone(),
+        other => panic!("expected text, got {other:?}"),
+    };
+    // ngspice-46 prints s = 9, w = 2.25, sq(v(out)) = 2.25,
+    // mismatch(v(out),1,0.1) = 1, then good, then sq(v(out)) = 3.375.
+    // A call that reads no vector stays a session scalar.
+    assert_eq!(text(0), format!("{:.17e}\n", 9.0));
+    let values: Vec<_> = printed(&presented[1])
+        .iter()
+        .map(|trace| trace.y.samples[0].re)
+        .collect();
+    for (value, expected) in values.iter().zip([2.25, 2.25, 1.0]) {
+        assert!((value - expected).abs() < 1e-9, "{values:?}");
+    }
+    assert_eq!(text(2), "good\n");
+    assert!((printed(&presented[3])[0].y.samples[0].re - 3.375).abs() < 1e-9);
+
+    for (definition, message) in [
+        ("define abs(x) x", "predefined"),
+        ("define f(x)", "body"),
+        ("define f x", "body"),
+        ("define f(1x) x", "invalid"),
+    ] {
+        let (_, error) = run_until_error(&format!(
+            "bad define\nV1 in 0 1\nR1 in 0 1k\n.control\n{definition}\n.endc\n.end\n"
+        ));
+        let error = error.unwrap();
+        assert!(error.contains(message), "{definition}: {error}");
+    }
+}
