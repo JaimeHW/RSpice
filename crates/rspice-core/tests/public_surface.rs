@@ -514,8 +514,11 @@ const MAX_PUBLIC_ITEMS: usize = 5235;
 // `Mosfet::set_native_xyce_transient_convergence` adds one: the circuit store
 // (`rspice-core` circuit/storage/nonlinear.rs) selects Xyce's transient
 // device-convergence status for classic MOS instances, as it does through
-// the diode's. The census is 1,605, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1605;
+// the diode's. The census is 1,605.
+// `parse_xyce_expression_with_abort` adds one: `rspice-core` (analysis/
+// measure_signals.rs) parses a Xyce `.PRINT` expression under Xyce's lexer, which
+// reads `X1:R1:R` as one name. The census is 1,606, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1606;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
