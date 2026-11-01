@@ -419,6 +419,9 @@ fn results_list(
                 if response.hovered() {
                     ui.painter().rect_filled(rect, 3.0, t.color.bg_hover);
                 }
+                // A row takes the keyboard's focus too; inside the list's
+                // clip, so the ring is drawn inside the row.
+                theme::paint_focus_ring(ui, &response, rect);
                 let text = format!(
                     "{}  {}:{}  {}",
                     row.logical_path,
