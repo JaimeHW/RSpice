@@ -607,7 +607,7 @@ fn exit_is_a_desktop_lifecycle_action_not_a_browser_menu_item() {
 
 #[test]
 fn application_menu_height_is_viewport_bounded() {
-    assert_eq!(menu_popup_height_for_viewport(900.0), 560.0);
+    assert_eq!(menu_popup_height_for_viewport(900.0), 836.0);
     assert_eq!(menu_popup_height_for_viewport(600.0), 536.0);
     assert_eq!(menu_popup_height_for_viewport(120.0), MENU_ROW_HEIGHT * 3.0);
 }
@@ -2245,6 +2245,12 @@ fn every_menu_is_wide_enough_for_its_longest_row() {
                 .memory(|memory| memory.area_rect(popup))
                 .expect("the menu is open")
                 .height();
+            // On desktop rows, no menu scrolls in a window 900 pt tall.
+            assert!(
+                large_targets || rows_height <= menu_popup_height_for_viewport(900.0),
+                "{} scrolls its {rows_height} pt of rows in a 900 pt window",
+                menu.label()
+            );
             let frame = 2.0 * (MENU_MARGIN + MENU_BORDER_WIDTH);
             let expected = rows_height.min(menu_popup_height_for_viewport(900.0)) + frame;
             assert!(

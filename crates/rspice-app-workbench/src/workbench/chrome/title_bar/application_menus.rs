@@ -111,8 +111,10 @@ pub(super) fn menu_popup_max_height(ui: &Ui) -> f32 {
 
 pub fn menu_popup_height_for_viewport(viewport_height: f32) -> f32 {
     // Preserve room for the title bar and a small bottom escape margin while
-    // guaranteeing enough space to navigate at least three standard rows.
-    (viewport_height - 64.0).clamp(MENU_ROW_HEIGHT * 3.0, 560.0)
+    // guaranteeing enough space to navigate at least three standard rows. A
+    // menu otherwise takes the window's height before it scrolls: File, the
+    // longest, scrolled its Exit out of sight under a fixed 560 pt.
+    (viewport_height - 64.0).max(MENU_ROW_HEIGHT * 3.0)
 }
 
 pub const fn file_menu_shows_exit(
