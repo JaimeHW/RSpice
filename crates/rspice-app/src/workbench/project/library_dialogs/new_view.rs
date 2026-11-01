@@ -174,7 +174,10 @@ impl ProjectFeature {
             .position(|view_type| *view_type == dialogs.new_view_type)
             .unwrap_or_default();
 
+        // The five types are one row of equal segments, which the 420 pt
+        // card would run past its edge.
         let choice = CommandForm::new("New view", "Create")
+            .option_columns()
             .describe("Create a named view of the selected type in this library cell.")
             .primary_enabled(can_create)
             // A refusal of the name stands under it; the footer states only
@@ -192,7 +195,12 @@ impl ProjectFeature {
                         Some(NameLine::Refused(refusal)) => FieldLine::Error(refusal),
                     },
                 );
-                if rows.choice("Type", &type_names, &mut type_index) {
+                if rows.segmented_columns(
+                    "Type",
+                    "library.new-view.type",
+                    &type_names,
+                    &mut type_index,
+                ) {
                     dialogs.new_view_type = CREATABLE_VIEW_TYPES[type_index];
                 }
                 Some(name_id)
@@ -883,7 +891,26 @@ mod tests {
             .and_then(egui::accesskit::Node::bounds)
             .expect("Create has bounds");
         let width = 2.0 * (create.x1 + 12.0) - 1440.0;
-        assert!(width <= 424.0, "New view is {width} pt wide");
+        assert!(width <= 524.0, "New view is {width} pt wide");
+        // The types are one row of equal segments: none wraps to a line of
+        // its own, and no two are spaced apart unevenly.
+        let types = CREATABLE_VIEW_TYPES.map(|view_type| {
+            nodes
+                .values()
+                .find(|node| node.label() == Some(view_type.display_name()))
+                .and_then(egui::accesskit::Node::bounds)
+                .unwrap_or_else(|| panic!("{} is published", view_type.display_name()))
+        });
+        for pair in types.windows(2) {
+            assert!(
+                (pair[0].y0 - pair[1].y0).abs() < 0.5,
+                "{types:?} are not one row"
+            );
+            assert!(
+                ((pair[0].x1 - pair[0].x0) - (pair[1].x1 - pair[1].x0)).abs() < 0.5,
+                "{types:?} are not equal segments"
+            );
+        }
         assert!(nodes.values().any(|node| {
             node.role() == egui::accesskit::Role::TextInput && node.label() == Some("View name")
         }));
