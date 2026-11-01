@@ -3046,6 +3046,13 @@ impl DcOutputSeries {
         for (name, values) in &self.columns {
             insert_case_variants(&mut signals, name, values);
         }
+        for (name, values) in &self.columns {
+            if let Some(alias) = dc_lead_current_alias(name)
+                && !signals.contains_key(&alias)
+            {
+                insert_case_variants(&mut signals, &alias, values);
+            }
+        }
         signals
     }
 }
@@ -5302,8 +5309,42 @@ impl DcSweepSeries {
         for (name, series) in &self.observables {
             insert_case_variants(&mut signals, name, series.as_slice());
         }
+        for (name, series) in &self.observables {
+            if let Some(alias) = dc_lead_current_alias(name)
+                && !signals.contains_key(&alias)
+            {
+                insert_case_variants(&mut signals, &alias, series.as_slice());
+            }
+        }
         signals
     }
+}
+
+/// Xyce's lead-current spelling, such as `IB(Q1)`, of a DC operating-point
+/// observable such as `Q1:IB`.
+///
+/// A transient run records these leads as device traces and spells them both
+/// ways (`insert_device_op_trace_spellings`); a DC sweep reads the same values
+/// from each point's device report. Only the leads Xyce gives a BJT, MOSFET,
+/// JFET or MESFET qualify, so a parameter that merely shares a spelling (a
+/// capacitor's `IC`) never answers a lead-current operand.
+fn dc_lead_current_alias(name: &str) -> Option<String> {
+    let (device, parameter) = name.rsplit_once(':')?;
+    let operator = parameter.to_ascii_uppercase();
+    let lead = operator.strip_prefix('I')?;
+    let letter = device
+        .rsplit([':', '.'])
+        .next()?
+        .chars()
+        .next()?
+        .to_ascii_uppercase();
+    let leads = match letter {
+        'Q' => "BCES",
+        'M' => "DGSB",
+        'J' | 'Z' => "DGS",
+        _ => return None,
+    };
+    (lead.len() == 1 && leads.contains(lead)).then(|| format!("{operator}({device})"))
 }
 
 /// Owned derived real projections of named complex signals.
@@ -7805,6 +7846,35 @@ mod tests {
                 .is_empty(),
             "an empty Xyce wildcard expansion must omit columns"
         );
+    }
+
+    #[test]
+    fn dc_print_reads_bjt_lead_currents_from_the_device_report() {
+        // Xyce prints IB(Q1) and IC(Q1) in a DC sweep; each point's device
+        // report carries them as Q1:ib and Q1:ic.
+        let netlist = xyce_netlist(
+            "DC lead currents\n\
+             V1 c 0 1\n\
+             V2 b 0 0.7\n\
+             Q1 c b 0 qmod\n\
+             .model qmod npn\n\
+             .DC V1 0 1 1\n\
+             .PRINT DC IB(Q1) IC(Q1)\n\
+             .END\n",
+        );
+        let point = |ib: Value, ic: Value| {
+            let mut result = SimulationResult::new(2, 0);
+            result.node_names = vec!["0".to_string(), "c".to_string(), "b".to_string()];
+            result.node_voltages = vec![0.0, 1.0, 0.7];
+            result.push_dc_observable("Q1:ib".to_string(), ib);
+            result.push_dc_observable("Q1:ic".to_string(), ic);
+            result
+        };
+        let sweep = vec![(0.0, point(1.0e-6, 1.0e-4)), (1.0, point(2.0e-6, 2.0e-4))];
+        let projected = evaluate_dc_output_requests(&netlist, &sweep)
+            .expect("DC lead currents resolve from the device report");
+        assert_eq!(projected[0].values, vec![1.0e-6, 2.0e-6]);
+        assert_eq!(projected[1].values, vec![1.0e-4, 2.0e-4]);
     }
 
     #[test]
@@ -11337,6 +11407,25 @@ mod tests {
         let signals = series.signal_map();
         assert!(signals.contains_key("TIME"));
         assert_eq!(signals["V(out)"], &[2.5, 2.5][..]);
+    }
+
+    #[test]
+    fn dc_series_spells_device_lead_currents_as_xyce_operators() {
+        let mut point = SimulationResult::new(1, 0);
+        point.node_voltages = vec![0.0, 2.5];
+        point.node_names = vec!["0".to_string(), "out".to_string()];
+        point.push_dc_observable("Q1:ib".to_string(), -8.0e-6);
+        point.push_dc_observable("X1:M2:id".to_string(), 3.0e-4);
+        point.push_dc_observable("C1:ic".to_string(), 0.5);
+        let sweep = vec![(0.0, point.clone()), (5.0, point)];
+
+        let series = DcSweepSeries::from_sweep(&sweep)
+            .expect("DC result schema is valid")
+            .expect("non-empty sweep");
+        let signals = series.signal_map();
+        assert_eq!(signals["IB(Q1)"], &[-8.0e-6, -8.0e-6][..]);
+        assert_eq!(signals["ID(X1:M2)"], &[3.0e-4, 3.0e-4][..]);
+        assert!(!signals.contains_key("IC(C1)"));
     }
 
     #[test]
