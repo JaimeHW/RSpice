@@ -28,14 +28,18 @@ use crate::ui::widgets::{
 };
 use crate::workbench::RSpiceApp;
 
+use crate::workbench::app_state::PlatformState;
 use crate::workbench::app_state::services_access::open_comparison;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, painted_label};
+use crate::workbench::features;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{
     RecoveryCandidate, RecoveryIntegrity, RecoveryNoticeTone, diagnostics_folder_supported,
     discard_checkpoint, open_diagnostics_folder, recovery_replacement_block_reason,
     refresh_catalog_if_requested, software_rendering_supported,
 };
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::{
     ProjectLauncherFilter, ProjectLauncherPage, ProjectLauncherSort,
@@ -306,9 +310,12 @@ impl LauncherLayout {
     }
 }
 
+/// The launcher, drawn in the project feature's context, with what the
+/// reader asked of it carried out by the shell as soon as it has drawn and
+/// before its focus is handed back.
 pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     if !app.state.project.project_launcher_open {
-        show_discard_confirmation(ctx, app);
+        show_discard_confirmation(ctx, &mut app.state.platform);
         return;
     }
 
@@ -323,20 +330,101 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
     );
 
     let screen = ctx.content_rect();
-    let layout = LauncherLayout::resolve(screen);
     let large_targets = app.state.workbench.coarse_pointer
         || screen.width() <= LAUNCHER_TOUCH_MAX_WIDTH
         || ctx.input(|input| input.has_touch_screen());
     let _control_height = LauncherControlHeightOverride::new(ctx, large_targets);
+    let LauncherPass {
+        action,
+        focus_state_id,
+        surface_id,
+        modal_layer,
+    } = launcher(ctx, &mut features::cx(app), screen, large_targets);
+
+    if let Some(action) = action {
+        match action {
+            LauncherAction::Close => dismiss_launcher(app),
+            LauncherAction::Browse => {
+                dismiss_launcher(app);
+                app.execute_command_key(ProjectCommand::OpenProject.key());
+            }
+            LauncherAction::NewProject => {
+                dismiss_launcher(app);
+                app.execute_command_key(ProjectCommand::NewProject.key());
+            }
+            LauncherAction::OpenNetlist => {
+                dismiss_launcher(app);
+                Command::OpenNetlist.execute(app);
+            }
+            LauncherAction::Open(recent) => {
+                dismiss_launcher(app);
+                app.open_recent_file(recent);
+            }
+            LauncherAction::Page(page) => {
+                app.state.project.project_launcher_page = page;
+                if page == ProjectLauncherPage::Recovery {
+                    app.state.platform.recovery_catalog.request_refresh();
+                }
+            }
+            LauncherAction::Recover(candidate) => match open_comparison(&mut app.state, &candidate)
+            {
+                Ok(()) => dismiss_launcher(app),
+                Err(error) => app.state.platform.recovery_catalog.warning(error),
+            },
+            LauncherAction::RequestDiscard(candidate) => {
+                app.state.platform.recovery_catalog.pending_discard = Some(candidate);
+            }
+            LauncherAction::OpenDiagnosticsFolder => {
+                match open_diagnostics_folder(&app.state.model, &app.state.platform) {
+                    Ok(path) => app
+                        .state
+                        .prompt(format!("Opened diagnostic folder: {}", path.display())),
+                    Err(error) => {
+                        app.state.record(
+                            LogSeverity::Error,
+                            LogSource::Studio,
+                            format!("Diagnostic folder could not be opened: {error}"),
+                        );
+                    }
+                }
+            }
+            LauncherAction::StartSafeMode(options) => {
+                match start_local_safe_mode(&mut app.state, options) {
+                    Ok(()) => app.state.project.project_launcher_open = false,
+                    Err(error) => app.state.platform.recovery_catalog.warning(error),
+                }
+            }
+        }
+    }
+    if !app.state.project.project_launcher_open {
+        Popup::close_all(ctx);
+        restore_launcher_focus(ctx, focus_state_id, surface_id, modal_layer);
+    }
+    show_discard_confirmation(ctx, &mut app.state.platform);
+}
+
+/// What one pass of the launcher leaves the shell: what the reader asked of
+/// it, and where focus goes back to once it closes.
+struct LauncherPass {
+    action: Option<LauncherAction>,
+    focus_state_id: Id,
+    surface_id: Id,
+    modal_layer: egui::LayerId,
+}
+
+/// Draw the launcher over the project feature's context, at `screen` with
+/// touch-sized targets where `large_targets` asks for them.
+fn launcher(
+    ctx: &Context,
+    cx: &mut Cx<'_, ProjectFeature>,
+    screen: Rect,
+    large_targets: bool,
+) -> LauncherPass {
+    let layout = LauncherLayout::resolve(screen);
     let t = Tokens::get(ctx);
     let focus_state_id = Id::new("workbench.project_launcher.focus-session");
     let opened_this_pass = begin_launcher_focus(ctx, focus_state_id);
-    let confirmation_open = app
-        .state
-        .platform
-        .recovery_catalog
-        .pending_discard
-        .is_some();
+    let confirmation_open = cx.platform.recovery_catalog.pending_discard.is_some();
     let popup_was_open = Popup::is_any_open(ctx);
     let mut action = (!confirmation_open
         && !popup_was_open
@@ -411,13 +499,13 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
                     regions.header.height(),
                     large_targets,
                     layout,
-                    app.state.model.safe_mode.active,
+                    cx.model.safe_mode.active,
                 );
                 close_control_id = Some(header.id);
                 if header.clicked() {
                     action = Some(LauncherAction::Close);
                 }
-                launcher_layout(ui, app, &mut action, layout, regions.body);
+                launcher_layout(ui, cx, &mut action, layout, regions.body);
                 ui.painter().hline(
                     regions.header.x_range(),
                     regions.header.bottom(),
@@ -453,7 +541,7 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
         && !confirmation_open
         && (opened_this_pass || !focus_is_within_modal(ctx, modal_layer))
     {
-        let target = if app.state.project.project_launcher_page == ProjectLauncherPage::Projects {
+        let target = if cx.state.project_launcher_page == ProjectLauncherPage::Projects {
             project_search_id()
         } else {
             close_control_id
@@ -461,66 +549,12 @@ pub(in crate::workbench) fn show(ctx: &Context, app: &mut RSpiceApp) {
         ctx.memory_mut(|memory| memory.request_focus(target));
     }
 
-    if let Some(action) = action {
-        match action {
-            LauncherAction::Close => dismiss_launcher(app),
-            LauncherAction::Browse => {
-                dismiss_launcher(app);
-                app.execute_command_key(ProjectCommand::OpenProject.key());
-            }
-            LauncherAction::NewProject => {
-                dismiss_launcher(app);
-                app.execute_command_key(ProjectCommand::NewProject.key());
-            }
-            LauncherAction::OpenNetlist => {
-                dismiss_launcher(app);
-                Command::OpenNetlist.execute(app);
-            }
-            LauncherAction::Open(recent) => {
-                dismiss_launcher(app);
-                app.open_recent_file(recent);
-            }
-            LauncherAction::Page(page) => {
-                app.state.project.project_launcher_page = page;
-                if page == ProjectLauncherPage::Recovery {
-                    app.state.platform.recovery_catalog.request_refresh();
-                }
-            }
-            LauncherAction::Recover(candidate) => match open_comparison(&mut app.state, &candidate)
-            {
-                Ok(()) => dismiss_launcher(app),
-                Err(error) => app.state.platform.recovery_catalog.warning(error),
-            },
-            LauncherAction::RequestDiscard(candidate) => {
-                app.state.platform.recovery_catalog.pending_discard = Some(candidate);
-            }
-            LauncherAction::OpenDiagnosticsFolder => {
-                match open_diagnostics_folder(&app.state.model, &app.state.platform) {
-                    Ok(path) => app
-                        .state
-                        .prompt(format!("Opened diagnostic folder: {}", path.display())),
-                    Err(error) => {
-                        app.state.record(
-                            LogSeverity::Error,
-                            LogSource::Studio,
-                            format!("Diagnostic folder could not be opened: {error}"),
-                        );
-                    }
-                }
-            }
-            LauncherAction::StartSafeMode(options) => {
-                match start_local_safe_mode(&mut app.state, options) {
-                    Ok(()) => app.state.project.project_launcher_open = false,
-                    Err(error) => app.state.platform.recovery_catalog.warning(error),
-                }
-            }
-        }
+    LauncherPass {
+        action,
+        focus_state_id,
+        surface_id: area_response.response.id,
+        modal_layer,
     }
-    if !app.state.project.project_launcher_open {
-        Popup::close_all(ctx);
-        restore_launcher_focus(ctx, focus_state_id, area_response.response.id, modal_layer);
-    }
-    show_discard_confirmation(ctx, app);
 }
 
 /// Close the modal presentation and leave its canonical route in the same
@@ -570,7 +604,7 @@ fn dismiss_launcher(app: &mut RSpiceApp) {
 
 fn launcher_layout(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
     rect: Rect,
@@ -594,7 +628,7 @@ fn launcher_layout(
             .id_salt("project-launcher-mobile-navigation")
             .scroll_bar_visibility(egui::scroll_area::ScrollBarVisibility::AlwaysHidden)
             .show(&mut nav_ui, |ui| {
-                ui.scope(|ui| launcher_nav(ui, app, action, true))
+                ui.scope(|ui| launcher_nav(ui, cx, action, true))
             });
         ui.ctx()
             .accesskit_node_builder(navigation.inner.response.id, |node| {
@@ -606,7 +640,7 @@ fn launcher_layout(
                 .max_rect(page_rect)
                 .layout(egui::Layout::top_down(Align::Min)),
         );
-        launcher_page(&mut page_ui, app, action, layout);
+        launcher_page(&mut page_ui, cx, action, layout);
         ui.painter().hline(
             rect.x_range(),
             nav_rect.bottom(),
@@ -630,7 +664,7 @@ fn launcher_layout(
             .max_rect(nav_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
-    let navigation = nav_ui.scope(|ui| launcher_nav(ui, app, action, false));
+    let navigation = nav_ui.scope(|ui| launcher_nav(ui, cx, action, false));
     ui.ctx()
         .accesskit_node_builder(navigation.response.id, |node| {
             node.set_role(egui::accesskit::Role::Navigation);
@@ -641,7 +675,7 @@ fn launcher_layout(
             .max_rect(page_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
-    launcher_page(&mut page_ui, app, action, layout);
+    launcher_page(&mut page_ui, cx, action, layout);
     ui.painter().vline(
         nav_rect.right(),
         rect.y_range(),
@@ -670,7 +704,12 @@ fn launcher_layout(
     ui.allocate_rect(rect, Sense::hover());
 }
 
-fn launcher_nav(ui: &mut Ui, app: &RSpiceApp, action: &mut Option<LauncherAction>, compact: bool) {
+fn launcher_nav(
+    ui: &mut Ui,
+    cx: &Cx<'_, ProjectFeature>,
+    action: &mut Option<LauncherAction>,
+    compact: bool,
+) {
     let t = Tokens::get(ui.ctx());
     let render = |ui: &mut Ui, page: ProjectLauncherPage, action: &mut Option<LauncherAction>| {
         let icon = match page {
@@ -679,7 +718,7 @@ fn launcher_nav(ui: &mut Ui, app: &RSpiceApp, action: &mut Option<LauncherAction
             ProjectLauncherPage::SafeMode => WorkbenchIcon::Warning,
         };
         let label = page.label();
-        let selected = app.state.project.project_launcher_page == page;
+        let selected = cx.state.project_launcher_page == page;
         let label_font = theme::sans(tokens::FS_2, FontWeight::Regular);
         let label_width = ui
             .painter()
@@ -791,15 +830,15 @@ fn launcher_nav(ui: &mut Ui, app: &RSpiceApp, action: &mut Option<LauncherAction
 
 fn launcher_page(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
-    match app.state.project.project_launcher_page {
-        ProjectLauncherPage::Projects => launcher_body(ui, app, action, layout),
-        ProjectLauncherPage::Recovery => recovery_page(ui, app, action, layout),
-        ProjectLauncherPage::SafeMode => safe_mode_page(ui, app, action, layout),
+    match cx.state.project_launcher_page {
+        ProjectLauncherPage::Projects => launcher_body(ui, cx, action, layout),
+        ProjectLauncherPage::Recovery => recovery_page(ui, cx, action, layout),
+        ProjectLauncherPage::SafeMode => safe_mode_page(ui, cx, action, layout),
     }
 }
 
@@ -939,7 +978,7 @@ fn safe_mode_tag(ui: &mut Ui) {
 
 fn launcher_body(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
@@ -953,7 +992,7 @@ fn launcher_body(
         }),
     );
 
-    launcher_toolbar(ui, app, layout);
+    launcher_toolbar(ui, cx, layout);
 
     // The project list owns the rest of the page down to the surface edge.
     let list_rect = ui.available_rect_before_wrap();
@@ -963,11 +1002,11 @@ fn launcher_body(
             .max_rect(list_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
-    if project_entries(app).is_empty() {
+    if project_entries(cx).is_empty() {
         empty_project_list(
             &mut list_ui,
-            app.state.project.project_launcher_query.is_empty()
-                && app.state.project.project_launcher_filter == ProjectLauncherFilter::All,
+            cx.state.project_launcher_query.is_empty()
+                && cx.state.project_launcher_filter == ProjectLauncherFilter::All,
             action,
         );
         return;
@@ -975,7 +1014,7 @@ fn launcher_body(
     egui::ScrollArea::vertical()
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
-        .show(&mut list_ui, |ui| project_list(ui, app, action, layout));
+        .show(&mut list_ui, |ui| project_list(ui, cx, action, layout));
 }
 
 fn project_heading_actions(
@@ -1027,13 +1066,13 @@ fn project_heading_actions(
 
 fn project_list(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.set_min_width(ui.available_width());
-    let entries = project_entries(app);
+    let entries = project_entries(cx);
     for group in ProjectGroup::ALL {
         let group_entries = entries
             .iter()
@@ -1159,8 +1198,8 @@ fn launcher_footer_reserve(ui: &Ui, layout: LauncherLayout, buttons: &[(&str, bo
         .max(LAUNCHER_PAGE_FOOTER_MIN_HEIGHT)
 }
 
-fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
-    let Some(candidate) = app.state.platform.recovery_catalog.pending_discard.clone() else {
+fn show_discard_confirmation(ctx: &Context, platform: &mut PlatformState) {
+    let Some(candidate) = platform.recovery_catalog.pending_discard.clone() else {
         return;
     };
     let choice = Dialog::new("Discard recovery checkpoint?", "Discard checkpoint")
@@ -1183,7 +1222,7 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
         DialogChoice::None => {}
         DialogChoice::Primary => {
             let outcome = discard_checkpoint(&candidate);
-            let catalog = &mut app.state.platform.recovery_catalog;
+            let catalog = &mut platform.recovery_catalog;
             catalog.pending_discard = None;
             match outcome {
                 Ok(message) => catalog.info(message),
@@ -1192,13 +1231,13 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
             catalog.request_refresh();
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            app.state.platform.recovery_catalog.pending_discard = None;
+            platform.recovery_catalog.pending_discard = None;
         }
         DialogChoice::Secondary => {}
     }
 }
 
-fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
+fn launcher_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, layout: LauncherLayout) {
     let t = Tokens::get(ui.ctx());
     Frame::new()
         .inner_margin(Margin::symmetric(if layout.phone { 9 } else { 12 }, 7))
@@ -1221,22 +1260,21 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                     .clamp(1.0, LAUNCHER_SEARCH_MAX_WIDTH);
                 launcher_search_field(
                     ui,
-                    &mut app.state.project.project_launcher_query,
+                    &mut cx.state.project_launcher_query,
                     search_width,
-                    app.state
-                        .workbench
+                    cx.wb
                         .outbox
                         .take::<crate::workbench::framework::requests::FocusProjectLauncherSearch>()
                         .is_some(),
                 );
 
                 if !layout.compact {
-                    launcher_filter_segments(ui, &mut app.state.project.project_launcher_filter);
+                    launcher_filter_segments(ui, &mut cx.state.project_launcher_filter);
                 }
 
                 if !layout.phone {
                     ui.with_layout(egui::Layout::right_to_left(Align::Center), |ui| {
-                        let selected = app.state.project.project_launcher_sort.label();
+                        let selected = cx.state.project_launcher_sort.label();
                         let options = vec![
                             "Last opened".to_owned(),
                             "Name".to_owned(),
@@ -1250,7 +1288,7 @@ fn launcher_toolbar(ui: &mut Ui, app: &mut RSpiceApp, layout: LauncherLayout) {
                             &options,
                             LAUNCHER_SORT_WIDTH,
                         ) {
-                            app.state.project.project_launcher_sort = match index {
+                            cx.state.project_launcher_sort = match index {
                                 0 => ProjectLauncherSort::LastOpened,
                                 1 => ProjectLauncherSort::Name,
                                 _ => ProjectLauncherSort::Owner,
@@ -1362,18 +1400,12 @@ fn launcher_filter_segments(ui: &mut Ui, selected: &mut ProjectLauncherFilter) {
     }
 }
 
-fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
-    let query = app
-        .state
-        .project
-        .project_launcher_query
-        .trim()
-        .to_lowercase();
-    let current_path = app.state.model.workspace.content.project.path.as_deref();
-    let current_name = app.state.model.workspace.content.project.display_name();
-    let filter = app.state.project.project_launcher_filter;
-    let mut entries = app
-        .state
+fn project_entries(cx: &Cx<'_, ProjectFeature>) -> Vec<ProjectEntry> {
+    let query = cx.state.project_launcher_query.trim().to_lowercase();
+    let current_path = cx.model.workspace.content.project.path.as_deref();
+    let current_name = cx.model.workspace.content.project.display_name();
+    let filter = cx.state.project_launcher_filter;
+    let mut entries = cx
         .platform
         .recent_files
         .iter()
@@ -1413,7 +1445,7 @@ fn project_entries(app: &RSpiceApp) -> Vec<ProjectEntry> {
         })
         .collect::<Vec<_>>();
 
-    match app.state.project.project_launcher_sort {
+    match cx.state.project_launcher_sort {
         ProjectLauncherSort::LastOpened => {}
         ProjectLauncherSort::Name => entries.sort_by(|left, right| {
             left.name

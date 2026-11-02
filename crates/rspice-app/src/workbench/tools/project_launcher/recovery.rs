@@ -10,7 +10,7 @@ use super::*;
 
 pub(super) fn recovery_page(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
@@ -45,7 +45,7 @@ pub(super) fn recovery_page(
                     // The notice is neutral text in an untinted box. A
                     // warning is the one notice that earns a mark.
                     if let Some(notice) =
-                        app.state.platform.recovery_catalog.notice.clone()
+                        cx.platform.recovery_catalog.notice.clone()
                     {
                         Frame::new()
                             .stroke(Stroke::new(1.0, t.color.border))
@@ -66,15 +66,11 @@ pub(super) fn recovery_page(
                             });
                     }
 
-                    let candidates = app
-                        .state
-                        .platform
+                    let candidates = cx.platform
                         .recovery_catalog
                         .candidates
                         .clone();
-                    let selected = app
-                        .state
-                        .platform
+                    let selected = cx.platform
                         .recovery_catalog
                         .selected_checkpoint
                         .clone();
@@ -113,8 +109,7 @@ pub(super) fn recovery_page(
                                         selected.as_ref() == Some(&candidate.checkpoint);
                                     let row = recovery_row(ui, &candidate, is_selected, layout);
                                     if response_activated(ui, &row) {
-                                        app.state
-                                            .platform
+                                        cx.platform
                                             .recovery_catalog
                                             .select(candidate.checkpoint.clone());
                                     }
@@ -127,9 +122,7 @@ pub(super) fn recovery_page(
                             }
                         });
 
-                    if let Some(candidate) = app
-                        .state
-                        .platform
+                    if let Some(candidate) = cx.platform
                         .recovery_catalog
                         .selected()
                         .cloned()
@@ -140,7 +133,7 @@ pub(super) fn recovery_page(
 
     const LEGACY_CHECKPOINT_ADVISORY: &str = "Legacy checkpoint ownership cannot be proven; open it non-destructively or use explicit recovery maintenance or migration";
 
-    let selected = app.state.platform.recovery_catalog.selected().cloned();
+    let selected = cx.platform.recovery_catalog.selected().cloned();
     launcher_page_footer(ui, layout, regions.footer, |ui| {
         let can_discard = selected
             .as_ref()
@@ -172,7 +165,7 @@ pub(super) fn recovery_page(
             .as_ref()
             .is_some_and(|candidate| candidate.integrity.is_recoverable());
         let replacement_block_reason = recoverable
-            .then(|| recovery_replacement_block_reason(&app.state.model))
+            .then(|| recovery_replacement_block_reason(cx.model))
             .flatten();
         let response = Button::new("Open recovery comparison")
             .accent()
@@ -524,7 +517,7 @@ pub(super) fn start_local_safe_mode(
 
 pub(super) fn safe_mode_page(
     ui: &mut Ui,
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, ProjectFeature>,
     action: &mut Option<LauncherAction>,
     layout: LauncherLayout,
 ) {
@@ -535,7 +528,7 @@ pub(super) fn safe_mode_page(
         layout,
         None,
     );
-    let active = app.state.model.safe_mode.active;
+    let active = cx.model.safe_mode.active;
     // Starting is refused while safe mode is already on, so the disabled
     // control says what is true rather than offering the start again.
     let start_label = if active {
@@ -562,9 +555,7 @@ pub(super) fn safe_mode_page(
                     ui.add_enabled_ui(!active, |ui| {
                         safe_mode_option(
                             ui,
-                            &mut app
-                                .state
-                                .model
+                            &mut cx.model
                                 .safe_mode
                                 .draft
                                 .disable_third_party_extensions,
@@ -574,9 +565,7 @@ pub(super) fn safe_mode_page(
                         );
                         safe_mode_option(
                             ui,
-                            &mut app
-                                .state
-                                .model
+                            &mut cx.model
                                 .safe_mode
                                 .draft
                                 .disable_gpu_acceleration,
@@ -588,9 +577,7 @@ pub(super) fn safe_mode_page(
                         );
                         safe_mode_option(
                             ui,
-                            &mut app
-                                .state
-                                .model
+                            &mut cx.model
                                 .safe_mode
                                 .draft
                                 .isolate_prior_documents,
@@ -600,16 +587,14 @@ pub(super) fn safe_mode_page(
                         );
                         safe_mode_option(
                             ui,
-                            &mut app.state.model.safe_mode.draft.reset_layout,
+                            &mut cx.model.safe_mode.draft.reset_layout,
                             "Reset dock and monitor geometry",
                             "Recover panels and windows to the primary display.",
                             None,
                         );
                         safe_mode_option(
                             ui,
-                            &mut app
-                                .state
-                                .model
+                            &mut cx.model
                                 .safe_mode
                                 .draft
                                 .open_project_read_only,
@@ -621,7 +606,7 @@ pub(super) fn safe_mode_page(
 
         });
 
-    let options = app.state.model.safe_mode.draft;
+    let options = cx.model.safe_mode.draft;
     launcher_page_footer(ui, layout, regions.footer, |ui| {
         let diagnostics = Button::new("Open diagnostic folder")
             .enabled(diagnostics_folder_supported())
