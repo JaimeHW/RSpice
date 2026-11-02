@@ -216,7 +216,7 @@ fn save_view_form(state: &mut EngineeringTableDialogState, ctx: &Context) -> Dia
         (None, false) => Err("Enter a name for the view."),
         (None, true) => Ok(None),
     };
-    let choice = CommandForm::new("Save engineering table view", "Save view")
+    CommandForm::new("Save engineering table view", "Save view")
         .describe("Keep the table's columns, sort and filters as a named view of this grid.")
         .primary_enabled(named)
         .status(status)
@@ -243,8 +243,7 @@ fn save_view_form(state: &mut EngineeringTableDialogState, ctx: &Context) -> Dia
                 &mut [("The grid opens on this view", &mut state.save_as_default)],
             );
             Some(name)
-        });
-    choice
+        })
 }
 
 /// Export: which rows, in which format, with what beside the values.
@@ -273,7 +272,7 @@ fn export_form(
         (None, None) => Ok(None),
     };
     let counted = format!("{rows_out} row{}", if rows_out == 1 { "" } else { "s" });
-    let choice = CommandForm::new("Export engineering table", "Export table")
+    CommandForm::new("Export engineering table", "Export table")
         .wide()
         .describe("Write the table's rows to a file, with the headers, units and view details chosen here.")
         .primary_enabled(refusal.is_none())
@@ -309,8 +308,7 @@ fn export_form(
                 ],
             );
             Some(scope.response.id)
-        });
-    choice
+        })
 }
 
 /// Row details: every field of one row, and the way to its source
@@ -348,7 +346,7 @@ fn row_details_form(
         (None, true) => Ok(None),
     };
     let revision = dataset.source_revision.to_string();
-    let choice = CommandForm::new("Engineering table row details", "Cross-probe source object")
+    CommandForm::new("Engineering table row details", "Cross-probe source object")
         .wide()
         .describe(
             "Read every field of one table row, and select its source object in the schematic.",
@@ -362,8 +360,7 @@ fn row_details_form(
                 rows.table(&ROW_DETAIL_COLUMNS, fields);
             }
             None
-        });
-    choice
+        })
 }
 
 impl RSpiceApp {
