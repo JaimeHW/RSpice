@@ -98,6 +98,8 @@ enum CommandKind {
     Unset,
     Save,
     Destroy,
+    /// `unlet vectors`.
+    Unlet,
     Alter,
     Analysis,
     Run,
@@ -157,6 +159,7 @@ impl CommandKind {
             "unset" => Self::Unset,
             "save" => Self::Save,
             "destroy" => Self::Destroy,
+            "unlet" => Self::Unlet,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" | "sp" => Self::Analysis,
@@ -426,6 +429,12 @@ impl ControlCircuit {
             )),
             CommandKind::Destroy => {
                 self.destroy(command)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Unlet => {
+                self.unlet(command)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))

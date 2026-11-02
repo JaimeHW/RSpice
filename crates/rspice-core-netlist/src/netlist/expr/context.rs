@@ -430,6 +430,15 @@ impl ParamContext {
         }
     }
 
+    /// Drop the numeric, complex or string binding of `name`, as a control
+    /// script's `unlet` drops a scalar its `let` bound.
+    pub fn remove(&mut self, name: &str) {
+        let key = name.to_uppercase();
+        self.params.remove(&key);
+        self.complex_params.remove(&key);
+        self.string_params.remove(&key);
+    }
+
     /// Set a string parameter value.
     pub fn set_string(&mut self, name: &str, value: impl Into<String>) {
         let key = name.to_uppercase();

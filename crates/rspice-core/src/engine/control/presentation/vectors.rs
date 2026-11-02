@@ -186,6 +186,28 @@ impl ControlCircuit {
         self.vectors.vectors[index].value.unit = unit.clone();
     }
 
+    /// `unlet` (frontend/postcoms.c:54 com_unlet, vectors.c:500
+    /// vec_remove): each name's `let` vector leaves the current plot. As in
+    /// ngspice, the plot's scale stays, and a name no vector has is nothing
+    /// to remove.
+    pub(in crate::engine::control) fn unlet(
+        &mut self,
+        command: &ControlCommand,
+    ) -> Result<(), ControlError> {
+        let words = crate::engine::control::shell::words(&command.arguments);
+        if words.is_empty() {
+            return Err(command_error(command.line, "unlet requires a vector"));
+        }
+        let plot = self.current_plot().map(str::to_owned);
+        for word in words {
+            self.vectors.vectors.retain(|vector| {
+                vector.plot.as_deref() != plot.as_deref()
+                    || !vector.name.eq_ignore_ascii_case(&word.text)
+            });
+        }
+        Ok(())
+    }
+
     /// `vec_get` over every vector, a scalar `let`'s copy included.
     fn find_vector(&self, name: &str, scalars: bool) -> Option<usize> {
         let (plot, name) = match name.split_once('.') {

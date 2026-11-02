@@ -1669,6 +1669,31 @@ fn wrdata_writes_vectors_in_columns_as_ngspice_does() {
     );
 }
 
+/// `unlet` (postcoms.c:54) drops a vector `let` bound and a scalar with
+/// it, so a later read of either fails where ngspice-46 finds the vector
+/// "not available"; the plot's own vectors stay, and a name no vector has
+/// is nothing to remove.
+#[test]
+fn unlet_drops_the_vectors_let_bound() {
+    for (read, missing) in [("print vint", "vint"), ("print one", "one")] {
+        let (presented, error) = run_until_error(&format!(
+            "unlet\nV1 in 0 PWL(0 0 1m 1)\nR1 in 0 1k\n.tran 0.5m 1m\n.control\nrun\n\
+             let vint = 2*v(in)\nlet one = 1\nprint vint one\nunlet vint one none\n\
+             print v(in)\n{read}\n.endc\n.end\n"
+        ));
+        let error = error
+            .expect("a read after unlet fails")
+            .to_ascii_lowercase();
+        assert!(error.contains(missing), "{error}");
+        // The print before unlet and `print v(in)` after it.
+        assert_eq!(presented.len(), 2);
+        assert!(matches!(
+            &presented[1].kind,
+            ControlPresentationKind::Print(traces) if traces[0].y.expression == "v(in)"
+        ));
+    }
+}
+
 /// `wrs2p` (postcoms.c:624, rawfile.c:765) writes ports 1 and 2 of the sp
 /// plot as Touchstone real and imaginary parts, labelled with `Rbase`. The
 /// rows are ngspice-46's for a tee of 10 and 20 ohms and 1 uF between a 50

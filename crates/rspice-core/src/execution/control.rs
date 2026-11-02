@@ -392,6 +392,7 @@ impl ControlProgram {
             variables,
             shell: BTreeMap::new(),
             vectors: BTreeSet::new(),
+            scalars: BTreeSet::new(),
             loops: Vec::new(),
             pc: 0,
             steps: 0,
@@ -429,6 +430,9 @@ pub struct ControlSession<'a> {
     shell: BTreeMap<String, ShellValue>,
     /// Lowercase names the host bound as vectors (`let` of a vector value).
     vectors: BTreeSet<String>,
+    /// Lowercase names a scalar `let` bound in the parameters, which
+    /// `unlet` drops again.
+    scalars: BTreeSet<String>,
     loops: Vec<LoopFrame>,
     pc: usize,
     steps: usize,
@@ -528,6 +532,7 @@ impl ControlSession<'_> {
                             finite(value, line)?;
                             self.vectors.remove(&key);
                             self.variables.set_complex(name, value);
+                            self.scalars.insert(key);
                         }
                         // The host bound a vector; a scalar of the same name
                         // left in the parameters is stale from here on.
@@ -748,6 +753,18 @@ impl ControlSession<'_> {
                         "unset" => {
                             for word in shell::words(&arguments) {
                                 self.shell.remove(&word.text.to_ascii_lowercase());
+                            }
+                        }
+                        // frontend/postcoms.c:54 com_unlet: the vector is
+                        // gone; a scalar's parameter goes with the host's
+                        // copy of it.
+                        "unlet" => {
+                            for word in shell::words(&arguments) {
+                                let key = word.text.to_ascii_lowercase();
+                                if self.scalars.remove(&key) {
+                                    self.variables.remove(&word.text);
+                                }
+                                self.vectors.remove(&key);
                             }
                         }
                         _ => {}
