@@ -1196,6 +1196,7 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::KeyboardShortcuts.key(),
     CloudCommand::AccountOrganization.key(),
     CloudCommand::License.key(),
+    CloudCommand::CheckForUpdates.key(),
     HardcopyCommand::ReportAuthoring.key(),
     ResultsCommand::AddVisualizationPane.key(),
     ResultsCommand::VisualizationDocumentProperties.key(),

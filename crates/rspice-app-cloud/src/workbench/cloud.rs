@@ -1,5 +1,5 @@
-//! The cloud feature: live sessions and web publication, the account console
-//! and the license.
+//! The cloud feature: live sessions and web publication, the account console,
+//! the license and the update check.
 //!
 //! Its commands are answered and carried out in a [`Cx`] over the feature's
 //! own slot, the model, the session and the platform services' state, and
@@ -27,6 +27,7 @@ use crate::workbench::app::dialogs::publish_web::{
 use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebParts, render_unpublish_web_dialog,
 };
+use crate::workbench::app::dialogs::update_check::{open_update_check, render_update_check_dialog};
 use crate::workbench::app_state::Model;
 use crate::workbench::chrome::presence::{PresenceAction, PresenceReads, session_presence_cluster};
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
@@ -39,7 +40,7 @@ use crate::workbench::slots::CloudState;
 use crate::workbench::state::WorkbenchSession;
 use crate::workbench::{RouteTransitionSource, SurfaceId, SurfaceRoute};
 
-use commands::CloudCommand;
+use commands::{CloudCommand, checks_for_updates};
 
 /// The cloud feature.
 pub struct CloudFeature;
@@ -130,13 +131,18 @@ fn open_sign_in_page(_ctx: &egui::Context, model: &mut Model, url: String) {
 }
 
 /// The dialog steps the feature draws, under the keys the shell's dialog
-/// order lists them by: the license, publish, live-session and unpublish
-/// dialogs, and the account console.
+/// order lists them by: the license, update-check, publish, live-session and
+/// unpublish dialogs, and the account console.
 const DIALOGS: &[FeatureDialog<CloudFeature>] = &[
     FeatureDialog {
         key: DialogKey("cloud.license"),
         is_open: |cloud| cloud.license_dialog.open,
         render: |cx, ctx| render_license_dialog(&mut license_parts(cx), ctx),
+    },
+    FeatureDialog {
+        key: DialogKey("cloud.check_for_updates"),
+        is_open: |cloud| cloud.update_check.open,
+        render: |cx, ctx| render_update_check_dialog(&mut cx.state.update_check, ctx),
     },
     FeatureDialog {
         key: DialogKey("cloud.publish_web"),
@@ -243,13 +249,15 @@ impl CommandSet for CloudCommand {
 
     /// A build with no cloud endpoints can never host a session or publish,
     /// whatever the reader does, so it offers neither rather than showing
-    /// two rows that are grey for good.
+    /// two rows that are grey for good. Only the desktop application checks
+    /// for updates.
     fn offered(self, reads: &Reads<'_, CloudFeature>) -> bool {
         match self {
             Self::LiveSession | Self::PublishToWeb => {
                 reads.own.account.availability() != CloudAccountAvailability::UnconfiguredBuild
             }
             Self::AccountOrganization | Self::License => true,
+            Self::CheckForUpdates => checks_for_updates(),
         }
     }
 
@@ -307,7 +315,9 @@ impl CommandSet for CloudCommand {
                     )
                 }
             },
-            Self::AccountOrganization | Self::License => CommandAvailability::Available,
+            Self::AccountOrganization | Self::License | Self::CheckForUpdates => {
+                CommandAvailability::Available
+            }
         }
     }
 
@@ -336,6 +346,7 @@ impl CommandSet for CloudCommand {
                 let cloud = &mut *cx.state;
                 open_license_dialog(&mut cloud.license_dialog, cloud.license.as_ref());
             }
+            Self::CheckForUpdates => open_update_check(&mut cx.state.update_check),
         }
     }
 }

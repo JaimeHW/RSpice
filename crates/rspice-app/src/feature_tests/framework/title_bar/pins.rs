@@ -534,6 +534,7 @@ const PINNED_MENUS: [(ApplicationMenu, &[&str]); 10] = [
             "---",
             "Report a problem… | system-diagnostics |  | on",
             "License and activation… | license-activation |  | on",
+            "Check for updates… | check-for-updates |  | on",
             "---",
             "Third-party notices and privacy | legal-privacy-center |  | on",
             "About RSpice | about |  | on",

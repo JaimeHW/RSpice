@@ -1,5 +1,6 @@
 //! The menu bar on the macOS desktop: the brand opens the RSpice menu, which
-//! holds About, Settings and Quit in place of Help, Edit and File; Window
+//! holds About, Check for updates, Settings and Quit in place of Help, Edit
+//! and File; Window
 //! begins with Minimize and Zoom; and every key reads the way an Apple menu
 //! writes it. Read for the macOS platform value on any host.
 
@@ -28,12 +29,13 @@ fn key_of(row: &str) -> &str {
 
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
-fn the_rspice_menu_holds_about_settings_and_quit_on_the_macos_desktop() {
+fn the_rspice_menu_holds_about_updates_settings_and_quit_on_the_macos_desktop() {
     let app = title_test_app();
     assert_eq!(
         menu_pin_on(app.application_menu(), &app, OperatingSystem::Mac),
         [
             "About RSpice | about |  | on",
+            "Check for updates\u{2026} | check-for-updates |  | on",
             "---",
             "Settings\u{2026} | preferences | \u{2318}, | on",
             "---",
@@ -42,17 +44,32 @@ fn the_rspice_menu_holds_about_settings_and_quit_on_the_macos_desktop() {
     );
 }
 
-/// On the macOS desktop About leaves Help, Preferences leaves Edit and Exit
-/// leaves File, and Window begins with the window itself; every other menu
-/// holds what it holds on Windows.
+/// On the macOS desktop About and Check for updates leave Help, Preferences
+/// leaves Edit and Exit leaves File, and Window begins with the window
+/// itself; every other menu holds what it holds on Windows.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_macos_menus_give_the_rspice_menu_its_rows_and_window_its_own() {
     let app = title_test_app();
+    let updates = "Check for updates\u{2026} | check-for-updates | on";
     for menu in ALL_MENUS {
         let entries = application_menu_entries(menu);
-        let windows = without_keys(&menu_pin_on(entries, &app, OperatingSystem::Windows));
+        let mut windows = without_keys(&menu_pin_on(entries, &app, OperatingSystem::Windows));
         let mac = without_keys(&menu_pin_on(entries, &app, OperatingSystem::Mac));
+        if menu == ApplicationMenu::Help {
+            let at = windows.iter().position(|row| row == updates);
+            assert!(
+                at.is_some(),
+                "Help checks for updates on Windows: {windows:#?}"
+            );
+            windows.retain(|row| row != updates);
+        } else {
+            assert!(
+                !windows.iter().any(|row| row == updates),
+                "{}",
+                menu.label()
+            );
+        }
         let (head, tail): (&[&str], &[&str]) = match menu {
             ApplicationMenu::File => (&[], &["---", "Exit | exit-rspice | on"]),
             ApplicationMenu::Edit => (&[], &["---", "Preferences\u{2026} | preferences | on"]),
@@ -82,11 +99,27 @@ fn the_macos_menus_give_the_rspice_menu_its_rows_and_window_its_own() {
 }
 
 /// The browser has its own application menu even on a Mac, so the page keeps
-/// About in Help and Preferences in Edit, and has no window to minimize.
+/// About in Help and Preferences in Edit, and has no window to minimize. It is
+/// always served the current version, so no menu checks for updates.
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn the_browser_on_a_mac_keeps_about_and_preferences_and_has_no_window_rows() {
     let app = title_test_app();
+    for os in [OperatingSystem::Mac, OperatingSystem::Windows] {
+        for menu in ALL_MENUS {
+            let rows = menu_pin_for(
+                application_menu_entries(menu),
+                &app,
+                CommandPlatform::Browser,
+                os,
+            );
+            assert!(
+                rows.iter().all(|row| !row.contains("check-for-updates")),
+                "{os:?} {}: {rows:#?}",
+                menu.label()
+            );
+        }
+    }
     let rows = |menu| {
         menu_pin_for(
             application_menu_entries(menu),

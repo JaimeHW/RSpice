@@ -720,7 +720,7 @@ const LAYOUT_MENU: &[MenuEntry] = &[
 ];
 
 /// Help: reading about RSpice and learning it from examples, getting help
-/// with a problem and the licence, then the notices and the version.
+/// with a problem, the licence and updates, then the notices and the version.
 const HELP_MENU: &[MenuEntry] = &[
     command(Command::HelpCenter).access('H'),
     command(Command::KeyboardShortcuts).access('K'),
@@ -729,6 +729,11 @@ const HELP_MENU: &[MenuEntry] = &[
     Separator,
     command(Command::SystemDiagnostics).access('R'),
     cloud(CloudCommand::License).access('L'),
+    // On macOS the RSpice menu checks for updates.
+    MenuEntry::Only(
+        MenuContext::UpdatesInHelpMenu,
+        &[cloud(CloudCommand::CheckForUpdates).access('C')],
+    ),
     Separator,
     command(Command::LegalPrivacy).access('T'),
     // On macOS, About is the RSpice menu's.
@@ -739,10 +744,10 @@ const HELP_MENU: &[MenuEntry] = &[
 ];
 
 /// The RSpice menu the brand opens at the bar's left on the macOS desktop:
-/// the application itself, its settings, and quitting it. Check for
-/// updates… stands under About once RSpice has that command.
+/// the application itself and its updates, its settings, and quitting it.
 pub(in crate::workbench) const APPLICATION_MENU: &[MenuEntry] = &[
     command(Command::About),
+    cloud(CloudCommand::CheckForUpdates),
     Separator,
     MenuEntry::command_as(SettingsCommand::Preferences.key(), "Settings\u{2026}"),
     Separator,

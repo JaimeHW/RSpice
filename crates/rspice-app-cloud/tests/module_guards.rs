@@ -28,6 +28,7 @@ const PUBLIC_MODULES: &[(&str, &str)] = &[
     ("lib.rs", "services"),
     ("lib.rs", "slots"),
     ("lib.rs", "unpublish_web"),
+    ("lib.rs", "update_check"),
     ("lib.rs", "user_identity"),
     ("lib.rs", "workbench"),
     ("services/cloud_account.rs", "model_hub_transport"),

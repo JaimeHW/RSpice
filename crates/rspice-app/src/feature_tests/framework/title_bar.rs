@@ -2132,11 +2132,14 @@ fn the_compact_menu_button_reaches_every_menu_on_touch_rows() {
                     && area.right() <= size.x + 0.5,
                 "{size:?}: {menu:?} hangs off screen at {area:?}"
             );
+            // A submenu too tall to open below its row opens above it, over
+            // the bar, so its rows are found from its top down rather than
+            // below the bar.
             for (label, _) in shown_rows(menu, &window.app) {
                 let row = nodes
                     .iter()
                     .find(|(drawn, role, rect)| {
-                        *drawn == label && is_menu_row(*role) && rect.top() > 30.0
+                        *drawn == label && is_menu_row(*role) && rect.top() >= area.top()
                     })
                     .unwrap_or_else(|| panic!("{size:?}: {menu:?} does not show {label:?}"));
                 assert!(

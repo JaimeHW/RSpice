@@ -81,6 +81,10 @@ pub enum MenuContext {
     /// RSpice runs as a desktop application on Windows or Linux, whose File
     /// menu ends in Exit. On macOS the application menu's Quit ends it.
     ExitInFileMenu,
+    /// RSpice runs as a desktop application on Windows or Linux, which checks
+    /// for updates from Help. On macOS the RSpice menu does, and a browser or
+    /// a tablet is updated by whatever serves or installed it.
+    UpdatesInHelpMenu,
     /// RSpice runs as a desktop application on macOS: the RSpice menu at the
     /// bar's left holds About, Settings and Quit, and Window minimizes and
     /// zooms the window.
@@ -113,7 +117,9 @@ impl MenuContext {
             Self::NavigableSourceEditor => editor.is_some_and(|editor| editor.navigable),
             Self::Drawing => editor.is_none(),
             Self::DesktopApplication => file_menu_shows_exit(platform),
-            Self::ExitInFileMenu => file_menu_shows_exit(platform) && os != OperatingSystem::Mac,
+            Self::ExitInFileMenu | Self::UpdatesInHelpMenu => {
+                file_menu_shows_exit(platform) && os != OperatingSystem::Mac
+            }
             Self::MacApplication => application_menus::shows_application_menu(platform, os),
             Self::NoApplicationMenu => !application_menus::shows_application_menu(platform, os),
             Self::ProjectOpen => app.platform().project_lifecycle.is_open(),

@@ -1,6 +1,6 @@
-//! The cloud feature's dialogs: license activation, web publication and live
-//! sessions; and what the cloud shows other features, from this state and
-//! from the sessions it runs.
+//! The cloud feature's dialogs: license activation, the update check, web
+//! publication and live sessions; and what the cloud shows other features,
+//! from this state and from the sessions it runs.
 
 use crate::services::live_protocol::CursorLocus;
 use crate::workbench::framework::feature::{CloudPort, CloudSessionPort, LiveCursor};
@@ -11,6 +11,9 @@ use crate::workbench::live_session::CloudHandles;
 pub struct CloudState {
     /// License activation dialog state
     pub license_dialog: crate::workbench::app::dialogs::license::LicenseDialogState,
+
+    /// Check for updates, and the check in flight.
+    pub update_check: crate::workbench::app::dialogs::update_check::UpdateCheckDialogState,
 
     /// Immutable cloud publication transaction.
     pub publish_web: crate::workbench::app::dialogs::publish_web::PublishWebDialogState,

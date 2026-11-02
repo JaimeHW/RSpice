@@ -49,6 +49,7 @@ pub mod services {
     pub mod dpapi;
     pub mod license;
     pub(crate) use rspice_app_services::services::live_protocol;
+    pub mod update_check;
 }
 
 pub mod workbench {
@@ -71,6 +72,7 @@ pub mod workbench {
             pub mod live_session;
             pub mod publish_web;
             pub mod unpublish_web;
+            pub mod update_check;
         }
     }
     pub mod app_state {

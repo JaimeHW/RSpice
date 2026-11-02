@@ -66,6 +66,12 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.license")),
     },
     DialogSpec {
+        key: DialogKey("cloud.check_for_updates"),
+        modality: Modality::Dialog,
+        is_open: Some(|state| features::dialog_open(state, DialogKey("cloud.check_for_updates"))),
+        render: |app, ctx| features::render_dialog(app, ctx, DialogKey("cloud.check_for_updates")),
+    },
+    DialogSpec {
         key: DialogKey("project.new_project"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.project.new_project.open),
