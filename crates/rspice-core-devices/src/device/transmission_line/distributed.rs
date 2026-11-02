@@ -525,7 +525,12 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
                 0.0
             };
             h1dash[i] = h1_dummy1 - h1_dummy2;
-            if h1dash[i].abs() <= h1_relval {
+            // A strict test, as the RC kernel's: with a zero chop tolerance
+            // ngspice's and Xyce's `<=` (N_DEV_LTRA.C:2517/2551/2570) end the
+            // convolution on an exactly zero coefficient, and steps far below
+            // the time resolution of the kernel give exactly equal divided
+            // differences. That drops every older sample from the sum.
+            if h1dash[i].abs() < h1_relval {
                 do_h1 = false;
             }
         }
@@ -559,7 +564,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
                     0.0
                 };
                 h2[i] = h2_dummy1 - h2_dummy2 + intlinfunc(lo2, hi2, h2_lo2, h2_hi2, lo2, hi2);
-                if h2[i].abs() <= h2_relval {
+                if h2[i].abs() < h2_relval {
                     do_h2 = false;
                 }
             }
@@ -580,7 +585,7 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
                     0.0
                 };
                 h3dash[i] = h3_dummy1 - h3_dummy2;
-                if h3dash[i].abs() <= h3_relval {
+                if h3dash[i].abs() < h3_relval {
                     do_h3 = false;
                 }
             }
@@ -594,6 +599,39 @@ pub(in crate::device::transmission_line) fn distributed_rlc_coefficients(
         h1dash,
         h2,
         h3dash,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rlc_convolution_keeps_older_history_past_an_exactly_zero_coefficient() {
+        // At beta*t below 1e-17 the twice-integrated h1dash rounds to exactly
+        // zero, so the two newest intervals give equal (zero) divided
+        // differences and an exactly zero coefficient. Those attosecond steps
+        // are what a Xyce-dialect run takes at a diode's reverse-recovery
+        // snap. The samples behind them still carry the line's own history.
+        let start = 1.0e-9;
+        let time_list = [
+            0.0,
+            0.25e-9,
+            0.5e-9,
+            0.75e-9,
+            start,
+            start + 1.0e-18,
+            start + 2.0e-18,
+        ];
+        let coeffs =
+            distributed_rlc_coefficients(1.0e-9, 0.5, 1.0, start + 3.0e-18, &time_list, 0.0);
+        assert_eq!(coeffs.h1dash[6], 0.0, "the sub-resolution coefficient");
+        for (index, coefficient) in coeffs.h1dash.iter().enumerate().take(5).skip(1) {
+            assert!(
+                coefficient.is_finite() && *coefficient != 0.0,
+                "h1dash[{index}] = {coefficient:e} was dropped from the convolution"
+            );
+        }
     }
 }
 
