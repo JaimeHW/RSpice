@@ -14,11 +14,16 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
 use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::PlatformState;
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{WorkbenchIcon, action_row, centered_content_rect};
+use crate::workbench::features;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::recovery::{RecoveryCandidate, RecoveryIntegrity};
+use crate::workbench::project::ProjectFeature;
 use crate::workbench::project::commands::ProjectCommand;
 use crate::workbench::project::workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
+use crate::workbench::slots::ProjectState;
 
 const HEADER_HEIGHT: f32 = 116.0;
 const CONTENT_MAX_WIDTH: f32 = 1240.0;
@@ -59,6 +64,8 @@ enum LandingAction {
     ReviewRecovery,
 }
 
+/// The landing, drawn in the project feature's context, with what the reader
+/// asked of it carried out by the shell as soon as it has drawn.
 pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     crate::workbench::lifecycle::recovery::refresh_catalog_if_requested(
         &mut app.state.platform,
@@ -66,18 +73,25 @@ pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         app.file_workflow_io.as_ref(),
     );
 
+    let action = landing(ui, &mut features::cx(app));
+
+    if let Some(action) = action {
+        execute_action(app, action);
+    }
+}
+
+/// Draw the landing over the project feature's context and return what the
+/// reader asked of it in this frame.
+fn landing(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) -> Option<LandingAction> {
     let mut action = None;
     egui::Frame::new()
         .fill(Tokens::get(ui.ctx()).color.bg_app)
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing = Vec2::ZERO;
             landing_header(ui);
-            landing_body(ui, app, &mut action);
+            landing_body(ui, cx, &mut action);
         });
-
-    if let Some(action) = action {
-        execute_action(app, action);
-    }
+    action
 }
 
 fn landing_header(ui: &mut Ui) {
@@ -126,7 +140,7 @@ fn landing_header(ui: &mut Ui) {
     });
 }
 
-fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
+fn landing_body(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, action: &mut Option<LandingAction>) {
     let available = ui.available_rect_before_wrap();
     ui.allocate_rect(available, Sense::hover());
     let mut content = centered_content_rect(available, DESKTOP_GUTTER, CONTENT_MAX_WIDTH);
@@ -148,7 +162,7 @@ fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAct
                 .layout(Layout::top_down(Align::Min)),
         );
         left.set_clip_rect(left_rect);
-        continue_column(&mut left, app, action);
+        continue_column(&mut left, cx, action);
 
         let mut right = ui.new_child(
             UiBuilder::new()
@@ -172,20 +186,24 @@ fn landing_body(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAct
             .auto_shrink([false, false])
             .show(&mut stacked, |ui| {
                 ui.set_min_width(content.width());
-                continue_column(ui, app, action);
+                continue_column(ui, cx, action);
                 ui.add_space(16.0);
                 start_rail(ui, action);
             });
     }
 }
 
-fn continue_column(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
-    let candidates = app.state.platform.recovery_catalog.candidates.clone();
+fn continue_column(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    action: &mut Option<LandingAction>,
+) {
+    let candidates = cx.platform.recovery_catalog.candidates.clone();
     if !candidates.is_empty() {
         recovery_card(ui, &candidates, action);
         ui.add_space(8.0);
     }
-    recent_projects(ui, app, action);
+    recent_projects(ui, cx, action);
 }
 
 fn recovery_card(
@@ -275,9 +293,13 @@ fn recovery_detail(candidate: &RecoveryCandidate) -> String {
     format!("{contents} · {}", candidate.age)
 }
 
-fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<LandingAction>) {
+fn recent_projects(
+    ui: &mut Ui,
+    cx: &mut Cx<'_, ProjectFeature>,
+    action: &mut Option<LandingAction>,
+) {
     let t = Tokens::get(ui.ctx());
-    let rows = recent_project_rows(app);
+    let rows = recent_project_rows(cx.state, cx.platform);
     let compact = ui.available_width() < PHONE_RECENTS_BREAKPOINT;
     // A stacked landing page lives inside an outer scroll area, where the
     // available height can be unbounded. Keep the table useful without ever
@@ -305,7 +327,7 @@ fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<Landing
             .max_rect(rect.shrink(1.0))
             .layout(Layout::top_down(Align::Min)),
     );
-    recent_toolbar(&mut panel, app, rows.len());
+    recent_toolbar(&mut panel, cx, rows.len());
     let rows_rect = panel.available_rect_before_wrap();
     panel.allocate_rect(rows_rect, Sense::hover());
     let mut rows_ui = panel.new_child(
@@ -314,8 +336,7 @@ fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<Landing
             .layout(Layout::top_down(Align::Min)),
     );
     rows_ui.set_clip_rect(rows_rect);
-    let no_recents = app
-        .state
+    let no_recents = cx
         .platform
         .recent_files
         .iter()
@@ -359,7 +380,7 @@ fn recent_projects(ui: &mut Ui, app: &mut RSpiceApp, action: &mut Option<Landing
     }
 }
 
-fn recent_toolbar(ui: &mut Ui, app: &mut RSpiceApp, shown: usize) {
+fn recent_toolbar(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, shown: usize) {
     let t = Tokens::get(ui.ctx());
     let frame = Frame::new()
         .fill(t.color.bg_panel_2)
@@ -371,18 +392,18 @@ fn recent_toolbar(ui: &mut Ui, app: &mut RSpiceApp, shown: usize) {
                     ui.spacing_mut().item_spacing.x = 5.0;
                     recent_toolbar_title(ui, shown);
                     ui.add_space((ui.available_width() - 154.0).max(4.0));
-                    recent_toolbar_filters(ui, app);
+                    recent_toolbar_filters(ui, cx);
                 });
                 ui.add_space(4.0);
                 let search_width = ui.available_width();
-                recent_toolbar_search(ui, app, search_width);
+                recent_toolbar_search(ui, cx, search_width);
             } else {
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 7.0;
                     recent_toolbar_title(ui, shown);
                     let search_width = (ui.available_width() - 174.0).clamp(150.0, 250.0);
-                    recent_toolbar_search(ui, app, search_width);
-                    recent_toolbar_filters(ui, app);
+                    recent_toolbar_search(ui, cx, search_width);
+                    recent_toolbar_filters(ui, cx);
                 });
             }
         });
@@ -407,10 +428,10 @@ fn recent_toolbar_title(ui: &mut Ui, shown: usize) {
     );
 }
 
-fn recent_toolbar_search(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
+fn recent_toolbar_search(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>, width: f32) {
     let search = ui.add_sized(
         [width.max(1.0), 24.0],
-        egui::TextEdit::singleline(&mut app.state.project.project_launcher_query)
+        egui::TextEdit::singleline(&mut cx.state.project_launcher_query)
             .hint_text("Project, path, owner…"),
     );
     ui.ctx().accesskit_node_builder(search.id, |node| {
@@ -418,7 +439,7 @@ fn recent_toolbar_search(ui: &mut Ui, app: &mut RSpiceApp, width: f32) {
     });
 }
 
-fn recent_toolbar_filters(ui: &mut Ui, app: &mut RSpiceApp) {
+fn recent_toolbar_filters(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
         for (filter, label) in [
@@ -426,14 +447,8 @@ fn recent_toolbar_filters(ui: &mut Ui, app: &mut RSpiceApp) {
             (ProjectLauncherFilter::Pinned, "Pinned"),
             (ProjectLauncherFilter::Shared, "Shared"),
         ] {
-            if segment_button(
-                ui,
-                label,
-                app.state.project.project_launcher_filter == filter,
-            )
-            .clicked()
-            {
-                app.state.project.project_launcher_filter = filter;
+            if segment_button(ui, label, cx.state.project_launcher_filter == filter).clicked() {
+                cx.state.project_launcher_filter = filter;
             }
         }
     });
@@ -781,16 +796,12 @@ fn recent_empty_state(ui: &mut Ui, no_recents: bool) {
     });
 }
 
-fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
-    let query = app
-        .state
-        .project
-        .project_launcher_query
-        .trim()
-        .to_ascii_lowercase();
-    let filter = app.state.project.project_launcher_filter;
-    app.state
-        .platform
+/// The recent projects the landing lists: the device's recents, narrowed by
+/// the launcher's search and filter, which the landing shares.
+fn recent_project_rows(project: &ProjectState, platform: &PlatformState) -> Vec<RecentProjectRow> {
+    let query = project.project_launcher_query.trim().to_ascii_lowercase();
+    let filter = project.project_launcher_filter;
+    platform
         .recent_files
         .iter()
         .filter(|recent| recent.kind == RecentKind::Project)
@@ -995,6 +1006,12 @@ fn execute_action(app: &mut RSpiceApp, action: LandingAction) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The rows the landing lists for `app`, read from the parts its page
+    /// draws from.
+    fn recent_project_rows(app: &RSpiceApp) -> Vec<RecentProjectRow> {
+        super::recent_project_rows(&app.state.project, &app.state.platform)
+    }
 
     fn project_recent(path: &str, pinned: bool, owner: Option<&str>) -> RecentFile {
         RecentFile {
