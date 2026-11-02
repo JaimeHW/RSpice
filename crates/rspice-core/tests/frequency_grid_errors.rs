@@ -95,15 +95,22 @@ fn authored_grids_apply_point_policy_before_capacity_and_circuit_construction() 
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn authored_grids_budget_actual_lin_dec_and_oct_points_and_remain_cancellable() {
     use rspice_core::abort_signal::{CountingAbort, ImmediateAbort};
-    for (sweep, expected) in [
-        ("LIN 2 1 9", vec![1.0]),
-        ("LIN 3 1 3", vec![1.0, 2.0, 3.0]),
-        ("DEC 1 1 100", vec![1.0, 10.0, 100.0]),
-        ("OCT 1 1 4", vec![1.0, 2.0, 4.0]),
+    // A LIN sweep of N points visits N frequencies, `.SENS AC` included
+    // (ngspice counts N there too, cktsens.c:877-880). `.SP` keeps ngspice's
+    // one point for LIN 2 (span.c:417-428).
+    for (sweep, sens, sp) in [
+        ("LIN 2 1 9", vec![1.0, 9.0], vec![1.0]),
+        ("LIN 3 1 3", vec![1.0, 2.0, 3.0], vec![1.0, 2.0, 3.0]),
+        (
+            "DEC 1 1 100",
+            vec![1.0, 10.0, 100.0],
+            vec![1.0, 10.0, 100.0],
+        ),
+        ("OCT 1 1 4", vec![1.0, 2.0, 4.0], vec![1.0, 2.0, 4.0]),
     ] {
-        for command in [
-            format!(".sens V(out) R1 AC {sweep}"),
-            format!(".sp {sweep} PORT1=(out)"),
+        for (command, expected) in [
+            (format!(".sens V(out) R1 AC {sweep}"), sens),
+            (format!(".sp {sweep} PORT1=(out)"), sp),
         ] {
             let netlist = rspice_core::Netlist::parse(&format!(
                 "Grid budget\nI1 0 out DC 1m AC 1\nR1 out 0 1k\n{command}\n.end\n"
@@ -212,11 +219,11 @@ fn retained_pnoise_carriers_apply_the_callers_offset_budget() {
         card.sweep.start_freq = 1.0;
         card.sweep.stop_freq = 2.0;
         // Retained-carrier integration and sidebands also consume the point
-        // ceiling. Allow those while checking LIN 2 still emits one offset.
+        // ceiling. Allow those while checking LIN 2 emits both offsets.
         let PeriodicNoiseResult::Driven { result, .. } = run(&card, 128, &NoAbort).unwrap() else {
             panic!("driven carrier")
         };
-        assert_eq!(result.frequencies, vec![1.0]);
+        assert_eq!(result.frequencies, vec![1.0, 2.0]);
     }
 }
 
