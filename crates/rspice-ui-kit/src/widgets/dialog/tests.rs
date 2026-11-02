@@ -139,6 +139,56 @@ fn capability_review_desktop_layout_uses_mockup_caps_and_is_centered() {
     assert_eq!(layout.surface_rect.top(), 100.0);
 }
 
+/// The dialog's node is where the dialog is: the card, not the screen its
+/// scrim covers, so assistive technology and a reader measuring the tree find
+/// the card's edges.
+#[test]
+fn the_dialog_node_bounds_the_card_and_not_the_screen() {
+    let ctx = Context::default();
+    crate::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut underlying = String::new();
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..4 {
+        let (_, output) = run_dialog(&ctx, raw_input(Vec::new()), &mut underlying, false, |ui| {
+            ui.label("Body");
+        });
+        nodes.extend(output.platform_output.accesskit_update.expect("tree").nodes);
+    }
+    let bounds = |role: egui::accesskit::Role, label: &str| {
+        nodes
+            .values()
+            .find(|node| node.role() == role && node.label() == Some(label))
+            .and_then(egui::accesskit::Node::bounds)
+            .unwrap_or_else(|| panic!("{label} is published as {role:?}"))
+    };
+    let dialog = bounds(egui::accesskit::Role::Dialog, TEST_TITLE);
+    let accept = bounds(egui::accesskit::Role::Button, "Accept");
+    let screen = Rect::from_min_size(egui::Pos2::ZERO, vec2(1_000.0, 800.0));
+    let card =
+        DialogLayout::resolve(Dialog::new(TEST_TITLE, "Accept").size, screen, None).surface_rect;
+    assert!(
+        (dialog.x0 - f64::from(card.left())).abs() < 1.0
+            && (dialog.x1 - f64::from(card.right())).abs() < 1.0,
+        "the dialog node runs {}..{}, the card {}..{}",
+        dialog.x0,
+        dialog.x1,
+        card.left(),
+        card.right()
+    );
+    assert!(
+        dialog.y0 > 0.0 && dialog.y1 < 800.0,
+        "the dialog node is {dialog:?}, the screen's height"
+    );
+    assert!(
+        dialog.x0 <= accept.x0
+            && accept.x1 <= dialog.x1
+            && dialog.y0 <= accept.y0
+            && accept.y1 <= dialog.y1,
+        "the dialog node {dialog:?} holds its own button {accept:?}"
+    );
+}
+
 /// A short narrow viewport clamps the card rather than letting it overrun.
 ///
 /// The surface still keeps its gutter on every side: a card that filled the

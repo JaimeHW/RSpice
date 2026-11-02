@@ -1236,6 +1236,9 @@ impl<'a> Dialog<'a> {
         let mut choice = DialogChoice::None;
         let mut rendered_focus = DialogRenderedFocus::default();
         let mut rendered_surface_height = None;
+        // The card, for the dialog's node: the area it is shown in covers the
+        // whole screen with its scrim, which is not where the dialog is.
+        let mut card = None;
         let area_response = area.show(ctx, |ui| {
             // Scrim: swallow pointer interaction with everything below.
             // accessibility-pointer-shim: the scrim consumes pointer
@@ -1479,6 +1482,7 @@ impl<'a> Dialog<'a> {
             // as it must.
             rendered_surface_height =
                 Some(surface_output.response.rect.height() + unshown_body_height);
+            card = Some(surface_output.response.rect);
         });
 
         if self.fixed_height.is_none()
@@ -1511,6 +1515,14 @@ impl<'a> Dialog<'a> {
         ctx.accesskit_node_builder(response.id, |node| {
             node.set_role(egui::accesskit::Role::Dialog);
             node.set_label(self.title.as_str());
+            if let Some(card) = card {
+                node.set_bounds(egui::accesskit::Rect {
+                    x0: card.min.x.into(),
+                    y0: card.min.y.into(),
+                    x1: card.max.x.into(),
+                    y1: card.max.y.into(),
+                });
+            }
             if let Some(description) = self.description.as_deref() {
                 node.set_description(description);
             }
