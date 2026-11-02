@@ -3075,9 +3075,10 @@ impl DelayConditionTracker {
         target: Value,
         td: Option<Value>,
     ) -> Option<Value> {
-        // TrigTarg::isWHENcondition rejects a constant dependent signal even
-        // when a moving RHS passes through it.
-        if value == previous_value {
+        // The edge is the step of value - target, as for WHEN.
+        let (edge_previous, edge_current) =
+            condition_edge_samples(previous_value, value, previous_target, target);
+        if edge_current == edge_previous {
             return None;
         }
         let previous_difference = previous_value - previous_target;
@@ -3104,8 +3105,8 @@ impl DelayConditionTracker {
             return None;
         }
 
-        let rise = value > previous_value;
-        let fall = value < previous_value;
+        let rise = edge_current > edge_previous;
+        let fall = edge_current < edge_previous;
         let requested = !self.occurrence_explicit
             || match self.edge {
                 EdgeType::Rise => rise,
@@ -3467,9 +3468,8 @@ fn select_measure_condition_occurrence(
     None
 }
 
-/// Return every qualifying `WHEN left=right` crossing interval in traversal
-/// order. Xyce requires the left operand itself to change over the interval;
-/// a moving right operand cannot trigger against a constant left operand.
+/// The edge of a `WHEN left=right` event: the step of left - right (see
+/// [`condition_edge_samples`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum MeasureConditionDirection {
     Rise,
@@ -3544,7 +3544,12 @@ pub(crate) fn measure_condition_crossing(
     right_current: Value,
     minval: Value,
 ) -> Option<MeasureConditionCrossing> {
-    if !minval.is_finite() || minval < 0.0 || left_current == left_previous {
+    if !minval.is_finite() || minval < 0.0 {
+        return None;
+    }
+    let (edge_previous, edge_current) =
+        condition_edge_samples(left_previous, left_current, right_previous, right_current);
+    if edge_current == edge_previous {
         return None;
     }
     let previous_difference = left_previous - right_previous;
@@ -3560,9 +3565,9 @@ pub(crate) fn measure_condition_crossing(
     if !current_equal && !strict_crossing {
         return None;
     }
-    let direction = if left_current > left_previous {
+    let direction = if edge_current > edge_previous {
         MeasureConditionDirection::Rise
-    } else if left_current < left_previous {
+    } else if edge_current < edge_previous {
         MeasureConditionDirection::Fall
     } else {
         // IEEE comparisons with a NaN endpoint are both false. Xyce still
@@ -3593,6 +3598,29 @@ pub(crate) fn measure_condition_crossing(
         current_within_minval: current_equal,
         direction,
     })
+}
+
+/// The two samples whose step is a `WHEN left=right` or `TRIG left=right`
+/// event's edge: those of left - right, so a right operand that crosses a
+/// constant left one is an event, and the event rises when left - right
+/// does. ngspice (com_measure2.c:563-582) and LTspice count edges this way.
+/// Xyce alone counts the left operand's own slope and passes over a
+/// constant left operand (N_IO_MeasureWhenAT.C:178, 222-256;
+/// N_IO_MeasureTrigTarg.C:723, 876-879), so RSpice follows the others in
+/// every dialect. Against a constant right operand the left samples stand
+/// for the difference, so that subtracting the level cannot round two
+/// distinct samples into one.
+fn condition_edge_samples(
+    left_previous: Value,
+    left_current: Value,
+    right_previous: Value,
+    right_current: Value,
+) -> (Value, Value) {
+    if right_previous == right_current {
+        (left_previous, left_current)
+    } else {
+        (left_previous - right_previous, left_current - right_current)
+    }
 }
 
 fn edge_matches_measure_condition(edge: EdgeType, direction: MeasureConditionDirection) -> bool {
@@ -5600,6 +5628,74 @@ mod tests {
             )
             .is_empty()
         );
+    }
+
+    #[test]
+    fn two_signal_when_edges_follow_the_difference() {
+        fn crossings(left: &[Value], right: &[Value], edge: EdgeType) -> Vec<(usize, Value)> {
+            measurement_condition_crossings(
+                left,
+                ResolvedMeasureOperand::Waveform(right),
+                left.len(),
+                &[],
+                edge,
+                XYCE_DEFAULT_MEASURE_MINVAL,
+            )
+        }
+        // The left operand rises throughout while left - right falls
+        // through zero at 0.5 and 2.5 and rises through it at 1.5 and 3.5.
+        // ngspice-46 and LTspice give FALL=1 0.5 and RISE=1 1.5; Xyce,
+        // counting the left operand's slope, gives RISE=1 0.5 and no fall.
+        let left = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let right = [-1.0, 2.0, 1.0, 4.0, 3.0];
+        assert_eq!(
+            crossings(&left, &right, EdgeType::Rise),
+            vec![(1, 0.5), (3, 0.5)]
+        );
+        assert_eq!(
+            crossings(&left, &right, EdgeType::Fall),
+            vec![(0, 0.5), (2, 0.5)]
+        );
+
+        // A right operand that crosses a constant left one is an event.
+        let level = [1.0, 1.0, 1.0];
+        let sweep = [0.0, 2.0, 0.0];
+        assert_eq!(
+            crossings(&level, &sweep, EdgeType::Cross),
+            vec![(0, 0.5), (1, 0.5)]
+        );
+        assert_eq!(crossings(&level, &sweep, EdgeType::Rise), vec![(1, 0.5)]);
+        assert_eq!(crossings(&level, &sweep, EdgeType::Fall), vec![(0, 0.5)]);
+    }
+
+    #[test]
+    fn two_signal_trigger_edges_follow_the_difference() {
+        // LTspice gives 1 for TRIG v(a)=v(b) RISE=1 TARG v(a)=v(b) FALL=2 on
+        // these waveforms: from the rise at 1.5 to the second fall at 2.5.
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let left = [0.0, 1.0, 2.0, 3.0, 4.0];
+        let right = [-1.0, 2.0, 1.0, 4.0, 3.0];
+        let events = |edge, number| {
+            let mut tracker =
+                DelayConditionTracker::new(edge, number, true, XYCE_DEFAULT_MEASURE_MINVAL);
+            axis.iter()
+                .zip(left.iter().zip(&right))
+                .filter_map(|(&time, (&value, &target))| {
+                    tracker.update_with_td(time, value, target, None)
+                })
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(events(EdgeType::Rise, 1), vec![1.5]);
+        assert_eq!(events(EdgeType::Fall, 2), vec![2.5]);
+        // A constant left operand still triggers on a moving right one.
+        let mut tracker =
+            DelayConditionTracker::new(EdgeType::Cross, 1, true, XYCE_DEFAULT_MEASURE_MINVAL);
+        let level = [(0.0, 1.0, 0.0), (1.0, 1.0, 2.0)];
+        let found = level
+            .iter()
+            .filter_map(|&(time, value, target)| tracker.update_with_td(time, value, target, None))
+            .collect::<Vec<_>>();
+        assert_eq!(found, vec![0.5]);
     }
 
     #[test]

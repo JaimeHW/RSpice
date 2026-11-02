@@ -442,3 +442,93 @@ fn xyce_continuous_failvalue_is_reachable_through_the_cli() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// `WHEN v(a)=v(b)` and `TRIG v(a)=v(b)` count edges by the slope of
+/// v(a) - v(b) in every dialect. v(a) rises throughout, v(a) - v(b) falls
+/// through zero at 0.5 and 2.5 and rises through it at 1.5 and 3.5, and v(d)
+/// crosses the constant v(c) at 0.5 and 1.5. ngspice-46 and LTspice 26.1.1
+/// print every value below for this deck (ngspice refuses the two-signal
+/// TRIG, so `D1` is LTspice's alone). Xyce 7.10, counting the left
+/// operand's slope, gives R1 0.5 and R2 1.5 and fails the falls, the
+/// constant-left measures and D1.
+#[test]
+fn two_signal_conditions_count_edges_by_their_difference_in_every_dialect() {
+    let dir = test_dir("two_signal_conditions");
+    let deck = dir.join("when.cir");
+    std::fs::write(
+        &deck,
+        "* two-signal WHEN and TRIG\n\
+         Va a 0 PWL(0 0 4 4)\n\
+         Vb b 0 PWL(0 -1 1 2 2 1 3 4 4 3)\n\
+         Vc c 0 1\n\
+         Vd d 0 PWL(0 0 1 2 2 0)\n\
+         Ra a 0 1k\n\
+         Rb b 0 1k\n\
+         Rc c 0 1k\n\
+         Rd d 0 1k\n\
+         .tran 1m 4 0 1m\n\
+         .meas tran r1 when v(a)=v(b) rise=1\n\
+         .meas tran r2 when v(a)=v(b) rise=2\n\
+         .meas tran f1 when v(a)=v(b) fall=1\n\
+         .meas tran f2 when v(a)=v(b) fall=2\n\
+         .meas tran c3 when v(a)=v(b) cross=3\n\
+         .meas tran rl when v(a)=v(b) rise=last\n\
+         .meas tran fl when v(a)=v(b) fall=last\n\
+         .meas tran x1 when v(c)=v(d)\n\
+         .meas tran kr when v(c)=v(d) rise=1\n\
+         .meas tran kf when v(c)=v(d) fall=1\n\
+         .meas tran d1 trig v(a)=v(b) rise=1 targ v(a)=v(b) fall=2\n\
+         .end\n",
+    )
+    .expect("write two-signal deck");
+
+    let expected = [
+        ("R1", 1.5),
+        ("R2", 3.5),
+        ("F1", 0.5),
+        ("F2", 2.5),
+        ("C3", 2.5),
+        ("RL", 3.5),
+        ("FL", 2.5),
+        ("X1", 0.5),
+        ("KR", 1.5),
+        ("KF", 0.5),
+        ("D1", 1.0),
+    ];
+    for dialect in ["best", "ngspice", "xyce"] {
+        let output = run_rspice(&[
+            "run",
+            deck.to_str().unwrap(),
+            "--spice-dialect",
+            dialect,
+            "--meas",
+        ]);
+        assert!(
+            output.status.success(),
+            "{dialect} run failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for (name, value) in expected {
+            if dialect == "ngspice" && name == "D1" {
+                continue;
+            }
+            let prefix = format!("{name} =");
+            let line = stdout
+                .lines()
+                .find(|line| line.trim_start().starts_with(&prefix))
+                .unwrap_or_else(|| panic!("{dialect}: no {name} line in output:\n{stdout}"));
+            let actual: f64 = line
+                .split('=')
+                .nth(1)
+                .and_then(|field| field.trim().parse().ok())
+                .unwrap_or_else(|| panic!("{dialect}: unparseable {name} line '{line}'"));
+            assert!(
+                (actual - value).abs() < 1e-6,
+                "{dialect}: {name} = {actual}, expected {value}"
+            );
+        }
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
