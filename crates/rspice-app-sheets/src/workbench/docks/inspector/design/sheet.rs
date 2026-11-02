@@ -37,9 +37,9 @@ use crate::workbench::app::drawing_sheet_edit::{
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::schematic_preferences::NET_NAME_CHARACTERS;
 use crate::workbench::design_system::{
-    Problem, problem_line, property_row_checklist, property_row_combo, property_row_combo_showing,
-    property_row_input_with_default, property_row_input_with_hint,
-    schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
+    Problem, problem_line, property_row, property_row_checklist, property_row_combo,
+    property_row_combo_showing, property_row_input_with_default, property_row_input_with_hint,
+    property_row_problem,
 };
 use crate::workbench::framework::requests::FollowSchematicGrid;
 use crate::workbench::state::WorkbenchSession;
@@ -214,13 +214,21 @@ fn schematic_section(ui: &mut Ui, model: &Model, editable: bool, edit: &mut Opti
         *edit = Some(SchematicEdit::Grid(pitch));
     }
     let characters = NET_NAME_CHARACTERS.map(|(choice, label)| (choice, label.to_owned()));
-    if let Some(choice) = choice_row(
+    // The field names the rule; the characters each allows are in the menu
+    // and on hover. Set at the field size, the strict set outran the field at
+    // the inspector's default width.
+    let shown = editable.then_some(match policy.net_naming {
+        NetNamingPolicy::StrictCaseSensitive => "Strict",
+        NetNamingPolicy::SpiceCompatibleRelaxed => "Relaxed",
+    });
+    if let Some(choice) = choice_row_showing(
         ui,
         editable,
         "Net names",
         "sheet-inspector-net-names",
         policy.net_naming,
         &characters,
+        shown,
     ) {
         *edit = Some(SchematicEdit::NetNameCharacters(choice));
     }

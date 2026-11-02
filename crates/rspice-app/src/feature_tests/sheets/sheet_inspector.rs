@@ -254,7 +254,7 @@ fn with_nothing_selected_the_panel_edits_the_sheet_and_repeats_no_command() {
          Document\nAll sheets\nLegal owner\n\nDocument status\nIn preparation\n\
          Identification number\n\nRevision\n\nDate of issue\nYYYY-MM-DD\n\n\
          Change reference\nECO or ticket\n\n\
-         Schematic\nGrid\n2.5 mm\nNet names\nA\u{2013}Z a\u{2013}z 0\u{2013}9 _.$:/![]<>-\n"
+         Schematic\nGrid\n2.5 mm\nNet names\nStrict\n"
     );
 }
 
@@ -580,7 +580,7 @@ fn the_open_schematics_grid_and_net_names_change_in_the_panel() {
     assert_eq!(app.state.design.schematic_snap.grid_size, 5);
     let painted = painted_panel(|ui| sheet_panel(ui, &mut app.state));
     assert!(
-        painted.ends_with("Grid\n1.25 mm\nNet names\nAny printable but spaces\n"),
+        painted.ends_with("Grid\n1.25 mm\nNet names\nRelaxed\n"),
         "{painted}"
     );
 

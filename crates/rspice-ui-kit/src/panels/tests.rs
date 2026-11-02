@@ -769,29 +769,6 @@ fn a_problem_row_keeps_its_value_neutral_and_only_marks_a_problem() {
             "{problem:?} mark {marks:?}"
         );
     }
-
-    // The schematic inspector's variant sets its value a size up, and is its
-    // own plain row when there is nothing to mark.
-    let schematic = render(&|ui| {
-        schematic_property_row(ui, "Terminal", "unplaced");
-    });
-    let schematic_clear = render(&|ui| {
-        schematic_property_row_problem(ui, "Terminal", "unplaced", None);
-    });
-    assert_eq!(value(&schematic_clear).pos, value(&schematic).pos);
-    assert_eq!(
-        value(&schematic_clear).galley.size(),
-        value(&schematic).galley.size()
-    );
-    let schematic_marked = render(&|ui| {
-        schematic_property_row_problem(ui, "Terminal", "unplaced", Some(Problem::Warning));
-    });
-    assert_eq!(value(&schematic_marked).fallback_color, palette.text);
-    assert!(
-        stroke_colors(&schematic_marked)
-            .iter()
-            .all(|color| *color == palette.warn)
-    );
 }
 
 /// A code inspector section's status is faint metadata with no dot in front of
@@ -1512,4 +1489,83 @@ fn a_title_field_holding_arabic_is_edited_in_the_order_it_is_typed() {
     }
     pass(vec![egui::Event::Text("x".to_owned())], &mut value);
     assert_eq!(value, "عدد 123 مرxحبا");
+}
+
+/// An inspector's typed value, its choice and its read-only facts read at
+/// one size, the size a field holds its value at: names and numbers in the
+/// mono face, a choice and a sentence in the body face. The rows stay one
+/// height.
+#[test]
+fn an_inspectors_values_read_at_the_field_size() {
+    fn walk(shape: &Shape, into: &mut Vec<(String, egui::FontId)>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+            Shape::Text(text) => into.push((
+                text.galley.text().to_owned(),
+                text.galley.job.sections[0].format.font_id.clone(),
+            )),
+            _ => {}
+        }
+    }
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut typed = "10k".to_owned();
+    let mut selected = "a4".to_owned();
+    let options = vec![("a4".to_owned(), "ISO A4".to_owned())];
+    let mut heights = Vec::new();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(320.0);
+            heights.clear();
+            // What each row advances the cursor by, its spacing included.
+            let mut advance = |ui: &mut Ui, row: &mut dyn FnMut(&mut Ui)| {
+                let top = ui.cursor().top();
+                row(ui);
+                heights.push(ui.cursor().top() - top);
+            };
+            advance(ui, &mut |ui| {
+                let _ = property_row(ui, "Instance", "R1");
+            });
+            advance(ui, &mut |ui| {
+                let _ = property_row_input(ui, "Resistance", &mut typed, false);
+            });
+            advance(ui, &mut |ui| {
+                let _ = property_row_combo(
+                    ui,
+                    "Size",
+                    "field-size-size",
+                    &mut selected,
+                    &options,
+                    true,
+                );
+            });
+            advance(ui, &mut |ui| {
+                let _ = property_row_problem(ui, "Net", "out", None);
+            });
+            let _ = property_row_wrapped(ui, "Rule", "Keep each member's own contract.");
+        });
+    });
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut texts);
+    }
+    let font_of = |value: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text == value)
+            .map(|(_, font)| font.clone())
+            .unwrap_or_else(|| panic!("{value:?} is painted"))
+    };
+    for value in ["R1", "10k", "out"] {
+        assert_eq!(font_of(value), theme::field_mono(), "{value:?}");
+    }
+    for value in ["ISO A4", "Keep each member's own contract."] {
+        assert_eq!(font_of(value), theme::field_sans(), "{value:?}");
+    }
+    assert!(
+        heights
+            .windows(2)
+            .all(|pair| (pair[0] - pair[1]).abs() < 0.5),
+        "row heights {heights:?}"
+    );
 }

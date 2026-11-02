@@ -29,8 +29,7 @@ pub const SELECTION_CROSSING: [SelectionCrossingPolicy; 3] = [
 ];
 
 /// The characters a net name may use, in stored index order, with the words
-/// Preferences and the sheet inspector name each set by. Each fits the
-/// inspector's value column at its default width whole.
+/// Preferences and the sheet inspector's menu name each set by.
 pub const NET_NAME_CHARACTERS: [(NetNamingPolicy, &str); 2] = [
     (
         NetNamingPolicy::StrictCaseSensitive,

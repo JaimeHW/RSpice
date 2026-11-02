@@ -29,10 +29,9 @@ use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, TreeRow, TreeRowResult};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{
-    Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row_captioned,
+    Problem, PropertyRowCaption, WorkbenchIcon, problem_line, property_row, property_row_captioned,
     property_row_combo, property_row_flagged, property_row_input_action,
-    property_row_input_captioned, property_row_input_with_hint,
-    schematic_property_row as property_row, schematic_property_row_problem as property_row_problem,
+    property_row_input_captioned, property_row_input_with_hint, property_row_problem,
 };
 use crate::workbench::framework::command_registry::CommandAvailability;
 use crate::workbench::framework::host::{Host, InspectorScope, Point};

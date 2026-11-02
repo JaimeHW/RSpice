@@ -641,7 +641,7 @@ fn committed_text(
             [width, 24.0],
             TextEdit::singleline(&mut text)
                 .id(egui::Id::new(("configuration-field", field)))
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                .font(theme::field_mono()),
         );
         if response.changed() {
             *buffer = Some(FieldEdit {

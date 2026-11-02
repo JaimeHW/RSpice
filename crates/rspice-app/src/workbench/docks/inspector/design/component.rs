@@ -815,7 +815,7 @@ pub(super) fn parameters_section(
                     removed = Some(parameter.key);
                 }
             } else {
-                crate::workbench::design_system::schematic_property_row_problem(
+                crate::workbench::design_system::property_row_problem(
                     ui,
                     &parameter.label,
                     &format!("{value} {UNDECLARED_PARAMETER_NOTE}"),

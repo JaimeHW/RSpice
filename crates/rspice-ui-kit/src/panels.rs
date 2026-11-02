@@ -837,52 +837,24 @@ pub fn labeled_icon_button_sized(
     response.on_hover_text(label)
 }
 
+/// A read-only property row. Its value reads at the size a field beside it
+/// holds a typed value, so a fact and an edit in one inspector read as one
+/// column; the label keeps the caption size.
 pub fn property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(
-        ui,
-        label,
-        value,
-        t.color.text,
-        None,
-        tokens::FS_0,
-        elide_text,
-    )
-}
-
-/// Read-only schematic property row. The upgraded inspector uses body-sized
-/// mono values while retaining caption-sized labels.
-pub fn schematic_property_row(ui: &mut Ui, label: &str, value: &str) -> Response {
-    let t = Tokens::get(ui.ctx());
-    property_row_with_tone(
-        ui,
-        label,
-        value,
-        t.color.text,
-        None,
-        tokens::FS_1,
-        elide_text,
-    )
+    property_row_with_tone(ui, label, value, t.color.text, None, elide_text)
 }
 
 /// Property row whose value is a file-system path. A long path is shortened
 /// from the middle, so the folder it names stays in view.
 pub fn property_row_path(ui: &mut Ui, label: &str, path: &str) -> Response {
     let t = Tokens::get(ui.ctx());
-    property_row_with_tone(
-        ui,
-        label,
-        path,
-        t.color.text,
-        None,
-        tokens::FS_0,
-        elide_path,
-    )
+    property_row_with_tone(ui, label, path, t.color.text, None, elide_path)
 }
 
 /// Property row whose value communicates an explicit semantic tone.
 pub fn property_row_toned(ui: &mut Ui, label: &str, value: &str, value_tone: Color32) -> Response {
-    property_row_with_tone(ui, label, value, value_tone, None, tokens::FS_0, elide_text)
+    property_row_with_tone(ui, label, value, value_tone, None, elide_text)
 }
 
 /// Property row whose value may carry a problem.
@@ -896,18 +868,7 @@ pub fn property_row_problem(
     value: &str,
     problem: Option<Problem>,
 ) -> Response {
-    property_row_with_problem(ui, label, value, problem, tokens::FS_0)
-}
-
-/// [`property_row_problem`] with the schematic inspector's body-sized value:
-/// with no problem it is a plain [`schematic_property_row`], to the pixel.
-pub fn schematic_property_row_problem(
-    ui: &mut Ui,
-    label: &str,
-    value: &str,
-    problem: Option<Problem>,
-) -> Response {
-    property_row_with_problem(ui, label, value, problem, tokens::FS_1)
+    property_row_with_problem(ui, label, value, problem)
 }
 
 fn property_row_with_problem(
@@ -915,7 +876,6 @@ fn property_row_with_problem(
     label: &str,
     value: &str,
     problem: Option<Problem>,
-    value_size: f32,
 ) -> Response {
     let palette = Tokens::get(ui.ctx()).color;
     let response = property_row_with_tone(
@@ -924,7 +884,6 @@ fn property_row_with_problem(
         value,
         palette.text,
         problem.map(|problem| (problem.mark(), problem.color(&palette))),
-        value_size,
         elide_text,
     );
     if let Some(problem) = problem {
@@ -1102,12 +1061,12 @@ fn field_margin(ui: &Ui, field: Rect, horizontal: i8) -> egui::Margin {
 }
 
 /// [`field_margin`] for a field that may be showing its hint. egui sets a hint
-/// in the body face, which is taller than the field's mono face, so while the
-/// hint shows the margin is measured against the hint. Either way the margins
+/// in the body face, whose line can be taller than the field's mono face, so
+/// while the hint shows the margin is measured against the taller of the two. Either way the margins
 /// fill `field` exactly, the odd pixel below, so an empty field and a filled
 /// one are one height.
 fn hinted_field_margin(ui: &Ui, field: Rect, horizontal: i8, hint_shown: bool) -> egui::Margin {
-    let mut text = ui.text_style_height(&egui::TextStyle::Monospace);
+    let mut text = ui.fonts_mut(|fonts| fonts.row_height(&theme::field_mono()));
     if hint_shown {
         let hint_font = egui::FontSelection::Default.resolve(ui.style());
         text = text.max(ui.fonts_mut(|fonts| fonts.row_height(&hint_font)));
@@ -1135,7 +1094,7 @@ fn hinted_field_margin(ui: &Ui, field: Rect, horizontal: i8, hint_shown: bool) -
 pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
     let t = Tokens::get(ui.ctx());
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let value_font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let value_font = theme::field_sans();
     let columns = RowColumns::of(ui, None);
     let label_galley = ui.painter().layout_no_wrap(
         elide_text(ui, label, &label_font, columns.label),
@@ -1381,7 +1340,7 @@ impl FieldText {
     fn new(ui: &Ui, value: &str, invalid: bool) -> Self {
         let t = Tokens::get(ui.ctx());
         let ink = if invalid { t.color.err } else { t.color.text };
-        let font = egui::TextStyle::Monospace.resolve(ui.style());
+        let font = theme::field_mono();
         Self {
             reading: crate::text::ReadingOrderEdit::new(ui, value, font.clone(), Some(ink), false),
             font,
@@ -1441,7 +1400,7 @@ fn property_row_text_edit_in<'t>(
             .data_mut(|data| data.get_temp::<egui::Id>(row.id))
             .is_some_and(|field| ui.memory(|memory| memory.has_focus(field)));
     let mut edit = edit
-        .font(egui::TextStyle::Monospace)
+        .font(theme::field_mono())
         .margin(hinted_field_margin(
             ui,
             value_rect,
@@ -1553,7 +1512,7 @@ pub fn property_row_input_action(
         ui.visuals().override_text_color.unwrap_or(t.color.text)
     };
     let edit = egui::TextEdit::singleline(value)
-        .font(egui::TextStyle::Monospace)
+        .font(theme::field_mono())
         .desired_width(value_rect.width())
         .margin(field_margin(ui, value_rect, 7));
     let (edit_response, elided) = ui
@@ -1573,7 +1532,7 @@ pub fn property_row_input_action(
                 // right edge looks complete and is not. Editing gets the
                 // whole text back, scrolled the way any field scrolls.
                 let output = edit.text_color(Color32::TRANSPARENT).show(ui);
-                let font = egui::TextStyle::Monospace.resolve(ui.style());
+                let font = theme::field_mono();
                 let full = output.galley.text();
                 let width = output.text_clip_rect.width();
                 let shown = crate::widgets::middle_elided(ui, full, &font, text_color, width);
@@ -1848,7 +1807,7 @@ fn property_row_dropdown_in(
             // The combo's frame is the field's: its padding shrinks to what
             // centres its text in the row's field height, and its text starts
             // where a typed field's does.
-            let text = ui.text_style_height(&egui::TextStyle::Button);
+            let text = ui.fonts_mut(|fonts| fonts.row_height(&theme::field_sans()));
             let spacing = ui.spacing_mut();
             spacing.button_padding.x = f32::from(FIELD_TEXT_INSET);
             spacing.button_padding.y = ((value_rect.height() - text) * 0.5).max(0.0);
@@ -1860,7 +1819,7 @@ fn property_row_dropdown_in(
                 - 2.0 * spacing.button_padding.x
                 - spacing.icon_spacing
                 - spacing.icon_width;
-            let font = egui::TextStyle::Button.resolve(ui.style());
+            let font = theme::field_sans();
             let cut = ui
                 .painter()
                 .layout_no_wrap(row.closed.to_owned(), font, Color32::PLACEHOLDER)
@@ -1871,7 +1830,7 @@ fn property_row_dropdown_in(
                 // The choice is the row's value and reads in value ink, as a
                 // typed value and a read-only one do. Left to egui it takes
                 // the resting-button tone, the label column's grey.
-                let output = egui::ComboBox::from_id_salt(id_source)
+                let output = crate::widgets::Combo::from_id_salt(id_source)
                     .width(value_rect.width())
                     .truncate()
                     .close_behavior(row.close_behavior)
@@ -1896,12 +1855,11 @@ fn property_row_with_tone(
     value: &str,
     value_tone: Color32,
     mark: Option<(StatusMark, Color32)>,
-    value_size: f32,
     elide_value: fn(&Ui, &str, &egui::FontId, f32) -> String,
 ) -> Response {
     let full_label = label;
     let full_value = value;
-    let value_font = theme::mono(value_size, FontWeight::Regular);
+    let value_font = theme::field_mono();
     // Read-only property cells share the editable row's invariant geometry.
     // Both columns are one line and ellipsized so changing the selected object
     // can never move the rows below it.

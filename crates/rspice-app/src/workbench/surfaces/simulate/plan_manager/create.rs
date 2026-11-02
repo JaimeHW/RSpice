@@ -341,10 +341,11 @@ fn created_plan_statement(ui: &mut Ui, new_plan: &NewSimulationPlanDraft) {
         return;
     }
     // Too narrow for four tracks. The same four facts as rows, where each value
-    // has the whole width to itself instead of a quarter of it.
+    // has the whole width to itself instead of a quarter of it. They are words,
+    // set in the body face, and a long one wraps rather than being cut.
     kit::section_head(ui, "Created by this transaction", None);
     for (heading, value) in &cells {
-        property_row(ui, heading, value);
+        crate::workbench::design_system::property_row_wrapped(ui, heading, value);
     }
 }
 
