@@ -108,9 +108,14 @@ impl ControlCircuit {
         // Validate every assignment before applying any, so a refused
         // variable leaves the session's settings as they were.
         let mut settings = self.settings.clone();
+        let mut shell = self.shell.clone();
         let mut plot = None;
         for assignment in &assignments {
             let name = assignment.name.to_ascii_lowercase();
+            shell.insert(
+                name.clone(),
+                crate::engine::control::shell::ShellValue::assigned(&assignment.value),
+            );
             if name == "curplot" {
                 // frontend/options.c:377 cp_usrset: `plot_setcur`, as
                 // `setplot` does.
@@ -166,6 +171,7 @@ impl ControlCircuit {
             self.set_plot(&plot, command.line)?;
         }
         self.settings = settings;
+        self.shell = shell;
         Ok(())
     }
 
@@ -176,6 +182,7 @@ impl ControlCircuit {
             return Err(command_error(command.line, "unset requires a variable"));
         }
         for word in words {
+            self.shell.remove(&word.text.to_ascii_lowercase());
             match word.text.to_ascii_lowercase().as_str() {
                 "noinit" | "noacct" => self.settings.suppress_initial_listing = false,
                 "num_threads" => self.settings.maximum_parallel_workers = None,

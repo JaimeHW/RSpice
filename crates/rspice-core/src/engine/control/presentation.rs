@@ -15,6 +15,7 @@ mod sparam;
 mod stability;
 mod transfer;
 mod vectors;
+mod wrdata;
 use crate::ComplexValue;
 use crate::engine::SensitivityCardResult;
 use crate::netlist::expr::{

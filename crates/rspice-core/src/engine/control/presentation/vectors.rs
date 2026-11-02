@@ -902,11 +902,7 @@ impl ControlCircuit {
         abort: &dyn AbortSignal,
     ) -> Result<ControlTrace, ControlError> {
         let value = self.evaluate_vector(y.0, variables, line, abort)?;
-        let dataset = value
-            .scale
-            .clone()
-            .or_else(|| self.current_plot().map(str::to_owned))
-            .unwrap_or_else(|| "const".into());
+        let dataset = self.vector_dataset(&value);
         let x = match x {
             Some((expression, label)) => {
                 let x = self.evaluate_vector(expression, variables, line, abort)?;
@@ -930,7 +926,41 @@ impl ControlCircuit {
                     voltage_sources: Vec::new(),
                 }
             }
-            None => match value
+            None => self.vector_scale(&value, &dataset, line, abort)?,
+        };
+        Ok(ControlTrace {
+            x,
+            y: ControlVector {
+                expression: y.1.to_owned(),
+                dataset,
+                unit: value.unit,
+                samples: value.samples,
+                current_sources: Vec::new(),
+                voltage_sources: Vec::new(),
+            },
+        })
+    }
+
+    /// The plot a vector is drawn from: its scale's, else the current one.
+    pub(in crate::engine::control) fn vector_dataset(&self, value: &VectorValue) -> String {
+        value
+            .scale
+            .clone()
+            .or_else(|| self.current_plot().map(str::to_owned))
+            .unwrap_or_else(|| "const".into())
+    }
+
+    /// The scale a vector follows (`v_scale`): its plot's, when the lengths
+    /// agree, else a user plot's of its length, else its indices.
+    pub(in crate::engine::control) fn vector_scale(
+        &self,
+        value: &VectorValue,
+        dataset: &str,
+        line: usize,
+        abort: &dyn AbortSignal,
+    ) -> Result<ControlVector, ControlError> {
+        Ok(
+            match value
                 .scale
                 .as_deref()
                 .and_then(|name| self.dataset(name))
@@ -960,7 +990,7 @@ impl ControlCircuit {
                 None => match self.user_plot_scale(value.samples.len()) {
                     Some(scale) => ControlVector {
                         expression: scale.name.clone(),
-                        dataset: dataset.clone(),
+                        dataset: dataset.to_owned(),
                         unit: scale.value.unit.clone(),
                         samples: scale.value.samples.clone(),
                         current_sources: Vec::new(),
@@ -968,7 +998,7 @@ impl ControlCircuit {
                     },
                     None => ControlVector {
                         expression: "index".into(),
-                        dataset: dataset.clone(),
+                        dataset: dataset.to_owned(),
                         unit: SignalUnit::Dimensionless,
                         samples: (0..value.samples.len())
                             .map(|index| ComplexValue::from(index as Value))
@@ -978,18 +1008,7 @@ impl ControlCircuit {
                     },
                 },
             },
-        };
-        Ok(ControlTrace {
-            x,
-            y: ControlVector {
-                expression: y.1.to_owned(),
-                dataset,
-                unit: value.unit,
-                samples: value.samples,
-                current_sources: Vec::new(),
-                voltage_sources: Vec::new(),
-            },
-        })
+        )
     }
 }
 

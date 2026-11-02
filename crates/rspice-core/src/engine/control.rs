@@ -118,6 +118,8 @@ enum CommandKind {
     Compose,
     /// `wrs2p [file]`.
     WriteSParameters,
+    /// `wrdata file vectors`.
+    WriteData,
     /// `meas` and `measure`.
     Measure,
     /// A command ngspice -b accepts with no batch effect.
@@ -171,6 +173,7 @@ impl CommandKind {
             "setplot" => Self::SetPlot,
             "compose" => Self::Compose,
             "wrs2p" => Self::WriteSParameters,
+            "wrdata" => Self::WriteData,
             "meas" | "measure" => Self::Measure,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
@@ -224,6 +227,10 @@ pub struct ControlCircuit {
     /// The directory `cd` moved to, which a relative redirection's file is
     /// in; `None` is the presentation host's own, the deck's directory.
     directory: Option<String>,
+    /// The shell variables `set` gave, which steer what `wrdata` writes
+    /// (`wr_singlescale`, `wr_vecnames`, `wr_onespace`, `appendwrite`,
+    /// `numdgt`).
+    shell: BTreeMap<String, crate::engine::control::shell::ShellValue>,
 }
 
 impl ControlCircuit {
@@ -246,6 +253,7 @@ impl ControlCircuit {
             value_limit: crate::resource::ResourceLimits::default().max_result_values,
             input_directory: None,
             directory: None,
+            shell: BTreeMap::new(),
         })
     }
 
@@ -590,6 +598,19 @@ impl ControlCircuit {
                     },
                 ))
             }
+            CommandKind::WriteData => match self.write_data(command, variables, abort)? {
+                Some((path, text)) => Ok(Self::batch_output(
+                    command,
+                    ControlPresentationKind::File {
+                        path: self.script_file(path),
+                        text,
+                        append: self.shell.contains_key("appendwrite"),
+                    },
+                )),
+                None => Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                )),
+            },
             CommandKind::Compose => {
                 self.compose(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(

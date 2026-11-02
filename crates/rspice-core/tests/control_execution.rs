@@ -1602,6 +1602,68 @@ fn meas_measures_the_current_plot_as_ngspice_does() {
     assert_eq!(twice[0].y.samples[0].re, 2e-3);
 }
 
+/// `wrdata` (com_gnuplot.c:44, gnuplot.c:684) writes each vector after its
+/// scale in `% .8e` columns, a complex one as its real and imaginary parts.
+/// `wr_vecnames` heads the columns, `wr_singlescale` writes the first scale
+/// only, `wr_onespace` and `numdgt` narrow them, `appendwrite` appends, and
+/// `vs` scales a vector by another, and a DC sweep's scale is `v-sweep`.
+/// The files are ngspice-46's for a 1 kohm
+/// divider with 1 uF across its foot.
+#[test]
+fn wrdata_writes_vectors_in_columns_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "wrdata\nV1 in 0 DC 0 AC 1\nR1 in out 1k\nR2 out 0 1k\nC1 out 0 1u\n.control\n\
+         dc V1 0 2 1\nset wr_vecnames\nwrdata dc.txt v(out) V(IN)*2\nac lin 3 1 1k\n\
+         wrdata ac.txt v(out) mag(v(out))\nset wr_singlescale\nset appendwrite\n\
+         wrdata ac.txt v(out) mag(v(out))\nset numdgt=3\nset wr_onespace\n\
+         let x = vector(3)\nlet y = x*x\nwrdata ac.txt y vs x\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let files: Vec<_> = presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::File { path, text, append } => {
+                Some((path.as_str(), text.as_str(), *append))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        files,
+        [
+            (
+                "dc.txt",
+                " v-sweep         v(out)          v-sweep         v(IN)*2        \n\
+                 \x200.00000000e+00  0.00000000e+00  0.00000000e+00  0.00000000e+00 \n\
+                 \x201.00000000e+00  5.00000000e-01  1.00000000e+00  2.00000000e+00 \n\
+                 \x202.00000000e+00  1.00000000e+00  2.00000000e+00  4.00000000e+00 \n",
+                false
+            ),
+            (
+                "ac.txt",
+                " frequency       v(out)          v(out)          frequency       mag(v(out))    \n\
+                 \x201.00000000e+00  4.99995065e-01 -1.57078082e-03  1.00000000e+00  4.99997533e-01 \n\
+                 \x205.00500000e+02  1.43995183e-01 -2.26413292e-01  5.00500000e+02  2.68323670e-01 \n\
+                 \x201.00000000e+03  4.59998342e-02 -1.44512741e-01  1.00000000e+03  1.51657236e-01 \n",
+                false
+            ),
+            (
+                "ac.txt",
+                " frequency       v(out)          v(out)          mag(v(out))    \n\
+                 \x201.00000000e+00  4.99995065e-01 -1.57078082e-03  4.99997533e-01 \n\
+                 \x205.00500000e+02  1.43995183e-01 -2.26413292e-01  2.68323670e-01 \n\
+                 \x201.00000000e+03  4.59998342e-02 -1.44512741e-01  1.51657236e-01 \n",
+                true
+            ),
+            (
+                "ac.txt",
+                "x y \n 0.000e+00  0.000e+00 \n 1.000e+00  1.000e+00 \n 2.000e+00  4.000e+00 \n",
+                true
+            ),
+        ]
+    );
+}
+
 /// `wrs2p` (postcoms.c:624, rawfile.c:765) writes ports 1 and 2 of the sp
 /// plot as Touchstone real and imaginary parts, labelled with `Rbase`. The
 /// rows are ngspice-46's for a tee of 10 and 20 ohms and 1 uF between a 50
