@@ -1009,13 +1009,15 @@ impl HbSolver {
                 return Err(HbError::Aborted);
             }
             state.begin_newton_iteration(iter)?;
+            // The starting point is never certified by itself: Xyce's NOX
+            // status test holds the update norm at 1 until one correction has
+            // been taken outside transient (N_NLS_NOX_XyceTests.C:403-406), so
+            // a seed that meets the row test only loosely, such as one
+            // transient period, still gets its Newton step.
             if iter == 0 {
                 self.compute_full_residual_with_gmin(state, gmin, source_scale)?;
                 if abort.is_aborted() {
                     return Err(HbError::Aborted);
-                }
-                if state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol) {
-                    return Ok(true);
                 }
             }
             // Subsequent iterations reuse the residual and physical row scales
@@ -3481,6 +3483,35 @@ mod exact_matrix_free_tests {
             limits.abstol,
             solver.voltage_abstol
         ));
+    }
+
+    #[test]
+    fn a_seed_inside_the_row_test_still_takes_one_newton_correction() {
+        // 1 uA into the 1 mS GMIN conductance settles at exactly 1 mV. The
+        // seed sits 10 ppm high, well inside the 1e-3 row test, and the one
+        // correction Xyce's NOX requires lands on the solution.
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), 1);
+        solver.add_dc_source(0, 1e-6);
+        let mut state = HbSolverState::new(1, 1);
+        state.x[0][0] = Complex64::new(1e-3 * (1.0 + 1e-5), 0.0);
+        let limits = HbNewtonLimits {
+            gmin: 1e-3,
+            max_iterations: 4,
+            tol: 1e-3,
+            abstol: 1e-12,
+            source_scale: 1.0,
+        };
+        assert!(
+            solver
+                .newton_inner_loop(&mut state, limits, &NoAbort)
+                .expect("a near-converged seed solves")
+        );
+        assert_eq!(state.total_iterations, 1);
+        assert!(
+            (state.x[0][0].re - 1e-3).abs() <= 1e-17,
+            "the seed was accepted without a correction: {:e}",
+            state.x[0][0].re
+        );
     }
 
     #[test]
