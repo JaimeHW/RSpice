@@ -382,8 +382,9 @@ use rspice_core::analysis::harmonic_balance::{
 // `SignalProjection::ordered_noise_columns`, the columns the CLI's noise
 // table prints for a `.PRINT NOISE` card, brings it to 5,237, and
 // `ControlCircuit::set_input_directory`, which names a control script's
-// `$inputdir`, to 5,238.
-const MAX_PUBLIC_ITEMS: usize = 5238;
+// `$inputdir`, to 5,238. `ControlProgram::unclosed_block`, the block a script
+// never closes, which the CLI warns of, brings it to 5,239.
+const MAX_PUBLIC_ITEMS: usize = 5239;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
