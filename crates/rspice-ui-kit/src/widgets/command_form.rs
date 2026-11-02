@@ -354,23 +354,10 @@ impl<'u> FormRows<'u> {
         })
     }
 
-    /// One contiguous group of exclusive options. Returns `true` when the
-    /// selection changed this frame.
-    pub fn segmented(
-        &mut self,
-        label: &str,
-        id_salt: &'static str,
-        options: &[&str],
-        selected: &mut usize,
-    ) -> bool {
-        self.row(label, |ui, _| {
-            segmented(ui, id_salt, options, selected, SegmentedWidth::Natural)
-        })
-    }
-
-    /// [`Self::segmented`] across the whole control column in equal
-    /// segments: as wide as the fields above it, with its options standing in
-    /// the columns a [`Self::check_columns`] row of as many checks uses.
+    /// One contiguous group of exclusive options across the whole control
+    /// column in equal segments: as wide as the fields above it, with its
+    /// options standing in the columns a [`Self::check_columns`] row of as
+    /// many checks uses. Returns `true` when the selection changed this frame.
     pub fn segmented_columns(
         &mut self,
         label: &str,
@@ -1608,13 +1595,13 @@ mod tests {
                     "IN OUT VDD",
                 );
                 rows.derived("2 pins \u{00b7} 2 conductors \u{00b7} port-list positions 1 to 2");
-                rows.segmented(
+                rows.segmented_columns(
                     "Direction",
                     "command-form.fixture.direction",
                     &["Input", "Output", "Inout", "Supply"],
                     &mut direction,
                 );
-                rows.segmented(
+                rows.segmented_columns(
                     "Signal",
                     "command-form.fixture.signal",
                     &["Analog", "Logic", "Power"],

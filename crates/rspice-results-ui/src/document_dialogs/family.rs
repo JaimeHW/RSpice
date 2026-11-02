@@ -97,7 +97,7 @@ pub fn show(ctx: &Context, draft: &mut FamilyDraft, choices: &FamilyChoices) -> 
                 },
             );
             let mut missing = usize::from(draft.omit_missing);
-            if rows.segmented(
+            if rows.segmented_columns(
                 "Not run",
                 "rspice.family.missing",
                 &["Keep", "Omit"],

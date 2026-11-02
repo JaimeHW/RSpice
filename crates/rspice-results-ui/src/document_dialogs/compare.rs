@@ -154,7 +154,7 @@ pub fn show(ctx: &Context, draft: &mut CompareDraft, choices: &CompareChoices) -
                 .iter()
                 .position(|candidate| *candidate == draft.alignment)
                 .unwrap_or(0);
-            if rows.segmented(
+            if rows.segmented_columns(
                 "Align by",
                 "rspice.compare.alignment",
                 &["X value", "Threshold", "Correlation"],
