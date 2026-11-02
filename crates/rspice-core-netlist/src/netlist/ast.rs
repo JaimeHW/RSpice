@@ -4180,11 +4180,27 @@ impl XyceOutputIntervalSchedule {
                 );
             }
         }
-        let final_index = accepted_times
-            .binary_search_by(|time| time.total_cmp(&final_time))
-            .map_err(|_| {
-                format!("accepted transient grid does not contain final output time {final_time}")
-            })?;
+        // Xyce finishes a run once its clock is within 1e-10 of the span of
+        // the final time (N_TIA_StepErrorControl.h:158-163), so the last
+        // accepted step may sit just short of it. No row is due there: the
+        // cadence target stays clamped to the final time the run never reached.
+        let final_index = match accepted_times.binary_search_by(|time| time.total_cmp(&final_time))
+        {
+            Ok(index) => index,
+            Err(insert)
+                if insert == accepted_times.len()
+                    && final_time - accepted_times[insert - 1]
+                        < 1.0e-10 * (final_time - run_initial_time) =>
+            {
+                insert - 1
+            }
+            Err(_) => {
+                return Err(format!(
+                    "accepted transient grid does not contain final output time {final_time}"
+                )
+                .into());
+            }
+        };
         let first_index = accepted_times.partition_point(|time| *time < output_start_time);
         if first_index > final_index {
             return Err("Xyce interval output selected no accepted steps".into());

@@ -2239,6 +2239,22 @@ mod tests {
     }
 
     #[test]
+    fn interval_output_projection_ends_at_a_run_finished_short_of_tstop() {
+        // Xyce finishes a transient on the step that enters its completion
+        // window short of TSTOP. Its interval output stops at the last target
+        // that step reached and prints no row at TSTOP itself.
+        let result = result_on_grid(vec![0.0, 0.3, 0.6, 0.9, 1.0 - 1.0e-11]);
+        let schedule = XyceOutputIntervalSchedule {
+            initial_interval: 0.25,
+            intervals: Vec::new(),
+        };
+        let projection = result
+            .output_projection(&[], Some(&schedule), 0.0, 1.0, 10)
+            .expect("a run finished short of TSTOP projects");
+        assert_eq!(projection.times(), &[0.0, 0.25, 0.5, 0.75]);
+    }
+
+    #[test]
     fn interval_output_projection_preserves_run_lattice_after_off_lattice_tstart() {
         let result = result_on_grid(vec![0.0, 0.95, 1.02, 1.2]);
         let schedule = XyceOutputIntervalSchedule {
