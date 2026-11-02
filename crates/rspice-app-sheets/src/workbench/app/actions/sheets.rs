@@ -258,11 +258,20 @@ pub fn delete_sheet(
 }
 
 /// `count` schematic objects, in words.
-fn counted_objects(count: usize) -> String {
+pub(in crate::workbench) fn counted_objects(count: usize) -> String {
     if count == 1 {
         "1 object".to_owned()
     } else {
         format!("{count} objects")
+    }
+}
+
+/// `count` explicit boundary ports, in words.
+fn counted_ports(count: usize) -> String {
+    if count == 1 {
+        "1 explicit boundary port".to_owned()
+    } else {
+        format!("{count} explicit boundary ports")
     }
 }
 
@@ -389,10 +398,10 @@ fn move_selection(model: &mut Model, destination: SheetId) -> Result<String, Str
             .map_err(|error| error.to_string())
     })?;
     Ok(format!(
-        "Moved {} object(s) to `{}` with {} explicit boundary port(s).",
-        receipt.object_ids.len(),
+        "Moved {} to `{}` with {}.",
+        counted_objects(receipt.object_ids.len()),
         model.sheet_name(destination),
-        receipt.created_port_ids.len()
+        counted_ports(receipt.created_port_ids.len())
     ))
 }
 
@@ -608,4 +617,18 @@ fn live_object_ids(model: &Model) -> Vec<u64> {
     );
     ids.extend(schematic.document().probes.iter().map(|object| object.id));
     ids.into_iter().collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Counts are said in words, never as "object(s)".
+    #[test]
+    fn counts_are_said_in_words() {
+        assert_eq!(counted_objects(1), "1 object");
+        assert_eq!(counted_objects(3), "3 objects");
+        assert_eq!(counted_ports(1), "1 explicit boundary port");
+        assert_eq!(counted_ports(0), "0 explicit boundary ports");
+    }
 }

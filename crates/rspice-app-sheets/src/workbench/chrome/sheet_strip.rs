@@ -492,15 +492,24 @@ fn delete_label(ui: &Ui, id: crate::state::SheetId) -> String {
     let plan = ui
         .ctx()
         .data(|data| data.get_temp::<DeletePlans>(delete_plans_id()));
-    match plan.and_then(|plans| plans.plan(id)) {
+    delete_plan_label(plan.and_then(|plans| plans.plan(id)))
+}
+
+/// The Delete row's words for `plan`.
+fn delete_plan_label(plan: Option<SheetDeletePlan>) -> String {
+    match plan {
         Some(SheetDeletePlan::MovesObjects {
             objects,
             destination_name,
             ..
-        }) => format!("Delete \u{00b7} move {objects} object(s) to `{destination_name}`"),
-        Some(SheetDeletePlan::Blocked { objects }) => {
-            format!("Delete \u{00b7} blocked: sheet holds {objects} object(s)")
-        }
+        }) => format!(
+            "Delete \u{00b7} move {} to `{destination_name}`",
+            sheet_actions::counted_objects(objects)
+        ),
+        Some(SheetDeletePlan::Blocked { objects }) => format!(
+            "Delete \u{00b7} blocked: sheet holds {}",
+            sheet_actions::counted_objects(objects)
+        ),
         Some(SheetDeletePlan::LastSheet) => "Delete \u{00b7} the last sheet is retained".to_owned(),
         Some(SheetDeletePlan::Empty) | None => "Delete".to_owned(),
     }
@@ -578,4 +587,20 @@ fn add_chip(ui: &mut Ui, height: f32) -> egui::Response {
     );
     theme::paint_focus_ring(ui, &response, rect);
     response.on_hover_text("New sheet")
+}
+
+#[cfg(test)]
+mod delete_label_tests {
+    use super::*;
+
+    /// The Delete row counts what the sheet holds in words.
+    #[test]
+    fn the_delete_row_counts_objects_in_words() {
+        for (objects, words) in [(1, "1 object"), (3, "3 objects")] {
+            assert_eq!(
+                delete_plan_label(Some(SheetDeletePlan::Blocked { objects })),
+                format!("Delete \u{00b7} blocked: sheet holds {words}")
+            );
+        }
+    }
 }
