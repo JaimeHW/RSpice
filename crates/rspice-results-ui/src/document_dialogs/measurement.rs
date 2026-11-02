@@ -46,7 +46,7 @@ pub fn show(
                 // says what Add waits for, so the form keeps one pitch.
                 match &preview.value {
                     Ok(None) => FieldLine::Derived(EXPRESSION_MISSING),
-                    Ok(Some(value)) => FieldLine::Derived(value),
+                    Ok(Some(value)) => FieldLine::Value(value),
                     Err(reason) => FieldLine::Error(reason),
                 },
             );

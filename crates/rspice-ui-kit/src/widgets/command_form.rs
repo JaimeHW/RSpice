@@ -104,8 +104,12 @@ pub struct ListEdit {
 pub enum FieldLine<'a> {
     /// Nothing yet. The slot keeps its height and stays blank.
     Blank,
-    /// What the field's value declares, set as a derived line.
+    /// What the field's value declares, in words: a derived line in the body
+    /// face.
     Derived(&'a str),
+    /// What the field's value works out to, when the line is itself a value:
+    /// a derived line in the mono face, as values are set.
+    Value(&'a str),
     /// Why the field's value is refused, in the error colour.
     Error(&'a str),
 }
@@ -464,8 +468,20 @@ impl<'u> FormRows<'u> {
     /// true of every draft.
     ///
     /// It wraps rather than eliding: what it says is the *content* of the
-    /// draft, and half of it is not worth having.
+    /// draft, and half of it is not worth having. It is words, so it is set
+    /// in the body face; [`Self::derived_mono`] sets names as a deck writes
+    /// them.
     pub fn derived(&mut self, text: &str) {
+        self.derived_in(text, theme::sans(tokens::FS_0, FontWeight::Regular));
+    }
+
+    /// [`Self::derived`] for a line that is names or code as a deck writes
+    /// them, such as the conductors a slice resolves to: set in mono.
+    pub fn derived_mono(&mut self, text: &str) {
+        self.derived_in(text, theme::mono(tokens::FS_0, FontWeight::Regular));
+    }
+
+    fn derived_in(&mut self, text: &str, font_id: egui::FontId) {
         let t = Tokens::get(self.ui.ctx());
         let indent = self.control_indent();
         self.gap(DERIVED_GAP);
@@ -474,7 +490,7 @@ impl<'u> FormRows<'u> {
         let mut job = egui::text::LayoutJob::single_section(
             text.to_owned(),
             egui::TextFormat {
-                font_id: theme::mono(tokens::FS_0, FontWeight::Regular),
+                font_id,
                 color: t.color.text_faint,
                 ..Default::default()
             },
@@ -517,6 +533,11 @@ impl<'u> FormRows<'u> {
         let (text, font, color) = match line {
             FieldLine::Blank => return,
             FieldLine::Derived(text) => (
+                text,
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                t.color.text_faint,
+            ),
+            FieldLine::Value(text) => (
                 text,
                 theme::mono(tokens::FS_0, FontWeight::Regular),
                 t.color.text_faint,
@@ -2373,6 +2394,48 @@ mod tests {
         let body = egui::TextStyle::Body.resolve(&ctx.global_style());
         assert_eq!(theme::field_sans(), body, "the body size and face");
         assert_eq!(theme::field_mono().size, body.size);
+    }
+
+    /// A derived line is words, set in the body face; one that is names as
+    /// a deck writes them, or a value, keeps the mono face values are set in.
+    #[test]
+    fn derived_lines_set_words_in_the_body_face_and_names_in_mono() {
+        let texts = painted_texts(|ctx| {
+            let mut bus = String::from("DATA[7:0]");
+            let mut expression = String::from("rms(V(out))");
+            let _ = CommandForm::new("Derived", "Apply").show(ctx, |rows| {
+                let bus_field = Id::new("command-form.derived.bus");
+                rows.text("Bus", bus_field, &mut bus, "");
+                rows.derived("8 members, descending");
+                rows.derived_mono("DATA[7] DATA[6]");
+                rows.field_line(Some(bus_field), FieldLine::Derived("Renames 3 occurrences"));
+                let measure = Id::new("command-form.derived.expression");
+                rows.text("Expression", measure, &mut expression, "");
+                rows.field_line(Some(measure), FieldLine::Value("1.25 mV"));
+                None
+            });
+        });
+        let font_of = |value: &str| {
+            texts
+                .iter()
+                .find(|text| text.galley.text() == value)
+                .map(|text| text.galley.job.sections[0].format.font_id.clone())
+                .unwrap_or_else(|| panic!("{value:?} is painted"))
+        };
+        for words in ["8 members, descending", "Renames 3 occurrences"] {
+            assert_eq!(
+                font_of(words),
+                theme::sans(tokens::FS_0, FontWeight::Regular),
+                "{words:?}"
+            );
+        }
+        for value in ["DATA[7] DATA[6]", "1.25 mV"] {
+            assert_eq!(
+                font_of(value),
+                theme::mono(tokens::FS_0, FontWeight::Regular),
+                "{value:?}"
+            );
+        }
     }
 
     /// A table starts on the labels' edge, and each column's entries start

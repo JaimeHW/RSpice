@@ -97,7 +97,7 @@ pub fn show(
     // The conductors wrap rather than eliding: a tap on sixteen bits whose
     // middle is an ellipsis has not said which bits it takes.
     if let Some(bits) = validation.resolved_bits() {
-        rows.derived(&bits);
+        rows.derived_mono(&bits);
     }
     let options = ORIENTATION_LABELS.map(str::to_owned);
     if let Some(index) = rows.select(

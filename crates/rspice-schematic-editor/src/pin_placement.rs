@@ -63,7 +63,7 @@ impl PinPlacementFields {
             rows.derived(declaration);
         }
         if let Some(bits) = bits {
-            rows.derived(bits);
+            rows.derived_mono(bits);
         }
         let mut direction = DIRECTIONS
             .iter()
