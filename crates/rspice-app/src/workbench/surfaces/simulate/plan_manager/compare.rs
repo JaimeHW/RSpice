@@ -78,8 +78,24 @@ const COMPARE_COLUMNS: [TableColumn; 5] = [
     },
 ];
 
-/// The width the word between the two pickers and the row's own spacing cost.
-const PICKER_GAP: f32 = 76.0;
+/// The word between the two pickers.
+const PICKER_JOIN: &str = "against";
+
+/// What the word between the two pickers and the row's spacing either side
+/// of it cost, measured as it is painted, so the two pickers share exactly
+/// the rest of the row.
+fn picker_gap(ui: &Ui) -> f32 {
+    let word = ui
+        .painter()
+        .layout_no_wrap(
+            PICKER_JOIN.to_owned(),
+            super::super::page_kit::note_font(),
+            egui::Color32::PLACEHOLDER,
+        )
+        .size()
+        .x;
+    word + 2.0 * ui.spacing().item_spacing.x
+}
 /// Narrowest and widest a picker is drawn at. Below the floor a plan name is
 /// elided to nothing; above the ceiling two pickers stop reading as one row.
 const PICKER_MIN_WIDTH: f32 = 148.0;
@@ -252,7 +268,7 @@ fn plan_picker_row(
     target: &PlanCatalogRecord,
 ) {
     let width =
-        ((ui.available_width() - PICKER_GAP) / 2.0).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH);
+        ((ui.available_width() - picker_gap(ui)) / 2.0).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH);
     let longest = [base, target]
         .into_iter()
         .map(|record| {
@@ -277,7 +293,7 @@ fn plan_picker_row(
         ) {
             draft.comparison.base_plan_id = Some(picked);
         }
-        super::super::page_kit::note_line(ui, "against", super::super::page_kit::Tone::Dim);
+        super::super::page_kit::note_line(ui, PICKER_JOIN, super::super::page_kit::Tone::Dim);
         if let Some(picked) = plan_picker(
             ui,
             "simulation.plan-manager.compare.target",
@@ -356,7 +372,7 @@ fn domain_table(ui: &mut Ui, domains: &[ComparedDomain]) {
                 1 => count_cell(ui, &domain.difference.added, &t),
                 2 => count_cell(ui, &domain.difference.removed, &t),
                 3 => count_cell(ui, &domain.difference.changed, &t),
-                _ => kit::cell_value(ui, &domain.verdict, domain.compatibility.tone(&t)),
+                _ => kit::cell_words(ui, &domain.verdict, domain.compatibility.tone(&t)),
             }
         },
     );
@@ -1395,6 +1411,103 @@ mod tests {
             draft.comparison.base_plan_id,
             Some(retained),
             "picking a compared plan moved the base with it"
+        );
+    }
+
+    /// A compatibility verdict is words. It is set in the body face, at the
+    /// size of the values beside it in its row, not in the mono face a value
+    /// is compared digit by digit in.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_compatibility_verdict_is_set_in_words_at_its_rows_size() {
+        let (app, active, _) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&app);
+        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
+        draft.mode = SimulationPlanManagerMode::Compare;
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            GATED_VIEWPORTS[0],
+                        )),
+                        ..Default::default()
+                    },
+                    |ctx| {
+                        dialog(ctx, &mut draft, &records);
+                    },
+                )
+                .shapes;
+        }
+        let verdict = shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "same analyses" => {
+                    Some(text.galley.job.sections[0].format.font_id.clone())
+                }
+                _ => None,
+            })
+            .expect("the analyses verdict is painted");
+        assert_eq!(
+            verdict,
+            theme::sans(tokens::FS_1, theme::FontWeight::Regular),
+            "the body face, at a value cell's size"
+        );
+    }
+
+    /// Side by side, the two pickers and the word between them fill their row
+    /// exactly: the row reserves what that word and its spacing cost, and
+    /// nothing more, so the second picker ends on the row's right edge.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn side_by_side_pickers_and_the_word_between_fill_their_row() {
+        let (app, active, retained) = app_with_two_identical_plans();
+        let records = plan_catalog_records(&app);
+        let (base, target) = (record_of(&records, retained), record_of(&records, active));
+        let mut draft = SimulationPlanManagerDraft::new(active, "Corner characterization");
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        // Narrow enough that neither picker is held at its widest, wide enough
+        // that both names fit whole side by side.
+        let width = 640.0;
+        let mut row = Rect::NOTHING;
+        for _ in 0..3 {
+            let _ = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(width, 200.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    egui::CentralPanel::default()
+                        .frame(egui::Frame::NONE)
+                        .show(ctx, |ui| {
+                            row = ui
+                                .vertical(|ui| {
+                                    plan_picker_row(ui, &mut draft, &records, base, target);
+                                })
+                                .response
+                                .rect;
+                        });
+                },
+            );
+        }
+        let control = crate::ui::tokens::Tokens::get(&ctx).metrics.ctl_h;
+        assert!(
+            row.height() < 2.0 * control,
+            "the pickers stacked: the row is {} points tall",
+            row.height()
+        );
+        assert!(
+            (row.width() - width).abs() < 0.5,
+            "the picker row is {} of {width} points wide",
+            row.width()
         );
     }
 }

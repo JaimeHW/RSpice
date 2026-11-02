@@ -570,6 +570,17 @@ pub(super) fn cell_value(ui: &mut Ui, value: &str, tone: Color32) {
         .text(rect.left_center(), Align2::LEFT_CENTER, text, font, tone);
 }
 
+/// Words in a row of values: [`cell_value`]'s size in the body face, elided
+/// to the cell. A verdict such as "same analyses" is read, not compared digit
+/// by digit, so it takes the face words take and keeps the row's one size.
+pub(super) fn cell_words(ui: &mut Ui, text: &str, tone: Color32) {
+    let rect = ui.max_rect();
+    let font = theme::sans(tokens::FS_1, FontWeight::Regular);
+    let shown = elide_text(ui, text, &font, rect.width());
+    ui.painter()
+        .text(rect.left_center(), Align2::LEFT_CENTER, shown, font, tone);
+}
+
 /// A sentence in a table cell, elided to it.
 ///
 /// [`cell_value`] is the sibling and is mono, which is right for an identity, a

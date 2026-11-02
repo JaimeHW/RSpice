@@ -121,8 +121,13 @@ pub(super) fn pressable_note_line(ui: &mut Ui, text: &str, tone: Tone) -> egui::
     note_line_sensing(ui, text, tone, Some(Sense::click()))
 }
 
+/// The face and size a [`note_line`] is set in.
+pub(super) fn note_font() -> egui::FontId {
+    theme::sans(tokens::FS_0, FontWeight::Regular)
+}
+
 fn note_line_sensing(ui: &mut Ui, text: &str, tone: Tone, sense: Option<Sense>) -> egui::Response {
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+    let font = note_font();
     let color = tone.color(ui);
     let mut label =
         egui::Label::new(egui::RichText::new(text).font(font.clone()).color(color)).wrap();
