@@ -485,7 +485,7 @@ fn the_defaults_speak_in_sentence_case_through_named_selects() {
         "Personal default",
         "New sheets",
         "Custom",
-        "Neither default has changed",
+        "Neither default has changed.",
     ] {
         assert!(
             texts.iter().any(|text| text == wanted),

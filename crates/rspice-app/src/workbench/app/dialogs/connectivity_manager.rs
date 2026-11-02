@@ -39,7 +39,7 @@ const PRIMARY: &str = "Apply reviewed connectivity repairs";
 /// Why "Begin bus placement" is disabled while the declaration is empty.
 const BUS_DECLARATION_MISSING: &str = "Enter a bus declaration to begin placement";
 /// Why the manager's Apply is disabled while nothing is chosen to apply.
-const NOTHING_TO_APPLY: &str = "Select a repair or change a policy to apply";
+const NOTHING_TO_APPLY: &str = "Select a repair or change a policy to apply.";
 /// Why "Begin bus placement" is disabled on a read-only schematic.
 const READ_ONLY_STATUS: &str = "The active schematic or project is read-only.";
 

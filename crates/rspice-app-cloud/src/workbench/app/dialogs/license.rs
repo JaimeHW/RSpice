@@ -83,15 +83,15 @@ pub fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context) {
     // The footer says why Verify waits, how to give it the key from the
     // keyboard, and what Activate will do; a refusal is under the field.
     let hint = match &phase {
-        LicensePhase::Entry if empty => Some("Paste a license key to verify it"),
-        LicensePhase::Entry => Some("Ctrl+Enter verifies the key"),
+        LicensePhase::Entry if empty => Some("Paste a license key to verify it."),
+        LicensePhase::Entry => Some("Ctrl+Enter verifies the key."),
         LicensePhase::Error(_) => None,
         LicensePhase::Verified(_) if already_active => None,
         LicensePhase::Verified(_) if cfg!(target_arch = "wasm32") => {
-            Some("Activate keeps the key in this browser; it works offline")
+            Some("Activate keeps the key in this browser; it works offline.")
         }
         LicensePhase::Verified(_) => {
-            Some("Activate keeps the key on this machine; it works offline")
+            Some("Activate keeps the key on this machine; it works offline.")
         }
     };
     let primary_enabled = !matches!(phase, LicensePhase::Entry) || !empty;

@@ -115,7 +115,7 @@ impl RSpiceApp {
             .primary_enabled(reviewed);
         if !reviewed {
             dialog = dialog
-                .hint("Confirm what the bundle contains to create it")
+                .hint("Confirm what the bundle contains to create it.")
                 .hint_tone(DialogHintTone::Warn);
         }
         let choice = dialog.show(ctx, |ui| {

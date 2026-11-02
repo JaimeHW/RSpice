@@ -126,7 +126,7 @@ fn refresh_untouched_baselines(defaults: &mut DrawingSheetDefaultsDialogState, m
 }
 
 /// Why Save is unavailable while neither default has been edited.
-const UNCHANGED: &str = "Neither default has changed";
+const UNCHANGED: &str = "Neither default has changed.";
 
 /// Draw the drawing-sheet defaults while they are open, over the open
 /// drawing's model, opening the custom sheet size library over them when the

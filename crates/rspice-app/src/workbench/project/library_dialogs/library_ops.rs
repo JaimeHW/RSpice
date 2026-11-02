@@ -195,7 +195,7 @@ impl ProjectFeature {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("creates an empty writable library")
+            .hint("Creates an empty writable library")
             .primary_enabled(catalog_current && !dialogs.new_library_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;
@@ -260,7 +260,7 @@ impl ProjectFeature {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("remaps buffers, tabs, bindings, and sources")
+            .hint("Remaps buffers, tabs, bindings, and sources")
             .primary_enabled(catalog_current && !dialogs.rename_library_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

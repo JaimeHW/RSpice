@@ -248,7 +248,7 @@ fn import(
     )
     .size(DialogSize::SimulationWorkflow)
     .ghost("Cancel")
-    .hint("Choose a package file, or paste one with Ctrl+V")
+    .hint("Choose a package file, or paste one with Ctrl+V.")
     .primary_enabled(!draft.name.trim().is_empty() && matches!(inspected, Some(Ok(_))))
     .show(ctx, |ui| {
         // No status word on this head. Whether a package is loaded, and whether

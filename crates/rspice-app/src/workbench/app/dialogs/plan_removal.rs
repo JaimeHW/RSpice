@@ -407,7 +407,7 @@ impl PlanRemovalRefusal {
             )
             .size(DialogSize::Transaction)
             .ghost("Close")
-            .hint("The plan is unchanged · no confirmation is being asked for")
+            .hint("The plan is unchanged; no confirmation is being asked for.")
             .show(ctx, |ui| {
                 kv_row(ui, "Analysis", &label);
                 kv_row(ui, "Bound to it", &blockers.join(", "));

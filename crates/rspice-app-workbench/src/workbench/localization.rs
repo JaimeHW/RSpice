@@ -298,7 +298,7 @@ define_messages! {
     NetlistControlRegionDisposition => ".control not executed",
     NetlistControlRegionCounts => "{promoted} promoted · {dropped} dropped",
     NetlistControlRegionDetail => "RSpice runs SPICE cards and has no .control interpreter. {promoted} command(s) in this deck were promoted into declarative directives; {dropped} were read and ignored.",
-    NetlistFindEnterTextHint => "Enter text to search",
+    NetlistFindEnterTextHint => "Enter text to search.",
     NetlistFindTitle => "Find and replace in source",
     NetlistFindNext => "Find next",
     NetlistFindDescription => "Search editable source and generated references; replacement remains limited to project-owned source artifacts.",

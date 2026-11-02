@@ -1211,7 +1211,7 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
     }
 }
 
-const NO_BOUND_SECTIONS: &str = "The bound library defines no model sections";
+const NO_BOUND_SECTIONS: &str = "The bound library defines no model sections.";
 
 /// Why Apply is waiting on the value, or `None` once there is one to apply.
 ///

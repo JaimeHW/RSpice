@@ -70,7 +70,7 @@ pub(crate) fn render_unpublish_web_dialog(parts: &mut UnpublishWebParts<'_>, ctx
         .size(DialogSize::Transaction)
         .destructive()
         .ghost("Cancel")
-        .hint("tombstone · the identifier is never reissued")
+        .hint("Tombstone · the identifier is never reissued")
         .primary_enabled(acknowledged)
         .primary_on_enter(false)
         .show(ctx, |ui| {

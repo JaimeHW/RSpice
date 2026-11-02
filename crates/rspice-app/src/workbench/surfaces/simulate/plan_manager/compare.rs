@@ -193,7 +193,7 @@ pub(super) fn dialog(
     // the row — base, then the word, then the compared plan — but the direction
     // the three count columns are stated in is not, and reading them backwards
     // inverts every added and removed on the surface.
-    .hint("Differences are stated from the base plan to the compared plan")
+    .hint("Differences are stated from the base plan to the compared plan.")
     .size(DialogSize::SimulationWorkflow)
     .show(ctx, |ui| {
         match &domains {

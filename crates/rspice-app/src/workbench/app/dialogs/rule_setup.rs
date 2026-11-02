@@ -27,7 +27,7 @@ const DESCRIPTION: &str = "The severity each design rule is reported at in this 
 /// What the last column states, for a reader who asks.
 const LOWEST_ALLOWED: &str = "The lowest severity this project may report the rule at; a finding     on an instance the deck cannot write is held at the second where one is named";
 /// Why Apply is unavailable while the draft is the project's deck.
-const UNCHANGED: &str = "No rule's severity has changed";
+const UNCHANGED: &str = "No rule's severity has changed.";
 
 /// Why an option below a rule's floor cannot be chosen.
 const REFUSES_THE_RUN: &str = "A finding of this rule refuses the run whatever it is reported as";

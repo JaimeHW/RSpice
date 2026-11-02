@@ -125,7 +125,7 @@ pub fn restore_dialog(
         } else {
             "Keep checkpoint"
         })
-        .hint("Esc opens the file and keeps the checkpoint")
+        .hint("Esc opens the file and keeps the checkpoint.")
         .show(ctx, |ui| {
             let c = Tokens::get(ui.ctx()).color;
             ui.label(

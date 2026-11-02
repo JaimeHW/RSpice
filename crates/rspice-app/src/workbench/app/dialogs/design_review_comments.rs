@@ -24,9 +24,9 @@ use crate::workbench::framework::feature::CloudSessionPort;
 const TITLE: &str = "Design review comments";
 const PRIMARY: &str = "Post reply";
 /// Why "Post reply" is disabled: there is no thread to reply to.
-const NO_THREAD_SELECTED: &str = "Select a review thread to reply to";
+const NO_THREAD_SELECTED: &str = "Select a review thread to reply to.";
 /// Why "Post reply" is disabled: the reply is empty.
-const NO_REPLY_WRITTEN: &str = "Write a reply to post it";
+const NO_REPLY_WRITTEN: &str = "Write a reply to post it.";
 /// Where every row of the body starts, as the title and footer do.
 const BODY_INSET: i8 = 12;
 

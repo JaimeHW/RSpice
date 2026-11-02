@@ -626,7 +626,7 @@ mod tests {
                 .values()
                 .any(|node| node.label() == Some(text) || node.value() == Some(text))
         };
-        for row in ["Find", "Replace", "Scope", "Enter text to search"] {
+        for row in ["Find", "Replace", "Scope", "Enter text to search."] {
             assert!(named(row), "the dialog names no {row:?}");
         }
         for gone in [

@@ -1170,7 +1170,7 @@ fn show_discard_confirmation(ctx: &Context, app: &mut RSpiceApp) {
     .size(DialogSize::Transaction)
     .destructive()
     .ghost("Keep checkpoint")
-    .hint("The saved source is not modified")
+    .hint("The saved source is not modified.")
     .show(ctx, |ui| {
         ui.label(format!(
             "Discard the autosave checkpoint for '{}'? This removes only '{}'.",

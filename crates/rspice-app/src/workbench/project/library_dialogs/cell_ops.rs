@@ -286,7 +286,7 @@ impl ProjectFeature {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("remaps buffers, tabs, and instance bindings")
+            .hint("Remaps buffers, tabs, and instance bindings")
             .primary_enabled(catalog_current && !dialogs.rename_cell_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

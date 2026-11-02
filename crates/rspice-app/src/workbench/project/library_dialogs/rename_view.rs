@@ -106,7 +106,7 @@ impl ProjectFeature {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("remaps the buffer, tabs, and instances bound to this view")
+            .hint("Remaps the buffer, tabs, and instances bound to this view")
             .primary_enabled(catalog_current && !dialogs.rename_view_name.trim().is_empty())
             .show(ctx, |ui| {
                 ui.spacing_mut().item_spacing.y = 2.0;

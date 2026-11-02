@@ -1519,4 +1519,80 @@ mod tests {
             moves.join("\n  ")
         );
     }
+
+    /// The literal a `.hint(` call or a hint constant opens at `start`, up to
+    /// its closing quote.
+    fn string_literal(source: &str, start: usize) -> Option<&str> {
+        let rest = source.get(start..)?;
+        let mut escaped = false;
+        for (index, character) in rest.char_indices() {
+            match character {
+                '\\' if !escaped => escaped = true,
+                '"' if !escaped => return Some(&rest[..index]),
+                _ => escaped = false,
+            }
+        }
+        None
+    }
+
+    /// A dialog's footer hint ends the way its words do: a sentence ends with
+    /// a period and a fragment does not, and either starts with a capital. A
+    /// hint that opens with an instruction or with its subject, or joins two
+    /// clauses, is a sentence.
+    #[test]
+    fn footer_hints_end_as_sentences_and_fragments_do() {
+        const SENTENCE_OPENINGS: [&str; 14] = [
+            "Enter ", "Select ", "Choose ", "Paste ", "Confirm ", "Write ", "Type ", "Press ",
+            "The ", "No ", "Neither ", "A ", "An ", "Another ",
+        ];
+        let mut hints = 0;
+        let mut strays = Vec::new();
+        for path in workspace_rust_sources() {
+            let shown = path.display().to_string().replace('\\', "/");
+            if shown.contains("/tests") || shown.ends_with("tests.rs") {
+                continue;
+            }
+            let source = std::fs::read_to_string(&path)
+                .unwrap_or_else(|error| panic!("read {shown}: {error}"));
+            let mut found = Vec::new();
+            for (at, _) in source.match_indices(".hint(\"") {
+                found.extend(string_literal(&source, at + ".hint(\"".len()));
+            }
+            for line in source.lines() {
+                let Some((name, rest)) = line
+                    .trim_start()
+                    .strip_prefix("const ")
+                    .and_then(|line| line.split_once(": &str = \""))
+                else {
+                    continue;
+                };
+                if source.contains(&format!(".hint({name})")) {
+                    found.extend(rest.strip_suffix("\";"));
+                }
+            }
+            for hint in found {
+                hints += 1;
+                let sentence = SENTENCE_OPENINGS
+                    .iter()
+                    .any(|opening| hint.starts_with(opening))
+                    || hint.contains("; ");
+                if !hint.chars().next().is_some_and(char::is_uppercase) {
+                    strays.push(format!("{shown}: {hint:?} starts in lower case"));
+                } else if sentence && !hint.ends_with('.') {
+                    strays.push(format!(
+                        "{shown}: {hint:?} is a sentence without its period"
+                    ));
+                }
+            }
+        }
+        assert!(
+            hints >= 20,
+            "only {hints} footer hints were found; the scan lost its sources"
+        );
+        assert!(
+            strays.is_empty(),
+            "footer hints:\n  {}",
+            strays.join("\n  ")
+        );
+    }
 }
