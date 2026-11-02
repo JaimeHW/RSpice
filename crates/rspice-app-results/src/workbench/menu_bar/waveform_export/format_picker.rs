@@ -7,9 +7,7 @@
 
 use egui::Context;
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select_with_disabled};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::ChoicePreference;
 use crate::workbench::documents::result_document::ResultsReads;
 use crate::workbench::preferences::UserPreferences;
@@ -91,35 +89,22 @@ pub fn show_dataset_export_picker(
     } else {
         Vec::new()
     };
-    let choice = Dialog::new("Export dataset", "Export\u{2026}")
-        .description("Choose the file format for the displayed result.")
-        .size(DialogSize::Confirmation)
-        .ghost("Cancel")
-        .show(ctx, |ui| {
-            let t = Tokens::get(ui.ctx());
-            ui.label(
-                egui::RichText::new("Format")
-                    .font(theme::sans(tokens::FS_1, FontWeight::Medium))
-                    .color(t.color.text),
-            );
-            ui.add_space(4.0);
-            if let Some(index) = select_with_disabled(
-                ui,
-                "results.export-dataset.format",
+    // Format stands on the label/value grid every form uses, its list across
+    // the control column. A line under it said the same of every format.
+    let choice = CommandForm::new("Export dataset", "Export\u{2026}")
+        .wide()
+        .describe("Choose the file format for the displayed result.")
+        .show(ctx, |rows| {
+            if let Some(index) = rows.select_with_disabled(
                 "Format",
+                "results.export-dataset.format",
                 FORMATS[picker.format].0,
                 &labels,
                 &disabled,
-                ui.available_width(),
             ) {
                 picker.format = index;
             }
-            ui.add_space(6.0);
-            ui.label(
-                egui::RichText::new("Every format keeps full stored precision.")
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                    .color(t.color.text_faint),
-            );
+            None
         });
     match choice {
         DialogChoice::Primary => {
@@ -229,6 +214,68 @@ mod tests {
                 .choice(ChoicePreference::EngineeringExport),
             0,
             "a cancelled picker leaves the remembered format alone"
+        );
+    }
+
+    /// Format stands in the label column with its list beside it, and the
+    /// list ends where the footer's actions end, as on every form.
+    #[test]
+    fn the_format_list_stands_on_the_form_grid() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut state = ResultsTestHost::default();
+        state.results.dataset_export = Some(DatasetExportPicker {
+            format: 0,
+            several_analyses: false,
+        });
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ctx| {
+                    show_dataset_export_picker(
+                        ctx,
+                        &mut state.results.dataset_export,
+                        &mut state.model.preferences,
+                    );
+                },
+            );
+            nodes.extend(
+                output
+                    .platform_output
+                    .accesskit_update
+                    .expect("AccessKit tree update")
+                    .nodes,
+            );
+        }
+        let bounds = |label: &str, role: egui::accesskit::Role| {
+            nodes
+                .values()
+                .find(|node| node.role() == role && node.label() == Some(label))
+                .and_then(egui::accesskit::Node::bounds)
+                .unwrap_or_else(|| panic!("{label} is published"))
+        };
+        let format = bounds("Format", egui::accesskit::Role::ComboBox);
+        let export = bounds("Export\u{2026}", egui::accesskit::Role::Button);
+        let title = nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Label
+                    && (node.label() == Some("Export dataset")
+                        || node.value() == Some("Export dataset"))
+            })
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("the title is published");
+        assert!(
+            format.x0 > title.x0 + 60.0 && (format.x1 - export.x1).abs() < 1.0,
+            "Format {format:?}, title {title:?}, Export {export:?}"
         );
     }
 }
