@@ -380,8 +380,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `ControlSession::quit_status`, the status ngspice -b exits with, brings it
 // to 5,236.
 // `SignalProjection::ordered_noise_columns`, the columns the CLI's noise
-// table prints for a `.PRINT NOISE` card, brings it to 5,237.
-const MAX_PUBLIC_ITEMS: usize = 5237;
+// table prints for a `.PRINT NOISE` card, brings it to 5,237, and
+// `ControlCircuit::set_input_directory`, which names a control script's
+// `$inputdir`, to 5,238.
+const MAX_PUBLIC_ITEMS: usize = 5238;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
