@@ -200,11 +200,15 @@ mod tests {
                         < 1.0e-10
                 );
             }
+            // The nested integral is t^2/2 in periods. Linear interpolation
+            // over the tolerance run's steps, at most a tenth of the period,
+            // moves it by at most 0.1^2/8 per sample.
             let quadratic_mean = (n - 1.0) * (2.0 * n - 1.0) / (12.0 * n * n);
+            let interpolation =
+                rate * rate * state.mna_branch_currents[physical + 2][0].re - quadratic_mean;
             assert!(
-                (rate * rate * state.mna_branch_currents[physical + 2][0].re - quadratic_mean)
-                    .abs()
-                    < 3.0e-5
+                interpolation.abs() <= 0.1_f64.powi(2) / 8.0,
+                "{interpolation}"
             );
             for (node, row, scale) in [
                 ("out", 0, rate),

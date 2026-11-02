@@ -26,7 +26,7 @@ use crate::circuit::CircuitData;
 use crate::engine::periodic_capability;
 use crate::engine::transient::netlist_checkpoint_identity;
 use crate::netlist::SourceSpec;
-use crate::{Netlist, Value};
+use crate::{Netlist, SpiceDialect, Value};
 use num_complex::Complex64;
 use std::collections::BTreeSet;
 
@@ -1503,7 +1503,7 @@ impl Engine {
         netlist: &Netlist,
         mut config: HbConfig,
     ) -> Result<HbConfig, SimulationError> {
-        Self::hb_dc_seed_policy(netlist)?;
+        self.hb_dc_seed_policy(netlist)?;
         if let Some(maxstep) = netlist.options.nonlin_hb_maxstep {
             if maxstep == 0 {
                 return Err(HbError::InvalidConfig(
@@ -1516,9 +1516,15 @@ impl Engine {
         Ok(config)
     }
 
-    fn hb_initial_state_strategy(netlist: &Netlist) -> HbInitialStateStrategy {
+    fn hb_initial_state_strategy(&self, netlist: &Netlist) -> HbInitialStateStrategy {
         let Some(mode) = netlist.options.hb_time_domain_mode else {
-            return HbInitialStateStrategy::DefaultDcSeed;
+            // Xyce's HB constructs with taHB_(1) (N_ANP_HB.C:134), so an
+            // omitted TAHB is the transient-assisted start in its dialect.
+            return if self.config.spice_dialect == SpiceDialect::Xyce {
+                HbInitialStateStrategy::TransientAssisted
+            } else {
+                HbInitialStateStrategy::DefaultDcSeed
+            };
         };
         match mode.xyce_value() {
             0 => HbInitialStateStrategy::Direct,
@@ -1528,8 +1534,8 @@ impl Engine {
         }
     }
 
-    fn hb_dc_seed_policy(netlist: &Netlist) -> Result<HbDcSeedPolicy, SimulationError> {
-        Ok(match Self::hb_initial_state_strategy(netlist) {
+    fn hb_dc_seed_policy(&self, netlist: &Netlist) -> Result<HbDcSeedPolicy, SimulationError> {
+        Ok(match self.hb_initial_state_strategy(netlist) {
             HbInitialStateStrategy::DefaultDcSeed => HbDcSeedPolicy::Enabled,
             HbInitialStateStrategy::Direct
             | HbInitialStateStrategy::TransientAssisted
@@ -1749,27 +1755,40 @@ impl Engine {
         let collocation_points = config
             .checked_fft_size()
             .map_err(|error| HbError::InvalidConfig(error.to_string()))?;
-        let integration_intervals = collocation_points.checked_mul(4).ok_or_else(|| {
-            HbError::InvalidConfig(
-                "TAHB=1 transient integration-point count exceeds this platform".to_string(),
-            )
-        })?;
-        self.ensure_analysis_points(integration_intervals.saturating_add(1))?;
-        let max_step = transient_period / integration_intervals as Value;
+        // Xyce's HB::runTol (N_ANP_HB.C:2221-2361) integrates one first-tone
+        // period under the transient's own step control: no .TRAN maximum
+        // step, so a tenth of the window (N_TIA_StepErrorControl.C:899-906),
+        // and backward Euler (maxOrder = 1). It reruns at a tenth of the
+        // TIMEINT RELTOL until the run accepts at least 1.2 steps per HB
+        // sample or the tolerance has fallen below 1e-6 (acceptICTranRun,
+        // :2374-2377).
+        let max_step = 0.1 * transient_period;
         if !transient_period.is_finite() || !max_step.is_finite() || max_step <= 0.0 {
             return Err(HbError::InvalidConfig(
                 "TAHB=1 first-tone transient period or timestep is not representable".to_string(),
             )
             .into());
         }
-        let (transient, integrals) = self
-            .run_tran_for_periodic_seed(netlist, transient_period, max_step, dc_seed, abort)
-            .map_err(|error| match error {
-                SimulationError::Aborted => SimulationError::Aborted,
-                other => SimulationError::Circuit(format!(
-                    "TAHB=1 first-tone transient initial-state construction failed: {other}"
-                )),
-            })?;
+        let wanted_steps = 1.2 * collocation_points as Value;
+        let mut seed_engine = self.resolved_for_netlist(netlist);
+        seed_engine.config.transient_timeint_max_order = 1;
+        let mut relative_tolerance = seed_engine.transient_lte_reltol();
+        let (transient, integrals) = loop {
+            seed_engine.config.transient_lte_reltol = Some(relative_tolerance);
+            let run = seed_engine
+                .run_tran_for_periodic_seed(netlist, transient_period, max_step, dc_seed, abort)
+                .map_err(|error| match error {
+                    SimulationError::Aborted => SimulationError::Aborted,
+                    other => SimulationError::Circuit(format!(
+                        "TAHB=1 first-tone transient initial-state construction failed: {other}"
+                    )),
+                })?;
+            let accepted_steps = run.0.time.len().saturating_sub(1) as Value;
+            if accepted_steps >= wanted_steps || relative_tolerance < 1.0e-6 {
+                break run;
+            }
+            relative_tolerance /= 10.0;
+        };
         let physical_count = branch_names
             .len()
             .checked_sub(integrals.names.len())
@@ -1967,7 +1986,7 @@ impl Engine {
             )
         })?;
         self.ensure_result_values(retained_scalar_values)?;
-        let initial_state_strategy = Self::hb_initial_state_strategy(netlist);
+        let initial_state_strategy = self.hb_initial_state_strategy(netlist);
         if let Some(seed) = dc_seed {
             if initial_state_strategy == HbInitialStateStrategy::Direct {
                 return Err(HbError::InvalidConfig(
@@ -1981,7 +2000,7 @@ impl Engine {
         let dc_seed_policy = if dc_seed.is_some() {
             HbDcSeedPolicy::Disabled
         } else {
-            Self::hb_dc_seed_policy(netlist)?
+            self.hb_dc_seed_policy(netlist)?
         };
         let drive_tones = Self::hb_collect_drive_tones(&config)?;
         Self::hb_validate_drive_tone_sources(&circuit, &drive_tones)?;
@@ -2213,7 +2232,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{SimulationConfig, SpiceDialect};
+    use crate::SimulationConfig;
 
     #[test]
     fn dependent_source_basis_preserves_clock_wrappers_and_limits() {
@@ -2395,7 +2414,9 @@ mod tests {
             .expect("TAHB=0 and NONLIN-HB MAXSTEP are supported");
 
         assert_eq!(
-            Engine::hb_dc_seed_policy(&netlist).expect("direct policy resolves"),
+            engine
+                .hb_dc_seed_policy(&netlist)
+                .expect("direct policy resolves"),
             HbDcSeedPolicy::Disabled
         );
         assert_eq!(effective.max_iterations, 2);
@@ -2417,7 +2438,8 @@ mod tests {
             )
             .expect("an omitted package leaves the caller's HB budget intact");
         assert_eq!(
-            Engine::hb_dc_seed_policy(&without_authored_budget)
+            engine
+                .hb_dc_seed_policy(&without_authored_budget)
                 .expect("omitted TAHB policy resolves"),
             HbDcSeedPolicy::Enabled
         );
@@ -2438,12 +2460,15 @@ mod tests {
              .end\n",
         )
         .expect("direct nonlinear HB deck parses");
+        let engine = Engine::new(SimulationConfig::default());
         assert_eq!(
-            Engine::hb_dc_seed_policy(&netlist).expect("direct policy resolves"),
+            engine
+                .hb_dc_seed_policy(&netlist)
+                .expect("direct policy resolves"),
             HbDcSeedPolicy::Disabled
         );
 
-        let analysis = Engine::new(SimulationConfig::default())
+        let analysis = engine
             .run_hb(&netlist, HbConfig::new(1.0e3).with_harmonics(3))
             .expect("direct frequency-domain nonlinear HB converges from the supplied zero state");
         assert!(analysis.converged);
@@ -2510,7 +2535,8 @@ mod tests {
         // exceed the largest sample error, so this is an analytic bound on
         // both the wanted coefficient error and leakage into every other bin.
         let angular_frequency = std::f64::consts::TAU * 2.0e3;
-        let maximum_step = 0.5e-3 / (13 * 4) as Value;
+        // Xyce's tolerance run bounds every step by a tenth of the period.
+        let maximum_step: Value = 0.1 * 0.5e-3;
         let interpolation_bound = angular_frequency.powi(2) * maximum_step.powi(2) / 8.0;
         let voltage_tolerance = interpolation_bound + 1.0e-10;
         let current_tolerance = interpolation_bound / 1.0e3 + 1.0e-12;
@@ -2524,11 +2550,6 @@ mod tests {
                 < current_tolerance,
             "TAHB=1 branch spectrum differs from the KCL oracle: expected {expected_source_current:?}, got {:?}",
             transient_seed.mna_branch_currents[0][2]
-        );
-        assert!(
-            transient_seed.x[0][1].norm() < 1.0e-6,
-            "first-tone trajectory leaked onto the common-grid fundamental: {:?}",
-            transient_seed.x[0]
         );
         for (harmonic, coefficient) in transient_seed.x[0].iter().enumerate() {
             if harmonic != 2 {
@@ -2583,6 +2604,89 @@ mod tests {
                 .iter()
                 .all(|value| *value == Complex64::new(0.0, 0.0))
         );
+    }
+
+    #[test]
+    fn omitted_tahb_is_the_transient_assisted_start_in_the_xyce_dialect_only() {
+        let netlist =
+            Netlist::parse("omitted TAHB\nV1 out 0 SIN(0 1 1k)\nR1 out 0 1k\n.hb 1k\n.end\n")
+                .expect("HB deck without an HBINT package parses");
+        for (dialect, strategy, policy) in [
+            (
+                SpiceDialect::Xyce,
+                HbInitialStateStrategy::TransientAssisted,
+                HbDcSeedPolicy::Disabled,
+            ),
+            (
+                SpiceDialect::Ngspice,
+                HbInitialStateStrategy::DefaultDcSeed,
+                HbDcSeedPolicy::Enabled,
+            ),
+            (
+                SpiceDialect::BestAvailable,
+                HbInitialStateStrategy::DefaultDcSeed,
+                HbDcSeedPolicy::Enabled,
+            ),
+        ] {
+            let engine = Engine::new(SimulationConfig {
+                spice_dialect: dialect,
+                ..Default::default()
+            });
+            assert_eq!(
+                engine.hb_initial_state_strategy(&netlist),
+                strategy,
+                "{dialect:?}"
+            );
+            assert_eq!(
+                engine
+                    .hb_dc_seed_policy(&netlist)
+                    .expect("omitted TAHB policy resolves"),
+                policy,
+                "{dialect:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn tahb_transient_takes_its_own_steps_instead_of_a_quarter_hb_sample() {
+        // Xyce's BUG_407 HB deck. A step bound of a quarter HB sample
+        // (period / 404) drives this resistive diode into a stall at the
+        // source minimum, 7.48 us, in an ordinary transient (Xyce 7.10 stalls
+        // there too); the tolerance run that sizes Xyce's TAHB transient
+        // takes about 250 steps.
+        let netlist = Netlist::parse(
+            "TAHB step sizing\nv1 a 0 sin 1 1 100k\nR1 a b 1k\nd1 b 0 dmod\n.model dmod d\n\
+             .options hbint tahb=1\n.hb 100k\n.end\n",
+        )
+        .expect("TAHB deck parses");
+        let config = HbConfig::new(1.0e5)
+            .with_harmonics(50)
+            .with_collocation_points(101);
+        let mut simulation = SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        };
+        simulation.resource_limits.max_analysis_points = 20_000;
+        let engine = Engine::new(simulation);
+        let mut seed = HbSolverState::new(2, config.num_harmonics);
+        seed.try_prepare_mna_branches(1, config.num_harmonics)
+            .expect("one source branch fits the seed");
+        engine
+            .hb_seed_transient_assisted(
+                &netlist,
+                &config,
+                &mut seed,
+                &["a".to_string(), "b".to_string()],
+                &["v1".to_string()],
+                &NoAbort,
+            )
+            .expect("the TAHB transient fits a 20k-point budget");
+        // v(a) = 1 + sin(2*pi*100 kHz*t): DC 1 and -j/2 at k=1, to within
+        // the linear-interpolation bound over steps of at most a tenth of
+        // the period, (2*pi*1e5)^2 * (1e-6)^2 / 8.
+        let bound = (std::f64::consts::TAU * 1.0e5 * 1.0e-6).powi(2) / 8.0;
+        assert!((seed.x[0][0] - Complex64::new(1.0, 0.0)).norm() < bound);
+        assert!((seed.x[0][1] - Complex64::new(0.0, -0.5)).norm() < bound);
     }
 
     #[test]
@@ -2694,7 +2798,9 @@ mod tests {
             assert!(dc.node_voltages[1].abs() < 1.0e-12);
 
             assert_eq!(
-                Engine::hb_dc_seed_policy(&netlist).expect("typed policy resolves"),
+                engine
+                    .hb_dc_seed_policy(&netlist)
+                    .expect("typed policy resolves"),
                 HbDcSeedPolicy::Disabled,
                 "an explicit initializer must not be overwritten by the legacy kernel DC seed"
             );
