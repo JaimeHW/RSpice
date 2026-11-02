@@ -512,16 +512,30 @@ mod tests {
         )
     }
 
-    /// A context reads each command's answer, by its key, as the shell took
-    /// it when it lent the context.
+    /// A context reads each command's answer, by its key and with its
+    /// reason, as the shell took it when it lent the context.
     #[test]
     fn a_context_reads_the_answers_the_shell_took_for_it() {
         let mut harness = reader();
-        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |key| key != SECOND);
+        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |key| {
+            if key == SECOND {
+                CommandAvailability::Disabled("second is refused")
+            } else {
+                CommandAvailability::Available
+            }
+        });
         let cx = harness.cx().with_foreign_availability(answers);
         assert!(cx.foreign_available(FIRST));
         assert!(!cx.foreign_available(SECOND));
         assert!(cx.foreign_available(THIRD));
+        assert_eq!(
+            cx.foreign_availability(SECOND),
+            CommandAvailability::Disabled("second is refused")
+        );
+        assert_eq!(
+            cx.foreign_availability(THIRD),
+            CommandAvailability::Available
+        );
     }
 
     /// Reading an answer from a context the shell lent without them is a
@@ -541,7 +555,9 @@ mod tests {
     #[should_panic(expected = "is not a command the feature declares it reads")]
     fn a_context_refuses_a_command_the_feature_does_not_read() {
         let mut harness = reader();
-        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |_| true);
+        let answers = ForeignAvailability::take(Reader::FOREIGN_AVAILABILITY, |_| {
+            CommandAvailability::Available
+        });
         let cx = harness.cx().with_foreign_availability(answers);
         cx.foreign_available(CommandKey::new("unread"));
     }

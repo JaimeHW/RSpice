@@ -93,7 +93,7 @@ pub(crate) fn cx_with_foreign_answers<F: Registered>(
         return F::cx(app);
     }
     let answers =
-        ForeignAvailability::take(F::FOREIGN_AVAILABILITY, |key| app.command_key_enabled(key));
+        ForeignAvailability::take(F::FOREIGN_AVAILABILITY, |key| app.command_availability(key));
     F::cx(app).with_foreign_availability(answers)
 }
 
@@ -508,6 +508,43 @@ mod tests {
                     "{slot} reads {key:?}, which no command answers to"
                 );
                 assert!(!keys[..index].contains(key), "{slot} reads {key:?} twice");
+            }
+        }
+    }
+
+    /// A command a feature reads runs exactly when the dispatcher answers that
+    /// it is available, so the answer a context holds, reason and all, is the
+    /// one a raise of it meets. A feature's own command runs exactly when it
+    /// is available; an application command does too unless its answer adds
+    /// a refusal the run does not make, which only a command that changes
+    /// the window session or runs only in a source editor does.
+    #[test]
+    fn a_command_a_feature_reads_runs_exactly_when_it_is_available() {
+        use crate::workbench::commands::vocabulary::legacy_command;
+
+        for (slot, keys) in foreign_availability() {
+            for key in keys {
+                if let Some(command) = legacy_command(*key) {
+                    assert!(
+                        !command.mutates_window_session() && !command.source_editor_only(),
+                        "{slot} reads {key:?}, whose answer refuses more than its run does"
+                    );
+                }
+            }
+        }
+        for open in [false, true] {
+            let mut app = RSpiceApp::test_instance();
+            if open {
+                app.state.open_project_session();
+            }
+            for (slot, keys) in foreign_availability() {
+                for key in keys {
+                    assert_eq!(
+                        app.command_key_enabled(*key),
+                        app.command_availability(*key).is_available(),
+                        "{slot} reads {key:?} (project open: {open})"
+                    );
+                }
             }
         }
     }

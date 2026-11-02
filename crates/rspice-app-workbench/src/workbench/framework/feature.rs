@@ -55,12 +55,13 @@ pub trait Feature: Sized + 'static {
     type Handles: 'static;
 
     /// The commands whose dispatcher answer the feature reads: whether each
-    /// would run if raised now, as a menu row or a toolbar button shows it.
+    /// would run if raised now, and why not, as a menu row or a toolbar
+    /// button shows it.
     /// Each is another feature's command, or one of the feature's own that
     /// the shell can answer ahead of it, with a guard or with an arm that
     /// takes the command where the reader is working. The shell takes the
     /// answers when it lends the feature a context for a call that reads
-    /// them, and [`Cx::foreign_available`] reads them.
+    /// them, and [`Cx::foreign_availability`] reads them.
     const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[];
 
     /// Hand the registry everything the feature declares.
@@ -450,12 +451,13 @@ impl<'a, F: Feature> Cx<'a, F> {
         self.wb.outbox().push(Execute(key));
     }
 
-    /// Whether the command `key` names would run if raised now, as the
-    /// dispatcher answered when the shell lent this context. `key` is one
-    /// the feature declares in [`Feature::FOREIGN_AVAILABILITY`], and the
-    /// shell lent the context with the answers: reading one from a context
-    /// lent without them is a fault in the call that reads it, not a no.
-    pub fn foreign_available(&self, key: CommandKey) -> bool {
+    /// Whether the command `key` names would run if raised now, and why
+    /// not, as the dispatcher answered when the shell lent this context.
+    /// `key` is one the feature declares in
+    /// [`Feature::FOREIGN_AVAILABILITY`], and the shell lent the context with
+    /// the answers: reading one from a context lent without them is a fault
+    /// in the call that reads it, not a no.
+    pub fn foreign_availability(&self, key: CommandKey) -> CommandAvailability {
         let index = F::FOREIGN_AVAILABILITY
             .iter()
             .position(|declared| *declared == key);
@@ -468,33 +470,45 @@ impl<'a, F: Feature> Cx<'a, F> {
             "the shell lent this context without the dispatcher's answers"
         );
         index
-            .zip(self.foreign)
-            .is_some_and(|(index, foreign)| foreign.0 & (1 << index) != 0)
+            .zip(self.foreign.as_ref())
+            .map_or(CommandAvailability::Hidden, |(index, foreign)| {
+                foreign.0[index]
+            })
+    }
+
+    /// Whether the command `key` names would run if raised now: the
+    /// dispatcher's answer [`Cx::foreign_availability`] reads is that it is
+    /// available.
+    pub fn foreign_available(&self, key: CommandKey) -> bool {
+        self.foreign_availability(key).is_available()
     }
 }
 
 /// The dispatcher's answers for the commands a feature declares in
 /// [`Feature::FOREIGN_AVAILABILITY`], taken as the shell lends it a context:
-/// whether each would run if raised then, in the order it declares them.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct ForeignAvailability(u32);
+/// whether each would run if raised then, and why not, in the order it
+/// declares them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ForeignAvailability([CommandAvailability; Self::CAPACITY]);
 
 impl ForeignAvailability {
-    /// The most commands a feature may declare it reads.
-    pub const CAPACITY: usize = u32::BITS as usize;
+    /// The most commands a feature may declare it reads. Each answer is held
+    /// whole, reason and all, in the context the shell lends.
+    pub const CAPACITY: usize = 12;
 
-    /// The answers `available` gives for `keys`, in order.
-    pub fn take(keys: &[CommandKey], mut available: impl FnMut(CommandKey) -> bool) -> Self {
+    /// The answers `availability` gives for `keys`, in order.
+    pub fn take(
+        keys: &[CommandKey],
+        mut availability: impl FnMut(CommandKey) -> CommandAvailability,
+    ) -> Self {
         debug_assert!(
             keys.len() <= Self::CAPACITY,
             "a feature reads at most {} commands' answers",
             Self::CAPACITY
         );
-        let mut answers = 0;
-        for (index, key) in keys.iter().enumerate() {
-            if available(*key) {
-                answers |= 1 << index;
-            }
+        let mut answers = [CommandAvailability::Hidden; Self::CAPACITY];
+        for (answer, key) in answers.iter_mut().zip(keys) {
+            *answer = availability(*key);
         }
         Self(answers)
     }
