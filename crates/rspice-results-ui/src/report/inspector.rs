@@ -9,11 +9,11 @@ use rspice_results::report_document::{
 use rspice_ui_kit::{
     panels::{
         Problem, code_inspector_section, panel_body, panel_inset, problem_line,
-        property_row_problem, section_block_gap,
+        property_row_problem,
     },
     theme::{self, FontWeight},
     tokens::{self, Tokens},
-    widgets::{Button, select},
+    widgets::select,
 };
 use rspice_vocabulary::product::ResultDocumentId;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -27,7 +27,6 @@ pub trait InspectorHost {
     fn bound_result_label(&self, document: &ReportDocument) -> (String, bool);
     fn transaction_error(&self) -> Option<&str>;
     fn commit_publication(&mut self, document: ResultDocumentId, setting: DocumentPublicationEdit);
-    fn open_release(&mut self);
 }
 
 pub fn show(
@@ -42,7 +41,6 @@ pub fn show(
     let writable = host.writable();
     let blocked_reason = host.blocked_reason();
     let mut pending_edit = None;
-    let mut open_release_owner = false;
     let pane = egui::Frame::new().fill(t.color.bg_panel).show(ui, |ui| {
         ui.set_min_size(Vec2::new(width.max(1.0), height.max(1.0)));
         // One body around every section, so they stack on the section gap
@@ -211,9 +209,9 @@ pub fn show(
                     // binding is incomplete. "Candidate", "Package owner" and
                     // "Physical DRC" were constants — the last of them for a
                     // check RSpice does not run — and the report's own UUID
-                    // is not the reader's. Both buttons called the same
-                    // thing, so there is one.
-                    code_inspector_section(ui, "Release", None, None, |ui| {
+                    // is not the reader's. Its Release button opened a
+                    // package assembly RSpice does not have, so it is gone.
+                    code_inspector_section(ui, "Result", None, None, |ui| {
                         ui.scope(|ui| {
                             let (bound_result, exact_binding) = host.bound_result_label(document);
                             property_row_problem(
@@ -223,10 +221,6 @@ pub fn show(
                                 (!exact_binding).then_some(Problem::Warning),
                             );
                         });
-                        section_block_gap(ui);
-                        if Button::new("Release…").show(ui).clicked() {
-                            open_release_owner = true;
-                        }
                     });
                     if let Some(error) = host.transaction_error() {
                         problem_line(ui, Problem::Failure, error);
@@ -237,9 +231,6 @@ pub fn show(
     paint_pane_separators(ui, pane.response.rect, separators, t.color.border);
     if let Some(setting) = pending_edit {
         host.commit_publication(document.id(), setting);
-    }
-    if open_release_owner {
-        host.open_release();
     }
 }
 

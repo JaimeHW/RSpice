@@ -74,9 +74,6 @@ impl InspectorHost for ReportHost<'_, '_> {
     fn commit_publication(&mut self, document: ResultDocumentId, setting: DocumentPublicationEdit) {
         commit_document_publication_setting(self.0, document, setting);
     }
-    fn open_release(&mut self) {
-        open_release_cockpit(self.0);
-    }
 }
 
 impl rspice_results_ui::report::composer::ComposerHost for ReportHost<'_, '_> {

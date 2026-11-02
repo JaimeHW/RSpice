@@ -301,17 +301,11 @@ fn report_title_row(ui: &mut Ui, host: &mut impl ComposerHost) {
         if ui.available_width() <= TITLE_ACTION_STACK_BREAKPOINT {
             report_title_heading(ui);
             ui.add_space(12.0);
-            ui.horizontal(|ui| {
-                ui.spacing_mut().item_spacing.x = 6.0;
-                let width = ((ui.available_width() - 6.0) * 0.5).max(1.0);
-                report_release_button(ui, host, width);
-                report_plan_button(ui, host, width);
-            });
+            let width = ui.available_width().max(1.0);
+            report_plan_button(ui, host, width);
         } else {
-            let release_width = report_title_button_width(ui, "Release closure", false);
             let plan_width = report_title_button_width(ui, "Plan report artifact…", true);
-            let actions_width = release_width + 6.0 + plan_width;
-            let heading_width = (ui.available_width() - actions_width - 12.0).max(1.0);
+            let heading_width = (ui.available_width() - plan_width - 12.0).max(1.0);
             ui.horizontal(|ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
                 ui.allocate_ui_with_layout(
@@ -323,7 +317,6 @@ fn report_title_row(ui: &mut Ui, host: &mut impl ComposerHost) {
                     },
                 );
                 ui.add_space(6.0);
-                report_release_button(ui, host, 0.0);
                 report_plan_button(ui, host, 0.0);
             });
         }
@@ -332,16 +325,6 @@ fn report_title_row(ui: &mut Ui, host: &mut impl ComposerHost) {
 
 fn report_title_heading(ui: &mut Ui) {
     heading(ui, "Engineering report composer", None);
-}
-
-fn report_release_button(ui: &mut Ui, host: &mut impl ComposerHost, width: f32) {
-    let mut button = Button::new("Release closure");
-    if width > 0.0 {
-        button = button.min_width(width).max_width(width);
-    }
-    if button.show(ui).clicked() {
-        host.open_release();
-    }
 }
 
 fn report_plan_button(ui: &mut Ui, host: &mut impl ComposerHost, width: f32) {

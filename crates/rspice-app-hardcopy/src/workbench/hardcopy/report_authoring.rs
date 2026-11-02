@@ -28,8 +28,6 @@ use crate::workbench::framework::feature::Cx;
 use crate::workbench::hardcopy::HardcopyFeature;
 use crate::workbench::hardcopy::report as report_editor;
 
-use super::super::{RouteTransitionSource, SurfaceId, SurfaceRoute};
-
 use result_insert::{
     commit_insert_result_document, open_insert_result_document, report_figure_options,
 };
@@ -566,16 +564,6 @@ fn report_bound_result_label(model: &Model, document: &ReportDocument) -> (Strin
             |run| format!("Run {}", run.id),
         );
     (label, true)
-}
-
-fn open_release_cockpit(cx: &mut Cx<'_, HardcopyFeature>) {
-    if let Err(error) = cx.wb.navigate(
-        SurfaceRoute::surface(SurfaceId::ReleaseCockpit),
-        RouteTransitionSource::User,
-    ) {
-        cx.wb
-            .prompt(format!("Cannot open release package assembly: {error}"));
-    }
 }
 
 pub fn commit_create_document(cx: &mut Cx<'_, HardcopyFeature>) {
