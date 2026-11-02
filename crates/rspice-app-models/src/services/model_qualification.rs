@@ -3,6 +3,10 @@
 //! Each step runs one vector. Cancellation discards partial work; solver and
 //! measurement failures are retained as failed outcomes in a complete run.
 //! Only the terminal step publishes a validated platform run.
+//!
+//! The desktop solves each vector in process. The browser posts it to the
+//! simulation worker and collects the outcome on a later step, so the
+//! interactive image links no solver for qualification.
 
 use rspice_model_library::qualification::*;
 use rspice_simulation::model_qualification::QualificationVectorError;
@@ -25,6 +29,8 @@ pub enum QualificationExecutionError {
     Cancelled,
     #[error("qualification execution session has already finished")]
     SessionFinished,
+    #[error("the browser simulation worker could not run the vector: {0}")]
+    Worker(String),
 }
 
 impl From<QualificationVectorError> for QualificationExecutionError {
@@ -59,6 +65,9 @@ pub struct QualificationExecutionSession {
     vector_outcomes: Vec<QualificationPlatformVectorOutcome>,
     cancelled: bool,
     finished: bool,
+    /// The worker request solving the next vector.
+    #[cfg(target_arch = "wasm32")]
+    in_flight: Option<u32>,
 }
 
 impl QualificationExecutionSession {
@@ -75,6 +84,8 @@ impl QualificationExecutionSession {
             vector_outcomes: Vec::with_capacity(suite.vectors.len()),
             cancelled: false,
             finished: false,
+            #[cfg(target_arch = "wasm32")]
+            in_flight: None,
         })
     }
 
@@ -97,6 +108,8 @@ impl QualificationExecutionSession {
     pub fn cancel(&mut self) {
         if !self.finished {
             self.cancelled = true;
+            #[cfg(target_arch = "wasm32")]
+            browser_worker::abandon(&mut self.in_flight);
         }
     }
 
@@ -122,6 +135,8 @@ impl QualificationExecutionSession {
         }
         if self.cancelled || abort.is_aborted() {
             self.cancelled = true;
+            #[cfg(target_arch = "wasm32")]
+            browser_worker::abandon(&mut self.in_flight);
             return Err(QualificationExecutionError::Cancelled);
         }
         let vector = self
@@ -129,12 +144,18 @@ impl QualificationExecutionSession {
             .vectors
             .get(self.next_vector)
             .expect("a validated qualification suite is non-empty and unfinished");
+        #[cfg(not(target_arch = "wasm32"))]
         let executed = rspice_simulation::model_qualification::execute_qualification_vector(
             vector,
             self.platform,
             abort,
         )
         .map_err(QualificationExecutionError::from);
+        #[cfg(target_arch = "wasm32")]
+        let Some(executed) = browser_worker::execute(&mut self.in_flight, vector, self.platform)?
+        else {
+            return Ok(QualificationExecutionStep::InProgress(self.progress()));
+        };
         let outcome = match executed {
             Ok(value) => value,
             Err(QualificationExecutionError::Cancelled) => {
@@ -169,7 +190,51 @@ impl QualificationExecutionSession {
             self.vector_outcomes.clone(),
         )?;
         self.finished = true;
+        #[cfg(target_arch = "wasm32")]
+        rspice_simulation::model_qualification::browser::release_qualification_worker();
         Ok(QualificationExecutionStep::Complete { progress, run })
+    }
+}
+
+/// The browser half of a step: the simulation worker solves the vector.
+#[cfg(target_arch = "wasm32")]
+mod browser_worker {
+    use super::*;
+    use rspice_simulation::model_qualification::browser;
+
+    type VectorOutcome = Result<PlatformQualificationOutcome, QualificationExecutionError>;
+
+    /// Post the vector, or collect its outcome once the worker answers;
+    /// `None` while the worker is still solving it.
+    pub(super) fn execute(
+        in_flight: &mut Option<u32>,
+        vector: &QualificationVector,
+        platform: QualificationPlatform,
+    ) -> Result<Option<VectorOutcome>, QualificationExecutionError> {
+        let Some(request) = *in_flight else {
+            *in_flight =
+                Some(browser::post_qualification_vector(vector, platform).map_err(failed)?);
+            return Ok(None);
+        };
+        let Some(answer) = browser::take_qualification_outcome(request) else {
+            return Ok(None);
+        };
+        *in_flight = None;
+        answer
+            .map(|result| Some(result.map_err(Into::into)))
+            .map_err(failed)
+    }
+
+    /// Stop the worker solving an abandoned vector.
+    pub(super) fn abandon(in_flight: &mut Option<u32>) {
+        if in_flight.take().is_some() {
+            browser::release_qualification_worker();
+        }
+    }
+
+    fn failed(error: String) -> QualificationExecutionError {
+        browser::release_qualification_worker();
+        QualificationExecutionError::Worker(error)
     }
 }
 

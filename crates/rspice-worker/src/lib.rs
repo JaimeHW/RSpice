@@ -1,4 +1,5 @@
-//! Browser worker host for simulation, compilation, hardcopy, and source imports.
+//! Browser worker host for simulation, model qualification, compilation,
+//! hardcopy, and source imports.
 
 #[cfg(target_arch = "wasm32")]
 mod hardcopy;
@@ -6,6 +7,8 @@ mod hardcopy;
 mod jit;
 #[cfg(target_arch = "wasm32")]
 mod model_import;
+#[cfg(target_arch = "wasm32")]
+mod model_qualification;
 
 #[cfg(target_arch = "wasm32")]
 pub use jit::*;
@@ -60,6 +63,13 @@ pub fn run_rspice_ui_model_import_request(
     value: wasm_bindgen::JsValue,
 ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
     model_import::run_worker_request_value(value)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn run_rspice_ui_model_qualification_request(
+    value: wasm_bindgen::JsValue,
+) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+    model_qualification::run_worker_request_value(value)
 }
 
 #[cfg(target_arch = "wasm32")]

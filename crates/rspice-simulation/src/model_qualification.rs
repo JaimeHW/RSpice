@@ -1,12 +1,16 @@
 //! One model-qualification vector executed on this image's solver.
 //!
-//! The model editor's qualification session runs each vector here. The
-//! worker wire carries a vector and its outcome as JSON, which the workspace's
-//! `float_roundtrip` parser returns bit for bit.
+//! The model editor's qualification session runs each vector here: in process
+//! on the desktop, and in the browser simulation worker on the web, so the
+//! interactive browser image links no solver for it. The worker exchanges the
+//! vector and its outcome as JSON, which the workspace's `float_roundtrip`
+//! parser returns bit for bit.
 
 use rspice_model_library::qualification::*;
 use serde::{Deserialize, Serialize};
 
+#[cfg(target_arch = "wasm32")]
+pub mod browser;
 #[cfg(test)]
 mod tests;
 
