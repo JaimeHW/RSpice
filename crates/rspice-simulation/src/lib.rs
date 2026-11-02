@@ -16,6 +16,7 @@ pub mod live_transient;
 pub mod manual_deck;
 pub mod measurement_references;
 pub mod model_import;
+pub mod model_qualification;
 pub mod model_sources;
 pub mod monte_carlo_checkpoint;
 pub mod netlist_gen;
