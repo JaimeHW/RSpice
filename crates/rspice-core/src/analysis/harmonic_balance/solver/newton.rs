@@ -7,6 +7,35 @@ use std::f64::consts::PI;
 
 type PeriodicSpectrum = (usize, usize, Vec<Complex64>);
 
+/// Extend each coupling spectrum to `span` with the coefficients a grid of
+/// `grid_points` samples aliases there.
+///
+/// The collocation residual multiplies sampled waveforms on that grid, so its
+/// exact Jacobian couples harmonics `k` and `m` through the grid's DFT
+/// coefficient at `k + m`. Above the grid's last harmonic `(grid_points-1)/2`
+/// that coefficient is the conjugate of the one at `grid_points - (k + m)`;
+/// it is not zero. A minimal `2N+1` grid (an explicit Xyce `NUMFREQ`) needs
+/// every Hankel coupling past harmonic N from this identity. Xyce applies its
+/// Jacobian through the same grid (an inverse transform, the sampled dF/dx and
+/// dQ/dx, a forward transform: N_LOA_HBLoader.C:264-301), so it carries these
+/// couplings implicitly. An oversampled grid already resolves `span` and is
+/// left unchanged.
+fn unfold_collocation_spectra(spectra: &mut [PeriodicSpectrum], grid_points: usize, span: usize) {
+    let resolved = (grid_points - 1) / 2 + 1;
+    for (_, _, spectrum) in spectra {
+        if spectrum.len() != resolved || span < resolved {
+            continue;
+        }
+        for index in resolved..=span.min(grid_points - 1) {
+            // An even grid's Nyquist coefficient is not retained.
+            let Some(image) = spectrum.get(grid_points - index).map(Complex64::conj) else {
+                break;
+            };
+            spectrum.push(image);
+        }
+    }
+}
+
 #[inline]
 fn exact_krylov_dense_recovery_allowed(size: usize, error: &rspice_matrix::SolverError) -> bool {
     size < super::krylov::KRYLOV_AUTO_THRESHOLD
@@ -1996,16 +2025,18 @@ impl HbSolver {
                     "nonlinear HB coupling span exceeds this platform".to_string(),
                 )
             })?;
-            let g_spectra = if self.has_nonlinear_devices() {
+            let mut g_spectra = if self.has_nonlinear_devices() {
                 self.conductance_spectra(state, extended, false)?
             } else {
                 Vec::new()
             };
-            let c_spectra = if self.has_nonlinear_devices() {
+            let mut c_spectra = if self.has_nonlinear_devices() {
                 self.capacitance_spectra(state, extended, false)?
             } else {
                 Vec::new()
             };
+            unfold_collocation_spectra(&mut g_spectra, self.fft.size(), extended);
+            unfold_collocation_spectra(&mut c_spectra, self.fft.size(), extended);
             let operator = ExactHbOperator {
                 non_electrical_nodes: &self.non_electrical_nodes,
                 num_nodes: n,
@@ -2318,8 +2349,10 @@ impl HbSolver {
                     "nonlinear HB coupling span exceeds this platform".to_string(),
                 )
             })?;
-            let g_spectra = self.conductance_spectra(state, extended, false)?;
-            let c_spectra = self.capacitance_spectra(state, extended, false)?;
+            let mut g_spectra = self.conductance_spectra(state, extended, false)?;
+            let mut c_spectra = self.capacitance_spectra(state, extended, false)?;
+            unfold_collocation_spectra(&mut g_spectra, self.fft.size(), extended);
+            unfold_collocation_spectra(&mut c_spectra, self.fft.size(), extended);
 
             let mut add_hankel = |i: usize, j: usize, k: usize, m: usize, hval: Complex64| {
                 let row_re = re_idx(i, k);
@@ -3638,6 +3671,75 @@ mod exact_matrix_free_tests {
         );
         assert_eq!(state.total_iterations, 1);
         assert!(state.x.iter().flatten().all(|&v| v == Complex64::ZERO));
+    }
+
+    #[test]
+    fn a_minimal_grid_newton_step_linearizes_the_collocation_residual() {
+        // A diode swinging through conduction on Xyce's minimal 2N+1 grid:
+        // the sampled conductance couples harmonic pairs through every grid
+        // coefficient, including those aliased past harmonic N.
+        let harmonics = 4;
+        for use_krylov in [false, true] {
+            let mut config = HbConfig::new(1e6)
+                .with_harmonics(harmonics)
+                .with_collocation_points(2 * harmonics + 1);
+            config.use_krylov = use_krylov;
+            let mut solver = HbSolver::new(config, 2);
+            solver.add_resistor(0, 1, 1e3);
+            solver.add_diode(1, 2, 1e-14, 1.0);
+            let source = solver
+                .try_add_named_voltage_source_branch_harmonics(1, 0, 0.65, &[(1, 0.2, 0.0)], "V1")
+                .unwrap();
+            solver
+                .try_add_periodic_voltage_source_branch(1, 0, source, 1, "V1")
+                .unwrap();
+            let mut state = HbSolverState::new(2, harmonics);
+            state.try_prepare_mna_branches(1, harmonics).unwrap();
+            state.x[0][0] = Complex64::new(0.65, 0.0);
+            state.x[0][1] = Complex64::new(0.1, 0.0);
+            state.x[1][0] = Complex64::new(0.6, 0.0);
+            state.x[1][1] = Complex64::new(0.04, -0.02);
+            state.x[1][2] = Complex64::new(0.0, 0.01);
+            let residual = |solver: &mut HbSolver, state: &mut HbSolverState| {
+                solver
+                    .compute_full_residual_with_gmin(state, 0.0, 1.0)
+                    .unwrap();
+                state
+                    .residual
+                    .iter()
+                    .chain(&state.mna_branch_residual)
+                    .flatten()
+                    .copied()
+                    .collect::<Vec<_>>()
+            };
+            let norm = |values: &[Complex64]| {
+                values
+                    .iter()
+                    .map(|value| value.norm_sqr())
+                    .sum::<Value>()
+                    .sqrt()
+            };
+            let initial = residual(&mut solver, &mut state);
+            let step = solver
+                .newton_correction(&state, 0.0, &NoAbort)
+                .unwrap()
+                .unwrap();
+            let (nodes, branches) = (state.x.clone(), state.mna_branch_currents.clone());
+            let alpha = 1e-4;
+            solver.set_newton_trial(&mut state, &nodes, &branches, &step, alpha);
+            let trial = residual(&mut solver, &mut state);
+            // Along an exact Newton direction R(x + a dx) = (1 - a) R(x) + O(a^2).
+            let defect = trial
+                .iter()
+                .zip(&initial)
+                .map(|(trial, initial)| trial - (1.0 - alpha) * initial)
+                .collect::<Vec<_>>();
+            let mismatch = norm(&defect) / (alpha * norm(&initial));
+            assert!(
+                mismatch < 1e-3,
+                "krylov {use_krylov}: the Newton step misses {mismatch:e} of the residual's linear change"
+            );
+        }
     }
 
     #[test]
