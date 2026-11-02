@@ -367,3 +367,70 @@ fn the_sheets_table_counts_ports_and_off_sheet_nets_apart() {
         (0, 0)
     );
 }
+
+/// A manager with nothing pending is at rest: Apply waits and the footer
+/// says what for, with no failure strip; and a design without variants
+/// states that it has none rather than drawing an empty list.
+#[test]
+fn a_manager_at_rest_states_facts_not_failures() {
+    let ctx = Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut app = RSpiceApp::test_instance();
+    open_design_management_dialog(
+        &mut app.state.project.design_management,
+        &mut app.state.model,
+        &app.state.platform,
+        &mut app.state.workbench,
+    );
+    app.state.project.design_management.active_tab = DesignManagementTab::Variants;
+    // The test project has no sheet catalog yet, so opening bootstraps one
+    // into the draft, which is a change to apply. A design that already has
+    // one opens with nothing pending, as this one now does.
+    let dialog = &mut app.state.project.design_management;
+    dialog.original = dialog.draft.clone();
+    assert!(!dialog.dirty(), "nothing is pending");
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..4 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| render_design_management_dialog(&mut parts(&mut app), ctx),
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    let says = |text: &str| {
+        nodes.values().any(|node| {
+            node.label().is_some_and(|label| label.contains(text))
+                || node.value().is_some_and(|value| value.contains(text))
+        })
+    };
+    assert!(
+        says("No reviewed design changes are pending."),
+        "the footer does not say what Apply waits for"
+    );
+    assert!(
+        !says("cannot continue"),
+        "a manager at rest is shown failing"
+    );
+    assert!(
+        nodes.values().any(|node| {
+            node.label() == Some("Active assembly variant") && node.value() == Some("None")
+        }),
+        "the design's lack of variants is not stated"
+    );
+    assert!(
+        !nodes.values().any(|node| {
+            node.role() == egui::accesskit::Role::ComboBox
+                && node.label() == Some("Active assembly variant")
+        }),
+        "an empty variant list is offered"
+    );
+}

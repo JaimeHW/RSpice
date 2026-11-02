@@ -378,20 +378,21 @@ pub(super) fn variants_manager_body(
             }
         });
 
-        let mut selected = active;
-        if setting_combo_by_id(
-            right,
-            "Active assembly variant",
-            &names,
-            &mut selected,
-            write_allowed,
-        ) && let Some(id) = selected
-        {
-            apply_domain_result(
-                &mut dialog.error,
-                draft.variants_mut().set_active(id),
-                "Active variant changed.",
-            );
+        // With no variant there is nothing to choose: the row says so,
+        // rather than offering an empty list.
+        if names.is_empty() {
+            property_row(right, ACTIVE_VARIANT, "None");
+        } else {
+            let mut selected = active;
+            if setting_combo_by_id(right, ACTIVE_VARIANT, &names, &mut selected, write_allowed)
+                && let Some(id) = selected
+            {
+                apply_domain_result(
+                    &mut dialog.error,
+                    draft.variants_mut().set_active(id),
+                    "Active variant changed.",
+                );
+            }
         }
         let settings = draft.variants().settings().clone();
         let mut inheritance = settings.inheritance;
@@ -490,6 +491,9 @@ pub(super) fn variants_manager_body(
     });
     action
 }
+
+/// The Variants tab's row naming the variant the design builds.
+const ACTIVE_VARIANT: &str = "Active assembly variant";
 
 pub(super) fn annotation_manager_body(
     ui: &mut Ui,

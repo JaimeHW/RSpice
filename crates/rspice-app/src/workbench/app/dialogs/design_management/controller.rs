@@ -55,6 +55,12 @@ pub(in crate::workbench) fn render_design_management_dialog(
         "Cancel"
     };
     let error = parts.dialog.error.clone();
+    // A manager with nothing pending is at rest, not failing: Apply waits
+    // for a reviewed change, and the footer says so without a failure mark.
+    let at_rest = validation
+        .as_ref()
+        .err()
+        .is_some_and(|message| message == NOTHING_PENDING);
     let mut body_scroll_offset = parts.dialog.body_scroll_offset;
     let mut dialog = Dialog::new(page.title(), page.primary())
         .description(description)
@@ -74,15 +80,20 @@ pub(in crate::workbench) fn render_design_management_dialog(
             "Discard uncommitted design-management changes?",
             "The live project remains unchanged. Subordinate operations already added to this manager draft are discarded together.",
         );
-    } else if let Some(error) = error
-        .as_deref()
-        .or_else(|| validation.as_ref().err().map(String::as_str))
-    {
+    } else if let Some(error) = error.as_deref().or_else(|| {
+        validation
+            .as_ref()
+            .err()
+            .filter(|_| !at_rest)
+            .map(String::as_str)
+    }) {
         dialog = dialog.transaction_state(
             DialogTransactionTone::Error,
             "Design transaction cannot continue",
             error,
         );
+    } else if at_rest {
+        dialog = dialog.hint(NOTHING_PENDING);
     }
 
     let mut body_action = DesignManagementBodyAction::None;
@@ -284,6 +295,9 @@ fn publish_design_management_draft(parts: &mut DesignManagementParts<'_>) -> Res
     Ok(())
 }
 
+/// What Apply waits for while the manager holds no reviewed change.
+const NOTHING_PENDING: &str = "No reviewed design changes are pending.";
+
 pub(super) fn validate_design_management_page(
     dialog: &DesignManagementDialogState,
     model: &Model,
@@ -297,7 +311,7 @@ pub(super) fn validate_design_management_page(
     match page {
         DesignManagementPage::Manager => {
             if !dialog.dirty() {
-                return Err("No reviewed design changes are pending.".to_owned());
+                return Err(NOTHING_PENDING.to_owned());
             }
         }
         DesignManagementPage::NewSheet => {
