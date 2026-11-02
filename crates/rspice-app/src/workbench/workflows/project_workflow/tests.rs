@@ -1979,7 +1979,10 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
         })
         .expect_err("a library segment with a space is refused");
 
-    assert!(error.starts_with("Library"), "{error}");
+    assert_eq!(
+        error,
+        "The library name can use only letters, numbers and underscores."
+    );
     assert_eq!(state.model.workspace.content.project.id(), before);
     assert!(
         state

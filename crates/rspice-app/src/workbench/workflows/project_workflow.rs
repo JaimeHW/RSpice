@@ -99,22 +99,66 @@ impl Default for NewProjectParams {
 }
 
 impl NewProjectParams {
-    /// Reject an identity the project file could not persist, naming the field
-    /// that failed. This is the only validation authority for the three names:
-    /// the dialog calls it on every keystroke to gate its primary action, and
-    /// creation calls it again so a route that skipped the dialog cannot seed
-    /// a project whose own `validate` would refuse it.
+    /// The first name still empty, as what creation waits for. An empty field
+    /// has refused nothing: it is not filled in yet.
+    pub(crate) fn missing(&self) -> Option<&'static str> {
+        [
+            (&self.name, "Type a project name."),
+            (&self.root_library, "Type a library name."),
+            (&self.top_cell, "Type a top cell name."),
+        ]
+        .into_iter()
+        .find_map(|(value, wait)| value.is_empty().then_some(wait))
+    }
+
+    /// Reject an identity the project file could not persist, in one sentence
+    /// naming the field that failed. This is the only validation authority for
+    /// the three names: the dialog calls it on every keystroke to gate its
+    /// primary action, and creation calls it again so a route that skipped the
+    /// dialog cannot seed a project whose own `validate` would refuse it.
     pub(crate) fn validate(&self) -> Result<(), String> {
-        crate::state::ProjectDescriptor::validate_name(&self.name)
-            .map_err(|error| format!("Project name {error}"))?;
-        validate_identity_segment("Library", &self.root_library)?;
-        validate_identity_segment("Top cell", &self.top_cell)
+        if let Some(wait) = self.missing() {
+            return Err(wait.to_owned());
+        }
+        crate::state::ProjectDescriptor::validate_name(&self.name).map_err(project_name_refusal)?;
+        validate_identity_segment("library", &self.root_library)?;
+        validate_identity_segment("top cell", &self.top_cell)
+    }
+}
+
+/// Why the project file refuses `name`, as a sentence.
+fn project_name_refusal(error: rspice_project::ProjectDescriptorError) -> String {
+    use rspice_project::ProjectDescriptorError as Refusal;
+    match error {
+        Refusal::EmptyName => "Type a project name.".to_owned(),
+        Refusal::NameTooLong { grapheme_count } => {
+            format!("The project name is {grapheme_count} characters long; the limit is 120.")
+        }
+        Refusal::SurroundingWhitespace => {
+            "The project name cannot begin or end with a space.".to_owned()
+        }
+        Refusal::ControlCharacter(_) => {
+            "The project name cannot contain a control character.".to_owned()
+        }
+        Refusal::PathSeparator(_) => "The project name cannot contain / or \\.".to_owned(),
+        other => {
+            let text = other.to_string();
+            let mut letters = text.chars();
+            letters.next().map_or_else(String::new, |first| {
+                format!("{}{}.", first.to_uppercase(), letters.as_str())
+            })
+        }
     }
 }
 
 fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
-    crate::state::workspace::validate_cell_view_name_segment(value)
-        .map_err(|error| format!("{field} {error}"))
+    use rspice_design_model::cell_view::CellViewNameError;
+    crate::state::workspace::validate_cell_view_name_segment(value).map_err(|error| match error {
+        CellViewNameError::Empty => format!("Type a {field} name."),
+        CellViewNameError::UnsupportedCharacter(_) => {
+            format!("The {field} name can use only letters, numbers and underscores.")
+        }
+    })
 }
 
 /// Replace the session with a blank default project.
@@ -174,7 +218,7 @@ pub(crate) fn refuse_new_project(
         return Err(ProjectLifecycleError::ActiveRun.to_string());
     }
     if let Err(error) = params.validate() {
-        workbench.prompt(format!("New project not created: {error}"));
+        workbench.prompt(format!("New project not created. {error}"));
         return Err(error);
     }
     Ok(())

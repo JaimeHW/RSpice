@@ -45,6 +45,22 @@ impl NewProjectDialogState {
             self.library = library_slug(&self.name);
         }
     }
+
+    /// What the footer says. An empty field has refused nothing, so the
+    /// footer names what Create waits for as a plain fact; a filled field the
+    /// project file could not record, or a refused create, is stated as a
+    /// refusal; a complete identity gets the reminder.
+    pub(crate) fn footer(&self) -> Result<&'static str, String> {
+        let params = self.params();
+        if let Some(wait) = params.missing() {
+            return Ok(wait);
+        }
+        params.validate()?;
+        match &self.error {
+            Some(refusal) => Err(refusal.clone()),
+            None => Ok("Nothing is written to disk until you save."),
+        }
+    }
 }
 
 /// Open the transaction with the default library and top cell. The project

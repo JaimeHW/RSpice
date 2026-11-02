@@ -7,7 +7,7 @@ use egui::Context;
 use crate::state::workspace::{DEFAULT_SCHEMATIC_VIEW, PROJECT_DESCRIPTOR_SCHEMA_VERSION};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, input_row, kv_row};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize, input_row, kv_row};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
 use crate::workbench::framework::feature::Cx;
 use crate::workbench::project::ProjectFeature;
@@ -26,6 +26,12 @@ impl ProjectFeature {
         // re-validates the post-edit identity, so the one-frame lag can never
         // let an invalid identity through.
         let entry_valid = cx.state.new_project.params().validate().is_ok();
+        // What Create waits for, or why it refuses, stands in the footer
+        // beside it, so the body ends at its last row.
+        let (hint, tone) = match cx.state.new_project.footer() {
+            Ok(fact) => (fact.to_owned(), DialogHintTone::Neutral),
+            Err(refusal) => (refusal, DialogHintTone::Error),
+        };
 
         let dialog = &mut cx.state.new_project;
         let choice = Dialog::new("Create RSpice project", "Create project")
@@ -35,7 +41,8 @@ impl ProjectFeature {
             )
             .size(DialogSize::Transaction)
             .ghost("Cancel")
-            .hint("nothing is written to disk until Save")
+            .hint(hint)
+            .hint_tone(tone)
             .primary_enabled(entry_valid)
             .show(ctx, |ui| {
                 ui.columns(2, |columns| {
@@ -55,8 +62,6 @@ impl ProjectFeature {
 }
 
 fn render_identity(ui: &mut egui::Ui, dialog: &mut NewProjectDialogState) {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
     section_head(ui, "Project identity");
     ui.spacing_mut().item_spacing.y = 2.0;
 
@@ -80,20 +85,6 @@ fn render_identity(ui: &mut egui::Ui, dialog: &mut NewProjectDialogState) {
         "Format",
         &format!(".rspiceproj \u{b7} schema {PROJECT_DESCRIPTOR_SCHEMA_VERSION}"),
     );
-
-    let message = dialog
-        .params()
-        .validate()
-        .err()
-        .or_else(|| dialog.error.clone());
-    if let Some(message) = message {
-        ui.add_space(tokens::SP_3);
-        ui.label(
-            egui::RichText::new(message)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(c.err),
-        );
-    }
 }
 
 fn render_contract(ui: &mut egui::Ui, dialog: &NewProjectDialogState) {
