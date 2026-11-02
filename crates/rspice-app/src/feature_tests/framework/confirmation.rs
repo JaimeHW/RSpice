@@ -131,7 +131,9 @@ fn close_project_review_renders_on_the_narrow_confirmation_surface() {
 }
 
 /// The save prompt in front of a destructive action is the same narrow
-/// question: no kicker, one sentence, and "Don't save" set apart.
+/// question: no kicker, one sentence, and "Don't save" set apart. Over a
+/// project that was never saved, the sentence is the one closing it says,
+/// so one state is never worded two ways.
 #[test]
 fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
     let mut app = RSpiceApp::test_instance();
@@ -151,7 +153,7 @@ fn save_prompt_asks_one_question_on_the_narrow_confirmation_surface() {
     assert_narrow_save_prompt(
         &painted,
         "Save changes to \u{201c}lna-frontend\u{201d}?",
-        "Your changes will be lost if you don't save them.",
+        "This project has never been saved.",
     );
     for retired in [
         "SCHEMATIC",

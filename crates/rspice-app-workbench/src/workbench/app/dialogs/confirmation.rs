@@ -11,7 +11,7 @@ use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
 use crate::ui::panels::WorkbenchIcon;
 use crate::workbench::app::dialogs::confirmation_state::{
-    ConfirmationResponse, ProjectReviewRequest,
+    ConfirmationAction, ConfirmationResponse, ProjectReviewRequest,
 };
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::lifecycle::project_lifecycle::{
@@ -95,11 +95,30 @@ fn render_pending_browser_file_operation(app: &mut impl ConfirmationHost, ctx: &
     }
 }
 
+/// What a save prompt says of a project that has never been saved: all of
+/// it is unsaved. Every prompt over the whole project says it the same way.
+const NEVER_SAVED: &str = "This project has never been saved.";
+
 fn render_save_confirmation_dialog(app: &mut impl ConfirmationHost, ctx: &Context) {
+    let never_saved = app.platform().project_lifecycle.accepted().is_none();
     let (title, consequence) = match app.workbench().confirmation_dialog.pending_action {
         Some(action) => (
             action.prompt_title(app.model().workspace.content.project.name().trim()),
-            action.prompt_consequence(),
+            // Leaving a never-saved project is stated as closing it is, so
+            // the same project is never described two ways.
+            if never_saved
+                && matches!(
+                    action,
+                    ConfirmationAction::ProjectNew
+                        | ConfirmationAction::ProjectOpen
+                        | ConfirmationAction::OpenNetlistProject
+                        | ConfirmationAction::CloseProject(_)
+                )
+            {
+                NEVER_SAVED
+            } else {
+                action.prompt_consequence()
+            },
         ),
         None => (
             "Save changes?".to_owned(),
@@ -240,7 +259,7 @@ fn render_close_save_prompt(
         format!("Save changes to \u{201c}{project}\u{201d}?")
     };
     let summary = match (never_saved, unsaved.len()) {
-        (true, _) => "This project has never been saved.".to_owned(),
+        (true, _) => NEVER_SAVED.to_owned(),
         (false, 1) => "1 document has unsaved changes.".to_owned(),
         (false, count) => format!("{count} documents have unsaved changes."),
     };
