@@ -290,12 +290,7 @@ impl RSpiceApp {
         match action {
             ConfirmationAction::ProjectNew => match example {
                 // An example opens as a new project the reader then saves.
-                Some(example) => {
-                    crate::workbench::tools::examples_browser::open_example(
-                        &mut self.state,
-                        &example,
-                    );
-                }
+                Some(example) => self.state.project.examples_confirmed = Some(example),
                 // The confirmation resolved what happens to the *current*
                 // project; the new one still has to be named before it exists.
                 None => crate::workbench::app::open_new_project_dialog(&mut self.state),

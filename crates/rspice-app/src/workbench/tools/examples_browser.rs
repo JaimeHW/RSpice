@@ -40,7 +40,7 @@ pub(crate) fn create_example_project(state: &mut AppState, example: Example) -> 
 }
 
 /// Open `name` as a new project, then ask where to save it.
-pub(crate) fn open_example(state: &mut AppState, name: &str) {
+fn open_example(state: &mut AppState, name: &str) {
     if let Some(example) = EXAMPLES.into_iter().find(|example| example.name == name)
         && create_example_project(state, example).is_ok()
     {
@@ -131,6 +131,11 @@ fn example_row(ui: &mut egui::Ui, example: Example, selected: bool) -> egui::Res
 
 /// The Examples dialog, while it is open.
 pub(crate) fn show(ctx: &Context, state: &mut AppState) {
+    // The example New project's prompt let through, once the project it
+    // replaces was saved or let go.
+    if let Some(name) = state.project.examples_confirmed.take() {
+        open_example(state, &name);
+    }
     let Some(mut selected) = state.project.examples_selection else {
         return;
     };

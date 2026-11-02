@@ -149,6 +149,9 @@ pub(crate) struct ProjectState {
     pub project_launcher_page: crate::workbench::project::workspace_state::ProjectLauncherPage,
     /// The Examples dialog, while it is open: the example chosen in it.
     pub(crate) examples_selection: Option<usize>,
+    /// The example New project's prompt let through, which Examples opens
+    /// on its next frame once the project it replaces was saved or let go.
+    pub(crate) examples_confirmed: Option<String>,
     pub project_page: crate::workbench::project::workspace_state::ProjectPage,
     /// Device-local filters and row selections for the Project workspace.
     /// They affect presentation only and never participate in project
