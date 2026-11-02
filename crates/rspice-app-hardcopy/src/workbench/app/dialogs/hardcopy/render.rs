@@ -175,6 +175,12 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
         clear_preview_textures(ctx);
         return;
     }
+    // The dialog appears once it has read its source, rather than over a
+    // frame or two claiming there is none.
+    if parts.dialog.opening_source_pending() {
+        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        return;
+    }
     if parts.dialog.printer_discovery_busy || parts.dialog.busy {
         ctx.request_repaint_after(std::time::Duration::from_millis(50));
     }
@@ -976,12 +982,6 @@ fn section_navigation(
                                     )
                                     .truncate(),
                                 );
-                                ui.add_space(5.0);
-                                ui.label(
-                                    egui::RichText::new("SEALED PUBLICATION SOURCE")
-                                        .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                                        .color(t.color.accent),
-                                );
                             });
                     },
                 );
@@ -1242,7 +1242,7 @@ pub fn editor_column(
 }
 
 fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
-    section_panel_header(ui, draft.section, draft.workflow);
+    section_panel_header(ui, draft.section);
     Frame::NONE
         .inner_margin(Margin::symmetric(PANEL_INSET_X, PANEL_INSET_Y))
         .show(ui, |ui| {
@@ -1264,49 +1264,34 @@ fn editor_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAction {
         .inner
 }
 
-fn section_panel_header(ui: &mut Ui, section: HardcopySection, workflow: HardcopyWorkflow) {
-    let (eyebrow, description) = match section {
-        HardcopySection::Source => (
-            "SEALED INPUT",
-            "Choose the retained document and the extent of it this hardcopy publishes. Both are resolved again before execution.",
-        ),
-        HardcopySection::Page => (
-            "OUTPUT MEDIA",
-            "Physical media, scale and tiling for the output. None of it rewrites the authored drawing sheet.",
-        ),
-        HardcopySection::DrawingSheet => (
-            "SHEET FURNITURE",
-            "Decide how much of the authored sheet is drawn, and what becomes of content that crosses it.",
-        ),
-        HardcopySection::Output => (
-            if workflow == HardcopyWorkflow::Export {
-                "ARTIFACT TARGET"
-            } else {
-                "PUBLICATION TARGET"
-            },
-            "Format, resolution and color. Each option is bounded by what this host can actually produce.",
-        ),
-        HardcopySection::Identity => (
-            "PROVENANCE",
-            "Legends, headers, provenance and watermark carried on every published page.",
-        ),
+fn section_panel_header(ui: &mut Ui, section: HardcopySection) {
+    let description = match section {
+        HardcopySection::Source => {
+            "Choose the retained document and the extent of it this hardcopy publishes."
+        }
+        HardcopySection::Page => {
+            "Physical media, scale and tiling for the output. None of it rewrites the authored drawing sheet."
+        }
+        HardcopySection::DrawingSheet => {
+            "Decide how much of the authored sheet is drawn, and what becomes of content that crosses it."
+        }
+        HardcopySection::Output => {
+            "Format, resolution and color. Each option is bounded by what this host can actually produce."
+        }
+        HardcopySection::Identity => {
+            "Legends, headers, provenance and watermark carried on every published page."
+        }
     };
-    panel_header(ui, eyebrow, section.label(), description);
+    panel_header(ui, section.label(), description);
 }
 
-fn panel_header(ui: &mut Ui, eyebrow: &str, title: &str, description: &str) {
+fn panel_header(ui: &mut Ui, title: &str, description: &str) {
     let t = Tokens::get(ui.ctx());
     let header = Frame::NONE
         .fill(t.color.bg_elevated)
         .inner_margin(Margin::symmetric(18, 14))
         .show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.label(
-                egui::RichText::new(eyebrow)
-                    .font(theme::mono(tokens::FS_0, FontWeight::SemiBold))
-                    .color(t.color.accent),
-            );
-            ui.add_space(4.0);
             ui.label(
                 egui::RichText::new(title)
                     .font(theme::sans(tokens::FS_3, FontWeight::SemiBold))
@@ -1395,17 +1380,6 @@ pub(super) fn fact_list(ui: &mut Ui, facts: &[(&'static str, String)]) {
                 );
             }
         });
-}
-
-/// The leading bytes of a content digest, which is as much as anyone reads and
-/// still far more than enough to tell two revisions apart by eye.
-pub(super) fn short_digest(digest: &crate::product::ContentDigest) -> String {
-    digest
-        .as_bytes()
-        .iter()
-        .take(8)
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 /// The composition below the rail's width: the sections become a tab strip

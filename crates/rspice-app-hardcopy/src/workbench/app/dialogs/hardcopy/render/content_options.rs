@@ -150,11 +150,6 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
         });
     });
     ui.add_space(12.0);
-    let available = draft
-        .source_candidates
-        .iter()
-        .filter(|candidate| candidate.availability.is_available())
-        .count();
     fact_list(
         ui,
         &draft.source.as_ref().map_or_else(
@@ -163,19 +158,9 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                 vec![
                     ("Document", source.display_name().to_owned()),
                     ("Revision", format!("r{}", source.revision().get())),
-                    ("Content digest", short_digest(&source.content_digest())),
-                    (
-                        "Retained sources",
-                        format!("{available} available of {}", draft.source_candidates.len()),
-                    ),
                 ]
             },
         ),
-    );
-    ui.add_space(10.0);
-    panel_note(
-        ui,
-        "Identity, revision and content digest are sealed when this workflow opens. Publication resolves them again and refuses rather than publishing a document that changed underneath the preview.",
     );
     action
 }

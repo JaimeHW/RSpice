@@ -525,6 +525,13 @@ impl HardcopyDialogState {
         };
     }
 
+    /// Whether the dialog has opened and is still reading its source: the
+    /// first resolution has neither arrived nor failed. Until it does there
+    /// is nothing true to draw, only "no source, unresolved".
+    pub(crate) fn opening_source_pending(&self) -> bool {
+        self.open && self.busy && self.source.is_none() && self.error.is_none()
+    }
+
     fn from_setup(setup: HardcopySetup) -> Self {
         let display_unit = LengthUnit::Inches;
         let physical = setup.physical_page();
@@ -1319,6 +1326,31 @@ mod tests {
             HardcopyScope::CurrentSheet,
         )
         .unwrap()
+    }
+
+    /// From the moment it opens until its source is read, the dialog has
+    /// nothing true to draw; once the source arrives, or its reading fails,
+    /// it does.
+    #[test]
+    fn the_dialog_waits_for_its_source_before_it_draws() {
+        let mut draft = HardcopyDialogState::default();
+        draft.begin_open(HardcopyWorkflow::Print, Vec::new());
+        assert!(draft.opening_source_pending());
+        draft.open(
+            HardcopyWorkflow::Print,
+            source(),
+            ContentExtent::try_new(
+                Length::from_micrometres(250_000),
+                Length::from_micrometres(160_000),
+            )
+            .unwrap(),
+            None,
+        );
+        assert!(!draft.opening_source_pending());
+
+        draft.begin_open(HardcopyWorkflow::Print, Vec::new());
+        draft.error = Some("The source could not be read.".to_owned());
+        assert!(!draft.opening_source_pending());
     }
 
     #[test]
