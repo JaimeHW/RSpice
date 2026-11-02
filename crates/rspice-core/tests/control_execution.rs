@@ -1485,6 +1485,51 @@ fn redirection_sends_a_commands_output_to_a_file_as_ngspice_does() {
     }
 }
 
+/// ngspice `cd` moves the directory a relative file is written in
+/// (frontend/com_chdir.c), and `$inputdir` is the deck's directory
+/// (frontend/inp.c:589), which the presentation host names.
+#[test]
+fn cd_and_inputdir_place_redirected_files_as_ngspice_does() {
+    let source = "cd\nV1 1 0 1\nR1 1 0 1\n.control\necho $inputdir\ncd sub\necho h > r4.txt\n\
+                  cd $inputdir\necho i > r5.txt\n.endc\n.end\n";
+    let program =
+        ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort).unwrap();
+    let netlist = Netlist::parse(program.declarative_source()).unwrap();
+    let mut session = program.start(netlist.params.clone());
+    let mut circuit = ControlCircuit::new(netlist).unwrap();
+    circuit.set_input_directory("decks".into());
+    let engine = Engine::new(SimulationConfig::default());
+    let mut presented = Vec::new();
+    while let Some(command) = session.next_command(&mut circuit, &NoAbort).unwrap() {
+        if let ControlCommandEffect::Presentation(request) = circuit
+            .execute(&engine, &command, session.variables(), &NoAbort)
+            .unwrap()
+        {
+            presented.push(request);
+        }
+    }
+    assert_eq!(texts(&presented), ["decks"]);
+    let joined = |directory: &str, file: &str| {
+        std::path::Path::new(directory)
+            .join(file)
+            .to_string_lossy()
+            .into_owned()
+    };
+    assert_eq!(
+        files(&presented),
+        [
+            (joined("sub", "r4.txt"), "h\n".to_owned(), false),
+            (
+                joined(&joined("sub", "decks"), "r5.txt"),
+                "i\n".to_owned(),
+                false
+            ),
+        ]
+    );
+    let (_, error) = run_until_error("bare cd\nV1 1 0 1\nR1 1 0 1\n.control\ncd\n.endc\n.end\n");
+    assert!(error.unwrap().contains("cd needs a directory"));
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

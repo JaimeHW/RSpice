@@ -102,6 +102,8 @@ enum CommandKind {
     Presentation,
     Echo,
     Display,
+    /// `cd directory`.
+    ChangeDirectory,
     /// XSPICE `edisplay`.
     EventDisplay,
     /// XSPICE `eprint`.
@@ -148,6 +150,7 @@ impl CommandKind {
             "echo" => Self::Echo,
             "display" => Self::Display,
             "edisplay" => Self::EventDisplay,
+            "cd" => Self::ChangeDirectory,
             "eprint" => Self::EventPrint,
             "listing" => Self::Listing,
             "rusage" => Self::ResourceUsage,
@@ -199,6 +202,12 @@ pub struct ControlCircuit {
     /// The engine's result-value ceiling, which `let` vectors share with the
     /// retained datasets. Refreshed from the engine on every command.
     value_limit: usize,
+    /// ngspice `inputdir`: the directory the deck was read from, as the
+    /// presentation host names it.
+    input_directory: Option<String>,
+    /// The directory `cd` moved to, which a relative redirection's file is
+    /// in; `None` is the presentation host's own, the deck's directory.
+    directory: Option<String>,
 }
 
 impl ControlCircuit {
@@ -219,7 +228,16 @@ impl ControlCircuit {
             runtime_options: crate::netlist::SimulationOptions::default(),
             vectors: presentation::VectorStore::default(),
             value_limit: crate::resource::ResourceLimits::default().max_result_values,
+            input_directory: None,
+            directory: None,
         })
+    }
+
+    /// Name the directory the deck was read from, which a script reads as
+    /// `$inputdir` (ngspice frontend/inp.c:589, the path's directory part,
+    /// or `.`). Without it `$inputdir` is undefined.
+    pub fn set_input_directory(&mut self, directory: String) {
+        self.input_directory = Some(directory);
     }
 
     pub fn netlist(&self) -> &Netlist {
@@ -322,8 +340,16 @@ impl ControlCircuit {
                 &mut prepared
                 && let ControlPresentationKind::Text(text) = &mut request.kind
             {
+                // A relative file is in the directory `cd` moved to.
+                let path = match &self.directory {
+                    Some(directory) => std::path::Path::new(directory)
+                        .join(&redirect.path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    None => redirect.path,
+                };
                 request.kind = ControlPresentationKind::File {
-                    path: redirect.path,
+                    path,
                     text: std::mem::take(text),
                     append: redirect.append,
                 };
@@ -471,6 +497,25 @@ impl ControlCircuit {
                 command,
                 ControlPresentationKind::Text(self.display(command)?),
             )),
+            CommandKind::ChangeDirectory => {
+                // frontend/com_chdir.c: the first word names the directory.
+                // ngspice's bare `cd` goes to the home directory, which a
+                // batch run's files may not be written in.
+                let words = shell::words(&command.arguments);
+                let Some(directory) = words.first() else {
+                    return Err(command_error(
+                        line,
+                        "cd needs a directory; a control script writes files only in the deck's \
+                         directory",
+                    )
+                    .into());
+                };
+                let base = std::path::Path::new(self.directory.as_deref().unwrap_or(""));
+                self.directory = Some(base.join(&directory.text).to_string_lossy().into_owned());
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
             CommandKind::EventDisplay => Ok(Self::batch_output(
                 command,
                 ControlPresentationKind::Text(self.event_display(command)?),
@@ -993,6 +1038,10 @@ impl ControlScalarEvaluator for ControlCircuit {
             "curplot" => Some(vec![self.plot_name()]),
             "batchmode" => Some(Vec::new()),
             "oscompiled" => Some(vec![os_compiled().to_string()]),
+            "inputdir" => self
+                .input_directory
+                .clone()
+                .map(|directory| vec![directory]),
             _ => None,
         }
     }

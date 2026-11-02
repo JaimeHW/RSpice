@@ -38,6 +38,19 @@ pub(super) fn run(
     let engine = build_observed_engine(args, config, netlist, quiet)?;
     let mut circuit =
         ControlCircuit::new(netlist.clone()).map_err(|error| map_execution(error, script, args))?;
+    // ngspice `inputdir` (frontend/inp.c:589): the deck path's directory
+    // part, or `.` (misc/util.c:241 ngdirname).
+    if !crate::commands::is_stdin(&args.input) {
+        circuit.set_input_directory(
+            args.input
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .map_or_else(
+                    || ".".to_owned(),
+                    |parent| parent.to_string_lossy().into_owned(),
+                ),
+        );
+    }
     let mut session = program.start(netlist.params.clone());
     let transaction = if publish::current().is_none() {
         Some(publish::begin()?)

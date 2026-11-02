@@ -69,6 +69,25 @@ fn control_redirection_writes_files_in_the_decks_directory() {
     assert!(!outside.exists());
 }
 
+/// `cd $inputdir` (ngspice frontend/inp.c:589) moves to the deck's own
+/// directory, so the file lands beside the deck.
+#[test]
+fn control_cd_to_inputdir_writes_beside_the_deck() {
+    let dir = test_dir("control-inputdir");
+    let deck = dir.join("inputdir.cir");
+    std::fs::write(
+        &deck,
+        "inputdir\nV1 in 0 1\nR1 in 0 1k\n.control\ncd $inputdir\necho there > beside.txt\n\
+         .endc\n.end\n",
+    )
+    .unwrap();
+    passed(&run(&deck, &dir.join("result.csv"), &[]));
+    assert_eq!(
+        std::fs::read_to_string(dir.join("beside.txt")).unwrap(),
+        "there\n"
+    );
+}
+
 #[test]
 fn complex_control_scalars_reach_print_publication_without_projection() {
     let dir = test_dir("control-complex-scalars");
