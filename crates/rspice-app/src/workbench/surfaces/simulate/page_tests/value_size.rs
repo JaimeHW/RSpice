@@ -121,3 +121,25 @@ fn every_value_a_studio_page_holds_is_painted_at_the_field_size() {
         "only {checked} field values were found painted"
     );
 }
+
+/// The Analyses card's facts read at the field size, each in its face: the
+/// plan statement is deck text, so mono; the prior datasets fact is words
+/// ("No prior datasets", "Run 3 finished"), so the body face.
+#[test]
+fn the_analyses_cards_facts_read_in_their_faces_at_the_field_size() {
+    let (texts, _) = paint(SimulationPage::Analyses);
+    let font_of = |wanted: &str| {
+        texts
+            .iter()
+            .find(|(text, _, _)| text == wanted)
+            .map(|(_, font, _)| font.clone())
+            .unwrap_or_else(|| panic!("{wanted:?} is painted"))
+    };
+    assert_eq!(font_of("No prior datasets"), crate::ui::theme::field_sans());
+    let statement = texts
+        .iter()
+        .find(|(text, _, _)| text.starts_with(".tran"))
+        .map(|(_, font, _)| font.clone())
+        .expect("the plan statement is painted");
+    assert_eq!(statement, crate::ui::theme::field_mono());
+}

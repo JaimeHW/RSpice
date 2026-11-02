@@ -2113,7 +2113,9 @@ fn analysis_contract(
                             )
                     }
                 };
-                property_row(ui, "Prior datasets", datasets.summary);
+                // Words ("No prior datasets", "Run 3 finished"), so the body
+                // face; the statement above is deck text and stays mono.
+                property_row_wrapped(ui, "Prior datasets", datasets.summary);
                 // The row above names the run; this opens it. Kept as a
                 // separate control rather than making the row clickable,
                 // because every other property row here is read-only and one

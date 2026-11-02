@@ -814,7 +814,8 @@ fn render_inspector(
                         ));
                     }
                 } else {
-                    crate::workbench::design_system::property_row(
+                    // A sentence, so the body face rather than a value's mono.
+                    crate::workbench::design_system::property_row_wrapped(
                         ui,
                         "Status",
                         "No retained run selected",
