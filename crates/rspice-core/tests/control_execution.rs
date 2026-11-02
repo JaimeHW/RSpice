@@ -1564,7 +1564,9 @@ fn sp_leaves_scattering_parameters_as_ngspice_does() {
 /// `meas` (measure.c:37, com_measure2.c:1623) measures the current plot and
 /// prints get_measure2's line for it, then binds the result with `let` to
 /// seven digits; a measurement that finds nothing prints ` meas ... failed!`
-/// and binds nothing. The lines are ngspice-46's for a triangle from 0 to 1 V
+/// and binds nothing. Two vectors cross rising where their difference rises
+/// (`texp`, as the triangle falls), and `10m` is a number. The lines are
+/// ngspice-46's for a triangle from 0 to 1 V
 /// and back over 2 ms, whose linear pieces every measurement reads exactly.
 #[test]
 fn meas_measures_the_current_plot_as_ngspice_does() {
@@ -1575,6 +1577,7 @@ fn meas_measures_the_current_plot_as_ngspice_does() {
          meas tran vint INTEG v(in) from=0 to=2m\nmeas tran vat FIND v(in) AT=0.25m\n\
          meas tran twhen WHEN v(in)=0.75 FALL=1\nlet half = 0.5\n\
          meas tran thalf WHEN v(in)= half RISE=1\nmeas tran bad WHEN v(in)=2 RISE=1\n\
+         meas tran texp WHEN v(in)=2*v(in)-0.5 RISE=1\nmeas tran t10m WHEN v(in)=10m\n\
          meas tran vmaxat MAX_AT v(in)\nmeas tran inner max v(in) > inner.txt\n\
          let twice = tdelay*2\nprint twice\n.endc\n.end\n",
     );
@@ -1590,6 +1593,8 @@ fn meas_measures_the_current_plot_as_ngspice_does() {
             "twhen               =  1.25000e-03",
             "thalf               =  5.00000e-04",
             " meas tran bad when v(in)=2 rise=1 failed!",
+            "texp                =  1.50000e-03",
+            "t10m                =  1.00000e-05",
             "vmaxat              =  1.00000e-03 with=  1.00000e+00",
         ]
     );

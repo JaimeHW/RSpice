@@ -68,11 +68,17 @@ const KEYWORDS: [&str; 13] = [
 /// `name=value` settings whose value is a number (measure_parse_stdParams).
 const SETTINGS: [&str; 8] = ["VAL", "AT", "FROM", "TO", "TD", "RISE", "FALL", "CROSS"];
 
-/// INPevaluate's number, a scale factor and unit letters included.
+/// INPevaluate's number, a scale factor and unit letters included. A word
+/// with anything but letters after its number, `0.9*v(2)`, is an
+/// expression.
 fn number(text: &str) -> Option<Value> {
-    text.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '+' | '-' | '.'))
-        .then(|| parse_spice_value(text).ok())
-        .flatten()
+    let unit = text.trim_start_matches(|c: char| {
+        c.is_ascii_digit() || matches!(c, '+' | '-' | '.' | 'e' | 'E')
+    });
+    (text.starts_with(|c: char| c.is_ascii_digit() || matches!(c, '+' | '-' | '.'))
+        && unit.chars().all(|c| c.is_ascii_alphabetic()))
+    .then(|| parse_spice_value(text).ok())
+    .flatten()
 }
 
 fn is_literal(text: &str) -> bool {
@@ -96,6 +102,30 @@ struct Operands {
 }
 
 impl Operands {
+    /// Hand `samples` over as a signal of their own; returns its name.
+    fn push(&mut self, samples: Vec<Value>) -> String {
+        let name = format!("v(meas_operand_{})", self.signals.len() + 1);
+        self.signals.push((name.clone(), samples));
+        name
+    }
+
+    /// The signal `left - right` of two signals already handed over.
+    fn difference(&mut self, left: &str, right: &str) -> String {
+        let samples = |name: &str| {
+            self.signals
+                .iter()
+                .find(|(signal, _)| signal == name)
+                .map(|(_, samples)| samples.as_slice())
+                .unwrap_or_default()
+        };
+        let difference = samples(left)
+            .iter()
+            .zip(samples(right))
+            .map(|(left, right)| left - right)
+            .collect();
+        self.push(difference)
+    }
+
     fn map(&self) -> HashMap<String, &[Value]> {
         let mut map = HashMap::new();
         for (name, samples) in &self.signals {
@@ -365,10 +395,16 @@ impl ControlCircuit {
                     let Operand::Signal(left) = self.measure_operand(key, operands, scope)? else {
                         return Err(command_error(line, format!("meas WHEN {key} is no vector")));
                     };
-                    let right = match self.measure_operand(value, operands, scope)? {
-                        Operand::Literal(value) | Operand::Signal(value) => value,
-                    };
-                    card.push(format!("{left}={right}"));
+                    card.push(match self.measure_operand(value, operands, scope)? {
+                        Operand::Literal(value) => format!("{left}={value}"),
+                        // ngspice counts the crossings of two vectors by
+                        // their difference (com_measure2.c:563), where this
+                        // host's engine reads the left one's slope, as Xyce
+                        // does: the difference is measured against zero.
+                        Operand::Signal(right) => {
+                            format!("{}=0", operands.difference(&left, &right))
+                        }
+                    });
                 }
             } else if KEYWORDS.contains(&upper.as_str()) {
                 card.push(upper);
@@ -411,10 +447,8 @@ impl ControlCircuit {
                 format!("meas operand '{text}' is not a vector of the current plot"),
             ));
         }
-        let name = format!("v(meas_operand_{})", operands.signals.len() + 1);
         let samples = vector.samples.iter().map(|sample| sample.re).collect();
-        operands.signals.push((name.clone(), samples));
-        Ok(Operand::Signal(name))
+        Ok(Operand::Signal(operands.push(samples)))
     }
 }
 
