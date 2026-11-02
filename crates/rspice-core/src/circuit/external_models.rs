@@ -140,6 +140,9 @@ pub(crate) struct XspiceActiveWave {
     /// The window the wave's code models count as the current instant
     /// ([`crate::xspice::CmContext::is_due`]).
     coincidence: Value,
+    /// The wave is a Newton load of an operating-point solve
+    /// ([`crate::xspice::CmContext::is_dc_operating_point`]).
+    operating_point_load: bool,
     current_source_values: Vec<Value>,
     analog_transitions: crate::xspice::AnalogTransitionMap,
     pass: usize,
@@ -1397,6 +1400,22 @@ impl CircuitData {
         }
     }
 
+    /// Evaluate all XSPICE code model instances for one Newton load of an
+    /// operating-point solve. A transient's operating point evaluates with the
+    /// transient's analysis type; the instances are told it is an operating
+    /// point all the same, since Xyce runs its DIG devices' DCOP load there
+    /// (`dcopFlag`, N_ANP_Transient.C:879).
+    pub(crate) fn evaluate_xspice_operating_point_load(
+        &mut self,
+        time: Value,
+        voltages: &[Value],
+        analysis: crate::xspice::AnalysisType,
+    ) {
+        self.xspice_operating_point_load = true;
+        self.evaluate_xspice_with_analysis(time, 0.0, voltages, analysis);
+        self.xspice_operating_point_load = false;
+    }
+
     /// Fallible XSPICE evaluation for the requested analysis type.
     pub fn try_evaluate_xspice_with_analysis(
         &mut self,
@@ -1561,6 +1580,7 @@ impl CircuitData {
             } else {
                 crate::numerics::integration::code_model_coincidence(0.0, 0.0)
             },
+            operating_point_load: self.xspice_operating_point_load,
             current_source_values: self.current_sources.values_at_time(time),
             analog_transitions: Default::default(),
             pass: 0,
@@ -1744,6 +1764,7 @@ impl CircuitData {
         let companion_coefficients = wave.coefficients;
         let xyce_one_step_order2 = wave.xyce_one_step_order2;
         let coincidence = wave.coincidence;
+        let operating_point_load = wave.operating_point_load;
         // An event no further ahead than the window the wave's models count
         // as now is delivered at this timepoint, as the model that scheduled
         // it acts on its own instants (`CmContext::is_due`); a consumer dates
@@ -1895,6 +1916,7 @@ impl CircuitData {
             instance.set_transient_companion_coefficients(companion_coefficients);
             instance.set_xyce_one_step_order2(xyce_one_step_order2);
             instance.set_code_model_coincidence(coincidence);
+            instance.set_operating_point_load(operating_point_load);
             if let Err(e) = instance.update_inputs_with_analog_transitions(
                 solution,
                 num_nodes,

@@ -5185,3 +5185,54 @@ r2 p 0 1k
         );
     }
 }
+
+#[test]
+fn a_transient_operating_point_leaves_no_output_transition_pending() {
+    // PREB and CLRB rise through diodes, so the operating point's first
+    // loads see both low and the truth table asks for Q = QBAR = 1 a DELAY
+    // later. Xyce loads a DIG device in its DCOP form all through the
+    // transient's operating point: once PREB and CLRB settle high, Q holds
+    // IC1 = 0 and nothing is left to happen at 20 ns. Xyce 7.10 gives
+    // V(PREB_IN) = 2.32066153 V, and V(Q_OUT) = 0.0731671626 V and
+    // V(QBAR_OUT) = 2.92668650 V at every point of the run.
+    let netlist = Netlist::parse(
+        "JKFF whose PREB and CLRB rise through diodes\n\
+         V1 vp 0 3\n\
+         D1 vp PREB_in DX\n\
+         R3 PREB_in 0 10k\n\
+         D2 vp CLRB_in DX\n\
+         R4 CLRB_in 0 10k\n\
+         V3 CLK_in 0 0\n\
+         V4 J_in 0 0\n\
+         V5 K_in 0 0\n\
+         V_dpn dig_pn 0 3\n\
+         UJKFF1 JKFF dig_pn 0 PREB_in CLRB_in CLK_in J_in K_in Q_out QBar_out DMOD IC1=0 IC2=1\n\
+         R1 Q_out 0 100K\n\
+         R2 QBar_out 0 100K\n\
+         .model DX D(IS=1e-14)\n\
+         .model DMOD DIG (CLO=1e-12 CHI=1e-12 S0RLO=5 S0RHI=200 S0TSW=5e-9\n\
+         + S0VLO=-1 S0VHI=1.8 S1RLO=200 S1RHI=5 S1TSW=5e-9 S1VLO=1 S1VHI=3\n\
+         + RLOAD=1000 CLOAD=1e-12 DELAY=20ns)\n\
+         .end\n",
+    )
+    .expect("JKFF deck parses");
+    let result = Engine::new(rspice_core::engine::SimulationConfig {
+        spice_dialect: rspice_core::engine::SpiceDialect::Xyce,
+        ..rspice_core::engine::SimulationConfig::default()
+    })
+    .run_tran(&netlist, 100e-9, 1e-9)
+    .expect("JKFF transient runs");
+    let series = |node: &str| transient_node_series(&result, node);
+    assert!(
+        (series("preb_in")[0] - 2.320_661_53).abs() < 1e-6,
+        "V(PREB_IN) at the operating point: {}",
+        series("preb_in")[0]
+    );
+    for (index, time) in result.time.iter().enumerate() {
+        let (q, qbar) = (series("q_out")[index], series("qbar_out")[index]);
+        assert!(
+            (q - 0.073_167_162_6).abs() < 1e-6 && (qbar - 2.926_686_50).abs() < 1e-6,
+            "t = {time:e}: V(Q_OUT) = {q}, V(QBAR_OUT) = {qbar}"
+        );
+    }
+}

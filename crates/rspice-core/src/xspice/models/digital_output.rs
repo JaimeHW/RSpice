@@ -303,6 +303,13 @@ fn q_state(value: Value) -> Option<bool> {
     }
 }
 
+/// The value an output takes on a DCOP load: the IC its instance line gives
+/// (`ic` names the parameter) over the truth table's. Xyce's `setIC`
+/// (N_DEV_Digital.C:1988-2005) runs after the truth table on every DCOP load.
+fn dcop_output(ctx: &CmContext, ic: &str, truth_table: Option<bool>) -> Option<bool> {
+    q_state(ctx.param_or(ic, f64::NAN)).or(truth_table)
+}
+
 fn state_resistances(state: Option<bool>, params: DigParams) -> OutputResistances {
     match state {
         Some(false) => OutputResistances {
@@ -534,7 +541,7 @@ impl XyceDTff {
         let mut transition_time = ctx.state_prev(transition_index);
         let changed = previous_state.is_some() && state.is_some() && previous_state != state;
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             state = Self::input_logic_state(voltage, None, params);
             transition_time = 0.0;
         } else if changed {
@@ -594,7 +601,7 @@ impl XyceDTff {
         }
         let mut pending_q = q_state(ctx.state_prev(STATE_PENDING_Q));
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             q = t;
             transition_start = 0.0;
             transition_from = q;
@@ -1059,7 +1066,7 @@ impl XyceDGate {
             let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
             let mut transition_time = ctx.state_prev(transition_index);
 
-            if ctx.is_dc() {
+            if ctx.is_dc_operating_point() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
             } else if previous_state.is_some() && previous_state != state {
@@ -1115,13 +1122,13 @@ impl XyceDGate {
         // operating point.  Xyce carries a combinational gate's resolved
         // truth-table value into that first transient sample rather than
         // treating it as a delayed transition from X.
-        if !ctx.is_dc() && q.is_none() && desired.is_some() {
+        if !ctx.is_dc_operating_point() && q.is_none() && desired.is_some() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
         }
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
@@ -1283,7 +1290,7 @@ impl CodeModel for XyceDGate {
         let (inputs, _transition_times, last_input_transition_time) =
             self.sample_inputs(ctx, params);
         let desired = self.logic(&inputs);
-        let desired = if ctx.is_dc() {
+        let desired = if ctx.is_dc_operating_point() {
             q_state(ctx.param("ic")).or(desired)
         } else {
             desired
@@ -1427,7 +1434,7 @@ impl XyceDAdd {
             let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
             let mut transition_time = ctx.state_prev(transition_index);
 
-            if ctx.is_dc() {
+            if ctx.is_dc_operating_point() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
             } else if previous_state.is_some() && previous_state != state {
@@ -1485,13 +1492,13 @@ impl XyceDAdd {
             transition_start = 0.0;
         }
 
-        if !ctx.is_dc() && q.is_none() && desired.is_some() {
+        if !ctx.is_dc_operating_point() && q.is_none() && desired.is_some() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
         }
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
@@ -1725,9 +1732,15 @@ impl CodeModel for XyceDAdd {
             }
             _ => None,
         };
+        let mut sum_target = desired.map(|value| value.0);
+        let mut carry_target = desired.map(|value| value.1);
+        if ctx.is_dc_operating_point() {
+            sum_target = dcop_output(ctx, "ic_sum", sum_target);
+            carry_target = dcop_output(ctx, "ic_carry", carry_target);
+        }
         let (sum, sum_start, sum_from) = Self::update_output(
             ctx,
-            desired.map(|value| value.0),
+            sum_target,
             last_input_transition_time,
             params,
             DigitalOutputSlots {
@@ -1740,7 +1753,7 @@ impl CodeModel for XyceDAdd {
         );
         let (carry, carry_start, carry_from) = Self::update_output(
             ctx,
-            desired.map(|value| value.1),
+            carry_target,
             last_input_transition_time,
             params,
             DigitalOutputSlots {
@@ -1998,7 +2011,7 @@ impl XyceDLegacyGate {
             let mut state = XyceDTff::input_logic_state(voltage, previous_state, params);
             let mut transition_time = ctx.state_prev(transition_index);
             let changed = previous_state.is_some() && previous_state != state;
-            if ctx.is_dc() {
+            if ctx.is_dc_operating_point() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
             } else if changed {
@@ -2050,13 +2063,13 @@ impl XyceDLegacyGate {
             transition_from = q;
             transition_start = 0.0;
         }
-        if !ctx.is_dc() && q.is_none() && desired.is_some() {
+        if !ctx.is_dc_operating_point() && q.is_none() && desired.is_some() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
         }
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             // Xyce evaluates the combinational truth table first and then
             // applies GateData::setIC while establishing the DC operating
             // point.  An authored IC therefore owns the initial output even
@@ -2637,8 +2650,8 @@ impl XyceDLegacyDff {
         let mut clock_changed = false;
         let mut clock_state = None;
         let mut deferred_until = f64::NAN;
-        let transient_start =
-            !ctx.is_dc() && !ctx.state_prev(Self::TRANSIENT_INITIALIZED).is_finite();
+        let transient_start = !ctx.is_dc_operating_point()
+            && !ctx.state_prev(Self::TRANSIENT_INITIALIZED).is_finite();
 
         for index in 0..Self::INPUT_COUNT {
             let state_index = Self::input_state_index(index, Self::INPUT_STATE);
@@ -2677,7 +2690,7 @@ impl XyceDLegacyDff {
             }
             let changed = previous_state.is_some() && previous_state != state;
 
-            if ctx.is_dc() {
+            if ctx.is_dc_operating_point() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
             } else if metadata_changed {
@@ -2737,7 +2750,7 @@ impl XyceDLegacyDff {
             return (None, None);
         };
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             return if *prebar && *clrbar {
                 (Some(*data), Some(!*data))
             } else if *prebar && !*clrbar {
@@ -2819,13 +2832,13 @@ impl XyceDLegacyDff {
             transition_from = q;
             transition_start = 0.0;
         }
-        if !ctx.is_dc() && q.is_none() && desired.is_some() {
+        if !ctx.is_dc_operating_point() && q.is_none() && desired.is_some() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
         }
 
-        if ctx.is_dc() {
+        if ctx.is_dc_operating_point() {
             q = desired;
             transition_from = q;
             transition_start = 0.0;
@@ -3086,7 +3099,7 @@ impl CodeModel for XyceDLegacyDff {
         ) = Self::sample_inputs(ctx, params, vref);
         let previous_q = q_state(ctx.state_prev(Self::Q_STATE));
         let previous_qbar = q_state(ctx.state_prev(Self::QB_STATE));
-        let (q_target, qbar_target) = Self::targets(
+        let (mut q_target, mut qbar_target) = Self::targets(
             ctx,
             &inputs,
             previous_q,
@@ -3094,6 +3107,10 @@ impl CodeModel for XyceDLegacyDff {
             clock_changed,
             clock_state,
         );
+        if ctx.is_dc_operating_point() {
+            q_target = dcop_output(ctx, "ic1", q_target);
+            qbar_target = dcop_output(ctx, "ic2", qbar_target);
+        }
         let (q, q_start, q_from) = Self::update_output(
             ctx,
             q_target,
@@ -3479,8 +3496,8 @@ impl XyceDSequential {
         let mut event_changed = false;
         let mut event_state = None;
         let mut deferred_until = f64::NAN;
-        let transient_start =
-            !ctx.is_dc() && !ctx.state_prev(Self::TRANSIENT_INITIALIZED).is_finite();
+        let transient_start = !ctx.is_dc_operating_point()
+            && !ctx.state_prev(Self::TRANSIENT_INITIALIZED).is_finite();
 
         for index in 0..width {
             let state_index = Self::input_state_index(index, Self::INPUT_STATE);
@@ -3522,7 +3539,7 @@ impl XyceDSequential {
                 );
             }
 
-            if ctx.is_dc() {
+            if ctx.is_dc_operating_point() {
                 state = XyceDTff::input_logic_state(voltage, None, params);
                 transition_time = 0.0;
             } else if changed {
@@ -3607,7 +3624,7 @@ impl XyceDSequential {
                 let [Some(data), Some(_clock), Some(prebar), Some(clrbar)] = inputs else {
                     return (None, None);
                 };
-                if ctx.is_dc() {
+                if ctx.is_dc_operating_point() {
                     return Self::async_targets(*prebar, *clrbar, None, None, Some(*data));
                 }
                 if event_changed {
@@ -3622,7 +3639,7 @@ impl XyceDSequential {
                 let [Some(j), Some(k), Some(_clock), Some(prebar), Some(clrbar)] = inputs else {
                     return (None, None);
                 };
-                if ctx.is_dc() {
+                if ctx.is_dc_operating_point() {
                     return Self::async_targets(*prebar, *clrbar, None, None, Some(*j));
                 }
                 if event_changed {
@@ -3643,7 +3660,7 @@ impl XyceDSequential {
                 let [Some(data), Some(enable), Some(prebar), Some(clrbar)] = inputs else {
                     return (None, None);
                 };
-                if ctx.is_dc() {
+                if ctx.is_dc_operating_point() {
                     return Self::async_targets(*prebar, *clrbar, None, None, Some(*data));
                 }
                 if *prebar && *clrbar && *enable {
@@ -3916,7 +3933,7 @@ impl XyceDSequential {
             self.sample_inputs(ctx, params, vref);
         let previous_q = q_state(ctx.state_prev(Self::Q_STATE));
         let previous_qbar = q_state(ctx.state_prev(Self::QB_STATE));
-        let (q_target, qbar_target) = self.targets(
+        let (mut q_target, mut qbar_target) = self.targets(
             ctx,
             &inputs,
             previous_q,
@@ -3924,6 +3941,10 @@ impl XyceDSequential {
             event_changed,
             event_state,
         );
+        if ctx.is_dc_operating_point() {
+            q_target = dcop_output(ctx, "ic1", q_target);
+            qbar_target = dcop_output(ctx, "ic2", qbar_target);
+        }
         let output_event_time = if self.kind == XyceDSequentialKind::Dlatch
             && inputs.get(1).copied().flatten() == Some(false)
             && q_target == previous_q

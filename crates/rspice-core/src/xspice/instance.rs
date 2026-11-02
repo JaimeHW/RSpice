@@ -1809,6 +1809,12 @@ impl XspiceInstance {
         self.context.coincidence = window;
     }
 
+    /// Mark the evaluations that follow as Newton loads of an operating-point
+    /// solve ([`super::CmContext::is_dc_operating_point`]), or as not.
+    pub(crate) fn set_operating_point_load(&mut self, operating_point_load: bool) {
+        self.context.set_operating_point_load(operating_point_load);
+    }
+
     /// Apply the owning engine's resource policy before model initialization.
     pub(crate) fn set_resource_limits(&mut self, resource_limits: crate::resource::ResourceLimits) {
         self.context.set_resource_limits(resource_limits);

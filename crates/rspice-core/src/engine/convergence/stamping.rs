@@ -186,7 +186,7 @@ impl Engine {
         }
         .map_err(SimulationError::from)?;
         if circuit.has_independent_xspice_evaluation() {
-            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
+            circuit.evaluate_xspice_operating_point_load(time, solution, analysis);
             circuit
                 .stamp_xspice(matrix, rhs)
                 .map_err(SimulationError::from)?;
@@ -259,7 +259,7 @@ impl Engine {
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         self.update_operating_point_nonlinear(circuit, solution);
         if circuit.has_independent_xspice_evaluation() {
-            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
+            circuit.evaluate_xspice_operating_point_load(time, solution, analysis);
         }
     }
 
@@ -279,7 +279,7 @@ impl Engine {
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         circuit.prime_nonlinear_operating_point(solution);
         if circuit.has_independent_xspice_evaluation() {
-            circuit.evaluate_xspice_with_analysis(time, 0.0, solution, analysis);
+            circuit.evaluate_xspice_operating_point_load(time, solution, analysis);
         }
     }
 

@@ -589,6 +589,9 @@ pub struct CmContext {
     pub call_type: CallType,
     /// Rollback/commit phase for this evaluation call.
     evaluation_phase: EvaluationPhase,
+    /// Whether this evaluation is a Newton load of an operating-point solve,
+    /// whichever analysis type that solve evaluates with.
+    operating_point_load: bool,
     /// Current iteration count (for convergence tracking)
     pub iteration: usize,
     /// Resource policy inherited from the owning simulation engine.
@@ -783,6 +786,7 @@ impl CmContext {
             analysis: AnalysisType::DcOp,
             call_type: CallType::Init,
             evaluation_phase: EvaluationPhase::DirectEvaluation,
+            operating_point_load: false,
             iteration: 0,
             resource_limits: crate::resource::ResourceLimits::default(),
             inputs: CopyOnWrite::default(),
@@ -899,6 +903,12 @@ impl CmContext {
     /// Set the rollback/commit phase for the next model evaluation.
     pub(crate) fn set_evaluation_phase(&mut self, phase: EvaluationPhase) {
         self.evaluation_phase = phase;
+    }
+
+    /// Mark the evaluations that follow as Newton loads of an operating-point
+    /// solve, or as not.
+    pub(crate) fn set_operating_point_load(&mut self, operating_point_load: bool) {
+        self.operating_point_load = operating_point_load;
     }
 
     //-------------------------------------------------------------------------
@@ -3114,6 +3124,14 @@ impl CmContext {
     /// Check if this is DC analysis
     pub fn is_dc(&self) -> bool {
         matches!(self.analysis, AnalysisType::DcOp | AnalysisType::DcSweep)
+    }
+
+    /// Whether this evaluation is a load of a DC operating point: a DC
+    /// analysis, or the operating point a transient solves before its first
+    /// step, which evaluates with the transient's analysis type. A UIC
+    /// transient solves no operating point, so its time-zero load is not one.
+    pub(crate) fn is_dc_operating_point(&self) -> bool {
+        self.is_dc() || self.operating_point_load
     }
 
     /// Check if this is transient analysis

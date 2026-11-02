@@ -107,6 +107,7 @@ impl CircuitData {
             xspice_code_model_coincidence: crate::numerics::integration::code_model_coincidence(
                 0.0, 0.0,
             ),
+            xspice_operating_point_load: false,
             xspice_registry: Arc::new(CodeModelRegistry::with_builtins()),
             xspice_evaluation_error: None,
             xspice_evaluation_warning: None,

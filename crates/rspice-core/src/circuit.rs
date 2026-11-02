@@ -720,6 +720,9 @@ pub struct CircuitData {
     /// breakpoint schedule; every other analysis evaluates with the
     /// compatibility window.
     pub(crate) xspice_code_model_coincidence: Value,
+    /// Set while an operating-point Newton load evaluates the XSPICE
+    /// instances ([`Self::evaluate_xspice_operating_point_load`]).
+    pub(crate) xspice_operating_point_load: bool,
     /// XSPICE code model registry (shared across instances)
     pub(crate) xspice_registry: Arc<CodeModelRegistry>,
     /// First XSPICE evaluation failure seen during the current analysis.
