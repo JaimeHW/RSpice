@@ -380,7 +380,7 @@ fn render_start(
     ui.horizontal(|ui| {
         ui.add(
             egui::TextEdit::singleline(&mut dialog.join_code_input)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                .font(theme::field_mono())
                 .desired_width(180.0)
                 .hint_text("join code from the host"),
         );
@@ -660,25 +660,28 @@ fn render_participant_row(
             } else {
                 "Viewer"
             };
-            egui::ComboBox::from_id_salt(("live-session-capability", &participant.principal_id))
-                .selected_text(current)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_label(participant.editor, "Editor").clicked() {
-                        actions.push(LiveDialogAction::SetEditor(
-                            participant.principal_id.clone(),
-                            true,
-                        ));
-                    }
-                    if ui.selectable_label(!participant.editor, "Viewer").clicked() {
-                        actions.push(LiveDialogAction::SetEditor(
-                            participant.principal_id.clone(),
-                            false,
-                        ));
-                    }
-                    if ui.selectable_label(false, "Remove from session").clicked() {
-                        actions.push(LiveDialogAction::Remove(participant.principal_id.clone()));
-                    }
-                });
+            crate::ui::widgets::Combo::from_id_salt((
+                "live-session-capability",
+                &participant.principal_id,
+            ))
+            .selected_text(current)
+            .show_ui(ui, |ui| {
+                if ui.selectable_label(participant.editor, "Editor").clicked() {
+                    actions.push(LiveDialogAction::SetEditor(
+                        participant.principal_id.clone(),
+                        true,
+                    ));
+                }
+                if ui.selectable_label(!participant.editor, "Viewer").clicked() {
+                    actions.push(LiveDialogAction::SetEditor(
+                        participant.principal_id.clone(),
+                        false,
+                    ));
+                }
+                if ui.selectable_label(false, "Remove from session").clicked() {
+                    actions.push(LiveDialogAction::Remove(participant.principal_id.clone()));
+                }
+            });
             ui.label(
                 egui::RichText::new(&participant.joined_at)
                     .font(theme::mono(tokens::FS_0, FontWeight::Regular))
@@ -691,7 +694,7 @@ fn render_participant_row(
 /// The three host-controlled policy selects, mockup labels verbatim.
 fn render_policy_fields(ui: &mut egui::Ui, draft: &mut LiveSessionPolicySummary, id_salt: &str) {
     field_label(ui, "Guests join as");
-    egui::ComboBox::from_id_salt((id_salt, "guests"))
+    crate::ui::widgets::Combo::from_id_salt((id_salt, "guests"))
         .width(ui.available_width())
         .selected_text(if draft.guests_edit {
             "Editors · edit and trigger runs"
@@ -711,7 +714,7 @@ fn render_policy_fields(ui: &mut egui::Ui, draft: &mut LiveSessionPolicySummary,
             );
         });
     field_label(ui, "Joining");
-    egui::ComboBox::from_id_salt((id_salt, "joining"))
+    crate::ui::widgets::Combo::from_id_salt((id_salt, "joining"))
         .width(ui.available_width())
         .selected_text(if draft.approve_joins {
             "Approve each join"
@@ -727,7 +730,7 @@ fn render_policy_fields(ui: &mut egui::Ui, draft: &mut LiveSessionPolicySummary,
             );
         });
     field_label(ui, "Save a copy");
-    egui::ComboBox::from_id_salt((id_salt, "save-copy"))
+    crate::ui::widgets::Combo::from_id_salt((id_salt, "save-copy"))
         .width(ui.available_width())
         .selected_text(if draft.allow_save_copy {
             "Allowed · participants may fork"

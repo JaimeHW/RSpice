@@ -121,7 +121,7 @@ pub(super) fn filter_strip(ui: &mut Ui, view: &mut ProblemsView, tally: &Tally) 
                 .hint_text(FILTER_HINT)
                 .margin(FILTER_MARGIN)
                 .vertical_align(egui::Align::Center)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                .font(theme::field_mono()),
         );
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label("Filter findings by text");

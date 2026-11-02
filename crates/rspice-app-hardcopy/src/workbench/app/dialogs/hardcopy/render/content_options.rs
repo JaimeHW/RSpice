@@ -23,7 +23,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     form_row(ui, |row| {
         row.narrow(|ui| {
             field(ui, "Document type", |ui| {
-                egui::ComboBox::from_id_salt("hardcopy-document-type")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-document-type")
                     .selected_text(active_kind.map_or("No active type", document_kind_label))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -70,7 +70,7 @@ pub(super) fn source_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
             });
             field(ui, "Scope", |ui| {
                 let selected = active_scope.map_or("No active extent", scope_label);
-                egui::ComboBox::from_id_salt("hardcopy-scope")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-scope")
                     .selected_text(selected)
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -182,7 +182,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                     let selected = paper_label(&draft.paper);
                     // A narrow cell: a long choice ends in an ellipsis rather
                     // than widening the column into the page desk beside it.
-                    egui::ComboBox::from_id_salt("hardcopy-paper")
+                    crate::ui::widgets::Combo::from_id_salt("hardcopy-paper")
                         .selected_text(selected)
                         .width(ui.available_width())
                         .truncate()
@@ -253,7 +253,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                 } else {
                     scale_label(scale_kind).to_owned()
                 };
-                egui::ComboBox::from_id_salt("hardcopy-scale")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-scale")
                     .selected_text(selected)
                     .width(ui.available_width())
                     .truncate()
@@ -305,7 +305,7 @@ pub(super) fn page_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> BodyAc
                     1 => "Single page".to_owned(),
                     _ => manual_label(draft),
                 };
-                egui::ComboBox::from_id_salt("hardcopy-pagination")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-pagination")
                     .selected_text(selected)
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -448,7 +448,7 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
     form_row(ui, |row| {
         row.narrow(|ui| {
             field(ui, "Extent", |ui| {
-                egui::ComboBox::from_id_salt("hardcopy-schematic-extent")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-schematic-extent")
                     .selected_text(match draft.schematic_extent {
                         SchematicHardcopyExtent::AuthoredDrawingSheet => "Authored drawing sheet",
                         SchematicHardcopyExtent::CompleteSchematicContent => {
@@ -485,7 +485,7 @@ pub(super) fn drawing_sheet_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) 
                     OutsideSheetContentPolicy::ExtendOutput => "Extend output to include content",
                 };
                 ui.add_enabled_ui(!complete, |ui| {
-                    egui::ComboBox::from_id_salt("hardcopy-outside-sheet-content")
+                    crate::ui::widgets::Combo::from_id_salt("hardcopy-outside-sheet-content")
                         .selected_text(selected)
                         .width(ui.available_width())
                         .show_ui(ui, |ui| {
@@ -585,7 +585,7 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
     form_row(ui, |row| {
         row.wide(|ui| {
             field(ui, "Color mapping", |ui| {
-                egui::ComboBox::from_id_salt("hardcopy-color")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-color")
                     .selected_text(color_mapping_label(draft.color_mapping))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -625,7 +625,7 @@ pub(super) fn output_panel(ui: &mut Ui, draft: &mut HardcopyDialogState) -> Body
                         draft.format,
                         OutputFormat::NativePrinter | OutputFormat::BrowserPrintDocument
                     );
-                egui::ComboBox::from_id_salt("hardcopy-background")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-background")
                     .selected_text(background_label(draft.background))
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -707,7 +707,7 @@ fn output_format_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
         "Printer / target"
     };
     field(ui, output_label, |ui| {
-        egui::ComboBox::from_id_salt("hardcopy-output")
+        crate::ui::widgets::Combo::from_id_salt("hardcopy-output")
             .selected_text(format_label(draft.format))
             .width(ui.available_width())
             .show_ui(ui, |ui| {
@@ -894,7 +894,7 @@ fn raster_resolution_field(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                         ),
                         egui::TextEdit::singleline(&mut draft.raster_dpi_draft)
                             .id(raster_resolution_id())
-                            .font(egui::TextStyle::Monospace)
+                            .font(crate::ui::theme::field_mono())
                             .frame(Frame::NONE),
                     );
                     let suffix = ui.allocate_ui_with_layout(

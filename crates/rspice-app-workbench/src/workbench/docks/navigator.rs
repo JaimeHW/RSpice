@@ -201,7 +201,7 @@ pub fn panel_search(
             egui::TextEdit::singleline(query)
                 .id(field_id)
                 .hint_text(placeholder)
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .font(theme::field_sans())
                 .margin(egui::Margin {
                     left: 29,
                     right: if clearable {

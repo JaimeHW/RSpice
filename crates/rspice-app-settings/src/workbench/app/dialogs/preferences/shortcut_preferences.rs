@@ -529,7 +529,7 @@ fn toolbar_controls(
         [control_width, Tokens::get(ui.ctx()).metrics.ctl_h.max(28.0)],
         egui::TextEdit::singleline(&mut editor.query)
             .hint_text("Command, context, or key\u{2026}")
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular)),
+            .font(theme::field_sans()),
     );
     search.widget_info(|| {
         WidgetInfo::labeled(WidgetType::TextEdit, true, "Filter keyboard commands")

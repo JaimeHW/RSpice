@@ -25,7 +25,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     .map_or("No printer selected", |value| value.display_name());
                 let mut selected_device = None;
                 field(ui, "Printer", |ui| {
-                    egui::ComboBox::from_id_salt("hardcopy-printer")
+                    crate::ui::widgets::Combo::from_id_salt("hardcopy-printer")
                         .selected_text(selected_name)
                         .width(ui.available_width())
                         .show_ui(ui, |ui| {
@@ -55,7 +55,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     let paper_id = current_job.selected_paper_id().to_owned();
                     let mut media = current_job.media_source().clone();
                     field(ui, "Media source", |ui| {
-                        egui::ComboBox::from_id_salt("hardcopy-printer-media")
+                        crate::ui::widgets::Combo::from_id_salt("hardcopy-printer-media")
                             .selected_text(media_label(&media))
                             .width(ui.available_width())
                             .show_ui(ui, |ui| {
@@ -88,7 +88,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     });
                     let mut dpi = current_job.resolution_dpi();
                     field(ui, "Resolution", |ui| {
-                        egui::ComboBox::from_id_salt("hardcopy-printer-resolution")
+                        crate::ui::widgets::Combo::from_id_salt("hardcopy-printer-resolution")
                             .selected_text(format!("{dpi} dpi"))
                             .width(ui.available_width())
                             .show_ui(ui, |ui| {
@@ -104,7 +104,7 @@ pub(super) fn printer_properties_body(ui: &mut Ui, draft: &mut HardcopyDialogSta
                     });
                     let mut duplex = current_job.duplex();
                     field(ui, "Duplex", |ui| {
-                        egui::ComboBox::from_id_salt("hardcopy-printer-duplex")
+                        crate::ui::widgets::Combo::from_id_salt("hardcopy-printer-duplex")
                             .selected_text(duplex_label(duplex))
                             .width(ui.available_width())
                             .show_ui(ui, |ui| {
@@ -264,7 +264,7 @@ pub(super) fn custom_paper_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
             field(column, "Bleed / crop", |ui| {
                 let bleed_value = if draft.bleed.trim() == "0" { 0 } else { 1 };
                 let mut choice = bleed_value;
-                egui::ComboBox::from_id_salt("hardcopy-custom-bleed")
+                crate::ui::widgets::Combo::from_id_salt("hardcopy-custom-bleed")
                     .selected_text(if choice == 0 {
                         "None"
                     } else if draft.display_unit == LengthUnit::Inches {
@@ -381,7 +381,7 @@ fn mapping_save_scope(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                     let current = mapping_scope_key(&draft.mapping_scope_draft);
                     let mut key = current;
                     field(ui, "Save to", |ui| {
-                        egui::ComboBox::from_id_salt("hardcopy-mapping-scope")
+                        crate::ui::widgets::Combo::from_id_salt("hardcopy-mapping-scope")
                             .selected_text(mapping_scope_label(key))
                             .width(ui.available_width())
                             .show_ui(ui, |ui| {
@@ -548,15 +548,18 @@ pub(super) fn print_mapping_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                                 });
                                 let mut color = entry.print_color();
                                 let color_response = mapping_cell(&mut columns[2], 36.0, |ui| {
-                                    egui::ComboBox::from_id_salt(("mapping-color", index))
-                                        .selected_text(print_color_label(color))
-                                        .width(ui.available_width())
-                                        .show_ui(ui, |ui| {
-                                            for (value, label) in print_color_options(color) {
-                                                ui.selectable_value(&mut color, value, label);
-                                            }
-                                        })
-                                        .response
+                                    crate::ui::widgets::Combo::from_id_salt((
+                                        "mapping-color",
+                                        index,
+                                    ))
+                                    .selected_text(print_color_label(color))
+                                    .width(ui.available_width())
+                                    .show_ui(ui, |ui| {
+                                        for (value, label) in print_color_options(color) {
+                                            ui.selectable_value(&mut color, value, label);
+                                        }
+                                    })
+                                    .response
                                 });
                                 color_response.widget_info(|| {
                                     egui::WidgetInfo::labeled(
@@ -571,19 +574,22 @@ pub(super) fn print_mapping_body(ui: &mut Ui, draft: &mut HardcopyDialogState) {
                                 let mut redundancy = entry.redundancy();
                                 let redundancy_response =
                                     mapping_cell(&mut columns[3], 36.0, |ui| {
-                                        egui::ComboBox::from_id_salt(("mapping-redundancy", index))
-                                            .selected_text(redundancy_label(redundancy))
-                                            .width(ui.available_width())
-                                            .show_ui(ui, |ui| {
-                                                for value in redundancy_options(redundancy) {
-                                                    ui.selectable_value(
-                                                        &mut redundancy,
-                                                        value,
-                                                        redundancy_label(value),
-                                                    );
-                                                }
-                                            })
-                                            .response
+                                        crate::ui::widgets::Combo::from_id_salt((
+                                            "mapping-redundancy",
+                                            index,
+                                        ))
+                                        .selected_text(redundancy_label(redundancy))
+                                        .width(ui.available_width())
+                                        .show_ui(ui, |ui| {
+                                            for value in redundancy_options(redundancy) {
+                                                ui.selectable_value(
+                                                    &mut redundancy,
+                                                    value,
+                                                    redundancy_label(value),
+                                                );
+                                            }
+                                        })
+                                        .response
                                     });
                                 redundancy_response.widget_info(|| {
                                     egui::WidgetInfo::labeled(

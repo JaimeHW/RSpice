@@ -415,7 +415,7 @@ fn manager_format_selector(ui: &mut Ui, state: &mut SheetFormatManagerState, t: 
             .color(t.color.text_dim),
     );
     ui.add_space(6.0);
-    egui::ComboBox::from_id_salt("sheet-format-manager-apply")
+    crate::ui::widgets::Combo::from_id_salt("sheet-format-manager-apply")
         .width(ui.available_width())
         .selected_text(manager_source_label(state))
         .show_ui(ui, |ui| {

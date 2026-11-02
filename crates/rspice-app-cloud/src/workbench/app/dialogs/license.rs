@@ -10,8 +10,8 @@ use egui::Context;
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::services::license::{self, LicenseInfo};
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
+use crate::ui::theme;
+use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
 
 use crate::workbench::app::dialogs::fact_grid;
@@ -128,7 +128,7 @@ pub fn render_license_dialog(parts: &mut LicenseParts<'_>, ctx: &Context) {
                     edited = ui
                         .add(
                             egui::TextEdit::multiline(text)
-                                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                                .font(theme::field_mono())
                                 .desired_rows(KEY_LINES)
                                 .desired_width(width)
                                 .hint_text("RSPICE-K1.\u{2026}"),

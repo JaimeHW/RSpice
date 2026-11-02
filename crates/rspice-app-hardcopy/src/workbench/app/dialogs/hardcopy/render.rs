@@ -1836,7 +1836,7 @@ fn length_field(ui: &mut Ui, label: &str, value: &mut String, unit: LengthUnit) 
                             control_height,
                         ),
                         egui::TextEdit::singleline(value)
-                            .font(egui::TextStyle::Monospace)
+                            .font(theme::field_mono())
                             .frame(Frame::NONE),
                     );
                     let suffix = ui.allocate_ui_with_layout(
@@ -1872,7 +1872,7 @@ fn enum_combo<T: Copy + PartialEq>(
         .find(|(candidate, _)| candidate == value)
         .map_or("Custom", |(_, label)| *label);
     field(ui, label, |ui| {
-        egui::ComboBox::from_id_salt(id)
+        crate::ui::widgets::Combo::from_id_salt(id)
             .selected_text(selected)
             .width(ui.available_width())
             .show_ui(ui, |ui| {

@@ -167,7 +167,7 @@ pub fn read_only_field(ui: &mut Ui, label: &str, value: &str, description: &str)
         let response = ui.add_sized(
             Vec2::new(ui.available_width(), t.metrics.ctl_h),
             TextEdit::singleline(&mut text)
-                .font(egui::TextStyle::Monospace)
+                .font(theme::field_mono())
                 .interactive(false)
                 .margin(egui::Margin::symmetric(8, 4)),
         );

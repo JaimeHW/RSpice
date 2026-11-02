@@ -700,7 +700,7 @@ fn render_search_field(ui: &mut Ui, width: f32) {
         egui::TextEdit::singleline(&mut filter.query)
             .id(Id::new(SHELL_ID).with("filter-field"))
             .hint_text("Search settings")
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .font(theme::field_sans())
             .margin(egui::Margin {
                 left: 29,
                 right: 8,

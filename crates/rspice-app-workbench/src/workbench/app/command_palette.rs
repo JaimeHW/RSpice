@@ -1169,7 +1169,7 @@ fn render_search_row(surface: &mut Ui, rect: Rect, query: &mut String) -> egui::
         input_rect.size(),
         egui::TextEdit::singleline(query)
             .id(search_id())
-            .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+            .font(theme::field_sans())
             .hint_text("Search commands, cells, signals, models…")
             // The frame holds the inset: a field given a frame of its own
             // ignores `margin`.

@@ -2,7 +2,7 @@
 
 use std::collections::BTreeMap;
 
-use egui::{ComboBox, Grid, RichText, ScrollArea, TextEdit, Ui, vec2};
+use egui::{Grid, RichText, ScrollArea, TextEdit, Ui, vec2};
 use egui_extras::{Column, TableBuilder};
 
 use crate::state::{AuthoredDrawingSheetSize, DrawingSheetPreset, DrawingSheetPresetScope};
@@ -757,7 +757,7 @@ fn preset_editor_form(
             form.add_space(4.0);
             field_label(form, "Scope");
             form.add_enabled_ui(!editing_name_only, |ui| {
-                ComboBox::from_id_salt("custom-sheet-editor-scope")
+                crate::ui::widgets::Combo::from_id_salt("custom-sheet-editor-scope")
                     .width(ui.available_width())
                     .selected_text(scope_label(draft.scope))
                     .show_ui(ui, |ui| {
@@ -805,7 +805,7 @@ fn preset_editor_form(
             });
             form.add_space(4.0);
             field_label(form, "Units");
-            ComboBox::from_id_salt("custom-sheet-editor-unit")
+            crate::ui::widgets::Combo::from_id_salt("custom-sheet-editor-unit")
                 .width(form.available_width())
                 .selected_text(unit_label(draft.unit))
                 .show_ui(form, |ui| {
@@ -828,7 +828,7 @@ fn preset_editor_form(
 
         editor_section(ui, "Starting frame", |form| {
             field_label(form, "Frame");
-            ComboBox::from_id_salt("custom-sheet-editor-frame")
+            crate::ui::widgets::Combo::from_id_salt("custom-sheet-editor-frame")
                 .width(form.available_width())
                 .selected_text(frame_label(draft.frame))
                 .show_ui(form, |ui| {
@@ -1074,7 +1074,7 @@ fn import_candidate_row(ui: &mut Ui, candidate: &mut ImportCandidate) {
         });
     }
     ui.add_enabled_ui(candidate.selected, |ui| {
-        ComboBox::from_id_salt((
+        crate::ui::widgets::Combo::from_id_salt((
             "sheet-preset-import-resolution",
             &candidate.portable.stable_id,
         ))
@@ -1216,7 +1216,7 @@ fn export_body(
         });
     ui.add_space(10.0);
     field_label(ui, "Package format");
-    ComboBox::from_id_salt("sheet-preset-export-format")
+    crate::ui::widgets::Combo::from_id_salt("sheet-preset-export-format")
         .width(ui.available_width())
         .selected_text(transfer.package_format.label())
         .show_ui(ui, |ui| {

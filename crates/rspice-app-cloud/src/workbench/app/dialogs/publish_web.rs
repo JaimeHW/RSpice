@@ -699,20 +699,20 @@ fn render_page_column(
     field_label(ui, "Title");
     ui.add(
         egui::TextEdit::singleline(&mut dialog.title)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .font(theme::field_sans())
             .desired_width(f32::INFINITY),
     );
     field_label(ui, "Author credit");
     ui.add(
         egui::TextEdit::singleline(&mut dialog.author_credit)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .font(theme::field_sans())
             .desired_width(f32::INFINITY)
             .hint_text("shown on the page · leave empty for Anonymous"),
     );
     field_label(ui, "Description");
     ui.add(
         egui::TextEdit::multiline(&mut dialog.description)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .font(theme::field_sans())
             .desired_rows(2)
             .desired_width(f32::INFINITY),
     );
@@ -727,7 +727,7 @@ fn render_page_column(
     field_label(ui, "Overview narrative");
     ui.add(
         egui::TextEdit::multiline(&mut dialog.overview_narrative)
-            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .font(theme::field_sans())
             .desired_rows(3)
             .desired_width(f32::INFINITY)
             .hint_text("What this circuit does, its design intent, and key conclusions"),
@@ -760,7 +760,7 @@ fn render_page_column(
     field_label(ui, "Content license");
     {
         use rspice_publication_contract::ContentLicense;
-        egui::ComboBox::from_id_salt("publish-web-license")
+        crate::ui::widgets::Combo::from_id_salt("publish-web-license")
             .width(ui.available_width())
             .selected_text(dialog.license.display_name())
             .show_ui(ui, |ui| {
@@ -776,7 +776,7 @@ fn render_page_column(
 
     if !bound {
         field_label(ui, "Visibility");
-        egui::ComboBox::from_id_salt("publish-web-visibility")
+        crate::ui::widgets::Combo::from_id_salt("publish-web-visibility")
             .width(ui.available_width())
             .selected_text(visibility_label(dialog.public_visibility))
             .show_ui(ui, |ui| {
@@ -794,7 +794,7 @@ fn render_page_column(
                 .or_else(|| workspaces.first())
                 .map(|workspace| workspace.name.clone())
                 .unwrap_or_default();
-            egui::ComboBox::from_id_salt("publish-web-workspace")
+            crate::ui::widgets::Combo::from_id_salt("publish-web-workspace")
                 .width(ui.available_width())
                 .selected_text(selected)
                 .show_ui(ui, |ui| {

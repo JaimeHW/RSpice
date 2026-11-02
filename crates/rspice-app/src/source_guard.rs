@@ -1596,19 +1596,34 @@ mod tests {
         );
     }
 
-    /// The application sources whose inputs
-    /// [`every_app_input_holds_its_value_at_the_field_size`] reads, under the
-    /// workspace's `crates/` directory.
-    fn field_size_roots(_crates: &Path) -> Vec<String> {
-        [
-            "rspice-app/src",
-            "rspice-schematic-editor/src",
-            "rspice-app-results/src",
-            "rspice-results-ui/src",
-            "rspice-app-models/src",
-        ]
-        .map(str::to_owned)
-        .to_vec()
+    /// The application's sources, which
+    /// [`every_app_input_holds_its_value_at_the_field_size`] reads: every
+    /// crate the application is split into, the results viewer's widgets and
+    /// the schematic editor's, under the workspace's `crates/` directory.
+    fn field_size_roots(crates: &Path) -> Vec<String> {
+        let mut roots: Vec<String> = std::fs::read_dir(crates)
+            .unwrap_or_else(|error| panic!("read {}: {error}", crates.display()))
+            .map(|entry| {
+                entry
+                    .expect("directory entry")
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .filter(|name| {
+                name.starts_with("rspice-app")
+                    || name == "rspice-results-ui"
+                    || name == "rspice-schematic-editor"
+            })
+            .map(|name| format!("{name}/src"))
+            .collect();
+        roots.sort();
+        assert!(
+            roots.len() >= 13,
+            "the scan found only {} application crates",
+            roots.len()
+        );
+        roots
     }
 
     /// Editors that keep a value size of their own, by file and function.

@@ -1228,7 +1228,7 @@ fn source_well(ui: &mut Ui, value: Option<&str>, enabled: bool) -> bool {
                 [width, t.metrics.ctl_h],
                 egui::TextEdit::singleline(&mut display)
                     .id_salt("preferences.shortcuts.import.source-display")
-                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                    .font(theme::field_mono())
                     .hint_text(IMPORT_SOURCE_PLACEHOLDER)
                     .interactive(false),
             )

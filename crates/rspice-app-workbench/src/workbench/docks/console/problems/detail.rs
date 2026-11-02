@@ -493,7 +493,7 @@ fn waiver_reason(ui: &mut Ui, draft: &mut WaiverDraft) -> Option<WaiverStep> {
         egui::TextEdit::singleline(&mut draft.reason)
             .id(egui::Id::new("workbench.problems.waiver-reason"))
             .hint_text("why this finding is accepted")
-            .font(theme::mono(CONSOLE_FONT_SIZE, FontWeight::Regular)),
+            .font(theme::field_mono()),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label("Reason for waiving this finding");
