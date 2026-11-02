@@ -70,6 +70,22 @@ pub(crate) fn open_source_document_dialog(state: &mut AppState) -> Result<(), St
     Ok(())
 }
 
+/// The netlist page's New source document and New top deck: the dialog on
+/// its review of a new top deck. Unlike Manage source document it opens on
+/// a project that owns no deck yet, the one [`generated_deck_refusal`]
+/// sends here.
+pub(crate) fn begin_new_top_deck(state: &mut AppState) -> Result<(), String> {
+    if !state.platform.project_lifecycle.is_open() {
+        return Err("Open a project before creating its top deck.".to_owned());
+    }
+    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
+        state,
+        CodeSourceFileAction::New,
+    )?;
+    state.code.code_workspace.source_document_dialog = true;
+    Ok(())
+}
+
 /// Whether the lifecycle dialog can be opened for the visible page.
 pub(crate) fn source_document_dialog_is_available(state: &AppState) -> bool {
     match visible_language(state) {
@@ -2179,6 +2195,30 @@ mod tests {
         let facts = netlist_lifecycle_facts(&app).unwrap();
         assert!(facts.deck_id.is_some());
         assert_eq!(facts.decks.len(), 1);
+    }
+
+    /// The page's New source document and New top deck make the deck that
+    /// refusal asks for, so they open the dialog on its review where Manage
+    /// source document refuses. They opened nothing but the refusal while
+    /// they went through Manage's route.
+    #[test]
+    fn new_source_document_opens_on_a_project_that_owns_no_deck() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
+        assert!(open_source_document_dialog(&mut app.state).is_err());
+
+        begin_new_top_deck(&mut app.state).unwrap();
+        assert!(app.state.code.code_workspace.source_document_dialog);
+        let transaction = app
+            .state
+            .code
+            .netlist
+            .lifecycle_dialog
+            .transaction
+            .as_ref()
+            .expect("the dialog reviews the new deck");
+        assert_eq!(transaction.action, CodeSourceFileAction::New);
+        assert!(!transaction.proposed_path.is_empty());
     }
 
     /// The deck's properties are its name, where it is on disk and its line

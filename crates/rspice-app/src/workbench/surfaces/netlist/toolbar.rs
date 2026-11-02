@@ -723,14 +723,7 @@ pub(super) fn code_toolbar(ui: &mut Ui, app: &mut RSpiceApp) -> CodeToolbarLayou
             let _ = open_owned_source(&mut app.state);
         }
         Some(NetlistToolbarAction::BeginFirstTopDeck) => {
-            let result = crate::workbench::app::open_source_document_dialog(&mut app.state)
-                .and_then(|()| {
-                    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-                        &mut app.state,
-                        crate::workbench::documents::code_workspace::CodeSourceFileAction::New,
-                    )
-                });
-            if let Err(error) = result {
+            if let Err(error) = crate::workbench::app::begin_new_top_deck(&mut app.state) {
                 app.state.prompt(error);
             }
         }
