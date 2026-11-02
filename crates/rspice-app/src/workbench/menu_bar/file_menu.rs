@@ -50,7 +50,9 @@ pub(crate) fn dispatch_file_menu_action(
             crate::workbench::workflows::project_workflow::save_project_as(state);
         }
         FileMenuAction::SaveAll => {
-            crate::workbench::workflows::project_workflow::save_all(state);
+            state.save_project_scope(
+                crate::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments,
+            );
         }
         FileMenuAction::RevertActiveDocument => {
             crate::workbench::workflows::project_workflow::request_revert_active_document(state);
@@ -76,7 +78,9 @@ pub(crate) fn dispatch_file_menu_action(
         }
         FileMenuAction::Save => {
             if state.platform.project_lifecycle.is_open() {
-                let _ = crate::workbench::workflows::project_workflow::save_project(state);
+                let _ = state.save_project_scope(
+                    crate::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
+                );
             } else {
                 let _ = crate::workbench::workflows::file_actions::action_file_save_with_io(
                     state,

@@ -38,12 +38,7 @@ fn replacement_guard_compares_project_owned_state_to_saved_snapshot() {
     let root = unique_temp_dir("recovery-project-boundary");
     let project_path = root.join("guard.rspiceproj");
     let mut state = AppState::default();
-    assert!(
-        crate::workbench::workflows::project_workflow::save_project_to_path(
-            &mut state,
-            &project_path
-        )
-    );
+    assert!(state.save_project_to_path(&project_path));
     assert_eq!(recovery_replacement_block_reason(&state.model), None);
 
     let transient = state

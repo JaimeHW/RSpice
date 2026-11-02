@@ -103,12 +103,12 @@ impl RSpiceApp {
                     return;
                 }
                 let outcome = if project_action {
-                    crate::workbench::workflows::project_workflow::save_all_for_continuation(
-                        &mut self.state,
+                    self.state.save_project_scope(
+                        crate::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments,
                     )
                 } else if self.state.platform.project_lifecycle.is_open() {
-                    crate::workbench::workflows::project_workflow::save_active_for_continuation(
-                        &mut self.state,
+                    self.state.save_project_scope(
+                        crate::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
                     )
                 } else if self.action_file_save() {
                     if self.state.model.schematic.session.is_dirty {
@@ -232,7 +232,7 @@ impl RSpiceApp {
             );
             return;
         }
-        match crate::workbench::workflows::project_workflow::save_all_for_continuation(&mut self.state) {
+        match self.state.save_project_scope(crate::workbench::lifecycle::project_lifecycle::SaveScope::AllDocuments) {
             crate::workbench::workflows::project_workflow::SaveRequestOutcome::CanonicalComplete => {
                 self.state.workbench.project_review_dialog.close();
                 self.state.close_project_discard(destination);
@@ -415,7 +415,12 @@ impl RSpiceApp {
 
     pub(in crate::workbench) fn action_file_save(&mut self) -> bool {
         if self.state.platform.project_lifecycle.is_open() {
-            return crate::workbench::workflows::project_workflow::save_project(&mut self.state);
+            return self
+                .state
+                .save_project_scope(
+                    crate::workbench::lifecycle::project_lifecycle::SaveScope::ActiveDocument,
+                )
+                .request_started();
         }
         let (state, io) = (&mut self.state, self.file_workflow_io.as_ref());
         crate::workbench::workflows::file_actions::action_file_save_with_io(state, io)

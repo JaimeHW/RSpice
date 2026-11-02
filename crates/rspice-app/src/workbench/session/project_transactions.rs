@@ -401,6 +401,24 @@ impl AppState {
         save_scope_for_platform(self, scope)
     }
 
+    /// Replace the session with a blank default project.
+    #[cfg(test)]
+    pub(crate) fn create_new_project(&mut self) {
+        let _ = self.create_new_project_with(&NewProjectParams::default());
+    }
+
+    /// Save the whole open project to `path`, as the reader picked it.
+    /// Returns whether it was written.
+    #[cfg(all(not(target_arch = "wasm32"), test))]
+    pub(crate) fn save_project_to_path(&mut self, path: &std::path::Path) -> bool {
+        self.save_project_scope_to(
+            SaveScope::AllDocuments,
+            path,
+            DestinationAuthority::UserSelected,
+        )
+        .is_ok()
+    }
+
     /// Save `scope` of the open project to `path` under `authority`.
     #[cfg(all(not(target_arch = "wasm32"), test))]
     pub(crate) fn save_project_scope_to(

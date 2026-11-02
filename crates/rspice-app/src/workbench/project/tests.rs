@@ -88,10 +88,7 @@ fn checking(file: Option<&std::path::Path>) -> RSpiceApp {
     #[cfg(not(target_arch = "wasm32"))]
     if let Some(file) = file {
         assert!(
-            crate::workbench::workflows::project_workflow::save_project_to_path(
-                &mut app.state,
-                file
-            ),
+            app.state.save_project_to_path(file),
             "the project is saved to its own file"
         );
     }

@@ -969,9 +969,7 @@ fn painted_sheet(state: &mut AppState) -> Vec<String> {
 #[test]
 fn an_imported_sheet_draws_the_same_with_its_source_gone() {
     use crate::state::ComponentType;
-    use crate::workbench::workflows::project_workflow::{
-        ProjectLoadOrigin, apply_loaded_project, save_project_to_path,
-    };
+    use crate::workbench::workflows::project_workflow::{ProjectLoadOrigin, apply_loaded_project};
 
     let folder = drawing_folder();
     std::fs::write(
@@ -1010,7 +1008,7 @@ fn an_imported_sheet_draws_the_same_with_its_source_gone() {
             .expect("system time after epoch")
             .as_nanos()
     ));
-    assert!(save_project_to_path(&mut app.state, &project), "it saves");
+    assert!(app.state.save_project_to_path(&project), "it saves");
     std::fs::remove_dir_all(&folder).expect("the drawing is gone");
     let loaded = crate::io::load_project_file(&project).expect("it reloads");
 

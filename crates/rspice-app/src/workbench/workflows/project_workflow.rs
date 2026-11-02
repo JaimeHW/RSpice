@@ -161,12 +161,6 @@ fn validate_identity_segment(field: &str, value: &str) -> Result<(), String> {
     })
 }
 
-/// Replace the session with a blank default project.
-#[cfg(test)]
-pub(crate) fn create_new_project(state: &mut AppState) {
-    let _ = state.create_new_project_with(&NewProjectParams::default());
-}
-
 /// How a new project under `params` states itself when it replaces the open
 /// one.
 pub(crate) fn new_project_announcement(params: &NewProjectParams) -> String {
@@ -357,17 +351,6 @@ fn seed_new_project_drawing_sheet_default(
     }
 }
 
-#[cfg(all(not(target_arch = "wasm32"), test))]
-pub(crate) fn save_project_to_path(state: &mut AppState, path: &Path) -> bool {
-    state
-        .save_project_scope_to(
-            SaveScope::AllDocuments,
-            path,
-            DestinationAuthority::UserSelected,
-        )
-        .is_ok()
-}
-
 fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> String {
     model
         .workspace
@@ -378,18 +361,6 @@ fn project_save_dialog_default_name(model: &Model, platform: &PlatformState) -> 
         .and_then(file_name_string)
         .or_else(|| platform.browser_project_save_name.clone())
         .unwrap_or_else(|| "untitled.rspiceproj".to_string())
-}
-
-pub(crate) fn save_project(state: &mut AppState) -> bool {
-    state
-        .save_project_scope(SaveScope::ActiveDocument)
-        .request_started()
-}
-
-pub(crate) fn save_all(state: &mut AppState) -> bool {
-    state
-        .save_project_scope(SaveScope::AllDocuments)
-        .request_started()
 }
 
 #[cfg_attr(not(target_arch = "wasm32"), allow(dead_code))]
@@ -404,21 +375,14 @@ pub(crate) enum SaveRequestOutcome {
 }
 
 impl SaveRequestOutcome {
-    fn request_started(&self) -> bool {
+    /// Whether the save began: it was neither cancelled nor refused.
+    pub(crate) fn request_started(&self) -> bool {
         !matches!(self, Self::Cancelled | Self::Failed(_))
     }
 
     pub(crate) fn authorizes_immediate_destructive_action(&self) -> bool {
         matches!(self, Self::CanonicalComplete)
     }
-}
-
-pub(crate) fn save_all_for_continuation(state: &mut AppState) -> SaveRequestOutcome {
-    state.save_project_scope(SaveScope::AllDocuments)
-}
-
-pub(crate) fn save_active_for_continuation(state: &mut AppState) -> SaveRequestOutcome {
-    state.save_project_scope(SaveScope::ActiveDocument)
 }
 
 /// A streamed mirror never acquires a canonical local binding implicitly.

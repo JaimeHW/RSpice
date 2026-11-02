@@ -281,7 +281,7 @@ fn clearing_results_or_replacing_a_drawing_preserves_project_marker_history() {
         let analysis = install_retained_results(&mut reopened);
         assert!(add_marker(&mut reopened, analysis) > published);
 
-        create_new_project(&mut reopened);
+        reopened.create_new_project();
         assert_ne!(reopened.model.workspace.content.project.id(), project_id);
         let analysis = install_retained_results(&mut reopened);
         assert_eq!(add_marker(&mut reopened, analysis), 1);

@@ -9,9 +9,8 @@ use crate::state::{
     ValidatedRevisionRequest,
 };
 use crate::ui::widgets::{CommandForm, DialogChoice};
-use crate::workbench::workflows::project_workflow::{
-    SaveRequestOutcome, save_active_for_continuation,
-};
+use crate::workbench::lifecycle::project_lifecycle::SaveScope;
+use crate::workbench::workflows::project_workflow::SaveRequestOutcome;
 
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app::dialogs::check_and_save_validation::{
@@ -474,7 +473,7 @@ impl RSpiceApp {
             }
         };
         self.state.sync_active_schematic_to_workspace();
-        match save_active_for_continuation(&mut self.state) {
+        match self.state.save_project_scope(SaveScope::ActiveDocument) {
             SaveRequestOutcome::CanonicalComplete => {
                 // Only a browser save that is still landing keeps the
                 // revision's id; this one has landed.

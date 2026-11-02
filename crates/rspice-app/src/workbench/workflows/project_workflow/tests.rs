@@ -61,7 +61,7 @@ fn new_and_closed_project_installs_reconcile_every_grid_pitch_owner() {
         .set_choice(ChoicePreference::SchematicGrid, 1)
         .unwrap();
 
-    create_new_project(&mut state);
+    state.create_new_project();
     state.assert_project_open_fact();
 
     assert_active_grid_pitch_contract(&state, crate::state::SchematicGridPitch::Mil25);
@@ -491,11 +491,19 @@ fn mirror_save_copy_policy_gates_every_project_persistence_path() {
     state.model.live_write_locks.mirror = true;
     state.model.live_write_locks.mirror_save_copy_allowed = false;
 
-    assert!(!save_project(&mut state));
-    assert!(!save_all(&mut state));
+    assert!(
+        !state
+            .save_project_scope(SaveScope::ActiveDocument)
+            .request_started()
+    );
+    assert!(
+        !state
+            .save_project_scope(SaveScope::AllDocuments)
+            .request_started()
+    );
     assert!(!save_project_as(&mut state));
     assert!(matches!(
-        save_all_for_continuation(&mut state),
+        state.save_project_scope(SaveScope::AllDocuments),
         SaveRequestOutcome::Failed(_)
     ));
 }
@@ -746,7 +754,7 @@ fn create_new_project_clears_stale_specialized_viewer_caches() {
     seed_specialized_viewer_caches(&mut state);
     state.platform.browser_project_save_name = Some("previous-project.rspiceproj".to_owned());
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     assert_specialized_viewer_caches_cleared(&state);
     assert!(
@@ -778,7 +786,7 @@ fn create_new_project_resets_project_owned_plan_and_model_context() {
     stale_models.add_library(ModelLibrary::new("stale_project_models"));
     state.model.model_library_manager = stale_models;
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     let reset_plan = state
         .model
@@ -825,7 +833,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
         .model_library_manager
         .add_library(ModelLibrary::new("previous_project_only"));
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     assert!(
         state
@@ -877,7 +885,7 @@ fn new_and_closed_projects_restore_configured_sources_without_leaking_project_li
 fn a_new_projects_plan_owns_its_variables_outputs_and_specifications() {
     let mut state = AppState::default();
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     let plan_id = state
         .model
@@ -934,7 +942,7 @@ fn create_new_project_copies_the_retained_solver_default_into_the_plan() {
         .set_choice(ChoicePreference::DefaultSolverPreset, 3)
         .expect("Robust is a valid solver preset");
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     assert_eq!(state.model.sim_setup.options.itl1, 200);
     assert_eq!(state.model.sim_setup.options.itl4, 20);
@@ -969,7 +977,7 @@ fn create_new_project_captures_the_personal_drawing_sheet_default() {
         .set_drawing_sheet_personal_preferences(personal)
         .expect("the personal default persists");
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     let project_default = state
         .model
@@ -1035,7 +1043,7 @@ fn new_project_custom_default_is_exact_and_has_no_personal_preset_dependency() {
         .unwrap();
     let retained_personal = state.model.preferences.drawing_sheet_personal_preferences();
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     let project_settings = state
         .model
@@ -1397,7 +1405,7 @@ fn save_project_to_path_writes_simulation_results() {
         std::process::id()
     ));
 
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
@@ -1473,7 +1481,7 @@ fn save_project_to_path_round_trips_result_markers() {
         std::process::id()
     ));
 
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
@@ -1570,7 +1578,7 @@ fn save_project_to_path_round_trips_logarithmic_panes() {
         std::process::id()
     ));
 
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
@@ -1649,7 +1657,7 @@ fn save_project_to_path_round_trips_stable_expression_traces() {
         std::process::id()
     ));
 
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
@@ -1807,7 +1815,7 @@ fn save_project_to_path_round_trips_canonical_result_document_entities() {
         "rspice-save-project-result-document-{}-{unique}.rspiceproj",
         std::process::id()
     ));
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let loaded = crate::io::load_project_file(&path).expect("saved project reloads");
     let _ = std::fs::remove_file(&path);
 
@@ -1860,7 +1868,7 @@ fn save_project_to_path_rejects_invalid_simulation_results_without_publishing() 
         std::process::id()
     ));
 
-    let saved = save_project_to_path(&mut state, &path);
+    let saved = state.save_project_to_path(&path);
     let published = path.exists();
     let _ = std::fs::remove_file(&path);
 
@@ -2004,7 +2012,7 @@ fn an_invalid_identity_creates_nothing_and_names_the_field() {
 fn netlist_import_keeps_creating_the_default_project_without_a_dialog() {
     let mut state = AppState::default();
 
-    create_new_project(&mut state);
+    state.create_new_project();
 
     assert!(!state.project.new_project.open);
     let defaults = NewProjectParams::default();
@@ -2136,7 +2144,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     let original = directory.join("original.rspiceproj");
     let renamed = directory.join("renamed.rspiceproj");
     let mut state = AppState::default();
-    assert!(save_project_to_path(&mut state, &original));
+    assert!(state.save_project_to_path(&original));
 
     assert!(save_project_as_to_path(&mut state, &renamed));
 
