@@ -13,10 +13,13 @@ use crate::state::model_library::{ModelSourceAuthority, SimulationPlanModelBindi
 use crate::ui::accessibility::{counted, plural_suffix};
 use crate::ui::icons::Icon;
 use crate::ui::widgets::{Button, IconButton, select};
-use crate::workbench::RSpiceApp;
+use crate::workbench::app_state::Model;
 use crate::workbench::framework::command_registry::ids;
-use crate::workbench::framework::feature::ModelsPort;
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::framework::ports::{ModelGateFact, QualificationGate};
+use crate::workbench::simulate::{
+    SimulateFeature, invalidate_preflight, record_plan_receipt, record_plan_refusal,
+};
 
 use super::page_kit::{
     RowPress, Tone, card, card_body, card_head_row, card_note, card_row, card_with_head, cell_ui,
@@ -69,41 +72,39 @@ const GATE_COLUMNS: [f32; 3] = [0.30, 0.46, 0.24];
 /// reported as a count and never dropped.
 const GATE_FINDING_ROWS: usize = 8;
 
-pub(super) fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    closure(ui, app);
-    qualification_gate(ui, app);
+pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    closure(ui, cx);
+    qualification_gate(ui, cx);
     card_row(
         ui,
-        app,
-        |ui, app| binding_policy(ui, app),
-        |ui, app| reproducibility(ui, app),
+        cx,
+        |ui, cx| binding_policy(ui, cx.model),
+        |ui, cx| reproducibility(ui, cx.model),
     );
 }
 
-fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
+fn closure(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
     // The scan the models workspace takes, taken here too, because this page is
     // reachable without ever opening that workspace and a drift report nobody
     // requested reads exactly like a closure with no drift. Event-driven, not
     // per frame: it rehashes every pinned source, and `needs_scan` is false
     // until the project revision or the catalog actually moves.
-    if app.state.model.source_drift_needs_scan() {
-        app.state.model.scan_source_drift();
+    if cx.model.source_drift_needs_scan() {
+        cx.model.scan_source_drift();
     }
-    let bindings = app.state.model.sim_setup.model_bindings.clone();
+    let bindings = cx.model.sim_setup.model_bindings.clone();
     // One name cannot be contested by one library, so a closure that loaded a
     // single library skips the index entirely. That check is free and the index
     // walks every model of every loaded library.
-    let definitions: Vec<DefinitionRow> =
-        if app.state.model.model_library_manager.library_count() > 1 {
-            app.state.model.definition_index()
-        } else {
-            Vec::new()
-        };
+    let definitions: Vec<DefinitionRow> = if cx.model.model_library_manager.library_count() > 1 {
+        cx.model.definition_index()
+    } else {
+        Vec::new()
+    };
     let invalid = bindings
         .iter()
         .filter(|binding| {
-            app.state
-                .model
+            cx.model
                 .model_library_manager
                 .validate_simulation_plan_bindings(std::slice::from_ref(binding))
                 .is_err()
@@ -112,8 +113,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     let drifted = bindings
         .iter()
         .filter(|binding| {
-            !app.state
-                .model
+            !cx.model
                 .source_drift_findings(&binding.library_name)
                 .is_empty()
         })
@@ -165,8 +165,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
         .iter()
         .map(|binding| binding.library_name.to_ascii_lowercase())
         .collect::<std::collections::HashSet<_>>();
-    let available = app
-        .state
+    let available = cx
         .model
         .model_library_manager
         .libraries_sorted()
@@ -242,12 +241,11 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 );
             }
             for (index, binding) in bindings.iter().enumerate() {
-                let library = app
-                    .state
+                let library = cx
                     .model
                     .model_library_manager
                     .get_library(&binding.library_name);
-                let corners = corner_options(app, &binding.library_name);
+                let corners = corner_options(cx.model, &binding.library_name);
                 let (rect, cells) = ledger_row_cells(ui, &CLOSURE_COLUMNS);
                 let t = Tokens::get(ui.ctx());
                 ui.painter().hline(
@@ -308,7 +306,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                 // to it. Drift is the models workspace's finding, read here rather
                 // than recomputed: this page cannot repair it, so it must not be
                 // able to disagree about whether there is anything to repair.
-                let drift = app.state.model.source_drift_findings(&binding.library_name);
+                let drift = cx.model.source_drift_findings(&binding.library_name);
                 paint_toned_text(
                     ui,
                     cells[3].shrink2(egui::vec2(8.0, 0.0)),
@@ -344,8 +342,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
                     plural_suffix(drift.len()),
                 ));
                 }
-                let validation = app
-                    .state
+                let validation = cx
                     .model
                     .model_library_manager
                     .validate_simulation_plan_bindings(std::slice::from_ref(binding));
@@ -446,7 +443,7 @@ fn closure(ui: &mut Ui, app: &mut RSpiceApp) {
     );
 
     if let Some(action) = requested.or(attach) {
-        apply_model_binding_action(app, action);
+        apply_model_binding_action(cx, action);
     }
 }
 
@@ -461,9 +458,8 @@ enum ModelBindingAction {
     Attach(String),
 }
 
-fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
-    app.state
-        .model
+fn corner_options(model: &Model, library: &str) -> Vec<String> {
+    model
         .model_library_manager
         .libraries_sorted()
         .into_iter()
@@ -476,13 +472,13 @@ fn corner_options(app: &RSpiceApp, library: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
-    let mut candidate = app.state.model.sim_setup.clone();
+fn apply_model_binding_action(cx: &mut Cx<'_, SimulateFeature>, action: ModelBindingAction) {
+    let mut candidate = cx.model.sim_setup.clone();
     let detail = match action {
         ModelBindingAction::SetCorner { index, corner } => {
             let Some(binding) = candidate.model_bindings.get_mut(index) else {
                 return record_binding_refusal(
-                    app,
+                    cx,
                     "The model binding changed before the edit committed.",
                 );
             };
@@ -507,40 +503,38 @@ fn apply_model_binding_action(app: &mut RSpiceApp, action: ModelBindingAction) {
             )
         }
         ModelBindingAction::Attach(name) => {
-            let binding = match app
-                .state
+            let binding = match cx
                 .model
                 .model_library_manager
                 .simulation_plan_binding(&name)
             {
                 Ok(binding) => binding,
-                Err(error) => return record_binding_refusal(app, &error),
+                Err(error) => return record_binding_refusal(cx, &error),
             };
             candidate.model_bindings.push(binding);
             format!("Attached model library {name} to the plan.")
         }
         _ => return,
     };
-    if let Err(error) = app
-        .state
+    if let Err(error) = cx
         .model
         .model_library_manager
         .validate_simulation_plan_bindings(&candidate.model_bindings)
     {
-        return record_binding_refusal(app, &error);
+        return record_binding_refusal(cx, &error);
     }
     match candidate.commit_active_plan_configuration_change(detail) {
         Ok(receipt) => {
-            app.state.model.sim_setup = candidate;
-            app.invalidate_simulation_preflight();
-            app.state.record_plan_receipt(receipt.status_line());
+            cx.model.sim_setup = candidate;
+            invalidate_preflight(cx);
+            record_plan_receipt(cx, receipt.status_line());
         }
-        Err(error) => record_binding_refusal(app, &error.to_string()),
+        Err(error) => record_binding_refusal(cx, &error.to_string()),
     }
 }
 
-fn record_binding_refusal(app: &mut RSpiceApp, error: &str) {
-    app.state.record_plan_refusal(error);
+fn record_binding_refusal(cx: &mut Cx<'_, SimulateFeature>, error: &str) {
+    record_plan_refusal(cx, error);
 }
 
 /// One model's contribution to the release gate.
@@ -753,19 +747,18 @@ fn gate_status(reading: &GateReading) -> Option<(String, Tone)> {
 /// Every number here is summed from the Models workspace's own summaries and
 /// none is recomputed, so the two surfaces cannot report different gates for
 /// the same closure.
-fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
-    let bound = app
-        .state
+fn qualification_gate(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let bound = cx
         .model
         .sim_setup
         .model_bindings
         .iter()
         .map(|binding| binding.library_name.to_ascii_lowercase())
         .collect::<std::collections::HashSet<_>>();
-    let summaries = app
-        .state
-        .models
-        .model_gate_facts(&app.state.model)
+    let summaries = cx
+        .peers
+        .models()
+        .model_gate_facts(cx.model)
         .into_iter()
         .filter(|fact| bound.contains(&fact.library.to_ascii_lowercase()))
         .collect::<Vec<_>>();
@@ -852,12 +845,12 @@ fn qualification_gate(ui: &mut Ui, app: &mut RSpiceApp) {
         // Route to the surface that owns the qualification record.
         // Dispositioning a vector from the plan would give one record two
         // authors, so the page hands off instead.
-        app.execute_command_key(ids::MODEL_QUALIFICATION);
+        cx.execute(ids::MODEL_QUALIFICATION);
     }
 }
 
-fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
-    let bindings = &app.state.model.sim_setup.model_bindings;
+fn binding_policy(ui: &mut Ui, model: &Model) {
+    let bindings = &model.sim_setup.model_bindings;
     let with_corner = bindings
         .iter()
         .filter(|binding| binding.selected_corner.is_some())
@@ -865,8 +858,7 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
     let subcircuits: usize = bindings
         .iter()
         .filter_map(|binding| {
-            app.state
-                .model
+            model
                 .model_library_manager
                 .get_library(&binding.library_name)
         })
@@ -900,16 +892,13 @@ fn binding_policy(ui: &mut Ui, app: &RSpiceApp) {
     });
 }
 
-fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
-    let libraries = app
-        .state
-        .model
+fn reproducibility(ui: &mut Ui, model: &Model) {
+    let libraries = model
         .sim_setup
         .model_bindings
         .iter()
         .filter_map(|binding| {
-            app.state
-                .model
+            model
                 .model_library_manager
                 .get_library(&binding.library_name)
         })
@@ -971,6 +960,8 @@ fn reproducibility(ui: &mut Ui, app: &RSpiceApp) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::workbench::RSpiceApp;
+    use crate::workbench::framework::feature::ModelsPort;
 
     fn active_plan_revision(app: &RSpiceApp) -> crate::product::ObjectRevision {
         app.state
@@ -1010,7 +1001,10 @@ mod tests {
             app.state.model.workspace.content.project.revision().get(),
         ));
 
-        apply_model_binding_action(&mut app, ModelBindingAction::Attach(first.clone()));
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(&mut app),
+            ModelBindingAction::Attach(first.clone()),
+        );
         assert_eq!(
             app.state.model.sim_setup.model_bindings[0].library_name,
             first
@@ -1018,7 +1012,10 @@ mod tests {
         assert_ne!(active_plan_revision(&app), initial_revision);
         assert!(app.state.runs.preflight.report.is_none());
 
-        apply_model_binding_action(&mut app, ModelBindingAction::Attach(second.clone()));
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(&mut app),
+            ModelBindingAction::Attach(second.clone()),
+        );
         assert_eq!(
             app.state
                 .model
@@ -1030,7 +1027,10 @@ mod tests {
             [first.as_str(), second.as_str()]
         );
 
-        apply_model_binding_action(&mut app, ModelBindingAction::MoveUp(1));
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(&mut app),
+            ModelBindingAction::MoveUp(1),
+        );
         assert_eq!(
             app.state
                 .model
@@ -1043,7 +1043,7 @@ mod tests {
         );
 
         apply_model_binding_action(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             ModelBindingAction::SetCorner {
                 index: 0,
                 corner: Some("FF".to_owned()),
@@ -1056,7 +1056,10 @@ mod tests {
             Some("FF")
         );
 
-        apply_model_binding_action(&mut app, ModelBindingAction::Remove(1));
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(&mut app),
+            ModelBindingAction::Remove(1),
+        );
         assert_eq!(app.state.model.sim_setup.model_bindings.len(), 1);
         assert_eq!(
             app.state.model.sim_setup.model_bindings[0].library_name,
@@ -1071,12 +1074,15 @@ mod tests {
         app.state.model.model_library_manager =
             crate::state::model_library::ModelLibraryManager::new();
         let library = add_sectioned_library(&mut app, "models-valid.lib", "valid_nch");
-        apply_model_binding_action(&mut app, ModelBindingAction::Attach(library));
+        apply_model_binding_action(
+            &mut crate::workbench::features::cx(&mut app),
+            ModelBindingAction::Attach(library),
+        );
         let before_bindings = app.state.model.sim_setup.model_bindings.clone();
         let before_revision = active_plan_revision(&app);
 
         apply_model_binding_action(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             ModelBindingAction::SetCorner {
                 index: 0,
                 corner: Some("NONEXISTENT".to_owned()),
@@ -1087,7 +1093,7 @@ mod tests {
         assert!(app.state.simulate.analysis_lifecycle_status.is_refusal());
 
         apply_model_binding_action(
-            &mut app,
+            &mut crate::workbench::features::cx(&mut app),
             ModelBindingAction::Attach("missing-library".to_owned()),
         );
         assert_eq!(app.state.model.sim_setup.model_bindings, before_bindings);
