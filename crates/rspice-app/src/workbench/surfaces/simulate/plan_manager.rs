@@ -511,7 +511,7 @@ fn plan_filter_field(ui: &mut Ui, filter: &mut String, width: f32) {
     let response = ui.add_sized(
         vec2(width, t.metrics.ctl_h),
         egui::TextEdit::singleline(filter)
-            .font(egui::TextStyle::Monospace)
+            .font(crate::ui::theme::field_mono())
             .margin(egui::Margin {
                 left: PLAN_FILTER_MARK_INSET,
                 right: 8,

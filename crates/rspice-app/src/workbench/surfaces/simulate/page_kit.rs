@@ -336,7 +336,7 @@ pub(super) fn filter_field(
         egui::TextEdit::singleline(query)
             .id_salt(id_salt)
             .hint_text(placeholder)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .font(theme::field_sans())
             .margin(egui::Margin {
                 left: 25,
                 right: 8,

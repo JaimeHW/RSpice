@@ -496,11 +496,11 @@ pub(super) fn defaulted_input(
     let response = ui.add_sized(
         vec2(width, t.metrics.ctl_h),
         egui::TextEdit::singleline(value)
-            .font(egui::TextStyle::Monospace)
+            .font(theme::field_mono())
             .margin(egui::Margin::symmetric(8, 4))
             .hint_text(
                 egui::RichText::new(EMPTY_WELL_PLACEHOLDER)
-                    .text_style(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .color(t.color.text_faint),
             ),
     );

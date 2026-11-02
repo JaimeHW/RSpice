@@ -889,7 +889,7 @@ fn selected_dimension(ui: &mut Ui, app: &mut RSpiceApp) {
                     egui::TextEdit::multiline(&mut text)
                         .desired_rows(5)
                         .desired_width(ui.available_width())
-                        .font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+                        .font(theme::field_mono()),
                 );
                 crate::ui::widgets::name_control(
                     ui,

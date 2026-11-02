@@ -271,7 +271,7 @@ pub(super) const ANALYSIS_CATALOG_SEARCH_LABEL: &str = "Search the analysis cata
 pub(super) fn analysis_catalog_search_field(query: &mut String) -> egui::TextEdit<'_> {
     egui::TextEdit::singleline(query)
         .id_source("workbench.simulate.analysis_catalog.search")
-        .font(theme::sans(tokens::FS_2, FontWeight::Regular))
+        .font(theme::field_sans())
         .hint_text("Search solvers, sweeps, measurements, checks…")
         .vertical_align(Align::Center)
         .frame(egui::Frame::NONE)

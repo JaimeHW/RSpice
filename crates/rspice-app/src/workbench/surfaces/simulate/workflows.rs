@@ -1897,7 +1897,7 @@ pub(super) fn workflow_multiline_field(ui: &mut Ui, label: &str, value: &mut Str
     let response = ui.add_sized(
         vec2(ui.available_width(), 74.0),
         egui::TextEdit::multiline(value)
-            .font(egui::TextStyle::Monospace)
+            .font(crate::ui::theme::field_mono())
             .margin(egui::Margin::symmetric(8, 6)),
     );
     crate::ui::widgets::name_control(ui, &response, label);

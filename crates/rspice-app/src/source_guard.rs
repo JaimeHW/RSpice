@@ -1595,4 +1595,251 @@ mod tests {
             strays.join("\n  ")
         );
     }
+
+    /// The application sources whose inputs
+    /// [`every_app_input_holds_its_value_at_the_field_size`] reads, under the
+    /// workspace's `crates/` directory.
+    fn field_size_roots(_crates: &Path) -> Vec<String> {
+        [
+            "rspice-app/src/workbench/surfaces/simulate",
+        ]
+        .map(str::to_owned)
+        .to_vec()
+    }
+
+    /// Editors that keep a value size of their own, by file and function.
+    ///
+    /// An editor that takes a table cell's place while the cell is edited
+    /// keeps the size of the cells around it, so the row does not change type
+    /// under the caret; a document is read at its editor's own size.
+    const OWN_SIZE_EDITORS: [(&str, &str); 0] = [];
+
+    /// Where `needle` sits in `source`, if that is code and not a comment.
+    fn in_code(source: &str, at: usize) -> bool {
+        let line = source[..at].rfind('\n').map_or(0, |index| index + 1);
+        !source[line..at].trim_start().starts_with("//")
+    }
+
+    /// The name of the function the code at `at` is written in.
+    fn enclosing_function(source: &str, at: usize) -> &str {
+        let mut end = at;
+        while let Some(index) = source[..end].rfind("fn ") {
+            let before = index.checked_sub(1).map(|index| source.as_bytes()[index]);
+            if before.is_none_or(|byte| byte.is_ascii_whitespace()) {
+                let name = &source[index + 3..];
+                let length = name
+                    .find(|character: char| !(character.is_alphanumeric() || character == '_'))
+                    .unwrap_or(name.len());
+                if length > 0 {
+                    return &name[..length];
+                }
+            }
+            end = index;
+        }
+        "<file>"
+    }
+
+    /// The builder chain that starts at `at`: everything up to the `;` or `,`
+    /// that ends it, or the bracket that closes the call it is an argument of.
+    fn builder_chain(source: &str, at: usize) -> &str {
+        let bytes = source.as_bytes();
+        let mut depth = 0_i32;
+        let mut index = at;
+        while index < bytes.len() {
+            match bytes[index] {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => {
+                    depth -= 1;
+                    if depth < 0 {
+                        break;
+                    }
+                }
+                b';' | b',' if depth == 0 => break,
+                b'"' => {
+                    index += 1;
+                    while index < bytes.len() && bytes[index] != b'"' {
+                        index += usize::from(bytes[index] == b'\\') + 1;
+                    }
+                }
+                _ => {}
+            }
+            index += 1;
+        }
+        &source[at..index.min(bytes.len())]
+    }
+
+    /// The argument of the last `.font(…)` written at the top level of `chain`.
+    fn last_font(chain: &str) -> Option<&str> {
+        let bytes = chain.as_bytes();
+        let mut depth = 0_i32;
+        let mut found = None;
+        let mut index = 0;
+        while index < bytes.len() {
+            if depth == 0 && chain[index..].starts_with(".font(") {
+                let start = index + ".font(".len();
+                let mut inner = 1;
+                let mut end = start;
+                while end < bytes.len() && inner > 0 {
+                    inner += match bytes[end] {
+                        b'(' => 1,
+                        b')' => -1,
+                        _ => 0,
+                    };
+                    end += 1;
+                }
+                found = Some(chain[start..end - 1].trim());
+                index = end;
+                continue;
+            }
+            match bytes[index] {
+                b'(' | b'[' | b'{' => depth += 1,
+                b')' | b']' | b'}' => depth -= 1,
+                _ => {}
+            }
+            index += 1;
+        }
+        found
+    }
+
+    /// What sets the value size of the text edit built at `at`, when that is
+    /// not the field size.
+    fn text_edit_stray(source: &str, at: usize) -> Option<String> {
+        let chain = builder_chain(source, at);
+        let mut font = last_font(chain).map(str::to_owned);
+        // `let mut edit = TextEdit::…; … edit = edit.font(…)`: the binding's
+        // later font is the one it is drawn in.
+        let line = source[..at].rfind('\n').map_or(0, |index| index + 1);
+        let binding = source[line..at]
+            .trim_start()
+            .strip_prefix("let mut ")
+            .and_then(|rest| rest.split_once(" = "))
+            .map(|(name, _)| name.trim());
+        if let Some(name) = binding {
+            let after = at + chain.len();
+            let rest = &source[after..(after + 2000).min(source.len())];
+            if let Some(index) = rest.find(&format!("{name}.font(")) {
+                let applied = &rest[index + name.len()..];
+                font = last_font(builder_chain(applied, 0)).map(str::to_owned);
+            }
+        }
+        match font {
+            Some(font) if font.ends_with("field_mono()") || font.ends_with("field_sans()") => None,
+            Some(font) => Some(format!("draws its value in `{font}`")),
+            None if chain.contains(".code_editor()") => {
+                Some("draws its value in the style's mono text (`.code_editor()`)".to_owned())
+            }
+            // The body text, which is the field size.
+            None => None,
+        }
+    }
+
+    /// Every input `source` builds, by the function it is built in, with
+    /// what sets its value size when that is not the field size.
+    fn input_value_sizes(source: &str) -> Vec<(&str, Option<String>)> {
+        let mut inputs = Vec::new();
+        for needle in ["TextEdit::singleline(", "TextEdit::multiline("] {
+            for (at, _) in source.match_indices(needle) {
+                if in_code(source, at) {
+                    inputs.push((enclosing_function(source, at), text_edit_stray(source, at)));
+                }
+            }
+        }
+        for needle in [
+            "ComboBox::from_id_salt(",
+            "ComboBox::from_label(",
+            "ComboBox::new(",
+        ] {
+            for (at, _) in source.match_indices(needle) {
+                if in_code(source, at) {
+                    inputs.push((
+                        enclosing_function(source, at),
+                        Some(
+                            "is egui's combo box, which draws its value in the button style; \
+                             build it with `widgets::Combo`"
+                                .to_owned(),
+                        ),
+                    ));
+                }
+            }
+        }
+        for (at, _) in source.match_indices("drag_value_text_style") {
+            if in_code(source, at) {
+                inputs.push((
+                    enclosing_function(source, at),
+                    Some("sets the text style a drag value draws its number in".to_owned()),
+                ));
+            }
+        }
+        inputs
+    }
+
+    /// Every text field, number field and combo box the application builds
+    /// holds its value at the field size, the size of the body text: a
+    /// field, a choice and a read-only fact side by side in a form read at one
+    /// size. An input sets no size of its own; a value in the mono face takes
+    /// `theme::field_mono`, words take `theme::field_sans` or the body text,
+    /// a number field takes the drag value style the theme sets, and a combo
+    /// box is the kit's `widgets::Combo`. The editors that keep a size of
+    /// their own are named, with why, in `OWN_SIZE_EDITORS`.
+    #[test]
+    fn every_app_input_holds_its_value_at_the_field_size() {
+        let crates = Path::new(env!("CARGO_MANIFEST_DIR")).join("..");
+        let mut inputs = 0;
+        let mut exempt = Vec::new();
+        let mut strays = Vec::new();
+        let roots = field_size_roots(&crates);
+        for root in &roots {
+            let mut paths = Vec::new();
+            rust_sources(&crates.join(root), &mut paths);
+            assert!(
+                !paths.is_empty(),
+                "the scan found no Rust source under {root}"
+            );
+            for path in paths {
+                let shown = path
+                    .strip_prefix(&crates)
+                    .expect("a scanned source sits under crates/")
+                    .display()
+                    .to_string()
+                    .replace('\\', "/");
+                // Test modules, and the feature tests the crate declares test-only.
+                if shown.contains("/tests")
+                    || shown.ends_with("tests.rs")
+                    || shown.contains("/feature_tests/")
+                {
+                    continue;
+                }
+                let source = std::fs::read_to_string(&path)
+                    .unwrap_or_else(|error| panic!("read {shown}: {error}"));
+                let source = without_test_items(&source);
+                for (function, stray) in input_value_sizes(&source) {
+                    inputs += 1;
+                    let Some(stray) = stray else {
+                        continue;
+                    };
+                    if OWN_SIZE_EDITORS.contains(&(shown.as_str(), function)) {
+                        exempt.push((shown.clone(), function.to_owned()));
+                    } else {
+                        strays.push(format!("{shown}: `{function}` {stray}"));
+                    }
+                }
+            }
+        }
+        assert!(inputs >= 1, "the scan found no inputs; it lost its sources");
+        for (file, function) in OWN_SIZE_EDITORS {
+            let covered = roots.iter().any(|root| file.starts_with(root.as_str()));
+            assert!(
+                !covered
+                    || exempt
+                        .iter()
+                        .any(|(shown, name)| shown == file && name == function),
+                "{file}: `{function}` keeps a size of its own no longer; take it off the list"
+            );
+        }
+        assert!(
+            strays.is_empty(),
+            "inputs that set their own value size:\n  {}",
+            strays.join("\n  ")
+        );
+    }
 }

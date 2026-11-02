@@ -397,6 +397,7 @@ fn transfer_list(ui: &mut Ui, label: &str, value: &mut String) {
             [ui.available_width(), 76.0],
             egui::TextEdit::multiline(value)
                 .code_editor()
+                .font(crate::ui::theme::field_mono())
                 .desired_rows(3),
         )
     });
