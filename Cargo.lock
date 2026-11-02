@@ -5312,7 +5312,6 @@ dependencies = [
  "base64 0.23.1",
  "egui",
  "js-sys",
- "num-complex",
  "rfd",
  "rspice-app-runs",
  "rspice-app-services",
