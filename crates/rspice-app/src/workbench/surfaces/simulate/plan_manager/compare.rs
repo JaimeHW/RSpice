@@ -35,8 +35,6 @@
 use super::records::PlanEntry;
 use super::*;
 
-use crate::workbench::design_system::elide_text;
-
 /// The comparison table, left to right — exactly the authored column set.
 ///
 /// Only the domain column is elastic. Every other column's longest value is
@@ -88,9 +86,9 @@ const PICKER_MIN_WIDTH: f32 = 148.0;
 const PICKER_MAX_WIDTH: f32 = 300.0;
 /// What a select spends on its own inset and chevron before its value.
 ///
-/// The control clips its value rather than eliding it, so a label longer than
-/// this leaves the clip rect — which is the same defect as a label the reader
-/// has to scroll to. The value is elided to what is left instead.
+/// A name longer than what is left is shortened from the middle, and a plan
+/// the reader has to guess at states nothing, so a row that cannot hold both
+/// names whole stacks its pickers instead.
 const PICKER_TEXT_INSET: f32 = 34.0;
 
 /// The most names one domain lists before the rest are counted.
@@ -242,6 +240,10 @@ pub(super) fn dialog(
 /// other side. Comparing a plan with itself is the state this route opens in
 /// whenever the selected row is the active plan, so a list that excluded it
 /// would be unable to express the pair the surface is already showing.
+///
+/// Side by side while both names fit their pickers whole. A body too narrow for
+/// that stacks them at its full width, base over compared with the word
+/// between, rather than shorten the name the whole comparison is about.
 fn plan_picker_row(
     ui: &mut Ui,
     draft: &mut SimulationPlanManagerDraft,
@@ -251,7 +253,20 @@ fn plan_picker_row(
 ) {
     let width =
         ((ui.available_width() - PICKER_GAP) / 2.0).clamp(PICKER_MIN_WIDTH, PICKER_MAX_WIDTH);
-    ui.horizontal(|ui| {
+    let longest = [base, target]
+        .into_iter()
+        .map(|record| {
+            ui.painter()
+                .layout_no_wrap(
+                    plan_option_label(record),
+                    theme::field_sans(),
+                    ui.visuals().text_color(),
+                )
+                .size()
+                .x
+        })
+        .fold(0.0, f32::max);
+    let sides = |ui: &mut Ui, draft: &mut SimulationPlanManagerDraft, width: f32| {
         if let Some(picked) = plan_picker(
             ui,
             "simulation.plan-manager.compare.base",
@@ -273,7 +288,13 @@ fn plan_picker_row(
         ) {
             draft.comparison.target_plan_id = Some(picked);
         }
-    });
+    };
+    if longest <= width - PICKER_TEXT_INSET {
+        ui.horizontal(|ui| sides(ui, draft, width));
+    } else {
+        let width = ui.available_width();
+        sides(ui, draft, width);
+    }
 }
 
 /// One side's picker. Returns the plan picked this frame.
@@ -286,16 +307,16 @@ fn plan_picker(
     records: &[PlanCatalogRecord],
 ) -> Option<SimulationPlanId> {
     let options = records.iter().map(plan_option_label).collect::<Vec<_>>();
-    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let shown = elide_text(
+    select(
         ui,
+        id_salt,
+        accessible_label,
         &plan_option_label(current),
-        &font,
-        width - PICKER_TEXT_INSET,
-    );
-    select(ui, id_salt, accessible_label, &shown, &options, width)
-        .and_then(|index| records.get(index))
-        .map(|record| record.id)
+        &options,
+        width,
+    )
+    .and_then(|index| records.get(index))
+    .map(|record| record.id)
 }
 
 /// A plan as one side of a comparison: its name and the revision this
