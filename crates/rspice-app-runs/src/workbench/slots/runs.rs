@@ -1,7 +1,9 @@
 //! The runs' state: what watching the simulations in flight and checking a
 //! run before it starts keep between frames.
 
-use rspice_app_state::workbench::app_state::model::Model;
+use rspice_app_state::workbench::app_state::model::{
+    Model, SchematicReviewMarkerVisibility, SlotFacts,
+};
 
 /// What the runs keep between frames.
 #[derive(Debug, Clone, Default)]
@@ -19,6 +21,17 @@ pub struct RunsState {
     /// The deck a manual-deck run started from and the baseline the last one
     /// left. Runtime only, and boxed so a moved state stays the same size.
     pub manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
+}
+
+impl RunsState {
+    /// What model code reads of the features' state: whether the run gate's
+    /// report is retained, and the review markers the drawing shows.
+    pub fn slot_facts(&self, review_markers: SchematicReviewMarkerVisibility) -> SlotFacts {
+        SlotFacts {
+            preflight_report_retained: self.preflight.report.is_some(),
+            review_markers,
+        }
+    }
 }
 
 /// Request a run of the Simulate workspace's run set, which replaces a

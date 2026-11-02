@@ -35,10 +35,8 @@ impl AppState {
 
     /// What model code reads of the features' state, as it stands now.
     pub(crate) fn slot_facts(&self) -> SlotFacts {
-        SlotFacts {
-            preflight_report_retained: self.runs.preflight.report.is_some(),
-            review_markers: self.design.schematic_visibility.review_markers,
-        }
+        self.runs
+            .slot_facts(self.design.schematic_visibility.review_markers)
     }
 
     // Application half of a model operation; it becomes a request.

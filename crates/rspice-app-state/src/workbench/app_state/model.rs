@@ -274,6 +274,9 @@ fn schematic_has_authored_content(
         || !schematic.validated_revisions.is_empty()
 }
 
+/// The review markers' visibility, the type [`SlotFacts`] carries.
+pub use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
+
 /// What model code reads of the features' state.
 ///
 /// The model never reaches up into a feature's slot for these. The caller

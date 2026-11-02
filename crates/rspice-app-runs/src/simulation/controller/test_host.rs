@@ -151,10 +151,8 @@ impl RunHost for RunTestHost {
 
     /// The drawing shows the review markers a new session shows.
     fn slot_facts(&self) -> SlotFacts {
-        SlotFacts {
-            preflight_report_retained: self.runs.preflight.report.is_some(),
-            review_markers: SchematicReviewMarkerVisibility::default(),
-        }
+        self.runs
+            .slot_facts(SchematicReviewMarkerVisibility::default())
     }
 
     /// No project compilation is current.
