@@ -2,7 +2,7 @@
 //! frontend/com_compose.c builds it.
 
 use super::*;
-use crate::execution::control::shell::{SetValue, assignments};
+use crate::engine::control::shell::{SetValue, assignments};
 
 impl ControlCircuit {
     /// `compose name values expr...` or `compose name parameter=value...`.

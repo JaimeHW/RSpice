@@ -1,8 +1,12 @@
 //! ngspice command-line words, `set` assignments and shell variables
 //! (frontend/parser/lexical.c, frontend/variable.c `cp_setparse`).
 
-use super::{ControlError, syntax};
 use crate::Value;
+use crate::control_protocol::{ControlError, ControlErrorKind};
+
+fn syntax(line: usize, message: impl Into<String>) -> ControlError {
+    ControlError::new(line, ControlErrorKind::Syntax, message)
+}
 
 /// One shell word. Quotes group whitespace and are removed, as `cp_unquote`
 /// removes them before a command sees its words.

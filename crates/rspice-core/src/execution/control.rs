@@ -12,9 +12,7 @@ use crate::netlist::expr::{ParamContext, eval_expression_complex_with_abort, is_
 use crate::{ComplexValue, Value};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub(crate) mod shell;
-
-use shell::ShellValue;
+use crate::engine::control::shell::{self, ShellValue};
 
 #[derive(Debug, Clone, Copy)]
 pub struct ControlLimits {

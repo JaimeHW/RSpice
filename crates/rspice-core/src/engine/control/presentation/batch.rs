@@ -113,7 +113,7 @@ impl ControlCircuit {
     /// `echo [-n] words...`: the words after substitution, unquoted and
     /// joined by single spaces.
     pub(in crate::engine) fn echo(command: &ControlCommand) -> String {
-        let mut words: Vec<_> = crate::execution::control::shell::words(&command.arguments)
+        let mut words: Vec<_> = crate::engine::control::shell::words(&command.arguments)
             .into_iter()
             .map(|word| word.text)
             .collect();
@@ -151,7 +151,7 @@ impl ControlCircuit {
         };
         let policy = self.netlist.ground_policy();
         let mut vectors = dataset.vectors(|name| policy.is_ground(name));
-        let requested = crate::execution::control::shell::words(&command.arguments);
+        let requested = crate::engine::control::shell::words(&command.arguments);
         if !requested.is_empty() {
             let mut text = String::new();
             for word in requested {
@@ -190,7 +190,7 @@ impl ControlCircuit {
         command: &ControlCommand,
     ) -> Result<(), ControlError> {
         let line = command.line;
-        let words = crate::execution::control::shell::words(&command.arguments);
+        let words = crate::engine::control::shell::words(&command.arguments);
         let names: Vec<String> = match words.as_slice() {
             [] => vec![self.plot_name()],
             [all] if all.text.eq_ignore_ascii_case("all") => (0..self.datasets.len())

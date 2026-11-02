@@ -20,6 +20,8 @@ use std::collections::{BTreeMap, BTreeSet};
 mod analysis;
 mod options;
 mod presentation;
+/// Shared with the session, which sits above this host.
+pub(crate) mod shell;
 mod transient;
 pub use options::ControlSettings;
 pub(super) use options::apply_runtime_options;
@@ -388,7 +390,7 @@ impl ControlCircuit {
                 ControlPresentationKind::ResourceUsage,
             )),
             CommandKind::SetPlot => {
-                let words = crate::execution::control::shell::words(&command.arguments);
+                let words = shell::words(&command.arguments);
                 let [name] = words.as_slice() else {
                     if words.is_empty() {
                         return Ok(Self::batch_output(

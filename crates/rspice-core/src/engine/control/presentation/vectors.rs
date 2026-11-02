@@ -414,7 +414,7 @@ impl ControlCircuit {
                 value
                     .samples
                     .iter()
-                    .map(|sample| crate::execution::control::shell::percent_g(sample.re))
+                    .map(|sample| crate::engine::control::shell::percent_g(sample.re))
                     .collect(),
             )),
             Err(error)

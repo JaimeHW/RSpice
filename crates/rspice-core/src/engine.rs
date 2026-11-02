@@ -59,7 +59,7 @@ pub use builder::{
 };
 
 mod config_resolver;
-mod control;
+pub(crate) mod control;
 pub use control::{
     ControlAnalysisResult, ControlCircuit, ControlCommandEffect, ControlCurrentSource,
     ControlExecutionError, ControlNamedDataset, ControlPlotOptions, ControlPresentation,

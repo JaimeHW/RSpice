@@ -100,7 +100,7 @@ impl ControlCircuit {
         variables: &ParamContext,
         abort: &dyn AbortSignal,
     ) -> Result<(), ControlExecutionError> {
-        use crate::execution::control::shell::{SetValue, assignments};
+        use crate::engine::control::shell::{SetValue, assignments};
         let assignments = assignments(&command.arguments, command.line)?;
         if assignments.is_empty() {
             return Err(command_error(command.line, "set requires a variable").into());
@@ -156,7 +156,7 @@ impl ControlCircuit {
 
     /// `unset`: the variables this host keeps return to their defaults.
     pub(super) fn apply_unset(&mut self, command: &ControlCommand) -> Result<(), ControlError> {
-        let words = crate::execution::control::shell::words(&command.arguments);
+        let words = crate::engine::control::shell::words(&command.arguments);
         if words.is_empty() {
             return Err(command_error(command.line, "unset requires a variable"));
         }
