@@ -705,6 +705,7 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
             }
             ui.label(messages.text(MessageId::CommonScope));
             find_scope_select(ui, &mut find, messages);
+            ui.horizontal_wrapped(|ui| find_options(ui, &mut find, messages));
         } else {
             egui::Grid::new("rspice.code.find-fields")
                 .num_columns(2)
@@ -731,31 +732,14 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
                     ui.label(messages.text(MessageId::CommonScope));
                     find_scope_select(ui, &mut find, messages);
                     ui.end_row();
+                    // The options qualify the fields above them, so they
+                    // start at the fields' edge, not under the labels.
+                    ui.allocate_exact_size(egui::Vec2::ZERO, egui::Sense::hover());
+                    ui.horizontal_wrapped(|ui| find_options(ui, &mut find, messages));
+                    ui.end_row();
                 });
         }
 
-        ui.horizontal_wrapped(|ui| {
-            ui.checkbox(
-                &mut find.match_case,
-                messages.text(MessageId::NetlistFindMatchCase),
-            );
-            ui.checkbox(
-                &mut find.whole_symbol,
-                messages.text(MessageId::NetlistFindWholeSymbol),
-            );
-            ui.checkbox(
-                &mut find.regular_expression,
-                messages.text(MessageId::NetlistFindRegularExpression),
-            );
-            ui.checkbox(
-                &mut find.include_comments,
-                messages.text(MessageId::NetlistFindIncludeComments),
-            );
-            ui.checkbox(
-                &mut find.include_generated_references,
-                messages.text(MessageId::NetlistFindIncludeGeneratedReferences),
-            );
-        });
         if !has_matches {
             return find_control_id;
         }
@@ -1081,6 +1065,34 @@ pub(super) fn find_replace_window(ctx: &egui::Context, app: &mut RSpiceApp) {
 }
 
 /// The scope as the kit's select, in the order the search widens.
+/// The search's options, in the order they narrow it.
+fn find_options(
+    ui: &mut Ui,
+    find: &mut crate::workbench::documents::netlist_document::NetlistFindState,
+    messages: MessageCatalog,
+) {
+    ui.checkbox(
+        &mut find.match_case,
+        messages.text(MessageId::NetlistFindMatchCase),
+    );
+    ui.checkbox(
+        &mut find.whole_symbol,
+        messages.text(MessageId::NetlistFindWholeSymbol),
+    );
+    ui.checkbox(
+        &mut find.regular_expression,
+        messages.text(MessageId::NetlistFindRegularExpression),
+    );
+    ui.checkbox(
+        &mut find.include_comments,
+        messages.text(MessageId::NetlistFindIncludeComments),
+    );
+    ui.checkbox(
+        &mut find.include_generated_references,
+        messages.text(MessageId::NetlistFindIncludeGeneratedReferences),
+    );
+}
+
 fn find_scope_select(
     ui: &mut Ui,
     find: &mut crate::workbench::documents::netlist_document::NetlistFindState,
@@ -1337,5 +1349,52 @@ mod tests {
                 "touch {coarse}: the field is {field} tall and the select {select}"
             );
         }
+    }
+
+    /// The options start at the fields' left edge, under the Find field, not
+    /// under the labels beside it.
+    #[test]
+    fn the_options_start_where_the_fields_do() {
+        use egui::accesskit::Role;
+
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page =
+            crate::workbench::documents::code_workspace::CodeWorkspacePage::Netlist;
+        app.state.code.netlist.find.open = true;
+        let ctx = egui::Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| find_replace_window(ui.ctx(), &mut app),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        let lefts = |role: Role| {
+            nodes
+                .values()
+                .filter(|node| node.role() == role)
+                .filter_map(|node| node.bounds())
+                .map(|bounds| bounds.x0)
+                .collect::<Vec<_>>()
+        };
+        let field = lefts(Role::TextInput)[0];
+        let checks = lefts(Role::CheckBox);
+        assert_eq!(checks.len(), 5, "{checks:?}");
+        let first = checks.iter().copied().fold(f64::INFINITY, f64::min);
+        assert!(
+            (first - field).abs() < 1.0,
+            "the options start at {first}, the field at {field}"
+        );
     }
 }
