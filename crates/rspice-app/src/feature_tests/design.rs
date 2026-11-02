@@ -365,3 +365,34 @@ fn engineering_table_view_opens_and_draws_in_the_frame() {
     assert!(draws_dialog(&mut app, "Engineering table view"));
     assert!(app.state.design.engineering_table.open);
 }
+
+#[test]
+fn stimulus_link_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    let id = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::VoltageSourcePulse, Point::new(100, 100));
+    let reference = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("the source is placed")
+        .spice_instance_name();
+    crate::workbench::app::open_stimulus_link(
+        &mut app.state,
+        id,
+        crate::workbench::app::StimulusLinkMode::Extract,
+    )
+    .expect("the save dialog opens");
+    assert!(draws_dialog(
+        &mut app,
+        &format!("Save {reference} as a definition")
+    ));
+    assert!(app.state.design.stimulus_link.open);
+}

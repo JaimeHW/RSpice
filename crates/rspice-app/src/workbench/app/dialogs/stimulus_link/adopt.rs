@@ -24,7 +24,8 @@ use crate::ui::input::focus_filter_on_typing;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
+use crate::workbench::state::WorkbenchSession;
 
 use super::shell::{self, Fact, MiniCache};
 use super::{StimulusLinkDialogState, consequence, realized};
@@ -81,7 +82,7 @@ pub(super) struct AdoptGroup<'a> {
 /// An empty group is absent rather than headed by nothing: a project with no
 /// current sources should not be told twice that it has none.
 pub(super) fn adopt_groups<'a>(
-    state: &AppState,
+    model: &Model,
     component: &Component,
     filter: &str,
     cache: &'a MiniCache,
@@ -89,8 +90,7 @@ pub(super) fn adopt_groups<'a>(
     let reference = component.spice_instance_name();
     let unit = placed_sources::source_unit(component);
     let needle = filter.trim().to_ascii_lowercase();
-    let mut ordered: Vec<&StimulusDefinition> = state
-        .model
+    let mut ordered: Vec<&StimulusDefinition> = model
         .workspace
         .content
         .stimulus_library
@@ -209,20 +209,21 @@ fn meta_line(
 /// Render the adopt transaction.
 pub(super) fn render(
     ctx: &egui::Context,
-    state: &mut AppState,
+    link: &mut StimulusLinkDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
     session: &StimulusLinkDialogState,
     component: &Component,
     cache: &mut MiniCache,
 ) {
     source_preview::ensure_minis(
         cache,
-        &state.model.workspace.content.stimulus_library,
+        &model.workspace.content.stimulus_library,
         session.timing,
     );
-    let groups = adopt_groups(state, component, &session.filter, cache);
+    let groups = adopt_groups(model, component, &session.filter, cache);
     let picked = session.pick.as_ref().and_then(|name| {
-        state
-            .model
+        model
             .workspace
             .content
             .stimulus_library
@@ -317,24 +318,24 @@ pub(super) fn render(
         focus
     });
 
-    state.design.stimulus_link.pick = pick;
-    state.design.stimulus_link.filter = filter;
+    link.pick = pick;
+    link.filter = filter;
     if closed {
-        state.design.stimulus_link.close();
+        link.close();
         return;
     }
     match choice {
         DialogChoice::Primary => {
             let Some(definition) = picked else { return };
-            match super::commit_adoption(state, session.component_id, &definition) {
+            match super::commit_adoption(model, session.component_id, &definition) {
                 Ok(line) => {
-                    state.prompt(line);
-                    state.design.stimulus_link.close();
+                    workbench.prompt(line);
+                    link.close();
                 }
-                Err(refusal) => state.design.stimulus_link.error = Some(refusal),
+                Err(refusal) => link.error = Some(refusal),
             }
         }
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.design.stimulus_link.close(),
+        DialogChoice::Ghost | DialogChoice::Cancelled => link.close(),
         DialogChoice::None | DialogChoice::Secondary => {}
     }
 }

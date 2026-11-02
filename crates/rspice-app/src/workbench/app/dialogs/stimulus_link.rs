@@ -42,8 +42,8 @@ use crate::state::stimulus_library::definition::{
     StimulusDefinition, StimulusDefinitionError, StimulusFamily,
 };
 use crate::state::stimulus_library::provenance::{AdoptionFit, ProvenanceState};
-use crate::workbench::app_state::AppState;
-use crate::workbench::state::Workspace;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::{WorkbenchSession, Workspace};
 
 use shell::MiniCache;
 
@@ -346,7 +346,7 @@ fn consequence(component: &Component, definition: &StimulusDefinition) -> String
 }
 
 /// Why this name cannot be saved, in the model's own words.
-fn extract_refusal(state: &AppState, component: &Component, name: &str) -> Option<String> {
+fn extract_refusal(model: &Model, component: &Component, name: &str) -> Option<String> {
     if let Err(error) = StimulusDefinition::new(
         name,
         component.kind,
@@ -354,8 +354,7 @@ fn extract_refusal(state: &AppState, component: &Component, name: &str) -> Optio
     ) {
         return Some(error.to_string());
     }
-    state
-        .model
+    model
         .workspace
         .content
         .stimulus_library
@@ -380,14 +379,19 @@ fn family_line(component: &Component) -> String {
 /// the per-frame clone of the session does not copy every evaluated curve, and
 /// are only put back while the dialog is still open: a closed dialog holds no
 /// samples for a library it is no longer showing.
-pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
-    if !state.design.stimulus_link.open {
+pub(crate) fn render_stimulus_link_dialog(
+    dialog: &mut StimulusLinkDialogState,
+    selected_definition: &mut Option<String>,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !dialog.open {
         return;
     }
-    let mut minis = std::mem::take(&mut state.design.stimulus_link.minis);
-    let session = state.design.stimulus_link.clone();
-    let Some(component) = state
-        .model
+    let mut minis = std::mem::take(&mut dialog.minis);
+    let session = dialog.clone();
+    let Some(component) = model
         .schematic
         .document()
         .components
@@ -395,16 +399,25 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
         .find(|component| component.id == session.component_id)
         .cloned()
     else {
-        state.design.stimulus_link.close();
+        dialog.close();
         return;
     };
 
     match session.mode {
-        StimulusLinkMode::Adopt => adopt::render(ctx, state, &session, &component, &mut minis),
-        StimulusLinkMode::Extract => extract::render(ctx, state, &session, &component),
+        StimulusLinkMode::Adopt => adopt::render(
+            ctx, dialog, model, workbench, &session, &component, &mut minis,
+        ),
+        StimulusLinkMode::Extract => extract::render(
+            ctx,
+            dialog,
+            selected_definition,
+            model,
+            &session,
+            &component,
+        ),
     }
-    if state.design.stimulus_link.open {
-        state.design.stimulus_link.minis = minis;
+    if dialog.open {
+        dialog.minis = minis;
     }
 }
 
@@ -412,12 +425,11 @@ pub(crate) fn render_stimulus_link_dialog(ctx: &Context, state: &mut AppState) {
 /// differs. One component transaction, so one undo restores the type and the
 /// card together.
 pub(crate) fn commit_adoption(
-    state: &mut AppState,
+    model: &mut Model,
     component_id: u64,
     definition: &StimulusDefinition,
 ) -> Result<String, String> {
-    let expected = state
-        .model
+    let expected = model
         .schematic
         .document()
         .components
@@ -441,20 +453,20 @@ pub(crate) fn commit_adoption(
         // exactly that change, so it is written as its own operation — one
         // undo entry, the instance replaced in place, and the topology version
         // bumped because the netlister must re-read the card.
-        if state.schematic_edit_read_only() {
+        if model.schematic_edit_read_only() {
             return Err(format!(
                 "{reference} was not re-placed: the active schematic view is read-only."
             ));
         }
         let description = format!("adopt {} onto {reference}", definition.name());
-        let replaced = candidate.replace_family(&mut state.model.schematic, description);
+        let replaced = candidate.replace_family(&mut model.schematic, description);
         if !replaced {
             return Err(format!(
                 "{reference} was not re-placed: the active schematic view is read-only."
             ));
         }
     } else {
-        state.model.edit_component_transaction(
+        model.edit_component_transaction(
             &expected,
             candidate.into_component(),
             "adopt stimulus definition",
@@ -521,10 +533,14 @@ pub(crate) fn commit_readoption(
 
 /// Publish the instance's card as a new `r1` definition and point the instance
 /// at it.
-fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, String> {
-    let session = state.design.stimulus_link.clone();
-    let expected = state
-        .model
+fn commit_extraction(
+    dialog: &StimulusLinkDialogState,
+    selected_definition: &mut Option<String>,
+    model: &mut Model,
+    component_id: u64,
+) -> Result<String, String> {
+    let session = dialog.clone();
+    let expected = model
         .schematic
         .document()
         .components
@@ -532,7 +548,7 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
         .find(|component| component.id == component_id)
         .cloned()
         .ok_or_else(|| "That instance is no longer on this sheet.".to_owned())?;
-    if let Some(refusal) = extract_refusal(state, &expected, &session.name) {
+    if let Some(refusal) = extract_refusal(model, &expected, &session.name) {
         return Err(refusal);
     }
     let mut candidate = expected.clone();
@@ -548,22 +564,19 @@ fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, 
     // instance refuses. The other order leaves a receipt naming a definition
     // the project does not hold — which every surface reads as `definition
     // removed`, over an extraction the reader was told had failed.
-    state
-        .model
+    model
         .workspace
         .content
         .stimulus_library
         .insert(definition)
         .map_err(|error| error.to_string())?;
     if let Err(refusal) =
-        state
-            .model
-            .edit_component_transaction(&expected, candidate, "save stimulus definition")
+        model.edit_component_transaction(&expected, candidate, "save stimulus definition")
     {
-        let _ = state.model.workspace.content.stimulus_library.delete(&name);
+        let _ = model.workspace.content.stimulus_library.delete(&name);
         return Err(refusal);
     }
-    state.design.selected_stimulus_definition = Some(name.clone());
+    *selected_definition = Some(name.clone());
     Ok(format!(
         "Saved stimulus definition {name} at r1 from {}.",
         session.reference

@@ -212,7 +212,7 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.stimulus_link"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.stimulus_link.open),
-        render: |app, ctx| dialogs::stimulus_link::render_stimulus_link_dialog(ctx, &mut app.state),
+        render: |app, ctx| DesignFeature::render_stimulus_link_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("design.create_hierarchy"),

@@ -21,7 +21,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogInitialFocus, DialogSize};
 use crate::workbench::app::dialogs::review_primitives::{input_field, text_edit_field};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::Model;
 
 use super::shell::{self, Fact};
 use super::{StimulusLinkDialogState, extract_refusal, family_line};
@@ -43,11 +43,13 @@ const PURPOSE: &str =
 /// Render the save transaction.
 pub(super) fn render(
     ctx: &egui::Context,
-    state: &mut AppState,
+    link: &mut StimulusLinkDialogState,
+    selected_definition: &mut Option<String>,
+    model: &mut Model,
     session: &StimulusLinkDialogState,
     component: &Component,
 ) {
-    let refusal = extract_refusal(state, component, &session.name);
+    let refusal = extract_refusal(model, component, &session.name);
     let title = format!("Save {} as a definition", session.reference);
     let dialog = Dialog::new(title.clone(), "Save definition")
         .description(PURPOSE)
@@ -100,26 +102,28 @@ pub(super) fn render(
         focus
     });
 
-    state.design.stimulus_link.name = name;
-    state.design.stimulus_link.purpose = purpose;
-    state.design.stimulus_link.select_name = false;
+    link.name = name;
+    link.purpose = purpose;
+    link.select_name = false;
     if closed {
-        state.design.stimulus_link.close();
+        link.close();
         return;
     }
     match choice {
-        DialogChoice::Primary => match super::commit_extraction(state, session.component_id) {
-            Ok(line) => {
-                state.record(
-                    crate::diagnostics::LogSeverity::Info,
-                    crate::diagnostics::LogSource::Studio,
-                    line,
-                );
-                state.design.stimulus_link.close();
+        DialogChoice::Primary => {
+            match super::commit_extraction(link, selected_definition, model, session.component_id) {
+                Ok(line) => {
+                    model.record(
+                        crate::diagnostics::LogSeverity::Info,
+                        crate::diagnostics::LogSource::Studio,
+                        line,
+                    );
+                    link.close();
+                }
+                Err(refusal) => link.error = Some(refusal),
             }
-            Err(refusal) => state.design.stimulus_link.error = Some(refusal),
-        },
-        DialogChoice::Ghost | DialogChoice::Cancelled => state.design.stimulus_link.close(),
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => link.close(),
         DialogChoice::None | DialogChoice::Secondary => {}
     }
 }

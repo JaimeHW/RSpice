@@ -348,10 +348,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("DesignFeature::render_documentation_shape_dialog", "design"),
     ("DesignFeature::render_array_selection_dialog", "design"),
     ("render_replace_instance_dialog", "design"),
-    (
-        "dialogs::stimulus_link::render_stimulus_link_dialog",
-        "design",
-    ),
+    ("DesignFeature::render_stimulus_link_dialog", "design"),
     ("render_create_hierarchy_dialog", "design"),
     ("ProjectFeature::render_check_and_save_dialog", "project"),
     ("render_connectivity_manager_dialog", "design"),

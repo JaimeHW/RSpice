@@ -17,6 +17,28 @@ use crate::state::{ComponentType, Point};
 use crate::ui::tokens::Mode;
 use crate::workbench::app::RSpiceApp;
 
+/// Draw the dialog as the frame's step does, over the whole state.
+fn render_stimulus_link_dialog(ctx: &egui::Context, state: &mut AppState) {
+    super::render_stimulus_link_dialog(
+        &mut state.design.stimulus_link,
+        &mut state.design.selected_stimulus_definition,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
+
+/// Save the instance's card as the dialog's primary does, over the whole
+/// state.
+fn commit_extraction(state: &mut AppState, component_id: u64) -> Result<String, String> {
+    super::commit_extraction(
+        &state.design.stimulus_link,
+        &mut state.design.selected_stimulus_definition,
+        &mut state.model,
+        component_id,
+    )
+}
+
 fn definition(name: &str, kind: ComponentType, value: &str, params: &str) -> StimulusDefinition {
     let mut definition =
         StimulusDefinition::new(name, kind, crate::state::stimulus_library::now_unix_ms)
@@ -133,7 +155,7 @@ fn groups_of(app: &RSpiceApp, id: u64, filter: &str, cache: &mut MiniCache) -> V
         PreviewTiming::default(),
     );
     let component = instance_of(app, id);
-    adopt_groups(&app.state, &component, filter, cache)
+    adopt_groups(&app.state.model, &component, filter, cache)
         .into_iter()
         .flat_map(|group| {
             std::iter::once(group.label).chain(group.rows.into_iter().map(|row| row.name))
@@ -172,7 +194,7 @@ fn a_cross_family_adoption_re_places_the_instance_and_keeps_both_nets() {
         .get("sensor_drive")
         .cloned()
         .expect("held");
-    let line = commit_adoption(&mut app.state, id, &held).expect("the adoption commits");
+    let line = commit_adoption(&mut app.state.model, id, &held).expect("the adoption commits");
     assert!(line.contains("re-placed as"), "{line}");
     assert!(line.contains("kept their nets"), "{line}");
 
@@ -218,7 +240,7 @@ fn a_same_family_adoption_is_a_copy_with_a_receipt() {
         .insert(held.clone())
         .expect("insert");
 
-    let line = commit_adoption(&mut app.state, id, &held).expect("the adoption commits");
+    let line = commit_adoption(&mut app.state.model, id, &held).expect("the adoption commits");
     assert!(!line.contains("re-placed"), "{line}");
     let component = instance_of(&app, id);
     assert_eq!(component.kind, ComponentType::VoltageSourcePulse);
@@ -239,7 +261,8 @@ fn a_cross_kind_adoption_is_refused_rather_than_converted() {
         .get("leak")
         .cloned()
         .expect("held");
-    let refusal = commit_adoption(&mut app.state, id, &held).expect_err("kinds do not convert");
+    let refusal =
+        commit_adoption(&mut app.state.model, id, &held).expect_err("kinds do not convert");
     assert!(refusal.contains("current definition"), "{refusal}");
     assert!(refusal.contains("Duplicate the definition"), "{refusal}");
 
@@ -327,7 +350,7 @@ fn arrow_keys_step_over_the_rows_that_cannot_be_adopted() {
         PreviewTiming::default(),
     );
     let component = instance_of(&app, id);
-    let groups = adopt_groups(&app.state, &component, "", &cache);
+    let groups = adopt_groups(&app.state.model, &component, "", &cache);
 
     let mut pick = stepped(&groups, None, 1).expect("the first reachable row");
     let mut walk = vec![pick.clone()];
@@ -356,7 +379,7 @@ fn arrow_keys_step_over_the_rows_that_cannot_be_adopted() {
 
     let (app, id) = kind_only_fixture();
     let component = instance_of(&app, id);
-    let groups = adopt_groups(&app.state, &component, "", &cache);
+    let groups = adopt_groups(&app.state.model, &component, "", &cache);
     assert!(
         stepped(&groups, None, 1).is_none(),
         "a library of nothing adoptable has nowhere to step to"
@@ -553,14 +576,14 @@ fn the_extract_name_is_refused_in_the_models_own_words() {
     let (app, id) = fixture();
     let component = instance_of(&app, id);
 
-    let invalid = extract_refusal(&app.state, &component, "two words").expect("refused");
+    let invalid = extract_refusal(&app.state.model, &component, "two words").expect("refused");
     assert!(invalid.contains("is not a SPICE identifier"), "{invalid}");
-    let duplicate = extract_refusal(&app.state, &component, "sensor_drive").expect("refused");
+    let duplicate = extract_refusal(&app.state.model, &component, "sensor_drive").expect("refused");
     assert!(
         duplicate.contains("this project already defines 'sensor_drive'"),
         "{duplicate}"
     );
-    assert!(extract_refusal(&app.state, &component, "v1_pulse").is_none());
+    assert!(extract_refusal(&app.state.model, &component, "v1_pulse").is_none());
 }
 
 /// Adopt refuses to open over a project with no definitions, because a list
@@ -595,7 +618,7 @@ fn adopt_opens_on_the_definition_the_instance_already_carries() {
         .get("sensor_drive")
         .cloned()
         .expect("held");
-    commit_adoption(&mut app.state, id, &held).expect("adopted");
+    commit_adoption(&mut app.state.model, id, &held).expect("adopted");
 
     open_stimulus_link(&mut app.state, id, StimulusLinkMode::Adopt).expect("opens");
     assert_eq!(
