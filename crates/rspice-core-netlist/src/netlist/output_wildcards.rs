@@ -8,8 +8,11 @@
 //! (N_IO_WildcardSupport.C:41-68). RSpice rewrites the card the same way at
 //! parse time, so the rest of the pipeline sees ordinary device operands.
 //! Xyce's own column order follows a hash map; RSpice lists the devices in
-//! flattened circuit order. `V()` wildcards stay on the card: the output
-//! projection expands them against the result's node names.
+//! flattened circuit order. On an AC, HB or noise card a `V()` wildcard
+//! expands here too, to each external node in circuit order
+//! (N_IO_OutputMgr.C:3016-3031, `getVWildcardList`); a transient or DC card
+//! keeps it, and the output projection expands it against the result's node
+//! names.
 
 use super::flattener::{Flattener, FlattenerConfig};
 use super::output_symbols::{
@@ -40,6 +43,40 @@ struct DeviceWildcard {
     operator: String,
     leads: WildcardLeads,
     pattern: String,
+}
+
+/// One `V()` wildcard on an AC, HB or noise card.
+struct NodeWildcard {
+    operator: String,
+    pattern: String,
+}
+
+/// The node wildcard an AC, HB or noise operand names, if it is one: `V(*)`,
+/// `VR(*)`, `VM(A*)` and the other voltage accessors.
+fn node_wildcard(
+    analysis: Option<OutputAnalysisKind>,
+    authored: &str,
+    kind: &OutputOperandKind,
+) -> Option<NodeWildcard> {
+    if !matches!(
+        analysis,
+        Some(OutputAnalysisKind::Ac | OutputAnalysisKind::Hb | OutputAnalysisKind::Noise)
+    ) || !matches!(
+        kind,
+        OutputOperandKind::Probe(SaveSignal::Voltage(_)) | OutputOperandKind::Expression { .. }
+    ) {
+        return None;
+    }
+    let (operator, rest) = authored.trim().split_once('(')?;
+    let argument = rest.strip_suffix(')')?.trim();
+    if !argument.contains(['*', '?']) || argument.contains(['(', ')', ',', '{', '}', '\'']) {
+        return None;
+    }
+    let operator = operator.trim().to_ascii_uppercase();
+    matches!(operator.as_str(), "V" | "VR" | "VI" | "VM" | "VP" | "VDB").then(|| NodeWildcard {
+        operator,
+        pattern: argument.to_ascii_uppercase(),
+    })
 }
 
 /// Device letters whose Xyce instances carry a single `BRANCH_D` lead entry.
@@ -119,9 +156,9 @@ fn xyce_device_name(name: &str) -> String {
 
 /// The operand kind the parser gives `probe`, with the save signal it records.
 fn device_operand(probe: String, saves: &mut Vec<SaveSignal>) -> OutputOperand {
-    let direct = probe
-        .split_once('(')
-        .is_some_and(|(operator, _)| operator.eq_ignore_ascii_case("I"));
+    let direct = probe.split_once('(').is_some_and(|(operator, _)| {
+        operator.eq_ignore_ascii_case("I") || operator.eq_ignore_ascii_case("V")
+    });
     let kind = match super::parser::parse_save_probe(&probe) {
         Some(signal) if direct => {
             saves.push(signal.clone());
@@ -140,7 +177,8 @@ fn device_operand(probe: String, saves: &mut Vec<SaveSignal>) -> OutputOperand {
     }
 }
 
-/// Expand every Xyce device wildcard on the deck's `.PRINT` cards.
+/// Expand every Xyce device wildcard on the deck's `.PRINT` cards, and the
+/// node wildcards on its AC, HB and noise cards.
 ///
 /// A pattern other than `*` that names no device at all stays on the card,
 /// so output validation refuses it as Xyce does ("undefined symbols in .PRINT
@@ -152,9 +190,13 @@ pub(super) fn expand_xyce_device_wildcards_with_abort(
     let expands = |request: &OutputRequest| {
         request.directive == OutputDirectiveKind::Print
             && request
-                .operand_kinds
+                .operands
                 .iter()
-                .any(|kind| device_wildcard(kind).is_some())
+                .zip(&request.operand_kinds)
+                .any(|(authored, kind)| {
+                    device_wildcard(kind).is_some()
+                        || node_wildcard(request.analysis, authored, kind).is_some()
+                })
     };
     if !netlist.output_requests.iter().any(expands) {
         return Ok(());
@@ -178,6 +220,15 @@ pub(super) fn expand_xyce_device_wildcards_with_abort(
             Some((element, name, letter))
         })
         .collect::<Vec<_>>();
+    let ground = netlist.ground_policy();
+    let mut seen_nodes = std::collections::HashSet::new();
+    let nodes = elements
+        .iter()
+        .flat_map(|element| &element.nodes)
+        .filter(|node| !ground.is_ground(node))
+        .map(|node| xyce_device_name(node))
+        .filter(|node| seen_nodes.insert(node.clone()))
+        .collect::<Vec<_>>();
 
     let mut saves = Vec::new();
     let mut expanded_saves = Vec::new();
@@ -191,6 +242,26 @@ pub(super) fn expand_xyce_device_wildcards_with_abort(
         );
         let mut operands = Vec::with_capacity(request.operands.len());
         for (authored, kind) in request.operands.iter().zip(&request.operand_kinds) {
+            // A node pattern that matches nothing prints nothing, as in Xyce.
+            if let Some(wildcard) = node_wildcard(request.analysis, authored, kind) {
+                expanded_saves.push(match kind {
+                    OutputOperandKind::Probe(signal) => signal.clone(),
+                    OutputOperandKind::Expression { body } => SaveSignal::Raw(body.clone()),
+                });
+                for (index, node) in nodes.iter().enumerate() {
+                    if index.is_multiple_of(64) && abort.is_aborted() {
+                        return Err(ParseWithAbortError::Aborted);
+                    }
+                    if wildcard.pattern == "*" || hierarchy_pattern_matches(&wildcard.pattern, node)
+                    {
+                        operands.push(device_operand(
+                            format!("{}({node})", wildcard.operator),
+                            &mut saves,
+                        ));
+                    }
+                }
+                continue;
+            }
             let wildcard = device_wildcard(kind).filter(|wildcard| {
                 wildcard.pattern == "*"
                     || devices
@@ -326,6 +397,42 @@ mod tests {
             [["I(V1)", "I(L1)", "IM(V1)", "IM(L1)", "I(X5*)"]
                 .map(String::from)
                 .to_vec()]
+        );
+    }
+
+    /// BUG_1211 and BUG_1238 print `V(*)`, `VM(*)` and `V(*1)` on AC and HB
+    /// cards: each external node, subcircuit nodes included, ground left out.
+    #[test]
+    fn ac_and_hb_node_wildcards_expand_to_each_external_node_in_circuit_order() {
+        let operands = xyce_print_operands(
+            "node wildcards\n\
+             V1 a1 0 DC 0 AC 1\n\
+             L1 a1 b1 1u\n\
+             X1 b1 0 sub\n\
+             .subckt sub p q\n\
+             R1 p c1 1\n\
+             R2 c1 q 1\n\
+             .ends\n\
+             .ac dec 1 1k 10k\n\
+             .print ac V(*) VM(*1) VDB(Q*)\n\
+             .print tran V(*)\n\
+             .end\n",
+        );
+        assert_eq!(
+            operands,
+            [
+                [
+                    "V(A1)",
+                    "V(B1)",
+                    "V(X1:C1)",
+                    "VM(A1)",
+                    "VM(B1)",
+                    "VM(X1:C1)"
+                ]
+                .map(String::from)
+                .to_vec(),
+                ["V(*)"].map(String::from).to_vec(),
+            ]
         );
     }
 }
