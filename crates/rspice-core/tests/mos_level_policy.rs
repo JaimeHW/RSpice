@@ -1536,6 +1536,58 @@ fn classic_mos_series_precedence_matches_explicit_resistor_values() {
 }
 
 #[test]
+fn xyce_mos2_without_fast_surface_states_cuts_off_at_von() {
+    use rspice_core::config::SpiceDialect;
+    // A CircuitSim90 voter25 enhancement device at 125 C, biased between
+    // VBIN and VON with NFS=0. Xyce cuts its channel off at VON
+    // (N_DEV_MOSFET2.C:2183-2190), so only the linearized reverse junctions
+    // conduct and the operating point converges. Cut off at VBIN instead,
+    // as ngspice does, the strong-inversion equations run in the window
+    // and the Newton solve never settled. Xyce 7.10, .dc VG 3.17 3.17 1:
+    // I(VD) = -1.462355296130e-07 A, I(VS) = -7.699808687366e-08 A, whose
+    // ratio is Vdb/Vsb: no channel current. Both currents sit 3.56e-4 under
+    // Xyce's, which is the junctions' IS(T)/vt at 125 C under the SI k/q
+    // rather than Xyce's CONSTKoverQ (1.3806226e-23/1.6021918e-19).
+    let netlist = Netlist::parse(
+        "MOS2 cutoff between VBIN and VON
+VD d 0 5.309247
+VG g 0 3.17
+VS s 0 2.795503
+M1 d g s 0 NENH L=2u W=3u
+.MODEL NENH NMOS LEVEL=2 VTO=0.9 PB=0.8 CGSO=2.1e-10 CGDO=2.1e-10 RSH=38 CJ=2.15e-4
++ MJ=0.76 CJSW=5.4e-10 MJSW=0.3 TOX=4.3e-8 NSUB=1e16 TPG=1 XJ=1.5e-7 LD=5e-8 UO=620
++ UCRIT=6.2e4 UEXP=0.125 VMAX=5.1e4 NEFF=4 DELTA=1.4
+.options device temp=125
+.end
+",
+    )
+    .unwrap();
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let op = engine
+        .run_dc_op(&netlist)
+        .expect("the Xyce-dialect operating point converges");
+    let drain = op.branch_current_named("VD").expect("drain source current");
+    let source = op
+        .branch_current_named("VS")
+        .expect("source source current");
+    let bias_ratio = 5.309247 / 2.795503;
+    assert!(
+        (drain / source - bias_ratio).abs() <= 1.0e-9 * bias_ratio,
+        "the channel conducts: I(VD)/I(VS) = {} against Vdb/Vsb = {bias_ratio}",
+        drain / source
+    );
+    for (name, current, xyce) in [
+        ("VD", drain, -1.462355296130e-07),
+        ("VS", source, -7.699808687366e-08),
+    ] {
+        assert!(
+            (current - xyce).abs() <= 4.0e-4 * xyce.abs(),
+            "I({name}) = {current:e} against Xyce's {xyce:e}"
+        );
+    }
+}
+
+#[test]
 fn classic_mos_series_zero_retains_xyce_sheet_resistance() {
     use rspice_core::config::SpiceDialect;
     for level in [1, 2, 3, 6] {

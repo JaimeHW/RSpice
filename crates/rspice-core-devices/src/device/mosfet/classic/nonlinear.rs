@@ -437,7 +437,7 @@ impl NonlinearDevice for Mosfet {
         // only (mos2conv.c:42-95); a branch-voltage step bound on top of the
         // node test never closes on a 5 mV branch whose nodes jitter by tens
         // of microvolts at 5 V. The Xyce dialect keeps its step test.
-        if !self.ngspice_convergence_test {
+        if !self.ngspice_dialect {
             let vgs_diff = (self.vgs - self.vgs_prev).abs();
             let vds_diff = (self.vds - self.vds_prev).abs();
             let vbs_diff = (self.vbs - self.vbs_prev).abs();
@@ -473,7 +473,7 @@ impl NonlinearDevice for Mosfet {
         let bulk_current_tol =
             reltol * bulk_current.abs().max(bulk_current_hat.abs()) + current_tol;
 
-        if self.ngspice_convergence_test {
+        if self.ngspice_dialect {
             // The step the last load predicts, against that load's currents
             // (mos2conv.c:56-95): cdhat against cd = mode * cdrain - cbd, and
             // cbhat against cbs + cbd.
@@ -578,7 +578,7 @@ mod tests {
         // far below abstol.
         let rail_jitter = |ngspice: bool| {
             let mut mos = Mosfet::new_nmos("n".into(), 1, 2, 3, 4);
-            mos.set_ngspice_convergence_test(ngspice);
+            mos.set_ngspice_dialect(ngspice);
             mos.vto = 1.0;
             mos.kp = 2.0e-5;
             mos.update(&[5.0, 5.0, 5.0 - 5.5e-3, 5.0]);

@@ -518,10 +518,11 @@ pub struct Mosfet {
     /// Report Xyce's transient device-convergence status (no junction
     /// limiting) instead of the SPICE current-prediction test.
     native_xyce_transient_convergence: bool,
-    /// Test convergence on ngspice's MOS1/2/3/6/9 convTest currents alone
-    /// (the ngspice and default dialects), not on the Xyce dialect's
-    /// branch-voltage step test.
-    ngspice_convergence_test: bool,
+    /// Follow ngspice's classic-MOS rules where Xyce's differ (the ngspice
+    /// and default dialects): its convTest on the drain and bulk currents
+    /// alone, not Xyce's branch-voltage step test, and its level-2 cutoff
+    /// at VBIN, not Xyce's at VON.
+    ngspice_dialect: bool,
     /// Hold an `OFF` instance through Xyce's initFixFlag (the Xyce dialect)
     /// instead of ngspice's MODEINITFIX.
     xyce_initial_fix: bool,
@@ -752,13 +753,17 @@ impl Mosfet {
             enabled && matches!(self.level, 1..=3) && !self.uses_legacy_bsim();
     }
 
-    /// Select ngspice's convTest for this instance: the drain and bulk
-    /// currents alone, as in every ngspice MOS1/2/3/6/9 and BSIM1 convTest
-    /// (mos2conv.c:42-95, b1cvtest.c). The engine clears it in the Xyce
-    /// dialect, which keeps its branch-voltage step test.
+    /// Select ngspice's classic-MOS rules for this instance where Xyce's
+    /// differ. The engine clears it in the Xyce dialect.
+    /// - convTest on the drain and bulk currents alone, as in every ngspice
+    ///   MOS1/2/3/6/9 and BSIM1 convTest (mos2conv.c:42-95, b1cvtest.c);
+    ///   Xyce keeps its branch-voltage step test.
+    /// - Without fast surface states, a level-2 channel cuts off at
+    ///   `vgs <= vbin` (mos2load.c:676); Xyce's cuts off at `vgs <= von`
+    ///   (N_DEV_MOSFET2.C:2183-2190).
     #[doc(hidden)]
-    pub fn set_ngspice_convergence_test(&mut self, enabled: bool) {
-        self.ngspice_convergence_test = enabled;
+    pub fn set_ngspice_dialect(&mut self, enabled: bool) {
+        self.ngspice_dialect = enabled;
     }
 
     /// Hold an `OFF` instance through Xyce's initFixFlag instead of ngspice's

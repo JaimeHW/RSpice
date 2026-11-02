@@ -8458,9 +8458,7 @@ impl Engine {
                             MosBodyJunctionModel::NgspiceReverseClamp
                         }
                     });
-                    mosfet.set_ngspice_convergence_test(
-                        self.config.spice_dialect != SpiceDialect::Xyce,
-                    );
+                    mosfet.set_ngspice_dialect(self.config.spice_dialect != SpiceDialect::Xyce);
                     mosfet.set_xyce_initial_fix(self.config.spice_dialect == SpiceDialect::Xyce);
 
                     // Device temperature: instance TEMP is absolute (C),
