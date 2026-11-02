@@ -1097,6 +1097,16 @@ enum HbInitialStateStrategy {
     DcOperatingPoint,
 }
 
+/// What the transient-assisted start produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum TransientAssistedSeed {
+    /// Every periodic unknown took its spectrum from the transient period.
+    Seeded,
+    /// The retained transient state has no waveform for this periodic branch,
+    /// and the HB state was left untouched.
+    Unrepresentable(String),
+}
+
 impl HbDriveTone {
     fn broadcast(harmonic: usize) -> Self {
         Self {
@@ -1714,7 +1724,7 @@ impl Engine {
         node_names: &[String],
         branch_names: &[String],
         abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<TransientAssistedSeed, SimulationError> {
         self.hb_seed_transient_assisted_with_dc_seed(
             netlist,
             config,
@@ -1739,7 +1749,7 @@ impl Engine {
         branch_names: &[String],
         dc_seed: Option<&super::PeriodicDcOperatingPointSeed>,
         abort: &dyn AbortSignal,
-    ) -> Result<(), SimulationError> {
+    ) -> Result<TransientAssistedSeed, SimulationError> {
         let first_tone_frequency = config
             .tones
             .first()
@@ -1801,6 +1811,19 @@ impl Engine {
             return Err(SimulationError::Circuit(
                 "TAHB=1 integral basis does not match the transient".into(),
             ));
+        }
+        // Xyce seeds every periodic unknown from its transient solution
+        // vector, where a lossless line carries its port currents as internal
+        // variables (N_DEV_TRA.C:153, :352). The retained transient keeps the
+        // circuit's own branch currents only, so a periodic branch it lacks
+        // leaves this start unrepresentable before the state is touched.
+        if let Some(branch) = branch_names[..physical_count].iter().find(|name| {
+            !transient
+                .branch_names
+                .iter()
+                .any(|candidate| candidate.eq_ignore_ascii_case(name))
+        }) {
+            return Ok(TransientAssistedSeed::Unrepresentable(branch.clone()));
         }
         let hb_period = config.fundamental_freq.recip();
         let sample_times = (0..collocation_points)
@@ -1882,7 +1905,7 @@ impl Engine {
                 .collect::<Result<Vec<_>, _>>()?;
             state.mna_branch_currents[physical_count + index] = fft.to_frequency_domain(&samples);
         }
-        Ok(())
+        Ok(TransientAssistedSeed::Seeded)
     }
 
     fn hb_validate_config(&self, config: &HbConfig) -> Result<(), SimulationError> {
@@ -2061,12 +2084,16 @@ impl Engine {
             )));
         }
 
-        // Construct the authored initial trajectory before Newton.  Explicit
-        // Xyce modes are strict: TAHB=1/2 either produce the complete retained
-        // node/branch spectrum or fail closed.  Only the omitted historical
-        // RSpice policy keeps its best-effort DC fallback.
-        match initial_state_strategy {
-            HbInitialStateStrategy::TransientAssisted => self
+        // Construct the authored initial trajectory before Newton. TAHB=2
+        // either produces the complete retained node/branch spectrum or fails
+        // closed. A transient-assisted start whose transient cannot represent
+        // every periodic unknown takes the standard DC start instead, so the
+        // Xyce default never refuses a deck the standard start runs; an
+        // authored TAHB=1 says so once.
+        let mut initial_state_strategy = initial_state_strategy;
+        let mut dc_seed_policy = dc_seed_policy;
+        if initial_state_strategy == HbInitialStateStrategy::TransientAssisted
+            && let TransientAssistedSeed::Unrepresentable(branch) = self
                 .hb_seed_transient_assisted_with_dc_seed(
                     netlist,
                     &config,
@@ -2075,7 +2102,21 @@ impl Engine {
                     &periodic_branch_names[..solver.capacitor_rate_start()],
                     dc_seed,
                     abort,
-                )?,
+                )?
+        {
+            if netlist.options.hb_time_domain_mode.is_some() {
+                log::warn!(
+                    "HB: TAHB=1 cannot seed periodic branch '{branch}' from its transient; \
+                     starting from the DC operating point instead"
+                );
+            }
+            initial_state_strategy = HbInitialStateStrategy::DefaultDcSeed;
+            if dc_seed.is_none() {
+                dc_seed_policy = HbDcSeedPolicy::Enabled;
+            }
+        }
+        match initial_state_strategy {
+            HbInitialStateStrategy::TransientAssisted => {}
             _ if dc_seed.is_some() => Self::hb_apply_bound_dc_seed(
                 dc_seed.expect("the matched branch has a seed"),
                 &mut state,

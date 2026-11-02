@@ -5,7 +5,7 @@ use num_complex::Complex64;
 use rspice_core::analysis::HbConfig;
 use rspice_core::analysis::pac::{PacConfig, PacSweepType};
 use rspice_core::constants::{K_BOLTZMANN, TEMP_REFERENCE};
-use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig};
+use rspice_core::engine::{Engine, HbAnalysisResult, SimulationConfig, SpiceDialect};
 use rspice_core::netlist::Netlist;
 
 const F0: f64 = 1.0e6;
@@ -126,6 +126,42 @@ fn hb_lossless_delay_line_has_exact_dc_and_multi_harmonic_phase() {
             5.0e-9,
             &format!("lossless line harmonic {harmonic}"),
         );
+    }
+}
+
+#[test]
+fn a_transient_start_without_line_port_currents_takes_the_standard_start() {
+    // The retained transient carries no waveform for the line's port
+    // branches, so a transient-assisted start, the Xyce default or an
+    // authored TAHB=1, takes the standard start instead of refusing. Each
+    // dialect is checked against its own direct (TAHB=0) start, because the
+    // Xyce dialect samples the pulse on the collocation grid.
+    let with_tahb =
+        |mode: u8| scalar_deck().replace(".end\n", &format!(".options hbint tahb={mode}\n.end\n"));
+    for (dialect, deck) in [
+        (SpiceDialect::Xyce, scalar_deck().to_string()),
+        (SpiceDialect::Xyce, with_tahb(1)),
+        (SpiceDialect::Ngspice, with_tahb(1)),
+    ] {
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: dialect,
+            ..Default::default()
+        });
+        let expected = engine
+            .run_hb(&parse(&with_tahb(0)), HbConfig::new(F0).with_harmonics(4))
+            .unwrap_or_else(|error| panic!("{dialect:?} direct start: {error}"));
+        let result = engine
+            .run_hb(&parse(&deck), HbConfig::new(F0).with_harmonics(4))
+            .unwrap_or_else(|error| panic!("{dialect:?}: {error}"));
+        assert!(result.converged);
+        for harmonic in 0..=4 {
+            assert_complex_relative(
+                hb_coefficient(&result, "far", harmonic),
+                hb_coefficient(&expected, "far", harmonic),
+                1.0e-9,
+                &format!("{dialect:?} harmonic {harmonic}"),
+            );
+        }
     }
 }
 
