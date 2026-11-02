@@ -46,6 +46,66 @@ fn the_windows_page_carries_no_constant_paragraphs() {
     assert!(!says("Restored geometry is clamped"));
 }
 
+/// The page's actions are named as their Window menu rows are, and are
+/// offered when those rows are: with one window open there is nothing to
+/// merge or recover.
+#[test]
+fn the_windows_page_actions_are_the_window_menu_rows() {
+    let ctx = Context::default();
+    ctx.enable_accesskit();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    app.state
+        .workbench
+        .window_session_dialog
+        .open(WindowSessionPage::Windows);
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..egui::RawInput::default()
+            },
+            |ctx| render_window_session_dialog(&mut app, ctx),
+        );
+        if let Some(update) = output.platform_output.accesskit_update {
+            nodes.extend(update.nodes);
+        }
+    }
+    let button = |label: &str| {
+        nodes
+            .values()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some(label)
+            })
+            .unwrap_or_else(|| panic!("{label} is not offered"))
+    };
+    assert!(!button("New window\u{2026}").is_disabled());
+    button("Move document to new window\u{2026}");
+    for idle in [
+        "Merge all windows\u{2026}",
+        "Recover off-screen windows\u{2026}",
+    ] {
+        assert!(
+            button(idle).is_disabled(),
+            "{idle} is offered with one window"
+        );
+    }
+    for gone in [
+        "Detach active\u{2026}",
+        "Consolidate\u{2026}",
+        "Monitor recovery\u{2026}",
+    ] {
+        assert!(
+            !nodes.values().any(|node| node.label() == Some(gone)),
+            "{gone} is still named apart from its menu row"
+        );
+    }
+}
+
 /// The window the manager is open in already has the focus, so its row
 /// offers no Focus; with no other window there is no Action column.
 #[test]

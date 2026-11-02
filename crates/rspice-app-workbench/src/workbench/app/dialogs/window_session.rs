@@ -515,28 +515,57 @@ fn render_windows_page(
     documents: &[crate::workbench::chrome::document_bar::WorkspaceDocumentDescriptor],
     action: &mut Option<WindowSessionAction>,
 ) {
-    ui.horizontal(|ui| {
-        if ui.button("New window\u{2026}").clicked() {
-            *action = Some(WindowSessionAction::OpenWorkflow(
-                WindowWorkflow::NewApplicationWindow,
-            ));
-        }
-        if ui.button("Detach active\u{2026}").clicked() {
-            *action = Some(WindowSessionAction::OpenWorkflow(
-                WindowWorkflow::DetachDocument,
-            ));
-        }
-        if ui.button("Consolidate\u{2026}").clicked() {
-            *action = Some(WindowSessionAction::OpenWorkflow(
-                WindowWorkflow::ConsolidateWindows,
-            ));
-        }
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Monitor recovery\u{2026}").clicked() {
-                *action = Some(WindowSessionAction::OpenWorkflow(
-                    WindowWorkflow::MonitorRecovery,
-                ));
+    // Each action is named as its Window menu row names it, and is offered
+    // when that row is: a button that opened a workflow only to refuse it
+    // said less than the disabled row did.
+    let detachable = documents
+        .iter()
+        .any(|document| document.open && document.active);
+    let secondary = !app
+        .workbench()
+        .window_session
+        .secondary_window_ids()
+        .is_empty();
+    let mut offer =
+        |ui: &mut egui::Ui, label: &str, enabled: bool, why: &str, workflow: WindowWorkflow| {
+            if ui
+                .add_enabled(enabled, egui::Button::new(label))
+                .on_disabled_hover_text(why)
+                .clicked()
+            {
+                *action = Some(WindowSessionAction::OpenWorkflow(workflow));
             }
+        };
+    ui.horizontal(|ui| {
+        offer(
+            ui,
+            "New window\u{2026}",
+            true,
+            "",
+            WindowWorkflow::NewApplicationWindow,
+        );
+        offer(
+            ui,
+            "Move document to new window\u{2026}",
+            detachable,
+            "No active document is available to detach.",
+            WindowWorkflow::DetachDocument,
+        );
+        offer(
+            ui,
+            "Merge all windows\u{2026}",
+            secondary,
+            "There are no detached application windows.",
+            WindowWorkflow::ConsolidateWindows,
+        );
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            offer(
+                ui,
+                "Recover off-screen windows\u{2026}",
+                secondary,
+                "There are no secondary application windows to recover.",
+                WindowWorkflow::MonitorRecovery,
+            );
         });
     });
     ui.add_space(8.0);
