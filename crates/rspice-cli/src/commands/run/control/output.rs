@@ -560,12 +560,10 @@ fn extent(
     let mut high = f64::NEG_INFINITY;
     for trace in traces {
         let vector = if x { &trace.x } else { &trace.y };
+        // A complex sample plots its real part, as ngspice draws a
+        // rectangular grid (frontend/plotting/graf.c:1048); the companion
+        // JSON keeps both parts.
         for sample in &vector.samples {
-            if sample.im != 0.0 {
-                return Err(std::io::Error::other(
-                    "SVG plots require real expressions; use real(...) or abs(...) for complex data",
-                ));
-            }
             if let Some(value) = transformed(sample.re, log) {
                 low = low.min(value);
                 high = high.max(value);
@@ -659,9 +657,6 @@ fn render_svg(
         )?;
         let mut connected = false;
         for (x, y) in trace.x.samples.iter().zip(&trace.y.samples) {
-            if x.im != 0.0 || y.im != 0.0 {
-                return Err(std::io::Error::other("SVG plots require real expressions"));
-            }
             let (Some(x), Some(y)) = (
                 transformed(x.re, options.x_logarithmic),
                 transformed(y.re, options.y_logarithmic),

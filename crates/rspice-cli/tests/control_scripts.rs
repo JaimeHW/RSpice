@@ -102,6 +102,28 @@ fn control_unclosed_block_warns_and_skips_the_rest_of_the_script() {
 
 /// `cd $inputdir` (ngspice frontend/inp.c:589) moves to the deck's own
 /// directory, so the file lands beside the deck.
+/// ngspice plots a complex vector's real part on a rectangular grid
+/// (frontend/plotting/graf.c:1048), so an AC `plot v(out)` draws
+/// 1 / (1 + (wRC)^2) for an RC low-pass rather than stopping the script.
+#[test]
+fn control_plot_draws_a_complex_vector_as_its_real_part() {
+    let dir = test_dir("control-complex-plot");
+    let deck = dir.join("complex.cir");
+    std::fs::write(
+        &deck,
+        "complex plot\nV1 in 0 dc 0 ac 1\nR1 in out 1k\nC1 out 0 1u\n.control\n\
+         ac lin 3 100 300\nplot v(out)\n.endc\n.end\n",
+    )
+    .unwrap();
+    passed(&run(&deck, &dir.join("result.csv"), &[]));
+    let svg = std::fs::read_to_string(dir.join("result.control-001.svg")).unwrap();
+    for frequency in [100.0, 300.0] {
+        let wrc = 2.0 * std::f64::consts::PI * frequency * 1e-3;
+        let real = 1.0 / (1.0 + wrc * wrc);
+        assert!(svg.contains(&format!(">{real:.3e}<")), "{real:.3e}: {svg}");
+    }
+}
+
 #[test]
 fn control_cd_to_inputdir_writes_beside_the_deck() {
     let dir = test_dir("control-inputdir");
