@@ -1,7 +1,7 @@
 //! Help dialogs on the modal primitive: the Help Center, Report a problem,
 //! About, and the keyboard shortcuts.
 
-use egui::{Context, Grid, RichText};
+use egui::{Context, RichText};
 
 use super::fact_grid;
 use crate::services::license::LicenseInfo;
@@ -17,6 +17,7 @@ use crate::workbench::design_system::WorkbenchIcon;
 use crate::workbench::workflows::export_workflow::SaveDialogConfig;
 
 pub(in crate::workbench) mod report_problem;
+pub(in crate::workbench) mod site;
 
 #[derive(Debug, Clone)]
 pub(crate) struct HelpCenterDialogState {
@@ -162,7 +163,7 @@ impl RSpiceApp {
         let mut action = None;
 
         let choice = Dialog::new(page.label(), "Close")
-            .description("Browse product guidance, release notes and legal notices.")
+            .description("Browse product guidance and legal notices.")
             .size(DialogSize::Manager)
             .show(ctx, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -181,8 +182,6 @@ impl RSpiceApp {
                 ui.separator();
                 match page {
                     HelpCenterPage::Help => render_help_page(ui, &mut query, &mut action),
-                    HelpCenterPage::ReleaseNotes => render_release_notes(ui),
-
                     HelpCenterPage::LegalPrivacy => render_legal_privacy(ui),
                     // Report a problem draws these; the strip above never
                     // offers them.
@@ -511,28 +510,6 @@ fn topic_row(ui: &mut egui::Ui, title: &str, detail: &str) {
         rect.bottom() - 0.5,
         egui::Stroke::new(1.0, t.color.border),
     );
-}
-
-fn render_release_notes(ui: &mut egui::Ui) {
-    section_heading(ui, "Current build");
-    Grid::new("help.release-build")
-        .num_columns(2)
-        .spacing([24.0, 7.0])
-        .show(ui, |ui| {
-            ui.label("RSpice");
-            ui.label(env!("CARGO_PKG_VERSION"));
-            ui.end_row();
-            ui.label("Build");
-            ui.label(env!("RSPICE_BUILD_HASH"));
-            ui.end_row();
-            ui.label("Target");
-            ui.label(format!(
-                "{} / {}",
-                std::env::consts::OS,
-                std::env::consts::ARCH
-            ));
-            ui.end_row();
-        });
 }
 
 fn render_legal_privacy(ui: &mut egui::Ui) {

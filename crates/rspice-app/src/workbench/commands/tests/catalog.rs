@@ -241,7 +241,7 @@ fn command_palette_and_help_commands_own_canonical_routes() {
 
     let mut help = RSpiceApp::test_instance();
     let help_source = help.state.workbench.current_route();
-    Command::ReleaseNotes.execute(&mut help);
+    Command::LegalPrivacy.execute(&mut help);
     assert_eq!(
         help.state.workbench.current_route(),
         crate::workbench::SurfaceRoute::surface(crate::workbench::SurfaceId::HelpCenter)
@@ -250,7 +250,7 @@ fn command_palette_and_help_commands_own_canonical_routes() {
     assert!(help.state.shell.help_center.route_owned);
     assert_eq!(
         help.state.shell.help_center.page,
-        crate::workbench::app::HelpCenterPage::ReleaseNotes
+        crate::workbench::app::HelpCenterPage::LegalPrivacy
     );
     assert_eq!(help.state.workbench.previous_route(), Some(help_source));
 }

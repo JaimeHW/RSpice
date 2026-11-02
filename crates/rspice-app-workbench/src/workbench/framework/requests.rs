@@ -349,6 +349,15 @@ impl Request for ClipboardImage {
     const DRAIN: Drain = Drain::AfterLiveSession;
 }
 
+/// Open this web page in a new tab of the reader's browser: a page of the
+/// RSpice site the Help menu names.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct OpenWebPage(pub String);
+
+impl Request for OpenWebPage {
+    const DRAIN: Drain = Drain::AfterLiveSession;
+}
+
 /// Enter (`true`) or leave platform full screen. Taken once, so the web
 /// backend is not sent the same viewport command every frame, and the
 /// session's own full-screen state is left to say what the host is doing.

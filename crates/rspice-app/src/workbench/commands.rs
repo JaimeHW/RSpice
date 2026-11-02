@@ -1194,11 +1194,9 @@ impl Command {
                 open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)
             }
             Self::Examples => app.state.project.open_examples(),
-            Self::ReleaseNotes => open_help_center(
-                &mut app.state,
-                crate::workbench::app::HelpCenterPage::ReleaseNotes,
+            Self::ReleaseNotes => crate::workbench::app::dialogs::help::site::open_release_notes(
+                &mut app.state.workbench.outbox,
             ),
-
             Self::SystemDiagnostics => open_help_center(
                 &mut app.state,
                 crate::workbench::app::HelpCenterPage::Diagnostics,
