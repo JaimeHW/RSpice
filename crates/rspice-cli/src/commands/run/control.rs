@@ -205,6 +205,9 @@ pub(super) fn run(
                             ControlAnalysisResult::Stability(result) => {
                                 frequency::finish_stb_result(&ctx, result)?;
                             }
+                            ControlAnalysisResult::SParameters(run) => {
+                                advanced::publish_sparam_run(&ctx, run, "sp")?;
+                            }
                             ControlAnalysisResult::Distortion(result) => {
                                 frequency::finish_disto_result(&ctx, result)?;
                             }

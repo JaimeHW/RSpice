@@ -103,6 +103,7 @@ pub(super) fn identity(
         AnalysisCommand::Sensitivity { .. } => AnalysisKind::Sensitivity,
         AnalysisCommand::Disto { .. } => AnalysisKind::Distortion,
         AnalysisCommand::Stb { .. } => AnalysisKind::Stb,
+        AnalysisCommand::Sp { .. } => AnalysisKind::Sp,
         AnalysisCommand::DcMatch(_) => AnalysisKind::DcMatch,
         _ => {
             return Err(command_error(
@@ -280,6 +281,7 @@ mod tests {
             (AnalysisKind::Sensitivity, "V(out) R1"),
             (AnalysisKind::Distortion, "lin 3 1 10"),
             (AnalysisKind::Stb, "lin 3 1 10 probe=Vprobe"),
+            (AnalysisKind::Sp, "lin 3 1k 3k 0"),
             (AnalysisKind::DcMatch, "OUT=V(out)"),
         ];
         for (kind, arguments) in fixtures {
@@ -418,7 +420,7 @@ mod tests {
                 ".qpnoise list=(1) out=V(out) outlattice=(0,0) minlattice=(0,0) maxlattice=(0,0)",
                 false,
             ),
-            ("Sp", ".sp lin 2 1 10", false),
+            ("Sp", ".sp lin 2 1 10", true),
             ("Stb", ".stb lin 2 1 10 probe=V1", true),
             ("Disto", ".disto lin 3 1 10 .9", true),
             ("Tran", ".tran 1u 1m", true),
@@ -446,6 +448,8 @@ mod tests {
                 format!(
                     "Control stability\nE1 out 0 sense 0 -10\nV1 out drive 0\nR1 drive sense 1k\nC1 sense 0 1u\n{card}\n.end\n"
                 )
+            } else if name == "Sp" {
+                format!("Control sp\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in 0 50\n{card}\n.end\n")
             } else {
                 format!(
                     "Control analyses\n.param r=1k\nV1 in 0 1 AC 1 DISTOF1 1m DISTOF2 1m\nR1 in out {{r}}\nR2 out 0 1k\n.data grid freq\n1\n10\n.enddata\n{card}\n.end\n"

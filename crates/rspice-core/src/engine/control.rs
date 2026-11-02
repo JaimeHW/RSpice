@@ -56,6 +56,8 @@ pub enum ControlAnalysisResult {
     AcTable(FrequencyDataResult<AcResult>),
     Distortion(Box<crate::analysis::DistortionAnalysisResult>),
     Stability(Box<super::StbAnalysisResult>),
+    /// An `sp` sweep's scattering parameters.
+    SParameters(Box<super::SParameterRun>),
     Noise(Vec<crate::analysis::NoiseResult>),
     NoiseTable(FrequencyDataResult<crate::analysis::NoiseResult>),
     DcSweep(Box<super::DcSweepResult>),
@@ -146,7 +148,7 @@ impl CommandKind {
             "destroy" => Self::Destroy,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
-            | "dcmatch" => Self::Analysis,
+            | "dcmatch" | "sp" => Self::Analysis,
             "run" => Self::Run,
             "plot" | "print" | "settype" => Self::Presentation,
             "echo" => Self::Echo,
@@ -724,6 +726,22 @@ impl ControlCircuit {
                 (
                     kind,
                     ControlAnalysisResult::Stability(Box::new(result)),
+                    count,
+                )
+            }
+            AnalysisCommand::Sp { .. } => {
+                let result = bounded
+                    .run_sp_with_abort(&netlist, &analysis, abort)
+                    .map_err(|error| simulation_error(line, error))?;
+                let ports = result.scattering.num_ports;
+                let count = result
+                    .scattering
+                    .data
+                    .len()
+                    .saturating_mul(ports.saturating_mul(ports).saturating_add(1));
+                (
+                    kind,
+                    ControlAnalysisResult::SParameters(Box::new(result)),
                     count,
                 )
             }

@@ -11,6 +11,7 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::PoleZero(_)
             | ControlAnalysisResult::Sensitivity(_)
             | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::SParameters(_)
             | ControlAnalysisResult::DcMatch(_) => &[],
             ControlAnalysisResult::DcSweep(result) => result
                 .points
@@ -40,6 +41,7 @@ impl ControlNamedDataset {
             ControlAnalysisResult::Ac(_) | ControlAnalysisResult::AcTable(_) => "AC Analysis",
             ControlAnalysisResult::Distortion(_) => "Distortion Analysis",
             ControlAnalysisResult::Stability(_) => "Stability Analysis",
+            ControlAnalysisResult::SParameters(_) => "SP Analysis",
             ControlAnalysisResult::Noise(_) | ControlAnalysisResult::NoiseTable(_) => {
                 "Noise Spectral Density Curves"
             }
@@ -59,6 +61,7 @@ impl ControlNamedDataset {
                 | ControlAnalysisResult::AcTable(_)
                 | ControlAnalysisResult::Distortion(_)
                 | ControlAnalysisResult::Stability(_)
+                | ControlAnalysisResult::SParameters(_)
         )
     }
 
@@ -92,6 +95,13 @@ impl ControlNamedDataset {
                 .iter()
                 .map(|name| (format!("{}#branch", name.to_ascii_lowercase()), "current")),
         );
+        if let ControlAnalysisResult::SParameters(run) = &self.result {
+            vectors.extend(
+                super::sparam::names(run)
+                    .into_iter()
+                    .map(|name| (name, "s-param")),
+            );
+        }
         vectors
     }
 }

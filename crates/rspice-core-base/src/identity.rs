@@ -108,8 +108,8 @@ impl AnalysisKind {
             Self::Distortion => Some("disto"),
             Self::Stb => Some("stb"),
             Self::DcMatch => Some("dcmatch"),
+            Self::Sp => Some("sp"),
             Self::ImplicitOp
-            | Self::Sp
             | Self::Pss
             | Self::Pac
             | Self::Pxf

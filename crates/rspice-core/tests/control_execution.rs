@@ -1468,6 +1468,40 @@ fn eprvcd_writes_event_nodes_as_vcd_as_ngspice_does() {
     assert!(analog.unwrap().contains("node dummy is not an event node"));
 }
 
+/// ngspice `sp` (spicelib/analysis/span.c) leaves `S_i_j` in plot `sp1` over
+/// the frequency scale. For a 50 ohm resistor between two 50 ohm ports
+/// ngspice-46 prints s_1_1 = 1/3 and s_2_1 = 2/3 at 1k, 2k and 3k, and
+/// `mag(s_2_1)` reads the same vector.
+#[test]
+fn sp_leaves_scattering_parameters_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "sp\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 50\n\
+         V2 out 0 dc 0 ac 0 portnum 2 z0 50\n.control\nsp lin 3 1k 3k 0\n\
+         print s_1_1 s_2_1\nlet g = mag(s_2_1)\nprint g\necho $curplot\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let close = |actual: ComplexValue, expected: f64| {
+        assert!(
+            (actual.re - expected).abs() < 1e-9 && actual.im.abs() < 1e-9,
+            "{actual} != {expected}"
+        );
+    };
+    let traces = printed(&presented[0]);
+    assert_eq!(traces.len(), 2);
+    for (trace, expected) in traces.iter().zip([1.0 / 3.0, 2.0 / 3.0]) {
+        let frequencies: Vec<f64> = trace.x.samples.iter().map(|x| x.re).collect();
+        assert_eq!(frequencies, [1e3, 2e3, 3e3]);
+        assert_eq!(trace.y.samples.len(), 3);
+        for &sample in &trace.y.samples {
+            close(sample, expected);
+        }
+    }
+    for &sample in &printed(&presented[1])[0].y.samples {
+        close(sample, 2.0 / 3.0);
+    }
+    assert_eq!(texts(&presented), ["sp1"]);
+}
+
 /// ngspice sets `oscompiled` to the system it was built for
 /// (frontend/init.c:40); the ngspice-46 Windows release echoes `8`, a Visual
 /// Studio build, as this host's MSVC build does.

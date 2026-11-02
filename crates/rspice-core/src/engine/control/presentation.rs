@@ -10,6 +10,7 @@ mod functions;
 mod noise;
 mod pole_zero;
 mod sensitivity;
+mod sparam;
 mod stability;
 mod transfer;
 mod vectors;
@@ -161,6 +162,7 @@ enum Column {
     Sensitivity(sensitivity::SensitivityColumn),
     Distortion(distortion::DistortionColumn),
     Stability(stability::StabilityColumn),
+    SParameter(sparam::SParameterColumn),
     DcMatch(dcmatch::DcMatchColumn),
 }
 
@@ -198,6 +200,7 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::NoiseTable(FrequencyDataResult { points, .. }) => points.len(),
             ControlAnalysisResult::Distortion(result) => result.points.len(),
             ControlAnalysisResult::Stability(result) => result.frequencies.len(),
+            ControlAnalysisResult::SParameters(run) => run.scattering.data.len(),
             ControlAnalysisResult::DcMatch(result) => result.contributors.len(),
             ControlAnalysisResult::DcSweep(result) => result.points.len(),
             ControlAnalysisResult::Transient(result) => result.time.len(),
@@ -219,7 +222,8 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::Noise(_)
             | ControlAnalysisResult::NoiseTable(_)
             | ControlAnalysisResult::Distortion(_)
-            | ControlAnalysisResult::Stability(_) => SignalUnit::Hertz,
+            | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::SParameters(_) => SignalUnit::Hertz,
             ControlAnalysisResult::DcSweep(result) => result
                 .axes
                 .last()
@@ -243,7 +247,8 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::Noise(_)
             | ControlAnalysisResult::NoiseTable(_)
             | ControlAnalysisResult::Distortion(_)
-            | ControlAnalysisResult::Stability(_) => "frequency",
+            | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::SParameters(_) => "frequency",
             ControlAnalysisResult::DcSweep(result) => {
                 result.axes.last().map_or("sweep", |a| a.name.as_str())
             }
@@ -276,6 +281,9 @@ impl ControlNamedDataset {
                 .get(row)
                 .map(|point| point.fundamental_f1.frequency),
             ControlAnalysisResult::Stability(result) => result.frequencies.get(row).copied(),
+            ControlAnalysisResult::SParameters(run) => {
+                run.scattering.data.get(row).map(|matrix| matrix.frequency)
+            }
             ControlAnalysisResult::DcSweep(result) => result.points.get(row).map(|p| p.sweep_value),
             ControlAnalysisResult::Transient(result) => result.time.get(row).copied(),
         }
@@ -287,6 +295,7 @@ impl ControlNamedDataset {
             | ControlAnalysisResult::PoleZero(_)
             | ControlAnalysisResult::Sensitivity(_)
             | ControlAnalysisResult::Stability(_)
+            | ControlAnalysisResult::SParameters(_)
             | ControlAnalysisResult::DcMatch(_) => &[],
             ControlAnalysisResult::Distortion(result) => result
                 .points
@@ -332,6 +341,11 @@ impl Selected<'_> {
             }
             (Column::Stability(_), _)
             | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::Stability(_)) => None,
+            (Column::SParameter(column), ControlAnalysisResult::SParameters(run)) => {
+                column.sample(run, row)
+            }
+            (Column::SParameter(_), _)
+            | (Column::Node(_) | Column::Branch(_), ControlAnalysisResult::SParameters(_)) => None,
             (Column::Distortion(column), ControlAnalysisResult::Distortion(result)) => {
                 column.sample(result, row)
             }
@@ -511,6 +525,7 @@ impl ControlCircuit {
                 .or(pole_zero::select_gain(dataset, name))
                 .or(sensitivity::select(dataset, name))
                 .or(stability::select(dataset, name))
+                .or(sparam::select(dataset, name))
                 .or(dcmatch::select(dataset, name))
                 .or(noise::select(dataset, name, line)?)
         {
@@ -567,6 +582,7 @@ impl ControlCircuit {
                 | ControlAnalysisResult::PoleZero(_)
                 | ControlAnalysisResult::Sensitivity(_)
                 | ControlAnalysisResult::Stability(_)
+                | ControlAnalysisResult::SParameters(_)
                 | ControlAnalysisResult::DcMatch(_) => {
                     return Err(unavailable(line, dataset, name));
                 }
