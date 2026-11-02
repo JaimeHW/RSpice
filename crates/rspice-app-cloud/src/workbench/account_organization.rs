@@ -243,7 +243,7 @@ fn license_rows(
                     "Verified on this device".to_owned()
                 },
             ),
-            ("Licensed to".to_owned(), info.licensed_to.clone()),
+            ("Licensed to".to_owned(), info.licensee_label().to_owned()),
             ("Edition".to_owned(), info.tier.clone()),
             ("Updates until".to_owned(), info.updates_until.clone()),
             ("License ID".to_owned(), info.license_id.clone()),

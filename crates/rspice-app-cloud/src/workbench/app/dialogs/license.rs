@@ -223,7 +223,7 @@ fn remove_license(parts: &mut LicenseParts<'_>) {
 
 /// The grant a verified key carries, and where the key is kept.
 fn grant_rows(rows: &mut fact_grid::Rows<'_>, info: &LicenseInfo) {
-    rows.text("Licensed to", &info.licensed_to);
+    rows.text("Licensed to", info.licensee_label());
     rows.text("Tier", &info.tier);
     if info.updates_expired {
         // Perpetual fallback: the key still activates; this build just

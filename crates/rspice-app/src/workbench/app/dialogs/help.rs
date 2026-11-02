@@ -210,7 +210,7 @@ impl RSpiceApp {
         if route_owned {
             self.state.close_route_owned_transient(
                 crate::workbench::SurfaceId::HelpCenter,
-                "Help Center",
+                "Help center",
             );
         }
     }

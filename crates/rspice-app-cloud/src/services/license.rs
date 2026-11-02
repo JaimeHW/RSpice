@@ -90,6 +90,8 @@ pub(crate) const FEATURE_LABELS: &[(u32, &str)] = &[
 /// A verified license grant.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct LicenseInfo {
+    /// Who the license names; empty when it names no one, so that nothing
+    /// signs a review with a placeholder.
     pub licensed_to: String,
     pub tier: String,
     pub updates_until: String,
@@ -99,6 +101,18 @@ pub struct LicenseInfo {
     /// activates (possession token), with the last in-term feature set.
     #[serde(default)]
     pub updates_expired: bool,
+}
+
+impl LicenseInfo {
+    /// Who the license names, as a reader sees it: in words when it names
+    /// no one.
+    pub fn licensee_label(&self) -> &str {
+        if self.licensed_to.trim().is_empty() {
+            "Not named in the license"
+        } else {
+            &self.licensed_to
+        }
+    }
 }
 
 /// Why a key failed to verify, with the user-facing message the dialog
@@ -442,7 +456,7 @@ fn parse_and_verify_with_policy(
     }
 
     Ok(LicenseInfo {
-        licensed_to: payload.licensee.clone().unwrap_or_else(|| "—".to_owned()),
+        licensed_to: payload.licensee.clone().unwrap_or_default(),
         tier: payload.tier_label().to_owned(),
         updates_until: date_from_unix_days(payload.expires_days),
         license_id: payload.license_id_display(),
@@ -628,6 +642,16 @@ mod tests {
             let encoded = crockford_encode(data);
             assert_eq!(crockford_decode(&encoded).as_deref(), Some(data));
         }
+    }
+
+    /// A license that names no one says so in words where it is shown, and
+    /// leaves no placeholder for a review to be signed with.
+    #[test]
+    fn a_license_naming_no_one_says_so_in_words() {
+        let mut info = parse_and_verify(SAMPLE_KEY).expect("sample key must verify");
+        assert_eq!(info.licensee_label(), info.licensed_to);
+        info.licensed_to.clear();
+        assert_eq!(info.licensee_label(), "Not named in the license");
     }
 
     #[test]

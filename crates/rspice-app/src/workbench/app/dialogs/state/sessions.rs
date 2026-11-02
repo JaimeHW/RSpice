@@ -21,7 +21,7 @@ impl HelpCenterPage {
 
     pub(crate) const fn label(self) -> &'static str {
         match self {
-            Self::Help => "Help Center",
+            Self::Help => "Help center",
             Self::ReleaseNotes => "Release notes",
 
             Self::Diagnostics => "Diagnostics",
