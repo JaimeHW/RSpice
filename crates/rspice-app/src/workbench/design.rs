@@ -6,8 +6,9 @@
 use egui::Context;
 
 use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
+use crate::workbench::app::dialogs::engineering_table::EngineeringTable;
 use crate::workbench::app::dialogs::hierarchy::descend;
-use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
+use crate::workbench::app::dialogs::selection::{array, bulk_edit, rename, shared_properties};
 use crate::workbench::app::dialogs::{
     find_replace, object_properties, placement, rule_setup, symbol_definition,
 };
@@ -204,5 +205,35 @@ impl DesignFeature {
                 cx.handles.run_controller,
             );
         }
+    }
+
+    /// Bulk edit, over its draft and the saved filters.
+    pub(in crate::workbench) fn render_selection_bulk_edit_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        bulk_edit::render_selection_bulk_edit_dialog(
+            &mut cx.state.selection_bulk_edit,
+            &mut cx.state.schematic_bulk_edit_filters,
+            cx.model,
+            cx.wb,
+            ctx,
+        );
+    }
+
+    /// Engineering table view, over its draft and the views saved on this
+    /// device.
+    pub(in crate::workbench) fn render_engineering_table_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        EngineeringTable {
+            dialog: &mut cx.state.engineering_table,
+            views: &mut cx.state.engineering_table_views,
+            model: cx.model,
+            platform: cx.platform,
+            workbench: cx.wb,
+        }
+        .render_engineering_table_dialog(ctx);
     }
 }

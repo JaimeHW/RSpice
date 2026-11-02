@@ -6,6 +6,19 @@
 
 use super::*;
 use crate::state::{LibraryCellInstance, Point};
+use crate::workbench::app::RSpiceApp;
+
+/// Draw the dialog as its dialog step does.
+fn render(app: &mut RSpiceApp, ctx: &Context) {
+    let state = &mut app.state;
+    render_selection_bulk_edit_dialog(
+        &mut state.design.selection_bulk_edit,
+        &mut state.design.schematic_bulk_edit_filters,
+        &mut state.model,
+        &mut state.workbench,
+        ctx,
+    );
+}
 
 fn component(id: u64, name: &str, section: Option<&str>) -> Component {
     let mut component = Component::new(id, ComponentType::CellInstance, Point::new(id as i32, 0))
@@ -36,21 +49,21 @@ fn the_result_columns_fit_inside_their_pane() {
 #[test]
 fn the_scope_line_names_the_occurrence_below_the_implicit_root() {
     let mut state = AppState::default();
-    assert_eq!(active_hierarchy_path(&state), "/");
+    assert_eq!(active_hierarchy_path(&state.model), "/");
 
     state.model.workspace.descend_into(
         "XAFE".to_owned(),
         crate::state::CellViewRef::new("user", "afe_core", "schematic"),
         crate::state::ViewType::Schematic,
     );
-    assert_eq!(active_hierarchy_path(&state), "/XAFE");
+    assert_eq!(active_hierarchy_path(&state.model), "/XAFE");
 
     state.model.workspace.descend_into(
         "XBIAS".to_owned(),
         crate::state::CellViewRef::new("user", "bias", "schematic"),
         crate::state::ViewType::Schematic,
     );
-    assert_eq!(active_hierarchy_path(&state), "/XAFE/XBIAS");
+    assert_eq!(active_hierarchy_path(&state.model), "/XAFE/XBIAS");
 
     assert_eq!(
         schematic_display_path("analog/opamp/schematic"),
@@ -79,13 +92,13 @@ fn free_text_query_searches_hidden_instance_parameters_and_binding_fields() {
         ..SelectionBulkFilter::default()
     };
     assert_eq!(
-        build_rows(&state, &filter, SelectionBulkProperty::ModelSection).len(),
+        build_rows(&state.model, &filter, SelectionBulkProperty::ModelSection).len(),
         1
     );
 
     filter.query = "analog".to_owned();
     assert_eq!(
-        build_rows(&state, &filter, SelectionBulkProperty::ModelSection).len(),
+        build_rows(&state.model, &filter, SelectionBulkProperty::ModelSection).len(),
         1
     );
 }
@@ -100,7 +113,7 @@ fn exact_mockup_default_section_filter_matches_an_inherited_binding() {
         ..SelectionBulkFilter::default()
     };
 
-    let rows = build_rows(&state, &filter, SelectionBulkProperty::ModelSection);
+    let rows = build_rows(&state.model, &filter, SelectionBulkProperty::ModelSection);
     assert_eq!(rows.len(), 1);
     assert_eq!(rows[0].object, "U1");
     assert!(rows[0].editable());
@@ -343,7 +356,7 @@ fn bom_and_distribution_bulk_edits_reach_the_parts_they_apply_to() {
     let mut state = AppState::default();
     state.model.schematic.document_mut_for_test().components = vec![component(1, "X1", None)];
     let rows = build_rows(
-        &state,
+        &state.model,
         &SelectionBulkFilter::default(),
         SelectionBulkProperty::ToleranceDistribution,
     );
@@ -407,7 +420,7 @@ fn impact_preview_is_exact_without_cloning_an_undo_transaction() {
         component(2, "X2", Some("tt")),
     ];
     let rows = build_rows(
-        &state,
+        &state.model,
         &SelectionBulkFilter::default(),
         SelectionBulkProperty::ModelSection,
     );
@@ -458,11 +471,11 @@ fn authority_rejects_active_selection_and_external_buffer_drift() {
         .model
         .workspace
         .insert_schematic_editor("user/child/schematic".to_owned(), SchematicState::default());
-    let authority = SelectionBulkEditAuthority::capture(&state);
-    assert!(authority.stale_reason(&state).is_none());
+    let authority = SelectionBulkEditAuthority::capture(&state.model);
+    assert!(authority.stale_reason(&state.model).is_none());
 
     state.model.schematic.session.editor.selection.clear();
-    assert!(authority.stale_reason(&state).is_some());
+    assert!(authority.stale_reason(&state.model).is_some());
     state
         .model
         .schematic
@@ -479,7 +492,7 @@ fn authority_rejects_active_selection_and_external_buffer_drift() {
         .document_mut_for_test()
         .components
         .push(component(2, "X2", Some("tt")));
-    assert!(authority.stale_reason(&state).is_some());
+    assert!(authority.stale_reason(&state.model).is_some());
 }
 
 #[test]
@@ -496,7 +509,7 @@ fn complete_project_rows_are_visible_but_other_owners_are_locked() {
         hierarchy_scope: SelectionBulkHierarchyScope::CompleteProject,
         ..SelectionBulkFilter::default()
     };
-    let rows = build_rows(&state, &filter, SelectionBulkProperty::ModelSection);
+    let rows = build_rows(&state.model, &filter, SelectionBulkProperty::ModelSection);
 
     assert_eq!(rows.len(), 2);
     assert_eq!(rows.iter().filter(|row| row.editable()).count(), 1);
@@ -516,9 +529,9 @@ fn port_rows_only_accept_the_display_property() {
         ..SelectionBulkFilter::default()
     };
 
-    let temperature_rows = build_rows(&state, &filter, SelectionBulkProperty::Temperature);
+    let temperature_rows = build_rows(&state.model, &filter, SelectionBulkProperty::Temperature);
     assert_eq!(temperature_rows[0].lock.as_deref(), Some("Not applicable"));
-    let display_rows = build_rows(&state, &filter, SelectionBulkProperty::Display);
+    let display_rows = build_rows(&state.model, &filter, SelectionBulkProperty::Display);
     assert!(display_rows[0].editable());
 }
 
@@ -540,7 +553,7 @@ fn accessibility_tree_exposes_only_the_mockup_bulk_edit_surface_actions() {
             )),
             ..egui::RawInput::default()
         },
-        |ctx| app.render_selection_bulk_edit_dialog(ctx),
+        |ctx| render(&mut app, ctx),
     );
     let nodes = output
         .platform_output
@@ -592,7 +605,7 @@ fn the_filter_fields_match_the_selects_and_say_their_names() {
                     )),
                     ..egui::RawInput::default()
                 },
-                |ctx| app.render_selection_bulk_edit_dialog(ctx),
+                |ctx| render(&mut app, ctx),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -651,7 +664,7 @@ fn the_body_stays_inside_the_dialog_when_no_section_is_defined() {
                 )),
                 ..egui::RawInput::default()
             },
-            |ctx| app.render_selection_bulk_edit_dialog(ctx),
+            |ctx| render(&mut app, ctx),
         );
         if let Some(update) = output.platform_output.accesskit_update {
             nodes.extend(update.nodes);

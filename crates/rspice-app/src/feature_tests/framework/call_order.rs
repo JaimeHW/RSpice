@@ -338,7 +338,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
         "design",
     ),
     ("DesignFeature::render_descend_hierarchy_dialog", "design"),
-    ("render_engineering_table_dialog", "design"),
+    ("DesignFeature::render_engineering_table_dialog", "design"),
     ("DesignFeature::render_pin_port_dialog", "design"),
     (
         "DesignFeature::render_design_review_comments_dialog",
@@ -357,7 +357,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_connectivity_manager_dialog", "design"),
     ("features::render_dialog", "sheets"),
     ("ProjectFeature::render_design_management_dialog", "project"),
-    ("render_selection_bulk_edit_dialog", "design"),
+    ("DesignFeature::render_selection_bulk_edit_dialog", "design"),
     (
         "ProjectFeature::render_project_revision_history_dialog",
         "project",

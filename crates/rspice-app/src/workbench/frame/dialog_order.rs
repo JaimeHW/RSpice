@@ -161,7 +161,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.engineering_table"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.engineering_table.open),
-        render: |app, ctx| app.render_engineering_table_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_engineering_table_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("design.pin_port"),
@@ -252,7 +254,9 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("design.selection_bulk_edit"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.selection_bulk_edit.open),
-        render: |app, ctx| app.render_selection_bulk_edit_dialog(ctx),
+        render: |app, ctx| {
+            DesignFeature::render_selection_bulk_edit_dialog(&mut features::cx(app), ctx)
+        },
     },
     DialogSpec {
         key: DialogKey("project.project_revision_history"),

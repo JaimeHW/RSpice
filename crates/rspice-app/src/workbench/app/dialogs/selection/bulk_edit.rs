@@ -12,7 +12,8 @@ use rspice_design::schematic::bom::BomField;
 use rspice_design::schematic::tolerance::{ToleranceDistribution, supports_tolerance};
 
 use super::bulk_filter::{
-    SelectionBulkFilter, SelectionBulkHierarchyScope, SelectionBulkObjectKind,
+    SelectionBulkFilter, SelectionBulkFilterSession, SelectionBulkHierarchyScope,
+    SelectionBulkObjectKind,
 };
 pub(crate) use crate::state::bulk_edit::{SelectionBulkProperty, SelectionBulkUnsetBehavior};
 use crate::state::bulk_edit::{
@@ -31,8 +32,10 @@ use crate::ui::widgets::{
 use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
 
-use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
-use crate::workbench::app_state::AppState;
+use crate::workbench::app::SchematicEditAuthority;
+use crate::workbench::app::actions::workspace::sync_active_schematic;
+use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::state::WorkbenchSession;
 
 const TITLE: &str = "Bulk edit";
 const PRIMARY: &str = "Apply";
@@ -126,15 +129,9 @@ pub(crate) struct SelectionBulkEditAuthority {
 }
 
 impl SelectionBulkEditAuthority {
-    fn capture(state: &AppState) -> Self {
-        let active_key = state
-            .model
-            .workspace
-            .content
-            .active_schematic_reference()
-            .key();
-        let mut project_buffers = state
-            .model
+    fn capture(model: &Model) -> Self {
+        let active_key = model.workspace.content.active_schematic_reference().key();
+        let mut project_buffers = model
             .workspace
             .content
             .schematic_buffers
@@ -149,16 +146,16 @@ impl SelectionBulkEditAuthority {
             .collect::<Vec<_>>();
         project_buffers.sort_by(|(left, _), (right, _)| left.cmp(right));
         Self {
-            active: SchematicEditAuthority::capture(state),
+            active: SchematicEditAuthority::capture(model),
             active_key,
-            design_management_revision: state.model.workspace.content.design_management.revision(),
+            design_management_revision: model.workspace.content.design_management.revision(),
             project_buffers,
         }
     }
 
-    fn stale_reason(&self, state: &AppState) -> Option<String> {
+    fn stale_reason(&self, model: &Model) -> Option<String> {
         let reopen = |reason: &str| format!("{reason}. Close Bulk edit and open it again.");
-        let current = crate::workbench::app::schematic_editor_request_source(state);
+        let current = crate::workbench::app::schematic_editor_request_source(model);
         if self.active.source.design_epoch != current.design_epoch {
             return Some(reopen("The design document changed"));
         }
@@ -169,39 +166,30 @@ impl SelectionBulkEditAuthority {
             || !self
                 .active
                 .snapshot
-                .is_equal_document(state.model.schematic.document())
+                .is_equal_document(model.schematic.document())
         {
             return Some(reopen("The active schematic changed"));
         }
-        if self.active.view_path != state.model.workspace.content.active_view.display_path()
-            || self.active_key
-                != state
-                    .model
-                    .workspace
-                    .content
-                    .active_schematic_reference()
-                    .key()
+        if self.active.view_path != model.workspace.content.active_view.display_path()
+            || self.active_key != model.workspace.content.active_schematic_reference().key()
         {
             return Some(reopen("The active cell/view changed"));
         }
         if !self.active.matches_source(&current) {
             return Some(reopen("The schematic source or editing scope changed"));
         }
-        if self.active.grid_size != state.model.schematic.document().grid_size
-            || self.active.document_policy != state.model.schematic.document().document_policy
+        if self.active.grid_size != model.schematic.document().grid_size
+            || self.active.document_policy != model.schematic.document().document_policy
         {
             return Some(reopen("The schematic grid or editing policy changed"));
         }
-        if self.active.selection != state.model.schematic.session.editor.selection {
+        if self.active.selection != model.schematic.session.editor.selection {
             return Some(reopen("The selected-object set changed"));
         }
-        if self.design_management_revision
-            != state.model.workspace.content.design_management.revision()
-        {
+        if self.design_management_revision != model.workspace.content.design_management.revision() {
             return Some(reopen("The sheet ownership catalog changed"));
         }
-        let live_external = state
-            .model
+        let live_external = model
             .workspace
             .content
             .schematic_buffers
@@ -212,7 +200,7 @@ impl SelectionBulkEditAuthority {
             return Some(reopen("The project schematic set changed"));
         }
         for (key, expected) in &self.project_buffers {
-            let Some(live) = state.model.workspace.content.schematic_buffers.get(key) else {
+            let Some(live) = model.workspace.content.schematic_buffers.get(key) else {
                 return Some(reopen("A project schematic was closed"));
             };
             if !expected.is_equal_document(live.document()) {
@@ -222,12 +210,12 @@ impl SelectionBulkEditAuthority {
         None
     }
 
-    fn validate_commit(&self, state: &AppState) -> Result<(), String> {
-        self.active.validate(state, TITLE)?;
-        if state.model.safe_mode.project_read_only() {
+    fn validate_commit(&self, model: &Model) -> Result<(), String> {
+        self.active.validate(model, TITLE)?;
+        if model.safe_mode.project_read_only() {
             return Err("Safe mode has opened the project read-only.".to_owned());
         }
-        if let Some(reason) = self.stale_reason(state) {
+        if let Some(reason) = self.stale_reason(model) {
             return Err(reason);
         }
         Ok(())
@@ -290,15 +278,15 @@ enum SelectionBulkBodyAction {
 
 pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
     let filter = state.design.schematic_bulk_edit_filters.active.clone();
-    let authority = SelectionBulkEditAuthority::capture(state);
+    let authority = SelectionBulkEditAuthority::capture(&state.model);
     let property = SelectionBulkProperty::default();
-    let rows = build_rows(state, &filter, property);
+    let rows = build_rows(&state.model, &filter, property);
     let selected = rows
         .iter()
         .filter(|row| row.editable())
         .map(|row| row.key.clone())
         .collect();
-    let bound_sections = bound_library_sections(state, &rows);
+    let bound_sections = bound_library_sections(&state.model, &rows);
     // Nothing is proposed: the value is the user's to choose, and Apply
     // waits for it.
     *state.design.selection_bulk_edit = SelectionBulkEditDialogState {
@@ -318,254 +306,219 @@ pub(crate) fn open_selection_bulk_edit_dialog(state: &mut AppState) {
     };
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_selection_bulk_edit_dialog(&mut self, ctx: &Context) {
-        if !self.state.design.selection_bulk_edit.open {
-            return;
-        }
-        let filter = self.state.design.selection_bulk_edit.filter.clone();
-        let property = self.state.design.selection_bulk_edit.property;
-        let rows = build_rows(&self.state, &filter, property);
-        let impact = preview_impact(
-            &self.state.model.schematic,
-            &rows,
-            &self.state.design.selection_bulk_edit.selected,
-            property,
-            &self.state.design.selection_bulk_edit.new_value,
-            self.state.design.selection_bulk_edit.unset_behavior,
-            &self
-                .state
-                .design
-                .selection_bulk_edit
-                .filter
-                .current_property,
+pub(in crate::workbench) fn render_selection_bulk_edit_dialog(
+    bulk_edit: &mut SelectionBulkEditDialogState,
+    filters: &mut SelectionBulkFilterSession,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+    ctx: &Context,
+) {
+    if !bulk_edit.open {
+        return;
+    }
+    let filter = bulk_edit.filter.clone();
+    let property = bulk_edit.property;
+    let rows = build_rows(model, &filter, property);
+    let impact = preview_impact(
+        &model.schematic,
+        &rows,
+        &bulk_edit.selected,
+        property,
+        &bulk_edit.new_value,
+        bulk_edit.unset_behavior,
+        &bulk_edit.filter.current_property,
+    );
+    let stale = bulk_edit
+        .authority
+        .as_ref()
+        .and_then(|authority| authority.stale_reason(model));
+    let write_allowed = !model.schematic_edit_read_only() && !model.safe_mode.project_read_only();
+    let primary_enabled =
+        write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;
+    let mut body_scroll_offset = bulk_edit.body_scroll_offset;
+    // A value not yet chosen is not a failed edit: the footer says what
+    // Apply is waiting for, and no "nothing was changed" banner opens
+    // over a dialog nobody has touched.
+    let missing_value = missing_value_reason(bulk_edit);
+    let error = bulk_edit
+        .error
+        .as_deref()
+        .or(stale.as_deref())
+        .or(impact.error.as_deref().filter(|_| missing_value.is_none()))
+        .map(str::to_owned);
+    let mut dialog = Dialog::new(TITLE, PRIMARY)
+        .description("Change one property on every object the filter matches.")
+        .size(DialogSize::SimulationWorkflow)
+        .initial_height(640.0)
+        .flush_body()
+        // The split's bands and rule reach the frame's right edge; a
+        // withheld scroll gutter left bare surface beside them.
+        .overlay_scrollbar()
+        .ghost("Cancel")
+        .primary_enabled(primary_enabled)
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::BodyControl)
+        .body_scroll_offset(&mut body_scroll_offset);
+    if let Some(reason) = missing_value {
+        dialog = dialog.hint(reason);
+    }
+    if !write_allowed {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Progress,
+            "Read only",
+            "This schematic cannot be edited. The filter still works.",
         );
-        let stale = self
-            .state
-            .design
-            .selection_bulk_edit
-            .authority
-            .as_ref()
-            .and_then(|authority| authority.stale_reason(&self.state));
-        let write_allowed = !self.state.schematic_edit_read_only()
-            && !self.state.model.safe_mode.project_read_only();
-        let primary_enabled =
-            write_allowed && stale.is_none() && impact.error.is_none() && impact.changed > 0;
-        let mut body_scroll_offset = self.state.design.selection_bulk_edit.body_scroll_offset;
-        // A value not yet chosen is not a failed edit: the footer says what
-        // Apply is waiting for, and no "nothing was changed" banner opens
-        // over a dialog nobody has touched.
-        let missing_value = missing_value_reason(&self.state.design.selection_bulk_edit);
-        let error = self
-            .state
-            .design
-            .selection_bulk_edit
-            .error
-            .as_deref()
-            .or(stale.as_deref())
-            .or(impact.error.as_deref().filter(|_| missing_value.is_none()))
-            .map(str::to_owned);
-        let mut dialog = Dialog::new(TITLE, PRIMARY)
-            .description("Change one property on every object the filter matches.")
-            .size(DialogSize::SimulationWorkflow)
-            .initial_height(640.0)
-            .flush_body()
-            // The split's bands and rule reach the frame's right edge; a
-            // withheld scroll gutter left bare surface beside them.
-            .overlay_scrollbar()
-            .ghost("Cancel")
-            .primary_enabled(primary_enabled)
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .body_scroll_offset(&mut body_scroll_offset);
-        if let Some(reason) = missing_value {
-            dialog = dialog.hint(reason);
-        }
-        if !write_allowed {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                "Read only",
-                "This schematic cannot be edited. The filter still works.",
-            );
-        } else if let Some(error) = error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                "Nothing was changed",
-                error,
-            );
-        }
-
-        let saved = self
-            .state
-            .design
-            .schematic_bulk_edit_filters
-            .saved()
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect::<Vec<_>>();
-        let analyses = self.state.model.sim_setup.enabled_analysis_instance_count();
-        let hierarchy_path = active_hierarchy_path(&self.state);
-        let mut action = SelectionBulkBodyAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = selection_bulk_body(
-                ui,
-                &mut self.state.design.selection_bulk_edit,
-                &rows,
-                &impact,
-                analyses,
-                &saved,
-                &hierarchy_path,
-            );
-            None
-        });
-        self.state.design.selection_bulk_edit.body_scroll_offset = body_scroll_offset;
-        self.handle_selection_bulk_body_action(action);
-
-        match choice {
-            DialogChoice::Primary => {
-                if let Err(error) = self.commit_selection_bulk_edit() {
-                    self.state.design.selection_bulk_edit.error = Some(error);
-                }
-            }
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.design.selection_bulk_edit.close();
-            }
-            DialogChoice::None | DialogChoice::Secondary => {}
-        }
+    } else if let Some(error) = error.as_deref() {
+        dialog =
+            dialog.transaction_state(DialogTransactionTone::Error, "Nothing was changed", error);
     }
 
-    fn handle_selection_bulk_body_action(&mut self, action: SelectionBulkBodyAction) {
-        match action {
-            SelectionBulkBodyAction::None => {}
-            SelectionBulkBodyAction::FilterChanged => {
-                let filter = self.state.design.selection_bulk_edit.filter.clone();
-                self.state.design.schematic_bulk_edit_filters.active = filter.clone();
-                let property = self.state.design.selection_bulk_edit.property;
-                let rows = build_rows(&self.state, &filter, property);
-                self.state.design.selection_bulk_edit.bound_sections =
-                    bound_library_sections(&self.state, &rows);
-                self.state.design.selection_bulk_edit.selected = rows
+    let saved = filters
+        .saved()
+        .iter()
+        .map(|entry| entry.name.clone())
+        .collect::<Vec<_>>();
+    let analyses = model.sim_setup.enabled_analysis_instance_count();
+    let hierarchy_path = active_hierarchy_path(model);
+    let mut action = SelectionBulkBodyAction::None;
+    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        action = selection_bulk_body(
+            ui,
+            &mut *bulk_edit,
+            &rows,
+            &impact,
+            analyses,
+            &saved,
+            &hierarchy_path,
+        );
+        None
+    });
+    bulk_edit.body_scroll_offset = body_scroll_offset;
+    handle_selection_bulk_body_action(bulk_edit, filters, model, action);
+
+    match choice {
+        DialogChoice::Primary => {
+            if let Err(error) = commit_selection_bulk_edit(bulk_edit, model, workbench) {
+                bulk_edit.error = Some(error);
+            }
+        }
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            bulk_edit.close();
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
+    }
+}
+
+fn handle_selection_bulk_body_action(
+    bulk_edit: &mut SelectionBulkEditDialogState,
+    filters: &mut SelectionBulkFilterSession,
+    model: &Model,
+    action: SelectionBulkBodyAction,
+) {
+    match action {
+        SelectionBulkBodyAction::None => {}
+        SelectionBulkBodyAction::FilterChanged => {
+            let filter = bulk_edit.filter.clone();
+            filters.active = filter.clone();
+            let property = bulk_edit.property;
+            let rows = build_rows(model, &filter, property);
+            bulk_edit.bound_sections = bound_library_sections(model, &rows);
+            bulk_edit.selected = rows
+                .into_iter()
+                .filter(SelectionBulkRow::editable)
+                .map(|row| row.key)
+                .collect();
+            bulk_edit.error = None;
+            bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
+        }
+        SelectionBulkBodyAction::SaveFilter => {
+            let name = bulk_edit.save_filter_name.clone();
+            filters.active = bulk_edit.filter.clone();
+            match filters.save_active(&name) {
+                Ok(()) => {
+                    bulk_edit.selected_saved_filter = Some(name.trim().to_owned());
+                    bulk_edit.save_filter_name.clear();
+                    bulk_edit.save_filter_open = false;
+                    bulk_edit.error = None;
+                }
+                Err(error) => bulk_edit.error = Some(error),
+            }
+        }
+        SelectionBulkBodyAction::LoadFilter => {
+            let name = bulk_edit.selected_saved_filter.clone();
+            if let Some(name) = name
+                && filters.load(&name)
+            {
+                let filter = filters.active.clone();
+                bulk_edit.filter = filter.clone();
+                let property = bulk_edit.property;
+                bulk_edit.selected = build_rows(model, &filter, property)
                     .into_iter()
                     .filter(SelectionBulkRow::editable)
                     .map(|row| row.key)
                     .collect();
-                self.state.design.selection_bulk_edit.error = None;
-                self.state.design.selection_bulk_edit.authority =
-                    Some(SelectionBulkEditAuthority::capture(&self.state));
+                bulk_edit.authority = Some(SelectionBulkEditAuthority::capture(model));
+                bulk_edit.error = None;
             }
-            SelectionBulkBodyAction::SaveFilter => {
-                let name = self
-                    .state
-                    .design
-                    .selection_bulk_edit
-                    .save_filter_name
-                    .clone();
-                self.state.design.schematic_bulk_edit_filters.active =
-                    self.state.design.selection_bulk_edit.filter.clone();
-                match self
-                    .state
-                    .design
-                    .schematic_bulk_edit_filters
-                    .save_active(&name)
-                {
-                    Ok(()) => {
-                        self.state.design.selection_bulk_edit.selected_saved_filter =
-                            Some(name.trim().to_owned());
-                        self.state
-                            .design
-                            .selection_bulk_edit
-                            .save_filter_name
-                            .clear();
-                        self.state.design.selection_bulk_edit.save_filter_open = false;
-                        self.state.design.selection_bulk_edit.error = None;
-                    }
-                    Err(error) => self.state.design.selection_bulk_edit.error = Some(error),
-                }
-            }
-            SelectionBulkBodyAction::LoadFilter => {
-                let name = self
-                    .state
-                    .design
-                    .selection_bulk_edit
-                    .selected_saved_filter
-                    .clone();
-                if let Some(name) = name
-                    && self.state.design.schematic_bulk_edit_filters.load(&name)
-                {
-                    let filter = self.state.design.schematic_bulk_edit_filters.active.clone();
-                    self.state.design.selection_bulk_edit.filter = filter.clone();
-                    let property = self.state.design.selection_bulk_edit.property;
-                    self.state.design.selection_bulk_edit.selected =
-                        build_rows(&self.state, &filter, property)
-                            .into_iter()
-                            .filter(SelectionBulkRow::editable)
-                            .map(|row| row.key)
-                            .collect();
-                    self.state.design.selection_bulk_edit.authority =
-                        Some(SelectionBulkEditAuthority::capture(&self.state));
-                    self.state.design.selection_bulk_edit.error = None;
-                }
-            }
-            SelectionBulkBodyAction::DeleteFilter => {
-                let name = self
-                    .state
-                    .design
-                    .selection_bulk_edit
-                    .selected_saved_filter
-                    .clone();
-                if let Some(name) = name
-                    && self.state.design.schematic_bulk_edit_filters.remove(&name)
-                {
-                    self.state.design.selection_bulk_edit.selected_saved_filter = None;
-                    self.state.design.selection_bulk_edit.error = None;
-                }
+        }
+        SelectionBulkBodyAction::DeleteFilter => {
+            let name = bulk_edit.selected_saved_filter.clone();
+            if let Some(name) = name
+                && filters.remove(&name)
+            {
+                bulk_edit.selected_saved_filter = None;
+                bulk_edit.error = None;
             }
         }
     }
+}
 
-    fn commit_selection_bulk_edit(&mut self) -> Result<(), String> {
-        let dialog = &self.state.design.selection_bulk_edit;
-        let authority = dialog
-            .authority
-            .as_ref()
-            .ok_or_else(|| "Bulk-edit document authority is missing.".to_owned())?;
-        authority.validate_commit(&self.state)?;
-        let rows = build_rows(&self.state, &dialog.filter, dialog.property);
-        let selected_active_ids = rows
-            .iter()
-            .filter(|row| row.editable() && dialog.selected.contains(&row.key))
-            .filter(|row| row.key.view_key.eq_ignore_ascii_case(&authority.active_key))
-            .filter_map(|row| {
-                matches!(
-                    row.key.kind,
-                    SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
-                )
-                .then_some(row.key.object_id)
-            })
-            .collect::<BTreeSet<_>>();
-        let receipt = apply_bulk_edit(
-            &mut self.state.model.schematic,
-            &selected_active_ids,
-            dialog.property,
-            &dialog.new_value,
-            dialog.unset_behavior,
-            Some(&dialog.filter.current_property),
-        )?;
-        if receipt.changed == 0 {
-            return Err("The selected objects already satisfy the requested value.".to_owned());
-        }
-        self.state.sync_active_schematic_to_workspace();
-        let analyses = self.state.model.sim_setup.enabled_analysis_instance_count();
-        self.state.prompt(format!(
-            "Bulk edit changed {} object{} as one undo step; {} enabled analys{} affected.",
-            receipt.changed,
-            if receipt.changed == 1 { "" } else { "s" },
-            analyses,
-            if analyses == 1 { "is" } else { "es" },
-        ));
-        self.state.design.selection_bulk_edit.close();
-        Ok(())
+fn commit_selection_bulk_edit(
+    bulk_edit: &mut SelectionBulkEditDialogState,
+    model: &mut Model,
+    workbench: &mut WorkbenchSession,
+) -> Result<(), String> {
+    let dialog = &*bulk_edit;
+    let authority = dialog
+        .authority
+        .as_ref()
+        .ok_or_else(|| "Bulk-edit document authority is missing.".to_owned())?;
+    authority.validate_commit(model)?;
+    let rows = build_rows(model, &dialog.filter, dialog.property);
+    let selected_active_ids = rows
+        .iter()
+        .filter(|row| row.editable() && dialog.selected.contains(&row.key))
+        .filter(|row| row.key.view_key.eq_ignore_ascii_case(&authority.active_key))
+        .filter_map(|row| {
+            matches!(
+                row.key.kind,
+                SelectionBulkRowKind::Instance | SelectionBulkRowKind::Port
+            )
+            .then_some(row.key.object_id)
+        })
+        .collect::<BTreeSet<_>>();
+    let receipt = apply_bulk_edit(
+        &mut model.schematic,
+        &selected_active_ids,
+        dialog.property,
+        &dialog.new_value,
+        dialog.unset_behavior,
+        Some(&dialog.filter.current_property),
+    )?;
+    if receipt.changed == 0 {
+        return Err("The selected objects already satisfy the requested value.".to_owned());
     }
+    sync_active_schematic(model, workbench);
+    let analyses = model.sim_setup.enabled_analysis_instance_count();
+    workbench.prompt(format!(
+        "Bulk edit changed {} object{} as one undo step; {} enabled analys{} affected.",
+        receipt.changed,
+        if receipt.changed == 1 { "" } else { "s" },
+        analyses,
+        if analyses == 1 { "is" } else { "es" },
+    ));
+    bulk_edit.close();
+    Ok(())
 }
 
 #[derive(Debug, Clone, Default)]
@@ -1292,14 +1245,13 @@ fn missing_value_reason(dialog: &SelectionBulkEditDialogState) -> Option<&'stati
 /// sections each library's corners bind, and the sections its model
 /// metadata declares. A library this project does not hold contributes
 /// nothing, and nothing is offered that no bound library defines.
-fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<String> {
+fn bound_library_sections(model: &Model, rows: &[SelectionBulkRow]) -> Vec<String> {
     let instances = rows
         .iter()
         .filter(|row| row.key.kind == SelectionBulkRowKind::Instance)
         .map(|row| row.key.object_id)
         .collect::<BTreeSet<_>>();
-    let libraries = state
-        .model
+    let libraries = model
         .schematic
         .document()
         .components
@@ -1310,7 +1262,7 @@ fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<St
         .collect::<BTreeSet<_>>();
     let mut sections = Vec::new();
     for name in libraries {
-        let Some(library) = state.model.model_library_manager.get_library(name) else {
+        let Some(library) = model.model_library_manager.get_library(name) else {
             continue;
         };
         sections.extend(
@@ -1337,8 +1289,8 @@ fn bound_library_sections(state: &AppState, rows: &[SelectionBulkRow]) -> Vec<St
 /// The occurrence the active schematic is open at — the dialog's scope line and
 /// the display path of every row it owns. The design root is implicit, so the
 /// top sheet is `/` rather than the name of the cell that happens to be top.
-fn active_hierarchy_path(state: &AppState) -> String {
-    state.model.workspace.content.occurrence_path().to_string()
+fn active_hierarchy_path(model: &Model) -> String {
+    model.workspace.content.occurrence_path().to_string()
 }
 
 /// The library cell a buffer outside the active occurrence belongs to.
@@ -1355,34 +1307,28 @@ fn schematic_display_path(cell_view_key: &str) -> String {
 }
 
 fn build_rows(
-    state: &AppState,
+    model: &Model,
     filter: &SelectionBulkFilter,
     property: SelectionBulkProperty,
 ) -> Vec<SelectionBulkRow> {
-    let active_key = state
-        .model
-        .workspace
-        .content
-        .active_schematic_reference()
-        .key();
+    let active_key = model.workspace.content.active_schematic_reference().key();
     let mut buffers = Vec::new();
     buffers.push((
         active_key.clone(),
-        active_hierarchy_path(state),
-        state.model.schematic.document(),
+        active_hierarchy_path(model),
+        model.schematic.document(),
         true,
     ));
     match filter.hierarchy_scope {
         SelectionBulkHierarchyScope::ActiveHierarchyPath => {
-            let hierarchy_keys = state
-                .model
+            let hierarchy_keys = model
                 .workspace
                 .content
                 .hierarchy_stack
                 .iter()
                 .map(|reference| reference.key())
                 .collect::<HashSet<_>>();
-            for (key, schematic) in &state.model.workspace.content.schematic_buffers {
+            for (key, schematic) in &model.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) && hierarchy_keys.contains(key) {
                     buffers.push((
                         key.clone(),
@@ -1395,7 +1341,7 @@ fn build_rows(
         }
         SelectionBulkHierarchyScope::CurrentSheet => {}
         SelectionBulkHierarchyScope::CompleteProject => {
-            for (key, schematic) in &state.model.workspace.content.schematic_buffers {
+            for (key, schematic) in &model.workspace.content.schematic_buffers {
                 if !key.eq_ignore_ascii_case(&active_key) {
                     buffers.push((
                         key.clone(),
@@ -1408,8 +1354,7 @@ fn build_rows(
         }
     }
     buffers.sort_by(|(left, _, _, _), (right, _, _, _)| left.cmp(right));
-    let active_sheet = state
-        .model
+    let active_sheet = model
         .workspace
         .content
         .design_management
@@ -1430,7 +1375,7 @@ fn build_rows(
             } else {
                 None
             },
-            &state.model.workspace.content.design_management,
+            &model.workspace.content.design_management,
         );
     }
     rows.retain(|row| row_matches_query(row, filter));

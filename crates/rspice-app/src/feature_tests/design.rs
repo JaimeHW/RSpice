@@ -347,3 +347,21 @@ fn design_rule_setup_opens_and_draws_in_the_frame() {
     assert!(draws_dialog(&mut app, "Design rule setup"));
     assert!(app.state.design.rule_setup.open);
 }
+
+#[test]
+fn bulk_edit_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    resistor(&mut app, Point::new(100, 100));
+    Command::SelectionBulkEdit.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Bulk edit"));
+    assert!(app.state.design.selection_bulk_edit.open);
+}
+
+#[test]
+fn engineering_table_view_opens_and_draws_in_the_frame() {
+    let mut app = design_app();
+    resistor(&mut app, Point::new(100, 100));
+    Command::EngineeringTableView.execute(&mut app);
+    assert!(draws_dialog(&mut app, "Engineering table view"));
+    assert!(app.state.design.engineering_table.open);
+}
