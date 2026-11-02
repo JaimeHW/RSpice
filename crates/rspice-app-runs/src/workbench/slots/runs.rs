@@ -1,6 +1,8 @@
 //! The runs' state: what watching the simulations in flight and checking a
 //! run before it starts keep between frames.
 
+use rspice_app_state::workbench::app_state::model::Model;
+
 /// What the runs keep between frames.
 #[derive(Debug, Clone, Default)]
 pub struct RunsState {
@@ -17,4 +19,11 @@ pub struct RunsState {
     /// The deck a manual-deck run started from and the baseline the last one
     /// left. Runtime only, and boxed so a moved state stays the same size.
     pub manual_run: Box<crate::simulation::manual_run::ManualRunHandoff>,
+}
+
+/// Request a run of the Simulate workspace's run set, which replaces a
+/// netlist rerun the runs had queued.
+pub fn request_run_set(model: &mut Model, runs: &mut RunsState) {
+    runs.manual_run.rerun_queued = false;
+    model.simulation.execution.request_simulate_run_set();
 }

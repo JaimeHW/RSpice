@@ -21,6 +21,7 @@ use crate::workbench::framework::feature::{Cx, Peers};
 use crate::workbench::framework::ports::ResultsPeer;
 use crate::workbench::slots::{PlatformState, RunsState};
 use crate::workbench::state::WorkbenchSession;
+use rspice_app_runs::workbench::slots::runs::request_run_set;
 
 /// The run tier's host over a simulate command's context.
 pub(in crate::workbench) struct RunView<'v, 'a> {
@@ -269,13 +270,6 @@ fn slot_facts(runs: &RunsState, review_markers: SchematicReviewMarkerVisibility)
         preflight_report_retained: runs.preflight.report.is_some(),
         review_markers,
     }
-}
-
-/// Request a run of the Simulate workspace's run set, which replaces a
-/// netlist rerun the runs had queued.
-fn request_run_set(model: &mut Model, runs: &mut RunsState) {
-    runs.manual_run.rerun_queued = false;
-    model.simulation.execution.request_simulate_run_set();
 }
 
 /// Check `subject` as Check Design does, unless a current check of it already

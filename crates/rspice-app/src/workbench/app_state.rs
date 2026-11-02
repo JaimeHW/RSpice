@@ -540,10 +540,10 @@ impl AppState {
                 .all(|schematic| !schematic_has_authored_content(schematic))
     }
 
-    /// Request a run from the Simulate workspace run set.
+    /// [`request_run_set`](rspice_app_runs::workbench::slots::runs::request_run_set)
+    /// for the session's model and runs.
     pub fn request_run_set_simulation(&mut self) {
-        self.runs.manual_run.rerun_queued = false;
-        self.model.simulation.execution.request_simulate_run_set();
+        rspice_app_runs::workbench::slots::runs::request_run_set(&mut self.model, &mut self.runs);
     }
 
     /// Answer the gesture just made, on the status bar.
