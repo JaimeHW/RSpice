@@ -116,6 +116,8 @@ enum CommandKind {
     ResourceUsage,
     SetPlot,
     Compose,
+    /// `wrs2p [file]`.
+    WriteSParameters,
     /// A command ngspice -b accepts with no batch effect.
     Ignored(Ignored),
 }
@@ -161,6 +163,7 @@ impl CommandKind {
             "rusage" => Self::ResourceUsage,
             "setplot" => Self::SetPlot,
             "compose" => Self::Compose,
+            "wrs2p" => Self::WriteSParameters,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
             }
@@ -345,16 +348,8 @@ impl ControlCircuit {
                 &mut prepared
                 && let ControlPresentationKind::Text(text) = &mut request.kind
             {
-                // A relative file is in the directory `cd` moved to.
-                let path = match &self.directory {
-                    Some(directory) => std::path::Path::new(directory)
-                        .join(&redirect.path)
-                        .to_string_lossy()
-                        .into_owned(),
-                    None => redirect.path,
-                };
                 request.kind = ControlPresentationKind::File {
-                    path,
+                    path: self.script_file(redirect.path),
                     text: std::mem::take(text),
                     append: redirect.append,
                 };
@@ -557,6 +552,17 @@ impl ControlCircuit {
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
+            CommandKind::WriteSParameters => {
+                let (path, text) = self.touchstone(command, variables, abort)?;
+                Ok(Self::batch_output(
+                    command,
+                    ControlPresentationKind::File {
+                        path: self.script_file(path),
+                        text,
+                        append: false,
+                    },
+                ))
+            }
             CommandKind::Compose => {
                 self.compose(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
@@ -579,6 +585,17 @@ impl ControlCircuit {
                     ControlPresentationKind::Ignored(reason),
                 ))
             }
+        }
+    }
+
+    /// A relative file is in the directory `cd` moved to.
+    fn script_file(&self, path: String) -> String {
+        match &self.directory {
+            Some(directory) => std::path::Path::new(directory)
+                .join(&path)
+                .to_string_lossy()
+                .into_owned(),
+            None => path,
         }
     }
 
