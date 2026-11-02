@@ -97,6 +97,25 @@ pub(super) fn design_management_tabs(
     first.unwrap_or(strip_response)
 }
 
+/// How many cross-sheet ports reach `sheet`, and how many nets leave it
+/// through them. A port pairs this sheet with one other for one net, so a
+/// net that reaches two other sheets is two ports and one net. Net names fold
+/// case, as the catalog's own port key does.
+pub(super) fn sheet_crossings<'a>(
+    ports: impl IntoIterator<Item = &'a CrossSheetPortDefinition>,
+    sheet: SheetId,
+) -> (usize, usize) {
+    let mut port_count = 0;
+    let mut nets = BTreeSet::new();
+    for port in ports {
+        if port.first.sheet_id == sheet || port.second.sheet_id == sheet {
+            port_count += 1;
+            nets.insert(port.net_name.to_lowercase());
+        }
+    }
+    (port_count, nets.len())
+}
+
 pub(super) fn sheets_manager_body(
     ui: &mut Ui,
     dialog: &mut DesignManagementDialogState,
@@ -138,18 +157,13 @@ pub(super) fn sheets_manager_body(
             );
         } else {
             for (index, (id, name)) in sheets.iter().enumerate() {
-                let port_count = ports
-                    .iter()
-                    .filter(|port| {
-                        let definition = port.definition();
-                        definition.first.sheet_id == *id || definition.second.sheet_id == *id
-                    })
-                    .count();
+                let (port_count, net_count) =
+                    sheet_crossings(ports.iter().map(|port| port.definition()), *id);
                 let values = [
                     format!("{:02}", index + 1),
                     name.clone(),
                     port_count.to_string(),
-                    port_count.to_string(),
+                    net_count.to_string(),
                     if Some(*id) == active_id {
                         "current"
                     } else {

@@ -11,13 +11,14 @@ use egui::{Align, Context, Frame, Layout, Margin, Sense, Stroke, Ui, Vec2, vec2}
 use crate::state::{
     AnnotationCollisionPolicy, AnnotationObject, AnnotationPosition, AnnotationPrefixAllocation,
     AnnotationRangeScope, AnnotationReservedRange, AssemblyVariantDraft, AssemblyVariantId,
-    DesignManagementCatalog, DrawingSheetInheritance, DrawingSheetNewSheetPolicy,
-    DrawingSheetStandard, HierarchyAuditConfiguration, HierarchyAuditRequest,
-    HierarchyAuditSubject, ImportedReferencePolicy, MissingReplacementPolicy,
-    ModelEquivalencePolicy, MoveSelectionRequest, ProtectedReferencePolicy, RenumberOrder,
-    RenumberRequest, RenumberScope, SchematicObjectKey, SchematicSheetFormat, SheetDefinition,
-    SheetDeleteBehavior, SheetId, SheetPageNumbering, SheetPortPolicy, SheetTemplate,
-    VariantInheritance, VariantMatrixEdit, VariantQualificationPlan,
+    CrossSheetPortDefinition, DesignManagementCatalog, DrawingSheetInheritance,
+    DrawingSheetNewSheetPolicy, DrawingSheetStandard, HierarchyAuditConfiguration,
+    HierarchyAuditRequest, HierarchyAuditSubject, ImportedReferencePolicy,
+    MissingReplacementPolicy, ModelEquivalencePolicy, MoveSelectionRequest,
+    ProtectedReferencePolicy, RenumberOrder, RenumberRequest, RenumberScope, SchematicObjectKey,
+    SchematicSheetFormat, SheetDefinition, SheetDeleteBehavior, SheetId, SheetPageNumbering,
+    SheetPortPolicy, SheetTemplate, VariantInheritance, VariantMatrixEdit,
+    VariantQualificationPlan,
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};

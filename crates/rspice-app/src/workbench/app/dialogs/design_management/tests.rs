@@ -2,7 +2,10 @@
 
 use super::operations::variant_connectivity_difference_count;
 use super::*;
-use crate::state::{ComponentType, Point};
+use crate::state::{
+    ComponentType, CrossSheetDiscipline, CrossSheetPortAnchor, CrossSheetPortDirection,
+    CrossSheetPortEndpoint, CrossSheetSignalType, Point,
+};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::project::commands::ProjectRequest;
@@ -322,4 +325,45 @@ fn a_create_hierarchy_handed_to_the_shell_opens_where_it_opened_in_place() {
         assert!(dialog.open, "handed {handed}");
         assert_eq!(app.state.prompt_text(), None, "handed {handed}");
     }
+}
+
+/// The Sheets table counts each sheet's ports and the nets leaving through
+/// them separately: a net reaching two other sheets is two ports but one
+/// net, and a second net through a third port is a second net.
+#[test]
+fn the_sheets_table_counts_ports_and_off_sheet_nets_apart() {
+    let [bias, afe, output] = [SheetId::new(), SheetId::new(), SheetId::new()];
+    let port = |net: &str, wire: u64, from: SheetId, to: SheetId| CrossSheetPortDefinition {
+        net_name: net.to_owned(),
+        first: CrossSheetPortEndpoint {
+            sheet_id: from,
+            anchor: CrossSheetPortAnchor::WirePoint {
+                wire_id: wire,
+                point: Point::origin(),
+            },
+        },
+        second: CrossSheetPortEndpoint {
+            sheet_id: to,
+            anchor: CrossSheetPortAnchor::WirePoint {
+                wire_id: wire + 100,
+                point: Point::origin(),
+            },
+        },
+        direction: CrossSheetPortDirection::Output,
+        signal_type: CrossSheetSignalType::Analog,
+        discipline: CrossSheetDiscipline::Electrical,
+    };
+    let ports = [
+        port("VREF", 1, bias, afe),
+        port("vref", 2, bias, output),
+        port("BIAS", 3, bias, afe),
+    ];
+
+    assert_eq!(super::manager::sheet_crossings(&ports, bias), (3, 2));
+    assert_eq!(super::manager::sheet_crossings(&ports, afe), (2, 2));
+    assert_eq!(super::manager::sheet_crossings(&ports, output), (1, 1));
+    assert_eq!(
+        super::manager::sheet_crossings(&ports, SheetId::new()),
+        (0, 0)
+    );
 }
