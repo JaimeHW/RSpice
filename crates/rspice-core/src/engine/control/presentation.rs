@@ -5,6 +5,7 @@ mod batch;
 mod compose;
 mod dcmatch;
 mod distortion;
+mod events;
 mod functions;
 mod noise;
 mod pole_zero;

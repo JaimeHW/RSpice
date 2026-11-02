@@ -102,6 +102,10 @@ enum CommandKind {
     Presentation,
     Echo,
     Display,
+    /// XSPICE `edisplay`.
+    EventDisplay,
+    /// XSPICE `eprint`.
+    EventPrint,
     Listing,
     ResourceUsage,
     SetPlot,
@@ -135,6 +139,8 @@ impl CommandKind {
             "plot" | "print" | "settype" => Self::Presentation,
             "echo" => Self::Echo,
             "display" => Self::Display,
+            "edisplay" => Self::EventDisplay,
+            "eprint" => Self::EventPrint,
             "listing" => Self::Listing,
             "rusage" => Self::ResourceUsage,
             "setplot" => Self::SetPlot,
@@ -421,6 +427,14 @@ impl ControlCircuit {
             CommandKind::Display => Ok(Self::batch_output(
                 command,
                 ControlPresentationKind::Text(self.display(command)?),
+            )),
+            CommandKind::EventDisplay => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(self.event_display(command)?),
+            )),
+            CommandKind::EventPrint => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(self.event_print(command)?),
             )),
             CommandKind::Listing => Ok(Self::batch_output(
                 command,

@@ -1367,6 +1367,59 @@ fn set_curplot_selects_the_plot_as_ngspice_does() {
     assert!(error.unwrap().contains("no plot named 'nowhere'"));
 }
 
+/// XSPICE `edisplay` and `eprint` (xspice/evt/evtprint.c:399, :101) list the
+/// event nodes and print a row at each step where a named node has an
+/// event; a source repeating a value records no event. ngspice-46 prints
+/// exactly these lines for the same deck and stimulus, up to its
+/// statistics, which count its own solver's load calls.
+#[test]
+fn eprint_and_edisplay_print_event_nodes_as_ngspice_does() {
+    let directory = std::env::temp_dir().join(format!("rspice-eprint-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let stimulus = directory.join("stimulus.txt");
+    std::fs::write(
+        &stimulus,
+        "0n 0s 1s\n1n 1s 1s\n2n 1s 0r\n3n Uz 0r\n4n 0s 1s\n",
+    )
+    .unwrap();
+    let deck = |commands: &str| {
+        format!(
+            "event print\nvdummy dummy 0 DC=0\na_source [a b] src\n\
+             .model src d_source(input_file=\"{}\")\na_inv a y inv\n\
+             .model inv d_inverter(rise_delay=0.5n fall_delay=0.5n)\n.tran 0.1n 5n\n\
+             .control\n{commands}\n.endc\n.end\n",
+            stimulus.to_string_lossy().replace('\\', "/")
+        )
+    };
+    let (presented, error) = run_until_error(&deck("run\nedisplay\neprint a b y"));
+    let (_, early) = run_until_error(&deck("eprint a"));
+    let (_, unknown) = run_until_error(&deck("run\neprint a z"));
+    std::fs::remove_dir_all(&directory).ok();
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "\nList of event nodes in plot tran1\n    \
+             node name           : type , number of events\n\n    \
+             a                   : d    ,     4\n    \
+             b                   : d    ,     3\n    \
+             y                   : d    ,     4",
+            "\n**** Results Data ****\n\nTime or Step\na\nb\ny\n\n\n\
+             0.000000000e+00    0s    1s    1s\n\
+             1.000000000e-09    1s    1s    1s\n\
+             1.500000000e-09    1s    1s    0s\n\
+             2.000000000e-09    1s    0r    0s\n\
+             3.000000000e-09    Uz    0r    0s\n\
+             3.500000000e-09    Uz    0r    Us\n\
+             4.000000000e-09    0s    1s    Us\n\
+             4.500000000e-09    0s    1s    1s\n\n\n\n\
+             **** Messages ****",
+        ]
+    );
+    assert!(early.unwrap().contains("no simulation has run"));
+    assert!(unknown.unwrap().contains("node z is not an event node"));
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

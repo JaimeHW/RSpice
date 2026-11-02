@@ -270,6 +270,17 @@ pub(crate) fn number_prefix(text: &str) -> Option<Value> {
     })
 }
 
+/// C's `%.*e`: `precision` decimals and an exponent of at least two digits.
+pub(crate) fn percent_e(value: Value, precision: usize) -> String {
+    let text = format!("{value:.precision$e}");
+    let Some((mantissa, exponent)) = text.split_once('e') else {
+        return text;
+    };
+    let exponent: i32 = exponent.parse().unwrap_or(0);
+    let sign = if exponent < 0 { '-' } else { '+' };
+    format!("{mantissa}e{sign}{:02}", exponent.unsigned_abs())
+}
+
 /// C's `%G` (frontend/variable.c:53 `cp_varwl`): six significant digits,
 /// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
 pub(crate) fn percent_g(value: Value) -> String {
