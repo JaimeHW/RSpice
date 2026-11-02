@@ -57,9 +57,8 @@ fn the_macos_menus_give_the_rspice_menu_its_rows_and_window_its_own() {
         let mut windows = without_keys(&menu_pin_on(entries, &app, OperatingSystem::Windows));
         let mac = without_keys(&menu_pin_on(entries, &app, OperatingSystem::Mac));
         if menu == ApplicationMenu::Help {
-            let at = windows.iter().position(|row| row == updates);
             assert!(
-                at.is_some(),
+                windows.iter().any(|row| row == updates),
                 "Help checks for updates on Windows: {windows:#?}"
             );
             windows.retain(|row| row != updates);

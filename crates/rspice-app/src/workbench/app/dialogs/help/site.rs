@@ -49,7 +49,8 @@ pub(in crate::workbench) enum DocsTopic {
 }
 
 impl DocsTopic {
-    pub(in crate::workbench) const ALL: [Self; 10] = [
+    #[cfg(test)]
+    const ALL: [Self; 10] = [
         Self::GettingStarted,
         Self::SchematicEntry,
         Self::SimulationSetup,
