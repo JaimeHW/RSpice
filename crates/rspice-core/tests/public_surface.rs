@@ -379,7 +379,9 @@ use rspice_core::analysis::harmonic_balance::{
 // default TMAX through it. The census is 5,235, with no slack.
 // `ControlSession::quit_status`, the status ngspice -b exits with, brings it
 // to 5,236.
-const MAX_PUBLIC_ITEMS: usize = 5236;
+// `SignalProjection::ordered_noise_columns`, the columns the CLI's noise
+// table prints for a `.PRINT NOISE` card, brings it to 5,237.
+const MAX_PUBLIC_ITEMS: usize = 5237;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
