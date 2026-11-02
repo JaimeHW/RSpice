@@ -942,12 +942,14 @@ impl ControlScalarEvaluator for ControlCircuit {
     }
 
     /// ngspice defines `curplot` from its plots (frontend/options.c:72),
-    /// and `batchmode` under `-b` (main.c:1032), as which this host runs
-    /// every script.
+    /// `batchmode` under `-b` (main.c:1032), as which this host runs every
+    /// script, and `oscompiled` for the system it was built for
+    /// (frontend/init.c:40).
     fn host_variable(&mut self, name: &str) -> Option<Vec<String>> {
         match name.to_ascii_lowercase().as_str() {
             "curplot" => Some(vec![self.plot_name()]),
             "batchmode" => Some(Vec::new()),
+            "oscompiled" => Some(vec![os_compiled().to_string()]),
             _ => None,
         }
     }
@@ -975,6 +977,29 @@ fn scalar(
         ))
     } else {
         Ok(value.re)
+    }
+}
+
+/// ngspice's code for the system it was built for (frontend/init.c:40):
+/// 8 for a Visual Studio build on Windows, 1 for MinGW, 3 FreeBSD,
+/// 4 OpenBSD, 5 Solaris, 6 Linux, 7 macOS, and 0 for any other.
+fn os_compiled() -> u8 {
+    if cfg!(all(windows, target_env = "msvc")) {
+        8
+    } else if cfg!(windows) {
+        1
+    } else if cfg!(target_os = "freebsd") {
+        3
+    } else if cfg!(target_os = "openbsd") {
+        4
+    } else if cfg!(any(target_os = "solaris", target_os = "illumos")) {
+        5
+    } else if cfg!(target_os = "linux") {
+        6
+    } else if cfg!(target_os = "macos") {
+        7
+    } else {
+        0
     }
 }
 

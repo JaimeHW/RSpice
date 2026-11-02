@@ -1420,6 +1420,25 @@ fn eprint_and_edisplay_print_event_nodes_as_ngspice_does() {
     assert!(unknown.unwrap().contains("node z is not an event node"));
 }
 
+/// ngspice sets `oscompiled` to the system it was built for
+/// (frontend/init.c:40); the ngspice-46 Windows release echoes `8`, a Visual
+/// Studio build, as this host's MSVC build does.
+#[test]
+fn oscompiled_names_the_build_system_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "os\nV1 1 0 5\nR1 1 0 1k\n.control\necho $oscompiled\n\
+         if $oscompiled = 1 | $oscompiled = 8\necho windows\nelse\necho other\nend\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let texts = texts(&presented);
+    let code: u8 = texts[0].parse().unwrap();
+    assert!(code <= 8);
+    assert_eq!(texts[1], if cfg!(windows) { "windows" } else { "other" });
+    if cfg!(all(windows, target_env = "msvc")) {
+        assert_eq!(code, 8);
+    }
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a
