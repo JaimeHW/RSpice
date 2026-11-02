@@ -314,9 +314,12 @@ fn vector_document<'a>(
             .voltage_sources
             .iter()
             .map(|source| {
+                // A destroyed plot's name can return, so the newest dataset
+                // of the name is the one the vector read.
                 let impulses = circuit
                     .datasets()
                     .iter()
+                    .rev()
                     .find(|dataset| dataset.name == source.dataset)
                     .and_then(|dataset| match &dataset.result {
                         ControlAnalysisResult::Transient(result) => {
@@ -343,6 +346,7 @@ fn vector_document<'a>(
                 let impulses = circuit
                     .datasets()
                     .iter()
+                    .rev()
                     .find(|dataset| dataset.name == source.dataset)
                     .and_then(|dataset| match &dataset.result {
                         ControlAnalysisResult::Transient(result) => {

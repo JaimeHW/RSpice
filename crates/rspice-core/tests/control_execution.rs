@@ -1333,6 +1333,23 @@ fn a_dollar_naming_no_variable_stays_as_ngspice_keeps_it() {
     assert_eq!(texts(&presented), ["e $ f", "k$"]);
 }
 
+/// ngspice names a plot by its type and one `plot_num` for every type, which
+/// only a live plot of the name advances and `destroy all` resets
+/// (frontend/vectors.c:897 `plot_alloc`, postcoms.c:907). ngspice-46 echoes
+/// these names for the same script.
+#[test]
+fn plots_are_named_with_ngspice_plot_numbers() {
+    let source = "plot names\nV1 1 0 5\nR1 1 0 1k\n.control\nop\necho $curplot\ndestroy op1\nop\n\
+        echo $curplot\nop\necho $curplot\ntran 1n 2n\necho $curplot\nsetplot new\necho $curplot\n\
+        destroy all\nop\necho $curplot\nlet a = op1.v(1)\necho $&a\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["op1", "op1", "op2", "tran2", "unknown2", "op1", "5"]
+    );
+}
+
 /// ngspice `set curplot = name` selects a plot as `setplot` does and keeps
 /// no variable (frontend/options.c:377 `cp_usrset`); ngspice-46 echoes
 /// `unknown1`, `op1` and `unknown1 0 1` for the same script.

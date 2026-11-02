@@ -380,7 +380,9 @@ fn mixed_control_program_runs_dc_in_source_order() {
             .iter()
             .map(|d| d.name.as_str())
             .collect::<Vec<_>>(),
-        vec!["op1", "dc1", "dc2", "ac1"]
+        // ngspice-46 lists op1, dc1, dc2 and ac2: the second dc plot moved
+        // the one plot number on (frontend/vectors.c:897 `plot_alloc`).
+        vec!["op1", "dc1", "dc2", "ac2"]
     );
     let out = sweep(&circuit, 1).points[2]
         .result

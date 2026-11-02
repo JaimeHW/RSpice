@@ -171,7 +171,11 @@ pub struct ControlCircuit {
     /// Datasets `destroy` took out of the plot list. Their results stay
     /// retained for publication; no name reads them.
     destroyed: BTreeSet<usize>,
+    /// Datasets run per analysis kind, which number their identities.
     ordinals: BTreeMap<&'static str, usize>,
+    /// ngspice's `plot_num` (frontend/plotting/plotting.c:18), the number a
+    /// new plot's name takes unless a live plot already has that name.
+    plot_number: usize,
     retained_values: usize,
     vector_units: BTreeMap<ControlVectorId, crate::signal_unit::SignalUnit>,
     settings: ControlSettings,
@@ -194,6 +198,7 @@ impl ControlCircuit {
             current: None,
             destroyed: BTreeSet::new(),
             ordinals: BTreeMap::new(),
+            plot_number: 1,
             retained_values: 0,
             vector_units: BTreeMap::new(),
             settings: ControlSettings::default(),
@@ -227,15 +232,8 @@ impl ControlCircuit {
     fn set_plot(&mut self, name: &str, line: usize) -> Result<(), ControlError> {
         if name.eq_ignore_ascii_case("new") {
             // frontend/vectors.c:1164 plot_alloc("unknown").
-            let ordinal = self
-                .ordinals
-                .get("unknown")
-                .copied()
-                .unwrap_or(0)
-                .checked_add(1)
-                .ok_or_else(|| command_error(line, "plot ordinal overflow"))?;
-            self.ordinals.insert("unknown", ordinal);
-            self.vectors.new_plot(format!("unknown{ordinal}"));
+            let name = self.new_plot_name("unknown", line)?;
+            self.vectors.new_plot(name);
         } else if let Some(index) = self.dataset_index(name) {
             self.current = Some(index);
             self.vectors.leave_plot();
@@ -246,6 +244,23 @@ impl ControlCircuit {
             ));
         }
         Ok(())
+    }
+
+    /// ngspice `plot_alloc` (frontend/vectors.c:897): the plot's type and
+    /// `plot_num`, which only a live plot of that name advances. A
+    /// destroyed plot's name is free again, so `op` after `destroy op1`
+    /// makes `op1`, and `op`, `op`, `tran` make `op1`, `op2` and `tran2`.
+    fn new_plot_name(&mut self, kind: &str, line: usize) -> Result<String, ControlError> {
+        loop {
+            let name = format!("{kind}{}", self.plot_number);
+            if self.dataset_index(&name).is_none() && !self.vectors.has_plot(&name) {
+                return Ok(name);
+            }
+            self.plot_number = self
+                .plot_number
+                .checked_add(1)
+                .ok_or_else(|| command_error(line, "plot number overflow"))?;
+        }
     }
 
     /// Consume the completed session for publication without cloning results.
@@ -523,7 +538,7 @@ impl ControlCircuit {
         let identity_ordinal = u32::try_from(ordinal - 1)
             .map_err(|_| command_error(line, "analysis identity ordinal overflow"))?;
         let analysis_id = crate::identity::AnalysisInstanceId::new(identity_kind, identity_ordinal);
-        let name = format!("{kind}{ordinal}");
+        let name = self.new_plot_name(kind, line)?;
         let netlist =
             transient::analysis_netlist(&self.netlist, &analysis, authored_index, line, abort)?;
         let mut device_op_report = None;
@@ -678,6 +693,9 @@ impl ControlCircuit {
         engine
             .ensure_result_values(retained_values)
             .map_err(|error| simulation_error(line, error))?;
+        // A destroyed plot's name may return; its `settype` units do not.
+        self.vector_units
+            .retain(|id, _| !id.dataset.eq_ignore_ascii_case(&name));
         self.datasets.push(ControlNamedDataset {
             name: name.clone(),
             analysis_id,

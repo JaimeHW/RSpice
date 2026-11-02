@@ -108,6 +108,10 @@ impl VectorStore {
         true
     }
 
+    pub(in crate::engine::control) fn has_plot(&self, name: &str) -> bool {
+        self.plot(name).is_some()
+    }
+
     fn plot(&self, name: &str) -> Option<&str> {
         self.plots
             .iter()

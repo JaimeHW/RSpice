@@ -193,11 +193,15 @@ impl ControlCircuit {
         let words = crate::engine::control::shell::words(&command.arguments);
         let names: Vec<String> = match words.as_slice() {
             [] => vec![self.plot_name()],
-            [all] if all.text.eq_ignore_ascii_case("all") => (0..self.datasets.len())
-                .filter(|index| !self.destroyed.contains(index))
-                .map(|index| self.datasets[index].name.clone())
-                .chain(self.vectors.plot_names())
-                .collect(),
+            [all] if all.text.eq_ignore_ascii_case("all") => {
+                // postcoms.c:907: plot names number from 1 again.
+                self.plot_number = 1;
+                (0..self.datasets.len())
+                    .filter(|index| !self.destroyed.contains(index))
+                    .map(|index| self.datasets[index].name.clone())
+                    .chain(self.vectors.plot_names())
+                    .collect()
+            }
             words => words.iter().map(|word| word.text.clone()).collect(),
         };
         for name in names {
