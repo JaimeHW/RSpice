@@ -889,11 +889,14 @@ jobs:
           wasm-bindgen --target web --out-name rspice-ui
           --out-dir crates/rspice-app/web/pkg
           target/wasm32-unknown-unknown/web-release/rspice-app.wasm
+      # rspice.app's static host refuses any file over 25 MiB, and the deploy
+      # ships each module gzip -9 compressed: the cap is that limit, not a budget.
       - name: Report browser UI image size
         run: >-
           python3 tools/ci/check_wasm_artifact_size.py
           crates/rspice-app/web/pkg/rspice-ui_bg.wasm
           --label rspice-ui
+          --max-gzip 26214400
       - name: Build production browser worker image
         run: >-
           cargo build --locked --profile web-release -p rspice-worker
@@ -910,6 +913,7 @@ jobs:
           python3 tools/ci/check_wasm_artifact_size.py
           crates/rspice-app/web/pkg/rspice-ui-worker_bg.wasm
           --label rspice-ui-worker
+          --max-gzip 26214400
       - name: Qualify browser WASM JIT solver bridge in Chromium
         run: python3 tools/ci/check_wasm_jit_browser.py
       - name: Qualify Monte Carlo checkpoint capture and continuation in Chromium

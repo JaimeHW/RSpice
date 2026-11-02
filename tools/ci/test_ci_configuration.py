@@ -717,7 +717,9 @@ class CiConfigurationTests(unittest.TestCase):
             report = job.split(f"- name: Report browser {step} image size", 1)[1].split("- name:", 1)[0]
             self.assertIn(f"crates/rspice-app/web/pkg/{stem}_bg.wasm", report)
             self.assertNotIn("--max-raw", report)
-            self.assertNotIn("--max-gzip", report)
+            # The static host's per-file limit, which the deploy enforces on the
+            # gzip -9 module it publishes.
+            self.assertIn("--max-gzip 26214400", report)
         self.assertLess(job.index("Generate production browser UI bindings"), job.index("Report browser UI image size"))
         self.assertLess(job.index("Generate production browser worker bindings"), job.index("Report browser worker image size"))
         self.assertLess(job.index("Report browser UI image size"), job.index("Build instrumented browser workbench"))
