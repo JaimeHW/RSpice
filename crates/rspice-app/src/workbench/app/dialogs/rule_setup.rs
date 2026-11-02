@@ -8,16 +8,18 @@
 //! severity below the rule's floor is shown and refused, with the reason.
 
 use egui::{Context, Grid, RichText, ScrollArea, Ui};
+use rspice_app_runs::workbench::slots::runs::RunsState;
 use rspice_design::drc::{
     DeckIssue, DesignRuleDeck, DrcRuleCategory, DrcSeverity, DrcViolationType,
 };
+use rspice_schematic_editor::session::visibility::SchematicReviewMarkerVisibility;
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Dialog, DialogChoice, DialogSize, DialogTransactionTone, select_with_disabled,
 };
-use crate::workbench::app_state::AppState;
+use crate::workbench::app_state::{AppState, Model};
 
 const TITLE: &str = "Design rule setup";
 const PRIMARY: &str = "Apply";
@@ -65,16 +67,23 @@ fn unread_issue(deck: &DesignRuleDeck) -> Option<DeckIssue> {
     })
 }
 
-/// Draw the dialog while it is open. Returns whether the draft was applied,
-/// so the caller drops any run prepared under the old deck.
-pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
-    if !state.design.rule_setup.open {
+/// Draw the dialog while it is open, over its draft, the review markers the
+/// drawing shows, the model and the run tier. Returns whether the draft was
+/// applied, so the caller drops any run prepared under the old deck.
+pub(in crate::workbench) fn render_rule_setup_dialog(
+    rule_setup: &mut RuleSetupDialogState,
+    review_markers: SchematicReviewMarkerVisibility,
+    model: &mut Model,
+    runs: &mut RunsState,
+    ctx: &Context,
+) -> bool {
+    if !rule_setup.open {
         return false;
     }
-    let read_only = state.model.safe_mode.project_read_only();
-    let unread = unread_issue(&state.design.rule_setup.draft);
+    let read_only = model.safe_mode.project_read_only();
+    let unread = unread_issue(&rule_setup.draft);
     let editable = !read_only && unread.is_none();
-    let changed = state.design.rule_setup.draft != *state.model.workspace.content.design_rules;
+    let changed = rule_setup.draft != *model.workspace.content.design_rules;
     let mut dialog = Dialog::new(TITLE, PRIMARY)
         .description(DESCRIPTION)
         // Wide enough for the table: on the manager size the rows ran past
@@ -97,18 +106,18 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
             "Inspection only",
             "The project is read-only.",
         );
-    } else if let Some(refusal) = state.design.rule_setup.refusal.clone() {
+    } else if let Some(refusal) = rule_setup.refusal.clone() {
         dialog =
             dialog.transaction_state(DialogTransactionTone::Error, "Severity refused", refusal);
     }
-    let session = &mut state.design.rule_setup;
+    let session = &mut *rule_setup;
     match dialog.show(ctx, |ui| rule_table(ui, session, editable)) {
         DialogChoice::Primary => {
-            apply_rule_setup(state);
+            apply_rule_setup(rule_setup, review_markers, model, runs);
             true
         }
         DialogChoice::Ghost | DialogChoice::Cancelled => {
-            state.design.rule_setup = RuleSetupDialogState::default();
+            *rule_setup = RuleSetupDialogState::default();
             false
         }
         DialogChoice::None | DialogChoice::Secondary => false,
@@ -118,13 +127,18 @@ pub(in crate::workbench) fn render_rule_setup_dialog(ctx: &Context, state: &mut 
 /// Make the draft the project's deck. The reports produced under the old one
 /// go stale through their digests, and preflight authority is dropped,
 /// because what blocks a run has changed.
-fn apply_rule_setup(state: &mut AppState) {
-    let draft = state.design.rule_setup.draft.clone();
-    *state.model.workspace.content.design_rules = draft;
-    state.model.workspace.content.project_metadata_dirty = true;
-    state.runs.preflight.invalidate();
-    state.publish_rule_deck_issues();
-    state.design.rule_setup = RuleSetupDialogState::default();
+fn apply_rule_setup(
+    rule_setup: &mut RuleSetupDialogState,
+    review_markers: SchematicReviewMarkerVisibility,
+    model: &mut Model,
+    runs: &mut RunsState,
+) {
+    let draft = rule_setup.draft.clone();
+    *model.workspace.content.design_rules = draft;
+    model.workspace.content.project_metadata_dirty = true;
+    runs.preflight.invalidate();
+    model.publish_rule_deck_issues(runs.slot_facts(review_markers));
+    *rule_setup = RuleSetupDialogState::default();
 }
 
 fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
@@ -283,6 +297,29 @@ fn refused_options(rule: DrcViolationType) -> Vec<(usize, &'static str)> {
 mod tests {
     use super::*;
     use crate::workbench::app::RSpiceApp;
+
+    /// Draw the dialog as the frame's step does, over the whole state.
+    fn render_rule_setup_dialog(ctx: &Context, state: &mut AppState) -> bool {
+        let review_markers = state.design.schematic_visibility.review_markers;
+        super::render_rule_setup_dialog(
+            &mut state.design.rule_setup,
+            review_markers,
+            &mut state.model,
+            &mut state.runs,
+            ctx,
+        )
+    }
+
+    /// Apply the draft as the dialog's Apply does, over the whole state.
+    fn apply_rule_setup(state: &mut AppState) {
+        let review_markers = state.design.schematic_visibility.review_markers;
+        super::apply_rule_setup(
+            &mut state.design.rule_setup,
+            review_markers,
+            &mut state.model,
+            &mut state.runs,
+        );
+    }
 
     #[test]
     fn the_dialog_opens_on_the_projects_deck_and_applies_its_draft() {

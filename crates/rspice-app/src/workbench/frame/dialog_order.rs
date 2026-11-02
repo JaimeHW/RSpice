@@ -309,17 +309,11 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
             app.after_contribution();
         },
     },
-    // A new deck changes what blocks a run, so a run prepared under the
-    // old one is not authorized under it.
     DialogSpec {
         key: DialogKey("design.rule_setup"),
         modality: Modality::Dialog,
         is_open: Some(|state| state.design.rule_setup.open),
-        render: |app, ctx| {
-            if dialogs::rule_setup::render_rule_setup_dialog(ctx, &mut app.state) {
-                app.invalidate_simulation_preflight();
-            }
-        },
+        render: |app, ctx| DesignFeature::render_rule_setup_dialog(&mut features::cx(app), ctx),
     },
     DialogSpec {
         key: DialogKey("sheets.drawing_sheet_defaults"),

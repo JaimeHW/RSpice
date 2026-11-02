@@ -368,8 +368,7 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
     ("render_create_model_bound_symbol_dialog", "design"),
     ("DesignFeature::render_symbol_definition_dialogs", "design"),
     ("ProjectFeature::render_configuration_dialog", "project"),
-    ("dialogs::rule_setup::render_rule_setup_dialog", "design"),
-    ("invalidate_simulation_preflight", "shell"),
+    ("DesignFeature::render_rule_setup_dialog", "design"),
     ("features::render_dialog", "sheets"),
     ("features::render_dialog", "sheets"),
     ("features::render_dialog", "sheets"),
@@ -416,12 +415,11 @@ const DIALOG_STEPS: &[(&str, &str)] = &[
 ];
 
 /// The steps of [`DIALOG_STEPS`] that draw no dialog of their own: they keep
-/// the routes and the dialogs they own in step, carry one dialog's outcome to
-/// the run, finish what a dialog decided, or draw the route overlays.
+/// the routes and the dialogs they own in step, finish what a dialog decided,
+/// or draw the route overlays.
 const SYNTHETIC_DIALOG_STEPS: &[&str] = &[
     "synchronize_route_owned_dialogs",
     "ProjectFeature::synchronize_design_management_route",
-    "invalidate_simulation_preflight",
     "ProjectFeature::process_pending_library_deletions",
     "process_exit_request",
     "show_route_overlays",
@@ -1290,8 +1288,8 @@ fn the_frame_dialogs_draw_in_todays_order() {
         .collect::<Vec<_>>();
     assert_eq!(
         recorded.len(),
-        76,
-        "the frame's 74 dialog steps, the route overlays' 3 owners in place of their host"
+        75,
+        "the frame's 73 dialog steps, the route overlays' 3 owners in place of their host"
     );
 
     let specs = dialog_specs(DIALOG_ORDER);

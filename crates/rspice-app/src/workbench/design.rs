@@ -9,7 +9,7 @@ use crate::workbench::app::dialogs::design_review_comments::ReviewComments;
 use crate::workbench::app::dialogs::hierarchy::descend;
 use crate::workbench::app::dialogs::selection::{array, rename, shared_properties};
 use crate::workbench::app::dialogs::{
-    find_replace, object_properties, placement, symbol_definition,
+    find_replace, object_properties, placement, rule_setup, symbol_definition,
 };
 use crate::workbench::framework::feature::{Cx, Feature, FeatureRegistry, NoHandles};
 use crate::workbench::slots::DesignState;
@@ -186,5 +186,23 @@ impl DesignFeature {
             session: cx.peers.cloud_session(),
         }
         .render_design_review_comments_dialog(ctx);
+    }
+
+    /// Design rule setup. A new deck changes what blocks a run, so an applied
+    /// one drops the run prepared under the old deck with its preflight.
+    pub(in crate::workbench) fn render_rule_setup_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        let review_markers = cx.state.schematic_visibility.review_markers;
+        if rule_setup::render_rule_setup_dialog(
+            &mut cx.state.rule_setup,
+            review_markers,
+            cx.model,
+            cx.runs,
+            ctx,
+        ) {
+            rspice_app_runs::workbench::preflight::invalidate(
+                &mut cx.runs.preflight,
+                cx.handles.run_controller,
+            );
+        }
     }
 }
