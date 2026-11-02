@@ -281,7 +281,7 @@ fn qualification_owned_combo_field(
             .layout(Layout::left_to_right(Align::Center)),
     );
     let output = field.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt(salt)
+        crate::ui::widgets::Combo::from_id_salt(salt)
             .selected_text(selected)
             .width(field_rect.width())
             .show_ui(ui, |ui| {
@@ -1800,7 +1800,7 @@ pub(super) fn qualification_text_field(
     );
     let mut edit = egui::TextEdit::singleline(value);
     if monospace {
-        edit = edit.font(theme::mono(tokens::FS_0, FontWeight::Regular));
+        edit = edit.font(crate::ui::theme::field_mono());
     }
     let response = field
         .add_enabled_ui(enabled, |ui| ui.add_sized(field_rect.size(), edit))
@@ -1848,7 +1848,7 @@ pub(super) fn qualification_combo_field<T: Copy + PartialEq>(
         .find_map(|(candidate, text)| (*candidate == *value).then_some(*text))
         .unwrap_or("Select");
     let output = field.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt(salt)
+        crate::ui::widgets::Combo::from_id_salt(salt)
             .selected_text(selected)
             .width(field_rect.width())
             .show_ui(ui, |ui| {
@@ -1903,7 +1903,7 @@ fn qualification_section_combo_field(
         .find_map(|(candidate, text)| candidate.eq_ignore_ascii_case(value).then_some(text))
         .map_or("Select model section", String::as_str);
     let output = field.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt("qualification-model-section")
+        crate::ui::widgets::Combo::from_id_salt("qualification-model-section")
             .selected_text(selected)
             .width(field_rect.width())
             .show_ui(ui, |ui| {
@@ -1945,7 +1945,7 @@ fn qualification_multiline_field(
     let response = field.add_sized(
         field_rect.size(),
         egui::TextEdit::multiline(value)
-            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+            .font(crate::ui::theme::field_mono())
             .desired_width(field_rect.width()),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {

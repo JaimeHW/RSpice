@@ -315,7 +315,7 @@ pub(super) fn dataset_dialog_body(
                 form_text_row(ui, "Suite owner identity", &mut draft.suite_owner_id);
             }
             ui.label("Dataset class");
-            egui::ComboBox::from_id_salt("correlation-dataset-class")
+            crate::ui::widgets::Combo::from_id_salt("correlation-dataset-class")
                 .selected_text(draft.class.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -343,7 +343,7 @@ pub(super) fn dataset_dialog_body(
         ui.add_sized(
             [ui.available_width().max(1.0), 170.0],
             egui::TextEdit::multiline(&mut draft.csv)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .font(crate::ui::theme::field_mono())
                 .code_editor()
                 .desired_rows(8),
         );
@@ -372,7 +372,7 @@ pub(super) fn retained_simulation_picker(
                     .find(|run| run.id == draft.retained_run_id)
                     .map_or("Select a completed run", |run| run.label.as_str());
                 let previous_run = draft.retained_run_id.clone();
-                egui::ComboBox::from_id_salt("correlation-retained-run")
+                crate::ui::widgets::Combo::from_id_salt("correlation-retained-run")
                     .selected_text(selected_run_label)
                     .width(dialog_field_width(ui))
                     .show_ui(ui, |ui| {
@@ -403,7 +403,7 @@ pub(super) fn retained_simulation_picker(
                     });
                 let previous_analysis = draft.retained_analysis_id.clone();
                 ui.add_enabled_ui(selected_run.is_some(), |ui| {
-                    egui::ComboBox::from_id_salt("correlation-retained-analysis")
+                    crate::ui::widgets::Combo::from_id_salt("correlation-retained-analysis")
                         .selected_text(selected_analysis_label)
                         .width(dialog_field_width(ui))
                         .show_ui(ui, |ui| {
@@ -440,7 +440,7 @@ pub(super) fn retained_simulation_picker(
                         format!("{} · {} samples", trace.name, trace.sample_count)
                     });
                 ui.add_enabled_ui(selected_analysis.is_some(), |ui| {
-                    egui::ComboBox::from_id_salt("correlation-retained-trace")
+                    crate::ui::widgets::Combo::from_id_salt("correlation-retained-trace")
                         .selected_text(selected_trace_label)
                         .width(dialog_field_width(ui))
                         .show_ui(ui, |ui| {
@@ -492,7 +492,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
                 &mut draft.simulation_dataset_id,
             );
             ui.label("Calculation");
-            egui::ComboBox::from_id_salt("correlation-metric-calculation")
+            crate::ui::widgets::Combo::from_id_salt("correlation-metric-calculation")
                 .selected_text(draft.calculation.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -509,7 +509,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
             );
             form_text_row(ui, "Minimum coverage (0..1)", &mut draft.minimum_coverage);
             ui.label("Aggregation");
-            egui::ComboBox::from_id_salt("correlation-metric-aggregation")
+            crate::ui::widgets::Combo::from_id_salt("correlation-metric-aggregation")
                 .selected_text(draft.aggregation.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -519,7 +519,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
                 });
             ui.end_row();
             ui.label("Alignment");
-            egui::ComboBox::from_id_salt("correlation-metric-alignment")
+            crate::ui::widgets::Combo::from_id_salt("correlation-metric-alignment")
                 .selected_text(draft.alignment.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -529,7 +529,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
                 });
             ui.end_row();
             ui.label("Release role");
-            egui::ComboBox::from_id_salt("correlation-metric-release-role")
+            crate::ui::widgets::Combo::from_id_salt("correlation-metric-release-role")
                 .selected_text(draft.release_role.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -578,7 +578,7 @@ pub(super) fn metric_dialog_body(ui: &mut Ui, draft: &mut CorrelationMetricDraft
                     .show(ui, |ui| {
                         form_text_row(ui, "Alignment axis", &mut draft.alignment_axis);
                         ui.label("Extrapolation");
-                        egui::ComboBox::from_id_salt("correlation-metric-extrapolation")
+                        crate::ui::widgets::Combo::from_id_salt("correlation-metric-extrapolation")
                             .selected_text(draft.extrapolation.label())
                             .width(dialog_field_width(ui))
                             .show_ui(ui, |ui| {
@@ -651,7 +651,7 @@ pub(super) fn review_dialog_body(
             ui.end_row();
             form_text_row(ui, "Independent reviewer", &mut draft.reviewer_id);
             ui.label("Decision");
-            egui::ComboBox::from_id_salt("correlation-review-decision")
+            crate::ui::widgets::Combo::from_id_salt("correlation-review-decision")
                 .selected_text(draft.decision.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {
@@ -685,7 +685,7 @@ pub(super) fn disposition_dialog_body(ui: &mut Ui, draft: &mut CorrelationOutlie
             ui.monospace(&draft.reference_observation_id);
             ui.end_row();
             ui.label("Decision");
-            egui::ComboBox::from_id_salt("correlation-outlier-decision")
+            crate::ui::widgets::Combo::from_id_salt("correlation-outlier-decision")
                 .selected_text(draft.decision.label())
                 .width(dialog_field_width(ui))
                 .show_ui(ui, |ui| {

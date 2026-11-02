@@ -843,7 +843,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut state.file_filter)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .font(theme::field_sans())
                     .hint_text(format!(
                         "Filter {scope_total} file{}…",
                         if scope_total == 1 { "" } else { "s" }

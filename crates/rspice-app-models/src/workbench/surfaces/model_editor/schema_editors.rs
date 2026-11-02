@@ -183,7 +183,7 @@ pub(super) fn section_override_combo(
     let before = value.clone();
     let response = field
         .add_enabled_ui(enabled, |ui| {
-            egui::ComboBox::from_id_salt(salt)
+            crate::ui::widgets::Combo::from_id_salt(salt)
                 .selected_text(value.as_str())
                 .width(field_rect.width())
                 .show_ui(ui, |ui| {
@@ -235,7 +235,7 @@ pub(super) fn parameter_schema_editor(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature
                 let before_kind = parameter.kind;
                 let type_response = type_ui
                     .add_enabled_ui(writable, |ui| {
-                        egui::ComboBox::from_id_salt(("model-parameter-kind", index))
+                        crate::ui::widgets::Combo::from_id_salt(("model-parameter-kind", index))
                             .selected_text(match parameter.kind {
                                 ModelParameterKind::Numeric => "numeric",
                                 ModelParameterKind::String => "string",
@@ -458,7 +458,7 @@ pub(super) fn model_text_field(ui: &mut Ui, label: &str, help: &str, value: &mut
     );
     let response = field.add_sized(
         field_rect.size(),
-        egui::TextEdit::singleline(value).font(theme::mono(tokens::FS_0, FontWeight::Regular)),
+        egui::TextEdit::singleline(value).font(crate::ui::theme::field_mono()),
     );
     ui.ctx().accesskit_node_builder(response.id, |node| {
         node.set_label(label);
@@ -498,7 +498,7 @@ pub(super) fn model_parent_field(ui: &mut Ui, value: &mut String, parents: &[Str
             .max_rect(field_rect)
             .layout(Layout::left_to_right(Align::Center)),
     );
-    let response = egui::ComboBox::from_id_salt("model-editor-new-section-parent")
+    let response = crate::ui::widgets::Combo::from_id_salt("model-editor-new-section-parent")
         .selected_text(if value.is_empty() {
             "Base model"
         } else {

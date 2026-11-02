@@ -1605,6 +1605,7 @@ mod tests {
             "rspice-schematic-editor/src",
             "rspice-app-results/src",
             "rspice-results-ui/src",
+            "rspice-app-models/src",
         ]
         .map(str::to_owned)
         .to_vec()
@@ -1615,7 +1616,7 @@ mod tests {
     /// An editor that takes a table cell's place while the cell is edited
     /// keeps the size of the cells around it, so the row does not change type
     /// under the caret; a document is read at its editor's own size.
-    const OWN_SIZE_EDITORS: [(&str, &str); 3] = [
+    const OWN_SIZE_EDITORS: [(&str, &str); 9] = [
         (
             "rspice-app/src/workbench/surfaces/verify/table.rs",
             "edit_cell",
@@ -1624,10 +1625,34 @@ mod tests {
             "rspice-app/src/workbench/surfaces/stimulus/pwl.rs",
             "cell_edit",
         ),
+        (
+            "rspice-app-models/src/workbench/surfaces/model_editor.rs",
+            "parameters_table",
+        ),
+        (
+            "rspice-app-models/src/workbench/surfaces/model_editor/schema_editors.rs",
+            "schema_text_edit_exact",
+        ),
+        (
+            "rspice-app-models/src/workbench/app/dialogs/pdk_settings.rs",
+            "source_edit_row",
+        ),
+        (
+            "rspice-app-models/src/workbench/app/dialogs/pdk_settings.rs",
+            "source_add_row",
+        ),
+        (
+            "rspice-app-models/src/workbench/app/dialogs/pdk_settings.rs",
+            "env_add_row",
+        ),
         // A document is read at its editor's own size.
         (
             "rspice-app/src/workbench/documents/code_workspace/editor.rs",
             "show_code_document_impl",
+        ),
+        (
+            "rspice-app-models/src/workbench/surfaces/models/manager/dialogs.rs",
+            "render_dialog",
         ),
     ];
 

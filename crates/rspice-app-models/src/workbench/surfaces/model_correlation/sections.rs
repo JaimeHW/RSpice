@@ -24,7 +24,7 @@ pub(super) fn suite_selector(
         .map_or("Select suite", |suite| suite.name.as_str());
     ui.horizontal(|ui| {
         ui.label(egui::RichText::new("Suite").font(theme::sans(tokens::FS_0, FontWeight::Medium)));
-        egui::ComboBox::from_id_salt("model-correlation-suite-selector")
+        crate::ui::widgets::Combo::from_id_salt("model-correlation-suite-selector")
             .selected_text(selected)
             .width(260.0)
             .show_ui(ui, |ui| {

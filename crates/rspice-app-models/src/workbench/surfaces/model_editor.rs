@@ -1938,7 +1938,7 @@ fn release_comparison_dialog(
                 .max_rect(field_rect)
                 .layout(Layout::left_to_right(Align::Center)),
         );
-        let response = egui::ComboBox::from_id_salt("model-release-comparison-selector")
+        let response = crate::ui::widgets::Combo::from_id_salt("model-release-comparison-selector")
             .selected_text(selected_label)
             .width(field_rect.width())
             .show_ui(&mut selector, |ui| {
