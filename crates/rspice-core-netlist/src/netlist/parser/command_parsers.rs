@@ -903,6 +903,13 @@ pub(super) fn parse_sp_command(
     };
 
     let points = expect_positive_usize_value(stream, line_num, params, ".SP point count")?;
+    // ngspice, the simulator `.SP` comes from, steps a two-point LIN sweep by
+    // zero and stops after its start (span.c:417-428).
+    let points = if variation == FreqVariation::Lin && points == 2 {
+        1
+    } else {
+        points
+    };
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
     let do_noise = if at_small_signal_fields_end(stream) || at_keyword(stream) {
@@ -1342,6 +1349,14 @@ pub(super) fn parse_disto_command(
     };
 
     let points = expect_positive_usize_value(stream, line_num, params, ".DISTO point count")?;
+    // ngspice, the simulator `.DISTO` comes from, steps a LIN sweep by
+    // (fstop - fstart) / (N + 1) and visits both ends, so N + 2 points
+    // (distoan.c:79-85, 254, 489).
+    let points = if variation == FreqVariation::Lin {
+        points.saturating_add(2)
+    } else {
+        points
+    };
     let start_freq = expect_value(stream, line_num, params)?;
     let stop_freq = expect_value(stream, line_num, params)?;
     let f2_over_f1 = if at_small_signal_fields_end(stream) {

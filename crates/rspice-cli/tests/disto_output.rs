@@ -345,7 +345,7 @@ fn dedicated_hdf5_section_round_trips_product_identity_and_provenance() {
     let source = std::fs::read_to_string(fixture("disto_two_tone.cir")).unwrap();
     std::fs::write(
         &deck,
-        source.replace(".disto lin 3 1k 2k 0.9", ".disto lin 3 1k 2.6k 0.9"),
+        source.replace(".disto lin 1 1k 2k 0.9", ".disto lin 1 1k 2.6k 0.9"),
     )
     .unwrap();
     let output = run(&deck, Some((&hdf5_path, "hdf5")));

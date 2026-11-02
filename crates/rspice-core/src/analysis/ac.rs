@@ -19,9 +19,12 @@ const SWEEP_RELTOL: Value = 1e-3;
 ///   `fstop`.
 /// * `Oct`: always anchors a `2^(1/n)` ratio at `fstart` (never warped,
 ///   `fstop` is generally not hit exactly).
-/// * `Lin`: `points` total spread evenly over the range; ngspice's
-///   freqDelta degenerates to zero for `points <= 2`, emitting a single
-///   point at `fstart`.
+/// * `Lin`: `points` total spread evenly over the range, and one point
+///   stays at `fstart`. Xyce, LTspice, QSPICE and ngspice's noise analysis
+///   (noisean.c:158-163) step a two-point sweep to both ends, where
+///   ngspice's AC analysis alone visits only `fstart` (acan.c:104-113).
+///   The `.SP` and `.DISTO` parsers turn ngspice's own counts for those
+///   analyses into this one (span.c:417-428, distoan.c:79-85).
 ///
 /// # Legacy compatibility
 ///
@@ -175,7 +178,7 @@ fn checked_ac_sweep_parameters(
         }
         FreqVariation::Oct => (std::f64::consts::LN_2 / points as Value).exp(),
         FreqVariation::Lin => {
-            if points > 2 {
+            if points > 1 {
                 (fstop - fstart) / (points - 1) as Value
             } else {
                 0.0
@@ -472,8 +475,11 @@ mod tests {
         assert_eq!(f[0], 1.0e3);
         assert!((f[4] - 2.0e3).abs() < 1e-6);
 
-        // ngspice's freqDelta degenerates to 0 for n <= 2: single point.
+        // Two points are both ends, as Xyce, LTspice, QSPICE and ngspice's
+        // noise analysis step them; one point stays at the start.
         let f = sweep(FreqVariation::Lin, 2, 1.0e3, 2.0e3);
+        assert_eq!(f, vec![1.0e3, 2.0e3]);
+        let f = sweep(FreqVariation::Lin, 1, 1.0e3, 2.0e3);
         assert_eq!(f, vec![1.0e3]);
         let f = sweep(FreqVariation::Lin, 1, 1.0e3, 1.0e3);
         assert_eq!(f, vec![1.0e3]);
@@ -572,7 +578,7 @@ mod tests {
             (FreqVariation::Dec, 10, 1.0, 1000.0, 31),
             (FreqVariation::Dec, 2, 10.0, 800.0, 4),
             (FreqVariation::Oct, 2, 8.0, 20.0, 3),
-            (FreqVariation::Lin, 2, 0.0, 100.0, 1),
+            (FreqVariation::Lin, 2, 0.0, 100.0, 2),
             (FreqVariation::Lin, 3, 0.0, 100.0, 3),
             (FreqVariation::Dec, 10, 100.0, 100.0, 1),
         ] {

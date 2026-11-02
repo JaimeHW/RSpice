@@ -16,7 +16,7 @@ fn run_document(dir: &Path, family: &str) -> PathBuf {
             "* PXF qualifier\nV1 in 0 SIN(0 1 1k) AC 1\nE1 drive 0 in 0 2\nR1 drive out 1k\nC1 out 0 1u\n.HB 1k\n.PXF DEC 3 10 10k INPUT=V1 OUT=V(out) INPUTSIDEBAND=0 OUTSIDEBAND=0 MAXSIDEBAND=1\n.END\n"
         }
         "disto" => {
-            "* distortion qualifiers\nV1 out 0 DC 0.5 DISTOF1 1m 0 DISTOF2 1m 20\nD1 out 0 DMOD\n.model DMOD D(IS=1e-12 N=1 CJO=0 TT=0)\n.DISTO LIN 3 1k 2k 0.8\n.END\n"
+            "* distortion qualifiers\nV1 out 0 DC 0.5 DISTOF1 1m 0 DISTOF2 1m 20\nD1 out 0 DMOD\n.model DMOD D(IS=1e-12 N=1 CJO=0 TT=0)\n.DISTO LIN 1 1k 2k 0.8\n.END\n"
         }
         _ => unreachable!(),
     };

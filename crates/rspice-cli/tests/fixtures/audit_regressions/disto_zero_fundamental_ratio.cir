@@ -6,5 +6,5 @@ D1 out 0 DM
 Vquiet quiet 0 0
 Rquiet quiet 0 1k
 .save I(Vquiet)
-.disto lin 3 1k 2k
+.disto lin 1 1k 2k
 .end

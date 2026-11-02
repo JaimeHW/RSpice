@@ -448,6 +448,54 @@ r2 out 0 1k
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
+/// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
+/// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,
+/// keeps its N + 2 points (distoan.c:79-85).
+#[test]
+fn a_two_point_lin_sweep_visits_both_ends() {
+    let dir = test_dir("lin_two_point");
+    for (dialect, card, expected) in [
+        ("best", ".ac lin 2 100 1k", vec![100.0, 1000.0]),
+        ("xyce", ".ac lin 2 100 1k", vec![100.0, 1000.0]),
+        ("ngspice", ".ac lin 2 100 1k", vec![100.0, 1000.0]),
+        ("best", ".noise v(out) v1 lin 2 100 1k", vec![100.0, 1000.0]),
+        ("xyce", ".noise v(out) v1 lin 2 100 1k", vec![100.0, 1000.0]),
+        (
+            "ngspice",
+            ".noise v(out) v1 lin 2 100 1k",
+            vec![100.0, 1000.0],
+        ),
+        (
+            "ngspice",
+            ".disto lin 2 100 400",
+            vec![100.0, 200.0, 300.0, 400.0],
+        ),
+    ] {
+        let deck = format!(
+            "* lin two\nv1 in 0 dc 0.5 ac 1 distof1 1m 0\nr1 in out 1k\nd1 out 0 dmod\n\
+             .model dmod d is=1e-14\n{card}\n.end\n"
+        );
+        let tag = format!("lin_{dialect}_{}", &card[1..3]);
+        let path = run_export_with_args(&dir, &tag, &deck, "csv", &["--spice-dialect", dialect]);
+        let text = std::fs::read_to_string(&path).expect("read csv");
+        let frequencies = text
+            .lines()
+            .skip(1)
+            .filter(|line| !line.starts_with('#'))
+            .map(|line| {
+                line.split(',')
+                    .next()
+                    .and_then(|cell| cell.parse::<f64>().ok())
+                    .expect("frequency cell")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(frequencies, expected, "{dialect} {card}: {text}");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `-f csv` must produce text CSV, not binary raw bytes (regression test).
 #[test]
 fn transient_csv_is_text_not_binary() {

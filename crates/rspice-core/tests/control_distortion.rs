@@ -77,7 +77,7 @@ fn print(circuit: &mut ControlCircuit, expression: &str) -> Vec<ControlTrace> {
 fn explicit_and_run_distortion_preserve_every_direct_spectrum() {
     for ratio in [None, Some(0.9)] {
         let args = format!(
-            "lin 3 1k 2k{}",
+            "lin 1 1k 2k{}",
             ratio.map_or(String::new(), |r| format!(" {r}"))
         );
         let mut circuit = circuit(&format!(".disto {args}"));
@@ -111,7 +111,7 @@ fn product_selection_preserves_peak_phase_units_and_physical_frequency() {
     let bias = 1e-12 * (0.5 / vt).exp();
     for (args, cases) in [
         (
-            "lin 3 1k 2k",
+            "lin 1 1k 2k",
             vec![
                 (
                     "2f1",
@@ -128,7 +128,7 @@ fn product_selection_preserves_peak_phase_units_and_physical_frequency() {
             ],
         ),
         (
-            "lin 3 1k 2k .9",
+            "lin 1 1k 2k .9",
             vec![
                 (
                     "f1+f2",
@@ -193,10 +193,10 @@ fn product_selection_preserves_peak_phase_units_and_physical_frequency() {
 #[cfg_attr(not(target_arch = "wasm32"), test)]
 fn qualified_product_expressions_keep_dataset_and_unit_identity() {
     let mut circuit = circuit("");
-    execute(&mut circuit, "disto", "lin 3 1k 2k").unwrap();
+    execute(&mut circuit, "disto", "lin 1 1k 2k").unwrap();
     let first = document(&circuit, 0);
     execute(&mut circuit, "alter", "V1 .55").unwrap();
-    execute(&mut circuit, "disto", "lin 3 1k 2k").unwrap();
+    execute(&mut circuit, "disto", "lin 1 1k 2k").unwrap();
     assert_eq!(document(&circuit, 0), first);
     assert_ne!(
         result(&circuit, 0).points[0]
@@ -262,7 +262,7 @@ fn failure_cancellation_and_cumulative_limits_preserve_datasets_and_ordinals() {
     let mut config = SimulationConfig::default();
     config.resource_limits.max_result_values = 4096;
     let engine = Engine::try_new(config).unwrap();
-    let request = command("disto", "lin 3 1k 2k .9");
+    let request = command("disto", "lin 1 1k 2k .9");
     circuit
         .execute(&engine, &request, &variables, &NoAbort)
         .unwrap();
@@ -279,7 +279,7 @@ fn failure_cancellation_and_cumulative_limits_preserve_datasets_and_ordinals() {
             source: SimulationError::Aborted
         })
     ));
-    for invalid in ["lin 3 1k 2k 1.1", "lin 3 0 2k", "lin 3 1k 2k junk"] {
+    for invalid in ["lin 1 1k 2k 1.1", "lin 3 0 2k", "lin 1 1k 2k junk"] {
         assert!(execute(&mut circuit, "disto", invalid).is_err());
     }
     assert_eq!(circuit.datasets().len(), 1);
@@ -314,7 +314,7 @@ fn failure_cancellation_and_cumulative_limits_preserve_datasets_and_ordinals() {
 fn second_tone_products_retain_dc_conjugation_identity_and_document_roundtrip() {
     use rspice_core::constants::{TEMP_REFERENCE, thermal_voltage};
     let mut circuit = circuit("");
-    execute(&mut circuit, "disto", "lin 5 1k 2.6k .9").unwrap();
+    execute(&mut circuit, "disto", "lin 3 1k 2.6k .9").unwrap();
     let vt = thermal_voltage(TEMP_REFERENCE);
     let bias = 1e-12 * (0.5 / vt).exp();
     let amplitude = bias * 1e-3 * (0.5e-3_f64).powi(2) / (8.0 * vt.powi(3));

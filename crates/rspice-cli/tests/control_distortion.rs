@@ -13,7 +13,7 @@ fn direct_explicit_and_run_routes_preserve_physical_spectra_and_presentations() 
         ("harmonic", "", "2f1", [2000.0, 3000.0, 4000.0]),
         ("mixing", " .9", "f1-f2", [100.0, 600.0, 1100.0]),
     ] {
-        let analysis = format!("disto lin 3 1k 2k{ratio}");
+        let analysis = format!("disto lin 1 1k 2k{ratio}");
         let presentation = format!(
             "print disto(\"{product}\",i(V1)) vs disto(\"{product}\",frequency)\nplot abs(disto(\"{product}\",i(V1)))"
         );
@@ -86,11 +86,11 @@ fn unavailable_product_and_invalid_later_analysis_preserve_existing_outputs() {
     let dir = common::test_dir("control-disto-rollback");
     for (name, failure) in [
         ("product", "print disto(\"f2\",v(0))"),
-        ("analysis", "disto lin 3 1k 2k 1.1"),
+        ("analysis", "disto lin 1 1k 2k 1.1"),
     ] {
         let deck = dir.join(format!("{name}.cir"));
         std::fs::write(&deck, format!(
-            "{DECK}.control\ndisto lin 3 1k 2k\nplot abs(disto(\"2f1\",i(V1)))\n{failure}\n.endc\n.end\n"
+            "{DECK}.control\ndisto lin 1 1k 2k\nplot abs(disto(\"2f1\",i(V1)))\n{failure}\n.endc\n.end\n"
         )).unwrap();
         let existing = dir.join(format!("{name}.disto-001.json"));
         std::fs::write(&existing, "previous result\n").unwrap();

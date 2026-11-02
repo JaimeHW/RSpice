@@ -798,4 +798,56 @@ mod tests {
         assert!(state.diagnostics[1].message.contains("V2"));
         assert!(state.diagnostics[2].message.contains("START"));
     }
+
+    /// A LIN sweep of N points is N points in every dialect, as Xyce,
+    /// LTspice, QSPICE and ngspice's noise analysis step it. The analyses
+    /// only ngspice runs keep its counts: `.SP LIN 2` is one point
+    /// (span.c:417-428) and `.DISTO LIN N` is N + 2 (distoan.c:79-85).
+    #[test]
+    fn a_lin_sweep_keeps_each_analysis_point_count() {
+        use crate::config::SpiceDialect;
+        let points = |dialect: SpiceDialect, card: &str| {
+            let netlist = crate::netlist::Netlist::parse_with_options(
+                &format!(
+                    "lin sweep\nV1 in 0 AC 1{}\nR1 in 0 1k\n{card}\n.end\n",
+                    if card.starts_with(".SP") {
+                        " PORTNUM 1 Z0 50"
+                    } else {
+                        ""
+                    }
+                ),
+                crate::netlist::NetlistParseOptions {
+                    spice_dialect: Some(dialect),
+                    ..Default::default()
+                },
+            )
+            .expect("sweep deck parses");
+            match netlist.analyses.as_slice() {
+                [AnalysisCommand::Ac { points, .. }]
+                | [AnalysisCommand::Noise { points, .. }]
+                | [AnalysisCommand::Sp { points, .. }]
+                | [AnalysisCommand::Disto { points, .. }] => *points,
+                other => panic!("expected one sweep, got {other:?}"),
+            }
+        };
+        for dialect in [
+            SpiceDialect::BestAvailable,
+            SpiceDialect::Ngspice,
+            SpiceDialect::Xyce,
+        ] {
+            assert_eq!(points(dialect, ".AC LIN 2 100 1k"), 2, "{dialect:?}");
+            assert_eq!(points(dialect, ".AC LIN 3 100 1k"), 3, "{dialect:?}");
+            assert_eq!(points(dialect, ".AC DEC 2 100 1k"), 2, "{dialect:?}");
+            assert_eq!(
+                points(dialect, ".NOISE V(in) V1 LIN 2 100 1k"),
+                2,
+                "{dialect:?}"
+            );
+            assert_eq!(points(dialect, ".SP LIN 2 100 1k"), 1, "{dialect:?}");
+            assert_eq!(points(dialect, ".SP LIN 3 100 1k"), 3, "{dialect:?}");
+            assert_eq!(points(dialect, ".DISTO LIN 2 1k 4k"), 4, "{dialect:?}");
+            assert_eq!(points(dialect, ".DISTO LIN 3 1k 4k"), 5, "{dialect:?}");
+            assert_eq!(points(dialect, ".DISTO DEC 2 1k 4k"), 2, "{dialect:?}");
+        }
+    }
 }
