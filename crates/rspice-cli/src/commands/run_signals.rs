@@ -60,6 +60,9 @@ pub(crate) struct ComplexSignal {
     pub(crate) kind: SignalKind,
     pub(crate) real: Vec<Value>,
     pub(crate) imag: Vec<Value>,
+    /// A real rendering of a complex probe (`VM(out)`, `VDB(out)`, ...): it
+    /// exports as one real column, and `imag` holds zeros.
+    pub(crate) real_only: bool,
 }
 
 impl ComplexSignal {
@@ -69,6 +72,18 @@ impl ComplexSignal {
 
     pub(crate) fn unit_symbol(&self) -> Option<String> {
         unit_symbol(self.kind)
+    }
+
+    /// The column a flat table writes for this signal.
+    pub(crate) fn column_data(&self) -> crate::commands::export_table::ColumnData {
+        if self.real_only {
+            crate::commands::export_table::ColumnData::Real(self.real.clone())
+        } else {
+            crate::commands::export_table::ColumnData::Complex {
+                real: self.real.clone(),
+                imag: self.imag.clone(),
+            }
+        }
     }
 }
 
@@ -109,7 +124,11 @@ pub(crate) fn complex_descriptor(
         &signal.display_name,
         &signal.raw_name,
         signal.kind,
-        SignalValueType::Complex,
+        if signal.real_only {
+            SignalValueType::Real
+        } else {
+            SignalValueType::Complex
+        },
     )
 }
 
@@ -286,17 +305,29 @@ fn complex_signals(
             ensure_dense(instance, &signal)?;
             let display_name = signal.descriptor().display_name().to_string();
             let kind = signal.descriptor().kind();
+            let raw_name = probe_registry_name(&display_name).to_string();
+            if let Some(values) = signal.real() {
+                return Ok(ComplexSignal {
+                    raw_name,
+                    display_name,
+                    kind,
+                    real: values.to_vec(),
+                    imag: vec![0.0; values.len()],
+                    real_only: true,
+                });
+            }
             let (real, imag) = signal.complex().ok_or_else(|| {
                 rspice_core::SimulationError::Circuit(format!(
-                    "{instance} projected signal '{display_name}' is real in a complex result"
+                    "{instance} projected signal '{display_name}' has no values"
                 ))
             })?;
             Ok(ComplexSignal {
-                raw_name: probe_registry_name(&display_name).to_string(),
+                raw_name,
                 display_name,
                 kind,
                 real: real.to_vec(),
                 imag: imag.to_vec(),
+                real_only: false,
             })
         })
         .collect()
@@ -575,6 +606,7 @@ fn ac_point_signals(
             kind: SignalKind::Voltage,
             real: vec![value.re],
             imag: vec![value.im],
+            real_only: false,
         });
     }
     for (branch_idx, value) in result.currents.iter().copied().enumerate() {
@@ -585,6 +617,7 @@ fn ac_point_signals(
             kind: SignalKind::Current,
             real: vec![value.re],
             imag: vec![value.im],
+            real_only: false,
         });
     }
     Ok(signals)

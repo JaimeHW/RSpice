@@ -428,6 +428,7 @@ fn pac_projected_sidebands(
                 kind: SignalKind::Voltage,
                 real,
                 imag,
+                real_only: false,
             });
         }
         for (name, (real, imag)) in result.branch_names.iter().zip(branch_columns) {
@@ -437,6 +438,7 @@ fn pac_projected_sidebands(
                 kind: SignalKind::Current,
                 real,
                 imag,
+                real_only: false,
             });
         }
         let signals = crate::commands::run_signals::complex_export_signals(
@@ -474,10 +476,7 @@ fn pac_export_table(
                 unit: signal.unit_symbol(),
                 name: format!("{}:sb{}", signal.display_name, entry.sideband),
                 var_type: signal.raw_variable_type().to_string(),
-                data: ColumnData::Complex {
-                    real: signal.real.clone(),
-                    imag: signal.imag.clone(),
-                },
+                data: signal.column_data(),
             })
         })
         .collect::<Vec<_>>();

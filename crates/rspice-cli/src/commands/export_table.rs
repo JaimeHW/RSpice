@@ -210,10 +210,7 @@ pub(crate) fn complex_table(
                 unit: signal.unit_symbol(),
                 name: signal.display_name.clone(),
                 var_type: signal.raw_variable_type().to_string(),
-                data: ColumnData::Complex {
-                    real: signal.real.clone(),
-                    imag: signal.imag.clone(),
-                },
+                data: signal.column_data(),
             })
             .collect(),
     }

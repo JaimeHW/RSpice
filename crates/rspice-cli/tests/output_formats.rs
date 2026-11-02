@@ -329,6 +329,63 @@ fn noise_exports_every_format() {
     check_all_formats("noise", NOISE_DECK);
 }
 
+/// `.PRINT AC VR(out) VI(out) VM(out) VP(out) VDB(out)` prints one real
+/// column each, as Xyce does; only the bare `V(out)` prints a complex pair.
+#[test]
+fn ac_rendering_accessors_export_one_real_column_each() {
+    let dir = test_dir("ac_rendering_csv");
+    let deck = "* ac rendering accessors
+v1 in 0 dc 0 ac 1
+r1 in out 1k
+c1 out 0 1n
+.ac dec 1 100k 1meg
+.print ac vr(out) vi(out) vm(out) vp(out) vdb(out) ir(v1) v(out)
+.end
+";
+    let path = run_export(&dir, "ac_rendering", deck, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .expect("csv header")
+        .split(',')
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        header,
+        [
+            "frequency",
+            "vr(out)",
+            "vi(out)",
+            "vm(out)",
+            "vp(out)",
+            "vdb(out)",
+            "ir(v1)",
+            "re(v(out))",
+            "im(v(out))"
+        ],
+        "{text}"
+    );
+    let row = lines
+        .next()
+        .expect("a first frequency")
+        .split(',')
+        .map(|field| field.parse::<f64>().expect("a number"))
+        .collect::<Vec<_>>();
+    let (re, im) = (row[1], row[2]);
+    let close = |left: f64, right: f64| (left - right).abs() <= 1e-12 * right.abs().max(1.0);
+    assert!(close(row[3], re.hypot(im)), "{text}");
+    assert!(close(row[4], im.atan2(re).to_degrees()), "{text}");
+    assert!(close(row[5], 20.0 * re.hypot(im).log10()), "{text}");
+    assert!(close(row[7], re) && close(row[8], im), "{text}");
+    assert!(
+        row[4] < 0.0 && row[4] > -90.0,
+        "an RC lag in degrees: {text}"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `-f csv` must produce text CSV, not binary raw bytes (regression test).
 #[test]
 fn transient_csv_is_text_not_binary() {

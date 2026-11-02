@@ -635,6 +635,7 @@ fn export_hb(
                 kind: crate::commands::run_signals::SignalKind::Voltage,
                 real,
                 imag,
+                real_only: false,
             }
         })
         .collect();
@@ -656,6 +657,7 @@ fn export_hb(
             kind: crate::commands::run_signals::SignalKind::Current,
             real,
             imag,
+            real_only: false,
         }
     }));
     let signals = crate::commands::run_signals::complex_export_signals(

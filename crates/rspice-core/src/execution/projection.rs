@@ -447,6 +447,15 @@ pub struct SignalProjection {
     save_only: Vec<SaveSignal>,
     keeps_everything: bool,
     authored: bool,
+    /// The unit a rendered phase (`VP(x)`, `ph(v(x))`) is printed in.
+    phase_unit: PhaseUnit,
+}
+
+/// The unit of a printed phase column.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhaseUnit {
+    Degrees,
+    Radians,
 }
 
 #[derive(Debug, Clone)]
@@ -524,6 +533,7 @@ impl SignalProjection {
                 .iter()
                 .any(|signal| matches!(signal, SaveSignal::All)),
             authored,
+            phase_unit: phase_unit(netlist),
         })
     }
 
@@ -620,6 +630,10 @@ impl SignalProjection {
         }
 
         let mut columns = Vec::new();
+        // The complex columns a rendering accessor printed (`VM(out)` reads
+        // `V(out)`), so the `.SAVE` the parser records beside an ordered
+        // operand does not export that probe a second time.
+        let mut rendered_sources = Vec::new();
         if self.keeps_everything {
             columns.extend(
                 source
@@ -635,6 +649,12 @@ impl SignalProjection {
             for (card, (authored, kind)) in self.ordered_operands(analysis) {
                 if abort.is_aborted() {
                     return Err(SimulationError::Aborted);
+                }
+                if source_value_type(source) == SignalValueType::Complex
+                    && complex_rendering(authored).is_some()
+                    && let Ok(column) = complex_operand_column(source, authored, kind)
+                {
+                    rendered_sources.push(column.identity());
                 }
                 columns.push(self.resolve_operand(params, source, card, authored, kind, abort)?);
             }
@@ -659,9 +679,10 @@ impl SignalProjection {
                         continue;
                     };
                     let candidate = inventory.clone().into_projected();
-                    if !columns
-                        .iter()
-                        .any(|column| column.identity() == candidate.identity())
+                    if !rendered_sources.contains(&candidate.identity())
+                        && !columns
+                            .iter()
+                            .any(|column| column.identity() == candidate.identity())
                     {
                         columns.push(candidate);
                     }
@@ -708,7 +729,9 @@ impl SignalProjection {
             return Ok(column);
         }
         match source_value_type(source) {
-            SignalValueType::Complex => resolve_complex_operand(source, authored, kind),
+            SignalValueType::Complex => {
+                resolve_complex_operand(source, authored, kind, self.phase_unit)
+            }
             _ => self.resolve_real_operand(params, source, card, authored, kind, abort),
         }
     }
@@ -1246,29 +1269,164 @@ fn select_exact_inventory(
         .map(ProjectionSourceSignal::into_projected)
 }
 
+/// The unit a deck's printed phase is in: ngspice's `vp()`/`ph()` give
+/// radians (cmath1.c `cx_ph`, with `cx_degrees` off unless a script sets
+/// `units=degrees`), Xyce's `VP()` gives degrees (N_IO_OpBuilders.C:704).
+fn phase_unit(netlist: &Netlist) -> PhaseUnit {
+    if netlist.parse_dialect() == crate::SpiceDialect::Ngspice {
+        PhaseUnit::Radians
+    } else {
+        PhaseUnit::Degrees
+    }
+}
+
 /// Resolve one authored operand against a complex-valued result.
 ///
 /// Complex families carry node voltages, branch currents, and device
 /// observables. Differential probes are synthesized from two materialized
 /// node voltages; anything the result cannot supply — including an authored
 /// output expression, which has no complex evaluator — is a typed error.
+///
+/// `V(x)` and `I(x)` print the complex column. A rendering accessor — `VR`,
+/// `VI`, `VM`, `VP`, `VDB` and their `I` forms, or ngspice's `db()`, `mag()`,
+/// `ph()`, `cph()`, `real()` and `imag()` of one probe — prints one real
+/// column under its own name, as Xyce and ngspice both do.
 fn resolve_complex_operand(
     source: &ProjectionSource<'_>,
     authored: &str,
     kind: &OutputOperandKind,
+    phase_unit: PhaseUnit,
 ) -> Result<ProjectedSignal, SimulationError> {
-    // Magnitude, phase, real, imaginary and decibel accessors are renderings
-    // of one complex column, so they select it rather than naming a different
-    // signal. The exporter decides how to render; the projection decides only
-    // which column the deck asked for.
+    let column = complex_operand_column(source, authored, kind)?;
+    // A distortion table derives its own magnitude, phase and ratio columns
+    // from each phasor, so it keeps the phasor.
+    if source.kind == AnalysisResultKind::Distortion {
+        return Ok(column);
+    }
+    match complex_rendering(authored) {
+        Some(rendering) => render_complex_column(column, authored, rendering, phase_unit),
+        None => Ok(column),
+    }
+}
+
+/// How a rendering accessor turns a complex column into a real one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ComplexRendering {
+    Real,
+    Imaginary,
+    Magnitude,
+    Phase,
+    ContinuousPhase,
+    Decibels,
+}
+
+/// The rendering an authored accessor asks for; `None` for a bare `V(x)` or
+/// `I(x)`, which keeps the complex column.
+fn complex_rendering(authored: &str) -> Option<ComplexRendering> {
+    complex_accessor(authored)?;
+    let (operator, _) = split_accessor(authored)?;
+    match operator.as_str() {
+        "VR" | "IR" | "REAL" | "RE" => Some(ComplexRendering::Real),
+        "VI" | "II" | "IMAG" => Some(ComplexRendering::Imaginary),
+        "VM" | "IM" | "MAG" => Some(ComplexRendering::Magnitude),
+        "VP" | "IP" | "PH" | "PHASE" => Some(ComplexRendering::Phase),
+        "CPH" => Some(ComplexRendering::ContinuousPhase),
+        "VDB" | "IDB" | "DB" => Some(ComplexRendering::Decibels),
+        _ => None,
+    }
+}
+
+/// Render one complex column as the real column an accessor prints.
+///
+/// The continuous phase unwraps each sample onto the branch nearest the one
+/// before it, as ngspice's `cph()` does (cmath1.c `cx_cph`).
+fn render_complex_column(
+    column: ProjectedSignal,
+    authored: &str,
+    rendering: ComplexRendering,
+    phase_unit: PhaseUnit,
+) -> Result<ProjectedSignal, SimulationError> {
+    let Some((real, imag)) = column.complex() else {
+        return Ok(column);
+    };
+    let to_unit = |radians: Value| match phase_unit {
+        PhaseUnit::Degrees => radians.to_degrees(),
+        PhaseUnit::Radians => radians,
+    };
+    let samples = real.iter().zip(imag);
+    let values = match rendering {
+        ComplexRendering::Real => real.to_vec(),
+        ComplexRendering::Imaginary => imag.to_vec(),
+        ComplexRendering::Magnitude => samples.map(|(re, im)| re.hypot(*im)).collect(),
+        ComplexRendering::Decibels => samples
+            .map(|(re, im)| 20.0 * re.hypot(*im).log10())
+            .collect(),
+        ComplexRendering::Phase => samples.map(|(re, im)| to_unit(im.atan2(*re))).collect(),
+        ComplexRendering::ContinuousPhase => {
+            let mut last = None::<Value>;
+            samples
+                .map(|(re, im)| {
+                    let phase = im.atan2(*re);
+                    let unwrapped = last.map_or(phase, |last| {
+                        phase
+                            - std::f64::consts::TAU
+                                * ((phase - last) / std::f64::consts::TAU + 0.5).floor()
+                    });
+                    last = Some(unwrapped);
+                    to_unit(unwrapped)
+                })
+                .collect()
+        }
+    };
+    // Real and imaginary parts and the magnitude keep the probe's unit; a
+    // phase or a decibel figure is a bare number.
+    let kind = match rendering {
+        ComplexRendering::Real | ComplexRendering::Imaginary | ComplexRendering::Magnitude => {
+            column.descriptor.kind()
+        }
+        _ => SignalKind::Scalar,
+    };
+    let registry = complex_accessor(authored).map_or_else(String::new, |(_, argument)| argument);
+    let name = authored.trim();
+    let descriptor =
+        signal_descriptor(name, &registry, kind, SignalValueType::Real).map_err(|error| {
+            SimulationError::Netlist(format!("output '{name}' cannot be described: {error}"))
+        })?;
+    Ok(ProjectedSignal {
+        descriptor,
+        values: ProjectionValues::Real(Cow::Owned(values)),
+        validity: column.validity,
+    })
+}
+
+/// The complex column one authored operand selects, before any rendering.
+fn complex_operand_column(
+    source: &ProjectionSource<'_>,
+    authored: &str,
+    kind: &OutputOperandKind,
+) -> Result<ProjectedSignal, SimulationError> {
     if let Some(column) = complex_accessor_column(source, authored) {
         return Ok(column);
     }
-    let OutputOperandKind::Probe(signal) = kind else {
-        return Err(SimulationError::Netlist(format!(
-            "output expression '{authored}' is not evaluable over a complex {} result",
-            source.instance
-        )));
+    // The parser keeps a rendering of a difference, `VM(a,b)`, as an
+    // expression; it reads the same difference `V(a,b)` does.
+    let rendered_difference = complex_rendering(authored)
+        .and(complex_accessor(authored))
+        .and_then(|(kind, argument)| {
+            let (positive, negative) = argument.split_once(',')?;
+            (kind == SignalKind::Voltage).then(|| {
+                SaveSignal::VoltageDiff(positive.trim().to_owned(), negative.trim().to_owned())
+            })
+        });
+    let signal = match (kind, &rendered_difference) {
+        (_, Some(difference)) => difference,
+        (OutputOperandKind::Probe(signal), None) => signal,
+        (_, None) => {
+            return Err(SimulationError::Netlist(format!(
+                "output expression '{authored}' is not evaluable over a complex {} result",
+                source.instance
+            )));
+        }
     };
     if let SaveSignal::VoltageDiff(positive, negative) = signal {
         let (positive_real, positive_imag) =
@@ -1633,8 +1791,156 @@ mod tests {
         assert_eq!(imag, [-0.25, -0.25]);
     }
 
+    /// The AC result the rendering tests project: `V(a)` = 3 + 4j, then -1,
+    /// and the branch current `I(V1)` = 0 + 2j, then 1 - 1j.
+    fn rendering_source() -> ProjectionSource<'static> {
+        ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+            .with_axis(vec![1.0, 10.0])
+            .with_signals(vec![
+                complex_signal(
+                    "V(a)",
+                    "a",
+                    SignalKind::Voltage,
+                    vec![3.0, -1.0],
+                    vec![4.0, 0.0],
+                ),
+                complex_signal(
+                    "I(V1)",
+                    "V1",
+                    SignalKind::Current,
+                    vec![0.0, 1.0],
+                    vec![2.0, -1.0],
+                ),
+            ])
+    }
+
+    fn rendered(projected: &ProjectedSignals, index: usize) -> Vec<Value> {
+        projected.signals()[index]
+            .real()
+            .expect("a rendering accessor prints one real column")
+            .to_vec()
+    }
+
+    /// `.PRINT AC VR(a) VI(a) VM(a) VP(a) VDB(a) IR(V1) II(V1) IM(V1)` prints
+    /// one real column each under its own name, and `V(a)`/`I(V1)` keep the
+    /// complex pair, as Xyce prints them (phase in degrees).
+    #[test]
+    fn a_rendering_accessor_prints_one_real_column_and_a_bare_probe_stays_complex() {
+        let netlist = parse(
+            "render\nV1 a 0 AC 1\nR1 a 0 1k\n.AC DEC 1 1 10\n\
+             .PRINT AC VR(a) VI(a) VM(a) VP(a) VDB(a) IR(V1) II(V1) IM(V1) IP(V1) V(a) I(V1)\n\
+             .END\n",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let projected = projection
+            .project(
+                &netlist.params,
+                &rendering_source(),
+                &crate::abort_signal::NoAbort,
+            )
+            .expect("every accessor resolves");
+        assert_eq!(
+            names(&projected),
+            [
+                "VR(a)", "VI(a)", "VM(a)", "VP(a)", "VDB(a)", "IR(V1)", "II(V1)", "IM(V1)",
+                "IP(V1)", "V(a)", "I(V1)"
+            ]
+        );
+        assert_eq!(rendered(&projected, 0), [3.0, -1.0]);
+        assert_eq!(rendered(&projected, 1), [4.0, 0.0]);
+        assert_eq!(rendered(&projected, 2), [5.0, 1.0]);
+        assert_eq!(
+            rendered(&projected, 3),
+            [4.0_f64.atan2(3.0).to_degrees(), 180.0]
+        );
+        assert_eq!(rendered(&projected, 4), [20.0 * 5.0_f64.log10(), 0.0]);
+        assert_eq!(rendered(&projected, 5), [0.0, 1.0]);
+        assert_eq!(rendered(&projected, 6), [2.0, -1.0]);
+        assert_eq!(rendered(&projected, 7), [2.0, 2.0_f64.sqrt()]);
+        assert_eq!(rendered(&projected, 8), [90.0, -45.0]);
+        assert_eq!(
+            projected.signals()[2].descriptor().kind(),
+            SignalKind::Voltage
+        );
+        assert_eq!(
+            projected.signals()[7].descriptor().kind(),
+            SignalKind::Current
+        );
+        assert_eq!(
+            projected.signals()[9].complex(),
+            Some((&[3.0, -1.0][..], &[4.0, 0.0][..]))
+        );
+        assert!(projected.signals()[10].complex().is_some());
+    }
+
+    /// A differential `VM(a,0)` renders the synthesized difference.
+    #[test]
+    fn a_differential_rendering_accessor_prints_one_real_column() {
+        let netlist =
+            parse("render diff\nV1 a 0 AC 1\nR1 a 0 1k\n.AC DEC 1 1 10\n.PRINT AC VM(a,0)\n.END\n");
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let projected = projection
+            .project(
+                &netlist.params,
+                &rendering_source(),
+                &crate::abort_signal::NoAbort,
+            )
+            .expect("the differential resolves");
+        assert_eq!(names(&projected), ["VM(a,0)"]);
+        assert_eq!(rendered(&projected, 0), [5.0, 1.0]);
+    }
+
+    /// ngspice prints `vp()` and `ph()` in radians (cmath1.c `cx_ph`), and
+    /// `cph()` keeps the phase continuous from one point to the next.
+    #[test]
+    fn the_ngspice_dialect_prints_phase_in_radians() {
+        let netlist = Netlist::parse_with_options(
+            "radians\nV1 a 0 AC 1\nR1 a 0 1k\n.AC DEC 1 1 10\n\
+             .PRINT AC vp(a) ph(v(a)) cph(i(v1))\n.END\n",
+            crate::netlist::NetlistParseOptions {
+                spice_dialect: Some(crate::SpiceDialect::Ngspice),
+                ..Default::default()
+            },
+        )
+        .expect("ngspice test netlist parses");
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::Ac, "AC")
+            .with_axis(vec![1.0, 10.0])
+            .with_signals(vec![
+                complex_signal(
+                    "V(a)",
+                    "a",
+                    SignalKind::Voltage,
+                    vec![3.0, -1.0],
+                    vec![4.0, 0.0],
+                ),
+                complex_signal(
+                    "I(V1)",
+                    "V1",
+                    SignalKind::Current,
+                    vec![-1.0, -1.0],
+                    vec![1.0e-3, -1.0e-3],
+                ),
+            ]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("every accessor resolves");
+        assert_eq!(
+            rendered(&projected, 0),
+            [4.0_f64.atan2(3.0), std::f64::consts::PI]
+        );
+        assert_eq!(rendered(&projected, 1), rendered(&projected, 0));
+        let continuous = rendered(&projected, 2);
+        assert!((continuous[0] - 1.0e-3_f64.atan2(-1.0)).abs() < 1.0e-12);
+        assert!(
+            (continuous[1] - (std::f64::consts::TAU + (-1.0e-3_f64).atan2(-1.0))).abs() < 1.0e-12,
+            "cph unwraps across the -pi cut: {continuous:?}"
+        );
+    }
+
     /// ngspice's `db()`/`ph()` of one probe (vbic/CEamp prints
-    /// `db(i(vmeas))`) select the probe's complex column as `idb(vmeas)` does.
+    /// `db(i(vmeas))`) select the probe's complex column as `idb(vmeas)` does,
+    /// and print it as one real column.
     #[test]
     fn an_ngspice_function_of_one_probe_selects_its_complex_column() {
         let netlist = parse(
@@ -1663,16 +1969,15 @@ mod tests {
         let projected = projection
             .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
             .expect("both functions resolve");
-        assert_eq!(projected.signals().len(), 2);
+        assert_eq!(names(&projected), ["db(i(vm))", "ph(v(a))"]);
         assert_eq!(
-            projected.signals()[0].descriptor().kind(),
-            SignalKind::Current
+            rendered(&projected, 0),
+            [0.0, 20.0 * 1.0e-3_f64.hypot(1.0).log10()]
         );
-        let (real, imag) = projected.signals()[0].complex().expect("complex column");
-        assert_eq!(real, [1.0, 1.0]);
-        assert_eq!(imag, [0.0, 1e-3]);
-        let (real, _) = projected.signals()[1].complex().expect("complex column");
-        assert_eq!(real, [1e3, 1e3]);
+        assert_eq!(
+            rendered(&projected, 1),
+            [0.0, 1.0_f64.atan2(1e3).to_degrees()]
+        );
     }
 
     /// A terminal current `@x1[ia]` is solved in the branch of the meter on
