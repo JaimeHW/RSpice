@@ -96,11 +96,7 @@ impl ControlNamedDataset {
                 .map(|name| (format!("{}#branch", name.to_ascii_lowercase()), "current")),
         );
         if let ControlAnalysisResult::SParameters(run) = &self.result {
-            vectors.extend(
-                super::sparam::names(run)
-                    .into_iter()
-                    .map(|name| (name, "s-param")),
-            );
+            vectors.extend(super::sparam::names(run));
         }
         vectors
     }

@@ -1502,6 +1502,43 @@ fn sp_leaves_scattering_parameters_as_ngspice_does() {
     assert_eq!(texts(&presented), ["sp1"]);
 }
 
+/// span.c also leaves `Y_i_j` and `Z_i_j`, which cktspdum.c's
+/// CKTspCalcSMatrix forms from S and each port's own z0. A tee of 10, 20 and
+/// 30 ohms has Z = [[40, 30], [30, 50]] and Y = Z^-1 whatever the ports'
+/// references; ngspice-46 prints these values with 50 and 75 ohm ports.
+#[test]
+fn sp_leaves_admittance_and_impedance_matrices_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "tee\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in mid 10\nR2 mid out 20\n\
+         R3 mid 0 30\nV2 out 0 dc 0 ac 0 portnum 2 z0 75\n.control\nsp lin 3 1k 3k 0\n\
+         print z_1_1 Z_1_2 z_2_1 z_2_2 y_1_1 y_1_2 y_2_1 Y_2_2\ndisplay\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let traces = printed(&presented[0]);
+    let expected = [40.0, 30.0, 30.0, 50.0]
+        .into_iter()
+        .chain([50.0, -30.0, -30.0, 40.0].map(|y| y / 1100.0));
+    assert_eq!(traces.len(), 8);
+    for (trace, expected) in traces.iter().zip(expected) {
+        assert_eq!(trace.y.samples.len(), 3);
+        for &sample in &trace.y.samples {
+            assert!(
+                (sample.re - expected).abs() < 1e-9 * expected.abs() && sample.im.abs() < 1e-12,
+                "{}: {sample} != {expected}",
+                trace.y.expression
+            );
+        }
+    }
+    let listing = texts(&presented).concat();
+    for line in [
+        "    S_2_2               : s-param, complex, 3 long\n",
+        "    Y_1_2               : admittance, complex, 3 long\n",
+        "    Z_2_1               : impedance, complex, 3 long\n",
+    ] {
+        assert!(listing.contains(line), "{listing}");
+    }
+}
+
 /// ngspice sets `oscompiled` to the system it was built for
 /// (frontend/init.c:40); the ngspice-46 Windows release echoes `8`, a Visual
 /// Studio build, as this host's MSVC build does.
