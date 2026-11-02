@@ -887,6 +887,49 @@ fn printed(request: &ControlPresentation) -> &[rspice_core::engine::ControlTrace
     }
 }
 
+/// `settype` takes every vector type ngspice names (frontend/typesdef.c:38);
+/// ngspice's sp examples mark their dB and phase vectors `decibel` and
+/// `phase`.
+#[test]
+fn settype_takes_every_ngspice_vector_type() {
+    let types = [
+        "notype",
+        "time",
+        "frequency",
+        "voltage",
+        "current",
+        "voltage-density",
+        "current-density",
+        "voltage^2-density",
+        "current^2-density",
+        "voltage^2",
+        "current^2",
+        "pole",
+        "zero",
+        "s-param",
+        "temp-sweep",
+        "res-sweep",
+        "impedance",
+        "admittance",
+        "power",
+        "phase",
+        "decibel",
+        "capacitance",
+        "charge",
+        "temperature",
+    ];
+    let settypes: String = types
+        .iter()
+        .map(|name| format!("settype {name} v(in)\n"))
+        .collect();
+    let (presented, error) = run_until_error(&format!(
+        "types\nV1 in 0 dc 0 ac 1\nR1 in 0 1k\n.control\nac lin 3 1k 3k\n{settypes}\
+         settype decibel v(in)\nprint v(in)\n.endc\n.end\n"
+    ));
+    assert_eq!(error, None);
+    assert_eq!(printed(presented.last().unwrap())[0].y.unit.symbol(), "dB");
+}
+
 /// ngspice com_let.c binds a vector in the current plot (vectors.c vec_get
 /// reads the current plot, then the constants plot), with the source's scale;
 /// evaluate.c doop pads the shorter operand with its last element.

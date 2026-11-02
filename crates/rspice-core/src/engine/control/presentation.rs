@@ -772,11 +772,27 @@ impl ControlCircuit {
             let unit = match type_name.to_ascii_lowercase().as_str() {
                 "voltage" => SignalUnit::Volt,
                 "current" => SignalUnit::Ampere,
-                "impedance" | "resistance" => SignalUnit::Ohm,
+                "impedance" | "resistance" | "res-sweep" => SignalUnit::Ohm,
                 "admittance" | "conductance" => SignalUnit::Siemens,
                 "frequency" => SignalUnit::Hertz,
                 "time" => SignalUnit::Second,
                 "notype" => SignalUnit::Unspecified,
+                // The rest of ngspice's vector types (frontend/typesdef.c:38),
+                // in the units this host spells them with.
+                "power" => SignalUnit::Watt,
+                "phase" => SignalUnit::Radian,
+                "decibel" => SignalUnit::decibel(),
+                "s-param" => SignalUnit::Dimensionless,
+                "pole" | "zero" => SignalUnit::RadianPerSecond,
+                "temperature" | "temp-sweep" => SignalUnit::Custom("degC".into()),
+                "capacitance" => SignalUnit::Custom("F".into()),
+                "charge" => SignalUnit::Custom("C".into()),
+                "voltage-density" => SignalUnit::Custom("V/sqrt(Hz)".into()),
+                "current-density" => SignalUnit::Custom("A/sqrt(Hz)".into()),
+                "voltage^2-density" => SignalUnit::Custom("V^2/Hz".into()),
+                "current^2-density" => SignalUnit::Custom("A^2/Hz".into()),
+                "voltage^2" => SignalUnit::Custom("V^2".into()),
+                "current^2" => SignalUnit::Custom("A^2".into()),
                 _ => {
                     return Err(command_error(
                         line,
