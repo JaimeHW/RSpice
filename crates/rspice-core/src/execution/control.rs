@@ -771,6 +771,12 @@ impl ControlSession<'_> {
                     name.push(character);
                 }
             }
+            // vareval (frontend/variable.c:993): a `$` that names no
+            // variable stays a `$`.
+            if name.is_empty() && !existence && !count {
+                output.push('$');
+                continue;
+            }
             require_identifier(&name, line)?;
             // ngspice reads a shell variable, then one its host defines
             // (frontend/variable.c:908 vareval); a scalar parameter answers

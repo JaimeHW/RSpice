@@ -1323,6 +1323,16 @@ fn control_lines_end_at_ngspice_inline_comments() {
     assert_eq!(texts(&presented), ["x=3", "a", "c", "g"]);
 }
 
+/// A `$` that names no variable stays a `$` (frontend/variable.c:993
+/// `vareval`); ngspice-46 echoes `e $ f` and `k$` for the same script.
+#[test]
+fn a_dollar_naming_no_variable_stays_as_ngspice_keeps_it() {
+    let source = "dollar\nV1 1 0 5\nR1 1 0 1k\n.control\necho \"e $ f\"\necho k$\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["e $ f", "k$"]);
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a
