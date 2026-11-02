@@ -1311,6 +1311,18 @@ fn indexing_selects_elements_and_ranges_as_ngspice_does() {
     assert!(error.unwrap().contains("names no vector"));
 }
 
+/// ngspice ends a control line at a `;`, a `$ ` or a `//` outside quotes
+/// (frontend/inpcom.c:3546 `inp_stripcomments_line`); ngspice-46 echoes
+/// `x=3`, `a`, `c` and `g` for the same script.
+#[test]
+fn control_lines_end_at_ngspice_inline_comments() {
+    let source = "inline comments\nV1 1 0 5\nR1 1 0 1k\n.control\nset x = 3   $ comment\n\
+        echo x=$x\necho a $ b\necho c$ d ; e\necho g // h\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["x=3", "a", "c", "g"]);
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

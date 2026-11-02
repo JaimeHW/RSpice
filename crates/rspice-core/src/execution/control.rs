@@ -951,13 +951,21 @@ fn control_body(text: &str) -> &str {
     if text.starts_with('*') || text.starts_with('$') {
         return "";
     }
+    // ngspice inp_stripcomments_line (frontend/inpcom.c:3546): outside
+    // quotes, `;`, `$ ` and `//` start a comment in a control section.
     let mut quote = None;
-    for (index, character) in text.char_indices() {
+    let mut characters = text.char_indices().peekable();
+    while let Some((index, character)) = characters.next() {
+        let next = characters.peek().map(|(_, next)| *next);
         if quote == Some(character) {
             quote = None;
         } else if quote.is_none() && matches!(character, '\'' | '"') {
             quote = Some(character);
-        } else if quote.is_none() && character == ';' {
+        } else if quote.is_none()
+            && (character == ';'
+                || (character == '$' && next == Some(' '))
+                || (character == '/' && next == Some('/')))
+        {
             return text.get(..index).unwrap_or_default().trim();
         }
     }
