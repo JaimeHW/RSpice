@@ -4,7 +4,9 @@ use egui::{Align, Id, Layout, Margin, Sense, Stroke, Ui, pos2, vec2};
 use rspice_design::properties::SourceContractFinding;
 use rspice_ui_kit::theme::{self, FontWeight};
 use rspice_ui_kit::tokens::{self, Tokens};
-use rspice_vocabulary::property::{DisplayMode, PropertyDefinition, PropertySheet, PropertyValue};
+use rspice_vocabulary::property::{
+    DisplayMode, PropertyDefinition, PropertySheet, PropertyType, PropertyValue,
+};
 use rspice_vocabulary::quantity::{QuantityPresentationPolicy, UiNumberLocale};
 
 use super::ComponentPropertyDraft;
@@ -28,6 +30,8 @@ const CELL_GAP: f32 = 14.0;
 const ROW_GAP: f32 = 10.0;
 /// Caption track height (label, required marker, modified dot, unit).
 const CAPTION_H: f32 = 15.0;
+/// The side of a check's box, drawn at the start of its target.
+const CHECK_BOX_SIDE: f32 = 14.0;
 /// Gap between a field block's caption, control, and hint tracks.
 const TRACK_GAP: f32 = 3.0;
 /// Reserved hint track for a field whose micro-copy is a single line.
@@ -519,18 +523,30 @@ fn field_block_height(
     width: f32,
 ) -> f32 {
     let control_h = Tokens::get(ui.ctx()).metrics.ctl_h;
+    // A check carries its name beside its box, so it has no caption track.
+    let caption_h = if is_check(definition) {
+        0.0
+    } else {
+        CAPTION_H + TRACK_GAP
+    };
     let hint = field_hint(definition, draft, advisories);
     // A field with nothing to report takes no hint track at all. Reserving
     // one kept a blank line under every field for the few that ever use it.
     if hint.is_empty() {
-        return CAPTION_H + TRACK_GAP + control_h;
+        return caption_h + control_h;
     }
     let hint_h = ui
         .fonts_mut(|fonts| fonts.layout_job(hint_layout_job(&hint, width)))
         .size()
         .y
         .max(HINT_LINE_H);
-    CAPTION_H + TRACK_GAP + control_h + TRACK_GAP + hint_h
+    caption_h + control_h + TRACK_GAP + hint_h
+}
+
+/// Whether `definition` is drawn as a check: a box with its name beside it,
+/// not a caption over a lone box.
+fn is_check(definition: &PropertyDefinition) -> bool {
+    definition.prop_type == PropertyType::Boolean
 }
 
 /// The micro-copy under one field: its validation error when it has one, and
@@ -626,7 +642,10 @@ fn render_property_field(
     let has_browser = def.name == "model" || picks_data_file;
 
     ui.set_width(width);
-    field_caption(ui, def, is_modified, error.is_some(), width);
+    let check = is_check(def);
+    if !check {
+        field_caption(ui, def, is_modified, error.is_some(), width);
+    }
 
     let mut changed_value = None;
     let mut numeric_text = None;
@@ -639,7 +658,10 @@ fn render_property_field(
         // The button as it will be drawn, measured. A 58-point allowance for
         // it was eight short, so the row ran past the column's edge and every
         // grid after it was laid out that much wider than the ones above.
-        let editor_width = if has_browser {
+        let editor_width = if check {
+            // A check's target is a control-high square, its box at the start.
+            Tokens::get(ui.ctx()).metrics.ctl_h
+        } else if has_browser {
             (ui.available_width() - browse_button.measured_width(ui) - ui.spacing().item_spacing.x)
                 .max(60.0)
         } else {
@@ -658,6 +680,12 @@ fn render_property_field(
         numeric_text = editor.numeric_text;
         numeric_parse_error = editor.parse_error;
         editor_id = editor.control_id;
+        if check {
+            // The name follows the box, not the rest of its square target.
+            ui.add_space(CHECK_BOX_SIDE - Tokens::get(ui.ctx()).metrics.ctl_h);
+            let rest = ui.available_width();
+            field_caption(ui, def, is_modified, error.is_some(), rest);
+        }
         if has_browser && browse_button.show(ui).clicked() {
             browse_clicked = true;
         }
@@ -1155,6 +1183,26 @@ mod tests {
     /// form under it: the Temperature fields ended right of the Electrical
     /// ones above them. A unit is set flush with its column's right edge, so
     /// the right column's units say where that edge is in each group.
+    /// A check states its name beside its box, as a check does: the Noisy
+    /// caption stands right of the column edge where every other caption
+    /// starts, not over a lone box.
+    #[test]
+    fn a_check_names_itself_beside_its_box() {
+        let texts = painted_texts(ComponentType::Resistor, |_| {});
+        let left = |wanted: &str| {
+            texts
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .map(|(_, rect)| rect.left())
+                .unwrap_or_else(|| panic!("{wanted} is not painted: {texts:?}"))
+        };
+        let (noisy, rise) = (left("Noisy"), left("Temp rise"));
+        assert!(
+            noisy > rise + CHECK_BOX_SIDE,
+            "Noisy at {noisy}, the column's captions at {rise}"
+        );
+    }
+
     #[test]
     fn the_model_row_keeps_to_the_columns_above_it() {
         let texts = painted_texts(ComponentType::Resistor, |_| {});
