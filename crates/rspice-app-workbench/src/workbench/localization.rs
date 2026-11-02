@@ -568,6 +568,7 @@ define_messages! {
     VerilogADeviceDescription => "Create a cell whose veriloga view holds a starter module, with a symbol generated from the module's ports.",
     VerilogADeviceLibrary => "Library",
     VerilogADeviceCell => "Cell name",
+    VerilogADeviceCellMissing => "Type a cell name.",
     VerilogADevicePorts => "Ports",
     VerilogADevicePortsHint => "inp:in inn:in out:out vdd vss",
     VerilogADeviceModule => "module {module}",

@@ -96,7 +96,7 @@ fn a_cell_name_the_library_already_holds_is_refused_under_its_field() {
     assert_eq!(lines(&app).0, Line::Derived("module _2stage".to_owned()));
     app.state.code.new_veriloga_device.name = String::new();
     assert_eq!(draft(&app.state), Draft::Empty);
-    assert_eq!(lines(&app).0, Line::Blank);
+    assert_eq!(lines(&app).0, Line::Derived("Type a cell name.".to_owned()));
 }
 
 /// A port entry the codec cannot read is refused under Ports, naming the
@@ -375,6 +375,18 @@ fn nothing_moves_while_the_draft_is_typed() {
         assert_eq!(painted.surface, empty.surface, "{draft}");
         assert_eq!(primary(painted), primary(&empty), "{draft}");
     }
+
+    // An empty name says what Create waits for where the module line will
+    // stand, so the slot under Cell name is never a blank gap.
+    let waiting = empty
+        .rect_of("Type a cell name.")
+        .expect("the waiting line");
+    let module = filled.rect_of("module opamp").expect("the module line");
+    assert!(
+        (waiting.left() - module.left()).abs() < 0.5
+            && (waiting.center().y - module.center().y).abs() < 0.5,
+        "{waiting:?} {module:?}"
+    );
 
     // A refusal stands where the line it replaces stood: under its field, at
     // the control column, not in the label column.

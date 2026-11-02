@@ -190,7 +190,6 @@ fn typed_ports(typed: &str, messages: &MessageCatalog) -> Result<Vec<PortSpec>, 
 /// What one field's line says, owned for the frame it is drawn in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Line {
-    Blank,
     Derived(String),
     Error(String),
 }
@@ -198,18 +197,17 @@ enum Line {
 impl Line {
     fn field_line(&self) -> FieldLine<'_> {
         match self {
-            Self::Blank => FieldLine::Blank,
             Self::Derived(text) => FieldLine::Derived(text),
             Self::Error(text) => FieldLine::Error(text),
         }
     }
 }
 
-/// The line under Cell name: the module the cell's view will declare, or why
-/// the name is refused.
+/// The line under Cell name: what Create waits for while there is none, the
+/// module the cell's view will declare, or why the name is refused.
 fn cell_line(state: &AppState, messages: &MessageCatalog) -> Line {
     match typed_cell(state, messages) {
-        None => Line::Blank,
+        None => Line::Derived(messages.text(MessageId::VerilogADeviceCellMissing)),
         Some(Err(refusal)) => Line::Error(refusal),
         Some(Ok(cell)) => Line::Derived(messages.format(
             MessageId::VerilogADeviceModule,
