@@ -7,6 +7,7 @@ mod dcmatch;
 mod distortion;
 mod events;
 mod functions;
+mod measure;
 mod noise;
 mod pole_zero;
 mod sensitivity;

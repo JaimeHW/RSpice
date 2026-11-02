@@ -118,6 +118,8 @@ enum CommandKind {
     Compose,
     /// `wrs2p [file]`.
     WriteSParameters,
+    /// `meas` and `measure`.
+    Measure,
     /// A command ngspice -b accepts with no batch effect.
     Ignored(Ignored),
 }
@@ -137,7 +139,12 @@ impl CommandKind {
     fn prints_text(&self) -> bool {
         matches!(
             self,
-            Self::Echo | Self::Display | Self::EventDisplay | Self::EventPrint | Self::EventVcd
+            Self::Echo
+                | Self::Display
+                | Self::EventDisplay
+                | Self::EventPrint
+                | Self::EventVcd
+                | Self::Measure
         )
     }
 
@@ -164,6 +171,7 @@ impl CommandKind {
             "setplot" => Self::SetPlot,
             "compose" => Self::Compose,
             "wrs2p" => Self::WriteSParameters,
+            "meas" | "measure" => Self::Measure,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
             }
@@ -343,6 +351,21 @@ impl ControlCircuit {
                 arguments,
                 ..command.clone()
             };
+            if let CommandKind::Measure = kind {
+                // A failed measurement's line goes to the terminal, not the
+                // file (measure.c:131 prints it on stdout).
+                let (text, measured) = self.measure(&command, variables, abort)?;
+                let kind = if measured {
+                    ControlPresentationKind::File {
+                        path: self.script_file(redirect.path),
+                        text,
+                        append: redirect.append,
+                    }
+                } else {
+                    ControlPresentationKind::Text(text)
+                };
+                return Ok(Self::batch_output(&command, kind));
+            }
             let mut prepared = self.prepare_kind(kind, engine, &command, variables, abort)?;
             if let PreparedCommand::Complete(ControlCommandEffect::Presentation(request)) =
                 &mut prepared
@@ -552,6 +575,10 @@ impl ControlCircuit {
                     ControlCommandEffect::CircuitChanged,
                 ))
             }
+            CommandKind::Measure => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(self.measure(command, variables, abort)?.0),
+            )),
             CommandKind::WriteSParameters => {
                 let (path, text) = self.touchstone(command, variables, abort)?;
                 Ok(Self::batch_output(

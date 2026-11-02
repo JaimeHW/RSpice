@@ -6994,7 +6994,7 @@ fn evaluate_tran_measurements_with_signals(
     }
 }
 
-fn evaluate_tran_measurements_with_signals_and_abort(
+pub(crate) fn evaluate_tran_measurements_with_signals_and_abort(
     netlist: &Netlist,
     time: &[Value],
     source_signals: &HashMap<String, &[Value]>,

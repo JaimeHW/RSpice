@@ -1561,6 +1561,47 @@ fn sp_leaves_scattering_parameters_as_ngspice_does() {
     assert_eq!(texts(&presented), ["sp1"]);
 }
 
+/// `meas` (measure.c:37, com_measure2.c:1623) measures the current plot and
+/// prints get_measure2's line for it, then binds the result with `let` to
+/// seven digits; a measurement that finds nothing prints ` meas ... failed!`
+/// and binds nothing. The lines are ngspice-46's for a triangle from 0 to 1 V
+/// and back over 2 ms, whose linear pieces every measurement reads exactly.
+#[test]
+fn meas_measures_the_current_plot_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "meas\nV1 in 0 PWL(0 0 1m 1 2m 0)\nR1 in 0 1k\n.tran 10u 2m\n.control\nrun\n\
+         meas tran TDelay TRIG v(in) VAL=0.5 RISE=1 TARG v(in) VAL=0.5 FALL=1\n\
+         meas tran vmax MAX v(in)\nmeas tran vavg AVG v(in)\n\
+         meas tran vint INTEG v(in) from=0 to=2m\nmeas tran vat FIND v(in) AT=0.25m\n\
+         meas tran twhen WHEN v(in)=0.75 FALL=1\nlet half = 0.5\n\
+         meas tran thalf WHEN v(in)= half RISE=1\nmeas tran bad WHEN v(in)=2 RISE=1\n\
+         meas tran vmaxat MAX_AT v(in)\nmeas tran inner max v(in) > inner.txt\n\
+         let twice = tdelay*2\nprint twice\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "tdelay              =  1.00000e-03 targ=  1.50000e-03 trig=  5.00000e-04",
+            "vmax                =  1.00000e+00 at=  1.00000e-03",
+            "vavg                =  5.00000e-01 from=  0.00000e+00 to=  2.00000e-03",
+            "vint                =  1.00000e-03 from=  0.00000e+00 to=  2.00000e-03",
+            "vat                 =  2.50000e-01",
+            "twhen               =  1.25000e-03",
+            "thalf               =  5.00000e-04",
+            " meas tran bad when v(in)=2 rise=1 failed!",
+            "vmaxat              =  1.00000e-03 with=  1.00000e+00",
+        ]
+    );
+    assert!(presented.iter().any(|request| matches!(
+        &request.kind,
+        ControlPresentationKind::File { path, text, append: false }
+            if path == "inner.txt" && text == "inner               =  1.00000e+00 at=  1.00000e-03\n"
+    )));
+    let twice = printed(presented.last().unwrap());
+    assert_eq!(twice[0].y.samples[0].re, 2e-3);
+}
+
 /// `wrs2p` (postcoms.c:624, rawfile.c:765) writes ports 1 and 2 of the sp
 /// plot as Touchstone real and imaginary parts, labelled with `Rbase`. The
 /// rows are ngspice-46's for a tee of 10 and 20 ohms and 1 uF between a 50
