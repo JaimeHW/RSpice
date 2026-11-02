@@ -817,7 +817,8 @@ fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
 
 /// Any `set` name is a shell variable (frontend/variable.c:86 cp_vset),
 /// except the simulator options ngspice hands the circuit (options.c:454
-/// if_option), which this host refuses rather than drops.
+/// if_option), which apply as `option` applies them; one `option` has no
+/// handler for refuses the whole `set`.
 #[test]
 fn set_accepts_shell_variables_and_applies_assignments_atomically() {
     let netlist = Netlist::parse("set deck\nV1 in 0 1\nR1 in 0 1k\n.end\n").unwrap();
@@ -836,8 +837,8 @@ fn set_accepts_shell_variables_and_applies_assignments_atomically() {
             &NoAbort,
         )
     };
-    let error = set(&mut circuit, "noinit num_threads=2 gmin=1e-12").unwrap_err();
-    assert!(error.to_string().contains("'gmin'"), "{error}");
+    let error = set(&mut circuit, "noinit num_threads=2 rshunt=1e9").unwrap_err();
+    assert!(error.to_string().contains("'RSHUNT'"), "{error}");
     assert!(!circuit.settings().suppress_initial_listing);
     assert_eq!(circuit.settings().maximum_parallel_workers, None);
     set(
@@ -2089,10 +2090,35 @@ fn shell_variables_expand_as_ngspice_does() {
         ]
     );
     // A simulator option is not a shell variable: ngspice hands it to the
-    // circuit, and this host refuses it rather than drop it.
+    // circuit, as `option` does, and an option `option` has no handler for
+    // is refused rather than dropped.
     let (_, error) =
         run_until_error("option\nV1 in 0 2\nR1 in 0 1k\n.control\nset gmin=1e-12\n.endc\n.end\n");
-    assert!(error.unwrap().contains("simulator option"));
+    assert_eq!(error, None);
+    let (_, error) =
+        run_until_error("option\nV1 in 0 2\nR1 in 0 1k\n.control\nset rshunt=1e9\n.endc\n.end\n");
+    assert!(error.unwrap().contains("RSHUNT"));
+}
+
+/// `set temp=100` sets the circuit's temperature for the analyses after it
+/// (frontend/options.c:453), as `option temp=100` does: ngspice-46 prints
+/// i(v1) = -1.00000e-03, then -5.78035e-04 through 1 kohm with TC1 = 0.01
+/// at 100 C, then -1.00000e-03 again at 27 C.
+#[test]
+fn set_temp_sets_the_circuit_temperature() {
+    let (presented, error) = run_until_error(
+        "settemp\nV1 1 0 1\nR1 1 0 1k tc1=0.01\n.control\nop\nprint i(v1)\nset temp=100\n\
+         op\nprint i(v1)\nset temp = 27\nop\nprint i(v1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let currents: Vec<_> = presented
+        .iter()
+        .map(|request| printed(request)[0].y.samples[0].re)
+        .collect();
+    for (current, expected) in currents.iter().zip([-1e-3, -1.0 / 1730.0, -1e-3]) {
+        assert!((current / expected - 1.0).abs() < 1e-9, "{currents:?}");
+    }
+    assert_eq!(currents.len(), 3);
 }
 
 /// ngspice `destroy` (frontend/postcoms.c:891) takes plots out of the plot

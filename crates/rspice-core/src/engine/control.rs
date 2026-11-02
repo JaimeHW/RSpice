@@ -410,7 +410,7 @@ impl ControlCircuit {
                 ))
             }
             CommandKind::Set => {
-                self.apply_set(command, variables, abort)?;
+                self.apply_set(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))

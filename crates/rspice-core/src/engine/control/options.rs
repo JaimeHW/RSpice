@@ -96,6 +96,7 @@ impl ControlCircuit {
 
     pub(super) fn apply_set(
         &mut self,
+        engine: &Engine,
         command: &ControlCommand,
         variables: &ParamContext,
         abort: &dyn AbortSignal,
@@ -110,6 +111,7 @@ impl ControlCircuit {
         let mut settings = self.settings.clone();
         let mut shell = self.shell.clone();
         let mut plot = None;
+        let mut options = Vec::new();
         for assignment in &assignments {
             let name = assignment.name.to_ascii_lowercase();
             shell.insert(
@@ -151,21 +153,32 @@ impl ControlCircuit {
                 }
                 settings.maximum_parallel_workers = Some(count as usize);
             } else if simulator_option(&name) {
-                return Err(command_error(
-                    command.line,
-                    format!(
-                        "set variable '{}' is a simulator option this host does not set; \
-                         use option",
-                        assignment.name
-                    ),
-                )
-                .into());
+                // frontend/options.c:453 cp_usrset hands the circuit a
+                // simulator option (if_option), as `option` does.
+                options.push(match &assignment.value {
+                    SetValue::Word(value) => format!("{name}={}", value.text),
+                    SetValue::Flag => name.clone(),
+                    SetValue::List(_) => {
+                        return Err(command_error(
+                            command.line,
+                            format!("simulator option '{}' takes one value", assignment.name),
+                        )
+                        .into());
+                    }
+                });
             }
             // Any other name is a shell variable, which the session keeps;
             // it steers nothing here, as interactive, plotting and hardcopy
             // variables steer nothing in a batch run. The plot labels
             // (curplotname, curplottitle, curplotdate) label nothing a batch
             // run prints.
+        }
+        if !options.is_empty() {
+            let options = ControlCommand {
+                arguments: options.join(" "),
+                ..command.clone()
+            };
+            self.apply_options(engine, &options, variables, abort)?;
         }
         if let Some(plot) = plot {
             self.set_plot(&plot, command.line)?;
@@ -194,8 +207,8 @@ impl ControlCircuit {
 }
 
 /// The options ngspice's `set` hands the circuit (frontend/options.c:454
-/// `if_option`; spicelib/analysis/cktsopt.c:260, the settable entries). A
-/// batch host must not drop one silently.
+/// `if_option`; spicelib/analysis/cktsopt.c:260, the settable entries),
+/// which `option` takes here, or refuses.
 fn simulator_option(name: &str) -> bool {
     const NAMES: &[&str] = &[
         "maxopalter",
