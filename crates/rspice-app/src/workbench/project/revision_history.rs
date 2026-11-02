@@ -455,13 +455,14 @@ fn revision_history_body(
                 .max_height(286.0)
                 .auto_shrink([false, true])
                 .show(ui, |ui| {
-                    let widths = column_widths(ui.available_width());
+                    let shown = shown_columns(&visible);
+                    let widths = column_widths(ui, &visible, &shown, ui.available_width());
                     Grid::new("project-revision-history-grid")
                         .min_col_width(0.0)
                         .spacing(egui::vec2(COLUMN_GAP, 4.0))
                         .show(ui, |ui| {
-                            for (heading, width) in COLUMNS.iter().zip(widths) {
-                                table_heading(ui, heading, width);
+                            for (&column, &width) in shown.iter().zip(&widths) {
+                                table_heading(ui, COLUMNS[column], width);
                             }
                             ui.end_row();
                             for row in &visible {
@@ -472,14 +473,14 @@ fn revision_history_body(
                                 // goes under the cells, which are laid out
                                 // first so the row's extent is known.
                                 let fill = ui.painter().add(egui::Shape::Noop);
-                                let cells = [
-                                    table_cell(ui, &row.revision, widths[0], true),
-                                    table_cell(ui, &row.time, widths[1], true),
-                                    table_cell(ui, &row.actor, widths[2], false),
-                                    table_cell(ui, &row.change, widths[3], false),
-                                    table_cell(ui, &row.affected_evidence, widths[4], false),
-                                    table_cell(ui, &row.status, widths[5], false),
-                                ];
+                                let texts = row_cells(row);
+                                let cells = shown
+                                    .iter()
+                                    .zip(&widths)
+                                    .map(|(&column, &width)| {
+                                        table_cell(ui, texts[column], width, MONO_COLUMNS[column])
+                                    })
+                                    .collect::<Vec<_>>();
                                 let extent = cells
                                     .iter()
                                     .fold(egui::Rect::NOTHING, |extent, cell| extent.union(*cell))
@@ -692,7 +693,14 @@ fn simulation_plan_row(
             "{} \u{00b7} {name}",
             if active { "Active" } else { "Retained" }
         ),
-        affected_evidence: format!("{analysis_count} analyses \u{00b7} {lineage_evidence}"),
+        affected_evidence: format!(
+            "{analysis_count} {} \u{00b7} {lineage_evidence}",
+            if analysis_count == 1 {
+                "analysis"
+            } else {
+                "analyses"
+            }
+        ),
         status: if active { "working" } else { "retained" }.to_owned(),
         schematic_revision: None,
         restorable_schematic_revision: None,
@@ -940,31 +948,88 @@ const COLUMNS: [&str; 6] = [
     "Affected records",
     "Status",
 ];
-/// Each column's share of the table's width. Fixed rather than measured from
-/// the rows, so the table always fits the dialog: a measured grid ran its last
-/// columns off the right edge behind a horizontal scroll bar.
-const COLUMN_SHARES: [f32; 6] = [0.12, 0.11, 0.2, 0.24, 0.23, 0.1];
+/// The columns whose identifiers and times are set in mono.
+const MONO_COLUMNS: [bool; 6] = [true, true, false, false, false, false];
 /// Air between two columns.
 const COLUMN_GAP: f32 = 8.0;
 /// The height of one row of the table.
 const CELL_HEIGHT: f32 = 22.0;
 
-/// The width of each column across `width`.
-fn column_widths(width: f32) -> [f32; 6] {
-    let room = (width - COLUMN_GAP * (COLUMNS.len() - 1) as f32).max(COLUMNS.len() as f32);
-    COLUMN_SHARES.map(|share| (room * share).floor())
+/// One row's text in each column, in [`COLUMNS`] order.
+fn row_cells(row: &ProjectAuditRow) -> [&str; 6] {
+    [
+        &row.revision,
+        &row.time,
+        &row.actor,
+        &row.change,
+        &row.affected_evidence,
+        &row.status,
+    ]
+}
+
+/// The columns, by index, that any of `rows` says something in. A column no
+/// row fills (times the project never retained) would be a heading over blank
+/// cells.
+fn shown_columns(rows: &[&ProjectAuditRow]) -> Vec<usize> {
+    (0..COLUMNS.len())
+        .filter(|&column| rows.iter().any(|row| !row_cells(row)[column].is_empty()))
+        .collect()
+}
+
+/// The width of each `shown` column across `width`: each column as wide as
+/// its widest text, then all of them widened in proportion to fill the table,
+/// so nothing is elided while the table fits. A table that cannot fit shrinks
+/// in the same proportion and elides, rather than running its last columns
+/// off the dialog's edge behind a scroll bar.
+fn column_widths(ui: &Ui, rows: &[&ProjectAuditRow], shown: &[usize], width: f32) -> Vec<f32> {
+    let measure = |text: RichText| {
+        egui::WidgetText::from(text)
+            .into_galley(
+                ui,
+                Some(egui::TextWrapMode::Extend),
+                f32::INFINITY,
+                egui::TextStyle::Body,
+            )
+            .size()
+            .x
+    };
+    let natural = shown
+        .iter()
+        .map(|&column| {
+            rows.iter()
+                .map(|row| measure(cell_text(row_cells(row)[column], MONO_COLUMNS[column])))
+                .fold(measure(heading_text(ui, COLUMNS[column])), f32::max)
+                .ceil()
+        })
+        .collect::<Vec<_>>();
+    let room = (width - COLUMN_GAP * shown.len().saturating_sub(1) as f32).max(1.0);
+    let scale = room / natural.iter().sum::<f32>().max(1.0);
+    natural
+        .iter()
+        .map(|width| (width * scale).floor())
+        .collect()
 }
 
 /// A column's heading: sentence case, in the label face, as written.
 fn table_heading(ui: &mut Ui, label: &str, width: f32) {
+    let text = heading_text(ui, label);
+    let _ = cell(ui, width, text);
+}
+
+fn heading_text(ui: &Ui, label: &str) -> RichText {
     let t = Tokens::get(ui.ctx());
-    let _ = cell(
-        ui,
-        width,
-        RichText::new(label)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text_dim),
-    );
+    RichText::new(label)
+        .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
+        .color(t.color.text_dim)
+}
+
+/// A cell's text: identifiers and times in mono, the rest in the body face.
+fn cell_text(text: &str, mono: bool) -> RichText {
+    if mono {
+        RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular))
+    } else {
+        RichText::new(text)
+    }
 }
 
 /// A cell of `width` holding `text` from its left edge, elided to fit: the
@@ -985,12 +1050,7 @@ fn cell(ui: &mut Ui, width: f32, text: RichText) -> (egui::Rect, egui::Response)
 /// hover when it does not. Identifiers and times are set in mono. Returns
 /// the cell's rect.
 fn table_cell(ui: &mut Ui, text: &str, width: f32, mono: bool) -> egui::Rect {
-    let rich = if mono {
-        RichText::new(text).font(theme::mono(tokens::FS_0, FontWeight::Regular))
-    } else {
-        RichText::new(text)
-    };
-    let (rect, response) = cell(ui, width, rich);
+    let (rect, response) = cell(ui, width, cell_text(text, mono));
     if !text.is_empty() {
         response.on_hover_text(text);
     }
@@ -1249,9 +1309,18 @@ mod tests {
             })
             .collect::<Vec<_>>();
         for heading in COLUMNS {
+            // No row retained a time, so no column stands over blank cells.
+            let drawn = texts.iter().any(|(text, _)| text == heading);
+            assert_eq!(drawn, heading != "Time", "{heading:?}: {texts:?}");
+        }
+        // Every cell is stated whole: the columns are as wide as their text.
+        for whole in row_cells(&rows[0])
+            .into_iter()
+            .filter(|text| !text.is_empty())
+        {
             assert!(
-                texts.iter().any(|(text, _)| text == heading),
-                "{heading:?} is not a heading: {texts:?}"
+                texts.iter().any(|(text, _)| text == whole),
+                "{whole:?} is elided: {texts:?}"
             );
         }
         for (text, rect) in &texts {
