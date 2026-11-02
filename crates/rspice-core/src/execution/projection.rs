@@ -488,8 +488,15 @@ impl SignalProjection {
                 )));
             }
             for kind in request.operand_kinds() {
-                if let OutputOperandKind::Probe(signal) = kind {
-                    card_owned.push(signal.clone());
+                match kind {
+                    OutputOperandKind::Probe(signal) => card_owned.push(signal.clone()),
+                    // The parser saves an accessor or expression operand
+                    // (`VR(a)`, `{V(a)*2}`) under its raw spelling. That save
+                    // belongs to the card's analysis: a `.PRINT AC VR(a)`
+                    // does not ask the `.OP` beside it for a column.
+                    OutputOperandKind::Expression { body } => {
+                        card_owned.push(SaveSignal::Raw(body.clone()));
+                    }
                 }
             }
             cards.push(ProjectionCard {
@@ -1900,6 +1907,48 @@ mod tests {
             rendered(&projected, 1),
             [std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_4]
         );
+    }
+
+    /// A `.PRINT AC VR(a)` card asks nothing of the `.OP` run beside it
+    /// (Xyce BUG_1238 bug1238-ac-op): the raw save the parser records for an
+    /// accessor operand belongs to its card.
+    #[test]
+    fn an_ac_accessor_operand_asks_no_column_of_the_operating_point() {
+        let netlist = parse(
+            "ac op
+V1 a 0 DC 1 AC 1
+R1 a 0 1k
+.OP
+.AC DEC 1 1 10
+             .PRINT AC VR(a) IR(V1)
+.END
+",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let source = ProjectionSource::new(AnalysisResultKind::OperatingPoint, "DC OP")
+            .with_axis(vec![0.0])
+            .with_signals(vec![real_signal(
+                "V(a)",
+                "a",
+                SignalKind::Voltage,
+                vec![1.0],
+            )]);
+        let projected = projection
+            .project(&netlist.params, &source, &crate::abort_signal::NoAbort)
+            .expect("the operating point projects");
+        assert!(
+            !names(&projected).iter().any(|name| name.starts_with("VR")),
+            "{:?}",
+            names(&projected)
+        );
+        let projected = projection
+            .project(
+                &netlist.params,
+                &rendering_source(),
+                &crate::abort_signal::NoAbort,
+            )
+            .expect("the AC result projects");
+        assert_eq!(names(&projected), ["VR(a)", "IR(V1)"]);
     }
 
     /// A differential `VM(a,0)` renders the synthesized difference.
