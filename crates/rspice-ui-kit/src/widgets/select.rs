@@ -3,8 +3,8 @@
 
 use egui::{Id, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 
-use crate::theme::{self, FontWeight};
-use crate::tokens::{self, Tokens};
+use crate::theme;
+use crate::tokens::Tokens;
 
 /// Options a drop-down shows before its list scrolls.
 const SELECT_VISIBLE_OPTIONS: usize = 12;
@@ -111,9 +111,9 @@ fn select_with_font(
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     let value_font = if mono {
-        theme::mono(tokens::FS_0, FontWeight::Regular)
+        theme::field_mono()
     } else {
-        theme::sans(tokens::FS_0, FontWeight::Regular)
+        theme::field_sans()
     };
 
     let width = width.max(if t.metrics.ctl_h >= 44.0 { 44.0 } else { 0.0 });

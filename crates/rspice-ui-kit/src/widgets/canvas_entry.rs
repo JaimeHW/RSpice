@@ -105,11 +105,11 @@ impl<'u> CanvasEntryRows<'u> {
     pub fn text(&mut self, label: &str, id: Id, value: &mut String, hint: &str) -> Response {
         self.row(label, |ui, width| {
             let t = Tokens::get(ui.ctx());
-            let reading = ReadingOrderEdit::new(ui, value, egui::TextStyle::Monospace, None, false);
+            let reading = ReadingOrderEdit::new(ui, value, theme::field_mono(), None, false);
             let mut lay_out = reading.as_ref().map(ReadingOrderEdit::layouter);
             let mut edit = egui::TextEdit::singleline(value)
                 .id(id)
-                .font(egui::TextStyle::Monospace)
+                .font(theme::field_mono())
                 .hint_text(hint)
                 .vertical_align(Align::Center)
                 .margin(egui::Margin::symmetric(6, 4));

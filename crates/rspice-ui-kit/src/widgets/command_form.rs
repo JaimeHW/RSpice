@@ -247,7 +247,7 @@ impl<'u> FormRows<'u> {
                 vec2(width, t.metrics.ctl_h),
                 egui::TextEdit::singleline(value)
                     .id(id)
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .hint_text(hint)
                     .vertical_align(Align::Center)
                     .margin(egui::Margin::symmetric(8, 4)),
@@ -272,6 +272,11 @@ impl<'u> FormRows<'u> {
     ) -> Response {
         self.row(label, |ui, _| {
             let t = Tokens::get(ui.ctx());
+            // A drag value sets its number in the style's mono text; here it
+            // is a field's value, at a field's size.
+            ui.style_mut()
+                .text_styles
+                .insert(egui::TextStyle::Monospace, theme::field_mono());
             let response = ui.add_sized(
                 vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
                 egui::DragValue::new(value).range(range).speed(1.0),
@@ -286,7 +291,7 @@ impl<'u> FormRows<'u> {
         })
     }
 
-    /// One multi-line mono text field, `lines` controls tall.
+    /// One multi-line prose field, `lines` controls tall, in the body face.
     ///
     /// For the one value in this family that is prose rather than a name: a
     /// design note's text, where a line break is content the model keeps. A
@@ -308,7 +313,7 @@ impl<'u> FormRows<'u> {
                 vec2(width, height),
                 egui::TextEdit::multiline(value)
                     .id(id)
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_sans())
                     .hint_text(hint)
                     .margin(egui::Margin::symmetric(8, 4)),
             );
@@ -335,7 +340,7 @@ impl<'u> FormRows<'u> {
                     vec2(field, t.metrics.ctl_h),
                     egui::TextEdit::singleline(value)
                         .id(id.with(axis))
-                        .font(egui::TextStyle::Monospace)
+                        .font(theme::field_mono())
                         .hint_text(axis)
                         .vertical_align(Align::Center)
                         .margin(egui::Margin::symmetric(8, 4)),
@@ -804,7 +809,7 @@ impl<'u> FormRows<'u> {
                             vec2((width - ctl_h - LIST_BUTTON_GAP).max(1.0), ctl_h),
                             egui::TextEdit::singleline(draft)
                                 .id(id)
-                                .font(egui::TextStyle::Monospace)
+                                .font(theme::field_mono())
                                 .hint_text(hint)
                                 .vertical_align(Align::Center)
                                 .margin(egui::Margin::symmetric(8, 4)),
@@ -1251,7 +1256,7 @@ fn list_entry(ui: &mut Ui, id: Id, entry: &str, remove_label: &str, width: f32) 
                     vec2((width - line_h).max(1.0), line_h),
                     egui::Sense::hover(),
                 );
-                let font = theme::mono(tokens::FS_1, FontWeight::Regular);
+                let font = theme::field_mono();
                 let shown =
                     middle_elided(ui, entry, &font, t.color.text, rect.width() - VALUE_INSET);
                 let elided = shown != entry;
@@ -2320,6 +2325,67 @@ mod tests {
             walk(&clipped.shape, &mut texts);
         }
         texts
+    }
+
+    /// Every field and every select in a form holds its value at one size,
+    /// the kit's body size: names, numbers and code in the mono face, a
+    /// choice named in words and a note's prose in the body face.
+    #[test]
+    fn fields_and_selects_hold_their_values_at_the_body_size() {
+        let texts = painted_texts(|ctx| {
+            let mut name = String::from("amp_core");
+            let (mut x, mut y) = (String::from("1.25"), String::from("2.5"));
+            let mut count = 7usize;
+            let mut note = String::from("Bias from the reference.");
+            let mut draft = String::from("VSS");
+            let _ = CommandForm::new("Fields", "Apply").show(ctx, |rows| {
+                rows.text("Name", Id::new("command-form.size.name"), &mut name, "");
+                let _ = rows.select(
+                    "Discipline",
+                    "command-form.size.discipline",
+                    "electrical",
+                    &["electrical".to_owned(), "logic".to_owned()],
+                );
+                rows.point(
+                    "Origin",
+                    Id::new("command-form.size.origin"),
+                    &mut x,
+                    &mut y,
+                );
+                rows.number("Count", &mut count, 1..=64, "1 to 64");
+                rows.text_multiline("Note", Id::new("command-form.size.note"), &mut note, "", 2);
+                let _ = rows.list(
+                    "Nets",
+                    Id::new("command-form.size.nets"),
+                    &["VDD".to_owned()],
+                    &mut draft,
+                    ListWords {
+                        hint: "",
+                        add: "Add",
+                        remove: "Remove",
+                    },
+                );
+                None
+            });
+        });
+        let font_of = |value: &str| {
+            texts
+                .iter()
+                .find(|text| text.galley.text() == value)
+                .map(|text| text.galley.job.sections[0].format.font_id.clone())
+                .unwrap_or_else(|| panic!("{value:?} is painted"))
+        };
+        for value in ["amp_core", "1.25", "2.5", "7", "VDD", "VSS"] {
+            assert_eq!(font_of(value), theme::field_mono(), "{value:?}");
+        }
+        for value in ["electrical", "Bias from the reference."] {
+            assert_eq!(font_of(value), theme::field_sans(), "{value:?}");
+        }
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let body = egui::TextStyle::Body.resolve(&ctx.global_style());
+        assert_eq!(theme::field_sans(), body, "the body size and face");
+        assert_eq!(theme::field_mono().size, body.size);
     }
 
     /// A table starts on the labels' edge, and each column's entries start

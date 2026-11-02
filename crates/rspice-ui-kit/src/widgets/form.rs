@@ -40,7 +40,7 @@ pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> R
     let response = ui.add_sized(
         vec2(width, t.metrics.ctl_h),
         TextEdit::singleline(value)
-            .font(egui::TextStyle::Monospace)
+            .font(theme::field_mono())
             .vertical_align(egui::Align::Center)
             .margin(egui::Margin::symmetric(8, 4)),
     );
@@ -69,7 +69,7 @@ pub fn mono_input_with_unit(
         return mono_input(ui, label, value, width);
     };
     let t = Tokens::get(ui.ctx());
-    let value_font = egui::TextStyle::Monospace.resolve(ui.style());
+    let value_font = theme::field_mono();
     let unit_galley = ui.painter().layout_no_wrap(
         unit.to_owned(),
         theme::sans(value_font.size, FontWeight::Regular),
@@ -85,7 +85,7 @@ pub fn mono_input_with_unit(
     let response = ui.add_sized(
         vec2(width, t.metrics.ctl_h),
         TextEdit::singleline(value)
-            .font(egui::TextStyle::Monospace)
+            .font(value_font.clone())
             .margin(margin),
     );
     name_control(ui, &response, label);

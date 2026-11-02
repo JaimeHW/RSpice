@@ -531,6 +531,18 @@ pub fn mono(size: f32, weight: FontWeight) -> FontId {
     FontId::new(size, weight.mono_family())
 }
 
+/// What a text input or a select draws the value it holds in: the body size,
+/// so every field and every choice in a form reads at one size. Names,
+/// numbers, expressions and code keep the mono face.
+pub fn field_mono() -> FontId {
+    mono(tokens::FS_2, FontWeight::Regular)
+}
+
+/// [`field_mono`] for prose, and for a choice named in words.
+pub fn field_sans() -> FontId {
+    sans(tokens::FS_2, FontWeight::Regular)
+}
+
 /// Font weight selection (egui has no variable axis, so weights map to
 /// dedicated families).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
