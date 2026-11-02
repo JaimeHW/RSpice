@@ -4672,6 +4672,10 @@ pub struct SimulationOptions {
     /// parameter-sweep marker for formatted output. Xyce enables it by
     /// default.
     pub output_print_footer: Option<bool>,
+    /// Xyce `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS`: a printed phase (`VP(x)`,
+    /// `IP(x)`) is in radians instead of Xyce's default degrees
+    /// (N_IO_OpBuilders.C:704).
+    pub output_phase_radians: Option<bool>,
     /// Xyce 7.10 `.OPTIONS RESTART` checkpoint and restore metadata.
     ///
     /// The core parser owns syntax, validation, and bounded schedule storage;
@@ -5057,6 +5061,9 @@ impl SimulationOptions {
         }
         if other.output_print_footer.is_some() {
             self.output_print_footer = other.output_print_footer;
+        }
+        if other.output_phase_radians.is_some() {
+            self.output_phase_radians = other.output_phase_radians;
         }
         if let Some(other_restart) = &other.restart {
             match &mut self.restart {

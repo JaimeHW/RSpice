@@ -1271,9 +1271,13 @@ fn select_exact_inventory(
 
 /// The unit a deck's printed phase is in: ngspice's `vp()`/`ph()` give
 /// radians (cmath1.c `cx_ph`, with `cx_degrees` off unless a script sets
-/// `units=degrees`), Xyce's `VP()` gives degrees (N_IO_OpBuilders.C:704).
+/// `units=degrees`), Xyce's `VP()` gives degrees unless
+/// `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS` asks for radians
+/// (N_IO_OpBuilders.C:704).
 fn phase_unit(netlist: &Netlist) -> PhaseUnit {
-    if netlist.parse_dialect() == crate::SpiceDialect::Ngspice {
+    if netlist.parse_dialect() == crate::SpiceDialect::Ngspice
+        || netlist.options.output_phase_radians == Some(true)
+    {
         PhaseUnit::Radians
     } else {
         PhaseUnit::Degrees
@@ -1871,6 +1875,31 @@ mod tests {
             Some((&[3.0, -1.0][..], &[4.0, 0.0][..]))
         );
         assert!(projected.signals()[10].complex().is_some());
+    }
+
+    /// Xyce's `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS` prints `VP()` in radians.
+    #[test]
+    fn the_xyce_phase_option_prints_phase_in_radians() {
+        let netlist = parse(
+            "radians\nV1 a 0 AC 1\nR1 a 0 1k\n.AC DEC 1 1 10\n\
+             .OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=true\n.PRINT AC VP(a) IP(V1)\n.END\n",
+        );
+        let projection = SignalProjection::from_netlist(&netlist).expect("projection builds");
+        let projected = projection
+            .project(
+                &netlist.params,
+                &rendering_source(),
+                &crate::abort_signal::NoAbort,
+            )
+            .expect("both accessors resolve");
+        assert_eq!(
+            rendered(&projected, 0),
+            [4.0_f64.atan2(3.0), std::f64::consts::PI]
+        );
+        assert_eq!(
+            rendered(&projected, 1),
+            [std::f64::consts::FRAC_PI_2, -std::f64::consts::FRAC_PI_4]
+        );
     }
 
     /// A differential `VM(a,0)` renders the synthesized difference.

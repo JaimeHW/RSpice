@@ -6410,6 +6410,28 @@ mod tests {
     }
 
     #[test]
+    fn xyce_phase_output_radians_is_a_typed_output_option() {
+        let netlist = Netlist::parse(
+            "phase in radians\n\
+             V1 out 0 AC 1\n\
+             .OPTIONS OUTPUT PHASE_OUTPUT_RADIANS=true\n\
+             .AC DEC 1 1 10\n\
+             .PRINT AC VP(out)\n\
+             .END\n",
+        )
+        .expect("the Xyce phase option parses");
+        assert_eq!(netlist.options.output_phase_radians, Some(true));
+        assert!(
+            netlist.diagnostics.is_empty(),
+            "a known option is not reported as ignored: {:?}",
+            netlist.diagnostics
+        );
+        let mut merged = crate::netlist::SimulationOptions::default();
+        merged.merge(&netlist.options);
+        assert_eq!(merged.output_phase_radians, Some(true));
+    }
+
+    #[test]
     fn xyce_print_layout_and_output_framing_are_typed_last_authored() {
         let netlist = Netlist::parse(
             "typed Xyce output layout\n\
@@ -6437,6 +6459,7 @@ mod tests {
         merged.merge(&netlist.options);
         assert_eq!(merged.output_print_header, Some(true));
         assert_eq!(merged.output_print_footer, Some(true));
+        assert_eq!(netlist.options.output_phase_radians, None);
         assert_eq!(
             netlist.saves.signals,
             vec![SaveSignal::Voltage("out".to_string())]

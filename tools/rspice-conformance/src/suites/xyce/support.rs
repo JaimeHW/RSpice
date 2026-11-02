@@ -2467,6 +2467,7 @@ impl XyceTestRunner {
             interp: _,
             output_print_header: _,
             output_print_footer: _,
+            output_phase_radians: _,
             output_interval_schedule,
             output_time_points,
             timeint_breakpoints,

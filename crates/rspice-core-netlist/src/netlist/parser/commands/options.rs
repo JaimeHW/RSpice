@@ -1194,6 +1194,10 @@ pub(in crate::netlist::parser) fn parse_options_command(
                     options.output_print_footer =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
                 }
+                (Some("OUTPUT"), "PHASE_OUTPUT_RADIANS") => {
+                    options.output_phase_radians =
+                        Some(parse_boolean_option(stream, line_num, params, has_equals)?);
+                }
                 (_, "INTERP") => {
                     options.interp =
                         Some(parse_boolean_option(stream, line_num, params, has_equals)?);
