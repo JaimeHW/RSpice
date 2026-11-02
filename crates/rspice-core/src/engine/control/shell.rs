@@ -349,6 +349,12 @@ pub(crate) fn percent_e(value: Value, precision: usize) -> String {
 /// C's `%G` (frontend/variable.c:53 `cp_varwl`): six significant digits,
 /// in exponent form below 1e-4 or from 1e6 on, without trailing zeros.
 pub(crate) fn percent_g(value: Value) -> String {
+    percent_g_with(value, 6, true)
+}
+
+/// C's `%.*g` (`%.*G` when `upper`): `precision` significant digits, in
+/// exponent form below 1e-4 or from 10^precision on, without trailing zeros.
+pub(crate) fn percent_g_with(value: Value, precision: usize, upper: bool) -> String {
     if value.is_nan() {
         return "NAN".into();
     }
@@ -362,15 +368,18 @@ pub(crate) fn percent_g(value: Value) -> String {
             text.to_owned()
         }
     };
-    let text = format!("{value:.5e}");
+    let precision = precision.max(1);
+    let digits = precision - 1;
+    let text = format!("{value:.digits$e}");
     let (mantissa, exponent) = text.split_once('e').unwrap_or((text.as_str(), "0"));
     let exponent: i32 = exponent.parse().unwrap_or(0);
-    if (-4..6).contains(&exponent) {
-        let decimals = (5 - exponent) as usize;
+    if (-4..precision as i32).contains(&exponent) {
+        let decimals = (digits as i32 - exponent) as usize;
         trim(&format!("{value:.decimals$}"))
     } else {
         let sign = if exponent < 0 { '-' } else { '+' };
-        format!("{}E{sign}{:02}", trim(mantissa), exponent.unsigned_abs())
+        let e = if upper { 'E' } else { 'e' };
+        format!("{}{e}{sign}{:02}", trim(mantissa), exponent.unsigned_abs())
     }
 }
 

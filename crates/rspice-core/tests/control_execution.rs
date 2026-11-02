@@ -1420,6 +1420,54 @@ fn eprint_and_edisplay_print_event_nodes_as_ngspice_does() {
     assert!(unknown.unwrap().contains("node z is not an event node"));
 }
 
+/// XSPICE `eprvcd` (xspice/evt/evtprint.c:578) writes the named event nodes
+/// as a VCD document: a `#time` in the timescale one decade finer than the
+/// transient's step at each step where a printed value changes, and each
+/// node's bit (`get_vcdval`, evtprint.c:461). For this deck and stimulus
+/// ngspice-46 writes exactly these lines after its `$date` line, which this
+/// host leaves out, with its own name and version.
+#[test]
+fn eprvcd_writes_event_nodes_as_vcd_as_ngspice_does() {
+    let directory = std::env::temp_dir().join(format!("rspice-eprvcd-{}", std::process::id()));
+    std::fs::create_dir_all(&directory).unwrap();
+    let stimulus = directory.join("stimulus.txt");
+    std::fs::write(
+        &stimulus,
+        "0n 0s 1s\n1n 1s 1s\n2n 1s 0r\n3n Uz 0r\n4n 0s 1s\n",
+    )
+    .unwrap();
+    let deck = |commands: &str| {
+        format!(
+            "event vcd\nvdummy dummy 0 DC=0\na_source [a b] src\n\
+             .model src d_source(input_file=\"{}\")\na_inv a y inv\n\
+             .model inv d_inverter(rise_delay=0.5n fall_delay=0.5n)\n.tran 0.1n 5n\n\
+             .control\n{commands}\n.endc\n.end\n",
+            stimulus.to_string_lossy().replace('\\', "/")
+        )
+    };
+    let (presented, error) = run_until_error(&deck("run\neprvcd a b y\neprvcd a b y > out.vcd"));
+    let (_, option) = run_until_error(&deck("run\neprvcd -a a"));
+    let (_, analog) = run_until_error(&deck("run\neprvcd a dummy"));
+    std::fs::remove_dir_all(&directory).ok();
+    assert_eq!(error, None);
+    let expected = format!(
+        "$version rspice {} $end\n$timescale 1 fs $end\n\
+         $var wire 1 ! a $end\n$var wire 1 \" b $end\n$var wire 1 # y $end\n\
+         $enddefinitions $end\n$dumpvars\n0!\n1\"\n1#\n$end\n\
+         #1000000\n1!\n#1500000\n0#\n#2000000\n0\"\n#3000000\nz!\n#3500000\nx#\n\
+         #4000000\n0!\n1\"\n#4500000\n1#\n\n\n",
+        env!("CARGO_PKG_VERSION")
+    );
+    assert_eq!(texts(&presented), [expected.trim_end()]);
+    assert_eq!(files(&presented), [("out.vcd".to_owned(), expected, false)]);
+    assert!(
+        option
+            .unwrap()
+            .contains("eprvcd option '-a' is not supported")
+    );
+    assert!(analog.unwrap().contains("node dummy is not an event node"));
+}
+
 /// ngspice sets `oscompiled` to the system it was built for
 /// (frontend/init.c:40); the ngspice-46 Windows release echoes `8`, a Visual
 /// Studio build, as this host's MSVC build does.

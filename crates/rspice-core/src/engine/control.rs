@@ -108,6 +108,8 @@ enum CommandKind {
     EventDisplay,
     /// XSPICE `eprint`.
     EventPrint,
+    /// XSPICE `eprvcd`.
+    EventVcd,
     Listing,
     ResourceUsage,
     SetPlot,
@@ -131,7 +133,7 @@ impl CommandKind {
     fn prints_text(&self) -> bool {
         matches!(
             self,
-            Self::Echo | Self::Display | Self::EventDisplay | Self::EventPrint
+            Self::Echo | Self::Display | Self::EventDisplay | Self::EventPrint | Self::EventVcd
         )
     }
 
@@ -152,6 +154,7 @@ impl CommandKind {
             "edisplay" => Self::EventDisplay,
             "cd" => Self::ChangeDirectory,
             "eprint" => Self::EventPrint,
+            "eprvcd" => Self::EventVcd,
             "listing" => Self::Listing,
             "rusage" => Self::ResourceUsage,
             "setplot" => Self::SetPlot,
@@ -523,6 +526,10 @@ impl ControlCircuit {
             CommandKind::EventPrint => Ok(Self::batch_output(
                 command,
                 ControlPresentationKind::Text(self.event_print(command)?),
+            )),
+            CommandKind::EventVcd => Ok(Self::batch_output(
+                command,
+                ControlPresentationKind::Text(self.event_vcd(command)?),
             )),
             CommandKind::Listing => Ok(Self::batch_output(
                 command,
