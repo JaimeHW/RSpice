@@ -5580,7 +5580,7 @@ impl NoiseSweepSeries {
         Self::from_sweep_with_abort(sweep, &NoAbort)
     }
 
-    fn from_sweep_with_abort(
+    pub(crate) fn from_sweep_with_abort(
         sweep: &[crate::analysis::NoiseResult],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Self>, SimulationError> {

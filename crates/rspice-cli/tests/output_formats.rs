@@ -386,6 +386,68 @@ c1 out 0 1n
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// `.PRINT NOISE` prints its own operands, as Xyce does: the small-signal
+/// solution as on an AC card, and `ONOISE`, `INOISE` and `DNO()` as spectral
+/// densities. A 1k/1k divider has an exact answer: the output sees
+/// 4kT·500 Ω V²/Hz, half of it from R1, through a gain of one half.
+#[test]
+fn noise_print_card_exports_its_own_columns() {
+    let dir = test_dir("noise_print_csv");
+    let deck = "* noise print columns
+v1 in 0 dc 0 ac 1
+r1 in out 1k
+r2 out 0 1k
+.noise v(out) v1 lin 3 100 1000
+.print noise vr(out) vm(out) onoise inoise dno(r1) {sqrt(onoise)} onoise_spectrum v(out)
+.end
+";
+    let path = run_export(&dir, "noise_print", deck, "csv");
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let mut lines = text.lines();
+    let header = lines
+        .next()
+        .expect("csv header")
+        .split(',')
+        .map(str::to_ascii_lowercase)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        header,
+        [
+            "frequency",
+            "vr(out)",
+            "vm(out)",
+            "onoise",
+            "inoise",
+            "dno(r1)",
+            "{sqrt(onoise)}",
+            "onoise_spectrum",
+            "re(v(out))",
+            "im(v(out))"
+        ],
+        "{text}"
+    );
+    let four_kt = 4.0 * 1.380649e-23 * 300.15;
+    let close = |left: f64, right: f64| (left - right).abs() <= 1e-9 * right.abs().max(1e-30);
+    let mut rows = 0;
+    for line in lines.filter(|line| !line.starts_with('#')) {
+        let row = line
+            .split(',')
+            .map(|value| value.parse::<f64>().expect("numeric csv cell"))
+            .collect::<Vec<_>>();
+        assert!(close(row[1], 0.5) && close(row[2], 0.5), "{text}");
+        assert!(close(row[3], four_kt * 500.0), "{text}");
+        assert!(close(row[4], four_kt * 2000.0), "{text}");
+        assert!(close(row[5], four_kt * 250.0), "{text}");
+        assert!(close(row[6], (four_kt * 500.0).sqrt()), "{text}");
+        assert!(close(row[7], (four_kt * 500.0).sqrt()), "{text}");
+        assert!(close(row[8], 0.5) && row[9].abs() <= 1e-15, "{text}");
+        rows += 1;
+    }
+    assert_eq!(rows, 3, "{text}");
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// `-f csv` must produce text CSV, not binary raw bytes (regression test).
 #[test]
 fn transient_csv_is_text_not_binary() {

@@ -23,7 +23,7 @@ use std::collections::HashMap;
 
 use crate::abort_signal::AbortSignal;
 use crate::analysis::measure_signals::{
-    CanonicalMeasureSignalIndex, OutputColumnKind, OutputOperandEvaluationError,
+    CanonicalMeasureSignalIndex, NoiseSweepSeries, OutputColumnKind, OutputOperandEvaluationError,
     evaluate_output_operand,
 };
 use crate::engine::SimulationError;
@@ -596,6 +596,73 @@ impl SignalProjection {
         crate::analysis::evaluate_dc_output_requests_with_abort(netlist, sweep, limits, abort)
             .and_then(frontend_columns)
             .map(Some)
+    }
+
+    /// Evaluate this deck's ordered `.PRINT`/`.PLOT NOISE` columns.
+    ///
+    /// Xyce prints exactly the operands of a `.PRINT NOISE` card. `V(x)` and
+    /// `I(x)` are the complex small-signal solution and its accessors render
+    /// one real column, as on an AC card; `ONOISE`, `INOISE`, `DNO()` and
+    /// `DNI()` are spectral densities in V²/Hz or A²/Hz
+    /// (N_ANP_NOISE.C:1390-1393, N_IO_Op.C:123-141), and an expression reads
+    /// them. ngspice's `onoise_spectrum` and `inoise_spectrum` keep the
+    /// amplitude densities of the default noise table. `None` means the deck
+    /// has no such card, so the frontend keeps that default table.
+    pub fn ordered_noise_columns(
+        &self,
+        netlist: &Netlist,
+        sweep: &[crate::analysis::NoiseResult],
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<ProjectedSignal>>, SimulationError> {
+        if self.keeps_everything || !self.has_ordered_card(AnalysisResultKind::Noise) {
+            return Ok(None);
+        }
+        let Some(series) = NoiseSweepSeries::from_sweep_with_abort(sweep, abort)? else {
+            return Ok(None);
+        };
+        let output_amplitude = sweep
+            .iter()
+            .map(crate::analysis::NoiseResult::output_noise_rms)
+            .collect::<Vec<_>>();
+        let input_amplitude = sweep
+            .iter()
+            .map(crate::analysis::NoiseResult::input_referred_rms)
+            .collect::<Vec<_>>();
+        let mut lookup = series.signal_map();
+        lookup.retain(|name, _| {
+            !name.eq_ignore_ascii_case("onoise_spectrum")
+                && !name.eq_ignore_ascii_case("inoise_spectrum")
+        });
+        for (name, values) in [
+            ("onoise_spectrum", &output_amplitude),
+            ("inoise_spectrum", &input_amplitude),
+        ] {
+            lookup.insert(name.to_string(), values.as_slice());
+            lookup.insert(format!("V({name})"), values.as_slice());
+        }
+        let source = ProjectionSource::new(AnalysisResultKind::Noise, "NOISE")
+            .with_axis(series.axis())
+            .with_signals(noise_inventory(sweep)?)
+            .with_lookup(lookup);
+        let mut columns = Vec::new();
+        for (card, (authored, kind)) in self.ordered_operands(Some(OutputAnalysisKind::Noise)) {
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            let column = match resolve_complex_operand(&source, authored, kind, self.phase_unit) {
+                Ok(column) => column,
+                Err(_) => self.resolve_real_operand(
+                    &netlist.params,
+                    &source,
+                    card,
+                    authored,
+                    kind,
+                    abort,
+                )?,
+            };
+            columns.push(column);
+        }
+        Ok(Some(columns))
     }
 
     /// The `.PRINT`/`.PLOT` operands that select one analysis family, in card
@@ -1563,6 +1630,69 @@ fn complex_accessor_column(
         })
         .cloned()
         .map(ProjectionSourceSignal::into_projected)
+}
+
+/// The complex small-signal node voltages and branch currents of a noise
+/// sweep, as the `V(node)` and `I(branch)` columns an AC result carries.
+fn noise_inventory(
+    sweep: &[crate::analysis::NoiseResult],
+) -> Result<Vec<ProjectionSourceSignal<'static>>, SimulationError> {
+    type Phasor = fn(&crate::analysis::NoiseResult, usize) -> Option<(Value, Value)>;
+    let Some(first) = sweep.first() else {
+        return Ok(Vec::new());
+    };
+    let families: [(SignalKind, char, &[String], Phasor); 2] = [
+        (
+            SignalKind::Voltage,
+            'V',
+            &first.node_names,
+            |point, index| point.voltages.get(index).map(|value| (value.re, value.im)),
+        ),
+        (
+            SignalKind::Current,
+            'I',
+            &first.branch_names,
+            |point, index| point.currents.get(index).map(|value| (value.re, value.im)),
+        ),
+    ];
+    let mut signals = Vec::with_capacity(first.voltages.len() + first.currents.len());
+    for (kind, prefix, names, phasor) in families {
+        for (index, name) in names.iter().enumerate() {
+            let registry = if name.is_empty() {
+                (index + 1).to_string()
+            } else {
+                name.clone()
+            };
+            let display = format!("{prefix}({registry})");
+            let (real, imag) = sweep
+                .iter()
+                .map(|point| phasor(point, index))
+                .collect::<Option<Vec<_>>>()
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "noise result lost {display} at a frequency point"
+                    ))
+                })?
+                .into_iter()
+                .unzip();
+            let signal = ProjectionSourceSignal::new(
+                &display,
+                &registry,
+                kind,
+                ProjectionValues::Complex {
+                    real: Cow::Owned(real),
+                    imag: Cow::Owned(imag),
+                },
+            )
+            .map_err(|error| {
+                SimulationError::Circuit(format!(
+                    "noise result signal {display} cannot be described: {error}"
+                ))
+            })?;
+            signals.push(signal);
+        }
+    }
+    Ok(signals)
 }
 
 fn complex_node(source: &ProjectionSource<'_>, node: &str) -> Option<(Vec<Value>, Vec<Value>)> {

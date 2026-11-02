@@ -298,8 +298,14 @@ fn complex_signals(
     instance: &str,
     projected: ProjectedSignals,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
+    complex_columns(instance, projected.into_signals())
+}
+
+fn complex_columns(
+    instance: &str,
+    projected: Vec<ProjectedSignal>,
+) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
     projected
-        .into_signals()
         .into_iter()
         .map(|signal| {
             ensure_dense(instance, &signal)?;
@@ -827,6 +833,19 @@ pub(crate) fn complex_export_signals(
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
     project_complex(netlist, &projection, kind, instance, axis, signals, abort)
+}
+
+/// The columns a deck's `.PRINT NOISE` card prints over one noise sweep;
+/// `None` for a deck without one, which keeps the default spectrum table.
+pub(crate) fn noise_print_signals(
+    netlist: &rspice_core::Netlist,
+    results: &[rspice_core::analysis::NoiseResult],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Option<Vec<ComplexSignal>>, rspice_core::SimulationError> {
+    projection(netlist)?
+        .ordered_noise_columns(netlist, results, abort)?
+        .map(|columns| complex_columns("NOISE", columns))
+        .transpose()
 }
 
 #[cfg(test)]

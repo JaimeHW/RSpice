@@ -1321,6 +1321,19 @@ fn finish_noise_projected(
         }
     }
 
+    // A `.PRINT NOISE` card prints its own columns. Projecting it is part of
+    // executing the deck, so an operand the sweep cannot supply fails even
+    // when no file was requested.
+    let printed = crate::commands::run_signals::noise_print_signals(
+        ctx.netlist,
+        results,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("NOISE output projection".to_string()),
+    })?;
+
     if let Some(output) = ctx.resolve_output("noise") {
         let analysis_id = output.analysis("noise")?;
         let noise_frequencies: Vec<f64> = results.iter().map(|result| result.frequency).collect();
@@ -1350,27 +1363,35 @@ fn finish_noise_projected(
         let output_unit = NoiseInputQuantity::Voltage.amplitude_density_unit();
         let input_unit = input_quantity.amplitude_density_unit();
 
-        let table = ExportTable {
-            scale_unit: None,
-            analysis: "noise".to_string(),
-            plot_name: "Noise Spectral Density Curves".to_string(),
-            scale_name: "frequency".to_string(),
-            scale_type: "frequency".to_string(),
-            scale: noise_frequencies.clone(),
-            columns: vec![
-                ExportColumn {
-                    unit: Some(output_unit.into()),
-                    name: "onoise_spectrum".to_string(),
-                    var_type: "voltage".to_string(),
-                    data: ColumnData::Real(onoise.clone()),
-                },
-                ExportColumn {
-                    unit: Some(input_unit.into()),
-                    name: "inoise_spectrum".to_string(),
-                    var_type: input_type.into(),
-                    data: ColumnData::Real(inoise.clone()),
-                },
-            ],
+        let table = match &printed {
+            Some(signals) => super::export::complex_table(
+                "noise",
+                "Noise Spectral Density Curves",
+                noise_frequencies.clone(),
+                signals,
+            ),
+            None => ExportTable {
+                scale_unit: None,
+                analysis: "noise".to_string(),
+                plot_name: "Noise Spectral Density Curves".to_string(),
+                scale_name: "frequency".to_string(),
+                scale_type: "frequency".to_string(),
+                scale: noise_frequencies.clone(),
+                columns: vec![
+                    ExportColumn {
+                        unit: Some(output_unit.into()),
+                        name: "onoise_spectrum".to_string(),
+                        var_type: "voltage".to_string(),
+                        data: ColumnData::Real(onoise.clone()),
+                    },
+                    ExportColumn {
+                        unit: Some(input_unit.into()),
+                        name: "inoise_spectrum".to_string(),
+                        var_type: input_type.into(),
+                        data: ColumnData::Real(inoise.clone()),
+                    },
+                ],
+            },
         };
         let schema = table_schema(&table)?;
         super::document::publish_analysis_result(
