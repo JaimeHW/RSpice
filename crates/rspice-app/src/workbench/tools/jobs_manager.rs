@@ -1877,6 +1877,15 @@ mod tests {
 
     /// The dialog, its route and the error a failed close reports all call
     /// it what the Simulate menu does.
+    /// At the manager's own width its queue fits the left pane, so it never
+    /// shows a sideways scrollbar under a table with nothing to scroll.
+    #[test]
+    fn the_queue_fits_the_left_pane_at_the_managers_width() {
+        // The 1,120 pt surface, less its 1 pt borders and the pane divider.
+        let left_pane = ((1_120.0_f32 - 2.0 - 1.0) * 0.695).max(560.0);
+        assert!(TABLE_MIN_WIDTH <= left_pane, "{TABLE_MIN_WIDTH} > {left_pane}");
+    }
+
     #[test]
     fn the_manager_is_titled_run_history_everywhere() {
         assert_eq!(SurfaceId::JobsManager.label(), TITLE);
