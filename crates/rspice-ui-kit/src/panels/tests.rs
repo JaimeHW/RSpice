@@ -1569,3 +1569,56 @@ fn an_inspectors_values_read_at_the_field_size() {
         "row heights {heights:?}"
     );
 }
+
+/// A sentence row of one line sets its value where a value row sets its
+/// value: centred on the row by its own line, which is a size above the
+/// label beside it, and the two rows are one height.
+#[test]
+fn a_one_line_sentence_sits_where_a_value_row_puts_its_value() {
+    fn walk(shape: &Shape, into: &mut Vec<(String, f32)>) {
+        match shape {
+            Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+            Shape::Text(text) => into.push((
+                text.galley.text().to_owned(),
+                text.pos.y + text.galley.rect.center().y,
+            )),
+            _ => {}
+        }
+    }
+    let ctx = egui::Context::default();
+    crate::Theme::default().apply(&ctx);
+    let mut tops = Vec::new();
+    let output = ctx.run_ui(Default::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            ui.set_width(320.0);
+            tops.clear();
+            tops.push(ui.cursor().top());
+            let _ = property_row(ui, "Instance", "R1");
+            tops.push(ui.cursor().top());
+            let _ = property_row_wrapped(ui, "Prior datasets", "No prior datasets");
+            tops.push(ui.cursor().top());
+        });
+    });
+    let mut texts = Vec::new();
+    for clipped in &output.shapes {
+        walk(&clipped.shape, &mut texts);
+    }
+    let centre_of = |value: &str| {
+        texts
+            .iter()
+            .find(|(text, _)| text == value)
+            .map(|(_, y)| *y)
+            .unwrap_or_else(|| panic!("{value:?} is painted"))
+    };
+    let value_row = centre_of("R1") - tops[0];
+    let sentence_row = centre_of("No prior datasets") - tops[1];
+    assert!(
+        (value_row - sentence_row).abs() < 0.5,
+        "the value sits {value_row} below its row's top, the sentence {sentence_row}"
+    );
+    let (first, second) = (tops[1] - tops[0], tops[2] - tops[1]);
+    assert!(
+        (first - second).abs() < 0.5,
+        "row heights {first} and {second}"
+    );
+}

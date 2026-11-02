@@ -1104,19 +1104,21 @@ pub fn property_row_wrapped(ui: &mut Ui, label: &str, text: &str) -> Response {
     let value_galley =
         ui.painter()
             .layout(text.to_owned(), value_font, t.color.text, columns.value);
-    // The first line sits where a one-line row's text sits; further lines
-    // grow the row downwards.
+    // The label and the value's first line each sit where a one-line row's
+    // text sits, centred on the row by their own line height (the value is a
+    // size above the label); further lines grow the row downwards.
     let row_height = property_row_height(ui);
-    let pad = text_pad(row_height, &label_galley);
-    let height = (value_galley.size().y + 2.0 * pad).max(row_height);
+    let label_pad = text_pad(row_height, &label_galley);
+    let value_pad = text_pad(row_height, &value_galley);
+    let height = (value_galley.size().y + 2.0 * value_pad).max(row_height);
     let (slot, response) = columns.allocate(ui, height, Sense::hover());
     ui.painter().galley(
-        Pos2::new(slot.label.left(), slot.rect.top() + pad),
+        Pos2::new(slot.label.left(), slot.rect.top() + label_pad),
         label_galley,
         t.color.text_dim,
     );
     ui.painter().galley(
-        Pos2::new(slot.value.left(), slot.rect.top() + pad),
+        Pos2::new(slot.value.left(), slot.rect.top() + value_pad),
         value_galley,
         t.color.text,
     );
