@@ -502,3 +502,70 @@ fn second_sibling_commit_failure_restores_existing_pair_or_leaves_both_absent() 
     );
     assert_no_staging_file(&directory);
 }
+
+/// Xyce's `.MEASURE FFT` statistics read the last `.FFT` of their output
+/// (N_IO_MeasureManager.C:486-525). A constant 1 V under a Hann window over
+/// eight points gives what Xyce 7.10 reports for the same spectrum in its
+/// MEASURE_FFT ENOB, SFDR, SNR, SNDR and THD tests; the Bartlett `.FFT`
+/// before it would give an ENOB of 3.52 instead.
+#[test]
+fn fft_measures_read_the_last_spectrum_of_their_output() {
+    let directory = test_dir("fft_measures");
+    let deck = write_deck(
+        &directory,
+        "measures.cir",
+        "* FFT measures\nV1 1 0 1\nR1 1 0 1\n.tran 0 1\n\
+         .fft v(1) np=8 window=bart\n.fft v(1) np=8 window=hann\n\
+         .measure fft E1 enob v(1)\n.measure fft S1 sfdr v(1)\n\
+         .measure fft N1 snr v(1)\n.measure fft N2 snr v(1) maxfreq=2\n\
+         .measure fft D1 sndr v(1)\n.measure fft T1 thd v(1)\n\
+         .measure fft P1 param {2*E1}\n.end\n",
+    );
+    let requested = directory.join("results.csv");
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "run",
+            deck.to_str().expect("UTF-8 deck path"),
+            "--meas",
+            "--output",
+            requested.to_str().expect("UTF-8 output path"),
+            "--format",
+            "csv",
+        ])
+        .output()
+        .expect("run FFT measure fixture");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success(),
+        "{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value = |name: &str| -> f64 {
+        let prefix = format!("{name} = ");
+        let line = stdout
+            .lines()
+            .map(str::trim)
+            .find(|line| line.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("no {name} in\n{stdout}"));
+        line[prefix.len()..]
+            .split_whitespace()
+            .next()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or_else(|| panic!("unreadable {line}"))
+    };
+    for (name, xyce) in [
+        ("E1", 2.947280),
+        ("S1", 19.77330),
+        ("N1", 200.0),
+        ("N2", 31.69055),
+        ("D1", 19.50263),
+        ("T1", -19.50263),
+        ("P1", 5.894560),
+    ] {
+        let rspice = value(name);
+        assert!(
+            (rspice - xyce).abs() <= 1e-5 * xyce.abs(),
+            "{name}: RSpice {rspice}, Xyce {xyce}"
+        );
+    }
+}

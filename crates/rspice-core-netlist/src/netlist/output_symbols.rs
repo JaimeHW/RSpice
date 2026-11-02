@@ -3290,7 +3290,8 @@ fn collect_measure_sources<'a>(
         | MeasureType::Rms { signal, .. }
         | MeasureType::Integ { signal, .. }
         | MeasureType::OnOff { signal, .. }
-        | MeasureType::Fourier { signal, .. } => {
+        | MeasureType::Fourier { signal, .. }
+        | MeasureType::FftMetric { signal, .. } => {
             output.push(MeasureDependencySource::Direct(signal))
         }
     }

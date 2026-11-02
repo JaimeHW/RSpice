@@ -3698,7 +3698,9 @@ fn compile_live_measure_state(
                 selected: None,
             }
         }
-        MeasureType::Fourier { .. } => LiveMeasureState::FinishedRun,
+        MeasureType::Fourier { .. } | MeasureType::FftMetric { .. } => {
+            LiveMeasureState::FinishedRun
+        }
         MeasureType::OnOff {
             statistic,
             signal,
@@ -6376,7 +6378,8 @@ fn statement_live_dependencies(
         | MeasureType::Rms { signal, .. }
         | MeasureType::Integ { signal, .. }
         | MeasureType::OnOff { signal, .. }
-        | MeasureType::Fourier { signal, .. } => {
+        | MeasureType::Fourier { signal, .. }
+        | MeasureType::FftMetric { signal, .. } => {
             add_live_operand_dependencies(signal, &mut names, params)
         }
     }
@@ -6535,7 +6538,8 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
             | MeasureType::OnOff { signal, .. }
-            | MeasureType::Fourier { signal, .. } => add(signal),
+            | MeasureType::Fourier { signal, .. }
+            | MeasureType::FftMetric { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -6671,7 +6675,8 @@ fn materialize_differential_voltage_signals(
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
             | MeasureType::OnOff { signal, .. }
-            | MeasureType::Fourier { signal, .. } => add(signal),
+            | MeasureType::Fourier { signal, .. }
+            | MeasureType::FftMetric { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -6774,6 +6779,31 @@ pub fn evaluate_tran_measurements_with_abort(
         }
     }
     Ok(measurements)
+}
+
+/// Evaluate `.MEASURE FFT` statements over the spectra of a transient's
+/// `.FFT` cards.
+pub fn evaluate_fft_measurements_with_abort(
+    netlist: &Netlist,
+    spectra: &[super::transient::TransientFftResult],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<MeasureResult>, SimulationError> {
+    let statements = measurements_for_analysis(netlist, "FFT");
+    if statements.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut engine = MeasureEngine::new();
+    for statement in statements {
+        engine.add(statement.clone());
+    }
+    engine.evaluate_spectra(
+        spectra,
+        MeasureParameters {
+            base: &netlist.params,
+            rows: None,
+        },
+        abort,
+    )
 }
 
 /// Rewrite a measurement's "signal not found" into the private-endpoint
@@ -7344,7 +7374,8 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::Param { .. }
         | MeasureType::Integ { .. }
         | MeasureType::OnOff { .. }
-        | MeasureType::Fourier { .. } => None,
+        | MeasureType::Fourier { .. }
+        | MeasureType::FftMetric { .. } => None,
     };
     if let Some((Some(from), Some(to))) = bounds
         && *from > *to

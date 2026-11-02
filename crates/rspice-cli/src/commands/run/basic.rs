@@ -1052,6 +1052,21 @@ pub(super) fn finish_transient_result(
         })?,
     };
     ctx.record_measurements("TRAN", measurements)?;
+    // `.MEASURE FFT` statistics read the spectra of the run's `.FFT` cards.
+    let spectra = match post_results {
+        Some(post) => &post.fft,
+        None => &result.fft_results,
+    };
+    let fft_measurements = rspice_core::analysis::evaluate_fft_measurements_with_abort(
+        ctx.netlist,
+        spectra,
+        &crate::abort::ProcessAbort,
+    )
+    .map_err(|source| CliError::CoreSimulationError {
+        source,
+        analysis: Some("FFT measurement projection".to_string()),
+    })?;
+    ctx.record_measurements("FFT", fft_measurements)?;
     let continuous_measurements = match post_results {
         Some(post) => post.continuous_measurements.clone(),
         None => rspice_core::analysis::evaluate_tran_continuous_measurements_with_limits_and_abort(

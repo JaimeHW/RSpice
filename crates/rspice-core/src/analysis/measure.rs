@@ -26,6 +26,7 @@ use std::collections::HashMap;
 pub(crate) mod continuous;
 pub(crate) mod events;
 mod fourier;
+mod spectrum;
 
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
 /// it walks, the dependent signals it can name, and the index at which each
@@ -970,6 +971,41 @@ impl MeasureEngine {
         Ok(results)
     }
 
+    /// Evaluate `.MEASURE FFT` statements: each statistic reads the last
+    /// `.FFT` of its output, and a PARAM or EQN then reads the results
+    /// before it by name, once, as Xyce evaluates them after the spectra
+    /// (N_IO_MeasureManager.C:486-525).
+    pub(crate) fn evaluate_spectra(
+        &self,
+        spectra: &[crate::analysis::transient::TransientFftResult],
+        params: MeasureParameters<'_>,
+        abort: &dyn crate::abort_signal::AbortSignal,
+    ) -> Result<Vec<MeasureResult>, crate::SimulationError> {
+        let mut results = self
+            .measurements
+            .iter()
+            .map(|m| match &m.measure_type {
+                MeasureType::Param { .. } | MeasureType::Equation { .. } => {
+                    MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
+                }
+                _ => spectrum::evaluate(m, spectra).check_contract(m),
+            })
+            .collect::<Vec<_>>();
+        for (idx, m) in self.measurements.iter().enumerate() {
+            continuous::poll(abort, idx)?;
+            if let MeasureType::Param { expression } | MeasureType::Equation { expression, .. } =
+                &m.measure_type
+            {
+                results[idx] = self
+                    .eval_param(&m.name, expression, &results, params, 0, abort)?
+                    .check_contract(m);
+            }
+        }
+        let statements = self.measurements.iter().collect::<Vec<_>>();
+        super::measure_units::annotate(&statements, &mut results, None, &HashMap::new());
+        Ok(results)
+    }
+
     fn fail_all(&self, reason: &str) -> Vec<MeasureResult> {
         self.measurements
             .iter()
@@ -1218,6 +1254,10 @@ impl MeasureEngine {
                 delayed_window_start(*from, *td, data.axis),
                 *to,
                 data,
+            ),
+            MeasureType::FftMetric { .. } => MeasureResult::failed(
+                &measurement.name,
+                "ENOB, SFDR, SNR, SNDR and THD read a .FFT spectrum, as .MEASURE FFT",
             ),
             MeasureType::Fourier {
                 signal,

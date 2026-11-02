@@ -3571,6 +3571,24 @@ pub(super) fn parse_meas_command(
                         td,
                     }
                 }
+                "ENOB" | "SFDR" | "SNR" | "SNDR" | "THD" => {
+                    let options =
+                        parse_measure_fft_options(stream, line_num, params, &measure_type_key)?;
+                    MeasureType::FftMetric {
+                        metric: match measure_type_key.as_str() {
+                            "ENOB" => crate::netlist::measure::FftMetric::Enob,
+                            "SFDR" => crate::netlist::measure::FftMetric::Sfdr,
+                            "SNR" => crate::netlist::measure::FftMetric::Snr,
+                            "SNDR" => crate::netlist::measure::FftMetric::Sndr,
+                            _ => crate::netlist::measure::FftMetric::Thd,
+                        },
+                        signal: signal.clone(),
+                        bin_size: options.bin_size,
+                        min_freq: options.min_freq,
+                        max_freq: options.max_freq,
+                        harmonics: options.harmonics,
+                    }
+                }
                 "FOUR" => {
                     let options = parse_measure_fourier_options(stream, line_num, params)?;
                     MeasureType::Fourier {
@@ -4891,6 +4909,88 @@ pub(super) fn parse_measure_range_options(
     }
 
     Ok((from, to, td))
+}
+
+/// The bins and band of a Xyce `.MEASURE FFT` `ENOB`, `SFDR`, `SNR`, `SNDR`
+/// or `THD` (N_IO_MeasureBase.C:508-524). `BINSIZ` defaults to 0, and Xyce
+/// reads it and `NBHARM` as integers.
+struct FftMetricOptions {
+    bin_size: usize,
+    min_freq: Option<crate::Value>,
+    max_freq: Option<crate::Value>,
+    harmonics: Option<i64>,
+}
+
+fn parse_measure_fft_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    kind: &str,
+) -> Result<FftMetricOptions, ParseError> {
+    let mut options = FftMetricOptions {
+        bin_size: 0,
+        min_freq: None,
+        max_freq: None,
+        harmonics: None,
+    };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
+            continue;
+        }
+        if matches!(stream.peek().kind, TokenKind::Comma) {
+            stream.advance();
+            continue;
+        }
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token '{}' after .MEAS {kind} operand",
+                    stream.peek().kind
+                ),
+            });
+        };
+        let key = key.to_ascii_uppercase();
+        if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
+            break;
+        }
+        if !matches!(key.as_str(), "BINSIZ" | "MINFREQ" | "MAXFREQ" | "NBHARM") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{key}' after .MEAS {kind} operand"),
+            });
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {key} in .MEAS {kind}"),
+            });
+        }
+        let value = expect_measure_value(stream, line_num, params)?;
+        let whole = value.is_finite() && value.fract() == 0.0;
+        match key.as_str() {
+            "BINSIZ" if whole && value >= 0.0 => options.bin_size = value as usize,
+            "BINSIZ" => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        ".MEAS {kind} BINSIZ must be a whole number of bins, got {value}"
+                    ),
+                });
+            }
+            "MINFREQ" => options.min_freq = Some(value),
+            "MAXFREQ" => options.max_freq = Some(value),
+            _ if whole => options.harmonics = Some(value as i64),
+            _ => {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(".MEAS {kind} NBHARM must be an integer, got {value}"),
+                });
+            }
+        }
+    }
+    Ok(options)
 }
 
 /// The fundamental, harmonic count, grid and window of a Xyce `FOUR`
@@ -9329,6 +9429,47 @@ mod tests {
         let error = Netlist::parse(&deck(".measure tran d four v(1) at=-1"))
             .expect_err("a negative AT is refused");
         assert!(error.to_string().contains("AT"), "{error}");
+    }
+
+    /// Xyce's `.MEASURE FFT` statistics take `BINSIZ`, `MINFREQ`, `MAXFREQ`
+    /// and `NBHARM` (N_IO_MeasureBase.C:508-524), with BINSIZ 0 by default.
+    #[test]
+    fn xyce_fft_measures_parse_their_bins_and_band() {
+        use crate::netlist::measure::{FftMetric, MeasureType};
+        let netlist = Netlist::parse(
+            "fft\nV1 1 0 1\nR1 1 0 1\n.tran 0 1\n.fft v(1) np=8\n\
+             .measure fft e enob v(1)\n\
+             .measure fft s sfdr v(1) minfreq=2 maxfreq=3 binsiz=1\n\
+             .measure fft n snr v(1) maxfreq=2\n\
+             .measure fft d sndr v(1)\n\
+             .measure fft t thd v(1) nbharm=3\n.end\n",
+        )
+        .expect("FFT measures parse");
+        let shapes = netlist
+            .measurements
+            .iter()
+            .map(|statement| match &statement.measure_type {
+                MeasureType::FftMetric {
+                    metric,
+                    bin_size,
+                    min_freq,
+                    max_freq,
+                    harmonics,
+                    ..
+                } => (*metric, *bin_size, *min_freq, *max_freq, *harmonics),
+                other => panic!("expected an FFT measure, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            shapes,
+            [
+                (FftMetric::Enob, 0, None, None, None),
+                (FftMetric::Sfdr, 1, Some(2.0), Some(3.0), None),
+                (FftMetric::Snr, 0, None, Some(2.0), None),
+                (FftMetric::Sndr, 0, None, None, None),
+                (FftMetric::Thd, 0, None, None, Some(3)),
+            ]
+        );
     }
 
     /// Xyce reads `agauss` at its mean outside a sampling analysis (the

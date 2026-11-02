@@ -343,6 +343,23 @@ pub enum OnOffStatistic {
     Frequency,
 }
 
+/// The figure a Xyce `.MEASURE FFT` statistic reads from the spectrum of a
+/// `.FFT` (N_IO_MeasureFFT.C).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FftMetric {
+    /// `ENOB`: the effective number of bits, `(SNDR - 1.76) / 6.02`.
+    Enob,
+    /// `SFDR`: the first harmonic over the largest spur, in dB.
+    Sfdr,
+    /// `SNR`: the first harmonic over the bins that are not its harmonics,
+    /// in dB.
+    Snr,
+    /// `SNDR`: the first harmonic over every other bin, in dB.
+    Sndr,
+    /// `THD`: the harmonics over the first harmonic, in dB.
+    Thd,
+}
+
 /// Type of measurement to perform
 #[derive(Debug, Clone)]
 pub enum MeasureType {
@@ -533,6 +550,24 @@ pub enum MeasureType {
         /// `MINVAL`: Xyce's window tolerance.
         minval: Value,
     },
+
+    /// Xyce `.MEASURE FFT` `ENOB`, `SFDR`, `SNR`, `SNDR` and `THD`: a figure
+    /// of the spectrum of the last `.FFT` of the same output
+    /// (N_IO_MeasureManager.C:486-525, N_IO_FFTAnalysis.C:801-990).
+    FftMetric {
+        metric: FftMetric,
+        signal: String,
+        /// `BINSIZ`: the bins on each side of the first harmonic that count
+        /// as signal for ENOB, SFDR and SNDR (Xyce default 0).
+        bin_size: usize,
+        /// `MINFREQ`: the lowest frequency SFDR searches.
+        min_freq: Option<Value>,
+        /// `MAXFREQ`: the highest frequency SFDR searches and SNR and THD
+        /// count harmonics to (Xyce default: half the points).
+        max_freq: Option<Value>,
+        /// `NBHARM`: the harmonics THD counts.
+        harmonics: Option<i64>,
+    },
 }
 
 /// Per-statement Xyce measurement-output routing.
@@ -635,7 +670,8 @@ impl MeasureStatement {
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
             | MeasureType::OnOff { signal, .. }
-            | MeasureType::Fourier { signal, .. } => rewrite(signal, policy),
+            | MeasureType::Fourier { signal, .. }
+            | MeasureType::FftMetric { signal, .. } => rewrite(signal, policy),
         }
     }
 }

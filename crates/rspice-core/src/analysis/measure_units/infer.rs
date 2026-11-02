@@ -108,6 +108,10 @@ impl Inference<'_> {
             }
             MeasureType::ErrorFunction { .. } => known("1"),
             MeasureType::Fourier { .. } => known("1"),
+            MeasureType::FftMetric { metric, .. } => match metric {
+                crate::netlist::measure::FftMetric::Enob => known("1"),
+                _ => known("dB"),
+            },
             MeasureType::OnOff { statistic, .. } => match statistic {
                 crate::netlist::measure::OnOffStatistic::Duty => known("1"),
                 crate::netlist::measure::OnOffStatistic::Frequency => known("Hz"),
