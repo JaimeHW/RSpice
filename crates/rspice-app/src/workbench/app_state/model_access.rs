@@ -146,11 +146,6 @@ impl AppState {
         self.model.active_design_check_status(self.slot_facts())
     }
 
-    pub(crate) fn simulation_root_design_check_status(&self) -> DesignCheckStatus<'_> {
-        self.model
-            .simulation_root_design_check_status(self.slot_facts())
-    }
-
     #[cfg(test)]
     pub(in crate::workbench) fn current_design_check(
         &self,

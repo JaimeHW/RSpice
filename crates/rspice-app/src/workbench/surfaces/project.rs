@@ -159,7 +159,11 @@ pub(in crate::workbench) fn show_landing(ui: &mut Ui, app: &mut RSpiceApp) {
 pub(in crate::workbench) fn page(ui: &mut Ui, app: &mut RSpiceApp) {
     let page = app.state.project.project_page;
     let panel = ui.scope(|ui| match page {
-        ProjectPage::Overview => overview::overview(ui, app),
+        // The Overview is the page in front, so its context holds the
+        // dispatcher's answers for the commands its rows offer.
+        ProjectPage::Overview => {
+            overview::overview(ui, &mut features::cx_with_foreign_answers(app, |_| true))
+        }
         // The Library page carries out what the reader asked of it between
         // its own calls, which the shell still does over the application.
         ProjectPage::Library => library::library(ui, app),
@@ -1196,6 +1200,78 @@ mod tests {
         );
         let painted = painted_text(&clicked);
         assert!(painted.contains(&second), "{painted}");
+    }
+
+    /// The label of the control `output` announces whose label starts with
+    /// `prefix`.
+    fn announced_starting(output: &egui::FullOutput, prefix: &str) -> String {
+        output
+            .platform_output
+            .accesskit_update
+            .as_ref()
+            .expect("the frame publishes its tree")
+            .nodes
+            .iter()
+            .find_map(|(_, node)| node.label().filter(|label| label.starts_with(prefix)))
+            .unwrap_or_else(|| panic!("the frame announces a control starting `{prefix}`"))
+            .to_owned()
+    }
+
+    /// History… on the Overview runs its command as the page returns, inside
+    /// the stage's step of the frame: the revision history is open before the
+    /// frame draws its dialogs, so it shows in the frame it was asked for in.
+    #[test]
+    fn overview_history_opens_before_the_frame_draws_its_dialogs() {
+        let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
+        assert!(!app.state.project.project_revision_history.open);
+
+        click_announced(&ctx, &mut app, settled, "History\u{2026}");
+
+        assert!(app.state.project.project_revision_history.open);
+    }
+
+    /// The latest run on the Overview is selected and its workspace opened as
+    /// the page returns, inside the stage's step of the frame that took the
+    /// click.
+    #[test]
+    fn overview_latest_run_opens_its_workspace_in_the_frame_it_was_clicked_in() {
+        let (ctx, mut app, _) = settled_on(ProjectPage::Overview);
+        app.state.model.simulation.start_run();
+        let mut settled = project_frame(&ctx, &mut app, Vec::new());
+        for _ in 0..2 {
+            settled = project_frame(&ctx, &mut app, Vec::new());
+        }
+        let latest_run = announced_starting(&settled, "Latest run:");
+
+        click_announced(&ctx, &mut app, settled, &latest_run);
+
+        assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
+        assert_eq!(app.state.model.simulation.view.active_run_idx, Some(0));
+    }
+
+    /// Open top schematic and the schematic checks row on the Overview open
+    /// the project's root in Design as the page returns, inside the stage's
+    /// step of the frame that took the click.
+    #[test]
+    fn overview_root_actions_open_the_root_in_the_frame_they_were_clicked_in() {
+        for label in ["Open top schematic", "Schematic checks:"] {
+            let (ctx, mut app, settled) = settled_on(ProjectPage::Overview);
+            let label = announced_starting(&settled, label);
+            let project = &app.state.model.workspace.content.project;
+            let root = crate::state::CellViewRef::new(
+                &project.root_library,
+                &project.top_cell,
+                crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
+            );
+
+            click_announced(&ctx, &mut app, settled, &label);
+
+            assert_eq!(app.state.workbench.workspace, Workspace::Design, "{label}");
+            assert_eq!(
+                app.state.model.workspace.content.active_view, root,
+                "{label}"
+            );
+        }
     }
 
     /// Model paths… on the Dependencies page is answered as the page returns,

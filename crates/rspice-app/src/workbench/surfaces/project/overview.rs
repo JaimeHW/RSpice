@@ -16,14 +16,15 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem, paint_problem_mark};
-use crate::workbench::RSpiceApp;
-use crate::workbench::app_state::DesignCheckStatus;
+use crate::workbench::app_state::{DesignCheckStatus, Model};
 use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::design_system::{property_row, property_row_problem};
 use crate::workbench::framework::command_registry::{CommandAvailability, ids};
+use crate::workbench::framework::feature::Cx;
 use crate::workbench::lifecycle::project_lifecycle::dirty_document_count;
-use crate::workbench::project::commands::ProjectCommand;
+use crate::workbench::project::commands::{ProjectCommand, ProjectRequest};
 use crate::workbench::project::workspace_state::ProjectPage;
+use crate::workbench::project::{ProjectFeature, lifecycle_view, slot_facts};
 use crate::workbench::state::Workspace;
 use rspice_design::drc::DrcSeverity;
 
@@ -99,32 +100,35 @@ struct StatusSnapshot {
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum OverviewIntent {
     Command(CommandKey),
-    ProjectRootCommand(Command),
+    CheckProjectRoot,
     OpenProjectRoot,
     OpenProjectModels,
     OpenRun(usize),
 }
 
 impl OverviewIntent {
-    fn execute(self, app: &mut RSpiceApp) {
+    /// Ask for what the reader asked of the page: a command runs, and what
+    /// only the shell carries out is raised for it, as the page returns.
+    fn raise(self, cx: &mut Cx<'_, ProjectFeature>) {
         match self {
-            Self::Command(key) => app.execute_command_key(key),
-            Self::ProjectRootCommand(command) => {
-                open_project_root(app);
-                if command.is_enabled(app) {
-                    command.execute(app);
-                }
+            Self::Command(key) => cx.execute(key),
+            Self::CheckProjectRoot => {
+                let root = project_root(cx.model);
+                cx.wb.outbox.push(ProjectRequest::OpenRootAndCheck(root));
             }
-            Self::OpenProjectRoot => open_project_root(app),
+            Self::OpenProjectRoot => {
+                let root = project_root(cx.model);
+                cx.wb
+                    .outbox
+                    .push(ProjectRequest::OpenView(root, ViewType::Schematic));
+            }
             Self::OpenProjectModels => {
-                app.state
-                    .workbench
+                cx.wb
                     .outbox
                     .push(crate::workbench::framework::requests::ShowProjectModels);
             }
             Self::OpenRun(index) => {
-                let has_retained_dataset = app
-                    .state
+                let has_retained_dataset = cx
                     .model
                     .simulation
                     .retained
@@ -133,10 +137,10 @@ impl OverviewIntent {
                     .is_some_and(|run| !run.analyses.is_empty());
                 let destination = run_destination(
                     has_retained_dataset,
-                    app.state.is_netlist_first_without_schematic(),
+                    cx.model.is_netlist_first_without_schematic(),
                 );
-                if app.state.model.simulation.select_run(index) {
-                    Command::OpenWorkspace(destination).execute(app);
+                if cx.model.simulation.select_run(index) {
+                    cx.execute(Command::OpenWorkspace(destination).key());
                 }
             }
         }
@@ -262,18 +266,16 @@ pub(super) const fn run_destination(has_retained_dataset: bool, netlist_first: b
     }
 }
 
-fn command_gate(app: &RSpiceApp, key: CommandKey) -> (bool, Option<&'static str>) {
-    match app.command_availability(key) {
+fn command_gate(cx: &Cx<'_, ProjectFeature>, key: CommandKey) -> (bool, Option<&'static str>) {
+    match cx.foreign_availability(key) {
         CommandAvailability::Available => (true, None),
         CommandAvailability::Disabled(reason) => (false, Some(reason)),
         CommandAvailability::Hidden => (false, Some("this action is unavailable in this context")),
     }
 }
 
-fn source_deck_snapshot(
-    state: &crate::workbench::app_state::AppState,
-) -> Option<SourceDeckSnapshot> {
-    let document = state.model.workspace.content.netlist_document.as_ref()?;
+fn source_deck_snapshot(model: &Model) -> Option<SourceDeckSnapshot> {
+    let document = model.workspace.content.netlist_document.as_ref()?;
     let name = document
         .provenance()
         .imported()
@@ -284,8 +286,7 @@ fn source_deck_snapshot(
                 .map(|saved| saved.origin().display_name().to_owned())
         })
         .or_else(|| {
-            state
-                .model
+            model
                 .workspace
                 .content
                 .netlist_source_path
@@ -397,35 +398,34 @@ fn source_deck_snapshot(
 }
 
 impl OverviewSnapshot {
-    fn capture(app: &RSpiceApp) -> Self {
-        let state = &app.state;
-        let project = &state.model.workspace.content.project;
-        let dirty_documents = dirty_document_count(state);
-        let netlist_first = state.is_netlist_first_without_schematic();
-        let source_deck = source_deck_snapshot(state);
-        let configuration = configuration_snapshot(app);
-        let checks = checks_snapshot(app);
-        let models = model_snapshot(app);
-        let library_count = state.model.library_manager.library_count();
-        let model_library_count = state.model.model_library_manager.library_count();
-        let cell_count = state.model.library_manager.total_cell_count();
-        let view_count = state.model.library_manager.total_view_count();
+    fn capture(cx: &Cx<'_, ProjectFeature>) -> Self {
+        let project = &cx.model.workspace.content.project;
+        let dirty_documents =
+            dirty_document_count(&lifecycle_view(cx.model, cx.platform, cx.wb, &cx.peers));
+        let netlist_first = cx.model.is_netlist_first_without_schematic();
+        let source_deck = source_deck_snapshot(cx.model);
+        let configuration = configuration_snapshot(cx);
+        let checks = checks_snapshot(cx);
+        let models = model_snapshot(cx);
+        let library_count = cx.model.library_manager.library_count();
+        let model_library_count = cx.model.model_library_manager.library_count();
+        let cell_count = cx.model.library_manager.total_cell_count();
+        let view_count = cx.model.library_manager.total_view_count();
         let root_reference = CellViewRef::new(
             &project.root_library,
             &project.top_cell,
             crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
         );
-        let root_schematic = if state.model.workspace.content.active_view == root_reference {
-            Some(state.model.schematic.editor_ref().design)
+        let root_schematic = if cx.model.workspace.content.active_view == root_reference {
+            Some(cx.model.schematic.editor_ref().design)
         } else {
-            state
-                .model
+            cx.model
                 .workspace
                 .content
                 .schematic_buffers
                 .get(&root_reference.key())
         };
-        let root_sheet_count = state
+        let root_sheet_count = cx
             .model
             .workspace
             .content
@@ -441,10 +441,10 @@ impl OverviewSnapshot {
             rspice_design::connectivity::summary::design_nets(schematic).len()
         });
 
-        let latest_run_status = state.model.simulation.retained.runs.first().map_or_else(
+        let latest_run_status = cx.model.simulation.retained.runs.first().map_or_else(
             || {
                 let command = Command::OpenWorkspace(run_destination(false, netlist_first));
-                let (enabled, disabled_reason) = command_gate(app, command.key());
+                let (enabled, disabled_reason) = command_gate(cx, command.key());
                 StatusSnapshot {
                     area: "Latest run",
                     state: "No retained run".to_owned(),
@@ -473,7 +473,7 @@ impl OverviewSnapshot {
                 let has_dataset = !run.analyses.is_empty();
                 let destination = run_destination(has_dataset, netlist_first);
                 let (enabled, disabled_reason) =
-                    command_gate(app, Command::OpenWorkspace(destination).key());
+                    command_gate(cx, Command::OpenWorkspace(destination).key());
                 StatusSnapshot {
                     area: "Latest run",
                     state: format!(
@@ -505,11 +505,11 @@ impl OverviewSnapshot {
         );
 
         let (configuration_enabled, configuration_disabled_reason) =
-            command_gate(app, Command::ConfigurationSets.key());
-        let (models_enabled, models_disabled_reason) = command_gate(app, ids::MODELS_CATALOG);
+            command_gate(cx, Command::ConfigurationSets.key());
+        let (models_enabled, models_disabled_reason) = command_gate(cx, ids::MODELS_CATALOG);
         let primary_status = if netlist_first {
             let (enabled, disabled_reason) =
-                command_gate(app, Command::OpenWorkspace(Workspace::Netlist).key());
+                command_gate(cx, Command::OpenWorkspace(Workspace::Netlist).key());
             source_deck.as_ref().map_or_else(
                 || StatusSnapshot {
                     area: "Source deck",
@@ -537,14 +537,14 @@ impl OverviewSnapshot {
                 },
             )
         } else {
-            let enabled = state.platform.project_lifecycle.is_open();
+            let enabled = cx.platform.project_lifecycle.is_open();
             StatusSnapshot {
                 area: "Schematic checks",
                 state: checks.state,
                 detail: checks.detail,
                 action: "Run checks",
                 tone: checks.tone,
-                intent: OverviewIntent::ProjectRootCommand(Command::CheckDesign),
+                intent: OverviewIntent::CheckProjectRoot,
                 enabled,
                 disabled_reason: (!enabled).then_some("no project is open"),
             }
@@ -586,10 +586,10 @@ impl OverviewSnapshot {
                 |deck| deck.problem.clone(),
             )
         } else {
-            problem_snapshot(app)
+            problem_snapshot(cx)
         };
 
-        let open_documents = state
+        let open_documents = cx
             .model
             .workspace
             .content
@@ -598,14 +598,14 @@ impl OverviewSnapshot {
             .map(|document| OpenDocumentSnapshot {
                 reference: document.reference.clone(),
                 view_type: document.view_type,
-                active: document.reference == state.model.workspace.content.active_view,
+                active: document.reference == cx.model.workspace.content.active_view,
                 dirty: document.dirty,
             })
             .collect();
 
         let now_ms =
             u64::try_from(crate::time_compat::unix_epoch().as_millis()).unwrap_or(u64::MAX);
-        let mut operations = state
+        let mut operations = cx
             .model
             .simulation
             .retained
@@ -650,8 +650,8 @@ impl OverviewSnapshot {
             })
             .collect::<Vec<_>>();
         let mut retained_revision_ids = BTreeSet::new();
-        for schematic in std::iter::once(state.model.schematic.editor_ref().design)
-            .chain(state.model.workspace.content.schematic_buffers.values())
+        for schematic in std::iter::once(cx.model.schematic.editor_ref().design)
+            .chain(cx.model.workspace.content.schematic_buffers.values())
         {
             for revision in schematic
                 .document()
@@ -696,7 +696,7 @@ impl OverviewSnapshot {
         // *mutation* receipts beside them are deliberately absent: they record a
         // sequence and no timestamp, so this time-ordered register could only
         // show them by inventing a `when` for them.
-        for publication in state
+        for publication in cx
             .model
             .workspace
             .content
@@ -732,16 +732,15 @@ impl OverviewSnapshot {
         // Counted from the retained records themselves, not from what the loops
         // above collected: each of those is capped, so reporting their length
         // would describe the cap rather than the project.
-        let retained_revision_total = std::iter::once(state.model.schematic.editor_ref().design)
-            .chain(state.model.workspace.content.schematic_buffers.values())
+        let retained_revision_total = std::iter::once(cx.model.schematic.editor_ref().design)
+            .chain(cx.model.workspace.content.schematic_buffers.values())
             .flat_map(|schematic| schematic.document().validated_revisions.records().iter())
             .map(|revision| revision.id().as_uuid())
             .collect::<BTreeSet<_>>()
             .len();
-        let operation_total = state.model.simulation.retained.runs.len()
+        let operation_total = cx.model.simulation.retained.runs.len()
             + retained_revision_total
-            + state
-                .model
+            + cx.model
                 .workspace
                 .content
                 .project
@@ -758,8 +757,8 @@ impl OverviewSnapshot {
             project_id: project.id().to_string(),
             project_revision: project.revision().get(),
             schema_version: project.schema_version(),
-            path: project_persistence_location(app),
-            persistence_bound: state.platform.project_lifecycle.binding().is_some(),
+            path: project_persistence_location(cx),
+            persistence_bound: cx.platform.project_lifecycle.binding().is_some(),
             descriptor_root: format!("{}/{}", project.root_library, project.top_cell),
             simulation_root: configuration.root.clone(),
             technology: project.technology_binding().map_or_else(
@@ -783,7 +782,7 @@ impl OverviewSnapshot {
             open_documents,
             operations,
             operation_total,
-            run_plan_name: state.model.sim_setup.active_plan_name().as_str().to_owned(),
+            run_plan_name: cx.model.sim_setup.active_plan_name().as_str().to_owned(),
             execution_target: crate::state::ExecutionTarget::current().label().to_owned(),
         }
     }
@@ -809,22 +808,26 @@ struct DrcCounts {
 /// centred content column on the application ground — and projects the
 /// dashboard as bordered cards that size to their content, so a sparse
 /// project shows page ground below the cards rather than stretched panels.
-pub(super) fn overview(ui: &mut Ui, app: &mut RSpiceApp) {
-    let snapshot = OverviewSnapshot::capture(app);
+/// The Overview page, over the dispatcher's answers the context holds for
+/// the commands its rows offer. What the reader asked of it is raised as the
+/// page returns, and the shell carries it out straight after.
+pub(super) fn overview(ui: &mut Ui, cx: &mut Cx<'_, ProjectFeature>) {
+    let snapshot = OverviewSnapshot::capture(cx);
     let mut intent = None;
+    let shown = &*cx;
     page::show(
         ui,
         "workbench.project.overview.page",
         |ui, inset, content_width| {
             retain_first_intent(
                 &mut intent,
-                overview_header(ui, app, &snapshot, inset, content_width),
+                overview_header(ui, shown, &snapshot, inset, content_width),
             );
-            overview_body(ui, app, &snapshot, &mut intent, inset, content_width);
+            overview_body(ui, shown, &snapshot, &mut intent, inset, content_width);
         },
     );
     if let Some(intent) = intent {
-        intent.execute(app);
+        intent.raise(cx);
     }
 }
 
@@ -836,7 +839,7 @@ fn retain_first_intent(slot: &mut Option<OverviewIntent>, candidate: Option<Over
 
 fn overview_body(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     snapshot: &OverviewSnapshot,
     intent: &mut Option<OverviewIntent>,
     inset: f32,
@@ -855,7 +858,7 @@ fn overview_body(
                     status_card(left, &snapshot.statuses, snapshot.problem.as_ref()),
                 );
                 left.add_space(CARD_GAP);
-                retain_first_intent(&mut left_intent, design_card(left, app, snapshot));
+                retain_first_intent(&mut left_intent, design_card(left, cx, snapshot));
             },
             |right| {
                 retain_first_intent(&mut right_intent, context_card(right, snapshot));
@@ -874,7 +877,7 @@ fn overview_body(
             ui.add_space(CARD_GAP);
             retain_first_intent(intent, context_card(ui, snapshot));
             ui.add_space(CARD_GAP);
-            retain_first_intent(intent, design_card(ui, app, snapshot));
+            retain_first_intent(intent, design_card(ui, cx, snapshot));
             ui.add_space(CARD_GAP);
             retain_first_intent(intent, operations_card(ui, snapshot));
         });
@@ -920,7 +923,7 @@ fn project_status_summary(statuses: &[StatusSnapshot], tone: Tone) -> String {
 /// same header rhythm as the workbench landing surfaces.
 fn overview_header(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     snapshot: &OverviewSnapshot,
     inset: f32,
     content_width: f32,
@@ -1068,7 +1071,7 @@ fn overview_header(
                             format!("Run {}…", snapshot.run_plan_name)
                         };
                         let command = Command::OpenWorkspace(Workspace::Simulate);
-                        let (enabled, disabled_reason) = command_gate(app, command.key());
+                        let (enabled, disabled_reason) = command_gate(cx, command.key());
                         let run_plan = Button::new(&run_label).enabled(enabled).show(ui);
                         let run_plan = disabled_reason.map_or(run_plan.clone(), |reason| {
                             run_plan.on_disabled_hover_text(reason)
@@ -1078,23 +1081,22 @@ fn overview_header(
                         }
                     }
                     let (new_cell_command_enabled, new_cell_command_reason) =
-                        command_gate(app, ProjectCommand::NewCell.key());
-                    let has_writable_library = app
-                        .state
+                        command_gate(cx, ProjectCommand::NewCell.key());
+                    let has_writable_library = cx
                         .model
                         .library_manager
                         .libraries_sorted()
                         .iter()
                         .any(|library| !library.read_only);
                     let new_cell_allowed = new_cell_command_enabled
-                        && !app.state.model.safe_mode.project_read_only()
+                        && !cx.model.safe_mode.project_read_only()
                         && has_writable_library;
                     let new_cell = Button::new("New cell…")
                         .enabled(new_cell_allowed)
                         .show(ui)
                         .on_disabled_hover_text(if let Some(reason) = new_cell_command_reason {
                             reason
-                        } else if app.state.model.safe_mode.project_read_only() {
+                        } else if cx.model.safe_mode.project_read_only() {
                             "Safe mode opened this project read-only."
                         } else if !has_writable_library {
                             "Attach or create a writable design library first."
@@ -1105,7 +1107,7 @@ fn overview_header(
                         intent = Some(OverviewIntent::Command(ProjectCommand::NewCell.key()));
                     }
                     let (open_deck_enabled, open_deck_disabled_reason) =
-                        command_gate(app, Command::OpenNetlist.key());
+                        command_gate(cx, Command::OpenNetlist.key());
                     let import_deck = Button::new("Import deck…")
                         .enabled(open_deck_enabled)
                         .show(ui);
@@ -1117,7 +1119,7 @@ fn overview_header(
                         intent = Some(import_deck_intent());
                     }
                     let (history_enabled, history_disabled_reason) =
-                        command_gate(app, ProjectCommand::RevisionHistory.key());
+                        command_gate(cx, ProjectCommand::RevisionHistory.key());
                     let history = Button::new("History…").enabled(history_enabled).show(ui);
                     let history = history_disabled_reason.map_or(history.clone(), |reason| {
                         history.on_disabled_hover_text(reason)
@@ -1199,20 +1201,18 @@ fn context_card(ui: &mut Ui, snapshot: &OverviewSnapshot) -> Option<OverviewInte
     })
 }
 
-fn open_project_root(app: &mut RSpiceApp) {
-    let reference = CellViewRef::new(
-        &app.state.model.workspace.content.project.root_library,
-        &app.state.model.workspace.content.project.top_cell,
+/// The project's root schematic.
+fn project_root(model: &Model) -> CellViewRef {
+    CellViewRef::new(
+        &model.workspace.content.project.root_library,
+        &model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
-    );
-    app.state.open_workspace_view(reference);
-    Command::OpenWorkspace(Workspace::Design).execute(app);
+    )
 }
 
-fn project_persistence_location(app: &RSpiceApp) -> String {
+fn project_persistence_location(cx: &Cx<'_, ProjectFeature>) -> String {
     let fallback = || {
-        app.state
-            .model
+        cx.model
             .workspace
             .content
             .project
@@ -1223,7 +1223,7 @@ fn project_persistence_location(app: &RSpiceApp) -> String {
                 |path| path.display().to_string(),
             )
     };
-    let Some(binding) = app.state.platform.project_lifecycle.binding() else {
+    let Some(binding) = cx.platform.project_lifecycle.binding() else {
         return fallback();
     };
 
@@ -1425,7 +1425,7 @@ fn status_rows(
 
 fn design_card(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     snapshot: &OverviewSnapshot,
 ) -> Option<OverviewIntent> {
     let objects = design_objects(snapshot);
@@ -1444,12 +1444,12 @@ fn design_card(
             singular_or_plural(snapshot.cell_count, "cell", "cells")
         )
     };
-    overview_card(ui, "Design", &meta, |ui| design_register(ui, app, &objects))
+    overview_card(ui, "Design", &meta, |ui| design_register(ui, cx, &objects))
 }
 
 fn design_register(
     ui: &mut Ui,
-    app: &RSpiceApp,
+    cx: &Cx<'_, ProjectFeature>,
     objects: &[DesignObjectSnapshot],
 ) -> Option<OverviewIntent> {
     ui.add_space(7.0);
@@ -1510,7 +1510,7 @@ fn design_register(
                 ui.spacing_mut().item_spacing = vec2(8.0, 8.0);
                 let library_command = ProjectCommand::Page(ProjectPage::Library);
                 let (library_enabled, library_disabled_reason) =
-                    command_gate(app, library_command.key());
+                    command_gate(cx, library_command.key());
                 let library = Button::new("Browse library…")
                     .enabled(library_enabled)
                     .show(ui);
@@ -1522,7 +1522,7 @@ fn design_register(
                 }
                 let configuration_command = Command::ConfigurationSets;
                 let (configuration_enabled, configuration_disabled_reason) =
-                    command_gate(app, configuration_command.key());
+                    command_gate(cx, configuration_command.key());
                 let configuration = Button::new("Configurations")
                     .enabled(configuration_enabled)
                     .show(ui);
@@ -1968,8 +1968,11 @@ fn activity_row(
     response.on_hover_text(format!("{event}\n{detail}"))
 }
 
-fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {
-    match app.state.simulation_root_design_check_status() {
+fn checks_snapshot(cx: &Cx<'_, ProjectFeature>) -> HealthCopy {
+    match cx
+        .model
+        .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
+    {
         DesignCheckStatus::Current(receipt) => {
             let summary = receipt.result.summary();
             drc_copy(
@@ -2001,13 +2004,16 @@ fn checks_snapshot(app: &RSpiceApp) -> HealthCopy {
 }
 
 /// The one project-root finding the status card's strip names, or nothing.
-fn problem_snapshot(app: &RSpiceApp) -> Option<ProblemSnapshot> {
+fn problem_snapshot(cx: &Cx<'_, ProjectFeature>) -> Option<ProblemSnapshot> {
     let root_path = format!(
         "{}/{}",
-        app.state.model.workspace.content.project.root_library,
-        app.state.model.workspace.content.project.top_cell
+        cx.model.workspace.content.project.root_library,
+        cx.model.workspace.content.project.top_cell
     );
-    let result = match app.state.simulation_root_design_check_status() {
+    let result = match cx
+        .model
+        .simulation_root_design_check_status(slot_facts(cx.runs, &cx.peers))
+    {
         DesignCheckStatus::Current(receipt) => &receipt.result,
         DesignCheckStatus::NotRun => {
             return Some(ProblemSnapshot {
@@ -2104,12 +2110,11 @@ fn drc_copy(current: bool, summary: Option<DrcCounts>) -> HealthCopy {
     }
 }
 
-fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
-    let catalog = &app.state.model.workspace.content.configuration_sets;
+fn configuration_snapshot(cx: &Cx<'_, ProjectFeature>) -> ConfigurationSnapshot {
+    let catalog = &cx.model.workspace.content.configuration_sets;
     // With no configuration used for runs the project runs Default: its own
     // top cell through the built-in view list, with no DUT instance.
-    let root = app
-        .state
+    let root = cx
         .model
         .workspace
         .content
@@ -2139,15 +2144,11 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
             tone: Tone::Neutral,
         };
     };
-    let projection = app
-        .state
-        .model
-        .workspace
-        .configuration_execution_projection(
-            &app.state.model.library_manager,
-            &app.state.model.workspace.content.active_view,
-            &app.state.model.schematic,
-        );
+    let projection = cx.model.workspace.configuration_execution_projection(
+        &cx.model.library_manager,
+        &cx.model.workspace.content.active_view,
+        &cx.model.schematic,
+    );
     let (detail, tone) = match projection {
         Ok(projection) => (
             format!(
@@ -2169,8 +2170,8 @@ fn configuration_snapshot(app: &RSpiceApp) -> ConfigurationSnapshot {
     }
 }
 
-fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
-    let manager = &app.state.model.model_library_manager;
+fn model_snapshot(cx: &Cx<'_, ProjectFeature>) -> ModelSnapshot {
+    let manager = &cx.model.model_library_manager;
     let library_count = manager.library_count();
     let model_count = manager.total_model_count();
     let mut sources = BTreeSet::new();
@@ -2180,16 +2181,10 @@ fn model_snapshot(app: &RSpiceApp) -> ModelSnapshot {
         }
     }
     let source_count = sources.len();
-    let scan_errors = &app.state.model.pdk_config.scan_errors;
-    let binding = app
-        .state
-        .model
-        .workspace
-        .content
-        .project
-        .technology_binding();
+    let scan_errors = &cx.model.pdk_config.scan_errors;
+    let binding = cx.model.workspace.content.project.technology_binding();
     let contract_error =
-        binding.and_then(|_| app.state.model.validate_project_technology_contract().err());
+        binding.and_then(|_| cx.model.validate_project_technology_contract().err());
     let source_contract_error = manager.libraries_sorted().into_iter().find_map(|library| {
         if !library.source_authority.has_execution_source() {
             return None;

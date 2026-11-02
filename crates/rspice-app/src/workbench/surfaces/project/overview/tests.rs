@@ -6,9 +6,29 @@
 //! it were the length of the history.
 
 use super::*;
+use crate::workbench::RSpiceApp;
+use crate::workbench::features;
 use crate::workbench::surfaces::project::library_publication::{
     commit_project_library_publication, prepare_project_library_publication,
 };
+
+/// The Overview's snapshot, as the page takes it in the context the shell
+/// lends it, with the dispatcher's answers for the commands its rows offer.
+fn snapshot_of(app: &mut RSpiceApp) -> OverviewSnapshot {
+    OverviewSnapshot::capture(&features::cx_with_foreign_answers(app, |_| true))
+}
+
+/// The project root's finding, as the page reads it in its context.
+fn problem_of(app: &mut RSpiceApp) -> Option<ProblemSnapshot> {
+    problem_snapshot(&features::cx(app))
+}
+
+/// What the reader asked of the Overview, raised in the project feature's
+/// context and carried out as the shell does once the page returns.
+fn raise(app: &mut RSpiceApp, intent: OverviewIntent) {
+    intent.raise(&mut features::cx(app));
+    app.after_contribution();
+}
 
 #[test]
 fn stale_checks_never_reuse_retained_result_copy() {
@@ -91,7 +111,7 @@ fn operations_meta_never_reports_the_display_limit_as_the_history() {
 fn published_library_snapshots_are_retained_project_operations() {
     let mut app = RSpiceApp::test_instance();
     assert!(
-        OverviewSnapshot::capture(&app)
+        snapshot_of(&mut app)
             .operations
             .iter()
             .all(|operation| !operation.event.contains("Library published")),
@@ -109,7 +129,7 @@ fn published_library_snapshots_are_retained_project_operations() {
     commit_project_library_publication(&mut app.state, candidate)
         .expect("durably accepted publication commits");
 
-    let snapshot = OverviewSnapshot::capture(&app);
+    let snapshot = snapshot_of(&mut app);
     let published = snapshot
         .operations
         .iter()
@@ -167,7 +187,10 @@ fn recent_operation_timestamps_fail_closed_and_format_relative_age() {
 #[test]
 fn overview_new_cell_action_opens_the_real_creation_workflow() {
     let mut app = RSpiceApp::test_instance();
-    OverviewIntent::Command(ProjectCommand::NewCell.key()).execute(&mut app);
+    raise(
+        &mut app,
+        OverviewIntent::Command(ProjectCommand::NewCell.key()),
+    );
     assert!(app.state.project.new_cell_dialog);
 }
 
@@ -176,7 +199,10 @@ fn overview_history_action_preserves_project_context() {
     let mut app = RSpiceApp::test_instance();
     app.state.workbench.workspace = Workspace::Project;
     let active = app.state.model.workspace.content.active_view.clone();
-    OverviewIntent::Command(ProjectCommand::RevisionHistory.key()).execute(&mut app);
+    raise(
+        &mut app,
+        OverviewIntent::Command(ProjectCommand::RevisionHistory.key()),
+    );
 
     assert_eq!(app.state.workbench.workspace, Workspace::Project);
     assert_eq!(app.state.model.workspace.content.active_view, active);
@@ -204,7 +230,7 @@ fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
     );
     app.state.workbench.workspace = Workspace::Project;
 
-    let snapshot = OverviewSnapshot::capture(&app);
+    let snapshot = snapshot_of(&mut app);
     let latest_run = snapshot
         .statuses
         .iter()
@@ -219,7 +245,7 @@ fn netlist_first_latest_run_leads_to_the_deck_rather_than_a_blocked_simulate() {
     // Simulate's run preflight reads the schematic a netlist-first project
     // leaves pristine, so routing there would strand the reader.
     assert!(!app.state.can_run_simulation());
-    latest_run.intent.clone().execute(&mut app);
+    raise(&mut app, latest_run.intent.clone());
     assert_eq!(app.state.workbench.workspace, Workspace::Netlist);
 }
 
@@ -236,7 +262,7 @@ fn overview_run_without_a_dataset_returns_to_analyses() {
     let mut app = RSpiceApp::test_instance();
     app.state.model.simulation.start_run();
 
-    OverviewIntent::OpenRun(0).execute(&mut app);
+    raise(&mut app, OverviewIntent::OpenRun(0));
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
 }
@@ -246,7 +272,7 @@ fn overview_run_action_opens_the_plan_without_starting_execution() {
     let mut app = RSpiceApp::test_instance();
     let retained_runs = app.state.model.simulation.retained.runs.len();
 
-    run_plan_intent().execute(&mut app);
+    raise(&mut app, run_plan_intent());
 
     assert_eq!(app.state.workbench.workspace, Workspace::Simulate);
     assert_eq!(
@@ -277,7 +303,7 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
     );
     app.state.workbench.workspace = Workspace::Project;
 
-    let snapshot = OverviewSnapshot::capture(&app);
+    let snapshot = snapshot_of(&mut app);
     let objects = design_objects(&snapshot);
 
     assert!(snapshot.netlist_first);
@@ -313,8 +339,7 @@ fn netlist_first_overview_never_exposes_the_pristine_bootstrap_schematic() {
 #[test]
 fn overview_model_closure_opens_the_models_workspace() {
     let mut app = RSpiceApp::test_instance();
-    OverviewIntent::OpenProjectModels.execute(&mut app);
-    app.after_contribution();
+    raise(&mut app, OverviewIntent::OpenProjectModels);
 
     assert_eq!(app.state.workbench.workspace, Workspace::Models);
 }
@@ -327,7 +352,7 @@ fn current_checks_without_a_retained_result_are_never_green() {
         &app.state.model.workspace.content.project.top_cell,
         crate::state::workspace::DEFAULT_SCHEMATIC_VIEW,
     );
-    let problem = problem_snapshot(&app).expect("checks that have not run are a finding");
+    let problem = problem_of(&mut app).expect("checks that have not run are a finding");
     assert_eq!(problem.code, "NOT RUN");
     assert_eq!(problem.tone, Tone::Warn);
 }
@@ -350,7 +375,7 @@ fn a_clean_project_root_states_no_problem() {
         .publish_active_design_check_result(result)
         .expect("publish project-root design-check receipt");
 
-    assert!(problem_snapshot(&app).is_none());
+    assert!(problem_of(&mut app).is_none());
 }
 
 #[test]
@@ -387,7 +412,7 @@ fn project_problem_selects_the_highest_severity_finding() {
         .publish_active_design_check_result(result)
         .expect("publish project-root design-check receipt");
 
-    let problem = problem_snapshot(&app).expect("a critical violation is a finding");
+    let problem = problem_of(&mut app).expect("a critical violation is a finding");
     assert_eq!(problem.code, "CHK-002");
     assert_eq!(problem.message, "critical finding");
     assert_eq!(problem.tone, Tone::Error);
@@ -395,8 +420,8 @@ fn project_problem_selects_the_highest_severity_finding() {
 
 #[test]
 fn design_register_rows_have_unique_truthful_identities() {
-    let app = RSpiceApp::test_instance();
-    let snapshot = OverviewSnapshot::capture(&app);
+    let mut app = RSpiceApp::test_instance();
+    let snapshot = snapshot_of(&mut app);
     let rows = design_objects(&snapshot);
     let unique = rows
         .iter()
@@ -413,8 +438,8 @@ fn design_register_rows_have_unique_truthful_identities() {
 /// DUT.
 #[test]
 fn overview_states_default_without_a_configuration() {
-    let app = RSpiceApp::test_instance();
-    let snapshot = OverviewSnapshot::capture(&app);
+    let mut app = RSpiceApp::test_instance();
+    let snapshot = snapshot_of(&mut app);
     let project = &app.state.model.workspace.content.project;
 
     assert!(!snapshot.configuration.configured);

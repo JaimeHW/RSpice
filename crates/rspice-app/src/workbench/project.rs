@@ -15,6 +15,7 @@ pub(crate) mod workspace_state;
 use rspice_app_models::veriloga_library::builtin_veriloga_model;
 
 use crate::state::ViewType;
+use crate::state::command_catalog::CommandKey;
 use crate::workbench::app::dialogs::check_and_save::CheckAndSaveParts;
 use crate::workbench::app::dialogs::design_management::{
     DesignManagementParts, DesignManagementTab, open_design_management_on,
@@ -28,9 +29,10 @@ use crate::workbench::app::dialogs::project::configuration_dialogs::{
 };
 use crate::workbench::app::{open_check_and_save_dialog, open_design_management_dialog};
 use crate::workbench::app_state::{Model, PlatformState, SlotFacts};
+use crate::workbench::commands::vocabulary::Command;
 use crate::workbench::docks::inspector::project::{ProjectInspector, ProjectInspectorAction};
 use crate::workbench::docks::navigator::project::ProjectNavigator;
-use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec};
+use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::feature::{
     CommandSet, Cx, Feature, FeatureInspector, FeatureNavigator, FeatureRegistry, NoHandles, Peers,
     Reads,
@@ -46,7 +48,7 @@ use commands::ProjectCommand;
 use library_dialogs::new_view_target;
 use revision_history::open_project_revision_history;
 use rspice_app_runs::workbench::slots::runs::RunsState;
-use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage};
+use workspace_state::{ProjectLauncherFilter, ProjectLauncherPage, ProjectPage};
 
 /// The project feature.
 pub(crate) struct ProjectFeature;
@@ -55,6 +57,18 @@ impl Feature for ProjectFeature {
     type State = ProjectState;
     type Session = WorkbenchSession;
     type Handles = NoHandles;
+    /// The Overview offers these, each drawn as the dispatcher answers it.
+    const FOREIGN_AVAILABILITY: &'static [CommandKey] = &[
+        Command::OpenWorkspace(Workspace::Simulate).key(),
+        Command::OpenWorkspace(Workspace::Results).key(),
+        Command::OpenWorkspace(Workspace::Netlist).key(),
+        Command::ConfigurationSets.key(),
+        ids::MODELS_CATALOG,
+        Command::OpenNetlist.key(),
+        ProjectCommand::NewCell.key(),
+        ProjectCommand::RevisionHistory.key(),
+        ProjectCommand::Page(ProjectPage::Library).key(),
+    ];
 
     fn register(registry: &mut FeatureRegistry<Self>) {
         registry.commands::<ProjectCommand>();
