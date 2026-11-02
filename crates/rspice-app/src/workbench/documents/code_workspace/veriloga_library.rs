@@ -7,7 +7,7 @@
 //! halves before publication or installation.
 //!
 //! Native builds publish the document under the user configuration directory.
-//! Browser builds already persist the complete [`crate::workbench::app_state::AppState`] through
+//! Browser builds already persist the complete application state through
 //! eframe storage; their dedicated filesystem entry points therefore remain
 //! quiet no-ops and never call APIs that abort on `wasm32`.
 
@@ -25,7 +25,7 @@ use crate::state::{
 };
 #[cfg(target_arch = "wasm32")]
 use crate::state::{LibraryManager, ProjectWorkspace};
-use crate::workbench::app_state::Model;
+use rspice_app_state::workbench::app_state::model::Model;
 
 #[cfg(not(target_arch = "wasm32"))]
 const VERILOGA_LIBRARY_CONFIG_FILE: &str = "veriloga_library.json";
@@ -535,12 +535,13 @@ mod tests {
         assert_eq!(restored.closure_digest(), original.closure_digest());
         assert_eq!(restored.root().exact_bytes(), original.root().exact_bytes());
         assert_eq!(restored.files(), original.files());
-        let receipt = crate::workbench::app_state::model::compile_project_bundle_receipt(
-            crate::product::ProjectId::new(),
-            restored,
-            Some("rspice_precision_amp_va"),
-        )
-        .expect("restored closure compiles without filesystem access");
+        let receipt =
+            rspice_app_state::workbench::app_state::model::compile_project_bundle_receipt(
+                crate::product::ProjectId::new(),
+                restored,
+                Some("rspice_precision_amp_va"),
+            )
+            .expect("restored closure compiles without filesystem access");
         assert_eq!(receipt.compilation.token().bundle_id, original.id());
         assert_eq!(
             receipt.compilation.token().closure_digest,

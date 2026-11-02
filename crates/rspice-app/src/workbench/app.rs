@@ -28,7 +28,7 @@ use crate::workbench::commands::vocabulary::command_registry;
 use egui::Context;
 
 use crate::workbench::app_state::AppState;
-use crate::workbench::app_state::session::veriloga_library::{
+use crate::workbench::documents::code_workspace::{
     restore_global_veriloga_library, save_global_veriloga_library,
 };
 use crate::workbench::framework::feature::ModelsPort;

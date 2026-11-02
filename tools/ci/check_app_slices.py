@@ -107,7 +107,6 @@ SLICE_RULES = [
     (W + r"app_state/session/preference_runtime", "shell"),
     (W + r"app_state/session/(preferences_file|shortcut_library)", "settings"),
     (W + r"app_state/session/shortcuts", "framework"),
-    (W + r"app_state/session/veriloga_library", "code"),
     (W + r"app_state/", "session"),
     # The slots AppState holds, each by the feature that owns it.
     (W + r"slots(\.rs$|/(defaults_)?tests\.rs$)", "session"),

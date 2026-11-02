@@ -33,10 +33,10 @@ use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::{ProjectSourceLanguage, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app::RSpiceApp;
-use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::app_state::{
     Model, PlatformState, VerilogABuildSettingsHistoryEntry, VerilogAModuleBinding,
 };
+use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{self, SelectedVerilogASource};
 use crate::workbench::{MessageCatalog, MessageId};
 

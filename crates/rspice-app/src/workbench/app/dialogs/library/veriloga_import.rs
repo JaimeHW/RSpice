@@ -24,7 +24,7 @@ use crate::state::{
 use crate::ui::widgets::{CommandForm, DialogChoice, TableColumn};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::Model;
-use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
+use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::{
     VerilogAImportFormState, VerilogAReplaceReview, VerilogAWorkbenchState,
     close_veriloga_import_form, request_veriloga_import_locate, writable_libraries,

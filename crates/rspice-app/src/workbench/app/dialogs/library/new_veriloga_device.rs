@@ -40,8 +40,8 @@ use crate::state::{Cell, CellViewRef, PortDirection, PortSpec, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::model::seed_veriloga_view;
-use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
 use crate::workbench::app_state::{AppState, Model};
+use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::documents::code_workspace::writable_libraries;
 use crate::workbench::{MessageCatalog, MessageId};
 

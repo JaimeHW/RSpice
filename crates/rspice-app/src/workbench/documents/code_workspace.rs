@@ -20,6 +20,7 @@ mod veriloga_catalog;
 mod veriloga_format;
 mod veriloga_inspector;
 mod veriloga_interface;
+mod veriloga_library;
 mod veriloga_live_check;
 mod veriloga_symbols;
 use rspice_simulation::project_veriloga::build_profile as veriloga_profile;
@@ -102,6 +103,9 @@ pub(crate) use veriloga_interface::VerilogASymbolDrift;
 pub(crate) use veriloga_interface::{
     VerilogACellSymbol, VerilogAInterfaceFinding, interface_check_finding, interface_finding,
     reconciled_symbol, refresh_symbol_standing, symbol_drift_text, symbol_standing,
+};
+pub(in crate::workbench) use veriloga_library::{
+    persist_global_veriloga_library, restore_global_veriloga_library, save_global_veriloga_library,
 };
 pub(crate) use veriloga_live_check::drive_veriloga_live_check;
 
