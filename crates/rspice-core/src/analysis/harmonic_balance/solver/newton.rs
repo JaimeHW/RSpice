@@ -1023,6 +1023,16 @@ impl HbSolver {
             // Subsequent iterations reuse the residual and physical row scales
             // computed by the previous line search at its accepted trial state.
 
+            // A seed whose rows already meet the test leaves a right-hand side
+            // at the rounding floor, so its correction is below the linear
+            // solve's resolution and the componentwise certificate cannot
+            // pass on it. Xyce's NOX accepts after that one iteration once the
+            // weighted update norm is under tolerance (N_NLS_NOX_XyceTests.C
+            // :403-406); an uncertified correction from such a seed is that
+            // zero update. A certified correction is still taken.
+            let seed_meets_rows = iter == 0
+                && state.rows_converged_with_branch_tolerances(tol, abstol, self.voltage_abstol);
+
             // 3+4. Build the Jacobian and solve J * dX = -R. The exact path
             // carries the conjugate (Hankel) coupling in a real-split system
             // and restores quadratic convergence; the Toeplitz-only complex
@@ -1030,6 +1040,13 @@ impl HbSolver {
             // system Krylov fast path.
             let delta_x = match self.newton_correction(state, gmin, abort)? {
                 Ok(dx) => dx,
+                Err(error) if error.is_convergence_failure() && seed_meets_rows => {
+                    log::debug!(
+                        "HB Newton correction from a seed inside the row test is below the \
+                         solve's resolution ({error}); accepting the seed"
+                    );
+                    return Ok(true);
+                }
                 Err(error) if error.is_convergence_failure() => {
                     log::debug!("HB Newton correction rejected: {error}");
                     return Ok(false);
@@ -3512,6 +3529,33 @@ mod exact_matrix_free_tests {
             "the seed was accepted without a correction: {:e}",
             state.x[0][0].re
         );
+    }
+
+    #[test]
+    fn a_seed_inside_the_row_test_converges_when_its_correction_is_uncertified() {
+        // The zero-conductance system above the Krylov threshold certifies no
+        // correction. A 1 fA residual sits inside the 1 pA row test, so the
+        // seed is the answer to the solve's resolution and converges in its
+        // one iteration. With 1 uA outside the row test, the same solve still
+        // fails (uncertified_krylov_step_allows_gmin_retry_...).
+        let nodes = super::super::krylov::KRYLOV_AUTO_THRESHOLD.div_ceil(3);
+        let mut solver = HbSolver::new(HbConfig::new(1e6).with_harmonics(1), nodes);
+        solver.add_dc_source(0, 1e-15);
+        let mut state = HbSolverState::new(nodes, 1);
+        let limits = HbNewtonLimits {
+            gmin: 0.0,
+            max_iterations: 2,
+            tol: 1e-6,
+            abstol: 1e-12,
+            source_scale: 1.0,
+        };
+        assert!(
+            solver
+                .newton_inner_loop(&mut state, limits, &NoAbort)
+                .expect("a seed inside the row test needs no certified correction")
+        );
+        assert_eq!(state.total_iterations, 1);
+        assert!(state.x.iter().flatten().all(|&v| v == Complex64::ZERO));
     }
 
     #[test]
