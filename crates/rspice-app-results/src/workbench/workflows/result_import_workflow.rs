@@ -708,7 +708,7 @@ fn result_import_map_page(ui: &mut egui::Ui, draft: &mut ResultImportDialogState
                 "touchstone-v1" | "touchstone-v2"
             );
             ui.add_enabled_ui(!domain_locked, |ui| {
-                egui::ComboBox::from_id_salt("rspice.result-import.domain")
+                crate::ui::widgets::Combo::from_id_salt("rspice.result-import.domain")
                     .selected_text(analysis_domain_label(draft.analysis_type))
                     .show_ui(ui, |ui| {
                         ui.selectable_value(

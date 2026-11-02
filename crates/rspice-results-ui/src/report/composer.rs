@@ -606,8 +606,7 @@ fn page_settings(
             report_form_label(ui, "Page title");
             let title_response = ui.add_sized(
                 Vec2::new(ui.available_width(), t.metrics.ctl_h),
-                egui::TextEdit::singleline(host.title_draft())
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+                egui::TextEdit::singleline(host.title_draft()).font(theme::field_sans()),
             );
             if title_response.has_focus() && ui.input(|input| input.key_pressed(egui::Key::Escape))
             {

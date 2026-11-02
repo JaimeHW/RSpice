@@ -140,7 +140,7 @@ pub fn show(
                 "Document types and viewers update with the selected immutable result.",
                 |ui| {
                 let selected_dataset_label = host.dataset_label(draft.dataset_id);
-                egui::ComboBox::from_id_salt("rspice.create-result-document.dataset")
+                rspice_ui_kit::widgets::Combo::from_id_salt("rspice.create-result-document.dataset")
                     .selected_text(selected_dataset_label)
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {
@@ -163,7 +163,7 @@ pub fn show(
                 |ui| {
                 let layout = ResultDocumentLayout::from_id(&draft.layout_id)
                     .unwrap_or(ResultDocumentLayout::TwoLinkedPanes);
-                egui::ComboBox::from_id_salt("rspice.create-result-document.layout")
+                rspice_ui_kit::widgets::Combo::from_id_salt("rspice.create-result-document.layout")
                     .selected_text(layout.label())
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {

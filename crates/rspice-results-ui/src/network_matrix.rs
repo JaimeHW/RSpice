@@ -160,7 +160,7 @@ pub fn show(
     let tokens = rspice_ui_kit::tokens::Tokens::get(ui.ctx());
     controls.block = controls.block.min(matrix.blocks().len() - 1);
     ui.horizontal_wrapped(|ui| {
-        egui::ComboBox::from_id_salt("network-matrix-block")
+        rspice_ui_kit::widgets::Combo::from_id_salt("network-matrix-block")
             .selected_text(matrix.blocks()[controls.block].label())
             .show_ui(ui, |ui| {
                 for (index, block) in matrix.blocks().iter().enumerate() {

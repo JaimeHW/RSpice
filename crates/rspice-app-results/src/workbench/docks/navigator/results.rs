@@ -1311,7 +1311,7 @@ fn results_browser_toolbar(
             egui::TextEdit::singleline(state.workbench.navigator_trees.filter_mut(workspace))
                 .id(field_id)
                 .hint_text(placeholder)
-                .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+                .font(theme::field_sans())
                 .margin(egui::Margin {
                     left: 29,
                     right: 8,

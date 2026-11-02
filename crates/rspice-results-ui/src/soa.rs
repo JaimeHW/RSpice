@@ -270,7 +270,7 @@ pub fn show(
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("SHOW").strong());
-                egui::ComboBox::from_id_salt("rspice.results.soa-filter")
+                rspice_ui_kit::widgets::Combo::from_id_salt("rspice.results.soa-filter")
                     .selected_text(filter.label())
                     .show_ui(ui, |ui| {
                         for candidate in SoaRuleFilter::ALL {

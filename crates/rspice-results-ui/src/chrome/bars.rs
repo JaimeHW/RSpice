@@ -321,7 +321,7 @@ fn result_viewer_actions(ui: &mut Ui, host: &mut impl SheetBarHost) {
             ui.add(
                 egui::TextEdit::singleline(filter)
                     .desired_width(150.0)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                    .font(theme::field_mono())
                     .hint_text("filter devices…"),
             );
         }

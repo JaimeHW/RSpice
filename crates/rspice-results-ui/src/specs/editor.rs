@@ -286,7 +286,7 @@ pub fn show(
                     ui.add(
                         egui::TextEdit::singleline(text)
                             .desired_width(width)
-                            .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                            .font(theme::field_mono())
                             .hint_text(hint),
                     );
                 };
@@ -345,7 +345,7 @@ pub fn show(
                 });
                 ui.horizontal(|ui| {
                     ui.add_space(10.0);
-                    egui::ComboBox::from_id_salt(("spec-comparison", idx))
+                    rspice_ui_kit::widgets::Combo::from_id_salt(("spec-comparison", idx))
                         .selected_text(draft.comparison.label())
                         .width(170.0)
                         .show_ui(ui, |ui| {
@@ -369,10 +369,10 @@ pub fn show(
                     field(ui, &mut draft.guard_band, 100.0, "guard band");
                     ui.add(egui::TextEdit::singleline(&mut draft.unit)
                         .desired_width(80.0)
-                        .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                        .font(theme::field_mono())
                         .hint_text("unit"))
                         .on_hover_text("Unit for the limit and guard band, such as mV, ns, dB, or V^2/Hz. Leave blank to use the measurement's native unit.");
-                    egui::ComboBox::from_id_salt(("spec-role", idx))
+                    rspice_ui_kit::widgets::Combo::from_id_salt(("spec-role", idx))
                         .selected_text(match draft.role {
                             SpecificationRole::Blocking => "Blocking",
                             SpecificationRole::Review => "Review",
@@ -424,7 +424,7 @@ pub fn show(
                             },
                             |(label, _)| label.clone(),
                         );
-                    egui::ComboBox::from_id_salt(("spec-scope", idx))
+                    rspice_ui_kit::widgets::Combo::from_id_salt(("spec-scope", idx))
                         .selected_text(current_scope)
                         .width(180.0)
                         .show_ui(ui, |ui| {
@@ -449,7 +449,7 @@ pub fn show(
                                 )
                         },
                     );
-                    egui::ComboBox::from_id_salt(("spec-producer", idx))
+                    rspice_ui_kit::widgets::Combo::from_id_salt(("spec-producer", idx))
                         .selected_text(current_producer)
                         .width(280.0)
                         .show_ui(ui, |ui| {

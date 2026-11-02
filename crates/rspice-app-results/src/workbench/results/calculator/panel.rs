@@ -343,7 +343,7 @@ impl CalculatorPanel {
         let response = ui.add(
             egui::TextEdit::singleline(&mut self.expression)
                 .id(editor_id)
-                .font(theme::mono(tokens::FS_2, FontWeight::Regular))
+                .font(theme::field_mono())
                 .desired_width(f32::INFINITY),
         );
         if response.changed() {
@@ -457,7 +457,7 @@ impl CalculatorPanel {
         pane_header(ui, |ui| {
             ui.add(
                 egui::TextEdit::singleline(&mut self.signal_filter)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                    .font(theme::field_sans())
                     .hint_text("Filter signals…")
                     .desired_width(ui.available_width()),
             );

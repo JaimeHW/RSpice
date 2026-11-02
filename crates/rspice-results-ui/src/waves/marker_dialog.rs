@@ -155,7 +155,7 @@ pub fn show(
             ui.add(
                 egui::TextEdit::singleline(&mut draft.note)
                     .desired_width(f32::INFINITY)
-                    .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                    .font(theme::field_sans())
                     .hint_text("What this marker calls out\u{2026}"),
             );
             ui.add_space(8.0);

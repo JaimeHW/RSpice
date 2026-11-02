@@ -73,7 +73,7 @@ impl EventDraft {
                 } else {
                     field(ui, "Signal", &mut self.signal, "V(out)");
                     field(ui, "Threshold", &mut self.value, "0.5 or V(in)");
-                    egui::ComboBox::from_id_salt("edge")
+                    rspice_ui_kit::widgets::Combo::from_id_salt("edge")
                         .selected_text(self.edge)
                         .show_ui(ui, |ui| {
                             for edge in ["RISE", "FALL", "CROSS"] {
@@ -240,14 +240,14 @@ impl MeasurementBuilder {
         ui.label("Build a measurement card, then choose Use card to apply it.");
         ui.horizontal_wrapped(|ui| {
             ui.label("Analysis");
-            egui::ComboBox::from_id_salt("measure-family")
+            rspice_ui_kit::widgets::Combo::from_id_salt("measure-family")
                 .selected_text(self.family)
                 .show_ui(ui, |ui| {
                     for family in ["TRAN", "AC", "DC", "NOISE"] {
                         ui.selectable_value(&mut self.family, family, family);
                     }
                 });
-            egui::ComboBox::from_id_salt("measure-operation")
+            rspice_ui_kit::widgets::Combo::from_id_salt("measure-operation")
                 .selected_text(
                     OPERATIONS
                         .iter()
@@ -286,7 +286,7 @@ impl MeasurementBuilder {
                             "zero-based index",
                         );
                     }
-                    egui::ComboBox::from_id_salt("comparison-norm")
+                    rspice_ui_kit::widgets::Combo::from_id_salt("comparison-norm")
                         .selected_text(self.reference_norm)
                         .show_ui(ui, |ui| {
                             for (norm, label) in [

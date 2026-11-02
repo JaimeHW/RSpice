@@ -117,7 +117,7 @@ pub fn inline_actions(
         let field = ui.add(
             egui::TextEdit::singleline(&mut open.text)
                 .desired_width(96.0)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular))
+                .font(theme::field_mono())
                 .hint_text("2.5G · 400p"),
         );
         if open.needs_focus {

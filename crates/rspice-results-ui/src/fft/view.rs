@@ -242,7 +242,7 @@ pub fn show(
         );
         ui.add_enabled_ui(fft.source_cache.is_some(), |ui| {
             let current = fft.window;
-            egui::ComboBox::from_id_salt("rspice.fft.window")
+            rspice_ui_kit::widgets::Combo::from_id_salt("rspice.fft.window")
                 .selected_text(current.display_name())
                 .show_ui(ui, |ui| {
                     for &window in crate::fft::WindowFunction::all() {
@@ -266,7 +266,7 @@ pub fn show(
                 .color(c.text_dim),
         );
         let current = fft.normalization;
-        egui::ComboBox::from_id_salt("rspice.fft.normalization")
+        rspice_ui_kit::widgets::Combo::from_id_salt("rspice.fft.normalization")
             .selected_text(current.display_name())
             .show_ui(ui, |ui| {
                 for &normalization in crate::fft::data::SpectrumNormalization::all() {

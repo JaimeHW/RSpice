@@ -6,8 +6,8 @@ use super::{
 use egui::{Ui, Vec2};
 use rspice_results::report_document::ReportDocument;
 use rspice_ui_kit::{
-    theme::{self, FontWeight},
-    tokens::{self, Tokens},
+    theme,
+    tokens::Tokens,
     widgets::{Dialog, DialogChoice, DialogInitialFocus, Problem, input_row, problem_line, select},
 };
 
@@ -671,7 +671,7 @@ fn dialog_text_area(ui: &mut Ui, label: &str, value: &mut String) -> egui::Respo
             Vec2::new(ui.available_width(), 82.0),
             egui::TextEdit::multiline(value)
                 .desired_rows(4)
-                .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+                .font(theme::field_sans()),
         )
     })
     .inner

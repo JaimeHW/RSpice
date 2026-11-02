@@ -115,7 +115,6 @@ pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> A
     let mut action = Action::None;
 
     let label_font = theme::mono(tokens::FS_0, FontWeight::Medium);
-    let input_font = theme::mono(tokens::FS_1, FontWeight::Regular);
     let error_font = theme::sans(tokens::FS_0, FontWeight::Regular);
     let label_width = ui
         .painter()
@@ -191,7 +190,7 @@ pub fn show(ui: &mut Ui, editor: &mut ExprEditor, scope_note: Option<&str>) -> A
                 ui.add_sized(
                     input_rect.size(),
                     egui::TextEdit::singleline(&mut editor.text)
-                        .font(input_font)
+                        .font(theme::field_mono())
                         .hint_text("V(out)/V(in) - dB(V(out)) - deriv(V(out))")
                         .desired_width(input_rect.width()),
                 )

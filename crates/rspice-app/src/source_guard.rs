@@ -1603,6 +1603,8 @@ mod tests {
         [
             "rspice-app/src",
             "rspice-schematic-editor/src",
+            "rspice-app-results/src",
+            "rspice-results-ui/src",
         ]
         .map(str::to_owned)
         .to_vec()

@@ -107,7 +107,7 @@ pub fn controls(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) ->
             .horizontal_wrapped(|ui| {
                 let mut changed = false;
                 ui.label("Measure");
-                egui::ComboBox::from_id_salt("hist_measurement")
+                rspice_ui_kit::widgets::Combo::from_id_salt("hist_measurement")
                     .selected_text(&selected_text)
                     .show_ui(ui, |ui| {
                         for name in names {
@@ -117,7 +117,7 @@ pub fn controls(ui: &mut Ui, settings: &mut HistogramState, names: &[String]) ->
                         }
                     });
                 ui.label("Display");
-                egui::ComboBox::from_id_salt("hist_mode")
+                rspice_ui_kit::widgets::Combo::from_id_salt("hist_mode")
                     .selected_text(settings.mode.label())
                     .show_ui(ui, |ui| {
                         for mode in HistogramDisplayMode::ALL {
