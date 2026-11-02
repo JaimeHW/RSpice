@@ -2413,6 +2413,29 @@ mod tests {
             .unwrap_or_else(|| panic!("missing voltage for node {node}"))
     }
 
+    /// An ideal source pins its node: ngspice's MNA preorder pivots the node
+    /// on the source's unit entry, and ngspice-46 prints v(out) = 1 exactly
+    /// for `V1 out 0 1` beside `R1 out 0 990.7408325021204`. Pivoted on its
+    /// own conductance, the node came out one bit short at these R.
+    #[test]
+    fn an_ideal_source_sets_its_node_voltage_exactly_beside_a_resistor() {
+        for resistance in [
+            "990.7408325021204",
+            "622.6558914999225",
+            "794.6031784345653",
+            "739.4187775904509",
+            "2.7713124781295746",
+        ] {
+            let deck = format!("pin\nV1 out 0 1\nR1 out 0 {resistance}\n.op\n.end\n");
+            let voltage = op_voltage(&deck, "out");
+            assert_eq!(
+                voltage.to_bits(),
+                1.0_f64.to_bits(),
+                "R = {resistance}: V(out) = {voltage:e}"
+            );
+        }
+    }
+
     /// A current source feeding a capacitor leaves the node's DC voltage set
     /// by nothing but the conditioning shunt, which reported a teravolt.
     #[test]

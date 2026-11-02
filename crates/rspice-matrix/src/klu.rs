@@ -236,6 +236,12 @@ pub struct KluSolver {
     col_perm: Vec<u32>,
     /// Structural transversal: preferred pivot row for each original column.
     matched_row_for_col: Vec<u32>,
+    /// The pivot row ngspice's MNA preorder gives an original column, or
+    /// `u32::MAX`: set from the values of each fresh factorization
+    /// ([`Self::update_twin_pivots`]) and preferred over the transversal.
+    twin_row_for_col: Vec<u32>,
+    /// Preorder workspace: the original column at each position.
+    twin_col_at: Vec<u32>,
     /// BTF block identifier for every original row and column. Numeric pivots
     /// are restricted to the current diagonal block.
     row_block: Vec<u32>,
@@ -471,6 +477,8 @@ impl KluSolver {
         self.a_rows.clear();
         self.col_perm.clear();
         self.matched_row_for_col.clear();
+        self.twin_row_for_col.clear();
+        self.twin_col_at.clear();
         self.row_block.clear();
         self.col_block.clear();
         self.block_count = 0;
@@ -643,6 +651,93 @@ impl KluSolver {
         Ok(())
     }
 
+    /// ngspice's MNA preorder (`spMNA_Preorder`, sputils.c). A column whose
+    /// diagonal is zero and that shares a pair of unit twins with column `r`,
+    /// `|a(r, j)| = |a(j, r)| = 1` as an ideal source's branch shares with
+    /// its node, trades places with that column, so each of the two unknowns
+    /// pivots on its twin: the node's voltage on the source's unit entry,
+    /// and the branch current on the node's. Columns with a lone twin trade
+    /// first; then the first zero diagonal with several twins trades with
+    /// its first, and the search repeats. The circuit pattern stores every
+    /// diagonal, so a zero value here stands for ngspice's absent diagonal.
+    fn update_twin_pivots(&mut self, values: &[Value]) -> Result<(), SolverError> {
+        let n = self.n;
+        resize_fallible(&mut self.twin_row_for_col, n, u32::MAX)?;
+        self.twin_row_for_col.fill(u32::MAX);
+        resize_fallible(&mut self.twin_col_at, n, 0)?;
+        for (position, column) in self.twin_col_at.iter_mut().enumerate() {
+            *column = position as u32;
+        }
+        let col_ptr = &self.a_col_ptr;
+        let rows = &self.a_rows;
+        let col_at = &mut self.twin_col_at;
+        let value = |row: usize, col: usize| -> Value {
+            let span = col_ptr[col]..col_ptr[col + 1];
+            rows[span.clone()]
+                .binary_search(&(row as u32))
+                .map_or(0.0, |offset| values[span.start + offset])
+        };
+        // The number of twins of the column at `position`, and the position
+        // of its first.
+        let twins = |col_at: &[u32], position: usize| -> (usize, usize) {
+            let col = col_at[position] as usize;
+            let mut count = 0;
+            let mut first = usize::MAX;
+            for index in col_ptr[col]..col_ptr[col + 1] {
+                let row = rows[index] as usize;
+                if values[index].abs() == 1.0 && value(position, col_at[row] as usize).abs() == 1.0
+                {
+                    count += 1;
+                    if count == 1 {
+                        first = row;
+                    } else {
+                        break;
+                    }
+                }
+            }
+            (count, first)
+        };
+        let zero_diagonal =
+            |col_at: &[u32], position: usize| value(position, col_at[position] as usize) == 0.0;
+        let mut start = 0;
+        // Every trade removes a zero diagonal, so `n` passes always suffice.
+        for _ in 0..=n {
+            let mut several_twins_at = None;
+            let mut swapped = false;
+            for position in start..n {
+                if !zero_diagonal(col_at, position) {
+                    continue;
+                }
+                match twins(col_at, position) {
+                    (1, twin) => {
+                        col_at.swap(position, twin);
+                        swapped = true;
+                    }
+                    (count, _) if count > 1 && several_twins_at.is_none() => {
+                        several_twins_at = Some(position);
+                    }
+                    _ => {}
+                }
+            }
+            let Some(position) = several_twins_at else {
+                break;
+            };
+            start = position;
+            if !swapped {
+                // No lone twin is left, and nothing has moved this zero
+                // diagonal since the scan: it trades with its first twin.
+                let (_, twin) = twins(col_at, position);
+                col_at.swap(position, twin);
+            }
+        }
+        for (position, &column) in self.twin_col_at.iter().enumerate() {
+            if column as usize != position {
+                self.twin_row_for_col[column as usize] = position as u32;
+            }
+        }
+        Ok(())
+    }
+
     /// Full Gilbert–Peierls factorization with fresh pivot selection.
     pub fn factor(&mut self, values: &[Value]) -> Result<(), SolverError> {
         self.factor_with_pivot_tolerance(values, self.effective_pivot_tolerance())?;
@@ -675,6 +770,7 @@ impl KluSolver {
             )));
         }
         self.update_row_scaling(values)?;
+        self.update_twin_pivots(values)?;
         let n = self.n;
         let col_ptr = &self.a_col_ptr;
         let row_idx = &self.a_rows;
@@ -823,10 +919,13 @@ impl KluSolver {
             // with structural-transversal preference within PIVOT_TOL. When
             // BTF is available, never pivot across a diagonal block boundary.
             let current_block = self.col_block.get(a_col).copied();
-            let preferred_row = self
-                .matched_row_for_col
-                .get(a_col)
-                .map_or(a_col, |&row| row as usize);
+            let preferred_row = match self.twin_row_for_col.get(a_col) {
+                Some(&row) if row != u32::MAX => row as usize,
+                _ => self
+                    .matched_row_for_col
+                    .get(a_col)
+                    .map_or(a_col, |&row| row as usize),
+            };
             let mut max_abs = 0.0_f64;
             let mut max_row = usize::MAX;
             let mut diag_abs = -1.0_f64;
@@ -2467,5 +2566,35 @@ mod tests {
         let mut solution = Vec::new();
         klu.solve(&[4.0, 9.0], &mut solution).unwrap();
         assert_close(&solution, &[3.0, 2.0]);
+    }
+
+    #[test]
+    fn a_node_an_ideal_source_pins_pivots_on_the_sources_unit_entry() {
+        // V1 out 0 1 beside R1 out 0 R: the stored branch diagonal is zero.
+        // The node's own conductance is within the pivot tolerance of the
+        // column maximum, and as the node's pivot it rounded V(out) one bit
+        // short of the source's value at each of these R. ngspice's preorder
+        // pivots the node on the source's unit entry instead, and ngspice-46
+        // prints v(out) = 1 exactly.
+        for resistance in [
+            990.740_832_502_120_4,
+            622.655_891_499_922_5,
+            794.603_178_434_565_3,
+            739.418_777_590_450_9,
+            2.771_312_478_129_574_6,
+        ] {
+            let conductance = 1.0 / resistance;
+            let mut klu = KluSolver::new();
+            klu.analyze(2, &[0, 2, 4], &[0, 1, 0, 1]).unwrap();
+            klu.factor(&[conductance, 1.0, 1.0, 0.0]).unwrap();
+            let mut solution = Vec::new();
+            klu.solve(&[0.0, 1.0], &mut solution).unwrap();
+            assert_eq!(
+                solution[0], 1.0,
+                "R = {resistance}: V(out) = {:e}",
+                solution[0]
+            );
+            assert_eq!(solution[1], -conductance, "R = {resistance}");
+        }
     }
 }
