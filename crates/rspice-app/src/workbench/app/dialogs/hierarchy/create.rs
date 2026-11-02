@@ -195,7 +195,13 @@ impl RSpiceApp {
                 edited |= rows
                     .text("Cell name", name, &mut draft.cell_name, "")
                     .changed();
-                edited |= rows.segmented("View", "create-hierarchy-view", &VIEW_OPTIONS, &mut view);
+                // View spans the column Cell name spans.
+                edited |= rows.segmented_columns(
+                    "View",
+                    "create-hierarchy-view",
+                    &VIEW_OPTIONS,
+                    &mut view,
+                );
                 rows.value_mono("Instances", &instances);
                 if ports.is_empty() {
                     rows.value("Ports", "None: no net crosses the selection's edge");
@@ -785,6 +791,26 @@ mod tests {
         assert!(
             explainers.is_empty(),
             "the explainers are back: {explainers:?}"
+        );
+        // View's two choices span the column Cell name spans.
+        let control = |name: &str| {
+            nodes
+                .iter()
+                .map(|(_, node)| node)
+                .find(|node| {
+                    node.label() == Some(name) && node.role() != egui::accesskit::Role::Label
+                })
+                .and_then(egui::accesskit::Node::bounds)
+                .unwrap_or_else(|| panic!("{name} is published"))
+        };
+        let (cell, schematic, symbol) = (
+            control("Cell name"),
+            control(VIEW_OPTIONS[0]),
+            control(VIEW_OPTIONS[1]),
+        );
+        assert!(
+            (schematic.x0 - cell.x0).abs() < 1.0 && (symbol.x1 - cell.x1).abs() < 1.0,
+            "{schematic:?}..{symbol:?} against {cell:?}"
         );
     }
 
