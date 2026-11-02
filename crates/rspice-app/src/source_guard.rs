@@ -1602,6 +1602,9 @@ mod tests {
     fn field_size_roots(_crates: &Path) -> Vec<String> {
         [
             "rspice-app/src/workbench/surfaces/simulate",
+            "rspice-app/src/workbench/app/dialogs",
+            "rspice-app/src/workbench/project",
+            "rspice-schematic-editor/src",
         ]
         .map(str::to_owned)
         .to_vec()

@@ -389,7 +389,7 @@ fn list_pane(
                 egui::TextEdit::singleline(filter)
                     .id(filter_id)
                     .hint_text("Filter definitions")
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .margin(egui::Margin::symmetric(8, 4)),
             );
             ui.ctx().accesskit_node_builder(response.id, |node| {

@@ -210,7 +210,7 @@ fn render_raw_source_draft(ui: &mut Ui, state: &mut PwlEditorState) -> PwlEditor
         egui::vec2(ui.available_width(), 84.0),
         egui::TextEdit::multiline(&mut source)
             .desired_width(f32::INFINITY)
-            .font(theme::mono(tokens::FS_1, FontWeight::Regular)),
+            .font(theme::field_mono()),
     );
     let result = if response.changed() {
         let _ = state.replace_raw_source_draft(source);

@@ -130,7 +130,7 @@ fn identity_section(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) 
             let response = ui.add_sized(
                 vec2(ui.available_width(), t.metrics.ctl_h),
                 egui::TextEdit::singleline(&mut draft.target)
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .margin(Margin::symmetric(8, 4)),
             );
             configure_field_validation(
@@ -154,7 +154,7 @@ fn identity_section(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) 
 fn source_contract_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {
     field_label(ui, "Source contract", |ui| {
         let selected = draft.source_label(draft.source_mode);
-        let response = egui::ComboBox::from_id_salt("create-model-bound-symbol-source")
+        let response = crate::ui::widgets::Combo::from_id_salt("create-model-bound-symbol-source")
             .selected_text(selected)
             .width(ui.available_width())
             .show_ui(ui, |ui| {
@@ -189,15 +189,16 @@ fn source_contract_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogSt
 fn template_combo(ui: &mut Ui, draft: &mut CreateModelBoundSymbolDialogState) {
     field_label(ui, "Template", |ui| {
         let before = draft.template;
-        let response = egui::ComboBox::from_id_salt("create-model-bound-symbol-template")
-            .selected_text(draft.template.label())
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                for template in CreateSymbolTemplate::ALL {
-                    ui.selectable_value(&mut draft.template, template, template.label());
-                }
-            })
-            .response;
+        let response =
+            crate::ui::widgets::Combo::from_id_salt("create-model-bound-symbol-template")
+                .selected_text(draft.template.label())
+                .width(ui.available_width())
+                .show_ui(ui, |ui| {
+                    for template in CreateSymbolTemplate::ALL {
+                        ui.selectable_value(&mut draft.template, template, template.label());
+                    }
+                })
+                .response;
         ui.ctx().accesskit_node_builder(response.id, |node| {
             node.set_label("Graphical template");
             node.set_description("Initial geometry for the new versioned symbol view");
@@ -368,7 +369,7 @@ fn pin_row(
     let name_response = ui.put(
         name_rect.shrink2(vec2(3.0, 3.0)),
         egui::TextEdit::singleline(&mut draft.pins[index].name)
-            .font(egui::TextStyle::Monospace)
+            .font(theme::field_mono())
             .margin(Margin::symmetric(5, 2)),
     );
     if name_response.changed() {
@@ -385,7 +386,7 @@ fn pin_row(
                 .max_rect(type_cell)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
-                egui::ComboBox::from_id_salt(("create-symbol-pin-type", index))
+                crate::ui::widgets::Combo::from_id_salt(("create-symbol-pin-type", index))
                     .selected_text(before_type.label())
                     .width(type_cell.width())
                     .show_ui(ui, |ui| {
@@ -414,7 +415,7 @@ fn pin_row(
                 .max_rect(side_cell)
                 .layout(Layout::left_to_right(Align::Center)),
             |ui| {
-                egui::ComboBox::from_id_salt(("create-symbol-pin-side", index))
+                crate::ui::widgets::Combo::from_id_salt(("create-symbol-pin-side", index))
                     .selected_text(before_side.label())
                     .width(side_cell.width())
                     .show_ui(ui, |ui| {

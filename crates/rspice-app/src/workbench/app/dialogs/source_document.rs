@@ -1256,7 +1256,7 @@ fn include_search_paths(
             let mut edited = draft.clone();
             ui.add(
                 egui::TextEdit::singleline(&mut edited)
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
             );
             if edited != draft {

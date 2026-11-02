@@ -216,7 +216,7 @@ pub(super) fn combo_field<T: Copy + PartialEq>(
         .find(|(value, _)| value == selected)
         .map_or("Select", |(_, text)| *text);
     ui.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt((id_namespace, label))
+        crate::ui::widgets::Combo::from_id_salt((id_namespace, label))
             .selected_text(selected_text)
             .width(ui.available_width())
             .show_ui(ui, |ui| {
@@ -304,7 +304,7 @@ pub(super) fn id_combo<T: Copy + PartialEq + std::fmt::Display>(
             |(_, name)| name.clone(),
         );
     ui.add_enabled_ui(enabled, |ui| {
-        egui::ComboBox::from_id_salt((id_namespace, label))
+        crate::ui::widgets::Combo::from_id_salt((id_namespace, label))
             .selected_text(selected_text)
             .width(ui.available_width())
             .show_ui(ui, |ui| {

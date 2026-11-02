@@ -1,8 +1,6 @@
 //! Editing the parameter form a symbol exposes.
 
-use egui::{
-    Align, ComboBox, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2,
-};
+use egui::{Align, Context, Frame, Grid, Layout, Margin, ScrollArea, Stroke, TextEdit, Ui, vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{
@@ -506,7 +504,7 @@ fn field_editor(
     let mut destination_section = current_section_key.clone();
     ui.horizontal(|ui| {
         ui.label("Section");
-        ComboBox::from_id_salt("parameter-field-section")
+        crate::ui::widgets::Combo::from_id_salt("parameter-field-section")
             .selected_text(
                 section_options
                     .iter()
@@ -560,7 +558,7 @@ fn field_editor(
                     ui.end_row();
                     ui.label("Type");
                     let prior = field.property_type;
-                    ComboBox::from_id_salt("parameter-field-type")
+                    crate::ui::widgets::Combo::from_id_salt("parameter-field-type")
                         .selected_text(property_type_label(field.property_type))
                         .show_ui(ui, |ui| {
                             for value in [
@@ -649,7 +647,7 @@ fn field_editor(
                     ui.end_row();
                     ui.label("Inheritance");
                     ui.vertical(|ui| {
-                        ComboBox::from_id_salt("parameter-field-inheritance")
+                        crate::ui::widgets::Combo::from_id_salt("parameter-field-inheritance")
                             .selected_text(inheritance_label(field.inheritance))
                             .show_ui(ui, |ui| {
                                 for value in ParameterInheritance::ALL {
@@ -669,7 +667,7 @@ fn field_editor(
                     });
                     ui.end_row();
                     ui.label("Visibility");
-                    ComboBox::from_id_salt("parameter-field-visibility")
+                    crate::ui::widgets::Combo::from_id_salt("parameter-field-visibility")
                         .selected_text(visibility_label(field.visibility))
                         .show_ui(ui, |ui| {
                             for value in [

@@ -203,7 +203,7 @@ impl ProjectFeature {
                             theme::sans(tokens::FS_1, FontWeight::Regular),
                             c.text_dim,
                         );
-                        egui::ComboBox::from_id_salt("copy_cell_target_combo")
+                        crate::ui::widgets::Combo::from_id_salt("copy_cell_target_combo")
                             .selected_text(&dialogs.copy_cell_target_library)
                             .width(ui.available_width())
                             .show_ui(ui, |ui| {

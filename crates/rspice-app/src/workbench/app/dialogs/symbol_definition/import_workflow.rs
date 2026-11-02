@@ -1,6 +1,6 @@
 //! Importing a symbol definition.
 
-use egui::{Align, ComboBox, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
+use egui::{Align, Context, Frame, Grid, Layout, Margin, Stroke, TextEdit, Ui, vec2};
 
 use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::{CellViewRef, ModelBoundSymbolDefinition, SymbolDefinitionImport};
@@ -203,7 +203,7 @@ fn import_body(
                     vec2(width, t.metrics.ctl_h),
                     TextEdit::singleline(&mut state.source_name)
                         .interactive(false)
-                        .font(egui::TextStyle::Monospace)
+                        .font(theme::field_mono())
                         .hint_text("Choose a symbol definition"),
                 );
                 if Button::new("Browse...").show(ui).clicked() {
@@ -219,7 +219,7 @@ fn import_body(
         "Target library",
         "Writable project-library destination.",
         |ui| {
-            ComboBox::from_id_salt("symbol-import-target-library")
+            crate::ui::widgets::Combo::from_id_salt("symbol-import-target-library")
                 .selected_text(&state.target_library)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {
@@ -242,7 +242,7 @@ fn import_body(
             ui.add_sized(
                 vec2(ui.available_width(), t.metrics.ctl_h),
                 TextEdit::singleline(&mut state.target_name)
-                    .font(egui::TextStyle::Monospace)
+                    .font(theme::field_mono())
                     .hint_text("opamp_5pin_variant"),
             )
         },
@@ -263,7 +263,7 @@ fn import_body(
                     "Create unbound symbol for review".to_owned()
                 }
             };
-            ComboBox::from_id_salt("symbol-import-pin-contract")
+            crate::ui::widgets::Combo::from_id_salt("symbol-import-pin-contract")
                 .selected_text(selected)
                 .width(ui.available_width())
                 .show_ui(ui, |ui| {

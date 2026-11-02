@@ -136,7 +136,7 @@ pub(super) fn subflow_fields(
                     .color(t.color.text_dim),
             );
             if settings.new_sheet_policy == DrawingSheetNewSheetPolicy::Ask {
-                egui::ComboBox::from_id_salt("new-sheet-drawing-format")
+                crate::ui::widgets::Combo::from_id_salt("new-sheet-drawing-format")
                     .selected_text(dialog.inputs.sheet_page_format.display())
                     .width(ui.available_width())
                     .show_ui(ui, |ui| {

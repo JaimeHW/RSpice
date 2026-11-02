@@ -1823,7 +1823,7 @@ fn saved_views_body(
         ui.add_sized(
             [SELECT_WIDTH, tokens.metrics.ctl_h],
             TextEdit::singleline(&mut state.saved_query)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                .font(theme::field_sans())
                 .hint_text("View name"),
         );
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1895,7 +1895,7 @@ fn saved_views_body(
                 ui.add_sized(
                     [SAVED_NAME_WIDTH, tokens.metrics.ctl_h],
                     TextEdit::singleline(&mut state.saved_edit_name)
-                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+                        .font(theme::field_sans())
                         .hint_text("View name"),
                 );
             } else {

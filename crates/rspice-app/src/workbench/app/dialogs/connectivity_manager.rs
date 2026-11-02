@@ -2135,20 +2135,19 @@ fn repair_preview_tab(
                                         .or_insert(0);
                                     *selected = (*selected)
                                         .min(repair.endpoint_choices.len().saturating_sub(1));
-                                    egui::ComboBox::from_id_salt(("repair-endpoint", &repair.id))
-                                        .selected_text(&repair.endpoint_choices[*selected].label)
-                                        .width(240.0)
-                                        .show_ui(ui, |ui| {
-                                            for (index, endpoint) in
-                                                repair.endpoint_choices.iter().enumerate()
-                                            {
-                                                ui.selectable_value(
-                                                    selected,
-                                                    index,
-                                                    &endpoint.label,
-                                                );
-                                            }
-                                        });
+                                    crate::ui::widgets::Combo::from_id_salt((
+                                        "repair-endpoint",
+                                        &repair.id,
+                                    ))
+                                    .selected_text(&repair.endpoint_choices[*selected].label)
+                                    .width(240.0)
+                                    .show_ui(ui, |ui| {
+                                        for (index, endpoint) in
+                                            repair.endpoint_choices.iter().enumerate()
+                                        {
+                                            ui.selectable_value(selected, index, &endpoint.label);
+                                        }
+                                    });
                                     if Button::new("Route to endpoint")
                                         .enabled(write_allowed && current)
                                         .show(ui)
@@ -2287,7 +2286,7 @@ fn policy_combo<T: Copy + PartialEq>(
         .spacing(Vec2::new(20.0, 7.0))
         .show(ui, |ui| {
             ui.label(label);
-            egui::ComboBox::from_id_salt(("connectivity-policy", label))
+            crate::ui::widgets::Combo::from_id_salt(("connectivity-policy", label))
                 .selected_text(display(*value))
                 .width(270.0)
                 .show_ui(ui, |ui| {
