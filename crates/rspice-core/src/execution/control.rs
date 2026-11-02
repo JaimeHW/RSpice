@@ -118,6 +118,8 @@ pub struct ControlProgram {
     declarative_source: String,
     instructions: Vec<Instruction>,
     limits: ControlLimits,
+    /// The line and keyword of the block the script never closes.
+    unclosed: Option<(usize, String)>,
 }
 
 impl ControlProgram {
@@ -134,6 +136,7 @@ impl ControlProgram {
             declarative_source: String::with_capacity(source.len()),
             instructions: Vec::new(),
             limits,
+            unclosed: None,
         };
         let mut in_control = false;
         let mut blocks: Vec<(usize, Option<usize>)> = Vec::new();
@@ -162,9 +165,8 @@ impl ControlProgram {
                 if !in_control {
                     return Err(syntax(line, ".endc without .control"));
                 }
-                if !blocks.is_empty() {
-                    return Err(syntax(line, "control block is missing end"));
-                }
+                // An open block continues into the next control region, as
+                // ngspice reads every region as one script.
                 in_control = false;
                 program.declarative_source.push('\n');
                 continue;
@@ -179,6 +181,16 @@ impl ControlProgram {
                 continue;
             }
             let pc = program.instructions.len();
+            // ngspice's built-in aliases (frontend/cpitf.c:191): `begin` is
+            // `if 1`, and each `end<block>` is `end`.
+            let (head, rest) = match head.to_ascii_lowercase().as_str() {
+                "begin" => {
+                    require_empty(rest, line)?;
+                    ("if", "1")
+                }
+                "endif" | "endwhile" | "endforeach" | "endrepeat" | "enddowhile" => ("end", rest),
+                _ => (head, rest),
+            };
             let op = match head.to_ascii_lowercase().as_str() {
                 "foreach" => {
                     let (variable, words) = split_head(rest);
@@ -326,7 +338,31 @@ impl ControlProgram {
         if in_control {
             return Err(syntax(source.lines().count(), "missing .endc"));
         }
+        // ngspice runs a block only once its `end` arrives, so a block the
+        // script never closes runs none of itself, nor anything after it;
+        // the statements before it run, and the run ends normally.
+        if let Some(&(opening, _)) = blocks.first()
+            && let Some(instruction) = program.instructions.get(opening)
+        {
+            let line = instruction.line;
+            let keyword = line
+                .checked_sub(1)
+                .and_then(|index| source.lines().nth(index))
+                .and_then(|text| text.split_whitespace().next())
+                .unwrap_or_default()
+                .to_ascii_lowercase();
+            program.unclosed = Some((line, keyword));
+            program.instructions.truncate(opening);
+        }
         Ok(program)
+    }
+
+    /// The block the script opens and never closes, as the line it opens on
+    /// and its keyword. ngspice runs none of that block and nothing after it.
+    pub fn unclosed_block(&self) -> Option<(usize, &str)> {
+        self.unclosed
+            .as_ref()
+            .map(|(line, keyword)| (*line, keyword.as_str()))
     }
 
     pub fn declarative_source(&self) -> &str {

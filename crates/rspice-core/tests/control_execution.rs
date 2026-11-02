@@ -1578,6 +1578,52 @@ fn cd_and_inputdir_place_redirected_files_as_ngspice_does() {
     assert!(error.unwrap().contains("cd needs a directory"));
 }
 
+/// ngspice aliases `endif`, `endwhile`, `endforeach`, `endrepeat` and
+/// `enddowhile` to `end`, and `begin` to `if 1` (frontend/cpitf.c:191). A
+/// block the script never closes runs none of itself and nothing after it:
+/// ngspice-46 echoes `before`, `batch`, `begun`, `after` for the first
+/// script, only `before` for the second, nothing for the third, and exits 0
+/// each time.
+#[test]
+fn block_aliases_close_blocks_and_an_unclosed_block_never_runs() {
+    let (presented, error) = run_until_error(
+        "aliases\nV1 1 0 1\nR1 1 0 1\n.control\necho before\nop\nif $?batchmode\necho batch\n\
+         print v(1)\nelse\necho interactive\nendif\nbegin\necho begun\nend\nlet n = 0\n\
+         while n < 2\nlet n = n + 1\nendwhile\necho after\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["before", "batch", "begun", "after"]);
+    assert_eq!(
+        printed(&presented[2])[0].y.samples,
+        [ComplexValue::new(1.0, 0.0)]
+    );
+
+    let unclosed =
+        "unclosed\nV1 1 0 1\nR1 1 0 1\n.control\necho before\nop\nIf 1\necho inside\n.endc\n.end\n";
+    let (presented, error) = run_until_error(unclosed);
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["before"]);
+
+    let nested = "nested\nV1 1 0 1\nR1 1 0 1\n.control\nop\nbegin\necho inside\nendwhatever\n\
+                  echo after\nwhile 0\necho never\nendwhile\necho done\n.endc\n.end\n";
+    let (presented, error) = run_until_error(nested);
+    assert_eq!(error, None);
+    assert!(texts(&presented).is_empty());
+
+    let unclosed_block = |source: &str| {
+        ControlProgram::parse_deck_with_abort(source, ControlLimits::default(), &NoAbort)
+            .unwrap()
+            .unclosed_block()
+            .map(|(line, keyword)| (line, keyword.to_owned()))
+    };
+    assert_eq!(unclosed_block(unclosed), Some((7, "if".to_owned())));
+    assert_eq!(unclosed_block(nested), Some((6, "begin".to_owned())));
+    assert_eq!(
+        unclosed_block("closed\nV1 1 0 1\n.control\nif 1\necho x\nendif\n.endc\n.end\n"),
+        None
+    );
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

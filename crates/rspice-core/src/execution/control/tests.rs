@@ -155,14 +155,16 @@ fn control_empty_infinite_loop_is_bounded_and_cancellation_is_typed() {
             .kind,
         ControlErrorKind::Aborted
     );
-    assert!(
-        ControlProgram::parse_deck_with_abort(
-            "bad\n.control\nif 1\n.endc\n.end\n",
-            ControlLimits::default(),
-            &NoAbort
-        )
-        .is_err()
-    );
+    // ngspice runs an unclosed block's script up to the block, and no
+    // further, without an error.
+    let unclosed = ControlProgram::parse_deck_with_abort(
+        "bad\n.control\nif 1\n.endc\n.end\n",
+        ControlLimits::default(),
+        &NoAbort,
+    )
+    .unwrap();
+    assert_eq!(unclosed.unclosed_block(), Some((3, "if")));
+    assert!(unclosed.authored_commands().next().is_none());
 }
 
 #[test]

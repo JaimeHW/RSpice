@@ -4,11 +4,7 @@ use std::process::Command;
 #[test]
 fn check_and_run_reject_invalid_requests_before_publication() {
     for (name, cards, diagnostic) in [
-        (
-            "control",
-            ".control\nforeach x 1 2\nop\n.endc",
-            "control.syntax",
-        ),
+        ("control", ".control\nop\nend\n.endc", "control.syntax"),
         ("tran", ".tran 1u -1m", "TSTOP"),
         ("ac", ".ac dec 1 100 1", "stop frequency"),
         ("dc", ".dc V1 0 1 0", "DC sweep"),

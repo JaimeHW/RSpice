@@ -69,6 +69,37 @@ fn control_redirection_writes_files_in_the_decks_directory() {
     assert!(!outside.exists());
 }
 
+/// A block the script never closes runs none of itself and nothing after it;
+/// ngspice-46 prints `before` alone and exits 0, saying nothing of the
+/// block, and the run also warns which block is unclosed.
+#[test]
+fn control_unclosed_block_warns_and_skips_the_rest_of_the_script() {
+    let dir = test_dir("control-unclosed");
+    let deck = dir.join("unclosed.cir");
+    std::fs::write(
+        &deck,
+        "unclosed\nV1 1 0 1\nR1 1 0 1\n.control\necho before\nop\nif 1\necho inside\n\
+         .endc\n.end\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("run")
+        .arg(&deck)
+        .arg("-o")
+        .arg(dir.join("result.csv"))
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(stdout.contains("before\n"), "{stdout}");
+    assert!(!stdout.contains("inside"), "{stdout}");
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unclosed.cir:7: `if` has no matching `end`"),
+        "{stderr}"
+    );
+}
+
 /// `cd $inputdir` (ngspice frontend/inp.c:589) moves to the deck's own
 /// directory, so the file lands beside the deck.
 #[test]

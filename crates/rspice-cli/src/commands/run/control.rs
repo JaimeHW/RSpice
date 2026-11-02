@@ -35,6 +35,20 @@ pub(super) fn run(
                 error
             }
         })?;
+    // ngspice runs a block only once its `end` arrives, and says nothing of
+    // one that never arrives; the run says why the rest of the script did
+    // not run.
+    if let Some((line, keyword)) = program.unclosed_block()
+        && !quiet
+    {
+        let origin = script.origin(line).cloned().unwrap_or_else(|| {
+            rspice_core::netlist::NetlistSourceLocation::in_file(&args.input, line)
+        });
+        crate::console::diagnostic_line(format_args!(
+            "Warning: {origin}: `{keyword}` has no matching `end`; as in ngspice, that block \
+             and every command after it do not run"
+        ));
+    }
     let engine = build_observed_engine(args, config, netlist, quiet)?;
     let mut circuit =
         ControlCircuit::new(netlist.clone()).map_err(|error| map_execution(error, script, args))?;
