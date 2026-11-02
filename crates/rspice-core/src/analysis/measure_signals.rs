@@ -3062,13 +3062,17 @@ impl DcOutputSeries {
 /// AC equation probes follow Xyce's scalar accessor semantics: bare `V()`
 /// and `I()` project the real component, while `VM`/`IM`, `VR`/`IR`,
 /// `VI`/`II`, `VP`/`IP`, and `VDB`/`IDB` select magnitude, real part,
-/// imaginary part, phase in degrees, and decibels respectively. `FREQ` and
-/// `HERTZ` both denote the current sweep frequency.
+/// imaginary part, phase, and decibels respectively, the phase in the deck's
+/// unit ([`PhaseUnit::of`]). `FREQ` and `HERTZ` both denote the current sweep
+/// frequency.
 pub fn evaluate_ac_equation_measurements(
     netlist: &Netlist,
     sweep: &[AcResult],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = AcSweepSeries::from_sweep(sweep).map_err(|error| error.to_string())? else {
+    let Some(series) =
+        AcSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), &NoAbort)
+            .map_err(|error| error.to_string())?
+    else {
         return Ok(Vec::new());
     };
     let alias_projection =
@@ -3090,7 +3094,9 @@ pub fn evaluate_noise_equation_measurements(
     netlist: &Netlist,
     sweep: &[crate::analysis::NoiseResult],
 ) -> Result<Vec<EquationMeasureTrace>, String> {
-    let Some(series) = NoiseSweepSeries::from_sweep(sweep).map_err(|error| error.to_string())?
+    let Some(series) =
+        NoiseSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), &NoAbort)
+            .map_err(|error| error.to_string())?
     else {
         return Ok(Vec::new());
     };
@@ -5347,6 +5353,40 @@ fn dc_lead_current_alias(name: &str) -> Option<String> {
     (lead.len() == 1 && leads.contains(lead)).then(|| format!("{operator}({device})"))
 }
 
+/// The unit of a printed or measured phase (`VP(x)`, `IP(x)`, `ph(v(x))`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) enum PhaseUnit {
+    #[default]
+    Degrees,
+    Radians,
+}
+
+impl PhaseUnit {
+    /// The unit a deck's phase is in: ngspice's `vp()`/`ph()` give radians
+    /// (cmath1.c `cx_ph`, with `cx_degrees` off unless a script sets
+    /// `units=degrees`), and its `.meas` reads those vectors; Xyce's `VP()`
+    /// gives degrees in output and measures unless
+    /// `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS` asks for radians
+    /// (N_IO_OpBuilders.C:704).
+    pub(crate) fn of(netlist: &Netlist) -> Self {
+        if netlist.parse_dialect() == crate::config::SpiceDialect::Ngspice
+            || netlist.options.output_phase_radians == Some(true)
+        {
+            Self::Radians
+        } else {
+            Self::Degrees
+        }
+    }
+
+    /// A phase of `radians` expressed in this unit.
+    pub(crate) fn express(self, radians: Value) -> Value {
+        match self {
+            Self::Degrees => radians.to_degrees(),
+            Self::Radians => radians,
+        }
+    }
+}
+
 /// Owned derived real projections of named complex signals.
 ///
 /// AC and NOISE share Xyce's projection names and scalar-accessor semantics,
@@ -5356,6 +5396,8 @@ fn dc_lead_current_alias(name: &str) -> Option<String> {
 #[derive(Default)]
 struct ComplexProjectionSeries {
     storage: Vec<(String, Vec<Value>)>,
+    /// The unit of the `VP`/`IP` projections.
+    phase_unit: PhaseUnit,
 }
 
 impl ComplexProjectionSeries {
@@ -5371,7 +5413,7 @@ impl ComplexProjectionSeries {
         }
         let mut magnitude = Vec::with_capacity(values.len());
         let mut db = Vec::with_capacity(values.len());
-        let mut phase_deg = Vec::with_capacity(values.len());
+        let mut phase = Vec::with_capacity(values.len());
         let mut real = Vec::with_capacity(values.len());
         let mut imag = Vec::with_capacity(values.len());
         for (index, value) in values.iter().enumerate() {
@@ -5381,7 +5423,7 @@ impl ComplexProjectionSeries {
             let norm = value.norm();
             magnitude.push(norm);
             db.push(20.0 * norm.log10());
-            phase_deg.push(value.arg().to_degrees());
+            phase.push(self.phase_unit.express(value.arg()));
             real.push(value.re);
             imag.push(value.im);
         }
@@ -5390,7 +5432,7 @@ impl ComplexProjectionSeries {
             .push((format!("{prefix}({raw})"), magnitude.clone()));
         self.storage.push((format!("{prefix}M({raw})"), magnitude));
         self.storage.push((format!("{prefix}DB({raw})"), db));
-        self.storage.push((format!("{prefix}P({raw})"), phase_deg));
+        self.storage.push((format!("{prefix}P({raw})"), phase));
         self.storage.push((format!("{prefix}R({raw})"), real));
         self.storage.push((format!("{prefix}I({raw})"), imag));
         if abort.is_aborted() {
@@ -5438,8 +5480,9 @@ fn insert_frequency_axis_variants<'a>(
 ///
 /// AC quantities are complex; measurements address the standard derived
 /// real series. For a node `x`: `V(x)`/`VM(x)` magnitude, `VDB(x)`
-/// 20·log10 magnitude, `VP(x)` phase in degrees, `VR(x)`/`VI(x)` real and
-/// imaginary parts; branch currents use the `I` prefix the same way. The
+/// 20·log10 magnitude, `VP(x)` phase (in degrees from [`Self::from_sweep`]),
+/// `VR(x)`/`VI(x)` real and imaginary parts; branch currents use the `I`
+/// prefix the same way. The
 /// frequency axis is reachable as `TIME` (the measurement abscissa),
 /// `FREQUENCY`, and `FREQ`.
 pub struct AcSweepSeries {
@@ -5451,11 +5494,12 @@ impl AcSweepSeries {
     /// Collect the derived real series across the sweep. Returns `Ok(None)`
     /// for an empty sweep and a typed schema error for malformed rows.
     pub fn from_sweep(sweep: &[AcResult]) -> Result<Option<Self>, SimulationError> {
-        Self::from_sweep_with_abort(sweep, &NoAbort)
+        Self::from_sweep_with_abort(sweep, PhaseUnit::Degrees, &NoAbort)
     }
 
     fn from_sweep_with_abort(
         sweep: &[AcResult],
+        phase_unit: PhaseUnit,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Self>, SimulationError> {
         if abort.is_aborted() {
@@ -5473,7 +5517,10 @@ impl AcSweepSeries {
             axis.push(point.frequency);
         }
 
-        let mut projections = ComplexProjectionSeries::default();
+        let mut projections = ComplexProjectionSeries {
+            phase_unit,
+            ..ComplexProjectionSeries::default()
+        };
 
         for (index, name) in first.node_names.iter().enumerate() {
             if index.is_multiple_of(64) && abort.is_aborted() {
@@ -5577,11 +5624,12 @@ impl NoiseSweepSeries {
     pub fn from_sweep(
         sweep: &[crate::analysis::NoiseResult],
     ) -> Result<Option<Self>, SimulationError> {
-        Self::from_sweep_with_abort(sweep, &NoAbort)
+        Self::from_sweep_with_abort(sweep, PhaseUnit::Degrees, &NoAbort)
     }
 
     pub(crate) fn from_sweep_with_abort(
         sweep: &[crate::analysis::NoiseResult],
+        phase_unit: PhaseUnit,
         abort: &dyn AbortSignal,
     ) -> Result<Option<Self>, SimulationError> {
         super::measure::continuous::poll(abort, 0)?;
@@ -5626,7 +5674,10 @@ impl NoiseSweepSeries {
             }
         }
 
-        let mut projections = ComplexProjectionSeries::default();
+        let mut projections = ComplexProjectionSeries {
+            phase_unit,
+            ..ComplexProjectionSeries::default()
+        };
         for (index, name) in first.node_names.iter().enumerate() {
             super::measure::continuous::poll(abort, index)?;
             let raw = if name.is_empty() {
@@ -5852,7 +5903,8 @@ fn evaluate_noise_measurements_with_parameters(
     if statements.is_empty() {
         return Ok(Vec::new());
     }
-    let series = match NoiseSweepSeries::from_sweep_with_abort(sweep, abort) {
+    let series = match NoiseSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), abort)
+    {
         Ok(Some(series)) => series,
         Ok(None) => {
             return Ok(failed_measurements(
@@ -7258,7 +7310,8 @@ fn evaluate_ac_measurements_with_parameters(
     if statements.is_empty() {
         return Ok(Vec::new());
     }
-    let Some(series) = AcSweepSeries::from_sweep_with_abort(sweep, abort)? else {
+    let Some(series) = AcSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), abort)?
+    else {
         return Ok(failed_measurements(
             &statements,
             "AC sweep produced no points",
@@ -7504,7 +7557,7 @@ mod tests {
         let sweep = vec![noise; 10_001];
         let abort = CountingAbort::new(2);
         assert!(matches!(
-            NoiseSweepSeries::from_sweep_with_abort(&sweep, &abort),
+            NoiseSweepSeries::from_sweep_with_abort(&sweep, PhaseUnit::Degrees, &abort),
             Err(SimulationError::Aborted)
         ));
         assert_eq!(abort.count(), 3);
@@ -10467,6 +10520,63 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![(Some(1.5), 5.0), (Some(2.5), 25.0)]
         );
+    }
+
+    /// `.MEAS AC` and `.MEAS NOISE` read a phase in the deck's unit. On an RC
+    /// pole ngspice-46's `find vp(out) at=1k` gives -0.785398 (radians), and
+    /// Xyce 7.10's gives -45 (degrees), or -0.7853983 under
+    /// PHASE_OUTPUT_RADIANS.
+    #[test]
+    fn ac_and_noise_measures_read_phase_in_the_decks_unit() {
+        use crate::config::SpiceDialect;
+        let pole = crate::Complex64::new(0.5, -0.5);
+        let ac = |frequency| AcResult {
+            frequency,
+            node_names: vec!["out".to_string()],
+            branch_names: vec!["V1".to_string()],
+            voltages: vec![pole],
+            currents: vec![pole],
+        };
+        let ac_sweep = [ac(1.0), ac(2.0)];
+        let noise_sweep = [noise_point(1.0, pole, pole), noise_point(2.0, pole, pole)];
+        let quarter = -std::f64::consts::FRAC_PI_4;
+        for (dialect, options, expected) in [
+            (SpiceDialect::Ngspice, "", quarter),
+            (SpiceDialect::Xyce, "", -45.0),
+            (
+                SpiceDialect::Xyce,
+                ".options output phase_output_radians=1\n",
+                quarter,
+            ),
+            (SpiceDialect::BestAvailable, "", -45.0),
+        ] {
+            let netlist = Netlist::parse_with_options(
+                &format!(
+                    "phase unit\nV1 out 0 AC 1\n.ac lin 2 1 2\n.noise v(out) V1 lin 2 1 2\n\
+                     {options}.meas ac vp1 find vp(out) at=1.5\n\
+                     .meas ac ip1 find ip(V1) at=1.5\n\
+                     .meas noise vp2 find vp(out) at=1.5\n.end\n"
+                ),
+                crate::netlist::NetlistParseOptions {
+                    spice_dialect: Some(dialect),
+                    ..Default::default()
+                },
+            )
+            .expect("phase deck parses");
+            let results = evaluate_ac_measurements(&netlist, &ac_sweep)
+                .into_iter()
+                .chain(evaluate_noise_measurements(&netlist, &noise_sweep))
+                .collect::<Vec<_>>();
+            assert_eq!(results.len(), 3, "{dialect:?} {options}");
+            for result in results {
+                let value = result.value.expect("phase measure has a value");
+                assert!(
+                    (value - expected).abs() < 1e-12,
+                    "{dialect:?} {options}{}: {value}",
+                    result.name
+                );
+            }
+        }
     }
 
     #[test]

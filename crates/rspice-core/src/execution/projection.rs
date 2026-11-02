@@ -24,7 +24,7 @@ use std::collections::HashMap;
 use crate::abort_signal::AbortSignal;
 use crate::analysis::measure_signals::{
     CanonicalMeasureSignalIndex, NoiseSweepSeries, OutputColumnKind, OutputOperandEvaluationError,
-    evaluate_output_operand,
+    PhaseUnit, evaluate_output_operand,
 };
 use crate::engine::SimulationError;
 use crate::netlist::{
@@ -451,13 +451,6 @@ pub struct SignalProjection {
     phase_unit: PhaseUnit,
 }
 
-/// The unit of a printed phase column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PhaseUnit {
-    Degrees,
-    Radians,
-}
-
 #[derive(Debug, Clone)]
 struct ProjectionCard {
     directive: OutputDirectiveKind,
@@ -540,7 +533,7 @@ impl SignalProjection {
                 .iter()
                 .any(|signal| matches!(signal, SaveSignal::All)),
             authored,
-            phase_unit: phase_unit(netlist),
+            phase_unit: PhaseUnit::of(netlist),
         })
     }
 
@@ -617,7 +610,8 @@ impl SignalProjection {
         if self.keeps_everything || !self.has_ordered_card(AnalysisResultKind::Noise) {
             return Ok(None);
         }
-        let Some(series) = NoiseSweepSeries::from_sweep_with_abort(sweep, abort)? else {
+        let Some(series) = NoiseSweepSeries::from_sweep_with_abort(sweep, self.phase_unit, abort)?
+        else {
             return Ok(None);
         };
         let output_amplitude = sweep
@@ -1343,21 +1337,6 @@ fn select_exact_inventory(
         .map(ProjectionSourceSignal::into_projected)
 }
 
-/// The unit a deck's printed phase is in: ngspice's `vp()`/`ph()` give
-/// radians (cmath1.c `cx_ph`, with `cx_degrees` off unless a script sets
-/// `units=degrees`), Xyce's `VP()` gives degrees unless
-/// `.OPTIONS OUTPUT PHASE_OUTPUT_RADIANS` asks for radians
-/// (N_IO_OpBuilders.C:704).
-fn phase_unit(netlist: &Netlist) -> PhaseUnit {
-    if netlist.parse_dialect() == crate::SpiceDialect::Ngspice
-        || netlist.options.output_phase_radians == Some(true)
-    {
-        PhaseUnit::Radians
-    } else {
-        PhaseUnit::Degrees
-    }
-}
-
 /// Resolve one authored operand against a complex-valued result.
 ///
 /// Complex families carry node voltages, branch currents, and device
@@ -1427,10 +1406,7 @@ fn render_complex_column(
     let Some((real, imag)) = column.complex() else {
         return Ok(column);
     };
-    let to_unit = |radians: Value| match phase_unit {
-        PhaseUnit::Degrees => radians.to_degrees(),
-        PhaseUnit::Radians => radians,
-    };
+    let to_unit = |radians: Value| phase_unit.express(radians);
     let samples = real.iter().zip(imag);
     let values = match rendering {
         ComplexRendering::Real => real.to_vec(),

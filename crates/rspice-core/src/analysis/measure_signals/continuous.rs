@@ -489,7 +489,7 @@ fn evaluate_ac_continuous_with_parameters(
             limits,
         )?;
     }
-    let series = match AcSweepSeries::from_sweep_with_abort(sweep, abort) {
+    let series = match AcSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), abort) {
         Ok(Some(series)) => series,
         Ok(None) => return failed(&statements, "AC sweep produced no points", abort),
         Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
@@ -591,7 +591,8 @@ fn evaluate_noise_continuous_with_parameters(
             )?;
         }
     }
-    let series = match NoiseSweepSeries::from_sweep_with_abort(sweep, abort) {
+    let series = match NoiseSweepSeries::from_sweep_with_abort(sweep, PhaseUnit::of(netlist), abort)
+    {
         Ok(Some(series)) => series,
         Ok(None) => return failed(&statements, "noise sweep produced no points", abort),
         Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
