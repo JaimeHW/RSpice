@@ -2091,6 +2091,31 @@ impl Bsim4v8Device {
 }
 
 impl NonlinearDevice for Bsim4v8Device {
+    fn reopen_operating_point(&mut self) {
+        // b4ld.c's MODEINITJCT load: the first iterate passes unlimited, and
+        // an `OFF` instance opens at zero bias again.
+        let zero = Bsim4v8Bias {
+            vds: 0.0,
+            vgs: 0.0,
+            vbs: 0.0,
+        };
+        let zero_junction = Bsim4v8JunctionBias { vbs: 0.0, vbd: 0.0 };
+        self.op = Bsim4v8Op::default();
+        self.bias = zero;
+        self.converged_ref = zero;
+        self.junction_bias = zero_junction;
+        self.converged_junction_ref = zero_junction;
+        self.von_prev = 0.0;
+        self.has_history = false;
+        self.limit_anchor_valid.set(false);
+        self.last_update = None;
+        self.last_update_open.set(false);
+        self.last_limited.set(false);
+        self.initial_off_seed_pending = true;
+        self.initial_off_seed_evaluations = 0;
+        self.initial_off_seed_raw = None;
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         self.converged_ref = self.bias;
         self.converged_junction_ref = self.junction_bias;

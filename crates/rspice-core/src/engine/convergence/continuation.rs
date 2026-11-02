@@ -1530,6 +1530,17 @@ m1 d g 0 0 nb3 w=10u l=1u
 .op
 .end
 ",
+        "* BSIM4
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 2m
+rg1 g 0 1k
+rd1 vcc d 10k
+m1 d g 0 0 nb4 w=10u l=1u
+.model nb4 nmos level=54
+.op
+.end
+",
         "\
 * JFET
 icc 0 vcc 50m
