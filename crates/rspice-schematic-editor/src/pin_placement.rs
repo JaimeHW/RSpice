@@ -69,7 +69,9 @@ impl PinPlacementFields {
             .iter()
             .position(|entry| *entry == self.direction)
             .unwrap_or(0);
-        if rows.segmented(
+        // Both choices span the control column, as the fields above and
+        // below them do, so no row stops short of its neighbours.
+        if rows.segmented_columns(
             DIRECTION_LABEL,
             "rspice.create-pins.direction",
             &DIRECTION_SEGMENTS,
@@ -81,7 +83,7 @@ impl PinPlacementFields {
             .iter()
             .position(|entry| *entry == self.signal_type)
             .unwrap_or(0);
-        if rows.segmented(
+        if rows.segmented_columns(
             SIGNAL_LABEL,
             "rspice.create-pins.signal",
             &SIGNAL_SEGMENTS,

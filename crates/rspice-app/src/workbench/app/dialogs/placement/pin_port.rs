@@ -55,6 +55,8 @@ const TITLE: &str = "Create pins";
 const PRIMARY: &str = "Place";
 const DESCRIPTION: &str = "Name the pins of this cell, then click to place each one.";
 const READ_ONLY: &str = "This schematic is read-only.";
+/// What Place waits for while no name is typed.
+const NAMES_MISSING: &str = "Type the names of the pins to place.";
 const DOCUMENT_CHANGED: &str = "The active schematic changed. Close this form and open it again.";
 const TOO_MANY: &str = "A batch holds at most 256 pins.";
 
@@ -107,7 +109,8 @@ pub(crate) fn open_create_pins(state: &mut AppState) {
 enum Draft {
     /// The form cannot be used at all, and says why.
     Blocked(&'static str),
-    /// Nothing typed. The primary is off and the form says nothing.
+    /// Nothing typed. The primary is off and the footer says what it
+    /// waits for.
     Empty,
     /// A refusal the reader has to fix.
     Refused(String),
@@ -240,9 +243,10 @@ pub(in crate::workbench) fn render_pin_port_dialog(
         .describe(DESCRIPTION)
         .primary_enabled(usable && ready)
         .fields_enabled(usable)
-        .status(match refusal.as_deref() {
-            Some(message) => Err(message),
-            None => Ok(None),
+        .status(match (refusal.as_deref(), &current) {
+            (Some(message), _) => Err(message),
+            (None, Draft::Empty) => Ok(Some(NAMES_MISSING)),
+            (None, _) => Ok(None),
         })
         .show(ctx, |rows| {
             form.fields

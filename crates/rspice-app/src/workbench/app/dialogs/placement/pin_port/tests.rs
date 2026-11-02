@@ -568,6 +568,75 @@ fn create_pins_fits_every_viewport() {
     }
 }
 
+/// Every labelled node the form publishes, with its role and bounds, after a
+/// few frames at the desktop size.
+fn published(app: &mut RSpiceApp) -> Vec<(egui::accesskit::Role, String, egui::Rect)> {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut nodes = std::collections::HashMap::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(dialog_input(Vec::new()), |ctx| render(app, ctx));
+        nodes.extend(
+            output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes,
+        );
+    }
+    nodes
+        .into_values()
+        .filter_map(|node| {
+            let b = node.bounds()?;
+            // A plain label publishes its text as the value.
+            let text = node
+                .label()
+                .filter(|label| !label.is_empty())
+                .or_else(|| node.value())?;
+            Some((
+                node.role(),
+                text.to_owned(),
+                egui::Rect::from_min_max(
+                    egui::pos2(b.x0 as f32, b.y0 as f32),
+                    egui::pos2(b.x1 as f32, b.y1 as f32),
+                ),
+            ))
+        })
+        .collect()
+}
+
+/// An empty form says what Place waits for, and both choices span the
+/// control column the Discipline list spans, so no row stops short of its
+/// neighbours.
+#[test]
+fn an_empty_form_says_what_place_waits_for_and_its_choices_fill_the_column() {
+    use egui::accesskit::Role;
+    let mut app = RSpiceApp::test_instance();
+    open_with(&mut app.state, "");
+    let nodes = published(&mut app);
+    assert!(
+        nodes.iter().any(|(_, label, _)| label == NAMES_MISSING),
+        "the disabled Place does not say why"
+    );
+    let control = |name: &str| {
+        nodes
+            .iter()
+            .find(|(role, label, _)| label == name && *role != Role::Label)
+            .map(|(_, _, rect)| *rect)
+            .unwrap_or_else(|| panic!("{name} is published"))
+    };
+    let discipline = control("Discipline");
+    for (first, last) in [("Input", "Supply"), ("Analog", "Power")] {
+        let (first, last) = (control(first), control(last));
+        assert!(
+            (first.left() - discipline.left()).abs() < 1.0
+                && (last.right() - discipline.right()).abs() < 1.0,
+            "{first:?}..{last:?} against {discipline:?}"
+        );
+    }
+}
+
 // ============================================================================
 // Renders for a human to look at
 // ============================================================================
