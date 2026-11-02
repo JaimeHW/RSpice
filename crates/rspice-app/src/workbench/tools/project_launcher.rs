@@ -1678,7 +1678,7 @@ fn launcher_search_field(
         egui::TextEdit::singleline(query)
             .id(project_search_id())
             .hint_text("Project, path, owner, tag…")
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
+            .font(theme::field_sans())
             .margin(Margin::ZERO)
             .vertical_align(Align::Center)
             .frame(Frame::NONE),

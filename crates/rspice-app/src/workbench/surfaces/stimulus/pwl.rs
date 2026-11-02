@@ -415,7 +415,7 @@ fn cell_edit(
     let response = ui.put(
         cell,
         egui::TextEdit::singleline(&mut text)
-            .font(egui::TextStyle::Monospace)
+            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
             .desired_width(cell.width())
             .margin(egui::Margin::symmetric(6, 3))
             .id_salt(("workbench.stimulus.pwl.cell", slot)),

@@ -599,7 +599,7 @@ fn rollback_receipt_selector(
         let selected = selected_receipt(receipts, draft.publication_id)
             .expect("rollback receipt is normalized before rendering");
         let prior = draft.publication_id;
-        egui::ComboBox::from_id_salt("workbench.project.library.rollback.publication")
+        crate::ui::widgets::Combo::from_id_salt("workbench.project.library.rollback.publication")
             .selected_text(format!(
                 "#{:04} \u{00b7} {}",
                 selected.sequence(),

@@ -137,7 +137,7 @@ pub(super) fn ownership_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp) 
             });
             ui.add_space(8.0);
             ui.label(messages.text(MessageId::NetlistEditStrategy));
-            egui::ComboBox::from_id_salt("rspice.code.ownership-strategy")
+            crate::ui::widgets::Combo::from_id_salt("rspice.code.ownership-strategy")
                 .selected_text(owned_strategy_label(messages, dialog.strategy))
                 .width(ui.available_width().max(1.0))
                 .show_ui(ui, |ui| {

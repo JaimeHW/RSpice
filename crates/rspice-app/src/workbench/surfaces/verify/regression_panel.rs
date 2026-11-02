@@ -477,7 +477,7 @@ fn tolerance_form(
     };
     crate::workbench::design_system::panel_body(ui, |ui| {
         let previous_method = draft.method;
-        egui::ComboBox::from_id_salt("verify.regression.tolerance.method")
+        crate::ui::widgets::Combo::from_id_salt("verify.regression.tolerance.method")
             .selected_text(draft.method.label())
             .width(ui.available_width().max(120.0))
             .show_ui(ui, |ui| {

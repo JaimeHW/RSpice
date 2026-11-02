@@ -425,7 +425,7 @@ fn symbol_grid_spacing(ui: &mut egui::Ui, app: &mut RSpiceApp, layout: LayoutSpe
     if !take_projected_tool_slot(ui, layout) {
         return;
     }
-    egui::ComboBox::from_id_salt("symbol-editor.grid-spacing")
+    crate::ui::widgets::Combo::from_id_salt("symbol-editor.grid-spacing")
         .selected_text(app.state.design.symbol.editor.grid_spacing.label())
         .width(72.0)
         .show_ui(ui, |ui| {

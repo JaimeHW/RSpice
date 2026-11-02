@@ -313,18 +313,19 @@ fn show_toolbar(
                     .map_or("No signed layer".to_owned(), |layer| {
                         format!("{}/{}", layer.layer, layer.purpose)
                     });
-                let layer_picker = egui::ComboBox::from_id_salt("physical-layout-active-layer")
-                    .selected_text(active_label)
-                    .show_ui(ui, |ui| {
-                        for layer in &display.ordered_layers {
-                            let label = format!("{}/{}", layer.layer, layer.purpose);
-                            ui.selectable_value(
-                                &mut session.active_layer,
-                                Some(layer.clone()),
-                                label,
-                            );
-                        }
-                    });
+                let layer_picker =
+                    crate::ui::widgets::Combo::from_id_salt("physical-layout-active-layer")
+                        .selected_text(active_label)
+                        .show_ui(ui, |ui| {
+                            for layer in &display.ordered_layers {
+                                let label = format!("{}/{}", layer.layer, layer.purpose);
+                                ui.selectable_value(
+                                    &mut session.active_layer,
+                                    Some(layer.clone()),
+                                    label,
+                                );
+                            }
+                        });
                 ui.ctx()
                     .accesskit_node_builder(layer_picker.response.id, |node| {
                         node.set_label("Active physical layout layer and purpose");

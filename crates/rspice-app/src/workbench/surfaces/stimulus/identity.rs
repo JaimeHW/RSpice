@@ -20,9 +20,10 @@ use super::super::super::design_system::{
 use super::{Stage, StageAction};
 
 /// Width of the editable name field. Wide enough for the longest name the
-/// library's own generator produces plus a descriptive suffix, and fixed so
-/// that the verbs on the right do not move when a name is typed.
-const NAME_WIDTH: f32 = 168.0;
+/// library's own generator produces plus a descriptive suffix, at the field
+/// size, and fixed so that the verbs on the right do not move when a name is
+/// typed.
+const NAME_WIDTH: f32 = 182.0;
 const COMBO_WIDTH: f32 = 96.0;
 const KIND_WIDTH: f32 = 56.0;
 const BUTTON: Vec2 = Vec2::new(28.0, 26.0);
@@ -165,7 +166,7 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
         .collect::<Vec<_>>();
     let response = ui.add(
         egui::TextEdit::singleline(&mut text)
-            .font(egui::TextStyle::Monospace)
+            .font(theme::field_mono())
             .desired_width(NAME_WIDTH)
             .margin(egui::Margin::symmetric(6, 3)),
     );
@@ -206,7 +207,7 @@ fn name_field(ui: &mut Ui, state: &AppState, stage: &Stage, actions: &mut Vec<St
 
 fn family_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<StageAction>) {
     let current = stage.working.family();
-    let response = egui::ComboBox::from_id_salt("workbench.stimulus.identity.family")
+    let response = crate::ui::widgets::Combo::from_id_salt("workbench.stimulus.identity.family")
         .width(COMBO_WIDTH)
         .selected_text(current.label())
         .show_ui(ui, |ui| {
@@ -226,7 +227,7 @@ fn family_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<Stage
 
 fn kind_combo(ui: &mut Ui, label: &str, stage: &Stage, actions: &mut Vec<StageAction>) {
     let current = stage.working.kind();
-    let response = egui::ComboBox::from_id_salt("workbench.stimulus.identity.kind")
+    let response = crate::ui::widgets::Combo::from_id_salt("workbench.stimulus.identity.kind")
         .width(KIND_WIDTH)
         .selected_text(current.letter())
         .show_ui(ui, |ui| {

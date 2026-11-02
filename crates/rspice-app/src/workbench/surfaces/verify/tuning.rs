@@ -835,7 +835,7 @@ fn tuning_variable_editor(
         ui.add_sized(
             [ui.available_width(), Tokens::get(ui.ctx()).metrics.ctl_h],
             egui::TextEdit::singleline(&mut draft.candidate_expression)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                .font(crate::ui::theme::field_mono())
                 .id_source(("workbench.verify.tuning.variable", variable.id)),
         )
     };

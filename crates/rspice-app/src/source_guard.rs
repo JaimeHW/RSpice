@@ -1601,9 +1601,7 @@ mod tests {
     /// workspace's `crates/` directory.
     fn field_size_roots(_crates: &Path) -> Vec<String> {
         [
-            "rspice-app/src/workbench/surfaces/simulate",
-            "rspice-app/src/workbench/app/dialogs",
-            "rspice-app/src/workbench/project",
+            "rspice-app/src",
             "rspice-schematic-editor/src",
         ]
         .map(str::to_owned)
@@ -1615,7 +1613,21 @@ mod tests {
     /// An editor that takes a table cell's place while the cell is edited
     /// keeps the size of the cells around it, so the row does not change type
     /// under the caret; a document is read at its editor's own size.
-    const OWN_SIZE_EDITORS: [(&str, &str); 0] = [];
+    const OWN_SIZE_EDITORS: [(&str, &str); 3] = [
+        (
+            "rspice-app/src/workbench/surfaces/verify/table.rs",
+            "edit_cell",
+        ),
+        (
+            "rspice-app/src/workbench/surfaces/stimulus/pwl.rs",
+            "cell_edit",
+        ),
+        // A document is read at its editor's own size.
+        (
+            "rspice-app/src/workbench/documents/code_workspace/editor.rs",
+            "show_code_document_impl",
+        ),
+    ];
 
     /// Where `needle` sits in `source`, if that is code and not a comment.
     fn in_code(source: &str, at: usize) -> bool {

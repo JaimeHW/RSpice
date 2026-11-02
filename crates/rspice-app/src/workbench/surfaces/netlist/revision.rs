@@ -136,65 +136,71 @@ pub(super) fn comparison_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp)
         });
         ui.add_space(8.0);
         ui.label(messages.text(MessageId::NetlistPriorRevision));
-        let revision = egui::ComboBox::from_id_salt("rspice.code.compare-revision-select")
-            .selected_text(selected_label)
-            .width(ui.available_width().max(1.0))
-            .show_ui(ui, |ui| {
-                if owned {
-                    if let Some(descriptor) = app
-                        .state
-                        .model
-                        .workspace
-                        .content
-                        .netlist_descriptor
-                        .as_ref()
-                    {
-                        for (index, snapshot) in
-                            descriptor.revision_history.iter().enumerate().rev()
+        let revision =
+            crate::ui::widgets::Combo::from_id_salt("rspice.code.compare-revision-select")
+                .selected_text(selected_label)
+                .width(ui.available_width().max(1.0))
+                .show_ui(ui, |ui| {
+                    if owned {
+                        if let Some(descriptor) = app
+                            .state
+                            .model
+                            .workspace
+                            .content
+                            .netlist_descriptor
+                            .as_ref()
                         {
-                            let revision = snapshot.document_revision.to_string();
-                            let digest = snapshot
-                                .content_digest
+                            for (index, snapshot) in
+                                descriptor.revision_history.iter().enumerate().rev()
+                            {
+                                let revision = snapshot.document_revision.to_string();
+                                let digest = snapshot
+                                    .content_digest
+                                    .to_string()
+                                    .chars()
+                                    .take(12)
+                                    .collect::<String>();
+                                let label = messages.format(
+                                    MessageId::NetlistOwnedRevisionChoice,
+                                    &[
+                                        ("revision", &revision),
+                                        ("digest", &digest),
+                                        ("message", &snapshot.message),
+                                    ],
+                                );
+                                ui.selectable_value(
+                                    &mut dialog.selected_history_index,
+                                    index,
+                                    label,
+                                );
+                            }
+                        }
+                    } else {
+                        for (index, artifact) in app
+                            .state
+                            .code
+                            .netlist
+                            .generated_history
+                            .iter()
+                            .enumerate()
+                            .rev()
+                        {
+                            let revision =
+                                artifact.provenance().input().revision().get().to_string();
+                            let digest = artifact
+                                .content_digest()
                                 .to_string()
                                 .chars()
                                 .take(12)
                                 .collect::<String>();
                             let label = messages.format(
-                                MessageId::NetlistOwnedRevisionChoice,
-                                &[
-                                    ("revision", &revision),
-                                    ("digest", &digest),
-                                    ("message", &snapshot.message),
-                                ],
+                                MessageId::NetlistGeneratedRevisionChoice,
+                                &[("revision", &revision), ("digest", &digest)],
                             );
                             ui.selectable_value(&mut dialog.selected_history_index, index, label);
                         }
                     }
-                } else {
-                    for (index, artifact) in app
-                        .state
-                        .code
-                        .netlist
-                        .generated_history
-                        .iter()
-                        .enumerate()
-                        .rev()
-                    {
-                        let revision = artifact.provenance().input().revision().get().to_string();
-                        let digest = artifact
-                            .content_digest()
-                            .to_string()
-                            .chars()
-                            .take(12)
-                            .collect::<String>();
-                        let label = messages.format(
-                            MessageId::NetlistGeneratedRevisionChoice,
-                            &[("revision", &revision), ("digest", &digest)],
-                        );
-                        ui.selectable_value(&mut dialog.selected_history_index, index, label);
-                    }
-                }
-            });
+                });
         Some(revision.response.id)
     });
     match choice {
@@ -314,7 +320,7 @@ pub(super) fn save_source_dialog_window(ctx: &egui::Context, app: &mut RSpiceApp
         ui.horizontal(|ui| {
             ui.label("Encoding");
             if dialog.save_as {
-                egui::ComboBox::from_id_salt("rspice.netlist.save-as-encoding")
+                crate::ui::widgets::Combo::from_id_salt("rspice.netlist.save-as-encoding")
                     .selected_text(dialog.encoding.label())
                     .show_ui(ui, |ui| {
                         for encoding in crate::state::NetlistTextEncoding::ALL {

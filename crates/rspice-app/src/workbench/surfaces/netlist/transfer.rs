@@ -80,18 +80,19 @@ pub(super) fn external_change_dialog_window(ctx: &egui::Context, app: &mut RSpic
         ));
         ui.add_space(8.0);
         ui.label(messages.text(MessageId::NetlistExternalResolution));
-        let resolution = egui::ComboBox::from_id_salt("rspice.netlist.external-resolution")
-            .selected_text(external_resolution_label(messages, review.resolution))
-            .width(ui.available_width().max(1.0))
-            .show_ui(ui, |ui| {
-                for resolution in NetlistExternalChangeResolution::ALL {
-                    ui.selectable_value(
-                        &mut review.resolution,
-                        resolution,
-                        external_resolution_label(messages, resolution),
-                    );
-                }
-            });
+        let resolution =
+            crate::ui::widgets::Combo::from_id_salt("rspice.netlist.external-resolution")
+                .selected_text(external_resolution_label(messages, review.resolution))
+                .width(ui.available_width().max(1.0))
+                .show_ui(ui, |ui| {
+                    for resolution in NetlistExternalChangeResolution::ALL {
+                        ui.selectable_value(
+                            &mut review.resolution,
+                            resolution,
+                            external_resolution_label(messages, resolution),
+                        );
+                    }
+                });
         ui.add_space(8.0);
         ui.label(egui::RichText::new(messages.text(MessageId::NetlistExternalEvidence)).strong());
         ui.label(if review.base_source.is_some() {
@@ -461,7 +462,7 @@ pub(super) fn import_review_dialog_window(ctx: &egui::Context, app: &mut RSpiceA
 
             ui.add_space(8.0);
             ui.label(messages.text(MessageId::NetlistSourceDialect));
-            let dialect = egui::ComboBox::from_id_salt("rspice.netlist.import-dialect")
+            let dialect = crate::ui::widgets::Combo::from_id_salt("rspice.netlist.import-dialect")
                 .selected_text(review.selected_dialect.label())
                 .width(ui.available_width().max(1.0))
                 .show_ui(ui, |ui| {

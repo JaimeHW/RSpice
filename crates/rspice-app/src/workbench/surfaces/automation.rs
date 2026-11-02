@@ -1243,7 +1243,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                 .automation
                 .debug
                 .exception_policy;
-            egui::ComboBox::from_id_salt("automation.debug.exceptions")
+            crate::ui::widgets::Combo::from_id_salt("automation.debug.exceptions")
                 .selected_text(automation_exception_policy_label(policy, messages))
                 .width(ui.available_width().max(1.0))
                 .show_ui(ui, |ui| {
@@ -1321,7 +1321,7 @@ fn debugger(ui: &mut Ui, app: &mut RSpiceApp) {
                             remove_breakpoint = Some((breakpoint.document_id, breakpoint.line));
                         }
                         let mut kind = breakpoint.kind;
-                        egui::ComboBox::from_id_salt((
+                        crate::ui::widgets::Combo::from_id_salt((
                             "automation.breakpoint.kind",
                             breakpoint.document_id,
                             breakpoint.line,
