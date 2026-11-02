@@ -270,7 +270,7 @@ define_surface_catalog! {
     JobsManager => { id: "jobs-manager", label: "Run history", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=jobs-manager" },
     WorkflowDialog => { id: "workflow-dialog", label: "Transactional workflow dialog", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=workflow-dialog" },
     NotificationCenter => { id: "notification-center", label: "Notifications", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=notification-center" },
-    HelpCenter => { id: "help-center", label: "Help center", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
+    HelpCenter => { id: "help-center", label: "Legal & privacy", archetype: Manager, tier: ReleaseTarget, status: ReleaseScope, deep_link: "?surface=help-center" },
     ProductReadinessCenter => { id: "product-readiness-center", label: "Product readiness contracts", archetype: Internal, tier: Internal, status: InternalOnly, deep_link: "?surface=product-readiness-center" },
     MobileNavigation => { id: "mobile-navigation", label: "Compact task navigation", archetype: Overlay, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-navigation" },
     MobileTaskHandoff => { id: "mobile-task-handoff", label: "Qualified-target handoff", archetype: Modal, tier: ReleaseTarget, status: Preview, deep_link: "?surface=mobile-task-handoff" },
