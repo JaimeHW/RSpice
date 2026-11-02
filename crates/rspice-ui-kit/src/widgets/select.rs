@@ -6,6 +6,10 @@ use egui::{Id, Sense, Shape, Stroke, Ui, WidgetInfo, WidgetType, vec2};
 use crate::theme;
 use crate::tokens::Tokens;
 
+/// Where a value starts inside the well and inside a drop-down row.
+const VALUE_INSET: f32 = 8.0;
+/// The well's right end the chevron keeps clear of the value.
+const CHEVRON_ROOM: f32 = 24.0;
 /// Options a drop-down shows before its list scrolls.
 const SELECT_VISIBLE_OPTIONS: usize = 12;
 
@@ -124,6 +128,20 @@ fn select_with_font(
     let hover =
         ui.ctx()
             .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
+    // A value wider than the well is shortened from the middle and named
+    // whole on hover: cut at the chevron, it read as complete.
+    let shown = super::middle_elided(
+        ui,
+        selected,
+        &value_font,
+        c.text,
+        (rect.width() - VALUE_INSET - CHEVRON_ROOM).max(1.0),
+    );
+    let response = if shown == selected {
+        response
+    } else {
+        response.on_hover_text(selected)
+    };
     let painter = ui.painter();
     painter.rect(
         rect,
@@ -135,12 +153,15 @@ fn select_with_font(
     painter
         .with_clip_rect(egui::Rect::from_min_max(
             rect.left_top(),
-            egui::pos2((rect.right() - 24.0).max(rect.left()), rect.bottom()),
+            egui::pos2(
+                (rect.right() - CHEVRON_ROOM).max(rect.left()),
+                rect.bottom(),
+            ),
         ))
         .text(
-            egui::pos2(rect.left() + 8.0, rect.center().y),
+            egui::pos2(rect.left() + VALUE_INSET, rect.center().y),
             egui::Align2::LEFT_CENTER,
-            selected,
+            shown,
             value_font.clone(),
             c.text,
         );
@@ -207,8 +228,17 @@ fn select_with_font(
                                     Sense::click()
                                 },
                             );
+                            let shown = super::middle_elided(
+                                ui,
+                                option,
+                                &value_font,
+                                c.text,
+                                (row.width() - 2.0 * VALUE_INSET).max(1.0),
+                            );
                             let row_response = if let Some(reason) = unavailable {
                                 row_response.on_hover_text(reason)
+                            } else if shown != *option {
+                                row_response.on_hover_text(option)
                             } else {
                                 row_response
                             };
@@ -229,9 +259,9 @@ fn select_with_font(
                                 painter.rect_filled(row, t.radius, c.bg_hover);
                             }
                             painter.text(
-                                egui::pos2(row.left() + 8.0, row.center().y),
+                                egui::pos2(row.left() + VALUE_INSET, row.center().y),
                                 egui::Align2::LEFT_CENTER,
-                                option,
+                                shown,
                                 value_font.clone(),
                                 if unavailable.is_some() {
                                     c.text_faint
@@ -406,6 +436,45 @@ mod tests {
             .into_iter()
             .map(str::to_owned)
             .collect()
+    }
+
+    /// A value wider than its well is shortened from the middle, both ends
+    /// kept, and painted inside the well rather than cut at the chevron.
+    #[test]
+    fn a_long_value_is_shortened_from_the_middle_to_fit_its_well() {
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let long = "Corner characterization \u{00b7} revision 1";
+        let options = vec![long.to_owned()];
+        let mut painted = Vec::new();
+        for _ in 0..2 {
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                let _ = select(ui, "fit", "Plan", long, &options, 140.0);
+            });
+            painted = output
+                .shapes
+                .iter()
+                .filter_map(|clipped| match &clipped.shape {
+                    egui::Shape::Text(text) => {
+                        Some((text.galley.text().to_owned(), text.galley.size().x))
+                    }
+                    _ => None,
+                })
+                .collect();
+        }
+        let (shown, width) = painted
+            .iter()
+            .find(|(text, _)| text.starts_with("Corner"))
+            .cloned()
+            .unwrap_or_else(|| panic!("the value is painted: {painted:?}"));
+        assert!(
+            shown.starts_with("Corner") && shown.ends_with(" 1") && shown.contains('\u{2026}'),
+            "{shown:?}"
+        );
+        assert!(
+            width <= 140.0 - VALUE_INSET - CHEVRON_ROOM,
+            "{shown:?} is {width} wide"
+        );
     }
 
     /// A long list scrolls inside its drop-down: the drop-down never grows
