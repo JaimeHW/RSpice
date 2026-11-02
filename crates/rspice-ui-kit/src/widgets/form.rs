@@ -1,7 +1,7 @@
 //! Form primitives — inspector rows, key-value rows, checkboxes, and the
 //! mono value input.
 
-use egui::{Frame, Response, TextEdit, Ui, vec2};
+use egui::{Response, TextEdit, Ui, vec2};
 
 use crate::theme::{self, FontWeight};
 use crate::tokens::{self, Tokens};
@@ -144,7 +144,8 @@ pub fn input_row(ui: &mut Ui, label: &str, value: &mut String) -> Response {
     .inner
 }
 
-/// A key-value row: dimmed key left, mono value right.
+/// A key-value row: dimmed key left, mono value right, at the size a field
+/// beside it holds its value.
 pub fn kv_row(ui: &mut Ui, key: &str, value: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
@@ -165,7 +166,7 @@ pub fn kv_row(ui: &mut Ui, key: &str, value: &str) {
         egui::pos2(rect.right(), rect.center().y),
         egui::Align2::RIGHT_CENTER,
         value,
-        theme::mono(tokens::FS_1, FontWeight::Regular),
+        theme::field_mono(),
         c.text,
     );
 }
@@ -232,25 +233,45 @@ pub fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) ->
     content(ui)
 }
 
-/// A wrapped, read-only engineering value under a stacked label.
-pub fn read_only_value(ui: &mut Ui, label: &str, value: &str) {
-    let t = Tokens::get(ui.ctx());
-    field_label(ui, label, |ui| {
-        Frame::new()
-            .fill(t.color.bg_panel)
-            .stroke(egui::Stroke::new(1.0, t.color.border))
-            .corner_radius(5.0)
-            .inner_margin(egui::Margin::symmetric(8, 6))
-            .show(ui, |ui| {
-                ui.set_min_width((ui.available_width() - 16.0).max(1.0));
-                ui.add(
-                    egui::Label::new(
-                        egui::RichText::new(value)
-                            .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                            .color(t.color.text),
-                    )
-                    .wrap(),
-                );
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A fact stated beside a field reads at the size the field holds its
+    /// value: the row's value and the typed value are one size.
+    #[test]
+    fn a_fact_beside_a_field_reads_at_the_fields_size() {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, egui::FontId)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                egui::Shape::Text(text) => into.push((
+                    text.galley.text().to_owned(),
+                    text.galley.job.sections[0].format.font_id.clone(),
+                )),
+                _ => {}
+            }
+        }
+        let ctx = egui::Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut name = "amp_core_copy".to_owned();
+        let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                kv_row(ui, "Cell", "amp_core");
+                let _ = input_row(ui, "New name", &mut name);
             });
-    });
+        });
+        let mut texts = Vec::new();
+        for clipped in &output.shapes {
+            walk(&clipped.shape, &mut texts);
+        }
+        let font_of = |value: &str| {
+            texts
+                .iter()
+                .find(|(text, _)| text == value)
+                .map(|(_, font)| font.clone())
+                .unwrap_or_else(|| panic!("{value:?} is painted"))
+        };
+        assert_eq!(font_of("amp_core"), theme::field_mono(), "the fact");
+        assert_eq!(font_of("amp_core_copy"), theme::field_mono(), "the field");
+    }
 }

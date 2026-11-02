@@ -276,11 +276,6 @@ impl<'u> FormRows<'u> {
     ) -> Response {
         self.row(label, |ui, _| {
             let t = Tokens::get(ui.ctx());
-            // A drag value sets its number in the style's mono text; here it
-            // is a field's value, at a field's size.
-            ui.style_mut()
-                .text_styles
-                .insert(egui::TextStyle::Monospace, theme::field_mono());
             let response = ui.add_sized(
                 vec2(NUMBER_FIELD_W, t.metrics.ctl_h),
                 egui::DragValue::new(value).range(range).speed(1.0),
@@ -417,17 +412,18 @@ impl<'u> FormRows<'u> {
     }
 
     /// One read-only fact, on the same grid as the controls: its label in the
-    /// label column, its value where a control's value would start. What a
-    /// form acts on is stated in a row, never in an unlabelled line above it.
+    /// label column, its value where a control's value would start, at the
+    /// size a field holds its value. What a form acts on is stated in a row,
+    /// never in an unlabelled line above it.
     pub fn value(&mut self, label: &str, value: &str) {
-        self.value_row(label, value, theme::sans(tokens::FS_0, FontWeight::Regular));
+        self.value_row(label, value, theme::field_sans());
     }
 
     /// [`Self::value`] for a path or an identifier, which is set in mono. A
     /// value too long for the row is shortened from the middle, so both ends
     /// of a path survive.
     pub fn value_mono(&mut self, label: &str, value: &str) {
-        self.value_row(label, value, theme::mono(tokens::FS_0, FontWeight::Regular));
+        self.value_row(label, value, theme::field_mono());
     }
 
     fn value_row(&mut self, label: &str, value: &str, font: egui::FontId) {
@@ -868,7 +864,7 @@ impl<'u> FormRows<'u> {
                         vec2(ui.available_width().max(1.0), t.metrics.ctl_h),
                         egui::Sense::hover(),
                     );
-                    let font = theme::sans(tokens::FS_0, FontWeight::Regular);
+                    let font = theme::field_sans();
                     let shown =
                         middle_elided(ui, value, &font, t.color.text, rect.width() - VALUE_INSET);
                     ui.painter().text(
@@ -2361,6 +2357,9 @@ mod tests {
                     &mut y,
                 );
                 rows.number("Count", &mut count, 1..=64, "1 to 64");
+                rows.value("Kind", "Subcircuit");
+                rows.value_mono("Library", "analog_lib");
+                let _ = rows.value_action("Findings", "3 open", "Show");
                 rows.text_multiline("Note", Id::new("command-form.size.note"), &mut note, "", 2);
                 let _ = rows.list(
                     "Nets",
@@ -2383,10 +2382,15 @@ mod tests {
                 .map(|text| text.galley.job.sections[0].format.font_id.clone())
                 .unwrap_or_else(|| panic!("{value:?} is painted"))
         };
-        for value in ["amp_core", "1.25", "2.5", "7", "VDD", "VSS"] {
+        for value in ["amp_core", "1.25", "2.5", "7", "VDD", "VSS", "analog_lib"] {
             assert_eq!(font_of(value), theme::field_mono(), "{value:?}");
         }
-        for value in ["electrical", "Bias from the reference."] {
+        for value in [
+            "electrical",
+            "Bias from the reference.",
+            "Subcircuit",
+            "3 open",
+        ] {
             assert_eq!(font_of(value), theme::field_sans(), "{value:?}");
         }
         let ctx = Context::default();

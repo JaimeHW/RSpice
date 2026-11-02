@@ -379,9 +379,12 @@ fn build_style(t: &Tokens) -> egui::Style {
                 TextStyle::Heading,
                 FontId::new(tokens::FS_3, fonts::sans_semibold()),
             ),
+            (field_text_style(), field_mono()),
         ]
         .into(),
-        drag_value_text_style: TextStyle::Monospace,
+        // A drag value is a number field: its number reads at the size every
+        // other field draws its value at.
+        drag_value_text_style: field_text_style(),
         ..Default::default()
     };
 
@@ -541,6 +544,12 @@ pub fn field_mono() -> FontId {
 /// [`field_mono`] for prose, and for a choice named in words.
 pub fn field_sans() -> FontId {
     sans(tokens::FS_2, FontWeight::Regular)
+}
+
+/// The text style that resolves to [`field_mono`]: what a drag value draws
+/// its number in.
+pub fn field_text_style() -> TextStyle {
+    TextStyle::Name("field".into())
 }
 
 /// Font weight selection (egui has no variable axis, so weights map to

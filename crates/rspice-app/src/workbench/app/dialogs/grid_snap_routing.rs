@@ -934,4 +934,53 @@ mod tests {
         );
         assert!(says("Snap spacing"));
     }
+
+    /// A routing the view cannot change is a read-only fact on the form's
+    /// grid, and it reads at the size of the choices above it.
+    #[test]
+    fn the_routing_fact_reads_at_the_size_of_the_choices_beside_it() {
+        fn walk(shape: &egui::Shape, into: &mut Vec<(String, egui::FontId)>) {
+            match shape {
+                egui::Shape::Vec(shapes) => shapes.iter().for_each(|shape| walk(shape, into)),
+                egui::Shape::Text(text) => into.push((
+                    text.galley.text().to_owned(),
+                    text.galley.job.sections[0].format.font_id.clone(),
+                )),
+                _ => {}
+            }
+        }
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        assert!(open_grid_snap_routing_dialog(&mut app.state));
+        let mut shapes = Vec::new();
+        for _ in 0..4 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ctx| app.render_grid_snap_routing_dialog(ctx),
+                )
+                .shapes;
+        }
+        let mut texts = Vec::new();
+        for clipped in &shapes {
+            walk(&clipped.shape, &mut texts);
+        }
+        let font_of = |value: &str| {
+            texts
+                .iter()
+                .find(|(text, _)| text == value)
+                .map(|(_, font)| font.clone())
+                .unwrap_or_else(|| panic!("{value:?} is painted"))
+        };
+        let choice = font_of(grid_style_label(app.state.design.grid));
+        assert_eq!(font_of("Orthogonal"), choice, "the routing fact");
+        assert_eq!(choice, crate::ui::theme::field_sans(), "the field size");
+    }
 }
