@@ -469,7 +469,8 @@ impl ExecutionRunner {
                             | ControlPresentationKind::Text(_)
                             | ControlPresentationKind::Listing
                             | ControlPresentationKind::ResourceUsage
-                            | ControlPresentationKind::Ignored(_) => &[],
+                            | ControlPresentationKind::Ignored(_)
+                            | ControlPresentationKind::File { .. } => &[],
                         };
                         if traces.iter().any(|trace| {
                             trace.x.samples.is_empty()

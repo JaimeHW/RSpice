@@ -1439,6 +1439,52 @@ fn oscompiled_names_the_build_system_as_ngspice_does() {
     }
 }
 
+fn files(presented: &[ControlPresentation]) -> Vec<(String, String, bool)> {
+    presented
+        .iter()
+        .filter_map(|request| match &request.kind {
+            ControlPresentationKind::File { path, text, append } => {
+                Some((path.clone(), text.clone(), *append))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// ngspice `> file` and `>> file` send a command's output to a file, and the
+/// words after the name stay the command's (frontend/streams.c:47
+/// `cp_redirect`); a quoted `>` is text. For the same script ngspice-46
+/// writes `a` to r1.txt, `b c` then `d` to r2.txt and `g` to r3.txt, and
+/// echoes `e > f`.
+#[test]
+fn redirection_sends_a_commands_output_to_a_file_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "redirect\nV1 1 0 1\nR1 1 0 1\n.control\necho a>r1.txt\necho b > r2.txt c\n\
+         echo d >> r2.txt\necho \"e > f\"\necho g >& r3.txt\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["e > f"]);
+    let file = |path: &str, text: &str, append| (path.to_owned(), text.to_owned(), append);
+    assert_eq!(
+        files(&presented),
+        [
+            file("r1.txt", "a\n", false),
+            file("r2.txt", "b c\n", false),
+            file("r2.txt", "d\n", true),
+            file("r3.txt", "g\n", false),
+        ]
+    );
+    for (line, message) in [
+        ("echo x >", "missing name for output"),
+        ("echo x > a > b", "ambiguous output redirect"),
+    ] {
+        let (_, error) = run_until_error(&format!(
+            "redirect error\nV1 1 0 1\nR1 1 0 1\n.control\n{line}\n.endc\n.end\n"
+        ));
+        assert!(error.unwrap_or_default().contains(message), "{line}");
+    }
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

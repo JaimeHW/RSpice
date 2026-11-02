@@ -22,6 +22,53 @@ fn document(path: &Path) -> serde_json::Value {
     serde_json::from_slice(&std::fs::read(path).expect("published control data")).unwrap()
 }
 
+/// ngspice `> file` and `>> file` write a command's output to a file in the
+/// deck's directory; a file outside it is refused before anything is written.
+#[test]
+fn control_redirection_writes_files_in_the_decks_directory() {
+    let dir = test_dir("control-redirection");
+    let deck = dir.join("redirect.cir");
+    std::fs::write(
+        &deck,
+        "redirect\nV1 in 0 1\nR1 in 0 1k\n.control\necho hello > out.txt\n\
+         echo more >> out.txt\n.endc\n.end\n",
+    )
+    .unwrap();
+    passed(&run(&deck, &dir.join("result.csv"), &[]));
+    let text = std::fs::read_to_string(dir.join("out.txt")).unwrap();
+    assert_eq!(text, "hello\nmore\n");
+
+    let escape = dir.join("escape.cir");
+    std::fs::write(
+        &escape,
+        "escape\nV1 in 0 1\nR1 in 0 1k\n.control\necho hello > ../escaped.txt\n.endc\n.end\n",
+    )
+    .unwrap();
+    let out = run(&escape, &dir.join("escape.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("outside the deck's directory"), "{stderr}");
+    assert!(!dir.parent().unwrap().join("escaped.txt").exists());
+
+    let outside = std::path::absolute(dir.parent().unwrap())
+        .unwrap()
+        .join("absolute-escape.txt");
+    let absolute = dir.join("absolute.cir");
+    std::fs::write(
+        &absolute,
+        format!(
+            "absolute\nV1 in 0 1\nR1 in 0 1k\n.control\necho hello > {}\n.endc\n.end\n",
+            outside.to_string_lossy().replace('\\', "/")
+        ),
+    )
+    .unwrap();
+    let out = run(&absolute, &dir.join("absolute.csv"), &[]);
+    assert!(!out.status.success());
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(stderr.contains("outside the deck's directory"), "{stderr}");
+    assert!(!outside.exists());
+}
+
 #[test]
 fn complex_control_scalars_reach_print_publication_without_projection() {
     let dir = test_dir("control-complex-scalars");

@@ -270,6 +270,71 @@ pub(crate) fn number_prefix(text: &str) -> Option<Value> {
     })
 }
 
+/// An output redirection: the file a command's output goes to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct Redirect {
+    pub path: String,
+    /// `>>`: the output is appended to the file.
+    pub append: bool,
+}
+
+/// Split ngspice's output redirection off a command's arguments
+/// (frontend/streams.c:47 `cp_redirect`): an unquoted `>` starts it, a second
+/// `>` appends, an `&` sends errors there too, and the next word names the
+/// file. The words after the file stay the command's.
+pub(crate) fn split_redirect(
+    text: &str,
+    line: usize,
+) -> Result<(String, Option<Redirect>), ControlError> {
+    let mut quote = None;
+    let mut start = None;
+    for (index, character) in text.char_indices() {
+        if quote == Some(character) {
+            quote = None;
+        } else if quote.is_none() && matches!(character, '\'' | '"') {
+            quote = Some(character);
+        } else if quote.is_none() && character == '>' {
+            start = Some(index);
+            break;
+        }
+    }
+    let Some(start) = start else {
+        return Ok((text.to_owned(), None));
+    };
+    let mut rest = text[start + 1..].trim_start();
+    let append = rest.starts_with('>');
+    if append {
+        rest = rest[1..].trim_start();
+    }
+    if let Some(after) = rest.strip_prefix('&') {
+        rest = after.trim_start();
+    }
+    let mut quote = None;
+    let end = rest
+        .char_indices()
+        .find(|&(_, character)| {
+            if quote == Some(character) {
+                quote = None;
+            } else if quote.is_none() && matches!(character, '\'' | '"') {
+                quote = Some(character);
+            }
+            quote.is_none() && (character.is_whitespace() || character == '>')
+        })
+        .map_or(rest.len(), |(index, _)| index);
+    let path = words(&rest[..end])
+        .into_iter()
+        .next()
+        .map(|word| word.text)
+        .filter(|path| !path.is_empty())
+        .ok_or_else(|| syntax(line, "missing name for output"))?;
+    let remainder = &rest[end..];
+    if split_redirect(remainder, line)?.1.is_some() {
+        return Err(syntax(line, "ambiguous output redirect"));
+    }
+    let arguments = format!("{}{remainder}", &text[..start]);
+    Ok((arguments.trim().to_owned(), Some(Redirect { path, append })))
+}
+
 /// C's `%.*e`: `precision` decimals and an exponent of at least two digits.
 pub(crate) fn percent_e(value: Value, precision: usize) -> String {
     let text = format!("{value:.precision$e}");

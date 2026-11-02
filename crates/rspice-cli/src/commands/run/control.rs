@@ -51,6 +51,7 @@ pub(super) fn run(
     let report_budget = ReportValueBudget::for_report(limits.max_result_values)?;
     let mut evaluated = std::collections::HashSet::new();
     let mut presentation_ordinal = 0usize;
+    let mut control_files = output::ControlFiles::default();
     let mut post_ordinals = std::collections::BTreeMap::new();
 
     let execution = (|| -> Result<(), CliError> {
@@ -228,6 +229,19 @@ pub(super) fn run(
                     }
                 }
                 ControlCommandEffect::Presentation(request) => match &request.kind {
+                    ControlPresentationKind::File { path, text, append } => {
+                        if let Err(reason) = control_files.record(path, text, *append, args)? {
+                            return Err(map_command(
+                                ControlError::new(
+                                    request.command.line,
+                                    ControlErrorKind::Host,
+                                    reason,
+                                ),
+                                script,
+                                args,
+                            ));
+                        }
+                    }
                     ControlPresentationKind::Text(_)
                     | ControlPresentationKind::Listing
                     | ControlPresentationKind::ResourceUsage
@@ -251,6 +265,7 @@ pub(super) fn run(
                 },
             }
         }
+        outputs.extend(std::mem::take(&mut control_files).publish()?);
         let ran_transient = circuit
             .datasets()
             .iter()

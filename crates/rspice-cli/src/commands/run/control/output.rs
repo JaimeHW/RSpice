@@ -25,7 +25,8 @@ pub(super) fn present(
         | ControlPresentationKind::Text(_)
         | ControlPresentationKind::Listing
         | ControlPresentationKind::ResourceUsage
-        | ControlPresentationKind::Ignored(_) => return Ok(Vec::new()),
+        | ControlPresentationKind::Ignored(_)
+        | ControlPresentationKind::File { .. } => return Ok(Vec::new()),
     };
     let summary_stdout = args.summary.as_deref() == Some(Path::new("-"));
     if options.is_none() && !summary_stdout {
@@ -385,6 +386,113 @@ fn same_owner(a: &rspice_core::CurrentImpulseOwner, b: &rspice_core::CurrentImpu
         ) => a.eq_ignore_ascii_case(b) && ap.eq_ignore_ascii_case(bp),
         _ => false,
     }
+}
+
+/// The files a control script's redirections write, in the order it first
+/// named them. Each is published once, when the script ends, since a run
+/// claims a destination once.
+#[derive(Default)]
+pub(super) struct ControlFiles {
+    files: Vec<(PathBuf, String)>,
+}
+
+impl ControlFiles {
+    /// Record a redirection's text: `>` replaces the file, `>>` appends to
+    /// it, to the bytes already on disk when this run has not written it.
+    /// A relative path names a file in the deck's directory, where ngspice
+    /// -b run from there writes it; a path that leaves that directory is
+    /// refused with the reason.
+    pub(super) fn record(
+        &mut self,
+        path: &str,
+        text: &str,
+        append: bool,
+        args: &RunArgs,
+    ) -> Result<Result<(), String>, CliError> {
+        let destination = match control_file_destination(path, args)? {
+            Ok(destination) => destination,
+            Err(reason) => return Ok(Err(reason)),
+        };
+        match self
+            .files
+            .iter_mut()
+            .find(|(known, _)| *known == destination)
+        {
+            Some((_, contents)) if append => contents.push_str(text),
+            Some((_, contents)) => *contents = text.to_owned(),
+            None => {
+                let mut contents = if append {
+                    match std::fs::read_to_string(&destination) {
+                        Ok(existing) => existing,
+                        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+                        Err(error) => return Err(CliError::output_error(&destination, error)),
+                    }
+                } else {
+                    String::new()
+                };
+                contents.push_str(text);
+                self.files.push((destination, contents));
+            }
+        }
+        Ok(Ok(()))
+    }
+
+    /// Publish every recorded file; returns their paths.
+    pub(super) fn publish(self) -> Result<Vec<PathBuf>, CliError> {
+        let mut written = Vec::with_capacity(self.files.len());
+        for (path, contents) in self.files {
+            publish_bytes(&path, contents.as_bytes())?;
+            written.push(path);
+        }
+        Ok(written)
+    }
+}
+
+fn control_file_destination(
+    path: &str,
+    args: &RunArgs,
+) -> Result<Result<PathBuf, String>, CliError> {
+    let directory = if crate::commands::is_stdin(&args.input) {
+        PathBuf::from(".")
+    } else {
+        match args.input.parent() {
+            Some(parent) if !parent.as_os_str().is_empty() => parent.to_path_buf(),
+            _ => PathBuf::from("."),
+        }
+    };
+    let directory = std::path::absolute(&directory)
+        .map_err(|error| CliError::output_error(&directory, error))?;
+    let directory = lexical(&directory);
+    let destination = lexical(&directory.join(path));
+    if destination.starts_with(&directory) && destination != directory {
+        Ok(Ok(destination))
+    } else {
+        Ok(Err(format!(
+            "`{path}` resolves to {}, outside the deck's directory {}; a control script \
+             writes files only inside it",
+            destination.display(),
+            directory.display()
+        )))
+    }
+}
+
+/// Lexical normalization: `.` dropped and `..` folded into its parent, so a
+/// path that climbs out of the deck's directory no longer starts with it.
+fn lexical(path: &Path) -> PathBuf {
+    use std::path::Component;
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    out.push(component);
+                }
+            }
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn publish_bytes(path: &Path, bytes: &[u8]) -> Result<(), CliError> {

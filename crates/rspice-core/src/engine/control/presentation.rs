@@ -119,6 +119,14 @@ pub enum ControlPresentationKind {
     /// A command ngspice -b accepts with no batch effect. The host reports
     /// this reason and the script continues.
     Ignored(String),
+    /// Text a command sends to a file instead of standard output (ngspice
+    /// `> path` and `>> path`). The presentation host writes it, replacing
+    /// the file or appending to it; this host never writes a file.
+    File {
+        path: String,
+        text: String,
+        append: bool,
+    },
 }
 
 #[derive(Debug, Clone)]

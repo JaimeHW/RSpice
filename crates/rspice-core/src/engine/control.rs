@@ -125,6 +125,14 @@ enum Ignored {
 }
 
 impl CommandKind {
+    /// The commands whose standard output a redirection can send to a file.
+    fn prints_text(&self) -> bool {
+        matches!(
+            self,
+            Self::Echo | Self::Display | Self::EventDisplay | Self::EventPrint
+        )
+    }
+
     fn parse(command: &ControlCommand) -> Result<Self, ControlError> {
         Ok(match command.name.as_str() {
             "option" | "options" => Self::Options,
@@ -299,7 +307,42 @@ impl ControlCircuit {
             )
             .into());
         }
-        match CommandKind::parse(command)? {
+        let kind = CommandKind::parse(command)?;
+        // ngspice cp_redirect (frontend/streams.c:47) sends the output of
+        // any command to the file a `>` names.
+        if kind.prints_text()
+            && let (arguments, Some(redirect)) = shell::split_redirect(&command.arguments, line)?
+        {
+            let command = ControlCommand {
+                arguments,
+                ..command.clone()
+            };
+            let mut prepared = self.prepare_kind(kind, engine, &command, variables, abort)?;
+            if let PreparedCommand::Complete(ControlCommandEffect::Presentation(request)) =
+                &mut prepared
+                && let ControlPresentationKind::Text(text) = &mut request.kind
+            {
+                request.kind = ControlPresentationKind::File {
+                    path: redirect.path,
+                    text: std::mem::take(text),
+                    append: redirect.append,
+                };
+            }
+            return Ok(prepared);
+        }
+        self.prepare_kind(kind, engine, command, variables, abort)
+    }
+
+    fn prepare_kind(
+        &mut self,
+        kind: CommandKind,
+        engine: &Engine,
+        command: &ControlCommand,
+        variables: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<PreparedCommand, ControlExecutionError> {
+        let line = command.line;
+        match kind {
             CommandKind::Options => {
                 self.apply_options(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
