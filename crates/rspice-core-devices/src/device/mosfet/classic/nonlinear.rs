@@ -265,6 +265,56 @@ impl Mosfet {
 }
 
 impl NonlinearDevice for Mosfet {
+    fn reopen_operating_point(&mut self) {
+        // mos1load.c's MODEINITJCT load at the start of each aid (cktop.c):
+        // the first iterate passes unlimited from the startup bias, and an
+        // `OFF` instance opens at zero bias again and holds through
+        // MODEINITFIX. The thermal voltage and junction GMIN are the
+        // analysis's, not the iterate's.
+        self.restore_nonlinear_state(MosfetNonlinearState {
+            junction_gmin: self.junction_gmin,
+            vt: self.vt,
+            vgs: 0.0,
+            vds: 0.0,
+            vbs: 0.0,
+            eval_vgs: 0.0,
+            eval_vds: 0.0,
+            eval_vbs: 0.0,
+            id: 0.0,
+            gm: 0.0,
+            gds: 0.0,
+            gmb: 0.0,
+            gss: 0.0,
+            id_eq: 0.0,
+            ibs: 0.0,
+            gbs: 0.0,
+            ibd: 0.0,
+            gbd: 0.0,
+            region: MosRegion::Cutoff,
+            vgs_prev: 0.0,
+            vds_prev: 0.0,
+            vbs_prev: 0.0,
+            eval_vgs_prev: 0.0,
+            eval_vds_prev: 0.0,
+            eval_vbs_prev: 0.0,
+            id_prev: 0.0,
+            gm_prev: 0.0,
+            gout_prev: 0.0,
+            gmb_prev: 0.0,
+            ibs_prev: 0.0,
+            gbs_prev: 0.0,
+            ibd_prev: 0.0,
+            gbd_prev: 0.0,
+            has_branch_history: false,
+            linearization_cache_valid: false,
+            initial_off_seed_pending: true,
+            initial_off_seed_evaluations: 0,
+            operating_point_startup: Some(InitialFixHold::default()),
+            update_open: false,
+            junction_limited: false,
+        });
+    }
+
     fn update(&mut self, voltages: &[Value]) {
         self.update_impl(voltages, None);
     }

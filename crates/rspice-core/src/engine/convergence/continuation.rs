@@ -1541,6 +1541,17 @@ m1 d g 0 0 nb4 w=10u l=1u
 .op
 .end
 ",
+        "* classic MOS
+icc 0 vcc 50m
+rcc vcc 0 100
+ig1 0 g 2m
+rg1 g 0 1k
+rd1 vcc d 10k
+m1 d g 0 0 nm1 w=10u l=1u
+.model nm1 nmos level=1 vto=0.7 kp=1e-4
+.op
+.end
+",
         "\
 * JFET
 icc 0 vcc 50m
