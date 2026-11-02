@@ -4426,6 +4426,7 @@ mod tests {
                     from,
                     to,
                     output,
+                    ..
                 } => {
                     assert_eq!(signal, "V(OUT)");
                     assert_eq!(*from, None);
@@ -4450,7 +4451,9 @@ mod tests {
 
         assert_eq!(netlist.measurements.len(), 1);
         match &netlist.measurements[0].measure_type {
-            crate::netlist::measure::MeasureType::Integ { signal, from, to } => {
+            crate::netlist::measure::MeasureType::Integ {
+                signal, from, to, ..
+            } => {
                 assert_eq!(signal, "VM(OUT)");
                 assert_eq!(*from, Some(10.0));
                 assert_eq!(*to, Some(100.0));

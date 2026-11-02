@@ -425,6 +425,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
         output: ExtremaOutput,
     },
 
@@ -433,6 +436,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
         output: ExtremaOutput,
     },
 
@@ -441,6 +447,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
     },
 
     /// Average value over range
@@ -448,6 +457,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
     },
 
     /// RMS value over range
@@ -455,6 +467,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
     },
 
     /// Integral of signal over range
@@ -462,6 +477,9 @@ pub enum MeasureType {
         signal: String,
         from: Option<Value>,
         to: Option<Value>,
+        /// Xyce `TD`: only the accepted steps at or after this time count,
+        /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
+        td: Option<Value>,
     },
 }
 

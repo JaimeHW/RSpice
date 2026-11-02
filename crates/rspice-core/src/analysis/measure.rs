@@ -1096,12 +1096,13 @@ impl MeasureEngine {
                 signal,
                 from,
                 to,
+                td,
                 output,
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
                 ExtremaRequest {
-                    from: *from,
+                    from: delayed_window_start(*from, *td, data.axis),
                     to: *to,
                     output: *output,
                     is_max: false,
@@ -1112,27 +1113,55 @@ impl MeasureEngine {
                 signal,
                 from,
                 to,
+                td,
                 output,
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
                 ExtremaRequest {
-                    from: *from,
+                    from: delayed_window_start(*from, *td, data.axis),
                     to: *to,
                     output: *output,
                     is_max: true,
                 },
                 data,
             ),
-            MeasureType::PeakToPeak { signal, from, to } => {
-                self.eval_pp(&measurement.name, signal, *from, *to, data)
-            }
-            MeasureType::Avg { signal, from, to } => {
-                self.eval_avg(&measurement.name, signal, *from, *to, data)
-            }
-            MeasureType::Rms { signal, from, to } => {
-                self.eval_rms(&measurement.name, signal, *from, *to, data)
-            }
+            MeasureType::PeakToPeak {
+                signal,
+                from,
+                to,
+                td,
+            } => self.eval_pp(
+                &measurement.name,
+                signal,
+                delayed_window_start(*from, *td, data.axis),
+                *to,
+                data,
+            ),
+            MeasureType::Avg {
+                signal,
+                from,
+                to,
+                td,
+            } => self.eval_avg(
+                &measurement.name,
+                signal,
+                delayed_window_start(*from, *td, data.axis),
+                *to,
+                data,
+            ),
+            MeasureType::Rms {
+                signal,
+                from,
+                to,
+                td,
+            } => self.eval_rms(
+                &measurement.name,
+                signal,
+                delayed_window_start(*from, *td, data.axis),
+                *to,
+                data,
+            ),
             MeasureType::Find {
                 signal,
                 at,
@@ -1175,11 +1204,16 @@ impl MeasureEngine {
                 },
                 data,
             ),
-            MeasureType::Integ { signal, from, to } => self.eval_integ(
+            MeasureType::Integ {
+                signal,
+                from,
+                to,
+                td,
+            } => self.eval_integ(
                 &measurement.name,
                 &measurement.analysis,
                 signal,
-                *from,
+                delayed_window_start(*from, *td, data.axis),
                 *to,
                 data,
             ),
@@ -2946,6 +2980,27 @@ fn delay_at_is_reached(
     })
 }
 
+/// The window start a Xyce `TD` gives a range or extrema measure: the first
+/// accepted step at or after `TD`, so the window opens on a sample and
+/// nothing is interpolated there (N_IO_MeasureBase.C:668-677, with Xyce's
+/// default MINVAL of 1e-12 as the relative tolerance). A later `FROM` still
+/// opens the window where it is.
+pub(crate) fn delayed_window_start(
+    from: Option<Value>,
+    td: Option<Value>,
+    axis: &[Value],
+) -> Option<Value> {
+    let Some(td) = td else {
+        return from;
+    };
+    let start = axis
+        .iter()
+        .copied()
+        .find(|time| delay_td_accepts_sample(*time, Some(td), 1.0e-12))
+        .unwrap_or(td);
+    Some(from.map_or(start, |from| from.max(start)))
+}
+
 pub(crate) fn delay_td_accepts_sample(axis: Value, td: Option<Value>, minval: Value) -> bool {
     td.is_none_or(|td| axis.partial_cmp(&(td * (1.0 - minval))) != Some(std::cmp::Ordering::Less))
 }
@@ -3855,6 +3910,7 @@ mod tests {
             tolerance: None,
             name: "area".to_string(),
             measure_type: MeasureType::Integ {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(2.0),
@@ -3888,9 +3944,24 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: match kind {
-                "INTEG" => MeasureType::Integ { signal, from, to },
-                "RMS" => MeasureType::Rms { signal, from, to },
-                _ => MeasureType::Avg { signal, from, to },
+                "INTEG" => MeasureType::Integ {
+                    td: None,
+                    signal,
+                    from,
+                    to,
+                },
+                "RMS" => MeasureType::Rms {
+                    td: None,
+                    signal,
+                    from,
+                    to,
+                },
+                _ => MeasureType::Avg {
+                    td: None,
+                    signal,
+                    from,
+                    to,
+                },
             },
             analysis: analysis.to_string(),
         }
@@ -3969,6 +4040,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "average".to_string(),
             measure_type: MeasureType::Avg {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
@@ -3997,6 +4069,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: name.to_string(),
             measure_type: MeasureType::Integ {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
@@ -4029,6 +4102,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "rms".to_string(),
             measure_type: MeasureType::Rms {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
@@ -4057,6 +4131,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "maximum".to_string(),
             measure_type: MeasureType::Max {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
@@ -4072,6 +4147,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "peak_to_peak".to_string(),
             measure_type: MeasureType::PeakToPeak {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
@@ -4112,6 +4188,7 @@ mod tests {
             statement(
                 "largest",
                 MeasureType::Max {
+                    td: None,
                     signal: "V(1)".to_string(),
                     from: Some(1.0),
                     to: Some(1.5),
@@ -4121,6 +4198,7 @@ mod tests {
             statement(
                 "smallest",
                 MeasureType::Min {
+                    td: None,
                     signal: "V(1)".to_string(),
                     from: Some(1.2),
                     to: Some(2.0),
@@ -4130,6 +4208,7 @@ mod tests {
             statement(
                 "swing",
                 MeasureType::PeakToPeak {
+                    td: None,
                     signal: "V(1)".to_string(),
                     from: Some(1.2),
                     to: Some(1.6),
@@ -4138,6 +4217,7 @@ mod tests {
             statement(
                 "reversed",
                 MeasureType::Max {
+                    td: None,
                     signal: "V(1)".to_string(),
                     from: Some(1.6),
                     to: Some(1.2),
@@ -4166,6 +4246,70 @@ mod tests {
     }
 
     #[test]
+    fn xyce_td_opens_the_window_on_the_first_step_at_or_after_it() {
+        // Xyce 7.10 on `V1 1 0 PWL 0 0 1 1 2 0` with `.TRAN 0 2`: MAX V(1)
+        // TD=1.5 is 0.3721612 and AVG V(1) TD=1.5 is 0.1860806, both read
+        // from its first accepted step after 1.5 (t = 1.6278388) with
+        // nothing interpolated at 1.5; MIN V(1) TD=0.5 is 0.
+        let statement = |name: &str, measure_type| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type,
+            analysis: "TRAN".to_string(),
+        };
+        let signal = || "V(1)".to_string();
+        let statements = [
+            statement(
+                "mx",
+                MeasureType::Max {
+                    signal: signal(),
+                    from: None,
+                    to: None,
+                    td: Some(1.5),
+                    output: ExtremaOutput::Value,
+                },
+            ),
+            statement(
+                "av",
+                MeasureType::Avg {
+                    signal: signal(),
+                    from: None,
+                    to: None,
+                    td: Some(1.5),
+                },
+            ),
+            statement(
+                "mn",
+                MeasureType::Min {
+                    signal: signal(),
+                    from: None,
+                    to: None,
+                    td: Some(0.5),
+                    output: ExtremaOutput::Value,
+                },
+            ),
+        ];
+        let axis = [0.0, 1.0, 1.4, 1.627_838_8, 2.0];
+        let values = axis.map(|time: Value| if time <= 1.0 { time } else { 2.0 - time });
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(1)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        for statement in &statements {
+            engine.add(statement.clone());
+        }
+        let values = engine
+            .evaluate(&axis, &signals)
+            .into_iter()
+            .map(|result| result.value.map(|value| (value * 1e7).round() / 1e7))
+            .collect::<Vec<_>>();
+        assert_eq!(values, [Some(0.3721612), Some(0.1860806), Some(0.0)]);
+    }
+
+    #[test]
     fn extrema_independent_axis_output_keeps_first_tie() {
         let statement = MeasureStatement {
             goal: None,
@@ -4175,6 +4319,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "peak_frequency".to_string(),
             measure_type: MeasureType::Max {
+                td: None,
                 signal: "V(out)".to_string(),
                 from: None,
                 to: None,
@@ -4202,6 +4347,7 @@ mod tests {
             print_policy: MeasurePrintPolicy::All,
             name: "peak".to_string(),
             measure_type: MeasureType::Max {
+                td: None,
                 signal: signal.to_string(),
                 from: None,
                 to: None,
@@ -5302,6 +5448,7 @@ mod tests {
         let mut peak = max_statement("V(out)");
         peak.name = "peak".to_string();
         peak.measure_type = MeasureType::Max {
+            td: None,
             signal: "V(out)".to_string(),
             from: None,
             to: None,
@@ -5919,6 +6066,7 @@ mod tests {
         engine.add(continuous_statement(
             "unsupported",
             MeasureType::Avg {
+                td: None,
                 signal: "Y".to_string(),
                 from: None,
                 to: None,

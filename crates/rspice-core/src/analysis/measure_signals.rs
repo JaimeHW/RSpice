@@ -3613,6 +3613,9 @@ fn compile_live_measure_state(
     use_legacy_tran_trig_targ: bool,
     params: &crate::netlist::ParamContext,
 ) -> Result<LiveMeasureState, String> {
+    let delayed = |from: Option<Value>, td: Option<Value>| {
+        crate::analysis::measure::delayed_window_start(from, td, axis)
+    };
     let bounds = |from: Option<Value>, to: Option<Value>| {
         if analysis.eq_ignore_ascii_case("DC")
             && let (Some(from), Some(to)) = (from, to)
@@ -3660,15 +3663,17 @@ fn compile_live_measure_state(
             signal,
             from,
             to,
+            td,
             output,
         }
         | MeasureType::Max {
             signal,
             from,
             to,
+            td,
             output,
         } => {
-            let (lower, upper) = bounds(*from, *to);
+            let (lower, upper) = bounds(delayed(*from, *td), *to);
             LiveMeasureState::Extremum {
                 signal: LiveMeasureOperand::compile(signal, params)?,
                 lower,
@@ -3678,8 +3683,13 @@ fn compile_live_measure_state(
                 selected: None,
             }
         }
-        MeasureType::PeakToPeak { signal, from, to } => {
-            let (lower, upper) = bounds(*from, *to);
+        MeasureType::PeakToPeak {
+            signal,
+            from,
+            to,
+            td,
+        } => {
+            let (lower, upper) = bounds(delayed(*from, *td), *to);
             LiveMeasureState::PeakToPeak {
                 signal: LiveMeasureOperand::compile(signal, params)?,
                 lower,
@@ -3689,8 +3699,19 @@ fn compile_live_measure_state(
                 initialized: false,
             }
         }
-        MeasureType::Avg { signal, from, to } | MeasureType::Rms { signal, from, to } => {
-            let (lower, upper) = bounds(*from, *to);
+        MeasureType::Avg {
+            signal,
+            from,
+            to,
+            td,
+        }
+        | MeasureType::Rms {
+            signal,
+            from,
+            to,
+            td,
+        } => {
+            let (lower, upper) = bounds(delayed(*from, *td), *to);
             LiveMeasureState::IntegralStatistic {
                 signal: LiveMeasureOperand::compile(signal, params)?,
                 lower,
@@ -3705,12 +3726,17 @@ fn compile_live_measure_state(
                 previous: None,
             }
         }
-        MeasureType::Integ { signal, from, to } => {
+        MeasureType::Integ {
+            signal,
+            from,
+            to,
+            td,
+        } => {
             let sweep_direction = axis
                 .first()
                 .zip(axis.last())
                 .map_or(1.0, |(first, last)| Value::signum(last - first));
-            let (lower, upper, direction) = match (*from, *to) {
+            let (lower, upper, direction) = match (delayed(*from, *td), *to) {
                 (Some(from), Some(to)) => (from.min(to), from.max(to), Value::signum(to - from)),
                 (Some(from), None) if sweep_direction >= 0.0 => {
                     (from, Value::INFINITY, sweep_direction)

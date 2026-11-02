@@ -3508,15 +3508,16 @@ pub(super) fn parse_meas_command(
 
             match measure_type_key.as_str() {
                 "AVG" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
                     MeasureType::Avg {
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                     }
                 }
                 "MAX" | "MAX_AT" => {
-                    let (from, to, mut output) =
+                    let ((from, to, td), mut output) =
                         parse_measure_extrema_options(stream, line_num, params)?;
                     if measure_type_key == "MAX_AT" {
                         output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
@@ -3525,11 +3526,12 @@ pub(super) fn parse_meas_command(
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                         output,
                     }
                 }
                 "MIN" | "MIN_AT" => {
-                    let (from, to, mut output) =
+                    let ((from, to, td), mut output) =
                         parse_measure_extrema_options(stream, line_num, params)?;
                     if measure_type_key == "MIN_AT" {
                         output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
@@ -3538,31 +3540,35 @@ pub(super) fn parse_meas_command(
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                         output,
                     }
                 }
                 "PP" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
                     MeasureType::PeakToPeak {
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                     }
                 }
                 "RMS" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
                     MeasureType::Rms {
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                     }
                 }
                 "INTEG" | "INTEGRAL" => {
-                    let (from, to) = parse_measure_range_options(stream, line_num, params)?;
+                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
                     MeasureType::Integ {
                         signal: signal.clone(),
                         from,
                         to,
+                        td,
                     }
                 }
                 "FIND" => {
@@ -4782,13 +4788,28 @@ fn parse_measure_event_occurrence(
     Ok(truncated as isize)
 }
 
+/// `FROM`, `TO` and, in the Xyce dialect, `TD` of a range measure.
+type MeasureRange = (
+    Option<crate::Value>,
+    Option<crate::Value>,
+    Option<crate::Value>,
+);
+
+/// Xyce's `TD` delays a range or extrema measure; the other dialects keep
+/// refusing it there.
+fn accepts_measure_delay(params: &ParamContext, key: &str) -> bool {
+    key.eq_ignore_ascii_case("TD")
+        && params.expression_dialect() == crate::config::ExpressionDialect::Xyce
+}
+
 pub(super) fn parse_measure_range_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(Option<crate::Value>, Option<crate::Value>), ParseError> {
+) -> Result<MeasureRange, ParseError> {
     let mut from = None;
     let mut to = None;
+    let mut td = None;
 
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
@@ -4806,7 +4827,9 @@ pub(super) fn parse_measure_range_options(
                 break;
             }
             TokenKind::Ident(s)
-                if s.eq_ignore_ascii_case("FROM") || s.eq_ignore_ascii_case("TO") =>
+                if s.eq_ignore_ascii_case("FROM")
+                    || s.eq_ignore_ascii_case("TO")
+                    || accepts_measure_delay(params, s) =>
             {
                 let key = s.to_ascii_uppercase();
                 stream.advance();
@@ -4820,6 +4843,7 @@ pub(super) fn parse_measure_range_options(
                 match key.as_str() {
                     "FROM" => from = Some(value),
                     "TO" => to = Some(value),
+                    "TD" => td = Some(value),
                     _ => {}
                 }
             }
@@ -4835,25 +4859,19 @@ pub(super) fn parse_measure_range_options(
         }
     }
 
-    Ok((from, to))
+    Ok((from, to, td))
 }
 
 fn parse_measure_extrema_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<
-    (
-        Option<crate::Value>,
-        Option<crate::Value>,
-        crate::netlist::measure::ExtremaOutput,
-    ),
-    ParseError,
-> {
+) -> Result<(MeasureRange, crate::netlist::measure::ExtremaOutput), ParseError> {
     use crate::netlist::measure::ExtremaOutput;
 
     let mut from = None;
     let mut to = None;
+    let mut td = None;
     let mut output = ExtremaOutput::Value;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
@@ -4876,7 +4894,8 @@ fn parse_measure_extrema_options(
         if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
             break;
         }
-        if !matches!(key.as_str(), "FROM" | "TO" | "OUTPUT") {
+        if !matches!(key.as_str(), "FROM" | "TO" | "OUTPUT") && !accepts_measure_delay(params, &key)
+        {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!("Unexpected option '{key}' after .MEAS extrema operand"),
@@ -4897,14 +4916,14 @@ fn parse_measure_extrema_options(
             }
         } else {
             let value = expect_measure_value(stream, line_num, params)?;
-            if key == "FROM" {
-                from = Some(value);
-            } else {
-                to = Some(value);
+            match key.as_str() {
+                "FROM" => from = Some(value),
+                "TD" => td = Some(value),
+                _ => to = Some(value),
             }
         }
     }
-    Ok((from, to, output))
+    Ok(((from, to, td), output))
 }
 
 fn parse_measure_equation_options(
@@ -7912,8 +7931,9 @@ mod tests {
         .expect("statement-wide qualifiers parse around derived qualifiers");
         let statement = &netlist.measurements[0];
         assert_eq!(statement.default_value, Some(3.0));
-        let crate::netlist::measure::MeasureType::Avg { signal, from, to } =
-            &statement.measure_type
+        let crate::netlist::measure::MeasureType::Avg {
+            signal, from, to, ..
+        } = &statement.measure_type
         else {
             panic!("expected AVG measurement");
         };
@@ -7941,8 +7961,9 @@ mod tests {
 
         assert_eq!(netlist.measurements[0].fail_value, Some(-1.5));
         assert_eq!(netlist.measurements[0].default_value, Some(2.0));
-        let crate::netlist::measure::MeasureType::Avg { signal, from, to } =
-            &netlist.measurements[0].measure_type
+        let crate::netlist::measure::MeasureType::Avg {
+            signal, from, to, ..
+        } = &netlist.measurements[0].measure_type
         else {
             panic!("expected AVG measurement");
         };
@@ -8974,6 +8995,36 @@ mod tests {
         )
         .expect("ignored Xyce option values parse");
         assert_eq!(netlist.options.timeint_reltol, Some(1e-4));
+    }
+
+    /// Xyce's `TD` delays a range or extrema measure (N_IO_MeasureBase.C:668);
+    /// the other dialects keep refusing it there.
+    #[test]
+    fn xyce_range_and_extrema_measures_take_a_delay() {
+        use crate::netlist::measure::MeasureType;
+        let deck = "delay\nV1 1 0 1\nR1 1 0 1\n.tran 0 2\n\
+                    .measure tran mx max v(1) td=1.5\n\
+                    .measure tran av avg v(1) from=0.2 td=1.5\n.end\n";
+        let xyce = Netlist::parse_with_options(
+            deck,
+            crate::netlist::NetlistParseOptions {
+                spice_dialect: Some(crate::config::SpiceDialect::Xyce),
+                expression_dialect: crate::config::ExpressionDialect::Xyce,
+                ..Default::default()
+            },
+        )
+        .expect("Xyce deck parses");
+        assert!(matches!(
+            &xyce.measurements[0].measure_type,
+            MeasureType::Max { td: Some(td), from: None, .. } if *td == 1.5
+        ));
+        assert!(matches!(
+            &xyce.measurements[1].measure_type,
+            MeasureType::Avg { td: Some(td), from: Some(from), .. } if *td == 1.5 && *from == 0.2
+        ));
+        let error = parse_in(deck, crate::config::SpiceDialect::Ngspice)
+            .expect_err("ngspice dialect refuses TD on MAX");
+        assert!(error.to_string().contains("TD"), "{error}");
     }
 
     /// Xyce reads `agauss` at its mean outside a sampling analysis (the

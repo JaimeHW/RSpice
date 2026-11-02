@@ -616,6 +616,12 @@ pub(super) fn evaluate(
     evaluation.evaluate(legacy)
 }
 
+/// The window start of a Xyce `TD` on an event operand: `TD` itself, there
+/// being no analog steps to open the window on.
+fn delayed(from: Option<crate::Value>, td: Option<crate::Value>) -> Option<crate::Value> {
+    super::delayed_window_start(from, td, &[])
+}
+
 /// One statement with at least one event operand.
 struct Evaluation<'a, 'd, 'b> {
     statement: &'a MeasureStatement,
@@ -731,28 +737,46 @@ impl Evaluation<'_, '_, '_> {
                 td,
                 minval,
             } => self.find(signal, *at, when.as_ref(), (*from, *to, *td), *minval),
-            MeasureType::Avg { signal, from, to } => {
-                self.aggregate(signal, *from, *to, Aggregate::Avg)
-            }
-            MeasureType::Rms { signal, from, to } => {
-                self.aggregate(signal, *from, *to, Aggregate::Rms)
-            }
-            MeasureType::Integ { signal, from, to } => {
-                self.aggregate(signal, *from, *to, Aggregate::Integ)
-            }
+            // An event trace has no accepted analog steps of its own, so a
+            // Xyce `TD` opens the window at `TD` itself.
+            MeasureType::Avg {
+                signal,
+                from,
+                to,
+                td,
+            } => self.aggregate(signal, delayed(*from, *td), *to, Aggregate::Avg),
+            MeasureType::Rms {
+                signal,
+                from,
+                to,
+                td,
+            } => self.aggregate(signal, delayed(*from, *td), *to, Aggregate::Rms),
+            MeasureType::Integ {
+                signal,
+                from,
+                to,
+                td,
+            } => self.aggregate(signal, delayed(*from, *td), *to, Aggregate::Integ),
             MeasureType::Min {
                 signal,
                 from,
                 to,
+                td,
                 output,
-            } => self.extremum(signal, *from, *to, *output, false),
+            } => self.extremum(signal, delayed(*from, *td), *to, *output, false),
             MeasureType::Max {
                 signal,
                 from,
                 to,
+                td,
                 output,
-            } => self.extremum(signal, *from, *to, *output, true),
-            MeasureType::PeakToPeak { signal, from, to } => self.peak_to_peak(signal, *from, *to),
+            } => self.extremum(signal, delayed(*from, *td), *to, *output, true),
+            MeasureType::PeakToPeak {
+                signal,
+                from,
+                to,
+                td,
+            } => self.peak_to_peak(signal, delayed(*from, *td), *to),
             MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
             MeasureType::ErrorFunction { .. } | MeasureType::FileError { .. } => self.shapeless(
                 "ERR",
