@@ -165,6 +165,27 @@ impl ControlCircuit {
         self.find_vector(name, false)
     }
 
+    /// The vector bound by `let` that `settype` names, with the id it
+    /// reports; com_stype (frontend/typesdef.c) types the vector itself.
+    pub(in crate::engine::control) fn user_vector_id(
+        &self,
+        name: &str,
+    ) -> Option<(usize, ControlVectorId)> {
+        let index = self.find_vector(name, true)?;
+        let vector = &self.vectors.vectors[index];
+        let dataset = vector.plot.clone().unwrap_or_else(|| "const".into());
+        let signal = vector.name.clone();
+        Some((index, ControlVectorId { dataset, signal }))
+    }
+
+    pub(in crate::engine::control) fn set_user_vector_unit(
+        &mut self,
+        index: usize,
+        unit: &SignalUnit,
+    ) {
+        self.vectors.vectors[index].value.unit = unit.clone();
+    }
+
     /// `vec_get` over every vector, a scalar `let`'s copy included.
     fn find_vector(&self, name: &str, scalars: bool) -> Option<usize> {
         let (plot, name) = match name.split_once('.') {

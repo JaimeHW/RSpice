@@ -802,8 +802,16 @@ impl ControlCircuit {
                 }
             };
             let mut vectors = Vec::new();
+            let mut user = Vec::new();
             while !input.is_empty() {
                 let (expression, _) = expression(&mut input, line, abort)?;
+                if let Expr::Param(name) = &expression
+                    && let Some((index, id)) = self.user_vector_id(name)
+                {
+                    user.push(index);
+                    vectors.push(id);
+                    continue;
+                }
                 let selected = match self.group(&expression, line)? {
                     Some(group) => group,
                     None => vec![self.direct(&expression, variables, line, abort)?],
@@ -824,6 +832,9 @@ impl ControlCircuit {
             check_abort(abort, line)?;
             for id in &vectors {
                 self.vector_units.insert(id.clone(), unit.clone());
+            }
+            for index in user {
+                self.set_user_vector_unit(index, &unit);
             }
             ControlPresentationKind::UnitsChanged { vectors, unit }
         } else {

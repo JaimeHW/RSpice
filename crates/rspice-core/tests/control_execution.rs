@@ -930,6 +930,22 @@ fn settype_takes_every_ngspice_vector_type() {
     assert_eq!(printed(presented.last().unwrap())[0].y.unit.symbol(), "dB");
 }
 
+/// com_stype sets the type of the vector it names, so a vector bound by
+/// `let` carries it too: ngspice's Tschebyschef-LP example marks
+/// `let S11db = db(s_1_1)` as decibel and its degree vectors as phase.
+#[test]
+fn settype_types_a_let_vector_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "types\nV1 in 0 dc 0 ac 1\nR1 in 0 1k\n.control\nac lin 3 1k 3k\n\
+         let g = db(v(in))\nlet p = ph(v(in))\nsettype decibel g\nsettype phase P\n\
+         print g p\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let traces = printed(presented.last().unwrap());
+    assert_eq!(traces[0].y.unit.symbol(), "dB");
+    assert_eq!(traces[1].y.unit.symbol(), "rad");
+}
+
 /// ngspice com_let.c binds a vector in the current plot (vectors.c vec_get
 /// reads the current plot, then the constants plot), with the source's scale;
 /// evaluate.c doop pads the shorter operand with its last element.
