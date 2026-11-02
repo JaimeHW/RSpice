@@ -384,7 +384,10 @@ use rspice_core::analysis::harmonic_balance::{
 // `ControlCircuit::set_input_directory`, which names a control script's
 // `$inputdir`, to 5,238. `ControlProgram::unclosed_block`, the block a script
 // never closes, which the CLI warns of, brings it to 5,239.
-const MAX_PUBLIC_ITEMS: usize = 5239;
+// `netlist::measure::OnOffStatistic`, which Xyce `.MEASURE` statistic
+// (DUTY, ON_TIME, OFF_TIME or FREQ) a `MeasureType::OnOff` reports, brings
+// it to 5,240.
+const MAX_PUBLIC_ITEMS: usize = 5240;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
