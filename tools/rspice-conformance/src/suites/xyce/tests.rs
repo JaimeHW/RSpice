@@ -4625,7 +4625,9 @@ fn nested_device_then_param_step_rebinds_source_expression() {
 }
 
 #[test]
-fn nested_step_shared_plan_preserves_data_metadata_and_combined_bindings() {
+fn a_step_data_card_drops_the_parameter_step_from_the_shared_plan() {
+    // Xyce's convertData clears every other .STEP sweep once a .STEP DATA=
+    // card is present (N_ANP_SweepParam.C:664-667), so only the table steps.
     let netlist = Netlist::parse(
         "nested DATA and parameter step\n\
              .param gain=1 bias=1\n\
@@ -4642,16 +4644,11 @@ fn nested_step_shared_plan_preserves_data_metadata_and_combined_bindings() {
     let steps = XyceTestRunner::step_commands(&netlist).expect("steps parse");
     let engine = Engine::new(SimulationConfig::default());
     let runs = XyceTestRunner::nested_step_runs_for_commands(&engine, &netlist, &steps)
-        .expect("shared plan expands DATA and PARAM steps");
+        .expect("shared plan expands the DATA step");
 
-    assert_eq!(runs.len(), 4);
-    for (run, (gain, row_index, bias)) in runs.iter().zip([
-        (2.0, 0.0, 10.0),
-        (3.0, 0.0, 10.0),
-        (2.0, 1.0, 20.0),
-        (3.0, 1.0, 20.0),
-    ]) {
-        assert_eq!(run.step_values, vec![gain, row_index]);
+    assert_eq!(runs.len(), 2);
+    for (run, (gain, row_index, bias)) in runs.iter().zip([(1.0, 0.0, 10.0), (1.0, 1.0, 20.0)]) {
+        assert_eq!(run.step_values, vec![row_index]);
         assert_eq!(run.netlist.params.get("gain"), Some(gain));
         assert_eq!(run.netlist.params.get("bias"), Some(bias));
         let source = run
