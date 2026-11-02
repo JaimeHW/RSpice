@@ -3,6 +3,8 @@
 mod campaign;
 mod completion_paths;
 mod controller;
+#[cfg(not(target_arch = "wasm32"))]
+mod engine_recovery_path;
 mod measurement;
 mod output_contract;
 mod preflight;
