@@ -329,6 +329,20 @@ impl std::fmt::Debug for MeasurementFileReference {
     }
 }
 
+/// The statistic a Xyce `DUTY`, `ON_TIME`, `OFF_TIME` or `FREQ` measure
+/// reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OnOffStatistic {
+    /// `DUTY`: the fraction of the window the signal is on.
+    Duty,
+    /// `ON_TIME`: the time the signal is on, per cycle.
+    OnTime,
+    /// `OFF_TIME`: the time the signal is off, per cycle.
+    OffTime,
+    /// `FREQ`: half the on and off transitions per unit time.
+    Frequency,
+}
+
 /// Type of measurement to perform
 #[derive(Debug, Clone)]
 pub enum MeasureType {
@@ -481,6 +495,25 @@ pub enum MeasureType {
         /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
         td: Option<Value>,
     },
+
+    /// Xyce `DUTY`, `ON_TIME`, `OFF_TIME` and `FREQ`: a statistic of the
+    /// signal's on and off states over the accepted transient steps in the
+    /// window, with nothing interpolated (N_IO_MeasureTranStats.C:90-115,
+    /// N_IO_MeasureDuty.C, N_IO_MeasureOnTime.C, N_IO_MeasureOffTime.C,
+    /// N_IO_MeasureFrequency.C).
+    OnOff {
+        statistic: OnOffStatistic,
+        signal: String,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+        /// `ON`: the level above which the signal is on (Xyce default 0).
+        on: Value,
+        /// `OFF`: the level below which it is off (Xyce default 0).
+        off: Value,
+        /// `MINVAL`: Xyce's comparison and window tolerance.
+        minval: Value,
+    },
 }
 
 /// Per-statement Xyce measurement-output routing.
@@ -581,7 +614,8 @@ impl MeasureStatement {
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::Integ { signal, .. } => rewrite(signal, policy),
+            | MeasureType::Integ { signal, .. }
+            | MeasureType::OnOff { signal, .. } => rewrite(signal, policy),
         }
     }
 }

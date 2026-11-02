@@ -1135,6 +1135,17 @@ enum LiveMeasureState {
         maximum: Value,
         initialized: bool,
     },
+    OnOff {
+        statistic: crate::netlist::measure::OnOffStatistic,
+        signal: LiveMeasureOperand,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+        on: Value,
+        off: Value,
+        minval: Value,
+        accumulator: crate::analysis::measure::OnOffAccumulator,
+    },
     IntegralStatistic {
         signal: LiveMeasureOperand,
         lower: Value,
@@ -3683,6 +3694,26 @@ fn compile_live_measure_state(
                 selected: None,
             }
         }
+        MeasureType::OnOff {
+            statistic,
+            signal,
+            from,
+            to,
+            td,
+            on,
+            off,
+            minval,
+        } => LiveMeasureState::OnOff {
+            statistic: *statistic,
+            signal: LiveMeasureOperand::compile(signal, params)?,
+            from: *from,
+            to: *to,
+            td: *td,
+            on: *on,
+            off: *off,
+            minval: *minval,
+            accumulator: crate::analysis::measure::OnOffAccumulator::default(),
+        },
         MeasureType::PeakToPeak {
             signal,
             from,
@@ -4329,6 +4360,7 @@ impl LiveMeasureState {
             }
             Self::Extremum { signal, .. }
             | Self::PeakToPeak { signal, .. }
+            | Self::OnOff { signal, .. }
             | Self::IntegralStatistic { signal, .. }
             | Self::FileError { signal, .. } => {
                 names.extend(signal.dependencies.iter().cloned());
@@ -4437,6 +4469,26 @@ impl LiveMeasureState {
                 // terminal printing only.
                 let _ = output;
                 Ok(selected.map(|(_, value)| value))
+            }
+            Self::OnOff {
+                statistic,
+                signal,
+                from,
+                to,
+                td,
+                on,
+                off,
+                minval,
+                accumulator,
+            } => {
+                if !crate::analysis::measure::xyce_window_accepts(
+                    axis_value, *from, *to, *td, *minval,
+                ) {
+                    return Ok(None);
+                }
+                let value = signal.value(row, signals, reads, params)?;
+                accumulator.push(axis_value, value, *on, *off, *minval);
+                Ok(accumulator.result(*statistic))
             }
             Self::PeakToPeak {
                 signal,
@@ -6315,7 +6367,8 @@ fn statement_live_dependencies(
         | MeasureType::PeakToPeak { signal, .. }
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
-        | MeasureType::Integ { signal, .. } => {
+        | MeasureType::Integ { signal, .. }
+        | MeasureType::OnOff { signal, .. } => {
             add_live_operand_dependencies(signal, &mut names, params)
         }
     }
@@ -6472,7 +6525,8 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::Integ { signal, .. } => add(signal),
+            | MeasureType::Integ { signal, .. }
+            | MeasureType::OnOff { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -6606,7 +6660,8 @@ fn materialize_differential_voltage_signals(
             | MeasureType::PeakToPeak { signal, .. }
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
-            | MeasureType::Integ { signal, .. } => add(signal),
+            | MeasureType::Integ { signal, .. }
+            | MeasureType::OnOff { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -7277,7 +7332,8 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         MeasureType::Delay { .. }
         | MeasureType::FileError { .. }
         | MeasureType::Param { .. }
-        | MeasureType::Integ { .. } => None,
+        | MeasureType::Integ { .. }
+        | MeasureType::OnOff { .. } => None,
     };
     if let Some((Some(from), Some(to))) = bounds
         && *from > *to

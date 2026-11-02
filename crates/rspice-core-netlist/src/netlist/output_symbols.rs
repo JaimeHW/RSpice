@@ -3288,7 +3288,8 @@ fn collect_measure_sources<'a>(
         | MeasureType::PeakToPeak { signal, .. }
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
-        | MeasureType::Integ { signal, .. } => output.push(MeasureDependencySource::Direct(signal)),
+        | MeasureType::Integ { signal, .. }
+        | MeasureType::OnOff { signal, .. } => output.push(MeasureDependencySource::Direct(signal)),
     }
 }
 

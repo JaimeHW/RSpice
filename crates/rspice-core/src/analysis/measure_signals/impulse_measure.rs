@@ -312,6 +312,20 @@ pub(super) fn compile<'a>(
                 inclusive_window(&result.time, *lower, *upper),
             )?;
         }
+        LiveMeasureState::OnOff {
+            signal,
+            from,
+            to,
+            td,
+            ..
+        } => {
+            let from = crate::analysis::measure::delayed_window_start(*from, *td, &result.time);
+            let (lower, upper) = live_measurement_window_bounds(&result.time, from, *to);
+            regular(
+                &signal.authored,
+                inclusive_window(&result.time, lower, upper),
+            )?;
+        }
         LiveMeasureState::Point {
             signal,
             at,

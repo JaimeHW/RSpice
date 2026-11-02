@@ -107,6 +107,11 @@ impl Inference<'_> {
                 self.signal(&expression.text, depth + 1, &axis)
             }
             MeasureType::ErrorFunction { .. } => known("1"),
+            MeasureType::OnOff { statistic, .. } => match statistic {
+                crate::netlist::measure::OnOffStatistic::Duty => known("1"),
+                crate::netlist::measure::OnOffStatistic::Frequency => known("Hz"),
+                _ => axis.interval(),
+            },
         };
         let value = match statement.measure_type {
             MeasureType::Min {

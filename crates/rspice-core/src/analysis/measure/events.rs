@@ -122,7 +122,8 @@ fn waveform_operands(statement: &MeasureStatement) -> Vec<&str> {
         | MeasureType::PeakToPeak { signal, .. }
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
-        | MeasureType::Integ { signal, .. } => operands.push(signal),
+        | MeasureType::Integ { signal, .. }
+        | MeasureType::OnOff { signal, .. } => operands.push(signal),
         MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
     }
     operands
@@ -778,6 +779,10 @@ impl Evaluation<'_, '_, '_> {
                 td,
             } => self.peak_to_peak(signal, delayed(*from, *td), *to),
             MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
+            MeasureType::OnOff { .. } => self.shapeless(
+                "DUTY",
+                "the on/off statistics read accepted analog steps, and an event trace has none",
+            ),
             MeasureType::ErrorFunction { .. } | MeasureType::FileError { .. } => self.shapeless(
                 "ERR",
                 "the error compares sampled values point by point, and a step function has no \

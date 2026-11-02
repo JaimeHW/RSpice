@@ -3571,6 +3571,24 @@ pub(super) fn parse_meas_command(
                         td,
                     }
                 }
+                "DUTY" | "ON_TIME" | "OFF_TIME" | "FREQ" => {
+                    let options = parse_measure_on_off_options(stream, line_num, params)?;
+                    MeasureType::OnOff {
+                        statistic: match measure_type_key.as_str() {
+                            "DUTY" => crate::netlist::measure::OnOffStatistic::Duty,
+                            "ON_TIME" => crate::netlist::measure::OnOffStatistic::OnTime,
+                            "OFF_TIME" => crate::netlist::measure::OnOffStatistic::OffTime,
+                            _ => crate::netlist::measure::OnOffStatistic::Frequency,
+                        },
+                        signal: signal.clone(),
+                        from: options.from,
+                        to: options.to,
+                        td: options.td,
+                        on: options.on,
+                        off: options.off,
+                        minval: statement_options.minval,
+                    }
+                }
                 "FIND" => {
                     let options = parse_point_measure_options(stream, line_num, params, "FIND")?;
 
@@ -4860,6 +4878,76 @@ pub(super) fn parse_measure_range_options(
     }
 
     Ok((from, to, td))
+}
+
+/// The window and levels of a Xyce `DUTY`, `ON_TIME`, `OFF_TIME` or `FREQ`
+/// measure. `ON` and `OFF` default to 0 (N_IO_MeasureBase.C:95-98).
+struct OnOffMeasureOptions {
+    from: Option<crate::Value>,
+    to: Option<crate::Value>,
+    td: Option<crate::Value>,
+    on: crate::Value,
+    off: crate::Value,
+}
+
+fn parse_measure_on_off_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<OnOffMeasureOptions, ParseError> {
+    let mut options = OnOffMeasureOptions {
+        from: None,
+        to: None,
+        td: None,
+        on: 0.0,
+        off: 0.0,
+    };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        // MINVAL is these measures' comparison tolerance; the statement scan
+        // has already read it.
+        if consume_meas_statement_qualifier(stream, line_num, params, true)?.is_some() {
+            continue;
+        }
+        if matches!(stream.peek().kind, TokenKind::Comma) {
+            stream.advance();
+            continue;
+        }
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token '{}' after .MEAS on/off operand",
+                    stream.peek().kind
+                ),
+            });
+        };
+        let key = key.to_ascii_uppercase();
+        if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
+            break;
+        }
+        if !matches!(key.as_str(), "FROM" | "TO" | "TD" | "ON" | "OFF") {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{key}' after .MEAS on/off operand"),
+            });
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {key} in .MEAS"),
+            });
+        }
+        let value = expect_measure_value(stream, line_num, params)?;
+        match key.as_str() {
+            "FROM" => options.from = Some(value),
+            "TO" => options.to = Some(value),
+            "TD" => options.td = Some(value),
+            "ON" => options.on = value,
+            _ => options.off = value,
+        }
+    }
+    Ok(options)
 }
 
 fn parse_measure_extrema_options(
@@ -9025,6 +9113,64 @@ mod tests {
         let error = parse_in(deck, crate::config::SpiceDialect::Ngspice)
             .expect_err("ngspice dialect refuses TD on MAX");
         assert!(error.to_string().contains("TD"), "{error}");
+    }
+
+    /// Xyce's DUTY, ON_TIME, OFF_TIME and FREQ take a window, a delay and
+    /// the ON and OFF levels, which default to 0 (N_IO_MeasureBase.C:95-98).
+    #[test]
+    fn xyce_on_off_measures_parse_their_levels_and_window() {
+        use crate::netlist::measure::{MeasureType, OnOffStatistic};
+        let netlist = Netlist::parse(
+            "on off\nV1 1 0 1\nR1 1 0 1\n.tran 0 2\n\
+             .measure tran d duty v(1) on=0.75 off=0.25 from=0.1 to=1.9 td=0.2\n\
+             .measure tran n on_time v(1)\n\
+             .measure tran f off_time v(1) minval=1e-6\n\
+             .measure tran q freq v(1) on=0.5 off=0.5\n.end\n",
+        )
+        .expect("on/off measures parse");
+        let shapes = netlist
+            .measurements
+            .iter()
+            .map(|statement| match &statement.measure_type {
+                MeasureType::OnOff {
+                    statistic,
+                    from,
+                    to,
+                    td,
+                    on,
+                    off,
+                    minval,
+                    ..
+                } => (*statistic, *from, *to, *td, *on, *off, *minval),
+                other => panic!("expected an on/off measure, got {other:?}"),
+            })
+            .collect::<Vec<_>>();
+        let minval = crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
+        assert_eq!(
+            shapes,
+            [
+                (
+                    OnOffStatistic::Duty,
+                    Some(0.1),
+                    Some(1.9),
+                    Some(0.2),
+                    0.75,
+                    0.25,
+                    minval
+                ),
+                (OnOffStatistic::OnTime, None, None, None, 0.0, 0.0, minval),
+                (OnOffStatistic::OffTime, None, None, None, 0.0, 0.0, 1e-6),
+                (
+                    OnOffStatistic::Frequency,
+                    None,
+                    None,
+                    None,
+                    0.5,
+                    0.5,
+                    minval
+                ),
+            ]
+        );
     }
 
     /// Xyce reads `agauss` at its mean outside a sampling analysis (the

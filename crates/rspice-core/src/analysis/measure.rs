@@ -19,6 +19,7 @@
 use super::measure_signals::MeasureParameters;
 use crate::Value;
 use crate::netlist::canonical_symbol;
+use crate::netlist::measure::OnOffStatistic;
 use crate::netlist::measure::XYCE_DEFAULT_MEASURE_MINVAL;
 use std::collections::HashMap;
 
@@ -1217,6 +1218,42 @@ impl MeasureEngine {
                 *to,
                 data,
             ),
+            MeasureType::OnOff {
+                statistic,
+                signal,
+                from,
+                to,
+                td,
+                on,
+                off,
+                minval,
+            } => {
+                if !measurement.analysis.eq_ignore_ascii_case("TRAN") {
+                    return MeasureResult::failed(
+                        &measurement.name,
+                        "DUTY, ON_TIME, OFF_TIME and FREQ measure a transient",
+                    );
+                }
+                let Some(values) = lookup_signal(data.signals, signal) else {
+                    return MeasureResult::failed(
+                        &measurement.name,
+                        &format!("Signal '{signal}' not found"),
+                    );
+                };
+                let mut accumulator = OnOffAccumulator::default();
+                for (time, value) in data.axis.iter().zip(values) {
+                    if xyce_window_accepts(*time, *from, *to, *td, *minval) {
+                        accumulator.push(*time, *value, *on, *off, *minval);
+                    }
+                }
+                match accumulator
+                    .result(*statistic)
+                    .filter(|value| value.is_finite())
+                {
+                    Some(value) => MeasureResult::success(&measurement.name, value),
+                    None => MeasureResult::failed(&measurement.name, "Empty range"),
+                }
+            }
         }
     }
 
@@ -2980,6 +3017,94 @@ fn delay_at_is_reached(
     })
 }
 
+/// Whether Xyce counts an accepted step at `time` in a measure's window:
+/// before `TD` or `FROM` or after `TO`, each relaxed by MINVAL, it does not
+/// (Base::withinTimeWindow, N_IO_MeasureBase.C:668-677).
+pub(crate) fn xyce_window_accepts(
+    time: Value,
+    from: Option<Value>,
+    to: Option<Value>,
+    td: Option<Value>,
+    minval: Value,
+) -> bool {
+    !(td.is_some_and(|td| time < td * (1.0 - minval))
+        || from.is_some_and(|from| time < from * (1.0 - minval))
+        || to.is_some_and(|to| time > to * (1.0 + minval)))
+}
+
+/// Xyce's `DUTY`, `ON_TIME`, `OFF_TIME` and `FREQ` statistics, fed one
+/// accepted step at a time as TranStats::updateTran feeds them
+/// (N_IO_MeasureTranStats.C:90-115). Each step after the first adds the time
+/// since the step before it, judged by the value at the new step.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct OnOffAccumulator {
+    last: Option<(Value, Value)>,
+    in_on_state: bool,
+    duty_on_time: Value,
+    window: Value,
+    on_time: Value,
+    off_time: Value,
+    on_cycles: u64,
+    off_cycles: u64,
+    rising: u64,
+    falling: u64,
+}
+
+impl OnOffAccumulator {
+    pub(crate) fn push(&mut self, time: Value, value: Value, on: Value, off: Value, minval: Value) {
+        if let Some((last_time, last_value)) = self.last {
+            let step = time - last_time;
+            self.window += step;
+            // Duty::updateMeasureVars: on above ON, or still on above OFF.
+            if value + minval > on || (self.in_on_state && value + minval > off) {
+                self.duty_on_time += step;
+                self.in_on_state = true;
+            } else {
+                self.in_on_state = false;
+            }
+            // OnTime::updateMeasureVars and OffTime::updateMeasureVars.
+            if value + minval >= on {
+                self.on_time += step;
+                if last_value < on {
+                    self.on_cycles += 1;
+                }
+            }
+            if value - minval <= off {
+                self.off_time += step;
+                if last_value > off {
+                    self.off_cycles += 1;
+                }
+            }
+            // Frequency::updateMeasureVars.
+            if value + minval > on && last_value < on {
+                self.rising += 1;
+            }
+            if value - minval < off && last_value > off {
+                self.falling += 1;
+            }
+        }
+        self.last = Some((time, value));
+    }
+
+    /// The statistic so far; `None` until a step has been seen.
+    pub(crate) fn result(&self, statistic: OnOffStatistic) -> Option<Value> {
+        self.last?;
+        let per_cycle = |time: Value, cycles: u64| {
+            if cycles > 0 {
+                time / cycles as Value
+            } else {
+                time
+            }
+        };
+        Some(match statistic {
+            OnOffStatistic::Duty => self.duty_on_time / self.window,
+            OnOffStatistic::OnTime => per_cycle(self.on_time, self.on_cycles),
+            OnOffStatistic::OffTime => per_cycle(self.off_time, self.off_cycles),
+            OnOffStatistic::Frequency => 0.5 * (self.rising + self.falling) as Value / self.window,
+        })
+    }
+}
+
 /// The window start a Xyce `TD` gives a range or extrema measure: the first
 /// accepted step at or after `TD`, so the window opens on a sample and
 /// nothing is interpolated there (N_IO_MeasureBase.C:668-677, with Xyce's
@@ -4307,6 +4432,66 @@ mod tests {
             .map(|result| result.value.map(|value| (value * 1e7).round() / 1e7))
             .collect::<Vec<_>>();
         assert_eq!(values, [Some(0.3721612), Some(0.1860806), Some(0.0)]);
+    }
+
+    #[test]
+    fn xyce_on_off_statistics_follow_the_accepted_steps() {
+        // Xyce's TranStats feed each accepted step after the first, judged
+        // by its own value (N_IO_MeasureTranStats.C:90-115). Over the steps
+        // 0..6 of 0 1 1 0 0 1 0 with ON = OFF = 0.5: DUTY is the on time over
+        // the window, 3/6 (N_IO_MeasureDuty.C:85-116); ON_TIME and OFF_TIME
+        // are 3 over 2 cycles each (N_IO_MeasureOnTime.C, OffTime.C); FREQ is
+        // half the 4 transitions over 6 (N_IO_MeasureFrequency.C). FROM=1.5
+        // opens the window on the step at 2, so DUTY is 1/4.
+        let statement = |name: &str, statistic, from| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: MeasureType::OnOff {
+                statistic,
+                signal: "V(1)".to_string(),
+                from,
+                to: None,
+                td: None,
+                on: 0.5,
+                off: 0.5,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+            analysis: "TRAN".to_string(),
+        };
+        let statements = [
+            statement("duty", OnOffStatistic::Duty, None),
+            statement("on", OnOffStatistic::OnTime, None),
+            statement("off", OnOffStatistic::OffTime, None),
+            statement("freq", OnOffStatistic::Frequency, None),
+            statement("late", OnOffStatistic::Duty, Some(1.5)),
+        ];
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let values = [0.0, 1.0, 1.0, 0.0, 0.0, 1.0, 0.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(1)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        for statement in &statements {
+            engine.add(statement.clone());
+        }
+        let values = engine
+            .evaluate(&axis, &signals)
+            .into_iter()
+            .map(|result| result.value)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [
+                Some(0.5),
+                Some(1.5),
+                Some(1.5),
+                Some(4.0 / 12.0),
+                Some(0.25)
+            ]
+        );
     }
 
     #[test]
