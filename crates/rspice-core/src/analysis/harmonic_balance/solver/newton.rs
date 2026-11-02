@@ -479,48 +479,59 @@ impl ExactHbOperator<'_> {
         output
     }
 
-    /// Canonicalize exact homogeneous singleton voltage constraints before a
-    /// full streamed certificate is formed. A grounded ideal voltage-source
-    /// branch row contains exactly one node-voltage coordinate. When that
-    /// realified row has an exactly zero RHS, the coordinate is mathematically
-    /// zero; spelling it as positive zero avoids treating Krylov roundoff as a
+    /// The realified rows that hold exactly one nonzero coefficient, each
+    /// with that coefficient's column: a grounded ideal voltage source, a
+    /// grounded inductor at DC, or a node whose harmonic-0 row is a lone
+    /// conductance.
+    fn one_entry_rows(&self) -> Vec<(usize, usize)> {
+        const EMPTY: usize = usize::MAX;
+        const COUPLED: usize = usize::MAX - 1;
+        let size = self.entity_count() * self.real_width;
+        let mut columns = vec![EMPTY; size];
+        let mut sums = vec![0.0; size];
+        self.visit_entries(|row, column, value| {
+            if value == 0.0 {
+                return;
+            }
+            match columns[row] {
+                EMPTY => {
+                    columns[row] = column;
+                    sums[row] = value;
+                }
+                COUPLED => {}
+                existing if existing == column => sums[row] += value,
+                _ => columns[row] = COUPLED,
+            }
+        });
+        columns
+            .into_iter()
+            .zip(sums)
+            .enumerate()
+            .filter(|&(_, (column, sum))| column < COUPLED && sum != 0.0)
+            .map(|(row, (column, _))| (row, column))
+            .collect()
+    }
+
+    /// Canonicalize exact homogeneous one-entry rows before a full streamed
+    /// certificate is formed. When a row with a single nonzero coefficient
+    /// has an exactly zero RHS, its coordinate is mathematically zero;
+    /// spelling it as positive zero avoids treating Krylov roundoff as a
     /// componentwise error of one in that homogeneous row.
     ///
-    /// This is deliberately an exact, topology-based operation: nonzero RHS
-    /// rows, floating two-node constraints, and non-voltage branches are left
-    /// untouched.
-    fn project_homogeneous_grounded_voltage_singletons(
+    /// This is deliberately exact: rows with a nonzero RHS, or with two
+    /// coupled coordinates, are left untouched.
+    fn project_homogeneous_one_entry_rows(
         &self,
+        one_entry_rows: &[(usize, usize)],
         solution: &mut [Complex64],
         rhs: &[Complex64],
     ) {
         debug_assert_eq!(solution.len(), self.entity_count() * self.real_width);
         debug_assert_eq!(rhs.len(), solution.len());
         let zero = Complex64::new(0.0, 0.0);
-        for (branch_index, branch) in self.mna_branches.iter().enumerate() {
-            let ExactMnaBranch::VoltageSource {
-                node_pos, node_neg, ..
-            } = branch
-            else {
-                continue;
-            };
-            let node = match (*node_pos, *node_neg) {
-                (node, 0) if node > 0 => node - 1,
-                (0, node) if node > 0 => node - 1,
-                _ => continue,
-            };
-            let branch_entity = self.num_nodes + branch_index;
-            for harmonic in 0..self.num_components {
-                let branch_re = self.re_idx(branch_entity, harmonic);
-                if rhs[branch_re] == zero {
-                    solution[self.re_idx(node, harmonic)] = zero;
-                }
-                if harmonic > 0 {
-                    let branch_im = self.im_idx(branch_entity, harmonic);
-                    if rhs[branch_im] == zero {
-                        solution[self.im_idx(node, harmonic)] = zero;
-                    }
-                }
+        for &(row, column) in one_entry_rows {
+            if rhs[row] == zero {
+                solution[column] = zero;
             }
         }
     }
@@ -661,11 +672,12 @@ impl super::krylov::KrylovPreconditioner for RowScaledExactHbPreconditioner<'_> 
 
 fn exact_hb_candidate_report(
     operator: &ExactHbOperator<'_>,
+    one_entry_rows: &[(usize, usize)],
     solution: &mut [Complex64],
     rhs: &[Complex64],
 ) -> Result<(rspice_matrix::ComplexTransposeBackwardErrorReport, Value), rspice_matrix::SolverError>
 {
-    operator.project_homogeneous_grounded_voltage_singletons(solution, rhs);
+    operator.project_homogeneous_one_entry_rows(one_entry_rows, solution, rhs);
     let size = rhs.len();
     let report = rspice_matrix::analyze_complex_transpose_solution_by_entry_visitor(
         size,
@@ -2012,6 +2024,7 @@ impl HbSolver {
                 periodic_networks: &self.exact_periodic_networks,
             };
             operator.validate()?;
+            let one_entry_rows = operator.one_entry_rows();
             let preconditioner = ExactHbPreconditioner::build(&operator);
             let rhs_complex = rhs
                 .iter()
@@ -2044,7 +2057,12 @@ impl HbSolver {
             {
                 Err(rspice_matrix::SolverError::Overflow)
             } else {
-                match exact_hb_candidate_report(&operator, &mut outcome.solution, &rhs_complex) {
+                match exact_hb_candidate_report(
+                    &operator,
+                    &one_entry_rows,
+                    &mut outcome.solution,
+                    &rhs_complex,
+                ) {
                     Ok((candidate_report, relative_residual)) => {
                         outcome.relative_residual = relative_residual;
                         let result = if candidate_report.is_accepted() {
@@ -2174,6 +2192,7 @@ impl HbSolver {
 
                     let (refined_report, relative_residual) = match exact_hb_candidate_report(
                         &operator,
+                        &one_entry_rows,
                         &mut outcome.solution,
                         &rhs_complex,
                     ) {
@@ -3172,7 +3191,7 @@ mod exact_matrix_free_tests {
     }
 
     #[test]
-    fn grounded_voltage_singleton_projection_is_exact_and_topology_limited() {
+    fn homogeneous_one_entry_projection_is_exact_and_coupling_limited() {
         let branches = vec![
             ExactMnaBranch::VoltageSource {
                 branch_ordinal: 1,
@@ -3228,12 +3247,19 @@ mod exact_matrix_free_tests {
             }
         }
 
-        operator.project_homogeneous_grounded_voltage_singletons(&mut solution, &rhs);
+        operator.project_homogeneous_one_entry_rows(
+            &operator.one_entry_rows(),
+            &mut solution,
+            &rhs,
+        );
 
+        // The grounded sources' homogeneous rows, and the grounded inductor's
+        // DC row V2 = 0, each hold one coordinate.
         for index in [
             operator.re_idx(0, 0),
             operator.im_idx(0, 1),
             operator.re_idx(1, 1),
+            operator.re_idx(1, 0),
         ] {
             assert_eq!(solution[index].re.to_bits(), 0);
             assert_eq!(solution[index].im.to_bits(), 0);
@@ -3244,12 +3270,14 @@ mod exact_matrix_free_tests {
             solution[operator.re_idx(0, 1)],
             original[operator.re_idx(0, 1)]
         );
-        // A grounded inductor row is not an ideal-voltage-source singleton.
+        // The inductor's harmonic rows couple its branch current, so they
+        // leave the node voltage alone.
         assert_eq!(
-            solution[operator.re_idx(1, 0)],
-            original[operator.re_idx(1, 0)]
+            solution[operator.re_idx(1, 2)],
+            original[operator.re_idx(1, 2)]
         );
-        // Branch-current coordinates are never canonicalized.
+        // A branch current appears only in node rows, which also carry GMIN,
+        // so none sits alone in a row.
         assert_eq!(
             solution[operator.re_idx(positive_grounded_branch, 0)],
             original[operator.re_idx(positive_grounded_branch, 0)]
@@ -3291,13 +3319,67 @@ mod exact_matrix_free_tests {
         candidate[operator.re_idx(0, 1)] = Complex64::new(1.0e-30, -1.0e-30);
 
         let (report, relative_residual) =
-            exact_hb_candidate_report(&operator, &mut candidate, &rhs)
+            exact_hb_candidate_report(&operator, &operator.one_entry_rows(), &mut candidate, &rhs)
                 .expect("canonical candidate has a finite full certificate");
 
         assert!(report.is_accepted());
         assert_eq!(relative_residual.to_bits(), 0);
         assert_eq!(candidate[operator.re_idx(0, 1)].re.to_bits(), 0);
         assert_eq!(candidate[operator.re_idx(0, 1)].im.to_bits(), 0);
+    }
+
+    #[test]
+    fn candidate_report_certifies_a_node_whose_dc_row_is_a_lone_conductance() {
+        // Node 2's harmonic-0 row is its conductance alone; a capacitor
+        // couples it to node 1 only at the harmonics. With no DC drive there,
+        // V2(0) is exactly zero, and GMRES roundoff in it is a componentwise
+        // backward error of one. No voltage source touches the row, so a
+        // projection limited to grounded sources leaves the solve uncertified.
+        let g = vec![(0, 0, 2.0), (1, 1, 4.0)];
+        let capacitance = 1.0e-9;
+        let c = vec![
+            (0, 0, capacitance),
+            (0, 1, -capacitance),
+            (1, 0, -capacitance),
+            (1, 1, capacitance),
+        ];
+        let operator = ExactHbOperator {
+            gmin: 0.0,
+            ..fixture(&g, &c, &[], &[])
+        };
+        let size = operator.entity_count() * operator.real_width;
+        let mut exact = vec![Complex64::new(0.0, 0.0); size];
+        for harmonic in 0..operator.num_components {
+            let k = harmonic as Value;
+            exact[operator.re_idx(0, harmonic)] = Complex64::new(1.0 + k, 0.0);
+            if harmonic > 0 {
+                exact[operator.im_idx(0, harmonic)] = Complex64::new(-0.5 - k, 0.0);
+                exact[operator.re_idx(1, harmonic)] = Complex64::new(0.25 * k, 0.0);
+                exact[operator.im_idx(1, harmonic)] = Complex64::new(-0.125 * k, 0.0);
+            }
+        }
+        let rhs = operator.apply(&exact);
+        let dc_row = operator.re_idx(1, 0);
+        assert_eq!(rhs[dc_row], Complex64::new(0.0, 0.0));
+        let mut candidate = exact;
+        candidate[dc_row] = Complex64::new(-8.3e-39, 0.0);
+
+        let (unprojected, _) =
+            exact_hb_candidate_report(&operator, &[], &mut candidate.clone(), &rhs)
+                .expect("the roundoff candidate has a finite full certificate");
+        assert!(!unprojected.is_accepted());
+        assert!((unprojected.componentwise_error() - 1.0).abs() < 1.0e-12);
+
+        let (report, _) =
+            exact_hb_candidate_report(&operator, &operator.one_entry_rows(), &mut candidate, &rhs)
+                .expect("the projected candidate has a finite full certificate");
+        assert!(
+            report.is_accepted(),
+            "componentwise error {:e}",
+            report.componentwise_error()
+        );
+        assert_eq!(candidate[dc_row].re.to_bits(), 0);
+        assert_eq!(candidate[dc_row].im.to_bits(), 0);
     }
 
     #[test]
