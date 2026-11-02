@@ -4065,9 +4065,18 @@ fn parse_measure_when_operand(
         TokenKind::Ident(_) if matches!(stream.peek_n(1).kind, TokenKind::LParen) => Ok(
             MeasureOperand::Waveform(parse_meas_signal(stream, line_num, params)?),
         ),
-        TokenKind::Ident(name) if params.get(name).is_none() => Ok(MeasureOperand::Waveform(
-            parse_meas_signal(stream, line_num, params)?,
-        )),
+        // A digit-leading word such as `10m` is a number with its scale
+        // suffix, which the lexer keeps as a name; ngspice reads it as the
+        // number (frontend/com_measure2.c:1522 measure_parse_when).
+        TokenKind::Ident(name)
+            if params.get(name).is_none()
+                && !(name.starts_with(|c: char| c.is_ascii_digit())
+                    && crate::netlist::lexer::parse_spice_value_complete(name).is_ok()) =>
+        {
+            Ok(MeasureOperand::Waveform(parse_meas_signal(
+                stream, line_num, params,
+            )?))
+        }
         _ => Ok(MeasureOperand::Constant(expect_measure_value(
             stream, line_num, params,
         )?)),

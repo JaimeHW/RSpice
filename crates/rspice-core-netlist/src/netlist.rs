@@ -4585,6 +4585,8 @@ mod tests {
              .dc V1 5 1 -1\n\
              .measure dc waveform WHEN V(one)={2*V(two)} FROM=4 TO=2 CROSS=2\n\
              .measure dc constant WHEN V(one)=2.5\n\
+             .measure dc scaled WHEN V(one)=10m\n\
+             .measure dc name WHEN V(one)=1n4148\n\
              .end\n",
         )
         .expect("standalone WHEN conditions parse");
@@ -4621,6 +4623,25 @@ mod tests {
             }
             other => panic!("expected standalone WHEN measurement, got {other:?}"),
         }
+        // `10m` is the number with its scale suffix, as ngspice reads it,
+        // though the lexer keeps a digit-leading word as a name; a word that
+        // is no whole number stays a waveform name.
+        let rights: Vec<_> = netlist.measurements[2..]
+            .iter()
+            .map(|measurement| match &measurement.measure_type {
+                crate::netlist::measure::MeasureType::When { condition, .. } => {
+                    condition.right.clone()
+                }
+                other => panic!("expected standalone WHEN measurement, got {other:?}"),
+            })
+            .collect();
+        assert_eq!(
+            rights,
+            [
+                crate::netlist::measure::MeasureOperand::Constant(10e-3),
+                crate::netlist::measure::MeasureOperand::Waveform("1N4148".into()),
+            ]
+        );
     }
 
     #[test]
