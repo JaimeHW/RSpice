@@ -123,7 +123,8 @@ fn waveform_operands(statement: &MeasureStatement) -> Vec<&str> {
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
         | MeasureType::Integ { signal, .. }
-        | MeasureType::OnOff { signal, .. } => operands.push(signal),
+        | MeasureType::OnOff { signal, .. }
+        | MeasureType::Fourier { signal, .. } => operands.push(signal),
         MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
     }
     operands
@@ -779,6 +780,10 @@ impl Evaluation<'_, '_, '_> {
                 td,
             } => self.peak_to_peak(signal, delayed(*from, *td), *to),
             MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
+            MeasureType::Fourier { .. } => self.shapeless(
+                "FOUR",
+                "a Fourier series reads accepted analog steps, and an event trace has none",
+            ),
             MeasureType::OnOff { .. } => self.shapeless(
                 "DUTY",
                 "the on/off statistics read accepted analog steps, and an event trace has none",

@@ -3571,6 +3571,19 @@ pub(super) fn parse_meas_command(
                         td,
                     }
                 }
+                "FOUR" => {
+                    let options = parse_measure_fourier_options(stream, line_num, params)?;
+                    MeasureType::Fourier {
+                        signal: signal.clone(),
+                        at: options.at,
+                        num_freq: options.num_freq,
+                        grid_size: options.grid_size,
+                        from: options.from,
+                        to: options.to,
+                        td: options.td,
+                        minval: statement_options.minval,
+                    }
+                }
                 "DUTY" | "ON_TIME" | "OFF_TIME" | "FREQ" => {
                     let options = parse_measure_on_off_options(stream, line_num, params)?;
                     MeasureType::OnOff {
@@ -4878,6 +4891,109 @@ pub(super) fn parse_measure_range_options(
     }
 
     Ok((from, to, td))
+}
+
+/// The fundamental, harmonic count, grid and window of a Xyce `FOUR`
+/// measure. `NUMFREQ` defaults to 10 and `GRIDSIZE` to 200
+/// (N_IO_MeasureBase.C:140-141). Without `AT` the fundamental is 0, so the
+/// measure fails at the end of the run, as Xyce's does; a negative `AT` is
+/// an error (N_IO_MeasureFourier.C:67-70).
+/// `PRECISION` only sets the digits of Xyce's printed harmonic table.
+struct FourierMeasureOptions {
+    at: crate::Value,
+    num_freq: usize,
+    grid_size: usize,
+    from: Option<crate::Value>,
+    to: Option<crate::Value>,
+    td: Option<crate::Value>,
+}
+
+fn parse_measure_fourier_options(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+) -> Result<FourierMeasureOptions, ParseError> {
+    let mut at = None;
+    let mut options = FourierMeasureOptions {
+        at: 0.0,
+        num_freq: 10,
+        grid_size: 200,
+        from: None,
+        to: None,
+        td: None,
+    };
+    while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
+        // MINVAL is this measure's window tolerance; the statement scan has
+        // already read it.
+        if consume_meas_statement_qualifier(stream, line_num, params, true)?.is_some() {
+            continue;
+        }
+        if matches!(stream.peek().kind, TokenKind::Comma) {
+            stream.advance();
+            continue;
+        }
+        let TokenKind::Ident(key) = &stream.peek().kind else {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(
+                    "Unexpected token '{}' after .MEAS FOUR operand",
+                    stream.peek().kind
+                ),
+            });
+        };
+        let key = key.to_ascii_uppercase();
+        if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
+            break;
+        }
+        if !matches!(
+            key.as_str(),
+            "AT" | "NUMFREQ" | "GRIDSIZE" | "FROM" | "TO" | "TD" | "PRECISION"
+        ) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Unexpected option '{key}' after .MEAS FOUR operand"),
+            });
+        }
+        stream.advance();
+        if !stream.consume(&TokenKind::Equals) {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("Expected '=' after {key} in .MEAS FOUR"),
+            });
+        }
+        let value = expect_measure_value(stream, line_num, params)?;
+        let count = |name: &str| {
+            if value.is_finite() && value >= 1.0 && value.fract() == 0.0 {
+                Ok(value as usize)
+            } else {
+                Err(ParseError::Syntax {
+                    line: line_num,
+                    message: format!(".MEAS FOUR {name} must be a positive integer, got {value}"),
+                })
+            }
+        };
+        match key.as_str() {
+            "AT" => at = Some(value),
+            "NUMFREQ" => options.num_freq = count("NUMFREQ")?,
+            "GRIDSIZE" => options.grid_size = count("GRIDSIZE")?,
+            "FROM" => options.from = Some(value),
+            "TO" => options.to = Some(value),
+            "TD" => options.td = Some(value),
+            // The digits Xyce prints the harmonic table with.
+            _ => {}
+        }
+    }
+    options.at = match at {
+        Some(at) if at.is_finite() && at >= 0.0 => at,
+        Some(at) => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!(".MEAS FOUR AT must be a frequency of 0 or more, got {at}"),
+            });
+        }
+        None => 0.0,
+    };
+    Ok(options)
 }
 
 /// The window and levels of a Xyce `DUTY`, `ON_TIME`, `OFF_TIME` or `FREQ`
@@ -9171,6 +9287,48 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    /// Xyce's FOUR takes its fundamental `AT`, with `NUMFREQ` 10 and
+    /// `GRIDSIZE` 200 by default (N_IO_MeasureBase.C:140-141); `PRECISION`
+    /// only sets the digits of Xyce's harmonic table, and a negative `AT` is
+    /// refused (N_IO_MeasureFourier.C:67-70).
+    #[test]
+    fn xyce_fourier_measures_parse_their_fundamental_and_grid() {
+        use crate::netlist::measure::MeasureType;
+        let deck =
+            |measure: &str| format!("four\nV1 1 0 1\nR1 1 0 1\n.tran 0 2\n{measure}\n.end\n");
+        let shape = |measure: &str| {
+            let netlist = Netlist::parse(&deck(measure)).expect("FOUR measure parses");
+            match &netlist.measurements[0].measure_type {
+                MeasureType::Fourier {
+                    at,
+                    num_freq,
+                    grid_size,
+                    from,
+                    to,
+                    ..
+                } => (*at, *num_freq, *grid_size, *from, *to),
+                other => panic!("expected a FOUR measure, got {other:?}"),
+            }
+        };
+        assert_eq!(
+            shape(".measure tran a four v(1) at=1e3"),
+            (1e3, 10, 200, None, None)
+        );
+        assert_eq!(
+            shape(
+                ".measure tran b four v(1) at=2k numfreq=5 gridsize=64 from=0.5 to=1.5 precision=4"
+            ),
+            (2e3, 5, 64, Some(0.5), Some(1.5))
+        );
+        assert_eq!(
+            shape(".measure tran c four v(1)"),
+            (0.0, 10, 200, None, None)
+        );
+        let error = Netlist::parse(&deck(".measure tran d four v(1) at=-1"))
+            .expect_err("a negative AT is refused");
+        assert!(error.to_string().contains("AT"), "{error}");
     }
 
     /// Xyce reads `agauss` at its mean outside a sampling analysis (the

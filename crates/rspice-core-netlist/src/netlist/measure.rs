@@ -514,6 +514,25 @@ pub enum MeasureType {
         /// `MINVAL`: Xyce's comparison and window tolerance.
         minval: Value,
     },
+
+    /// Xyce `FOUR`: the total harmonic distortion, in percent, of the last
+    /// period (1/`AT`) of the accepted steps in the window, read from a
+    /// natural cubic spline on `GRIDSIZE` points with `NUMFREQ` harmonics
+    /// counted from DC (N_IO_MeasureFourier.C).
+    Fourier {
+        signal: String,
+        /// `AT`: the fundamental frequency.
+        at: Value,
+        /// `NUMFREQ`: the harmonics computed, DC included (Xyce default 10).
+        num_freq: usize,
+        /// `GRIDSIZE`: the spline samples in the period (Xyce default 200).
+        grid_size: usize,
+        from: Option<Value>,
+        to: Option<Value>,
+        td: Option<Value>,
+        /// `MINVAL`: Xyce's window tolerance.
+        minval: Value,
+    },
 }
 
 /// Per-statement Xyce measurement-output routing.
@@ -615,7 +634,8 @@ impl MeasureStatement {
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
-            | MeasureType::OnOff { signal, .. } => rewrite(signal, policy),
+            | MeasureType::OnOff { signal, .. }
+            | MeasureType::Fourier { signal, .. } => rewrite(signal, policy),
         }
     }
 }

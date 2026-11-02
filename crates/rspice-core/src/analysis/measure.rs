@@ -25,6 +25,7 @@ use std::collections::HashMap;
 
 pub(crate) mod continuous;
 pub(crate) mod events;
+mod fourier;
 
 /// The waveform a `.MEASURE` statement is evaluated over: the independent axis
 /// it walks, the dependent signals it can name, and the index at which each
@@ -1218,6 +1219,42 @@ impl MeasureEngine {
                 *to,
                 data,
             ),
+            MeasureType::Fourier {
+                signal,
+                at,
+                num_freq,
+                grid_size,
+                from,
+                to,
+                td,
+                minval,
+            } => {
+                if !measurement.analysis.eq_ignore_ascii_case("TRAN") {
+                    return MeasureResult::failed(&measurement.name, "FOUR measures a transient");
+                }
+                let Some(values) = lookup_signal(data.signals, signal) else {
+                    return MeasureResult::failed(
+                        &measurement.name,
+                        &format!("Signal '{signal}' not found"),
+                    );
+                };
+                let (time, values): (Vec<Value>, Vec<Value>) = data
+                    .axis
+                    .iter()
+                    .zip(values)
+                    .filter(|(time, _)| xyce_window_accepts(**time, *from, *to, *td, *minval))
+                    .map(|(time, value)| (*time, *value))
+                    .unzip();
+                match fourier::xyce_total_harmonic_distortion(
+                    &time, &values, *at, *num_freq, *grid_size,
+                ) {
+                    Some(thd) => MeasureResult::success(&measurement.name, thd),
+                    None => MeasureResult::failed(
+                        &measurement.name,
+                        "the window holds less than one period of AT",
+                    ),
+                }
+            }
             MeasureType::OnOff {
                 statistic,
                 signal,
@@ -4492,6 +4529,58 @@ mod tests {
                 Some(0.25)
             ]
         );
+    }
+
+    #[test]
+    fn xyce_fourier_measure_reads_the_last_period_of_its_window() {
+        // Xyce's FOUR fits a spline through the window's accepted steps and
+        // reports the THD of its last period (N_IO_MeasureFourier.C:159-354).
+        // A 1 kHz fundamental with a fifth harmonic at a tenth of its
+        // amplitude reads 10 %. TO=1.5 ms closes the window half a period
+        // early, so the last period still spans one full cycle; FROM=1.8 ms
+        // leaves less than a period, and the measure fails.
+        let statement = |name: &str, from, to| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type: MeasureType::Fourier {
+                signal: "V(1)".to_string(),
+                at: 1.0e3,
+                num_freq: 10,
+                grid_size: 200,
+                from,
+                to,
+                td: None,
+                minval: XYCE_DEFAULT_MEASURE_MINVAL,
+            },
+            analysis: "TRAN".to_string(),
+        };
+        let statements = [
+            statement("whole", None, None),
+            statement("early", None, Some(1.5e-3)),
+            statement("short", Some(1.8e-3), None),
+        ];
+        let axis = (0..=2000).map(|i| 1.0e-6 * i as Value).collect::<Vec<_>>();
+        let omega = 2.0 * std::f64::consts::PI * 1.0e3;
+        let values = axis
+            .iter()
+            .map(|t| (omega * t).sin() + 0.1 * (5.0 * omega * t).cos())
+            .collect::<Vec<_>>();
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(1)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        for statement in &statements {
+            engine.add(statement.clone());
+        }
+        let values = engine
+            .evaluate(&axis, &signals)
+            .into_iter()
+            .map(|result| result.value.map(|value| (value * 1e4).round() / 1e4))
+            .collect::<Vec<_>>();
+        assert_eq!(values, [Some(10.0), Some(10.0), None]);
     }
 
     #[test]

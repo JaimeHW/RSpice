@@ -399,6 +399,8 @@ pub(super) fn compile<'a>(
                 }
             }
         }
+        // FOUR reads the finished run's sampled steps, not a live operand.
+        LiveMeasureState::FinishedRun => {}
     }
     Ok(None)
 }

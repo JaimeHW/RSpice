@@ -1189,6 +1189,10 @@ enum LiveMeasureState {
         source: LiveEquationSource,
         dependencies: Vec<String>,
     },
+    /// A value only the finished run has, as FOUR's: Xyce computes it once
+    /// the transient ends, so a trace of it reads the default throughout
+    /// (Xyce's own MEASURE/FourierTest.cir.prn prints 0 at every step).
+    FinishedRun,
 }
 
 enum LiveEquationSource {
@@ -3694,6 +3698,7 @@ fn compile_live_measure_state(
                 selected: None,
             }
         }
+        MeasureType::Fourier { .. } => LiveMeasureState::FinishedRun,
         MeasureType::OnOff {
             statistic,
             signal,
@@ -4387,6 +4392,7 @@ impl LiveMeasureState {
                 state.trigger.dependencies(&mut names);
                 state.target.dependencies(&mut names);
             }
+            Self::FinishedRun => {}
         }
         names.sort();
         names.dedup();
@@ -4861,6 +4867,7 @@ impl LiveMeasureState {
                     .zip(target.selected)
                     .map(|(trigger, target)| target - trigger))
             }
+            Self::FinishedRun => Ok(None),
             Self::FileError {
                 signal,
                 samples,
@@ -6368,7 +6375,8 @@ fn statement_live_dependencies(
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
         | MeasureType::Integ { signal, .. }
-        | MeasureType::OnOff { signal, .. } => {
+        | MeasureType::OnOff { signal, .. }
+        | MeasureType::Fourier { signal, .. } => {
             add_live_operand_dependencies(signal, &mut names, params)
         }
     }
@@ -6526,7 +6534,8 @@ fn materialize_measure_expression_signals_with_limits_and_abort(
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
-            | MeasureType::OnOff { signal, .. } => add(signal),
+            | MeasureType::OnOff { signal, .. }
+            | MeasureType::Fourier { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -6661,7 +6670,8 @@ fn materialize_differential_voltage_signals(
             | MeasureType::Avg { signal, .. }
             | MeasureType::Rms { signal, .. }
             | MeasureType::Integ { signal, .. }
-            | MeasureType::OnOff { signal, .. } => add(signal),
+            | MeasureType::OnOff { signal, .. }
+            | MeasureType::Fourier { signal, .. } => add(signal),
             MeasureType::Param { .. } | MeasureType::Equation { .. } => {}
         }
     }
@@ -7333,7 +7343,8 @@ fn normalize_dc_measurement_window(mut statement: MeasureStatement) -> MeasureSt
         | MeasureType::FileError { .. }
         | MeasureType::Param { .. }
         | MeasureType::Integ { .. }
-        | MeasureType::OnOff { .. } => None,
+        | MeasureType::OnOff { .. }
+        | MeasureType::Fourier { .. } => None,
     };
     if let Some((Some(from), Some(to))) = bounds
         && *from > *to

@@ -3289,7 +3289,10 @@ fn collect_measure_sources<'a>(
         | MeasureType::Avg { signal, .. }
         | MeasureType::Rms { signal, .. }
         | MeasureType::Integ { signal, .. }
-        | MeasureType::OnOff { signal, .. } => output.push(MeasureDependencySource::Direct(signal)),
+        | MeasureType::OnOff { signal, .. }
+        | MeasureType::Fourier { signal, .. } => {
+            output.push(MeasureDependencySource::Direct(signal))
+        }
     }
 }
 
