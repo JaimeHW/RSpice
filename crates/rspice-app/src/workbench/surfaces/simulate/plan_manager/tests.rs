@@ -2136,6 +2136,32 @@ fn the_import_route_loses_no_fact_to_elision() {
     assert_route_loses_no_fact_to_elision(SimulationPlanManagerMode::Import);
 }
 
+/// Export and import state the package they move whole at every gated
+/// viewport, which is stronger than losing no fact: nothing they paint is
+/// shortened. Their counts and the package's description are sentences in
+/// wrapped rows; as mono rows at the field size, portrait cut them to
+/// "0 variables · 0 saved outputs · 0 speci…".
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn export_and_import_paint_every_fact_whole_at_every_gated_viewport() {
+    for mode in [
+        SimulationPlanManagerMode::Export,
+        SimulationPlanManagerMode::Import,
+    ] {
+        for (arrangement, screen) in GATED_VIEWPORTS {
+            let RouteSpeech { painted, .. } = route_speech(screen, mode);
+            let elided: Vec<&String> = painted
+                .iter()
+                .filter(|text| text.contains('\u{2026}') && !is_authored_whole(text))
+                .collect();
+            assert!(
+                elided.is_empty(),
+                "{mode:?} in {arrangement} shortened {elided:?}"
+            );
+        }
+    }
+}
+
 /// A plan edit answers the gesture that made it, on the status bar. The
 /// reader is looking at the manager; nothing is interrupted to say so.
 #[cfg(not(target_arch = "wasm32"))]

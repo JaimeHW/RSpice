@@ -17,7 +17,7 @@
 
 use super::*;
 
-use crate::workbench::design_system::property_row_input;
+use crate::workbench::design_system::{property_row_input, property_row_wrapped};
 
 /// The package's compatibility contract, and the only version this build reads.
 const SIMULATION_PLAN_PACKAGE_VERSION: u16 = 1;
@@ -159,7 +159,10 @@ fn export(
         if let Some(record) = selected {
             property_row(ui, "Name", &record.name);
             property_row(ui, "Revision", &record.revision.to_string());
-            property_row(
+            // Counts in words and the package's description, here and on the
+            // import route: wrapped rows in the body face, which hold them
+            // whole where a mono row at the field size cut them short.
+            property_row_wrapped(
                 ui,
                 "Declares",
                 &format!(
@@ -170,7 +173,7 @@ fn export(
                     plural_suffix(record.model_bindings)
                 ),
             );
-            property_row(
+            property_row_wrapped(
                 ui,
                 "Plan-owned records",
                 &format!(
@@ -184,7 +187,7 @@ fn export(
                 ),
             );
         }
-        property_row(ui, "Package", &envelope_label(draft.exchange_text.len()));
+        property_row_wrapped(ui, "Package", &envelope_label(draft.exchange_text.len()));
         ui.add_space(8.0);
         kit::note_grid(ui, &EXPORT_NOTES);
         workflow_validation_message(ui, draft.validation_error.as_deref());
@@ -264,7 +267,7 @@ fn import(
         });
         match &inspected {
             Some(Ok(package)) => {
-                property_row(
+                property_row_wrapped(
                     ui,
                     "Package envelope",
                     &envelope_label(draft.exchange_text.len()),
@@ -274,7 +277,7 @@ fn import(
                     "Source revision",
                     &package.plan.source_revision.get().to_string(),
                 );
-                property_row(
+                property_row_wrapped(
                     ui,
                     "Declares",
                     &format!(
@@ -285,7 +288,7 @@ fn import(
                         plural_suffix(package.plan.model_bindings.len())
                     ),
                 );
-                property_row(
+                property_row_wrapped(
                     ui,
                     "Plan-owned records",
                     &format!(
@@ -311,7 +314,7 @@ fn import(
                 );
             }
             None => {
-                property_row(ui, "Package envelope", NO_PACKAGE_CHOSEN);
+                property_row_wrapped(ui, "Package envelope", NO_PACKAGE_CHOSEN);
             }
         }
         // No gap before the head: it draws its own closing rule, which is the
