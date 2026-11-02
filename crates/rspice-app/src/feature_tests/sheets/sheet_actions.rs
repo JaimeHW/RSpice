@@ -311,7 +311,13 @@ fn a_blocking_delete_policy_refuses_and_states_what_the_sheet_holds() {
         second,
     )
     .expect_err("the sheet still owns an object");
-    assert!(error.contains("still owns"), "{error}");
+    // The sheet is named as the reader knows it, never by its identity.
+    let name = state.model.sheet_name(second);
+    assert_eq!(
+        error,
+        format!("Sheet `{name}` still holds 1 object; move it to another sheet first.")
+    );
+    assert!(!error.contains(&second.to_string()), "{error}");
     assert_eq!(sheet_count(&state), 2);
 }
 

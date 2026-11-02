@@ -11,6 +11,8 @@
 //! since other features bring a sheet forward too; this module states their
 //! outcome on the status bar.
 
+use rspice_design_model::design_management::DesignManagementError;
+
 use crate::state::{
     DrawingSheetInheritance, DrawingSheetNewSheetPolicy, MoveSelectionRequest,
     ReorderPageNumbering, SchematicSheetFormat, SheetCatalog, SheetDefinition, SheetDeleteBehavior,
@@ -255,6 +257,15 @@ pub fn delete_sheet(
     commit_delete_sheet(model, workbench, id)
 }
 
+/// `count` schematic objects, in words.
+fn counted_objects(count: usize) -> String {
+    if count == 1 {
+        "1 object".to_owned()
+    } else {
+        format!("{count} objects")
+    }
+}
+
 /// Delete a sheet now, under the catalog's own delete policy.
 ///
 /// For a caller that has already shown the outcome (the sheet strip's menu
@@ -278,15 +289,24 @@ pub(in crate::workbench) fn commit_delete_sheet(
             };
             catalog
                 .delete_sheet(catalog.revision(), id, resolution)
-                .map_err(|error| error.to_string())
+                // The catalog names the sheet by its identity; the reader knows
+                // it by its name.
+                .map_err(|error| match error {
+                    DesignManagementError::SheetNotEmpty { objects, .. } => format!(
+                        "Sheet `{name}` still holds {}; move {} to another sheet first.",
+                        counted_objects(objects),
+                        if objects == 1 { "it" } else { "them" }
+                    ),
+                    other => other.to_string(),
+                })
         })
         .map(|receipt| {
             if receipt.moved_object_ids.is_empty() {
                 format!("Deleted sheet `{name}`.")
             } else {
                 format!(
-                    "Deleted sheet `{name}` and moved {} object(s) to the adjacent sheet.",
-                    receipt.moved_object_ids.len()
+                    "Deleted sheet `{name}` and moved {} to the adjacent sheet.",
+                    counted_objects(receipt.moved_object_ids.len())
                 )
             }
         });
