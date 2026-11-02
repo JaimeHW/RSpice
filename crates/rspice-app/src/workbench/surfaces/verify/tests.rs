@@ -9,6 +9,7 @@ use super::tuning::{revert_tuning_session, tuning_commit_block_reason, tuning_is
 use super::*;
 use crate::product::{AnalysisInstanceId, ContentDigest, ObjectRevision};
 use crate::state::{AnalysisResult, AnalysisType, RetainedTrace, SimulationRun};
+use crate::workbench::RSpiceApp;
 
 mod yield_histogram;
 
@@ -80,7 +81,8 @@ fn selecting_a_golden_regression_baseline_pins_its_dataset_atomically() {
     app.state.model.simulation.retained.runs = vec![candidate, baseline].into();
     assert!(app.state.model.simulation.select_run(0));
 
-    commit_regression_baseline(&mut app, baseline_id).expect("baseline commits");
+    commit_regression_baseline(&mut crate::workbench::features::cx(&mut app), baseline_id)
+        .expect("baseline commits");
 
     assert!(
         app.state
@@ -140,7 +142,7 @@ fn stage_literal_tuning_binding(
     component_id: u64,
     variable_name: &str,
 ) -> crate::product::DesignVariableId {
-    sync_tuning_session(app);
+    sync_tuning_session(&mut crate::workbench::features::cx(app));
     let component = app
         .state
         .model
@@ -231,8 +233,11 @@ fn verify_plan_insertion_invalidates_retained_preflight_evidence() {
         .expect("default plan")
         .revision();
 
-    open_analysis_configuration(&mut app, crate::simulation::plan::AnalysisKind::Noise)
-        .expect("missing analysis inserts and opens");
+    open_analysis_configuration(
+        &mut crate::workbench::features::cx(&mut app),
+        crate::simulation::plan::AnalysisKind::Noise,
+    )
+    .expect("missing analysis inserts and opens");
 
     assert_eq!(
         app.state
@@ -257,17 +262,17 @@ fn tuning_session_discovers_real_variables_and_revert_is_non_destructive() {
         .stable_analysis_plan()
         .unwrap()
         .id();
-    sync_tuning_session(&mut app);
+    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
 
     assert_eq!(app.state.simulate.verification.tuning_variables.len(), 1);
     let draft = &mut app.state.simulate.verification.tuning_variables[0];
     assert_eq!(draft.variable_id, variable_id);
     draft.candidate_expression = "620 ohm".to_owned();
-    assert!(tuning_is_dirty(&app));
+    assert!(tuning_is_dirty(&app.state.simulate));
 
-    revert_tuning_session(&mut app);
+    revert_tuning_session(&mut crate::workbench::features::cx(&mut app));
 
-    assert!(!tuning_is_dirty(&app));
+    assert!(!tuning_is_dirty(&app.state.simulate));
     assert_eq!(
         app.state
             .model
@@ -305,10 +310,11 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
         .stable_analysis_plan()
         .unwrap()
         .revision();
-    sync_tuning_session(&mut app);
+    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
     app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
-    tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
+    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+        .expect("valid candidate commits and dispatches");
 
     let plan = app.state.model.sim_setup.stable_analysis_plan().unwrap();
     assert_eq!(plan.revision(), source_plan_revision.next().unwrap());
@@ -326,7 +332,7 @@ fn tuning_commit_is_one_plan_revision_and_queues_the_required_run() {
     assert_eq!(variable.expression, "620 ohm");
     assert_eq!(variable.revision, ObjectRevision::INITIAL.next().unwrap());
     assert!(app.state.model.simulation.execution.trigger_simulation);
-    assert!(!tuning_is_dirty(&app));
+    assert!(!tuning_is_dirty(&app.state.simulate));
 }
 
 /// A tuning commit prepares the run it requires in its own frame and queues
@@ -345,9 +351,10 @@ fn an_edit_after_a_tuning_commit_refuses_its_run() {
         &mut app.state.model.schematic,
     );
     add_tuning_variable(&mut app);
-    sync_tuning_session(&mut app);
+    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
     app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
-    tuning::commit_tuning_and_run(&mut app).expect("valid candidate commits and dispatches");
+    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
+        .expect("valid candidate commits and dispatches");
     assert!(app.state.model.simulation.execution.trigger_simulation);
     thread_preparations::take();
 
@@ -396,10 +403,10 @@ fn reverting_a_literal_value_proposal_discards_variable_and_binding_only() {
         .clone();
     stage_literal_tuning_binding(&mut app, component_id, "R1_VALUE");
 
-    assert!(tuning_is_dirty(&app));
-    revert_tuning_session(&mut app);
+    assert!(tuning_is_dirty(&app.state.simulate));
+    revert_tuning_session(&mut crate::workbench::features::cx(&mut app));
 
-    assert!(!tuning_is_dirty(&app));
+    assert!(!tuning_is_dirty(&app.state.simulate));
     assert!(
         app.state
             .simulate
@@ -484,7 +491,7 @@ fn literal_value_commit_adds_variable_binds_once_and_dispatches_prepared_run() {
         .revision();
     let variable_id = stage_literal_tuning_binding(&mut app, component_id, "RLOAD_VALUE");
 
-    tuning::commit_tuning_and_run(&mut app)
+    tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
         .expect("the exact prepared candidate commits and dispatches");
 
     let variable = app
@@ -593,12 +600,16 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
     );
     assert!(app.state.schematic_edit_read_only());
 
-    let reason = tuning_commit_block_reason(&app);
+    let reason = tuning_commit_block_reason(
+        &app.state.model,
+        &app.state.simulate,
+        app.state.slot_facts(),
+    );
     assert_eq!(
         reason,
         "The staged instance Value binding cannot be committed because the active schematic is read-only."
     );
-    let error = tuning::commit_tuning_and_run(&mut app)
+    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
         .expect_err("authority revoked after staging must prevent every authoritative write");
 
     assert_eq!(error, reason);
@@ -624,7 +635,7 @@ fn tuning_commit_rechecks_live_schematic_authority_after_staging() {
         value_before
     );
     assert_eq!(app.state.model.schematic.can_undo(), can_undo_before);
-    assert!(tuning_is_dirty(&app));
+    assert!(tuning_is_dirty(&app.state.simulate));
     assert!(!app.state.model.simulation.execution.trigger_simulation);
 }
 
@@ -658,7 +669,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
     retain_preflight_report(&mut app);
     stage_literal_tuning_binding(&mut app, component_id, "RFAIL_VALUE");
 
-    let error = tuning::commit_tuning_and_run(&mut app)
+    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
         .expect_err("missing ground and open pins fail exact run preparation");
 
     assert!(error.contains("the run could not be prepared"), "{error}");
@@ -695,7 +706,7 @@ fn failed_literal_value_run_preparation_rolls_back_plan_and_schematic() {
             .is_empty()
     );
     assert!(app.state.runs.preflight.report.is_some());
-    assert!(tuning_is_dirty(&app));
+    assert!(tuning_is_dirty(&app.state.simulate));
     assert!(!app.state.model.simulation.execution.trigger_simulation);
 }
 
@@ -711,7 +722,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
         .unwrap()
         .id();
     let before = serde_json::to_vec(&app.state.model.workspace).unwrap();
-    sync_tuning_session(&mut app);
+    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
     let draft = &mut app.state.simulate.verification.tuning_variables[0];
     draft.candidate_expression = "2 kohm".to_owned();
     let mut candidate = app
@@ -726,7 +737,7 @@ fn invalid_tuning_candidate_never_mutates_authoritative_plan_data() {
     candidate.expression.clone_from(&draft.candidate_expression);
     draft.validation_error = candidate.validate().err();
 
-    assert!(tuning::commit_tuning_and_run(&mut app).is_err());
+    assert!(tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app)).is_err());
     assert_eq!(
         serde_json::to_vec(&app.state.model.workspace).unwrap(),
         before
@@ -755,10 +766,10 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
     app.state.runs.preflight.report = Some(crate::state::PreflightReport::retained_for_test(
         app.state.model.workspace.content.project.revision().get(),
     ));
-    sync_tuning_session(&mut app);
+    sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
     app.state.simulate.verification.tuning_variables[0].candidate_expression = "620 ohm".to_owned();
 
-    let error = tuning::commit_tuning_and_run(&mut app)
+    let error = tuning::commit_tuning_and_run(&mut crate::workbench::features::cx(&mut app))
         .expect_err("an empty schematic must block the required run");
 
     assert!(error.contains("required run is blocked"));
@@ -786,7 +797,7 @@ fn blocked_tuning_run_rolls_back_plan_workspace_and_preflight_state() {
         app.state.runs.preflight.report.is_some(),
         "a blocked tuning run rolls back without dropping retained preflight evidence",
     );
-    assert!(tuning_is_dirty(&app));
+    assert!(tuning_is_dirty(&app.state.simulate));
     assert!(!app.state.model.simulation.execution.trigger_simulation);
 }
 
@@ -807,7 +818,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
             .with_name_value("M1", "NMOS"),
         );
 
-    cross_probe_soa_device(&mut app, "m1")
+    cross_probe_soa_device(&mut crate::workbench::features::cx(&mut app), "m1")
         .expect("device identity cross-probes case-insensitively");
 
     assert!(
@@ -823,7 +834,7 @@ fn soa_cross_probe_selects_the_exact_schematic_device() {
         app.state.workbench.workspace,
         super::super::super::state::Workspace::Design
     );
-    assert!(cross_probe_soa_device(&mut app, "M404").is_err());
+    assert!(cross_probe_soa_device(&mut crate::workbench::features::cx(&mut app), "M404").is_err());
 }
 
 #[test]
@@ -917,8 +928,8 @@ fn verification_requires_an_explicit_active_run_selection() {
         .push(SimulationRun::new(1));
     app.state.model.simulation.view.active_run_idx = None;
 
-    assert_eq!(verification_run_index(&app), None);
-    assert!(verification_run(&app).is_none());
+    assert_eq!(verification_run_index(&app.state.model), None);
+    assert!(verification_run(&app.state.model).is_none());
 }
 
 #[test]
@@ -1765,12 +1776,12 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 
     let mut app = super::raster::corner_app();
     assert_eq!(
-        verification_evidence_domain(&app),
+        verification_evidence_domain(&app.state.model),
         EvidenceDomain::Legacy,
         "the corner fixture's run predates receipts, which Verify reads"
     );
     assert!(
-        !verification_specs(&app).is_empty(),
+        !verification_specs(&app.state.model).is_empty(),
         "and its four limits are this plan's"
     );
 
@@ -1794,17 +1805,23 @@ fn verify_refuses_the_datasets_the_studio_refuses_and_names_why() {
 
     assert_ne!(other, plan_id);
     assert_eq!(
-        verification_evidence_domain(&app),
+        verification_evidence_domain(&app.state.model),
         EvidenceDomain::AnotherPlan
     );
     assert!(
-        verification_specs(&app).is_empty(),
+        verification_specs(&app.state.model).is_empty(),
         "another plan's dataset answers none of this plan's limits"
     );
-    let run = verification_run(&app).expect("the run is still the one Verify reads");
-    let family =
-        latest_analysis(&app, AnalysisType::Corner).expect("and still holds its corner run");
-    let matrix = corner_matrix(run, family, None, &verification_specs(&app), None);
+    let run = verification_run(&app.state.model).expect("the run is still the one Verify reads");
+    let family = latest_analysis(&app.state.model, AnalysisType::Corner)
+        .expect("and still holds its corner run");
+    let matrix = corner_matrix(
+        run,
+        family,
+        None,
+        &verification_specs(&app.state.model),
+        None,
+    );
     assert!(
         !matrix.rows.is_empty(),
         "the values the run did measure stay on the page"
@@ -1932,7 +1949,9 @@ fn the_soa_pane_validate_retained_evidence_once_per_dataset_generation() {
                 ..Default::default()
             },
             |ctx| {
-                egui::CentralPanel::default().show(ctx, |ui| device_safety(ui, &mut app));
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    device_safety(ui, &mut crate::workbench::features::cx(&mut app))
+                });
             },
         );
     };
@@ -1970,7 +1989,8 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
     let mut app = app_retaining_soa_evidence();
     let version = app.state.model.simulation.view.data_version;
     assert!(
-        latest_validated_analysis(&app, AnalysisType::Soa).is_some(),
+        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
+            .is_some(),
         "the fixture retains validated SOA evidence"
     );
 
@@ -1986,7 +2006,8 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
     analysis.waveforms[0].y = std::sync::Arc::new(shortened);
 
     assert!(
-        latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
+        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
+            .is_none(),
         "the gate kept a valid verdict after its retained source was corrupted"
     );
     assert_eq!(app.state.model.simulation.view.data_version, version);
@@ -1995,7 +2016,8 @@ fn the_soa_evidence_gate_rejects_source_edits_before_a_version_bump() {
         app.state.model.simulation.view.data_version.wrapping_add(1);
 
     assert!(
-        latest_validated_analysis(&app, AnalysisType::Soa).is_none(),
+        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
+            .is_none(),
         "the gate served a verdict from the previous dataset generation"
     );
 }
@@ -2026,14 +2048,14 @@ fn corner_labels_read_back_into_their_point() {
 
 fn fixture_corner_matrix() -> CornerMatrix {
     let app = super::raster::corner_app();
-    let run = verification_run(&app).expect("the fixture selects its run");
-    let family =
-        latest_analysis(&app, AnalysisType::Corner).expect("the fixture holds a corner run");
+    let run = verification_run(&app.state.model).expect("the fixture selects its run");
+    let family = latest_analysis(&app.state.model, AnalysisType::Corner)
+        .expect("the fixture holds a corner run");
     corner_matrix(
         run,
         family,
         None,
-        &verification_specs(&app),
+        &verification_specs(&app.state.model),
         Some(&ReferenceCorner {
             process: "TT".to_owned(),
             temperature: 27.0,
@@ -2100,13 +2122,13 @@ fn the_corner_matrix_reads_every_output_at_every_corner_from_the_run() {
 #[test]
 fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
     let app = super::raster::corner_app();
-    let run = verification_run(&app).expect("run");
-    let family = latest_analysis(&app, AnalysisType::Corner).expect("corner run");
+    let run = verification_run(&app.state.model).expect("run");
+    let family = latest_analysis(&app.state.model, AnalysisType::Corner).expect("corner run");
     let matrix = corner_matrix(
         run,
         family,
         None,
-        &verification_specs(&app),
+        &verification_specs(&app.state.model),
         Some(&ReferenceCorner {
             process: "TT".to_owned(),
             temperature: 85.0,
@@ -2119,8 +2141,9 @@ fn a_corner_run_without_its_reference_point_has_no_nominal_column() {
 #[test]
 fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
     let app = super::raster::soa_app();
-    let analysis = latest_validated_analysis(&app, AnalysisType::Soa)
-        .expect("the SOA fixture's evidence validates");
+    let analysis =
+        latest_validated_analysis(&app.state.model, &*app.state.results, AnalysisType::Soa)
+            .expect("the SOA fixture's evidence validates");
     let Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) =
         &analysis.result_payload
     else {
@@ -2151,7 +2174,8 @@ fn soa_rows_put_violations_first_and_the_summary_counts_devices() {
 #[test]
 fn optimization_iterations_put_the_cost_first_and_name_the_best() {
     let app = super::raster::optimization_app();
-    let result = latest_analysis(&app, AnalysisType::Optimization).expect("optimization run");
+    let result =
+        latest_analysis(&app.state.model, AnalysisType::Optimization).expect("optimization run");
     let table = IterationTable::from_result(result).expect("iterations");
     assert_eq!(
         table

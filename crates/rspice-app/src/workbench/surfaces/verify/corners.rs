@@ -479,37 +479,36 @@ enum CornerAction {
     Export,
 }
 
-pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
-    let runs = run_choice(app, |run| {
+pub(super) fn corners(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
             analysis.analysis_type == crate::state::AnalysisType::Corner
                 && verified_analysis(analysis)
         })
     });
-    let run_name = verification_run(app).map(|run| format!("Run {}", run.id));
+    let run_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
     let reference = ReferenceCorner {
-        process: app
-            .state
+        process: cx
             .model
             .sim_setup
             .reference_pvt
             .process
             .short_name()
             .to_owned(),
-        temperature: app.state.model.sim_setup.reference_pvt.temperature_celsius,
+        temperature: cx.model.sim_setup.reference_pvt.temperature_celsius,
     };
-    let matrix = latest_analysis(app, crate::state::AnalysisType::Corner)
-        .zip(verification_run(app))
+    let matrix = latest_analysis(cx.model, crate::state::AnalysisType::Corner)
+        .zip(verification_run(cx.model))
         .map(|(family, run)| {
             corner_matrix(
                 run,
                 family,
-                corner_point_labels(app, family),
-                &verification_specs(app),
+                corner_point_labels(cx.model, family),
+                &verification_specs(cx.model),
                 Some(&reference),
             )
         });
-    let compare = app.state.simulate.verification.corner_compare_nominal;
+    let compare = cx.state.verification.corner_compare_nominal;
 
     let mut actions = Vec::new();
     let mut toolbar_actions = Vec::new();
@@ -541,15 +540,15 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
     .show(ui);
     match output.action.and_then(|index| actions.get(index)) {
         Some(CornerAction::CompareNominal) => {
-            app.state.simulate.verification.corner_compare_nominal = !compare;
+            cx.state.verification.corner_compare_nominal = !compare;
         }
-        Some(CornerAction::Export) => export_active_corner_matrix(app),
+        Some(CornerAction::Export) => export_active_corner_matrix(cx),
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.model.simulation, index);
+        select_verification_run(&mut cx.model.simulation, index);
     }
-    action_problem_line(ui, app);
+    action_problem_line(ui, cx.model, cx.state);
 
     let Some(matrix) = matrix else {
         let text = run_name.map_or_else(
@@ -559,9 +558,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             },
         );
         if empty_line(ui, &text, Some("Open run set")) {
-            app.execute_command_key(
-                SimulateCommand::Page(crate::state::SimulationPage::RunSet).key(),
-            );
+            cx.execute(SimulateCommand::Page(crate::state::SimulationPage::RunSet).key());
         }
         return;
     };
@@ -571,9 +568,7 @@ pub(super) fn corners(ui: &mut Ui, app: &mut RSpiceApp) {
             "This corner run kept no outputs. Add measurements to the plan's outputs, then run it again.",
             Some("Open outputs"),
         ) {
-            app.execute_command_key(
-                SimulateCommand::Page(crate::state::SimulationPage::Outputs).key(),
-            );
+            cx.execute(SimulateCommand::Page(crate::state::SimulationPage::Outputs).key());
         }
         return;
     }
@@ -655,11 +650,11 @@ fn corner_table(ui: &mut Ui, matrix: &CornerMatrix, compare: bool) {
         });
 }
 
-pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
+pub(super) fn export_active_corner_matrix(cx: &mut Cx<'_, SimulateFeature>) {
     let result_id =
-        latest_analysis(app, crate::state::AnalysisType::Corner).map(|result| result.id);
+        latest_analysis(cx.model, crate::state::AnalysisType::Corner).map(|result| result.id);
     let analysis_index = result_id.and_then(|result_id| {
-        app.state.model.simulation.active_run().and_then(|run| {
+        cx.model.simulation.active_run().and_then(|run| {
             run.analyses.iter().position(|analysis| {
                 analysis.id == result_id
                     && analysis.analysis_type == crate::state::AnalysisType::Corner
@@ -668,23 +663,23 @@ pub(super) fn export_active_corner_matrix(app: &mut RSpiceApp) {
         })
     });
     if let Some(index) = analysis_index {
-        app.state.model.simulation.select_analysis(index);
-        app.execute_command_key(ids::EXPORT_RESULTS);
-        app.state.simulate.verification.action_problem = None;
+        cx.model.simulation.select_analysis(index);
+        cx.execute(ids::EXPORT_RESULTS);
+        cx.state.verification.action_problem = None;
     } else {
-        app.state.simulate.verification.action_problem =
+        cx.state.verification.action_problem =
             Some("Nothing to export: this run holds no completed corner result.".to_owned());
     }
 }
 
 pub(super) fn corner_point_labels(
-    app: &RSpiceApp,
+    model: &Model,
     result: &crate::state::AnalysisResult,
 ) -> Option<Vec<String>> {
     use crate::simulation::plan::AnalysisDraft;
 
     let provenance = result.provenance.as_ref()?;
-    let plan = app.state.model.sim_setup.stable_analysis_plan().ok()?;
+    let plan = model.sim_setup.stable_analysis_plan().ok()?;
     let instance = plan
         .instances()
         .iter()
@@ -696,10 +691,7 @@ pub(super) fn corner_point_labels(
         return None;
     };
     let labels = state
-        .to_config(
-            &app.state.model.sim_setup.run_set,
-            app.state.model.sim_setup.reference_pvt,
-        )
+        .to_config(&model.sim_setup.run_set, model.sim_setup.reference_pvt)
         .ok()?
         .corner_names();
     let points = result.waveforms.first()?.x.len();

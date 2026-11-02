@@ -141,7 +141,10 @@ pub(super) fn page_geometry(mut app: RSpiceApp, page: VerificationPage) -> PageG
     crate::ui::Theme::default().apply(&ctx);
     let mut geometry = PageGeometry::default();
     for _ in 0..3 {
-        geometry = page_pass(&ctx, page_input(Vec::new()), |ui| super::show(ui, &mut app)).1;
+        geometry = page_pass(&ctx, page_input(Vec::new()), |ui| {
+            super::show(ui, &mut crate::workbench::features::cx(&mut app))
+        })
+        .1;
     }
     geometry
 }
@@ -164,7 +167,7 @@ pub(super) fn page_render(
         last = Some(page_pass(
             &ctx,
             rspice_ui_kit::raster::display_input(size, 2.0),
-            |ui| super::show(ui, &mut app),
+            |ui| super::show(ui, &mut crate::workbench::features::cx(&mut app)),
         ));
     }
     let (output, geometry) = last.expect("three passes ran");
@@ -353,7 +356,7 @@ pub(super) fn tuning_app() -> RSpiceApp {
     );
     app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
     app.state.model.simulation.view.active_run_idx = Some(0);
-    super::tuning::sync_tuning_session(&mut app);
+    super::tuning::sync_tuning_session(&mut crate::workbench::features::cx(&mut app));
     app.state.model.simulation.view.active_run_idx = Some(1);
     app
 }
@@ -435,7 +438,8 @@ pub(super) fn regression_app() -> RSpiceApp {
     payload.specification_policy.regression = RegressionSpecificationPolicy::LimitAndWaveform;
     app.state.model.simulation.retained.runs = vec![baseline, candidate].into();
     assert!(app.state.model.simulation.select_run(1));
-    super::commit_regression_baseline(&mut app, baseline_id).expect("the baseline commits");
+    super::commit_regression_baseline(&mut crate::workbench::features::cx(&mut app), baseline_id)
+        .expect("the baseline commits");
     app.state.simulate.verification.regression_selected_target = Some(waveform);
     app
 }

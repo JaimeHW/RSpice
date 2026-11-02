@@ -712,12 +712,21 @@ const DESIGN_CONTRIBUTIONS: &[Step] = &[
     ),
 ];
 
-/// The shell's `contribute`, at the simulate feature's docks: the navigator
-/// and the inspector draw in the feature's context on both its workspaces.
-/// On Simulate each has the command it raised answered once it has drawn,
-/// before the next point draws; on Verify they raise nothing, so they answer
-/// nothing where they draw.
+/// The shell's `contribute`, at the simulate feature's points. The Verify
+/// surface draws in the feature's context and has the command it raised
+/// answered once it has drawn, before the next point draws. The navigator
+/// and the inspector draw in the feature's context on both its workspaces:
+/// on Simulate each has the command it raised answered once it has drawn;
+/// on Verify they raise nothing, so they answer nothing where they draw.
 const SIMULATE_CONTRIBUTIONS: &[Step] = &[
+    (
+        "workspace surface",
+        &[
+            "Workspace::Verify => verify::show(ui, &mut features::cx(app)),",
+            "app.after_contribution();",
+            "Point::SplitResults =>",
+        ],
+    ),
     (
         "navigator",
         &[
@@ -1404,7 +1413,7 @@ fn a_design_dock_has_what_it_raised_answered_once_it_draws() {
 }
 
 #[test]
-fn a_simulate_dock_has_the_command_it_raised_answered_once_it_draws() {
+fn a_simulate_surface_or_dock_has_the_command_it_raised_answered_once_it_draws() {
     assert_runs_in_order(
         "RSpiceApp::contribute",
         &body(SHELL_HOST, "fn contribute("),

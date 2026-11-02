@@ -21,12 +21,20 @@ mod yield_page;
 use egui::{ScrollArea, Ui};
 use sha2::{Digest as _, Sha256};
 
+use crate::simulation::RunHost as _;
 use crate::state::SpecEntry;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Button, Problem};
-use crate::workbench::RSpiceApp;
-use crate::workbench::framework::ports::ResultsPort as _;
+use crate::workbench::app_state::run_preflight::simulation_run_block_reason;
+use crate::workbench::app_state::{Model, SlotFacts};
+use crate::workbench::framework::feature::Cx;
+use crate::workbench::framework::ports::ResultsPort;
+use crate::workbench::simulate::{
+    SimulateFeature, invalidate_preflight, record_plan_receipt, run_host,
+};
+use crate::workbench::slots::SimulateState;
+use rspice_app_runs::workbench::slots::runs::request_run_set;
 
 use super::super::state::VerificationSessionState;
 use crate::state::VerificationPage;
@@ -39,10 +47,10 @@ use regression_panel::*;
 use safety::*;
 use yield_page::*;
 
-pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
-    let page = app.state.simulate.verification_page;
+pub fn show(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let page = cx.state.verification_page;
     if page == VerificationPage::Tuning {
-        sync_tuning_session(app);
+        sync_tuning_session(cx);
     }
     // A refused action is stated under the toolbar of the page it was taken
     // on; another page has no business repeating it.
@@ -52,7 +60,7 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
         .data(|data| data.get_temp::<VerificationPage>(shown_page))
         != Some(page)
     {
-        app.state.simulate.verification.action_problem = None;
+        cx.state.verification.action_problem = None;
         ui.ctx().data_mut(|data| data.insert_temp(shown_page, page));
     }
     let ctx = ui.ctx().clone();
@@ -62,29 +70,27 @@ pub fn show(ui: &mut Ui, app: &mut RSpiceApp) {
     ui.scope(|ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
         match page {
-            VerificationPage::Yield => yield_page(ui, app),
-            VerificationPage::Corners => corners(ui, app),
-            VerificationPage::Optimization => optimization(ui, app),
-            VerificationPage::DeviceSafety => device_safety(ui, app),
-            VerificationPage::Tuning => tuning(ui, app),
-            VerificationPage::Regression => regression(ui, app),
+            VerificationPage::Yield => yield_page(ui, cx),
+            VerificationPage::Corners => corners(ui, cx),
+            VerificationPage::Optimization => optimization(ui, cx),
+            VerificationPage::DeviceSafety => device_safety(ui, cx),
+            VerificationPage::Tuning => tuning(ui, cx),
+            VerificationPage::Regression => regression(ui, cx),
         }
     });
-    regression_baseline_picker(&ctx, app);
-    tuning_review_dialog(&ctx, app);
+    regression_baseline_picker(&ctx, cx);
+    tuning_review_dialog(&ctx, cx);
 }
 
 /// The runs a page could read: the run it reads now, and every other run that
 /// holds the page's evidence.
 fn run_choice(
-    app: &RSpiceApp,
+    model: &Model,
     holds: impl Fn(&crate::state::SimulationRun) -> bool,
 ) -> toolbar::RunChoice {
-    let selected = verification_run_index(app);
+    let selected = verification_run_index(model);
     toolbar::RunChoice {
-        candidates: app
-            .state
-            .model
+        candidates: model
             .simulation
             .retained
             .runs
@@ -123,14 +129,14 @@ fn record_action(session: &mut VerificationSessionState, result: Result<(), Stri
 /// What this page could not do, under the toolbar it was asked on: the
 /// refusal of the last action, and the reason the run it reads cannot be held
 /// against the plan's limits.
-fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
-    if let Some(problem) = &app.state.simulate.verification.action_problem {
+fn action_problem_line(ui: &mut Ui, model: &Model, simulate: &SimulateState) {
+    if let Some(problem) = &simulate.verification.action_problem {
         let _ = crate::ui::widgets::problem_line(ui, Problem::Failure, problem);
     }
     // `NoDataset` is the empty state, which already says what produces data;
     // repeating it under the same toolbar would be two lines for one fact.
-    if verification_run(app).is_some()
-        && let Some(refusal) = verification_evidence_domain(app).refusal()
+    if verification_run(model).is_some()
+        && let Some(refusal) = verification_evidence_domain(model).refusal()
     {
         let _ = crate::ui::widgets::problem_line(
             ui,
@@ -146,11 +152,10 @@ fn action_problem_line(ui: &mut Ui, app: &RSpiceApp) {
 /// Classified through the one owner of that question, so this surface and the
 /// studio's requirements page cannot reach different conclusions about the
 /// same run.
-fn verification_evidence_domain(app: &RSpiceApp) -> crate::state::EvidenceDomain {
-    app.state
-        .model
+fn verification_evidence_domain(model: &Model) -> crate::state::EvidenceDomain {
+    model
         .simulation
-        .evidence_domain(verification_plan_id(app))
+        .evidence_domain(verification_plan_id(model))
 }
 
 /// The limits the run this page reads may be judged against.
@@ -161,37 +166,24 @@ fn verification_evidence_domain(app: &RSpiceApp) -> crate::state::EvidenceDomain
 /// other reported nothing for the same run and the same limit. The run's own
 /// values stay on the page — they are what it measured — with no verdict
 /// column and the line under the toolbar naming why.
-fn verification_specs(app: &RSpiceApp) -> Vec<SpecEntry> {
-    if !verification_evidence_domain(app).answers_a_plan_limit() {
+fn verification_specs(model: &Model) -> Vec<SpecEntry> {
+    if !verification_evidence_domain(model).answers_a_plan_limit() {
         return Vec::new();
     }
-    verification_plan_id(app).map_or_else(
-        || app.state.model.workspace.content.specs.clone(),
-        |plan_id| {
-            app.state
-                .model
-                .workspace
-                .content
-                .active_specs(plan_id)
-                .to_vec()
-        },
+    verification_plan_id(model).map_or_else(
+        || model.workspace.content.specs.clone(),
+        |plan_id| model.workspace.content.active_specs(plan_id).to_vec(),
     )
 }
 
-fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
-    if !app
-        .state
-        .simulate
-        .verification
-        .regression_baseline_picker_open
-    {
+fn regression_baseline_picker(ctx: &egui::Context, cx: &mut Cx<'_, SimulateFeature>) {
+    if !cx.state.verification.regression_baseline_picker_open {
         return;
     }
 
-    let active_run = app.state.model.simulation.active_run();
+    let active_run = cx.model.simulation.active_run();
     let active_run_id = active_run.map(|run| run.run_id);
-    let mut candidates = app
-        .state
+    let mut candidates = cx
         .model
         .simulation
         .retained
@@ -210,11 +202,7 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
         .collect::<Vec<_>>();
     candidates.sort_by(|left, right| right.1.cmp(&left.1));
 
-    let mut selected = app
-        .state
-        .simulate
-        .verification
-        .regression_baseline_picker_selection;
+    let mut selected = cx.state.verification.regression_baseline_picker_selection;
     if selected.is_none_or(|selected| !candidates.iter().any(|row| row.0 == selected)) {
         selected = candidates.first().map(|row| row.0);
     }
@@ -288,51 +276,39 @@ fn regression_baseline_picker(ctx: &egui::Context, app: &mut RSpiceApp) {
 
     if commit {
         if let Some(run_id) = selected {
-            if let Err(error) = commit_regression_baseline(app, run_id) {
-                app.state.simulate.verification.action_problem =
+            if let Err(error) = commit_regression_baseline(cx, run_id) {
+                cx.state.verification.action_problem =
                     Some(format!("The baseline was not changed: {error}"));
-                app.state
-                    .simulate
-                    .verification
-                    .regression_baseline_picker_selection = selected;
+                cx.state.verification.regression_baseline_picker_selection = selected;
                 return;
             }
-            app.state.simulate.verification.action_problem = None;
+            cx.state.verification.action_problem = None;
         }
         open = false;
     }
     if cancel {
         open = false;
     }
-    app.state
-        .simulate
-        .verification
-        .regression_baseline_picker_selection = selected;
-    app.state
-        .simulate
-        .verification
-        .regression_baseline_picker_open = open;
+    cx.state.verification.regression_baseline_picker_selection = selected;
+    cx.state.verification.regression_baseline_picker_open = open;
 }
 
-fn verification_run_index(app: &RSpiceApp) -> Option<usize> {
-    app.state
-        .model
+fn verification_run_index(model: &Model) -> Option<usize> {
+    model
         .simulation
         .view
         .active_run_idx
-        .filter(|index| *index < app.state.model.simulation.retained.runs.len())
+        .filter(|index| *index < model.simulation.retained.runs.len())
 }
 
-fn verification_run(app: &RSpiceApp) -> Option<&crate::state::SimulationRun> {
-    verification_run_index(app)
-        .and_then(|index| app.state.model.simulation.retained.runs.get(index))
+fn verification_run(model: &Model) -> Option<&crate::state::SimulationRun> {
+    verification_run_index(model).and_then(|index| model.simulation.retained.runs.get(index))
 }
 
-fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analysis::YieldResult] {
-    verification_run(app)
+fn verification_yield_results(model: &Model) -> &[rspice_results::yield_analysis::YieldResult] {
+    verification_run(model)
         .and_then(|run| {
-            app.state
-                .model
+            model
                 .simulation
                 .retained
                 .yield_results_for_dataset(run.dataset_id)
@@ -341,9 +317,8 @@ fn verification_yield_results(app: &RSpiceApp) -> &[rspice_results::yield_analys
 }
 
 /// The plan whose limits this surface reads, when the plan is stable.
-fn verification_plan_id(app: &RSpiceApp) -> Option<crate::product::SimulationPlanId> {
-    app.state
-        .model
+fn verification_plan_id(model: &Model) -> Option<crate::product::SimulationPlanId> {
+    model
         .sim_setup
         .stable_analysis_plan()
         .ok()
@@ -485,10 +460,10 @@ fn signed_scalar(value: f64) -> String {
 }
 
 fn latest_analysis(
-    app: &RSpiceApp,
+    model: &Model,
     analysis_type: crate::state::AnalysisType,
 ) -> Option<&crate::state::AnalysisResult> {
-    app.state.model.simulation.active_run().and_then(|run| {
+    model.simulation.active_run().and_then(|run| {
         run.analyses
             .iter()
             .rev()
@@ -508,25 +483,23 @@ fn verified_analysis(analysis: &crate::state::AnalysisResult) -> bool {
 /// until the datasets do. The Results workspace owns the memoized answer,
 /// keyed by data version and analysis; this asks that owner rather than
 /// keeping a second verdict of its own.
-fn latest_validated_analysis(
-    app: &RSpiceApp,
+fn latest_validated_analysis<'m>(
+    model: &'m Model,
+    results: &dyn ResultsPort,
     analysis_type: crate::state::AnalysisType,
-) -> Option<&crate::state::AnalysisResult> {
-    let dataset_id = app.state.model.simulation.active_run()?.dataset_id;
-    latest_analysis(app, analysis_type).filter(|analysis| {
-        app.state
-            .results
-            .analysis_evidence_is_valid(&app.state.model, dataset_id, analysis)
-    })
+) -> Option<&'m crate::state::AnalysisResult> {
+    let dataset_id = model.simulation.active_run()?.dataset_id;
+    latest_analysis(model, analysis_type)
+        .filter(|analysis| results.analysis_evidence_is_valid(model, dataset_id, analysis))
 }
 
 fn request_analysis_run(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     kinds: &[crate::simulation::plan::AnalysisKind],
 ) -> Result<(), String> {
     let mut selected = None;
     let mut plan_changed = false;
-    let mut setup = app.state.model.sim_setup.clone();
+    let mut setup = cx.model.sim_setup.clone();
     {
         let plan = setup.stable_analysis_plan_mut()?;
         for kind in kinds {
@@ -551,19 +524,20 @@ fn request_analysis_run(
     }
     setup.refresh_legacy_analysis_projections();
     if plan_changed {
-        app.state.model.sim_setup = setup;
-        invalidate_plan_bound_preflight(app);
+        cx.model.sim_setup = setup;
+        invalidate_plan_bound_preflight(cx);
     }
     if let Some((kind, id)) = selected {
-        app.state.simulate.active_analysis = kind.legacy_index();
-        app.state.simulate.active_analysis_instance = Some(id);
+        cx.state.active_analysis = kind.legacy_index();
+        cx.state.active_analysis_instance = Some(id);
     }
-    crate::workbench::preflight::start(&mut app.state, &mut app.simulation_controller, true);
+    {
+        let (mut host, controller) = run_host(cx);
+        crate::workbench::preflight::start(&mut host, controller, true);
+    }
     // A run that waits on the engine's check of its decks is queued when the
     // check authorizes it.
-    if app.state.model.simulation.execution.trigger_simulation
-        || app.state.runs.preflight.run_awaits_check()
-    {
+    if cx.model.simulation.execution.trigger_simulation || cx.runs.preflight.run_awaits_check() {
         Ok(())
     } else {
         Err(
@@ -574,10 +548,10 @@ fn request_analysis_run(
 }
 
 fn open_analysis_configuration(
-    app: &mut RSpiceApp,
+    cx: &mut Cx<'_, SimulateFeature>,
     kind: crate::simulation::plan::AnalysisKind,
 ) -> Result<(), String> {
-    let mut setup = app.state.model.sim_setup.clone();
+    let mut setup = cx.model.sim_setup.clone();
     let (id, plan_changed) = {
         let plan = setup.stable_analysis_plan_mut()?;
         if let Some(instance) = plan
@@ -595,22 +569,25 @@ fn open_analysis_configuration(
     };
     setup.refresh_legacy_analysis_projections();
     if plan_changed {
-        app.state.model.sim_setup = setup;
-        invalidate_plan_bound_preflight(app);
+        cx.model.sim_setup = setup;
+        invalidate_plan_bound_preflight(cx);
     }
-    app.state.simulate.active_analysis = kind.legacy_index();
-    app.state.simulate.active_analysis_instance = Some(id);
-    app.state
-        .workbench
-        .activate(super::super::state::Workspace::Simulate);
+    cx.state.active_analysis = kind.legacy_index();
+    cx.state.active_analysis_instance = Some(id);
+    cx.wb.activate(super::super::state::Workspace::Simulate);
     Ok(())
 }
 
 /// Invalidate both visible preflight evidence and the controller's retained
 /// one-use permit at the same boundary as an authoritative plan mutation.
 /// Historical results remain immutable and are intentionally unaffected.
-pub(super) fn invalidate_plan_bound_preflight(app: &mut RSpiceApp) {
-    app.invalidate_simulation_preflight();
+pub(super) fn invalidate_plan_bound_preflight(cx: &mut Cx<'_, SimulateFeature>) {
+    invalidate_preflight(cx);
+}
+
+/// What model operations read of the slots, as the run view reads them.
+fn slot_facts(cx: &mut Cx<'_, SimulateFeature>) -> SlotFacts {
+    run_host(cx).0.slot_facts()
 }
 
 #[derive(Debug, Clone, PartialEq)]

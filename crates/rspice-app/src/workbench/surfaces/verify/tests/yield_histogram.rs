@@ -7,7 +7,7 @@ use super::super::super::super::state::{YieldLimitBound, YieldLimitDraft};
 use super::*;
 
 fn fixture_yield_results(app: &RSpiceApp) -> Vec<rspice_results::yield_analysis::YieldResult> {
-    verification_yield_results(app).to_vec()
+    verification_yield_results(&app.state.model).to_vec()
 }
 
 /// A Spec cell and an axis tick state a quantity the way the measured values
@@ -60,7 +60,11 @@ fn yield_rows_compute_their_statistics_from_the_samples() {
         .simulation
         .yield_analysis()
         .expect("the run holds a Monte Carlo analysis");
-    let rows = yield_rows_of(&analysis.data, &results, &verification_specs(&app));
+    let rows = yield_rows_of(
+        &analysis.data,
+        &results,
+        &verification_specs(&app.state.model),
+    );
     assert_eq!(rows.len(), 1);
     let row = &rows[0];
     assert_eq!((row.output.as_str(), row.unit.as_str()), ("gain", "dB"));
@@ -127,7 +131,7 @@ fn the_shown_histogram_is_the_readers_pick_or_the_lowest_yield() {
 #[test]
 fn a_limit_set_in_the_plan_rejudges_the_retained_trials() {
     let mut app = super::raster::monte_carlo_app();
-    let plan_id = verification_plan_id(&app).expect("default plan");
+    let plan_id = verification_plan_id(&app.state.model).expect("default plan");
     let definitions = |app: &RSpiceApp| {
         app.state
             .model
@@ -235,7 +239,7 @@ fn type_limit(
     };
     for events in [Vec::new(), vec![enter]] {
         let _ = super::raster::page_pass(ctx, super::raster::page_input(events), |ui| {
-            super::super::show(ui, &mut app);
+            super::super::show(ui, &mut crate::workbench::features::cx(&mut app));
         });
     }
     app
@@ -249,7 +253,7 @@ fn type_limit(
 fn a_limit_typed_into_its_cell_is_the_plans_on_enter() {
     let mut app = super::raster::monte_carlo_app();
     app.state.simulate.verification_page = VerificationPage::Yield;
-    let plan_id = verification_plan_id(&app).expect("default plan");
+    let plan_id = verification_plan_id(&app.state.model).expect("default plan");
     let ctx = egui::Context::default();
     rspice_ui_kit::Theme::default().apply(&ctx);
     let gain = |app: &RSpiceApp| {

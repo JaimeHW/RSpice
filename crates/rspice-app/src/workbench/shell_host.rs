@@ -114,7 +114,7 @@ impl Host for RSpiceApp {
                     Workspace::Simulate => simulate::show(ui, app),
                     Workspace::Stimulus => stimulus::show(ui, &mut app.state),
                     Workspace::Results => features::show_surface::<ResultsFeature>(app, ui),
-                    Workspace::Verify => verify::show(ui, app),
+                    Workspace::Verify => verify::show(ui, &mut features::cx(app)),
                     Workspace::Models => features::show_surface::<ModelsFeature>(app, ui),
                     Workspace::Netlist => {
                         netlist::prepare_workspace(app);

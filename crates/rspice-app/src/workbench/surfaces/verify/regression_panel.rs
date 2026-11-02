@@ -33,9 +33,9 @@ struct RegressionRow {
     cells: Vec<Cell>,
 }
 
-pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
-    let regression_policy = active_regression_specification_policy(app);
-    let targets = regression_run_pair(app)
+pub(super) fn regression(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let regression_policy = active_regression_specification_policy(cx.model);
+    let targets = regression_run_pair(cx.model, cx.state)
         .map(|(baseline, current)| {
             let checks = derive_regression_checks(baseline, current);
             let waveforms = if regression_requires_waveforms(regression_policy) {
@@ -46,9 +46,9 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             regression_target_descriptors(&checks, &waveforms)
         })
         .unwrap_or_default();
-    synchronize_regression_drafts(app, &targets);
-    let mut session = app.state.simulate.verification.clone();
-    let pair = regression_run_pair(app);
+    synchronize_regression_drafts(cx, &targets);
+    let mut session = cx.state.verification.clone();
+    let pair = regression_run_pair(cx.model, cx.state);
     let checks = pair
         .map(|(baseline, current)| derive_regression_checks(baseline, current))
         .unwrap_or_default();
@@ -58,13 +58,12 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     } else {
         Vec::new()
     };
-    let rules = app
-        .state
+    let rules = cx
         .model
         .sim_setup
         .analysis_plan
         .as_ref()
-        .and_then(|plan| app.state.model.workspace.content.plan_data(plan.id()))
+        .and_then(|plan| cx.model.workspace.content.plan_data(plan.id()))
         .map(|payload| payload.regression_tolerances.clone())
         .unwrap_or_default();
     let coverage_issues = pair
@@ -72,19 +71,13 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
             regression_coverage_issues_for_policy(baseline, current, &rules, regression_policy)
         })
         .unwrap_or_default();
-    let active_contract = app
-        .state
-        .model
-        .sim_setup
-        .analysis_plan
-        .as_ref()
-        .map(|plan| {
-            (
-                plan.id(),
-                plan.revision(),
-                regression_tolerance_digest(&rules),
-            )
-        });
+    let active_contract = cx.model.sim_setup.analysis_plan.as_ref().map(|plan| {
+        (
+            plan.id(),
+            plan.revision(),
+            regression_tolerance_digest(&rules),
+        )
+    });
     let receipt = pair.and_then(|(baseline, current)| {
         session
             .regression_comparison
@@ -131,8 +124,8 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         regression_ci_documents(receipt, &cases)
     });
 
-    let runs = run_choice(app, |run| validate_regression_run(run).is_ok());
-    let candidate_name = verification_run(app).map(|run| format!("Run {}", run.id));
+    let runs = run_choice(cx.model, |run| validate_regression_run(run).is_ok());
+    let candidate_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
     let summary = pair.map(|(baseline, current)| {
         let text = format!(
             "Run {} vs baseline Run {} \u{00b7} {passed} / {total} pass",
@@ -168,7 +161,7 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
         actions: &toolbar_actions,
     }
     .show(ui);
-    action_problem_line(ui, app);
+    action_problem_line(ui, cx.model, cx.state);
     if !orphan_targets.is_empty() {
         let names = coverage_issues
             .iter()
@@ -257,39 +250,32 @@ pub(super) fn regression(ui: &mut Ui, app: &mut RSpiceApp) {
     let mut removed_orphans = false;
     match output.action.and_then(|index| actions.get(index)) {
         Some(RegressionAction::SelectBaseline) => {
-            app.state
-                .simulate
-                .verification
-                .regression_baseline_picker_selection = active_regression_baseline(app);
-            app.state
-                .simulate
-                .verification
-                .regression_baseline_picker_open = true;
+            cx.state.verification.regression_baseline_picker_selection =
+                active_regression_baseline(cx.model, cx.state);
+            cx.state.verification.regression_baseline_picker_open = true;
         }
-        Some(RegressionAction::Run) => run_regression_comparison(app),
+        Some(RegressionAction::Run) => run_regression_comparison(cx),
         Some(RegressionAction::Export) => match export_documents {
-            Some(Ok((junit, tap))) => export_regression_ci(app, &junit, &tap),
+            Some(Ok((junit, tap))) => export_regression_ci(cx, &junit, &tap),
             Some(Err(error)) => {
-                app.state.simulate.verification.action_problem =
+                cx.state.verification.action_problem =
                     Some(format!("JUnit / TAP export failed: {error}."));
             }
             None => {}
         },
         Some(RegressionAction::RemoveOrphans) => {
             removed_orphans = true;
-            let result = remove_orphaned_regression_rules(app, &orphan_targets).map(|_| ());
-            record_action(&mut app.state.simulate.verification, result);
+            let result = remove_orphaned_regression_rules(cx, &orphan_targets).map(|_| ());
+            record_action(&mut cx.state.verification, result);
         }
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.model.simulation, index);
+        select_verification_run(&mut cx.model.simulation, index);
     }
     if !removed_orphans {
-        app.state.simulate.verification.regression_selected_target =
-            session.regression_selected_target;
-        app.state.simulate.verification.regression_tolerance_drafts =
-            session.regression_tolerance_drafts;
+        cx.state.verification.regression_selected_target = session.regression_selected_target;
+        cx.state.verification.regression_tolerance_drafts = session.regression_tolerance_drafts;
     }
 }
 

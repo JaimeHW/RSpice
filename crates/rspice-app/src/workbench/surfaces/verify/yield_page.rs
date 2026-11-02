@@ -215,14 +215,14 @@ pub(super) fn yield_rows_of<W>(
 /// frame, that is the most expensive thing on the page for values that cannot
 /// change until the run's evidence does. The frame judges the trials again
 /// whenever a limit changes, and that is a new data version.
-fn yield_rows(ctx: &egui::Context, app: &RSpiceApp) -> Vec<YieldRow> {
-    let simulation = &app.state.model.simulation;
+fn yield_rows(ctx: &egui::Context, model: &Model) -> Vec<YieldRow> {
+    let simulation = &model.simulation;
     let Some(analysis) = simulation.yield_analysis() else {
         return Vec::new();
     };
     let key = egui::Id::new((
         "workbench.verify.yield.rows",
-        verification_run(app).map(|run| run.dataset_id.to_string()),
+        verification_run(model).map(|run| run.dataset_id.to_string()),
         analysis.id,
         simulation.view.data_version,
     ));
@@ -231,8 +231,8 @@ fn yield_rows(ctx: &egui::Context, app: &RSpiceApp) -> Vec<YieldRow> {
     }
     let rows = yield_rows_of(
         &analysis.data,
-        verification_yield_results(app),
-        &verification_specs(app),
+        verification_yield_results(model),
+        &verification_specs(model),
     );
     ctx.data_mut(|data| data.insert_temp(key, rows.clone()));
     rows
@@ -397,8 +397,8 @@ pub(super) fn set_limit(
     })
 }
 
-pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
-    let runs = run_choice(app, |run| {
+pub(super) fn yield_page(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
             analysis.success
                 && matches!(
@@ -407,27 +407,20 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
                 )
         })
     });
-    let run_name = verification_run(app).map(|run| format!("Run {}", run.id));
-    let results = verification_yield_results(app);
-    let rows = yield_rows(ui.ctx(), app);
-    let plan_id = verification_plan_id(app);
+    let run_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
+    let results = verification_yield_results(cx.model);
+    let rows = yield_rows(ui.ctx(), cx.model);
+    let plan_id = verification_plan_id(cx.model);
     let entry_allowed =
-        plan_id.is_some() && verification_evidence_domain(app).answers_a_plan_limit();
+        plan_id.is_some() && verification_evidence_domain(cx.model).answers_a_plan_limit();
     let gate = plan_id
-        .and_then(|plan_id| app.state.model.workspace.content.plan_data(plan_id))
+        .and_then(|plan_id| cx.model.workspace.content.plan_data(plan_id))
         .map(|payload| payload.specification_policy.monte_carlo.clone())
         .unwrap_or_default();
-    let policy = app.state.model.preferences.quantity_presentation_policy();
-    let locale = app.state.workbench.number_locale;
-    let shown = shown_yield_row(
-        &rows,
-        app.state
-            .simulate
-            .verification
-            .yield_selected_spec
-            .as_deref(),
-    );
-    let analysis = app.state.model.simulation.yield_analysis();
+    let policy = cx.model.preferences.quantity_presentation_policy();
+    let locale = cx.wb.number_locale;
+    let shown = shown_yield_row(&rows, cx.state.verification.yield_selected_spec.as_deref());
+    let analysis = cx.model.simulation.yield_analysis();
     let trials = analysis.and_then(|analysis| match &analysis.family_metadata {
         Some(AnalysisResultFamilyMetadata::MonteCarlo {
             runs_requested,
@@ -486,12 +479,12 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
     }
     .show(ui);
     if output.action == Some(0) {
-        app.execute_command_key(ids::EDIT_SPECIFICATIONS);
+        cx.execute(ids::EDIT_SPECIFICATIONS);
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.model.simulation, index);
+        select_verification_run(&mut cx.model.simulation, index);
     }
-    action_problem_line(ui, app);
+    action_problem_line(ui, cx.model, cx.state);
     if unrecorded {
         let _ = rspice_ui_kit::widgets::problem_line(
             ui,
@@ -501,7 +494,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
     }
 
     if rows.is_empty() {
-        app.state.simulate.verification.yield_limit_draft = None;
+        cx.state.verification.yield_limit_draft = None;
         let text = run_name.map_or_else(
             || "No Monte Carlo results. Add a Monte Carlo analysis to the plan, then run it.".to_owned(),
             |run| {
@@ -512,8 +505,8 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
         );
         if empty_line(ui, &text, Some("Configure Monte Carlo")) {
             let result =
-                open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::MonteCarlo);
-            record_action(&mut app.state.simulate.verification, result);
+                open_analysis_configuration(cx, crate::simulation::plan::AnalysisKind::MonteCarlo);
+            record_action(&mut cx.state.verification, result);
         }
         return;
     }
@@ -535,9 +528,8 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
         Column::number("Yield", 76.0),
         Column::words("Pass/fail", 70.0),
     ];
-    let mut draft = app
+    let mut draft = cx
         .state
-        .simulate
         .verification
         .yield_limit_draft
         .take()
@@ -596,7 +588,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
             ]
         });
     if let Some(index) = response.clicked {
-        app.state.simulate.verification.yield_selected_spec = Some(rows[index].output.clone());
+        cx.state.verification.yield_selected_spec = Some(rows[index].output.clone());
     }
     match response.edited {
         Some(EditOutcome::Cancel) => draft = None,
@@ -610,8 +602,8 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
                     .map_or_else(String::new, |row| row.limit_unit().to_owned());
                 let applied = parse_limit(&open.text, &unit, policy, locale).and_then(|value| {
                     let plan_id = plan_id.ok_or_else(|| "the plan is not ready".to_owned())?;
-                    let mut workspace = app.state.model.workspace.clone();
-                    let mut setup = app.state.model.sim_setup.clone();
+                    let mut workspace = cx.model.workspace.clone();
+                    let mut setup = cx.model.sim_setup.clone();
                     let detail = set_limit(
                         &mut workspace.content,
                         plan_id,
@@ -623,20 +615,20 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
                     let receipt = setup
                         .commit_active_plan_configuration_change(detail)
                         .map_err(|error| error.to_string())?;
-                    app.state.model.workspace = workspace;
-                    app.state.model.sim_setup = setup;
+                    cx.model.workspace = workspace;
+                    cx.model.sim_setup = setup;
                     Ok(receipt.status_line())
                 });
                 match applied {
                     Ok(receipt) => {
-                        invalidate_plan_bound_preflight(app);
-                        app.state.record_plan_receipt(receipt);
-                        record_action(&mut app.state.simulate.verification, Ok(()));
+                        invalidate_plan_bound_preflight(cx);
+                        record_plan_receipt(cx, receipt);
+                        record_action(&mut cx.state.verification, Ok(()));
                         ui.ctx().request_repaint();
                     }
                     Err(problem) => {
                         record_action(
-                            &mut app.state.simulate.verification,
+                            &mut cx.state.verification,
                             Err(format!(
                                 "The {} limit of {} was not set: {problem}.",
                                 bound_word(open.bound),
@@ -672,7 +664,7 @@ pub(super) fn yield_page(ui: &mut Ui, app: &mut RSpiceApp) {
             focus: true,
         });
     }
-    app.state.simulate.verification.yield_limit_draft = draft;
+    cx.state.verification.yield_limit_draft = draft;
 
     let Some(index) = shown else {
         return;

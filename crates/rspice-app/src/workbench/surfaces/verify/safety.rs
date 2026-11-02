@@ -101,22 +101,24 @@ enum SoaAction {
     Edit,
 }
 
-pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
-    let runs = run_choice(app, |run| {
+pub(super) fn device_safety(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
             analysis.analysis_type == crate::state::AnalysisType::Soa && verified_analysis(analysis)
         })
     });
-    let run_name = verification_run(app).map(|run| format!("Run {}", run.id));
-    let rows =
-        latest_validated_analysis(app, crate::state::AnalysisType::Soa).and_then(|analysis| {
-            match &analysis.result_payload {
-                Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) => {
-                    Some(soa_rows(evaluations))
-                }
-                _ => None,
-            }
-        });
+    let run_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
+    let rows = latest_validated_analysis(
+        cx.model,
+        cx.peers.results(),
+        crate::state::AnalysisType::Soa,
+    )
+    .and_then(|analysis| match &analysis.result_payload {
+        Some(crate::state::AnalysisResultPayload::Soa { evaluations, .. }) => {
+            Some(soa_rows(evaluations))
+        }
+        _ => None,
+    });
     let actions = [SoaAction::Run, SoaAction::Edit];
     let toolbar_actions = [
         ToolbarAction::new("Run SOA checks"),
@@ -132,20 +134,20 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
     .show(ui);
     match output.action.and_then(|index| actions.get(index)) {
         Some(SoaAction::Run) => {
-            let result = request_analysis_run(app, &[crate::simulation::plan::AnalysisKind::Soa]);
-            record_action(&mut app.state.simulate.verification, result);
+            let result = request_analysis_run(cx, &[crate::simulation::plan::AnalysisKind::Soa]);
+            record_action(&mut cx.state.verification, result);
         }
         Some(SoaAction::Edit) => {
             let result =
-                open_analysis_configuration(app, crate::simulation::plan::AnalysisKind::Soa);
-            record_action(&mut app.state.simulate.verification, result);
+                open_analysis_configuration(cx, crate::simulation::plan::AnalysisKind::Soa);
+            record_action(&mut cx.state.verification, result);
         }
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.model.simulation, index);
+        select_verification_run(&mut cx.model.simulation, index);
     }
-    action_problem_line(ui, app);
+    action_problem_line(ui, cx.model, cx.state);
 
     let Some(rows) = rows else {
         let text = run_name.map_or_else(
@@ -186,14 +188,16 @@ pub(super) fn device_safety(ui: &mut Ui, app: &mut RSpiceApp) {
         })
         .clicked;
     if let Some(index) = clicked {
-        let result = cross_probe_soa_device(app, &rows[index].device);
-        record_action(&mut app.state.simulate.verification, result);
+        let result = cross_probe_soa_device(cx, &rows[index].device);
+        record_action(&mut cx.state.verification, result);
     }
 }
 
-pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Result<(), String> {
-    let component_id = app
-        .state
+pub(super) fn cross_probe_soa_device(
+    cx: &mut Cx<'_, SimulateFeature>,
+    device_id: &str,
+) -> Result<(), String> {
+    let component_id = cx
         .model
         .schematic
         .document()
@@ -202,16 +206,13 @@ pub(super) fn cross_probe_soa_device(app: &mut RSpiceApp, device_id: &str) -> Re
         .find(|component| component.name.eq_ignore_ascii_case(device_id))
         .map(|component| component.id)
         .ok_or_else(|| format!("{device_id} is not on the open schematic"))?;
-    app.state
-        .model
+    cx.model
         .schematic
         .session
         .editor
         .selection
         .select_only_component(component_id);
-    app.state
-        .workbench
-        .activate(crate::workbench::state::Workspace::Design);
+    cx.wb.activate(crate::workbench::state::Workspace::Design);
     Ok(())
 }
 

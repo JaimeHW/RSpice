@@ -138,15 +138,15 @@ enum OptimizationAction {
     Run,
 }
 
-pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
-    let runs = run_choice(app, |run| {
+pub(super) fn optimization(ui: &mut Ui, cx: &mut Cx<'_, SimulateFeature>) {
+    let runs = run_choice(cx.model, |run| {
         run.analyses.iter().any(|analysis| {
             analysis.analysis_type == crate::state::AnalysisType::Optimization
                 && verified_analysis(analysis)
         })
     });
-    let run_name = verification_run(app).map(|run| format!("Run {}", run.id));
-    let table = latest_analysis(app, crate::state::AnalysisType::Optimization)
+    let run_name = verification_run(cx.model).map(|run| format!("Run {}", run.id));
+    let table = latest_analysis(cx.model, crate::state::AnalysisType::Optimization)
         .and_then(IterationTable::from_result);
     let actions = [OptimizationAction::Configure, OptimizationAction::Run];
     let toolbar_actions = [
@@ -171,19 +171,19 @@ pub(super) fn optimization(ui: &mut Ui, app: &mut RSpiceApp) {
     let kind = crate::simulation::plan::AnalysisKind::Optimization;
     match output.action.and_then(|index| actions.get(index)) {
         Some(OptimizationAction::Configure) => {
-            let result = open_analysis_configuration(app, kind);
-            record_action(&mut app.state.simulate.verification, result);
+            let result = open_analysis_configuration(cx, kind);
+            record_action(&mut cx.state.verification, result);
         }
         Some(OptimizationAction::Run) => {
-            let result = request_analysis_run(app, &[kind]);
-            record_action(&mut app.state.simulate.verification, result);
+            let result = request_analysis_run(cx, &[kind]);
+            record_action(&mut cx.state.verification, result);
         }
         None => {}
     }
     if let Some(index) = output.run {
-        select_verification_run(&mut app.state.model.simulation, index);
+        select_verification_run(&mut cx.model.simulation, index);
     }
-    action_problem_line(ui, app);
+    action_problem_line(ui, cx.model, cx.state);
 
     let Some(table) = table else {
         let text = run_name.map_or_else(
