@@ -768,6 +768,7 @@ impl Engine {
                     .or_else(|| alias!(&["TC2"], "TC2"))
             }
             ElementKind::Coupling { .. } => alias!(&["K", "COUPLING", "VALUE"], "K"),
+            ElementKind::Mosfet { .. } => alias!(&["DELVT0"], "DELVTO"),
             ElementKind::TransmissionLine { .. } => {
                 alias!(&["Z0", "VALUE"], "Z0").or_else(|| alias!(&["F", "FREQ"], "FREQ"))
             }
@@ -1877,6 +1878,32 @@ impl Engine {
                     Some(_) => {
                         return Err(SimulationError::Circuit(
                             "Unsupported inductor step parameter; use L, VALUE, M, MULT, SCALE, TEMP, DTEMP, TC1, or TC2"
+                                .to_string(),
+                        ));
+                    }
+                }
+                Ok(())
+            }
+            ElementKind::Mosfet {
+                instance_params,
+                deferred_params,
+                ..
+            } => {
+                // The instance's geometry and offsets. Each analysis builds
+                // the circuit again, which selects the model bin for the new
+                // geometry and redoes the instance's setup and temperature
+                // update, as ngspice does after `alter @m1[w]`.
+                const PARAMETERS: &[&str] = &[
+                    "W", "L", "M", "NF", "AD", "AS", "PD", "PS", "NRD", "NRS", "SA", "SB", "SD",
+                    "DTEMP", "DELVTO",
+                ];
+                match param_upper.as_deref() {
+                    Some(name) if PARAMETERS.contains(&name) => {
+                        set_instance_param(instance_params, deferred_params, name, value);
+                    }
+                    _ => {
+                        return Err(SimulationError::Circuit(
+                            "Unsupported MOSFET step parameter; use W, L, M, NF, AD, AS, PD, PS, NRD, NRS, SA, SB, SD, DTEMP, or DELVTO"
                                 .to_string(),
                         ));
                     }

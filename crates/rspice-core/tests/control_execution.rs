@@ -1695,6 +1695,35 @@ fn unlet_drops_the_vectors_let_bound() {
     }
 }
 
+/// `alter @m1[w]` changes a MOSFET's instance parameter for the analyses
+/// after it, which set the instance up again for its new geometry. For a
+/// level-1 NMOS of KP 100u in saturation, ngspice-46 prints i(vd) =
+/// -3.20000e-04 at W/L = 10u/1u, then -6.40000e-04 at W = 20u, -3.20000e-04
+/// at L = 2u and -9.60000e-04 at M = 3; a parameter MOSFETs lack is refused.
+#[test]
+fn alter_changes_a_mosfet_instance_parameter() {
+    let (presented, error) = run_until_error(
+        "alterw\nm1 d g 0 0 nch L=1u W=10u\nvg g 0 1.5\nvd d 0 1\n\
+         .model nch nmos level=1 vto=0.7 kp=100u\n.control\nop\nprint i(vd)\n\
+         alter @m1[w]=20u\nop\nprint i(vd)\nalter @m1[l]=2u\nop\nprint i(vd)\n\
+         alter @m1[m]=3\nop\nprint i(vd)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let currents: Vec<_> = presented
+        .iter()
+        .map(|request| printed(request)[0].y.samples[0].re)
+        .collect();
+    assert_eq!(currents.len(), 4);
+    for (current, expected) in currents.iter().zip([-3.2e-4, -6.4e-4, -3.2e-4, -9.6e-4]) {
+        assert!((current / expected - 1.0).abs() < 1e-6, "{currents:?}");
+    }
+    let (_, error) = run_until_error(
+        "alterw\nm1 d g 0 0 nch L=1u W=10u\nvg g 0 1.5\nvd d 0 1\n\
+         .model nch nmos level=1 vto=0.7 kp=100u\n.control\nalter @m1[bogus]=1\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("Unsupported MOSFET step parameter"));
+}
+
 /// `wrs2p` (postcoms.c:624, rawfile.c:765) writes ports 1 and 2 of the sp
 /// plot as Touchstone real and imaginary parts, labelled with `Rbase`. The
 /// rows are ngspice-46's for a tee of 10 and 20 ohms and 1 uF between a 50
