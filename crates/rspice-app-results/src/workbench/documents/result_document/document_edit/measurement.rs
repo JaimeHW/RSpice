@@ -56,9 +56,10 @@ pub fn preview(state: ResultsReads<'_>, draft: &MeasurementDraft) -> Measurement
         evaluate(analysis, expression).map(|value| Some(fmt_si_significant(value, "", digits)))
     };
     let refusal = pane.is_none().then(|| QUICK_VIEW.to_owned());
+    // A run's label already names it ("Run 1 (8:31:04 PM)"), as the
+    // navigator shows it; a number in front would name it twice.
     MeasurementPreview {
-        pane: pane
-            .unwrap_or_else(|| format!("Run {} · {} · {}", run.id, run.label, analysis.label)),
+        pane: pane.unwrap_or_else(|| format!("{} · {}", run.label, analysis.label)),
         value,
         refusal,
     }

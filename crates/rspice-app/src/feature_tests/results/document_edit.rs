@@ -629,6 +629,12 @@ fn a_measurement_over_a_quick_view_is_evaluated_and_not_kept() {
         preview.refusal.as_deref(),
         Some("Create a result document to keep measurements.")
     );
+    // The quick view is named as the navigator names it: the run's label,
+    // which already says which run it is, then the analysis.
+    let run = app.state.model.simulation.active_run().expect("a run");
+    let analysis = app.state.model.simulation.active_analysis().expect("one");
+    assert_eq!(preview.pane, format!("{} · {}", run.label, analysis.label));
+    assert_eq!(preview.pane.matches("Run 1").count(), 1, "{}", preview.pane);
     assert!(matches!(preview.value, Ok(Some(_))), "{:?}", preview.value);
     commit_open_dialog(&mut app.state.results_parts());
     assert!(

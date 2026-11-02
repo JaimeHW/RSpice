@@ -21,6 +21,9 @@ pub struct MeasurementPreview {
     pub refusal: Option<String>,
 }
 
+/// What the line under Expression says before anything is typed.
+const EXPRESSION_MISSING: &str = "Type an expression that reduces to one number.";
+
 pub fn show(
     ctx: &Context,
     draft: &mut MeasurementDraft,
@@ -39,12 +42,60 @@ pub fn show(
             rows.text("Expression", field, &mut draft.expression, "rms(V(out))");
             rows.field_line(
                 Some(field),
+                // The line is never blank: before anything is typed it
+                // says what Add waits for, so the form keeps one pitch.
                 match &preview.value {
-                    Ok(None) => FieldLine::Blank,
+                    Ok(None) => FieldLine::Derived(EXPRESSION_MISSING),
                     Ok(Some(value)) => FieldLine::Derived(value),
                     Err(reason) => FieldLine::Error(reason),
                 },
             );
             Some(field)
         })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Before anything is typed, the line under Expression says what Add
+    /// waits for, so no blank slot stands between the field and the footer.
+    #[test]
+    fn an_empty_expression_says_what_add_waits_for() {
+        let ctx = Context::default();
+        rspice_ui_kit::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut draft = MeasurementDraft::default();
+        let preview = MeasurementPreview {
+            pane: "Run 1 (8:31:04 PM)".to_owned(),
+            value: Ok(None),
+            refusal: None,
+        };
+        let mut said = false;
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    show(ui.ctx(), &mut draft, &preview);
+                },
+            );
+            said |= output
+                .platform_output
+                .accesskit_update
+                .expect("AccessKit tree update")
+                .nodes
+                .iter()
+                .any(|(_, node)| {
+                    node.label() == Some(EXPRESSION_MISSING)
+                        || node.value() == Some(EXPRESSION_MISSING)
+                });
+        }
+        assert!(said, "the line under Expression is blank");
+    }
 }
