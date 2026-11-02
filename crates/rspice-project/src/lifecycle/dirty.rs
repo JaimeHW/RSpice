@@ -22,7 +22,10 @@ impl ProjectLifecycle {
 
     /// Whether this never-saved project still holds what it started from:
     /// see [`ProjectLifecycle::mark_pristine`].
-    fn is_pristine(&self, capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>) -> bool {
+    fn is_pristine(
+        &self,
+        capture: impl FnOnce() -> Result<ProjectFile, ProjectLifecycleError>,
+    ) -> bool {
         self.pristine.is_some_and(|pristine| {
             capture()
                 .and_then(|current| self.working_fingerprints(&current))

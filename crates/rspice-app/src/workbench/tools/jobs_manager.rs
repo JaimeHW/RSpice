@@ -1883,7 +1883,10 @@ mod tests {
     fn the_queue_fits_the_left_pane_at_the_managers_width() {
         // The 1,120 pt surface, less its 1 pt borders and the pane divider.
         let left_pane = ((1_120.0_f32 - 2.0 - 1.0) * 0.695).max(560.0);
-        assert!(TABLE_MIN_WIDTH <= left_pane, "{TABLE_MIN_WIDTH} > {left_pane}");
+        assert!(
+            TABLE_MIN_WIDTH <= left_pane,
+            "{TABLE_MIN_WIDTH} > {left_pane}"
+        );
     }
 
     #[test]
