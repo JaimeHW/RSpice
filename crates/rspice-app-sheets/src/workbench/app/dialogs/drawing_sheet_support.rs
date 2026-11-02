@@ -223,34 +223,10 @@ fn sheet_format_manager_body(
         .corner_radius(t.radius)
         .inner_margin(Margin::same(11))
         .show(ui, |ui| {
+            // Only the selector: two notes beside it said the same thing
+            // about every application, so they said nothing about this one.
             ui.set_min_width(ui.available_width());
-            if sheet_format_manager_controls_stack(ui.available_width()) {
-                manager_format_selector(ui, state, &t);
-                ui.add_space(MANAGER_APPLY_GAP);
-                manager_apply_notes(ui);
-            } else {
-                // The reference splits this row 0.6fr / 1fr, not in half: the
-                // selector is one line of format text, the notes beside it are
-                // two paragraphs, and an even split left the selector padded
-                // with empty panel while the notes wrapped early.
-                let total = ui.available_width();
-                let selector_width =
-                    ((total - MANAGER_APPLY_GAP) * MANAGER_SELECTOR_SHARE).max(220.0);
-                let notes_width = (total - MANAGER_APPLY_GAP - selector_width).max(1.0);
-                ui.horizontal_top(|ui| {
-                    ui.spacing_mut().item_spacing.x = MANAGER_APPLY_GAP;
-                    ui.allocate_ui_with_layout(
-                        vec2(selector_width, 0.0),
-                        Layout::top_down(Align::Min),
-                        |ui| manager_format_selector(ui, state, &t),
-                    );
-                    ui.allocate_ui_with_layout(
-                        vec2(notes_width, 0.0),
-                        Layout::top_down(Align::Min),
-                        manager_apply_notes,
-                    );
-                });
-            }
+            manager_format_selector(ui, state, &t);
         });
     // Allocated only when there is something to say. A reserved band held an
     // empty strip of dialog above the footer on every well-formed selection.
@@ -263,15 +239,6 @@ fn sheet_format_manager_body(
         ui.colored_label(t.color.warn, "Select at least one sheet.");
     }
 }
-
-pub fn sheet_format_manager_controls_stack(available_width: f32) -> bool {
-    available_width < 620.0
-}
-
-/// The lead between the selector and the notes beside it, and the selector's
-/// share of the row — the reference's `0.6fr / 1fr` split with a 13 pt gap.
-const MANAGER_APPLY_GAP: f32 = 13.0;
-const MANAGER_SELECTOR_SHARE: f32 = 0.375;
 
 /// Below this the dialog body scrolls sideways rather than shortening a sheet
 /// name or an engineering dimension to fit.
@@ -484,20 +451,6 @@ fn manager_format_selector(ui: &mut Ui, state: &mut SheetFormatManagerState, t: 
 
 /// The selector's way out to the open sheet's own properties.
 const SHEET_PROPERTIES_INSTEAD: &str = "Edit the open sheet's properties instead\u{2026}";
-
-fn manager_apply_notes(ui: &mut Ui) {
-    manager_apply_note(
-        ui,
-        "Partial application is reported, never silent.",
-        "A sheet governed by an organization template is skipped and named in the receipt; sheets that did change are not rolled back.",
-    );
-    ui.add_space(7.0);
-    manager_apply_note(
-        ui,
-        "One undo entry.",
-        "Applying to several sheets is one transaction: undo restores every sheet's previous format together.",
-    );
-}
 
 fn validate_manager_authority(
     model: &Model,
@@ -867,25 +820,6 @@ fn format_label_with_dimensions(format: &SchematicSheetFormat) -> String {
         format.authored_size.label(),
         format.display_unit.format_size_um(width, height)
     )
-}
-
-fn manager_apply_note(ui: &mut Ui, heading: &str, body: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        RichText::new(heading)
-            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text),
-    );
-    // Stated, because the note sits in a column the caller sized: without it the
-    // detail line lays out against the panel and runs under the footer.
-    ui.add(
-        egui::Label::new(
-            RichText::new(body)
-                .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        )
-        .wrap(),
-    );
 }
 
 fn inheritance_label(inheritance: DrawingSheetInheritance) -> &'static str {

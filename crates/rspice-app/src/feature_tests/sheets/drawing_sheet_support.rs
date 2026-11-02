@@ -19,12 +19,49 @@ fn open_manager(state: &mut crate::workbench::app_state::AppState) -> Result<(),
     )
 }
 
+/// The apply panel holds the format selector and nothing beside it: two
+/// notes there said the same thing about every application, so they said
+/// nothing about this one.
 #[test]
-fn sheet_format_manager_controls_stack_at_phone_width() {
-    assert!(sheet_format_manager_controls_stack(366.0));
-    assert!(sheet_format_manager_controls_stack(619.0));
-    assert!(!sheet_format_manager_controls_stack(620.0));
-    assert!(!sheet_format_manager_controls_stack(760.0));
+fn the_apply_panel_states_no_constant_notes() {
+    let mut app = RSpiceApp::test_instance();
+    open_manager(&mut app.state).expect("the manager opens");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut texts = Vec::new();
+    for _ in 0..3 {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1440.0, 900.0),
+                )),
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+        );
+        texts = output
+            .platform_output
+            .accesskit_update
+            .expect("AccessKit tree update")
+            .nodes
+            .iter()
+            .flat_map(|(_, node)| [node.label(), node.value()])
+            .flatten()
+            .map(str::to_owned)
+            .collect::<Vec<_>>();
+    }
+    assert!(
+        texts.iter().any(|text| text == "Format to apply"),
+        "the selector is drawn: {texts:?}"
+    );
+    let notes = texts
+        .iter()
+        .filter(|text| text.contains("Partial application") || text.contains("One undo entry"))
+        .collect::<Vec<_>>();
+    assert!(notes.is_empty(), "the constant notes are back: {notes:?}");
 }
 
 #[test]
