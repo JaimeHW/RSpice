@@ -7,7 +7,7 @@ use crate::state::workspace::VERILOGA_LIBRARY_NAME;
 use crate::state::workspace::{
     starter_veriloga_source, verilog_module_name, verilog_port_declaration,
 };
-use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine};
+use crate::ui::widgets::{CommandForm, DialogChoice};
 use crate::workbench::app::dialogs::library::{LIBRARY_CATALOG_STALE_MESSAGE, validate_lcv_name};
 use crate::workbench::app_state::Model;
 use crate::workbench::framework::feature::Cx;
@@ -125,9 +125,9 @@ pub(crate) fn new_view_opening(
 }
 
 /// Why Create is waiting while the view has no name.
-const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view";
+const NEW_VIEW_NAME_MISSING: &str = "Enter a name for the view.";
 
-/// What the line under the view name says when Create cannot run on it.
+/// What the footer says about the view name when Create cannot run on it.
 enum NameLine {
     /// Nothing typed yet: what Create waits for, not a refusal.
     Missing,
@@ -180,21 +180,19 @@ impl ProjectFeature {
             .option_columns()
             .describe("Create a named view of the selected type in this library cell.")
             .primary_enabled(can_create)
-            // A refusal of the name stands under it; the footer states only
-            // what belongs to no field.
-            .status(error.as_deref().map_or(Ok(None), Err))
+            // What Create waits for, or why it refuses the name, stands in
+            // the footer beside it, as New cell's does, so the rows keep one
+            // pitch and the body ends at its last row.
+            .status(match (&error, &name_refusal) {
+                (Some(error), _) => Err(error.as_str()),
+                (None, Some(NameLine::Missing)) => Ok(Some(NEW_VIEW_NAME_MISSING)),
+                (None, Some(NameLine::Refused(refusal))) => Err(refusal.as_str()),
+                (None, None) => Ok(None),
+            })
             .show(ctx, |rows| {
                 rows.value_mono("Library", &dialogs.new_view_library);
                 rows.value_mono("Cell", &dialogs.new_view_cell);
                 rows.text("View name", name_id, &mut dialogs.new_view_name, "");
-                rows.field_line(
-                    Some(name_id),
-                    match &name_refusal {
-                        None => FieldLine::Blank,
-                        Some(NameLine::Missing) => FieldLine::Derived(NEW_VIEW_NAME_MISSING),
-                        Some(NameLine::Refused(refusal)) => FieldLine::Error(refusal),
-                    },
-                );
                 if rows.segmented_columns(
                     "Type",
                     "library.new-view.type",
@@ -915,11 +913,33 @@ mod tests {
             node.role() == egui::accesskit::Role::TextInput && node.label() == Some("View name")
         }));
         assert!(
-            nodes
-                .values()
-                .any(|node| node.value() == Some(NEW_VIEW_NAME_MISSING)),
+            nodes.values().any(|node| {
+                node.label() == Some(NEW_VIEW_NAME_MISSING)
+                    || node.value() == Some(NEW_VIEW_NAME_MISSING)
+            }),
             "Create does not say what it waits for"
         );
+        // Library, Cell, View name and Type keep one pitch: no blank line
+        // stands between the name and the types. Measured at row bottoms, as
+        // the kit lays the first fact row out shorter at its top.
+        let row = |label: &str| {
+            nodes
+                .values()
+                .filter(|node| node.label() == Some(label))
+                .filter_map(egui::accesskit::Node::bounds)
+                .map(|bounds| bounds.y1)
+                .next()
+                .unwrap_or_else(|| panic!("{label} is published"))
+        };
+        // The kit paints row labels; the Type row stands where its segments do.
+        let [library, cell, name] = ["Library", "Cell", "View name"].map(row);
+        let bottoms = [library, cell, name, types[0].y1];
+        for pair in bottoms.windows(2) {
+            assert!(
+                ((pair[1] - pair[0]) - (bottoms[1] - bottoms[0])).abs() < 1.0,
+                "rows are not evenly pitched: {bottoms:?}"
+            );
+        }
         assert!(matches!(
             new_view_name_line("bad name"),
             Some(NameLine::Refused(_))
