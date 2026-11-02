@@ -1125,12 +1125,14 @@ enum LiveMeasureState {
         upper: Value,
         output: ExtremaOutput,
         is_max: bool,
+        crossing: Option<crate::analysis::measure::RiseFallCrossTracker>,
         selected: Option<(Value, Value)>,
     },
     PeakToPeak {
         signal: LiveMeasureOperand,
         lower: Value,
         upper: Value,
+        crossing: Option<crate::analysis::measure::RiseFallCrossTracker>,
         minimum: Value,
         maximum: Value,
         initialized: bool,
@@ -3680,6 +3682,8 @@ fn compile_live_measure_state(
             to,
             td,
             output,
+            crossing,
+            rfc_level,
         }
         | MeasureType::Max {
             signal,
@@ -3687,6 +3691,8 @@ fn compile_live_measure_state(
             to,
             td,
             output,
+            crossing,
+            rfc_level,
         } => {
             let (lower, upper) = bounds(delayed(*from, *td), *to);
             LiveMeasureState::Extremum {
@@ -3695,6 +3701,7 @@ fn compile_live_measure_state(
                 upper,
                 output: *output,
                 is_max: matches!(statement.measure_type, MeasureType::Max { .. }),
+                crossing: crate::analysis::measure::RiseFallCrossTracker::of(*crossing, *rfc_level),
                 selected: None,
             }
         }
@@ -3726,12 +3733,15 @@ fn compile_live_measure_state(
             from,
             to,
             td,
+            crossing,
+            rfc_level,
         } => {
             let (lower, upper) = bounds(delayed(*from, *td), *to);
             LiveMeasureState::PeakToPeak {
                 signal: LiveMeasureOperand::compile(signal, params)?,
                 lower,
                 upper,
+                crossing: crate::analysis::measure::RiseFallCrossTracker::of(*crossing, *rfc_level),
                 minimum: Value::INFINITY,
                 maximum: Value::NEG_INFINITY,
                 initialized: false,
@@ -4456,12 +4466,18 @@ impl LiveMeasureState {
                 upper,
                 output,
                 is_max,
+                crossing,
                 selected,
             } => {
                 if !live_axis_in_window(axis_value, *lower, *upper, 1.0e-12) {
                     return Ok(None);
                 }
                 let value = signal.value(row, signals, reads, params)?;
+                match crossing.as_mut().map(|crossing| crossing.step(value)) {
+                    Some(None) => return Ok(None),
+                    Some(Some(true)) => *selected = None,
+                    _ => {}
+                }
                 let replaces = selected.is_none_or(|(_, selected_value)| {
                     if *is_max {
                         value > selected_value
@@ -4502,6 +4518,7 @@ impl LiveMeasureState {
                 signal,
                 lower,
                 upper,
+                crossing,
                 minimum,
                 maximum,
                 initialized,
@@ -4510,6 +4527,11 @@ impl LiveMeasureState {
                     return Ok(None);
                 }
                 let value = signal.value(row, signals, reads, params)?;
+                match crossing.as_mut().map(|crossing| crossing.step(value)) {
+                    Some(None) => return Ok(None),
+                    Some(Some(true)) => *initialized = false,
+                    _ => {}
+                }
                 if !*initialized {
                     *minimum = value;
                     *maximum = value;

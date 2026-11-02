@@ -406,10 +406,10 @@ impl XyceTestRunner {
             && statement.default_value.is_none()
             && statement.print_policy == MeasurePrintPolicy::All
             && (matches!((&statement.measure_type, role),
-                (MeasureType::Max { signal, from: None, to: None, td: None, output: ExtremaOutput::Value }, Bug440Role::Resistor)
+                (MeasureType::Max { signal, from: None, to: None, td: None, output: ExtremaOutput::Value, crossing: None, rfc_level: None }, Bug440Role::Resistor)
                     if signal == expected_signal)
                 || matches!((&statement.measure_type, role),
-                    (MeasureType::Min { signal, from: None, to: None, td: None, output: ExtremaOutput::Value }, Bug440Role::Behavioral)
+                    (MeasureType::Min { signal, from: None, to: None, td: None, output: ExtremaOutput::Value, crossing: None, rfc_level: None }, Bug440Role::Behavioral)
                         if signal == expected_signal))
     }
 

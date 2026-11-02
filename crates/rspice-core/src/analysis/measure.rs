@@ -74,6 +74,117 @@ struct ExtremaRequest {
     to: Option<Value>,
     output: ExtremaOutput,
     is_max: bool,
+    crossing: Option<RiseFallCrossTracker>,
+}
+
+/// A Xyce RISE, FALL or CROSS window on a MAX, MIN or PP measure, fed the
+/// value at each step of the measure's time window in turn
+/// (Extrema::updateTran, N_IO_MeasureExtrema.C:109-162;
+/// Base::withinRiseFallCrossWindow, N_IO_MeasureBase.C:774-864).
+///
+/// The first step seeds the previous value, so a DC offset is no rise.
+/// Without RFC_LEVEL a rise or fall begins where the signal turns; with it,
+/// where the signal crosses the level, and CROSS always counts crossings of
+/// the level (0 by default). LAST restarts the window at each new one.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct RiseFallCrossTracker {
+    occurrence: EventOccurrence,
+    level: Option<Value>,
+    previous: Option<Value>,
+    rising: bool,
+    falling: bool,
+    rises: isize,
+    falls: isize,
+    crosses: isize,
+}
+
+impl RiseFallCrossTracker {
+    pub(crate) fn of(crossing: Option<EventOccurrence>, level: Option<Value>) -> Option<Self> {
+        crossing.map(|occurrence| Self {
+            occurrence,
+            level,
+            previous: None,
+            rising: false,
+            falling: false,
+            rises: 0,
+            falls: 0,
+            crosses: 0,
+        })
+    }
+
+    /// Whether the step of `value` is in the window: `None` when it is
+    /// not, and `Some(true)` when it opens a new LAST window, which
+    /// discards the steps before it.
+    pub(crate) fn step(&mut self, value: Value) -> Option<bool> {
+        let level = self.level.unwrap_or(0.0);
+        let last = self.previous.replace(value).unwrap_or(value);
+        let (mut new_rise, mut new_fall) = (false, false);
+        if self.level.is_some() {
+            if value - level >= 0.0 && last - level < 0.0 {
+                self.rises += 1;
+                new_rise = true;
+            } else if value - level <= 0.0 && last - level > 0.0 {
+                self.falls += 1;
+                new_fall = true;
+            }
+        } else {
+            if value > last && !self.rising {
+                (self.rising, self.falling) = (true, false);
+                self.rises += 1;
+                new_rise = true;
+            }
+            if value < last && !self.falling {
+                (self.rising, self.falling) = (false, true);
+                self.falls += 1;
+                new_fall = true;
+            }
+        }
+        let new_cross = (value - level <= 0.0 && last - level > 0.0)
+            || (value - level >= 0.0 && last - level < 0.0);
+        if new_cross {
+            self.crosses += 1;
+        }
+        let (count, opened) = match self.occurrence.edge {
+            EdgeType::Rise => (self.rises, new_rise),
+            EdgeType::Fall => (self.falls, new_fall),
+            EdgeType::Cross => (self.crosses, new_cross),
+        };
+        let number = self.occurrence.number;
+        ((number < 0 && count > 0) || number == count).then_some(number < 0 && opened)
+    }
+
+    /// The steps of the window, in order, or why there are none: as Xyce
+    /// reports it, what the signal did in the time window instead.
+    fn select(
+        mut self,
+        samples: impl Iterator<Item = (Value, Value)>,
+    ) -> Result<Vec<(Value, Value)>, String> {
+        let mut window = Vec::new();
+        for (axis, value) in samples {
+            if let Some(restart) = self.step(value) {
+                if restart {
+                    window.clear();
+                }
+                window.push((axis, value));
+            }
+        }
+        if !window.is_empty() {
+            return Ok(window);
+        }
+        let edge = match self.occurrence.edge {
+            EdgeType::Rise => "RISE",
+            EdgeType::Fall => "FALL",
+            EdgeType::Cross => "CROSS",
+        };
+        let requested = match self.occurrence.number {
+            number if number < 0 => edge.to_string(),
+            number => format!("{edge}={number}"),
+        };
+        Err(format!(
+            "no {requested} in the window, which has {} rises, {} falls and {} crossings",
+            self.rises, self.falls, self.crosses
+        ))
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -1136,6 +1247,8 @@ impl MeasureEngine {
                 to,
                 td,
                 output,
+                crossing,
+                rfc_level,
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
@@ -1144,6 +1257,7 @@ impl MeasureEngine {
                     to: *to,
                     output: *output,
                     is_max: false,
+                    crossing: RiseFallCrossTracker::of(*crossing, *rfc_level),
                 },
                 data,
             ),
@@ -1153,6 +1267,8 @@ impl MeasureEngine {
                 to,
                 td,
                 output,
+                crossing,
+                rfc_level,
             } => self.eval_min_max(
                 &measurement.name,
                 signal,
@@ -1161,6 +1277,7 @@ impl MeasureEngine {
                     to: *to,
                     output: *output,
                     is_max: true,
+                    crossing: RiseFallCrossTracker::of(*crossing, *rfc_level),
                 },
                 data,
             ),
@@ -1169,11 +1286,14 @@ impl MeasureEngine {
                 from,
                 to,
                 td,
+                crossing,
+                rfc_level,
             } => self.eval_pp(
                 &measurement.name,
                 signal,
                 delayed_window_start(*from, *td, data.axis),
                 *to,
+                RiseFallCrossTracker::of(*crossing, *rfc_level),
                 data,
             ),
             MeasureType::Avg {
@@ -1635,6 +1755,7 @@ impl MeasureEngine {
             to,
             output,
             is_max,
+            crossing,
         } = request;
         let MeasureData {
             axis: time,
@@ -1654,9 +1775,15 @@ impl MeasureEngine {
             .copied()
             .zip(signal.iter().copied())
             .filter(|&(axis, _)| Self::axis_in_measurement_window(axis, lower, upper));
-        let ends = self.extrema_window_ends(time, signal, lower, upper);
+        let window = match crossing.map(|crossing| crossing.select(samples.clone())) {
+            Some(Ok(window)) => window,
+            Some(Err(absent)) => return MeasureResult::failed(name, &absent),
+            None => samples
+                .chain(self.extrema_window_ends(time, signal, lower, upper))
+                .collect(),
+        };
         let mut selected: Option<(Value, Value)> = None;
-        for (axis, value) in samples.chain(ends) {
+        for (axis, value) in window {
             let replaces = selected.is_none_or(|(_, selected_value)| {
                 if is_max {
                     value > selected_value
@@ -1721,6 +1848,7 @@ impl MeasureEngine {
         signal_name: &str,
         from: Option<Value>,
         to: Option<Value>,
+        crossing: Option<RiseFallCrossTracker>,
         data: MeasureData<'_, '_>,
     ) -> MeasureResult {
         let MeasureData {
@@ -1741,9 +1869,15 @@ impl MeasureEngine {
             .copied()
             .zip(signal.iter().copied())
             .filter(|&(axis, _)| Self::axis_in_measurement_window(axis, lower, upper));
-        let ends = self.extrema_window_ends(time, signal, lower, upper);
+        let window = match crossing.map(|crossing| crossing.select(samples.clone())) {
+            Some(Ok(window)) => window,
+            Some(Err(absent)) => return MeasureResult::failed(name, &absent),
+            None => samples
+                .chain(self.extrema_window_ends(time, signal, lower, upper))
+                .collect(),
+        };
         let mut selected: Option<(Value, Value)> = None;
-        for (_, value) in samples.chain(ends) {
+        for (_, value) in window {
             match &mut selected {
                 None => selected = Some((value, value)),
                 Some((minimum, maximum)) => {
@@ -4338,6 +4472,8 @@ mod tests {
                 from: Some(2.0),
                 to: Some(1.0),
                 output: ExtremaOutput::Value,
+                crossing: None,
+                rfc_level: None,
             },
             analysis: "AC".to_string(),
         };
@@ -4353,6 +4489,8 @@ mod tests {
                 signal: "V(out)".to_string(),
                 from: Some(2.0),
                 to: Some(1.0),
+                crossing: None,
+                rfc_level: None,
             },
             analysis: "AC".to_string(),
         };
@@ -4395,6 +4533,8 @@ mod tests {
                     from: Some(1.0),
                     to: Some(1.5),
                     output: ExtremaOutput::IndependentAxis,
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
             statement(
@@ -4405,6 +4545,8 @@ mod tests {
                     from: Some(1.2),
                     to: Some(2.0),
                     output: ExtremaOutput::Value,
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
             statement(
@@ -4414,6 +4556,8 @@ mod tests {
                     signal: "V(1)".to_string(),
                     from: Some(1.2),
                     to: Some(1.6),
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
             statement(
@@ -4424,6 +4568,8 @@ mod tests {
                     from: Some(1.6),
                     to: Some(1.2),
                     output: ExtremaOutput::Value,
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
         ];
@@ -4473,6 +4619,8 @@ mod tests {
                     to: None,
                     td: Some(1.5),
                     output: ExtremaOutput::Value,
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
             statement(
@@ -4492,6 +4640,8 @@ mod tests {
                     to: None,
                     td: Some(0.5),
                     output: ExtremaOutput::Value,
+                    crossing: None,
+                    rfc_level: None,
                 },
             ),
         ];
@@ -4624,6 +4774,89 @@ mod tests {
     }
 
     #[test]
+    fn xyce_extrema_read_the_steps_of_their_rise_fall_or_cross() {
+        // Over 0 1 2 1 0 1 3 1 0, Xyce's turns give rises at the steps 1
+        // and 5 and falls at 3 and 7 (Base::withinRiseFallCrossWindow,
+        // N_IO_MeasureBase.C:774-864): RISE=1 reads the steps 1-4, LAST
+        // the steps from 5, and FALL=1 the steps 3-6. With RFC_LEVEL=1.5,
+        // CROSS=1 reads step 2 alone and RISE=1 the steps 2-5. RISE=3 never
+        // opens, so the measure fails.
+        use crate::netlist::measure::{EdgeType, EventOccurrence};
+        let crossing = |edge, number| Some(EventOccurrence { edge, number });
+        let statement = |name: &str, measure_type| MeasureStatement {
+            goal: None,
+            tolerance: None,
+            default_value: None,
+            fail_value: None,
+            print_policy: MeasurePrintPolicy::All,
+            name: name.to_string(),
+            measure_type,
+            analysis: "TRAN".to_string(),
+        };
+        let max = |crossing, rfc_level| MeasureType::Max {
+            signal: "V(1)".to_string(),
+            from: None,
+            to: None,
+            td: None,
+            output: ExtremaOutput::Value,
+            crossing,
+            rfc_level,
+        };
+        let statements = [
+            statement("rise1", max(crossing(EdgeType::Rise, 1), None)),
+            statement("last", max(crossing(EdgeType::Rise, -1), None)),
+            statement(
+                "pp_fall1",
+                MeasureType::PeakToPeak {
+                    signal: "V(1)".to_string(),
+                    from: None,
+                    to: None,
+                    td: None,
+                    crossing: crossing(EdgeType::Fall, 1),
+                    rfc_level: None,
+                },
+            ),
+            statement("cross1", max(crossing(EdgeType::Cross, 1), Some(1.5))),
+            statement(
+                "min_rise1",
+                MeasureType::Min {
+                    signal: "V(1)".to_string(),
+                    from: None,
+                    to: None,
+                    td: None,
+                    output: ExtremaOutput::Value,
+                    crossing: crossing(EdgeType::Rise, 1),
+                    rfc_level: Some(1.5),
+                },
+            ),
+            statement("rise3", max(crossing(EdgeType::Rise, 3), None)),
+        ];
+        let axis = [0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0];
+        let values = [0.0, 1.0, 2.0, 1.0, 0.0, 1.0, 3.0, 1.0, 0.0];
+        let mut signals: HashMap<String, &[Value]> = HashMap::new();
+        signals.insert("V(1)".to_string(), &values);
+        let mut engine = MeasureEngine::new();
+        for statement in &statements {
+            engine.add(statement.clone());
+        }
+        let results = engine.evaluate(&axis, &signals);
+        let values = results
+            .iter()
+            .map(|result| result.value)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            values,
+            [Some(2.0), Some(3.0), Some(3.0), Some(2.0), Some(0.0), None]
+        );
+        // As Xyce does, the failure says what the signal did instead: the
+        // two falls to 0 cross it.
+        assert_eq!(
+            results[5].error.as_deref(),
+            Some("no RISE=3 in the window, which has 2 rises, 2 falls and 2 crossings")
+        );
+    }
+
+    #[test]
     fn extrema_independent_axis_output_keeps_first_tie() {
         let statement = MeasureStatement {
             goal: None,
@@ -4638,6 +4871,8 @@ mod tests {
                 from: None,
                 to: None,
                 output: ExtremaOutput::IndependentAxis,
+                crossing: None,
+                rfc_level: None,
             },
             analysis: "AC".to_string(),
         };
@@ -4666,6 +4901,8 @@ mod tests {
                 from: None,
                 to: None,
                 output: ExtremaOutput::Value,
+                crossing: None,
+                rfc_level: None,
             },
             analysis: "TRAN".to_string(),
         }
@@ -5767,6 +6004,8 @@ mod tests {
             from: None,
             to: None,
             output: ExtremaOutput::IndependentAxis,
+            crossing: None,
+            rfc_level: None,
         };
         peak.fail_value = Some(4.0);
         let dependent = MeasureStatement {

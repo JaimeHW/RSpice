@@ -460,6 +460,14 @@ pub enum MeasureType {
         /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
         td: Option<Value>,
         output: ExtremaOutput,
+        /// Xyce `RISE`, `FALL` or `CROSS`: only the steps of that rise, fall
+        /// or crossing count, and `LAST` (-1) reads the last one
+        /// (Base::withinRiseFallCrossWindow, N_IO_MeasureBase.C:774-864).
+        crossing: Option<EventOccurrence>,
+        /// Xyce `RFC_LEVEL`: RISE and FALL count crossings of this level
+        /// instead of turns of the signal, and CROSS counts crossings of it
+        /// instead of 0.
+        rfc_level: Option<Value>,
     },
 
     /// Maximum value over range
@@ -471,6 +479,14 @@ pub enum MeasureType {
         /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
         td: Option<Value>,
         output: ExtremaOutput,
+        /// Xyce `RISE`, `FALL` or `CROSS`: only the steps of that rise, fall
+        /// or crossing count, and `LAST` (-1) reads the last one
+        /// (Base::withinRiseFallCrossWindow, N_IO_MeasureBase.C:774-864).
+        crossing: Option<EventOccurrence>,
+        /// Xyce `RFC_LEVEL`: RISE and FALL count crossings of this level
+        /// instead of turns of the signal, and CROSS counts crossings of it
+        /// instead of 0.
+        rfc_level: Option<Value>,
     },
 
     /// Peak-to-peak (max - min) over range
@@ -481,6 +497,14 @@ pub enum MeasureType {
         /// Xyce `TD`: only the accepted steps at or after this time count,
         /// with no interpolation at the boundary (N_IO_MeasureBase.C:668-677).
         td: Option<Value>,
+        /// Xyce `RISE`, `FALL` or `CROSS`: only the steps of that rise, fall
+        /// or crossing count, and `LAST` (-1) reads the last one
+        /// (Base::withinRiseFallCrossWindow, N_IO_MeasureBase.C:774-864).
+        crossing: Option<EventOccurrence>,
+        /// Xyce `RFC_LEVEL`: RISE and FALL count crossings of this level
+        /// instead of turns of the signal, and CROSS counts crossings of it
+        /// instead of 0.
+        rfc_level: Option<Value>,
     },
 
     /// Average value over range

@@ -7006,15 +7006,29 @@ fn scalar_tran_measurement_admission_rejects_unrepresented_semantics_and_resolve
     runner
         .static_tran_plan_for_deck(&deck)
         .expect("canonical scalar measurement qualifies");
+    // Xyce's MAX, MIN and PP read a RISE, FALL or CROSS window at an
+    // RFC_LEVEL (N_IO_MeasureExtrema.C:138), so these qualify.
+    for measurement in [
+        ".MEASURE TRAN M MAX V(out) RISE=1",
+        ".MEASURE TRAN M MAX V(out) RFC_LEVEL=0.5 RISE=1",
+    ] {
+        fs::write(&deck_path, source_for(measurement, ""))
+            .expect("write extrema window admission deck");
+        runner
+            .static_tran_plan_for_deck(&deck)
+            .unwrap_or_else(|error| panic!("{measurement} must qualify: {error}"));
+    }
+    let error = plan_error(source_for(".MEASURE TRAN M MAX V(out) RFC_LEVEL 0.5", ""));
+    assert!(
+        error.contains("Expected '=' after RFC_LEVEL"),
+        "RFC_LEVEL without '=' produced an unrelated admission error: {error}"
+    );
 
     for measurement in [
         ".MEASURE TRAN M AVG V(out) MYSTERY=1",
         ".MEASURE TRAN M AVG V(out) MYSTERY =1",
         ".MEASURE TRAN M AVG V(out) TOL=1e-3",
-        ".MEASURE TRAN M MAX V(out) RISE=1",
-        ".MEASURE TRAN M MAX V(out) RFC_LEVEL=0.5 RISE=1",
         ".MEASURE TRAN M MAX V(out) FRAC_MAX=0.5",
-        ".MEASURE TRAN M MAX V(out) RFC_LEVEL 0.5",
         ".MEASURE TRAN M MAX V(out) FRAC_MAX 0.5",
         ".MEASURE TRAN M AVG V(out) MINVAL=1e-6",
         ".MEASURE TRAN M AVG V(out) MAX_THRESH 0.5",
@@ -7112,16 +7126,13 @@ R1 out 0 1\n\
 .TRAN 0 1m\n\
 .END\n";
     fs::write(&deck_path, include_source).expect("write included measurement root deck");
-    fs::write(
-        &include_path,
-        ".MEASURE TRAN M MAX V(out) RFC_LEVEL=0.5 RISE=1\n",
-    )
-    .expect("write included unrepresented qualifier");
+    fs::write(&include_path, ".MEASURE TRAN M MAX V(out) FRAC_MAX=0.5\n")
+        .expect("write included unrepresented qualifier");
     assert!(
         runner
             .static_tran_plan_for_deck(&deck)
             .expect_err("included unrepresented qualifier must fail admission")
-            .contains("Unexpected option 'RFC_LEVEL'")
+            .contains("Unexpected option 'FRAC_MAX'")
     );
     fs::write(&include_path, ".MEASURE TRAN M AVG V(out)\n+ V(extra)\n")
         .expect("write included continued extra operand");

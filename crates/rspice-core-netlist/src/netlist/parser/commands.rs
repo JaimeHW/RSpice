@@ -3517,40 +3517,46 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "MAX" | "MAX_AT" => {
-                    let ((from, to, td), mut output) =
-                        parse_measure_extrema_options(stream, line_num, params)?;
+                    let mut options =
+                        parse_measure_extrema_options(stream, line_num, params, true)?;
                     if measure_type_key == "MAX_AT" {
-                        output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
+                        options.output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
                     }
                     MeasureType::Max {
                         signal: signal.clone(),
-                        from,
-                        to,
-                        td,
-                        output,
+                        from: options.from,
+                        to: options.to,
+                        td: options.td,
+                        output: options.output,
+                        crossing: options.crossing,
+                        rfc_level: options.rfc_level,
                     }
                 }
                 "MIN" | "MIN_AT" => {
-                    let ((from, to, td), mut output) =
-                        parse_measure_extrema_options(stream, line_num, params)?;
+                    let mut options =
+                        parse_measure_extrema_options(stream, line_num, params, true)?;
                     if measure_type_key == "MIN_AT" {
-                        output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
+                        options.output = crate::netlist::measure::ExtremaOutput::IndependentAxis;
                     }
                     MeasureType::Min {
                         signal: signal.clone(),
-                        from,
-                        to,
-                        td,
-                        output,
+                        from: options.from,
+                        to: options.to,
+                        td: options.td,
+                        output: options.output,
+                        crossing: options.crossing,
+                        rfc_level: options.rfc_level,
                     }
                 }
                 "PP" => {
-                    let (from, to, td) = parse_measure_range_options(stream, line_num, params)?;
+                    let options = parse_measure_extrema_options(stream, line_num, params, false)?;
                     MeasureType::PeakToPeak {
                         signal: signal.clone(),
-                        from,
-                        to,
-                        td,
+                        from: options.from,
+                        to: options.to,
+                        td: options.td,
+                        crossing: options.crossing,
+                        rfc_level: options.rfc_level,
                     }
                 }
                 "RMS" => {
@@ -5166,17 +5172,32 @@ fn parse_measure_on_off_options(
     Ok(options)
 }
 
+/// The window, output and Xyce RISE/FALL/CROSS window of a `MAX`, `MIN` or
+/// `PP` measure. Xyce reads RISE, FALL, CROSS and RFC_LEVEL on these three
+/// alone (Extrema::updateTran, N_IO_MeasureExtrema.C:109-162).
+struct ExtremaMeasureOptions {
+    from: Option<crate::Value>,
+    to: Option<crate::Value>,
+    td: Option<crate::Value>,
+    output: crate::netlist::measure::ExtremaOutput,
+    crossing: Option<crate::netlist::measure::EventOccurrence>,
+    rfc_level: Option<crate::Value>,
+}
+
 fn parse_measure_extrema_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
-) -> Result<(MeasureRange, crate::netlist::measure::ExtremaOutput), ParseError> {
-    use crate::netlist::measure::ExtremaOutput;
+    allow_output: bool,
+) -> Result<ExtremaMeasureOptions, ParseError> {
+    use crate::netlist::measure::{EdgeType, EventOccurrence, ExtremaOutput};
 
     let mut from = None;
     let mut to = None;
     let mut td = None;
     let mut output = ExtremaOutput::Value;
+    let mut crossing = None;
+    let mut rfc_level = None;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         if consume_meas_statement_qualifier(stream, line_num, params, false)?.is_some() {
             continue;
@@ -5198,8 +5219,12 @@ fn parse_measure_extrema_options(
         if matches!(key.as_str(), "GOAL" | "TOL" | "DEFAULT_VAL") {
             break;
         }
-        if !matches!(key.as_str(), "FROM" | "TO" | "OUTPUT") && !accepts_measure_delay(params, &key)
-        {
+        let known = matches!(
+            key.as_str(),
+            "FROM" | "TO" | "RISE" | "FALL" | "CROSS" | "RFC_LEVEL"
+        ) || (key == "OUTPUT" && allow_output)
+            || accepts_measure_delay(params, &key);
+        if !known {
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: format!("Unexpected option '{key}' after .MEAS extrema operand"),
@@ -5218,16 +5243,41 @@ fn parse_measure_extrema_options(
             if matches!(value.to_ascii_uppercase().as_str(), "TIME" | "FREQ" | "SV") {
                 output = ExtremaOutput::IndependentAxis;
             }
+        } else if matches!(key.as_str(), "RISE" | "FALL" | "CROSS") {
+            if crossing.is_some() {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message:
+                        "Only one RISE, FALL, or CROSS qualifier is allowed on an extrema .MEAS"
+                            .to_string(),
+                });
+            }
+            crossing = Some(EventOccurrence {
+                edge: match key.as_str() {
+                    "RISE" => EdgeType::Rise,
+                    "FALL" => EdgeType::Fall,
+                    _ => EdgeType::Cross,
+                },
+                number: parse_measure_event_occurrence(stream, line_num, params, &key)?,
+            });
         } else {
             let value = expect_measure_value(stream, line_num, params)?;
             match key.as_str() {
                 "FROM" => from = Some(value),
                 "TD" => td = Some(value),
+                "RFC_LEVEL" => rfc_level = Some(value),
                 _ => to = Some(value),
             }
         }
     }
-    Ok(((from, to, td), output))
+    Ok(ExtremaMeasureOptions {
+        from,
+        to,
+        td,
+        output,
+        crossing,
+        rfc_level,
+    })
 }
 
 fn parse_measure_equation_options(
@@ -9470,6 +9520,56 @@ mod tests {
                 (FftMetric::Thd, 0, None, None, Some(3)),
             ]
         );
+    }
+
+    /// Xyce's MAX, MIN and PP take RISE, FALL or CROSS, with LAST, and
+    /// RFC_LEVEL (N_IO_MeasureBase.C:323-372); one of the three at a time,
+    /// and PP has no OUTPUT.
+    #[test]
+    fn xyce_extrema_parse_their_rise_fall_or_cross() {
+        use crate::netlist::measure::{EdgeType, EventOccurrence, MeasureType};
+        let deck = |measure: &str| format!("rfc\nV1 1 0 1\nR1 1 0 1\n.tran 0 1\n{measure}\n.end\n");
+        let window = |measure: &str| {
+            let netlist = Netlist::parse(&deck(measure)).expect("extrema measure parses");
+            match &netlist.measurements[0].measure_type {
+                MeasureType::Max {
+                    crossing,
+                    rfc_level,
+                    ..
+                }
+                | MeasureType::Min {
+                    crossing,
+                    rfc_level,
+                    ..
+                }
+                | MeasureType::PeakToPeak {
+                    crossing,
+                    rfc_level,
+                    ..
+                } => (*crossing, *rfc_level),
+                other => panic!("expected an extrema measure, got {other:?}"),
+            }
+        };
+        let occurrence = |edge, number| Some(EventOccurrence { edge, number });
+        assert_eq!(
+            window(".measure tran a max v(1) fall=2"),
+            (occurrence(EdgeType::Fall, 2), None)
+        );
+        assert_eq!(
+            window(".measure tran a min v(1) rise=last"),
+            (occurrence(EdgeType::Rise, -1), None)
+        );
+        assert_eq!(
+            window(".measure tran a pp v(1) rfc_level=0.5 cross=1"),
+            (occurrence(EdgeType::Cross, 1), Some(0.5))
+        );
+        assert_eq!(window(".measure tran a max v(1)"), (None, None));
+        for refused in [
+            ".measure tran a max v(1) rise=1 fall=1",
+            ".measure tran a pp v(1) output=time",
+        ] {
+            assert!(Netlist::parse(&deck(refused)).is_err(), "{refused}");
+        }
     }
 
     /// Xyce reads `agauss` at its mean outside a sampling analysis (the

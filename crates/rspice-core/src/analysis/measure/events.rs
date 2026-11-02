@@ -761,11 +761,24 @@ impl Evaluation<'_, '_, '_> {
                 td,
             } => self.aggregate(signal, delayed(*from, *td), *to, Aggregate::Integ),
             MeasureType::Min {
+                crossing: Some(_), ..
+            }
+            | MeasureType::Max {
+                crossing: Some(_), ..
+            }
+            | MeasureType::PeakToPeak {
+                crossing: Some(_), ..
+            } => self.shapeless(
+                "RISE, FALL or CROSS",
+                "its window counts turns between accepted analog steps, and an event trace has none",
+            ),
+            MeasureType::Min {
                 signal,
                 from,
                 to,
                 td,
                 output,
+                ..
             } => self.extremum(signal, delayed(*from, *td), *to, *output, false),
             MeasureType::Max {
                 signal,
@@ -773,12 +786,14 @@ impl Evaluation<'_, '_, '_> {
                 to,
                 td,
                 output,
+                ..
             } => self.extremum(signal, delayed(*from, *td), *to, *output, true),
             MeasureType::PeakToPeak {
                 signal,
                 from,
                 to,
                 td,
+                ..
             } => self.peak_to_peak(signal, delayed(*from, *td), *to),
             MeasureType::Derivative { .. } => self.shapeless("DERIV", "a step has no derivative"),
             MeasureType::FftMetric { .. } => self.shapeless(
