@@ -18,12 +18,13 @@ use crate::state::ProjectSourceLanguage;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
-use crate::workbench::app::RSpiceApp;
+use crate::workbench::app_state::{Model, PlatformState};
 use crate::workbench::design_system::inspector::muted_inspector_copy;
 use crate::workbench::documents::code_workspace::{
     self, CodeSourceSearchResults, CodeSourceSearchScope, CodeSourceSearchState,
-    SOURCE_SEARCH_RESULT_LIMIT,
+    CodeWorkspaceRuntimeState, SOURCE_SEARCH_RESULT_LIMIT,
 };
+use crate::workbench::documents::netlist_document::NetlistDocumentState;
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// The scopes a bundle search can run in, in the order the dialog offers them.
@@ -145,135 +146,148 @@ fn find_status(
     (text, DialogHintTone::Neutral)
 }
 
-impl RSpiceApp {
-    pub(crate) fn render_source_find_dialog(&mut self, ctx: &Context) {
-        if self.state.code.code_workspace.source_search.is_none() {
-            crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
-            return;
-        }
-        let _opening_input =
-            crate::ui::input::InputScope::enter(ctx, code_workspace::source_search_query_id());
-        // Read the search once, run it once, and render from that. Re-running
-        // per part would let two parts of one dialog state different counts.
-        let Some(search) = self.state.code.code_workspace.source_search.clone() else {
-            return;
-        };
-        let results = code_workspace::source_search_results(self, &search);
-        let blocked = code_workspace::source_file_mutation_block_reason(self, search.language);
-        let replaceable = blocked.is_none()
-            && code_workspace::source_bundle_document_is_editable(
-                self,
-                search.language,
-                search.bundle_id,
-                &search.active_path,
-            );
-
-        let messages = self.state.workbench.messages();
-        let failure = search
-            .error
-            .clone()
-            .or_else(|| results.as_ref().err().cloned());
-        let found = results.unwrap_or_default();
-        let (status, tone) = find_status(
-            messages,
-            &search,
-            failure.as_deref(),
-            blocked,
-            &found,
-            replaceable,
+/// Draw Find in source while a search is open, over the Code workspace's
+/// runtime state, the netlist editor's state, the model and the platform's
+/// state. Returns `true` when the reader asked to replace every match, which
+/// writes the bundle past these parts: the search stays open for it.
+pub(in crate::workbench) fn render_source_find_dialog(
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    model: &Model,
+    platform: &PlatformState,
+    messages: MessageCatalog,
+    ctx: &Context,
+) -> bool {
+    if code.source_search.is_none() {
+        crate::ui::input::InputScope::discard(ctx, code_workspace::source_search_query_id());
+        return false;
+    }
+    let _opening_input =
+        crate::ui::input::InputScope::enter(ctx, code_workspace::source_search_query_id());
+    // Read the search once, run it once, and render from that. Re-running
+    // per part would let two parts of one dialog state different counts.
+    let Some(search) = code.source_search.clone() else {
+        return false;
+    };
+    let results = code_workspace::source_search_results_in(model, code, netlist, platform, &search);
+    let blocked = code_workspace::source_file_mutation_block_reason_in(
+        model,
+        code,
+        platform,
+        search.language,
+    );
+    let replaceable = blocked.is_none()
+        && code_workspace::source_bundle_document_is_editable_in(
+            model,
+            code,
+            platform,
+            search.language,
+            search.bundle_id,
+            &search.active_path,
         );
-        // A document nothing may be written to is searched, never replaced
-        // in: it has no Replace field and no Replace all, and Close is all
-        // its footer offers.
-        let (title, primary) = if replaceable {
-            (
-                MessageId::NetlistFindTitle,
-                MessageId::NetlistFindReplaceAll,
-            )
-        } else {
-            (MessageId::CodeSearchTitle, MessageId::CommonClose)
-        };
-        let mut dialog = Dialog::new(messages.text(title), messages.text(primary))
-            .description(messages.text(MessageId::CodeSearchDescription))
-            .size(DialogSize::Transaction)
-            // The fields end where the footer's buttons do, not a bar's width in.
-            .overlay_scrollbar()
-            // Enter in the Find field searches as it types; it must never
-            // replace every match.
-            .primary_on_enter(false)
-            .initial_focus(DialogInitialFocus::Control(
-                code_workspace::source_search_query_id(),
-            ))
-            .hint(status)
-            .hint_tone(tone);
-        if replaceable {
-            dialog = dialog
-                .primary_enabled(
-                    failure.is_none() && !search.query.is_empty() && found.editable_matches > 0,
-                )
-                .ghost(messages.text(MessageId::CommonClose));
-        }
 
-        let mut action = FindAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = find_body(ui, &mut self.state, &found, replaceable);
-            Some(code_workspace::source_search_query_id())
-        });
-        let close = match choice {
-            DialogChoice::Primary if replaceable => {
-                action = FindAction::Replace;
-                false
-            }
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => true,
-            DialogChoice::Secondary | DialogChoice::None => false,
-        };
-        self.apply_find_action(action, ctx);
-        if close {
-            self.state.code.code_workspace.source_search = None;
-        }
+    let failure = search
+        .error
+        .clone()
+        .or_else(|| results.as_ref().err().cloned());
+    let found = results.unwrap_or_default();
+    let (status, tone) = find_status(
+        messages,
+        &search,
+        failure.as_deref(),
+        blocked,
+        &found,
+        replaceable,
+    );
+    // A document nothing may be written to is searched, never replaced
+    // in: it has no Replace field and no Replace all, and Close is all
+    // its footer offers.
+    let (title, primary) = if replaceable {
+        (
+            MessageId::NetlistFindTitle,
+            MessageId::NetlistFindReplaceAll,
+        )
+    } else {
+        (MessageId::CodeSearchTitle, MessageId::CommonClose)
+    };
+    let mut dialog = Dialog::new(messages.text(title), messages.text(primary))
+        .description(messages.text(MessageId::CodeSearchDescription))
+        .size(DialogSize::Transaction)
+        // The fields end where the footer's buttons do, not a bar's width in.
+        .overlay_scrollbar()
+        // Enter in the Find field searches as it types; it must never
+        // replace every match.
+        .primary_on_enter(false)
+        .initial_focus(DialogInitialFocus::Control(
+            code_workspace::source_search_query_id(),
+        ))
+        .hint(status)
+        .hint_tone(tone);
+    if replaceable {
+        dialog = dialog
+            .primary_enabled(
+                failure.is_none() && !search.query.is_empty() && found.editable_matches > 0,
+            )
+            .ghost(messages.text(MessageId::CommonClose));
     }
 
-    fn apply_find_action(&mut self, action: FindAction, ctx: &Context) {
-        match action {
-            FindAction::None => {}
-            FindAction::Replace => {
-                if let Err(error) = code_workspace::commit_source_search_replace(self) {
-                    if let Some(search) = self.state.code.code_workspace.source_search.as_mut() {
-                        search.error = Some(error);
-                    } else {
-                        self.state.prompt(error);
-                    }
+    let mut action = FindAction::None;
+    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        action = find_body(ui, code, messages, &found, replaceable);
+        Some(code_workspace::source_search_query_id())
+    });
+    let close = match choice {
+        DialogChoice::Primary if replaceable => {
+            action = FindAction::Replace;
+            false
+        }
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled => true,
+        DialogChoice::Secondary | DialogChoice::None => false,
+    };
+    let replace = apply_find_action(code, action, ctx);
+    if close {
+        code.source_search = None;
+    }
+    replace
+}
+
+/// Apply what the body asked for over the Code workspace's runtime state.
+/// Returns `true` for Replace all, which the shell carries out.
+fn apply_find_action(
+    code: &mut CodeWorkspaceRuntimeState,
+    action: FindAction,
+    ctx: &Context,
+) -> bool {
+    match action {
+        FindAction::None => false,
+        FindAction::Replace => true,
+        // A result row is a document plus an exact line, so following one
+        // has to select that document before revealing the line in it.
+        FindAction::Reveal(logical_path, line) => {
+            let Some(search) = code.source_search.as_ref() else {
+                return false;
+            };
+            let (language, bundle_id) = (search.language, search.bundle_id);
+            match language {
+                ProjectSourceLanguage::VerilogA => {
+                    code.veriloga.selected_file = Some(code_workspace::VerilogAFileSelection {
+                        bundle_id,
+                        logical_path: logical_path.clone(),
+                    });
+                }
+                ProjectSourceLanguage::RSpiceAutomation => {
+                    code.automation.selected_file = Some(logical_path.clone());
                 }
             }
-            // A result row is a document plus an exact line, so following one
-            // has to select that document before revealing the line in it.
-            FindAction::Reveal(logical_path, line) => {
-                let Some(search) = self.state.code.code_workspace.source_search.as_ref() else {
-                    return;
-                };
-                let (language, bundle_id) = (search.language, search.bundle_id);
-                match language {
-                    ProjectSourceLanguage::VerilogA => {
-                        self.state.code.code_workspace.veriloga.selected_file =
-                            Some(code_workspace::VerilogAFileSelection {
-                                bundle_id,
-                                logical_path: logical_path.clone(),
-                            });
-                    }
-                    ProjectSourceLanguage::RSpiceAutomation => {
-                        self.state.code.code_workspace.automation.selected_file =
-                            Some(logical_path.clone());
-                    }
-                }
-                crate::workbench::documents::text_editor_commands::queue_reveal_line(
-                    ctx,
-                    code_workspace::source_editor_id(language, bundle_id, &logical_path),
-                    line,
-                );
-                if let Some(search) = self.state.code.code_workspace.source_search.as_mut() {
-                    search.active_path = logical_path;
-                }
+            crate::workbench::documents::text_editor_commands::queue_reveal_line(
+                ctx,
+                code_workspace::source_editor_id(language, bundle_id, &logical_path),
+                line,
+            );
+            if let Some(search) = code.source_search.as_mut() {
+                search.active_path = logical_path;
             }
+            false
         }
     }
 }
@@ -282,12 +296,12 @@ impl RSpiceApp {
 /// the options under them, and the matches under a rule once there are any.
 fn find_body(
     ui: &mut Ui,
-    state: &mut crate::workbench::app_state::AppState,
+    code: &mut CodeWorkspaceRuntimeState,
+    messages: MessageCatalog,
     found: &CodeSourceSearchResults,
     replaceable: bool,
 ) -> FindAction {
-    let messages = state.workbench.messages();
-    let Some(search) = state.code.code_workspace.source_search.as_mut() else {
+    let Some(search) = code.source_search.as_mut() else {
         return FindAction::None;
     };
     let has_selection = search.selection_char_range.is_some();
@@ -510,6 +524,8 @@ fn results_list(
 mod tests {
     use super::*;
 
+    use crate::workbench::app::RSpiceApp;
+
     use crate::workbench::documents::code_workspace::CodeWorkspacePage;
 
     #[test]
@@ -633,7 +649,7 @@ mod tests {
                     )),
                     ..Default::default()
                 },
-                |ctx| app.render_source_find_dialog(ctx),
+                |ui| app.render_frame_dialogs(ui),
             );
             if let Some(update) = output.platform_output.accesskit_update {
                 nodes.extend(update.nodes);
@@ -732,7 +748,7 @@ mod tests {
                 )),
                 ..Default::default()
             },
-            |ctx| app.render_source_find_dialog(ctx),
+            |ui| app.render_frame_dialogs(ui),
         );
         let Some(update) = output.platform_output.accesskit_update else {
             panic!("the find dialog publishes an accessibility tree");

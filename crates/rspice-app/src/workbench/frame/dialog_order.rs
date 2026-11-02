@@ -271,13 +271,19 @@ pub(in crate::workbench) const DIALOG_ORDER: &[DialogSpec<RSpiceApp, AppState>] 
         key: DialogKey("code.source_document"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_source_document_dialog(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_source_document_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.source_find"),
         modality: Modality::Modeless,
         is_open: None,
-        render: |app, ctx| app.render_source_find_dialog(ctx),
+        render: |app, ctx| {
+            CodeFeature::render_source_find_dialog(&mut features::cx(app), ctx);
+            app.after_contribution();
+        },
     },
     DialogSpec {
         key: DialogKey("code.rename_symbol"),

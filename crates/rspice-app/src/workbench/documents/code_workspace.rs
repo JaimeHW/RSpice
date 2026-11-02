@@ -68,16 +68,19 @@ pub(crate) use source_files::{
     open_source_file_dialog_in_bundle, open_source_history, open_source_workspace_dialog,
     poll_automation_source_import, request_automation_source_import,
     source_bundle_contains_document, source_bundle_document_is_editable,
-    source_document_is_editable, source_file_mutation_block_reason,
+    source_bundle_document_is_editable_in, source_document_is_editable,
+    source_file_mutation_block_reason, source_file_mutation_block_reason_in,
 };
 pub(crate) use source_navigation::{
     SourceIncludeTarget, SourceIndexCache, SourceNavigation, SourceOutlineGroup, builtin_header,
     document_navigation,
 };
+#[cfg(test)]
+pub(crate) use source_search::source_search_results;
 pub(crate) use source_search::{
     CodeSourceSearchResults, SOURCE_SEARCH_RESULT_LIMIT, commit_source_search_replace,
     open_active_source_search, open_source_search, open_source_search_in_bundle,
-    source_search_query_id, source_search_results,
+    source_search_query_id, source_search_results_in,
 };
 pub(crate) use veriloga::{
     PickedSource, SelectedVerilogASource, active_veriloga_file_path, cancel_veriloga_compile,

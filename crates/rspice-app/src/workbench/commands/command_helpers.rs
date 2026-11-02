@@ -5,7 +5,8 @@ use crate::diagnostics::{LogSeverity, LogSource};
 use crate::state::ViewType;
 use crate::workbench::app::dialogs::project::configuration_dialogs::{Leaving, go_on_leaving};
 use crate::workbench::app::dialogs::project::new_project::NewProjectDialogState;
-use crate::workbench::code::commands::{CodeCommand, CodeRequest};
+use crate::workbench::app::dialogs::source_document;
+use crate::workbench::code::commands::{CodeCommand, CodeRequest, SourceDocumentRequest};
 use crate::workbench::documents::code_workspace::persist_global_veriloga_library;
 use crate::workbench::framework::requests::ProjectFileAction;
 use crate::workbench::project::commands::{ProjectRequest, ReservedLibraryRevision};
@@ -460,6 +461,65 @@ pub(in crate::workbench) fn answer_code_request(app: &mut RSpiceApp, request: Co
                     error,
                 );
             }
+        }
+        CodeRequest::ReplaceSourceSearchMatches => {
+            if let Err(error) =
+                crate::workbench::documents::code_workspace::commit_source_search_replace(app)
+            {
+                if let Some(search) = app.state.code.code_workspace.source_search.as_mut() {
+                    search.error = Some(error);
+                } else {
+                    app.state.prompt(error);
+                }
+            }
+        }
+        CodeRequest::SourceDocument(request) => answer_source_document_request(app, request),
+    }
+}
+
+/// Carry out what a source document dialog handed over: create the
+/// Automation workspace its draft describes or the top deck its creation
+/// form drafted, or a lifecycle choice on the document it manages, then the
+/// close the same frame asked for.
+// Interim: each answer is the body the dialog ran in place, until the code
+// feature carries it out over its own parts.
+fn answer_source_document_request(app: &mut RSpiceApp, request: SourceDocumentRequest) {
+    match request {
+        SourceDocumentRequest::CreateWorkspace => {
+            match crate::workbench::documents::code_workspace::commit_source_workspace_dialog(app) {
+                Ok(message) => {
+                    app.state
+                        .record(LogSeverity::Info, LogSource::Studio, message);
+                }
+                Err(error) => {
+                    if let Some(state) = app
+                        .state
+                        .code
+                        .code_workspace
+                        .source_workspace_dialog
+                        .as_mut()
+                    {
+                        state.error = Some(error);
+                    }
+                }
+            }
+        }
+        SourceDocumentRequest::Document {
+            action,
+            language,
+            logical_path,
+            close,
+        } => {
+            app.apply_lifecycle_action(action, language, &logical_path);
+            if close {
+                source_document::close_document_lifecycle(&mut app.state.code.code_workspace);
+            }
+        }
+        SourceDocumentRequest::Netlist { action, close } => {
+            source_document::apply_netlist_lifecycle_action(&mut app.state, action, close);
+        }
+        SourceDocumentRequest::CreateTopDeck => {
+            source_document::commit_new_top_deck(&mut app.state);
         }
     }
 }

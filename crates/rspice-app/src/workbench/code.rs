@@ -14,7 +14,7 @@ use crate::workbench::app::dialogs::library::new_veriloga_device::{
     self, new_veriloga_device_available_in, open_new_veriloga_device_form_in,
 };
 use crate::workbench::app::dialogs::library::veriloga_import;
-use crate::workbench::app::dialogs::veriloga_build_settings;
+use crate::workbench::app::dialogs::{source_document, source_find, veriloga_build_settings};
 use crate::workbench::app::{
     source_document_dialog_is_available, veriloga_build_settings_available,
 };
@@ -403,6 +403,41 @@ impl CodeFeature {
             ctx,
         ) {
             cx.wb.outbox.push(CodeRequest::ReplaceVerilogASource);
+        }
+    }
+
+    /// The source document dialogs: the Automation workspace's draft, else
+    /// the lifecycle of the document on the page in front.
+    pub(in crate::workbench) fn render_source_document_dialog(
+        cx: &mut Cx<'_, Self>,
+        ctx: &Context,
+    ) {
+        let code = &mut *cx.state;
+        if let Some(request) = source_document::render_source_document_dialog(
+            &mut code.code_workspace,
+            &mut code.netlist,
+            cx.model,
+            cx.wb,
+            cx.platform,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::SourceDocument(request));
+        }
+    }
+
+    /// Find in source.
+    pub(in crate::workbench) fn render_source_find_dialog(cx: &mut Cx<'_, Self>, ctx: &Context) {
+        let messages = cx.wb.messages();
+        let code = &mut *cx.state;
+        if source_find::render_source_find_dialog(
+            &mut code.code_workspace,
+            &code.netlist,
+            cx.model,
+            cx.platform,
+            messages,
+            ctx,
+        ) {
+            cx.wb.outbox.push(CodeRequest::ReplaceSourceSearchMatches);
         }
     }
 }

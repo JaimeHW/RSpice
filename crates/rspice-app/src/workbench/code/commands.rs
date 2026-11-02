@@ -16,10 +16,12 @@ use crate::io::NetlistFormat;
 use crate::state::command_catalog::{
     CommandKey, CommandPlatform, ShortcutBinding, ShortcutChord, ShortcutContext, ShortcutKind,
 };
+use crate::state::{ProjectSourceLanguage, ProjectSourceRole};
 use crate::workbench::framework::command_registry::{CommandFlags, CommandOwner, CommandSpec, ids};
 use crate::workbench::framework::requests::{
     Drain, EditorViewCommand, Request, SourceEditorRequest, StructuralCommand,
 };
+use rspice_app_workbench::workbench::documents::CodeSourceFileAction;
 
 /// One command of the code feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -88,11 +90,13 @@ pub(crate) enum CodeCommand {
 /// the module it compiles; and, from the feature's dialogs, creating the
 /// device New Verilog-A device drafted, importing the cells Import
 /// Verilog-A planned, replacing the source Replace source from file
-/// confirmed, and saving Build settings, then compiling when the reader
-/// asked for both. Each command or dialog step that raises one raises one.
-/// Taken straight after the call that raised it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) enum CodeRequest {
+/// confirmed, saving Build settings, then compiling when the reader asked
+/// for both, replacing every match Find in source found, and the source
+/// document dialogs' choices that write the project's sources. Each command
+/// or dialog step that raises one raises one. Taken straight after the call
+/// that raised it.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workbench) enum CodeRequest {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
@@ -115,10 +119,79 @@ pub(crate) enum CodeRequest {
     ImportVerilogACells,
     ReplaceVerilogASource,
     SaveVerilogABuildSettings { compile: bool },
+    ReplaceSourceSearchMatches,
+    SourceDocument(SourceDocumentRequest),
 }
 
 impl Request for CodeRequest {
     const DRAIN: Drain = Drain::AfterContribution;
+}
+
+/// What a choice in the source document dialogs still needs of the whole
+/// application, which the shell carries out as the dialog's step returns.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workbench) enum SourceDocumentRequest {
+    /// Create the Automation workspace the draft describes.
+    CreateWorkspace,
+    /// A lifecycle choice on the Verilog-A or Automation document at
+    /// `logical_path`, then the dialog's close when the same frame closed it.
+    Document {
+        action: LifecycleAction,
+        language: ProjectSourceLanguage,
+        logical_path: String,
+        close: bool,
+    },
+    /// A lifecycle choice on the netlist page's deck or include, then the
+    /// dialog's close when the same frame closed it.
+    Netlist {
+        action: NetlistLifecycleAction,
+        close: bool,
+    },
+    /// Create the top deck the creation form drafted on a project that owns
+    /// no deck, then close the dialog once the deck is made.
+    CreateTopDeck,
+}
+
+/// What the source document dialog's body asked for of a Verilog-A or
+/// Automation document, applied after rendering so a transaction never
+/// mutates the project while its own rows are still on screen.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workbench) enum LifecycleAction {
+    None,
+    Begin(CodeSourceFileAction),
+    Commit,
+    Cancel,
+    OpenHistory,
+    SelectRevision(u64),
+    Restore,
+    CloseHistory,
+    Import,
+    /// Replace this Verilog-A file's content from a picked file, through the
+    /// import transaction's own confirmation. File > Import never does it.
+    ReplaceFromFile,
+    AssignRole(Option<ProjectSourceRole>),
+}
+
+/// What the source document dialog's body asked for of the netlist page's
+/// deck or include, applied the same way.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(in crate::workbench) enum NetlistLifecycleAction {
+    None,
+    Begin(CodeSourceFileAction),
+    Commit,
+    Cancel,
+    SelectDeck(uuid::Uuid),
+    OpenHistory,
+    CopyIncludeOwnership,
+    ReleaseIncludeOwnership,
+    BeginInclude(CodeSourceFileAction),
+    CommitInclude,
+    CancelInclude,
+    SaveSourceAs,
+    /// The whole ordered include search chain, as the rows now read it. The
+    /// list is applied as one value so add, remove and reorder cannot each
+    /// invent their own idea of the order.
+    SetIncludeSearchPaths(Vec<std::path::PathBuf>),
 }
 
 const ALL: &[CommandPlatform] = &CommandPlatform::ALL;

@@ -102,7 +102,7 @@ fn source_editor_handoff(language: ProjectSourceLanguage, preceding: &str) {
             |ui| {
                 app.handle_shortcuts(ui);
                 crate::workbench::surfaces::show(ui, &mut app);
-                app.render_source_find_dialog(ui);
+                app.render_frame_dialogs(ui);
             },
         );
     };

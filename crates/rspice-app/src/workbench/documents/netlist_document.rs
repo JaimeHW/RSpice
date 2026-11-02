@@ -762,12 +762,18 @@ pub(crate) fn active_dependency_in<'a>(
 /// project and is therefore an editable project document.
 #[must_use]
 pub fn active_dependency_is_owned(state: &AppState) -> bool {
-    let Some(identity) = state.code.netlist.active_dependency_identity.as_deref() else {
+    active_dependency_is_owned_in(&state.model, &state.code.netlist)
+}
+
+/// [`active_dependency_is_owned`], over the model and the netlist editor's
+/// state.
+#[must_use]
+pub(crate) fn active_dependency_is_owned_in(model: &Model, netlist: &NetlistDocumentState) -> bool {
+    let Some(identity) = netlist.active_dependency_identity.as_deref() else {
         return false;
     };
-    state.code.netlist.active_dependency_root == Some(ActiveNetlistDocument::OwnedSource)
-        && state
-            .model
+    netlist.active_dependency_root == Some(ActiveNetlistDocument::OwnedSource)
+        && model
             .workspace
             .content
             .netlist_descriptor

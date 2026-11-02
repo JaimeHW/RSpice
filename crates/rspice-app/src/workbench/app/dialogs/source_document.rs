@@ -26,6 +26,9 @@ use crate::ui::widgets::{
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::{AppState, Model, PlatformState};
+use crate::workbench::code::commands::{
+    LifecycleAction, NetlistLifecycleAction, SourceDocumentRequest,
+};
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
     PANEL_INSET, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
@@ -36,7 +39,7 @@ use crate::workbench::documents::code_workspace::{
     self, CodeSourceFileAction, CodeWorkspaceRuntimeState,
 };
 use crate::workbench::documents::netlist_document::{self, NetlistDocumentState};
-use crate::workbench::state::Workspace;
+use crate::workbench::state::{WorkbenchSession, Workspace};
 use crate::workbench::{MessageCatalog, MessageId};
 
 /// Side of a leading problem mark on an include row, and the advance from its
@@ -184,33 +187,23 @@ struct NetlistLifecycleFacts {
     include_owned: bool,
 }
 
-fn netlist_lifecycle_facts(app: &RSpiceApp) -> Option<NetlistLifecycleFacts> {
-    let descriptor = app
-        .state
-        .model
-        .workspace
-        .content
-        .netlist_descriptor
-        .as_ref();
-    let document = app.state.model.workspace.content.netlist_document.as_ref();
+fn netlist_lifecycle_facts(
+    model: &Model,
+    netlist: &NetlistDocumentState,
+) -> Option<NetlistLifecycleFacts> {
+    let descriptor = model.workspace.content.netlist_descriptor.as_ref();
+    let document = model.workspace.content.netlist_document.as_ref();
     if descriptor.is_some() != document.is_some() {
         return None;
     }
     let mut decks = Vec::with_capacity(
-        app.state
-            .model
-            .workspace
-            .content
-            .retained_netlist_decks
-            .len()
-            + usize::from(descriptor.is_some()),
+        model.workspace.content.retained_netlist_decks.len() + usize::from(descriptor.is_some()),
     );
     if let Some(descriptor) = descriptor {
         decks.push((descriptor.deck_id, descriptor.artifact_name.clone()));
     }
     decks.extend(
-        app.state
-            .model
+        model
             .workspace
             .content
             .retained_netlist_decks
@@ -227,12 +220,10 @@ fn netlist_lifecycle_facts(app: &RSpiceApp) -> Option<NetlistLifecycleFacts> {
             .to_ascii_lowercase()
             .cmp(&right.1.to_ascii_lowercase())
     });
-    let active_dependency =
-        crate::workbench::documents::netlist_document::active_dependency(&app.state);
+    let active_dependency = netlist_document::active_dependency_in(model, netlist);
     let native_path = active_dependency.map_or_else(
         || {
-            app.state
-                .model
+            model
                 .workspace
                 .content
                 .netlist_source_path
@@ -242,7 +233,7 @@ fn netlist_lifecycle_facts(app: &RSpiceApp) -> Option<NetlistLifecycleFacts> {
         |dependency| dependency.locator().native_origin().map(str::to_owned),
     );
     let include_owned = active_dependency.is_some()
-        && crate::workbench::documents::netlist_document::active_dependency_is_owned(&app.state);
+        && netlist_document::active_dependency_is_owned_in(model, netlist);
     let root_path = descriptor.map_or_else(
         || "No top deck".to_owned(),
         |descriptor| descriptor.artifact_name.clone(),
@@ -305,14 +296,16 @@ fn line_ending_summary(content: &str) -> MessageId {
     }
 }
 
-fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentFacts> {
-    let language = visible_language(&app.state)?;
-    let logical_path = code_workspace::active_bundle_path(
-        &app.state.model.workspace,
-        &app.state.code.code_workspace,
-        language,
-    )?;
-    let bundle = app.state.model.workspace.active_source_bundle(language)?;
+fn document_facts(
+    workspace: Workspace,
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    messages: MessageCatalog,
+) -> Option<DocumentFacts> {
+    let language = visible_language_in(workspace, model, code)?;
+    let logical_path = code_workspace::active_bundle_path(&model.workspace, code, language)?;
+    let bundle = model.workspace.active_source_bundle(language)?;
     let content = bundle.file_content(&logical_path).unwrap_or_default();
     let history = bundle
         .revision_history()
@@ -334,8 +327,10 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
             == Some(crate::state::ProjectSourceRole::AutomationEntry),
         is_environment_lock: bundle.role_for_path(&logical_path)
             == Some(crate::state::ProjectSourceRole::AutomationEnvironmentLock),
-        editable: code_workspace::source_bundle_document_is_editable(
-            app,
+        editable: code_workspace::source_bundle_document_is_editable_in(
+            model,
+            code,
+            platform,
             language,
             bundle.id(),
             &logical_path,
@@ -349,7 +344,9 @@ fn document_facts(app: &RSpiceApp, messages: MessageCatalog) -> Option<DocumentF
         imports: dependency_paths(bundle, &logical_path, true),
         imported_by: dependency_paths(bundle, &logical_path, false),
         history,
-        block_reason: code_workspace::source_file_mutation_block_reason(app, language),
+        block_reason: code_workspace::source_file_mutation_block_reason_in(
+            model, code, platform, language,
+        ),
         logical_path,
     })
 }
@@ -375,43 +372,6 @@ fn dependency_paths(
                 .then(|| other.to_owned())
         })
         .collect()
-}
-
-/// What the body asked for, applied after rendering so a transaction never
-/// mutates the project while its own rows are still on screen.
-enum LifecycleAction {
-    None,
-    Begin(CodeSourceFileAction),
-    Commit,
-    Cancel,
-    OpenHistory,
-    SelectRevision(u64),
-    Restore,
-    CloseHistory,
-    Import,
-    /// Replace this Verilog-A file's content from a picked file, through the
-    /// import transaction's own confirmation. File > Import never does it.
-    ReplaceFromFile,
-    AssignRole(Option<crate::state::ProjectSourceRole>),
-}
-
-enum NetlistLifecycleAction {
-    None,
-    Begin(CodeSourceFileAction),
-    Commit,
-    Cancel,
-    SelectDeck(uuid::Uuid),
-    OpenHistory,
-    CopyIncludeOwnership,
-    ReleaseIncludeOwnership,
-    BeginInclude(CodeSourceFileAction),
-    CommitInclude,
-    CancelInclude,
-    SaveSourceAs,
-    /// The whole ordered include search chain, as the rows now read it. The
-    /// list is applied as one value so add, remove and reorder cannot each
-    /// invent their own idea of the order.
-    SetIncludeSearchPaths(Vec<std::path::PathBuf>),
 }
 
 /// Which section states a failure, chosen by the action that caused it.
@@ -459,89 +419,143 @@ fn role_label(messages: MessageCatalog, role: Option<crate::state::ProjectSource
     )
 }
 
-impl RSpiceApp {
-    pub(in crate::workbench) fn render_source_document_dialog(&mut self, ctx: &Context) {
-        if self
-            .state
-            .code
-            .code_workspace
-            .source_workspace_dialog
-            .is_some()
-        {
-            self.render_source_workspace_dialog(ctx);
-            return;
-        }
-        if !self.state.code.code_workspace.source_document_dialog {
-            return;
-        }
-        if visible_language(&self.state).is_none() {
-            self.render_netlist_source_document_dialog(ctx);
-            return;
-        }
-        let messages = self.state.workbench.messages();
-        let Some(facts) = document_facts(self, messages) else {
-            // The bundle or the page went away underneath an open dialog.
-            self.state.code.code_workspace.source_document_dialog = false;
-            return;
-        };
+/// Close the document lifecycle dialog and the drafts it opened.
+pub(in crate::workbench) fn close_document_lifecycle(code: &mut CodeWorkspaceRuntimeState) {
+    code.source_document_dialog = false;
+    code.source_file_dialog = None;
+    code.source_history = None;
+}
 
-        let mut dialog = Dialog::new(
-            messages.text(MessageId::CodeSourceLifecycleTitle),
-            messages.text(MessageId::CommonClose),
-        )
-        .description(messages.format(
-            MessageId::CodeSourceLifecycleDescription,
-            &[("document", &facts.leaf)],
-        ))
-        .size(DialogSize::SimulationWorkflow)
-        .flush_body()
-        .overlay_scrollbar()
-        .primary_on_enter(false)
-        .initial_focus(DialogInitialFocus::BodyControl);
-        if let Some(reason) = facts.block_reason {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                messages.text(MessageId::CodeSourceOperationsHeld),
-                reason,
-            );
-        } else if !facts.editable {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                messages.text(MessageId::CodeSourceReadOnlyDocument),
-                messages.text(MessageId::CodeSourceReadOnlyDocumentDetail),
-            );
-        }
+/// Close the netlist lifecycle dialog and the transactions it opened.
+fn close_netlist_lifecycle(
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &mut NetlistDocumentState,
+) {
+    code.source_document_dialog = false;
+    netlist.lifecycle_dialog.transaction = None;
+    netlist.lifecycle_dialog.include_transaction = None;
+}
 
-        let mut action = LifecycleAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = lifecycle_body(ui, &mut self.state, &facts, messages);
-            None
-        });
-        self.apply_lifecycle_action(action, &facts);
-        if matches!(
-            choice,
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
-        ) {
-            self.state.code.code_workspace.source_document_dialog = false;
-            self.state.code.code_workspace.source_file_dialog = None;
-            self.state.code.code_workspace.source_history = None;
-        }
+/// Draw the source document dialogs over the Code workspace's runtime state,
+/// the netlist editor's state, the model, the workbench session and the
+/// platform's state: the Automation workspace's draft while one is open, else
+/// the lifecycle of the document on the page in front. What a choice still
+/// needs of the whole application is returned for the shell to carry out.
+pub(in crate::workbench) fn render_source_document_dialog(
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &mut NetlistDocumentState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    platform: &PlatformState,
+    ctx: &Context,
+) -> Option<SourceDocumentRequest> {
+    if code.source_workspace_dialog.is_some() {
+        return render_source_workspace_dialog(code, wb.messages(), ctx);
+    }
+    if !code.source_document_dialog {
+        return None;
+    }
+    if visible_language_in(wb.workspace, model, code).is_none() {
+        return render_netlist_source_document_dialog(code, netlist, model, wb, ctx);
+    }
+    let messages = wb.messages();
+    let Some(facts) = document_facts(wb.workspace, model, code, platform, messages) else {
+        // The bundle or the page went away underneath an open dialog.
+        code.source_document_dialog = false;
+        return None;
+    };
+
+    let mut dialog = Dialog::new(
+        messages.text(MessageId::CodeSourceLifecycleTitle),
+        messages.text(MessageId::CommonClose),
+    )
+    .description(messages.format(
+        MessageId::CodeSourceLifecycleDescription,
+        &[("document", &facts.leaf)],
+    ))
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    .overlay_scrollbar()
+    .primary_on_enter(false)
+    .initial_focus(DialogInitialFocus::BodyControl);
+    if let Some(reason) = facts.block_reason {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Progress,
+            messages.text(MessageId::CodeSourceOperationsHeld),
+            reason,
+        );
+    } else if !facts.editable {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Progress,
+            messages.text(MessageId::CodeSourceReadOnlyDocument),
+            messages.text(MessageId::CodeSourceReadOnlyDocumentDetail),
+        );
     }
 
-    fn apply_lifecycle_action(&mut self, action: LifecycleAction, facts: &DocumentFacts) {
+    let mut action = LifecycleAction::None;
+    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        action = lifecycle_body(ui, code, &facts, messages);
+        None
+    });
+    let close = matches!(
+        choice,
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
+    );
+    match action {
+        LifecycleAction::None => {}
+        LifecycleAction::Cancel => code.source_file_dialog = None,
+        LifecycleAction::SelectRevision(revision) => {
+            if let Some(history) = code.source_history.as_mut() {
+                history.selected_revision = Some(revision);
+                history.error = None;
+            }
+        }
+        LifecycleAction::CloseHistory => code.source_history = None,
+        // The rest write the project's sources, so the shell carries them
+        // out, and then the close this frame asked for.
+        action => {
+            return Some(SourceDocumentRequest::Document {
+                action,
+                language: facts.language,
+                logical_path: facts.logical_path,
+                close,
+            });
+        }
+    }
+    if close {
+        close_document_lifecycle(code);
+    }
+    None
+}
+
+impl RSpiceApp {
+    /// Carry out a lifecycle choice on the Verilog-A or Automation document at
+    /// `logical_path` that the dialog handed the shell.
+    pub(in crate::workbench) fn apply_lifecycle_action(
+        &mut self,
+        action: LifecycleAction,
+        language: ProjectSourceLanguage,
+        logical_path: &str,
+    ) {
         // Where a failure is stated is part of the action, not a guess made
         // afterwards: a rejected rename belongs beside the path field, and a
         // rejected restore beside the revision list. Deciding by whichever
         // draft happens to be open would put one inside the other's section.
         let (outcome, report) = match action {
-            LifecycleAction::None => return,
+            // Nothing to carry out, or a choice the form applies over the Code
+            // workspace's own state (Cancel, SelectRevision, CloseHistory):
+            // the form never hands these over.
+            LifecycleAction::None
+            | LifecycleAction::Cancel
+            | LifecycleAction::SelectRevision(_)
+            | LifecycleAction::CloseHistory => return,
             LifecycleAction::Begin(file_action) => (
                 code_workspace::open_source_file_dialog(
                     self,
-                    facts.language,
+                    language,
                     file_action,
-                    &facts.logical_path,
-                    &facts.logical_path,
+                    logical_path,
+                    logical_path,
                 ),
                 Report::Console,
             ),
@@ -549,36 +563,21 @@ impl RSpiceApp {
                 code_workspace::commit_source_file_dialog(self).map(|_| ()),
                 Report::FileTransaction,
             ),
-            LifecycleAction::Cancel => {
-                self.state.code.code_workspace.source_file_dialog = None;
-                return;
-            }
             LifecycleAction::OpenHistory => (
-                code_workspace::open_source_history(self, facts.language, &facts.logical_path),
+                code_workspace::open_source_history(self, language, logical_path),
                 Report::Console,
             ),
-            LifecycleAction::SelectRevision(revision) => {
-                if let Some(history) = self.state.code.code_workspace.source_history.as_mut() {
-                    history.selected_revision = Some(revision);
-                    history.error = None;
-                }
-                return;
-            }
             LifecycleAction::Restore => (
                 code_workspace::commit_source_history_restore(self).map(|_| ()),
                 Report::History,
             ),
-            LifecycleAction::CloseHistory => {
-                self.state.code.code_workspace.source_history = None;
-                return;
-            }
             LifecycleAction::Import => (
-                code_workspace::request_automation_source_import(self, &facts.logical_path),
+                code_workspace::request_automation_source_import(self, logical_path),
                 Report::Console,
             ),
             LifecycleAction::ReplaceFromFile => {
                 let outcome =
-                    code_workspace::request_veriloga_source_replacement(self, &facts.logical_path);
+                    code_workspace::request_veriloga_source_replacement(self, logical_path);
                 if outcome.is_ok() {
                     // The picker and then the replacement's own confirmation
                     // take over; this dialog would only sit behind them.
@@ -587,8 +586,7 @@ impl RSpiceApp {
                 (outcome, Report::Console)
             }
             LifecycleAction::AssignRole(role) => (
-                code_workspace::assign_automation_source_role(self, &facts.logical_path, role)
-                    .map(|_| ()),
+                code_workspace::assign_automation_source_role(self, logical_path, role).map(|_| ()),
                 Report::Console,
             ),
         };
@@ -619,331 +617,310 @@ impl RSpiceApp {
                 .record(LogSeverity::Error, LogSource::Studio, error);
         }
     }
+}
 
-    fn render_netlist_source_document_dialog(&mut self, ctx: &Context) {
-        let messages = self.state.workbench.messages();
-        let Some(facts) = netlist_lifecycle_facts(self) else {
-            self.state.code.code_workspace.source_document_dialog = false;
-            self.state.code.netlist.lifecycle_dialog.transaction = None;
-            self.state.code.netlist.lifecycle_dialog.include_transaction = None;
-            return;
-        };
-        if facts.decks.is_empty() && facts.include_identity.is_none() {
-            render_new_top_deck_form(&mut self.state, ctx, messages);
-            return;
-        }
-        let mut dialog = Dialog::new(
-            messages.text(MessageId::CodeSourceLifecycleTitle),
-            messages.text(MessageId::CommonClose),
-        )
-        .description(messages.format(
-            MessageId::CodeSourceLifecycleDescription,
-            &[("document", &facts.logical_path)],
-        ))
-        .size(DialogSize::SimulationWorkflow)
-        .flush_body()
-        // The rows fit at every desktop size; a bar would only reserve a
-        // gutter that left the right edge wider than the left.
-        .overlay_scrollbar()
-        .primary_on_enter(false)
-        .initial_focus(DialogInitialFocus::BodyControl);
-        if let Some(reason) = facts.operations_blocked.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Progress,
-                messages.text(MessageId::CodeSourceOperationsHeld),
-                reason,
-            );
-        }
-
-        let mut action = NetlistLifecycleAction::None;
-        let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
-            action = netlist_lifecycle_body(ui, &mut self.state, &facts, messages);
-            None
-        });
-        match action {
-            NetlistLifecycleAction::None => {}
-            NetlistLifecycleAction::Begin(file_action) => {
-                if let Err(error) =
-                    crate::workbench::documents::netlist_document::begin_netlist_lifecycle_action(
-                        &mut self.state,
-                        file_action,
-                    )
-                {
-                    self.state.prompt(error);
-                }
-            }
-            NetlistLifecycleAction::Commit => {
-                match crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-                    &mut self.state,
-                ) {
-                    Ok(message) => {
-                        self.state
-                            .record(LogSeverity::Info, LogSource::Studio, message);
-                    }
-                    Err(error) => {
-                        if let Some(transaction) =
-                            self.state.code.netlist.lifecycle_dialog.transaction.as_mut()
-                        {
-                            transaction.error = Some(error);
-                        } else {
-                            self.state
-                                .record(LogSeverity::Error, LogSource::Studio, error);
-                        }
-                    }
-                }
-            }
-            NetlistLifecycleAction::Cancel => {
-                self.state.code.netlist.lifecycle_dialog.transaction = None;
-            }
-            NetlistLifecycleAction::SelectDeck(deck_id) => {
-                if let Err(error) =
-                    crate::workbench::documents::netlist_document::select_retained_top_deck(
-                        &mut self.state,
-                        deck_id,
-                    )
-                {
-                    self.state.prompt(error);
-                }
-            }
-            NetlistLifecycleAction::OpenHistory => {
-                self.state.code.netlist.comparison_dialog.open = true;
-                self.state
-                    .code
-                    .netlist
-                    .comparison_dialog
-                    .selected_history_index = facts.history_count.saturating_sub(1);
-                self.state.code.code_workspace.source_document_dialog = false;
-            }
-            NetlistLifecycleAction::CopyIncludeOwnership => {
-                match crate::workbench::documents::netlist_document::copy_active_dependency_to_project(
-                    &mut self.state,
-                ) {
-                    Ok(_) => {
-                        self.state.record(
-                            LogSeverity::Info,
-                            LogSource::Studio,
-                            messages.text(MessageId::NetlistCopySucceeded),
-                        );
-                    }
-                    Err(error) => {
-                        self.state
-                            .record(LogSeverity::Error, LogSource::Studio, error);
-                    }
-                }
-            }
-            NetlistLifecycleAction::ReleaseIncludeOwnership => {
-                match crate::workbench::documents::netlist_document::release_active_dependency_from_project(
-                    &mut self.state,
-                ) {
-                    Ok(()) => {
-                        self.state.record(
-                            LogSeverity::Info,
-                            LogSource::Studio,
-                            messages.text(MessageId::NetlistReleaseSucceeded),
-                        );
-                    }
-                    Err(error) => {
-                        self.state
-                            .record(LogSeverity::Error, LogSource::Studio, error);
-                    }
-                }
-            }
-            NetlistLifecycleAction::BeginInclude(file_action) => {
-                if let Err(error) = crate::workbench::documents::netlist_document::begin_owned_include_lifecycle_action(
-                    &mut self.state,
-                    file_action,
-                ) {
-                    self.state.prompt(error);
-                }
-            }
-            NetlistLifecycleAction::CommitInclude => {
-                match crate::workbench::documents::netlist_document::commit_owned_include_lifecycle_action(
-                    &mut self.state,
-                ) {
-                    Ok(message) => {
-                        self.state
-                            .record(LogSeverity::Info, LogSource::Studio, message);
-                    }
-                    Err(error) => {
-                        if let Some(transaction) = self
-                            .state
-                            .code
-                            .netlist
-                            .lifecycle_dialog
-                            .include_transaction
-                            .as_mut()
-                        {
-                            transaction.error = Some(error);
-                        }
-                    }
-                }
-            }
-            NetlistLifecycleAction::CancelInclude => {
-                self.state.code.netlist.lifecycle_dialog.include_transaction = None;
-            }
-            NetlistLifecycleAction::SaveSourceAs => {
-                crate::workbench::documents::netlist_document::open_netlist_save_dialog(
-                    &mut self.state,
-                    true,
-                );
-                self.state.code.code_workspace.source_document_dialog = false;
-            }
-            NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
-                if let Err(error) = self
-                    .state
-                    .model
-                    .workspace
-                    .content.project
-                    .set_include_search_paths(paths)
-                    .map_err(|error| error.to_string())
-                {
-                    self.state.prompt(error);
-                } else {
-                    self.state.model.workspace.content.project_metadata_dirty = true;
-                    // The chain decides which file every relative include
-                    // resolves to, so the deck's diagnostics are no longer
-                    // evidence about the chain that is now in force.
-                    self.state.model.invalidate_source_evidence();
-                }
-            }
-        }
-        if matches!(
-            choice,
-            DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
-        ) {
-            self.state.code.code_workspace.source_document_dialog = false;
-            self.state.code.netlist.lifecycle_dialog.transaction = None;
-            self.state.code.netlist.lifecycle_dialog.include_transaction = None;
-        }
+fn render_netlist_source_document_dialog(
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &mut NetlistDocumentState,
+    model: &mut Model,
+    wb: &mut WorkbenchSession,
+    ctx: &Context,
+) -> Option<SourceDocumentRequest> {
+    let messages = wb.messages();
+    let Some(facts) = netlist_lifecycle_facts(model, netlist) else {
+        close_netlist_lifecycle(code, netlist);
+        return None;
+    };
+    if facts.decks.is_empty() && facts.include_identity.is_none() {
+        return render_new_top_deck_form(code, netlist, ctx, messages);
+    }
+    let mut dialog = Dialog::new(
+        messages.text(MessageId::CodeSourceLifecycleTitle),
+        messages.text(MessageId::CommonClose),
+    )
+    .description(messages.format(
+        MessageId::CodeSourceLifecycleDescription,
+        &[("document", &facts.logical_path)],
+    ))
+    .size(DialogSize::SimulationWorkflow)
+    .flush_body()
+    // The rows fit at every desktop size; a bar would only reserve a
+    // gutter that left the right edge wider than the left.
+    .overlay_scrollbar()
+    .primary_on_enter(false)
+    .initial_focus(DialogInitialFocus::BodyControl);
+    if let Some(reason) = facts.operations_blocked.as_deref() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Progress,
+            messages.text(MessageId::CodeSourceOperationsHeld),
+            reason,
+        );
     }
 
-    /// The transaction that creates the Automation workspace a project has
-    /// none of. It is opened straight from the empty state, so it renders
-    /// whenever the draft exists rather than waiting for the lifecycle dialog
-    /// to be asked for.
-    fn render_source_workspace_dialog(&mut self, ctx: &Context) {
-        let Some(draft) = self
-            .state
-            .code
-            .code_workspace
-            .source_workspace_dialog
-            .clone()
-        else {
-            return;
-        };
-        let language = ProjectSourceLanguage::RSpiceAutomation.label();
-        let messages = self.state.workbench.messages();
-        let mut dialog = Dialog::new(
-            messages.text(MessageId::CodeSourceWorkspaceTitle),
-            messages.text(MessageId::CodeSourceWorkspacePrimary),
-        )
-        .description(messages.format(
-            MessageId::CodeSourceWorkspaceDescription,
-            &[("language", language)],
-        ))
-        .size(DialogSize::Transaction)
-        .ghost(messages.text(MessageId::CommonCancel));
-        if let Some(error) = draft.error.as_deref() {
-            dialog = dialog.transaction_state(
-                DialogTransactionTone::Error,
-                messages.text(MessageId::CodeSourceWorkspaceRefused),
-                error,
-            );
+    let mut action = NetlistLifecycleAction::None;
+    let choice = dialog.show_with_initial_body_focus(ctx, |ui| {
+        action = netlist_lifecycle_body(ui, netlist, code, model, &facts, messages);
+        None
+    });
+    let close = matches!(
+        choice,
+        DialogChoice::Primary | DialogChoice::Ghost | DialogChoice::Cancelled
+    );
+    match action {
+        NetlistLifecycleAction::None => {}
+        NetlistLifecycleAction::Cancel => {
+            netlist.lifecycle_dialog.transaction = None;
         }
+        NetlistLifecycleAction::OpenHistory => {
+            netlist.comparison_dialog.open = true;
+            netlist.comparison_dialog.selected_history_index =
+                facts.history_count.saturating_sub(1);
+            code.source_document_dialog = false;
+        }
+        NetlistLifecycleAction::CancelInclude => {
+            netlist.lifecycle_dialog.include_transaction = None;
+        }
+        NetlistLifecycleAction::SetIncludeSearchPaths(paths) => {
+            if let Err(error) = model
+                .workspace
+                .content
+                .project
+                .set_include_search_paths(paths)
+                .map_err(|error| error.to_string())
+            {
+                wb.prompt(error);
+            } else {
+                model.workspace.content.project_metadata_dirty = true;
+                // The chain decides which file every relative include
+                // resolves to, so the deck's diagnostics are no longer
+                // evidence about the chain that is now in force.
+                model.invalidate_source_evidence();
+            }
+        }
+        // The rest write the project's decks and includes, so the shell
+        // carries them out, and then the close this frame asked for.
+        action => return Some(SourceDocumentRequest::Netlist { action, close }),
+    }
+    if close {
+        close_netlist_lifecycle(code, netlist);
+    }
+    None
+}
 
-        let mut edited = draft.clone();
-        let choice = dialog.show(ctx, |ui| {
-            code_inspector_section(
-                ui,
-                &messages.text(MessageId::CodeSourceWorkspaceClosure),
-                None,
-                None,
-                |ui| {
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceWorkspaceRootPath),
-                        &mut edited.root_path,
-                        false,
-                    );
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
-                        &mut edited.run_plan_path,
-                        false,
-                    );
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
-                        &mut edited.environment_lock_path,
-                        false,
-                    );
-                    property_row_input(
-                        ui,
-                        &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
-                        &mut edited.permission_manifest_path,
-                        false,
-                    );
-                    property_row(
-                        ui,
-                        &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
-                        &edited.netlist_source_path,
-                    );
-                },
-            );
-        });
-        if let Some(state) = self
-            .state
-            .code
-            .code_workspace
-            .source_workspace_dialog
-            .as_mut()
-        {
-            state.root_path = edited.root_path;
-            state.run_plan_path = edited.run_plan_path;
-            state.environment_lock_path = edited.environment_lock_path;
-            state.permission_manifest_path = edited.permission_manifest_path;
+/// Carry out a lifecycle choice on the netlist page's deck or include that
+/// the dialog handed the shell, then close the dialog when the same frame
+/// closed it.
+pub(in crate::workbench) fn apply_netlist_lifecycle_action(
+    state: &mut AppState,
+    action: NetlistLifecycleAction,
+    close: bool,
+) {
+    let messages = state.workbench.messages();
+    match action {
+        // Nothing to carry out, or a choice the form applies over the Code
+        // workspace's and the netlist editor's state and the model (Cancel,
+        // OpenHistory, CancelInclude, SetIncludeSearchPaths): the form never
+        // hands these over.
+        NetlistLifecycleAction::None
+        | NetlistLifecycleAction::Cancel
+        | NetlistLifecycleAction::OpenHistory
+        | NetlistLifecycleAction::CancelInclude
+        | NetlistLifecycleAction::SetIncludeSearchPaths(_) => {}
+        NetlistLifecycleAction::Begin(file_action) => {
+            if let Err(error) = netlist_document::begin_netlist_lifecycle_action(state, file_action)
+            {
+                state.prompt(error);
+            }
         }
-        match choice {
-            DialogChoice::Primary => match code_workspace::commit_source_workspace_dialog(self) {
+        NetlistLifecycleAction::Commit => {
+            match netlist_document::commit_netlist_lifecycle_action(state) {
                 Ok(message) => {
-                    self.state
-                        .record(LogSeverity::Info, LogSource::Studio, message);
+                    state.record(LogSeverity::Info, LogSource::Studio, message);
                 }
                 Err(error) => {
-                    if let Some(state) = self
-                        .state
-                        .code
-                        .code_workspace
-                        .source_workspace_dialog
-                        .as_mut()
+                    if let Some(transaction) =
+                        state.code.netlist.lifecycle_dialog.transaction.as_mut()
                     {
-                        state.error = Some(error);
+                        transaction.error = Some(error);
+                    } else {
+                        state.record(LogSeverity::Error, LogSource::Studio, error);
                     }
                 }
-            },
-            DialogChoice::Ghost | DialogChoice::Cancelled => {
-                self.state.code.code_workspace.source_workspace_dialog = None;
             }
-            DialogChoice::None | DialogChoice::Secondary => {}
         }
+        NetlistLifecycleAction::SelectDeck(deck_id) => {
+            if let Err(error) = netlist_document::select_retained_top_deck(state, deck_id) {
+                state.prompt(error);
+            }
+        }
+        NetlistLifecycleAction::CopyIncludeOwnership => {
+            match netlist_document::copy_active_dependency_to_project(state) {
+                Ok(_) => {
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        messages.text(MessageId::NetlistCopySucceeded),
+                    );
+                }
+                Err(error) => {
+                    state.record(LogSeverity::Error, LogSource::Studio, error);
+                }
+            }
+        }
+        NetlistLifecycleAction::ReleaseIncludeOwnership => {
+            match netlist_document::release_active_dependency_from_project(state) {
+                Ok(()) => {
+                    state.record(
+                        LogSeverity::Info,
+                        LogSource::Studio,
+                        messages.text(MessageId::NetlistReleaseSucceeded),
+                    );
+                }
+                Err(error) => {
+                    state.record(LogSeverity::Error, LogSource::Studio, error);
+                }
+            }
+        }
+        NetlistLifecycleAction::BeginInclude(file_action) => {
+            if let Err(error) =
+                netlist_document::begin_owned_include_lifecycle_action(state, file_action)
+            {
+                state.prompt(error);
+            }
+        }
+        NetlistLifecycleAction::CommitInclude => {
+            match netlist_document::commit_owned_include_lifecycle_action(state) {
+                Ok(message) => {
+                    state.record(LogSeverity::Info, LogSource::Studio, message);
+                }
+                Err(error) => {
+                    if let Some(transaction) = state
+                        .code
+                        .netlist
+                        .lifecycle_dialog
+                        .include_transaction
+                        .as_mut()
+                    {
+                        transaction.error = Some(error);
+                    }
+                }
+            }
+        }
+        NetlistLifecycleAction::SaveSourceAs => {
+            netlist_document::open_netlist_save_dialog(state, true);
+            state.code.code_workspace.source_document_dialog = false;
+        }
+    }
+    if close {
+        close_netlist_lifecycle(&mut state.code.code_workspace, &mut state.code.netlist);
+    }
+}
+
+/// The transaction that creates the Automation workspace a project has
+/// none of. It is opened straight from the empty state, so it renders
+/// whenever the draft exists rather than waiting for the lifecycle dialog
+/// to be asked for.
+fn render_source_workspace_dialog(
+    code: &mut CodeWorkspaceRuntimeState,
+    messages: MessageCatalog,
+    ctx: &Context,
+) -> Option<SourceDocumentRequest> {
+    let draft = code.source_workspace_dialog.clone()?;
+    let language = ProjectSourceLanguage::RSpiceAutomation.label();
+    let mut dialog = Dialog::new(
+        messages.text(MessageId::CodeSourceWorkspaceTitle),
+        messages.text(MessageId::CodeSourceWorkspacePrimary),
+    )
+    .description(messages.format(
+        MessageId::CodeSourceWorkspaceDescription,
+        &[("language", language)],
+    ))
+    .size(DialogSize::Transaction)
+    .ghost(messages.text(MessageId::CommonCancel));
+    if let Some(error) = draft.error.as_deref() {
+        dialog = dialog.transaction_state(
+            DialogTransactionTone::Error,
+            messages.text(MessageId::CodeSourceWorkspaceRefused),
+            error,
+        );
+    }
+
+    let mut edited = draft.clone();
+    let choice = dialog.show(ctx, |ui| {
+        code_inspector_section(
+            ui,
+            &messages.text(MessageId::CodeSourceWorkspaceClosure),
+            None,
+            None,
+            |ui| {
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceWorkspaceRootPath),
+                    &mut edited.root_path,
+                    false,
+                );
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceWorkspaceRunPlanPath),
+                    &mut edited.run_plan_path,
+                    false,
+                );
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceWorkspaceEnvironmentLockPath),
+                    &mut edited.environment_lock_path,
+                    false,
+                );
+                property_row_input(
+                    ui,
+                    &messages.text(MessageId::CodeSourceWorkspacePermissionPath),
+                    &mut edited.permission_manifest_path,
+                    false,
+                );
+                property_row(
+                    ui,
+                    &messages.text(MessageId::CodeSourceWorkspaceBoundDeck),
+                    &edited.netlist_source_path,
+                );
+            },
+        );
+    });
+    if let Some(state) = code.source_workspace_dialog.as_mut() {
+        state.root_path = edited.root_path;
+        state.run_plan_path = edited.run_plan_path;
+        state.environment_lock_path = edited.environment_lock_path;
+        state.permission_manifest_path = edited.permission_manifest_path;
+    }
+    match choice {
+        // Creating the workspace writes the project's sources, so the
+        // shell carries it out.
+        DialogChoice::Primary => Some(SourceDocumentRequest::CreateWorkspace),
+        DialogChoice::Ghost | DialogChoice::Cancelled => {
+            code.source_workspace_dialog = None;
+            None
+        }
+        DialogChoice::None | DialogChoice::Secondary => None,
     }
 }
 
 /// New source document on a project that owns no deck: a form that makes
 /// one. There is no current document to state and nothing to operate on,
 /// so the lifecycle's sections would be a page of disabled controls.
-fn render_new_top_deck_form(state: &mut AppState, ctx: &Context, messages: MessageCatalog) {
-    let Some(transaction) = state
-        .code
-        .netlist
+fn render_new_top_deck_form(
+    code: &mut CodeWorkspaceRuntimeState,
+    netlist: &mut NetlistDocumentState,
+    ctx: &Context,
+    messages: MessageCatalog,
+) -> Option<SourceDocumentRequest> {
+    let Some(transaction) = netlist
         .lifecycle_dialog
         .transaction
         .as_mut()
         .filter(|transaction| transaction.action == CodeSourceFileAction::New)
     else {
-        state.code.code_workspace.source_document_dialog = false;
-        state.code.netlist.lifecycle_dialog.transaction = None;
-        return;
+        code.source_document_dialog = false;
+        netlist.lifecycle_dialog.transaction = None;
+        return None;
     };
     let title = messages.text(MessageId::CodeSourceCreateTitle);
     let primary = messages.text(MessageId::CodeSourceCreatePrimary);
@@ -976,29 +953,31 @@ fn render_new_top_deck_form(state: &mut AppState, ctx: &Context, messages: Messa
             Some(field.id)
         });
     match choice {
-        DialogChoice::Primary => {
-            match crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
-                state,
-            ) {
-                Ok(message) => {
-                    state.record(LogSeverity::Info, LogSource::Studio, message);
-                    state.code.code_workspace.source_document_dialog = false;
-                    state.code.netlist.lifecycle_dialog.transaction = None;
-                }
-                Err(error) => {
-                    if let Some(transaction) =
-                        state.code.netlist.lifecycle_dialog.transaction.as_mut()
-                    {
-                        transaction.error = Some(error);
-                    }
-                }
-            }
-        }
+        DialogChoice::Primary => return Some(SourceDocumentRequest::CreateTopDeck),
         DialogChoice::Ghost | DialogChoice::Cancelled => {
+            code.source_document_dialog = false;
+            netlist.lifecycle_dialog.transaction = None;
+        }
+        DialogChoice::None | DialogChoice::Secondary => {}
+    }
+    None
+}
+
+/// Create the top deck the creation form drafted, which the form handed the
+/// shell, and close the dialog once it is made; a refusal stays in the
+/// form's footer.
+pub(in crate::workbench) fn commit_new_top_deck(state: &mut AppState) {
+    match netlist_document::commit_netlist_lifecycle_action(state) {
+        Ok(message) => {
+            state.record(LogSeverity::Info, LogSource::Studio, message);
             state.code.code_workspace.source_document_dialog = false;
             state.code.netlist.lifecycle_dialog.transaction = None;
         }
-        DialogChoice::None | DialogChoice::Secondary => {}
+        Err(error) => {
+            if let Some(transaction) = state.code.netlist.lifecycle_dialog.transaction.as_mut() {
+                transaction.error = Some(error);
+            }
+        }
     }
 }
 
@@ -1032,7 +1011,7 @@ fn dialog_section(ui: &mut Ui, title: &str, meta: Option<&str>, body: impl FnOnc
 
 fn lifecycle_body(
     ui: &mut Ui,
-    state: &mut AppState,
+    code: &mut CodeWorkspaceRuntimeState,
     facts: &DocumentFacts,
     messages: MessageCatalog,
 ) -> LifecycleAction {
@@ -1044,11 +1023,11 @@ fn lifecycle_body(
             action = chosen;
         }
         operations(ui, facts, &mut action, messages);
-        if let Some(chosen) = operation_review(ui, state, messages) {
+        if let Some(chosen) = operation_review(ui, code, messages) {
             action = chosen;
         }
         includes(ui, facts, messages);
-        if let Some(chosen) = revision_history(ui, state, facts, messages) {
+        if let Some(chosen) = revision_history(ui, code, facts, messages) {
             action = chosen;
         }
     });
@@ -1057,7 +1036,9 @@ fn lifecycle_body(
 
 fn netlist_lifecycle_body(
     ui: &mut Ui,
-    state: &mut AppState,
+    netlist: &mut NetlistDocumentState,
+    code: &mut CodeWorkspaceRuntimeState,
+    model: &Model,
     facts: &NetlistLifecycleFacts,
     messages: MessageCatalog,
 ) -> NetlistLifecycleAction {
@@ -1097,7 +1078,7 @@ fn netlist_lifecycle_body(
                         &mut selected,
                         &choices,
                         facts.operations_blocked.is_none()
-                            && state.code.netlist.lifecycle_dialog.transaction.is_none(),
+                            && netlist.lifecycle_dialog.transaction.is_none(),
                     ) && let Some((deck_id, _)) =
                         facts.decks.iter().find(|(_, path)| *path == selected)
                         && Some(*deck_id) != facts.deck_id
@@ -1131,14 +1112,8 @@ fn netlist_lifecycle_body(
             |ui| {
                 ui.horizontal_wrapped(|ui| {
                     ui.spacing_mut().item_spacing = egui::vec2(6.0, 6.0);
-                    let transaction_open =
-                        state.code.netlist.lifecycle_dialog.transaction.is_some()
-                            || state
-                                .code
-                                .netlist
-                                .lifecycle_dialog
-                                .include_transaction
-                                .is_some();
+                    let transaction_open = netlist.lifecycle_dialog.transaction.is_some()
+                        || netlist.lifecycle_dialog.include_transaction.is_some();
                     if facts.include_identity.is_some() {
                         if Button::new(&messages.text(MessageId::NetlistCopyProject))
                             .enabled(!facts.include_owned && !transaction_open)
@@ -1204,7 +1179,7 @@ fn netlist_lifecycle_body(
                         if Button::new(&messages.text(MessageId::CodeSourceRevisionHistory))
                             .enabled(
                                 facts.history_count > 0
-                                    && state.code.netlist.lifecycle_dialog.transaction.is_none(),
+                                    && netlist.lifecycle_dialog.transaction.is_none(),
                             )
                             .show(ui)
                             .clicked()
@@ -1215,13 +1190,13 @@ fn netlist_lifecycle_body(
                 });
             },
         );
-        if let Some(chosen) = include_search_paths(ui, state, messages) {
+        if let Some(chosen) = include_search_paths(ui, code, model, messages) {
             action = chosen;
         }
-        if let Some(chosen) = netlist_operation_review(ui, state, messages) {
+        if let Some(chosen) = netlist_operation_review(ui, netlist, messages) {
             action = chosen;
         }
-        if let Some(chosen) = netlist_include_operation_review(ui, state, messages) {
+        if let Some(chosen) = netlist_include_operation_review(ui, netlist, messages) {
             action = chosen;
         }
     });
@@ -1237,22 +1212,22 @@ fn netlist_lifecycle_body(
 /// visible.
 fn include_search_paths(
     ui: &mut Ui,
-    state: &mut AppState,
+    code: &mut CodeWorkspaceRuntimeState,
+    model: &Model,
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
     let chain = rspice_simulation::netlist_preparation::IncludeSearchChain::resolve(
-        state.model.workspace.content.project.include_search_paths(),
-        state.model.workspace.content.project.data_root(),
+        model.workspace.content.project.include_search_paths(),
+        model.workspace.content.project.data_root(),
     );
-    let authored = state
-        .model
+    let authored = model
         .workspace
         .content
         .project
         .include_search_paths()
         .to_vec();
-    let unsaved = state.model.workspace.content.project.data_root().is_none();
+    let unsaved = model.workspace.content.project.data_root().is_none();
     let mut action = None;
     dialog_section(
         ui,
@@ -1264,7 +1239,7 @@ fn include_search_paths(
         |ui| {
             // The chain goes on into the library folders set in Preferences,
             // so a list that ended here would misstate where a name is found.
-            let library_folders = !state.library_folders().is_empty();
+            let library_folders = !model.library_folders().is_empty();
             if authored.is_empty() {
                 muted_inspector_copy(
                     ui,
@@ -1277,7 +1252,7 @@ fn include_search_paths(
             }
             let inset = panel_inset(ui);
             for (index, entry) in chain.entries().iter().enumerate() {
-                let selected = state.code.code_workspace.include_search_selected == Some(index);
+                let selected = code.include_search_selected == Some(index);
                 let (rect, response) = ui.allocate_exact_size(
                     egui::vec2(ui.available_width(), property_row_height(ui)),
                     egui::Sense::click(),
@@ -1352,7 +1327,7 @@ fn include_search_paths(
                 theme::paint_focus_ring(ui, &response, rect);
                 let response = response.on_hover_text(entry.resolved().display().to_string());
                 if response.clicked() {
-                    state.code.code_workspace.include_search_selected = Some(index);
+                    code.include_search_selected = Some(index);
                 }
             }
             if library_folders && !authored.is_empty() {
@@ -1368,13 +1343,11 @@ fn include_search_paths(
                 );
             }
             section_block_gap(ui);
-            let selected = state
-                .code
-                .code_workspace
+            let selected = code
                 .include_search_selected
                 .filter(|index| *index < authored.len());
             // The field spans the body; the commands under it wrap.
-            let draft = state.code.code_workspace.include_search_draft.clone();
+            let draft = code.include_search_draft.clone();
             let mut edited = draft.clone();
             ui.add(
                 egui::TextEdit::singleline(&mut edited)
@@ -1382,7 +1355,7 @@ fn include_search_paths(
                     .hint_text(messages.text(MessageId::NetlistIncludeSearchPathHint)),
             );
             if edited != draft {
-                state.code.code_workspace.include_search_draft = edited.clone();
+                code.include_search_draft = edited.clone();
             }
             section_block_gap(ui);
             ui.horizontal_wrapped(|ui| {
@@ -1394,7 +1367,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.push(std::path::PathBuf::from(edited.trim()));
-                    state.code.code_workspace.include_search_draft.clear();
+                    code.include_search_draft.clear();
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 #[cfg(not(target_arch = "wasm32"))]
@@ -1417,7 +1390,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.swap(index - 1, index);
-                    state.code.code_workspace.include_search_selected = Some(index - 1);
+                    code.include_search_selected = Some(index - 1);
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathMoveDown))
@@ -1428,7 +1401,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.swap(index, index + 1);
-                    state.code.code_workspace.include_search_selected = Some(index + 1);
+                    code.include_search_selected = Some(index + 1);
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
                 if Button::new(&messages.text(MessageId::NetlistIncludeSearchPathRemove))
@@ -1440,7 +1413,7 @@ fn include_search_paths(
                 {
                     let mut next = authored.clone();
                     next.remove(index);
-                    state.code.code_workspace.include_search_selected = None;
+                    code.include_search_selected = None;
                     action = Some(NetlistLifecycleAction::SetIncludeSearchPaths(next));
                 }
             });
@@ -1451,11 +1424,11 @@ fn include_search_paths(
 
 fn netlist_operation_review(
     ui: &mut Ui,
-    state: &mut AppState,
+    netlist: &mut NetlistDocumentState,
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let transaction = state.code.netlist.lifecycle_dialog.transaction.as_mut()?;
+    let transaction = netlist.lifecycle_dialog.transaction.as_mut()?;
     let (title, commit) = match transaction.action {
         CodeSourceFileAction::New => (
             MessageId::CodeSourceCreateTitle,
@@ -1548,16 +1521,11 @@ fn netlist_operation_review(
 
 fn netlist_include_operation_review(
     ui: &mut Ui,
-    state: &mut AppState,
+    netlist: &mut NetlistDocumentState,
     messages: MessageCatalog,
 ) -> Option<NetlistLifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let transaction = state
-        .code
-        .netlist
-        .lifecycle_dialog
-        .include_transaction
-        .as_mut()?;
+    let transaction = netlist.lifecycle_dialog.include_transaction.as_mut()?;
     let (title, commit) = if transaction.action == CodeSourceFileAction::Rename {
         (
             MessageId::CodeSourceRenameTitle,
@@ -1818,11 +1786,11 @@ impl Refusal {
 /// proposed path and its failure reason stay together.
 fn operation_review(
     ui: &mut Ui,
-    state: &mut AppState,
+    code: &mut CodeWorkspaceRuntimeState,
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
     let t = Tokens::get(ui.ctx());
-    let draft = state.code.code_workspace.source_file_dialog.as_mut()?;
+    let draft = code.source_file_dialog.as_mut()?;
     let (title, commit) = match draft.action {
         CodeSourceFileAction::New => (
             MessageId::CodeSourceCreateTitle,
@@ -1928,11 +1896,11 @@ fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
 
 fn revision_history(
     ui: &mut Ui,
-    state: &mut AppState,
+    code: &mut CodeWorkspaceRuntimeState,
     facts: &DocumentFacts,
     messages: MessageCatalog,
 ) -> Option<LifecycleAction> {
-    let history = state.code.code_workspace.source_history.as_ref()?;
+    let history = code.source_history.as_ref()?;
     let t = Tokens::get(ui.ctx());
     let selected = history.selected_revision;
     let error = history.error.clone();
@@ -2085,7 +2053,12 @@ mod include_search_raster {
                     let messages = crate::workbench::MessageCatalog::new(
                         crate::workbench::UiTextLocale::EnglishUnitedStates,
                     );
-                    let _ = include_search_paths(ui, state, messages);
+                    let _ = include_search_paths(
+                        ui,
+                        &mut state.code.code_workspace,
+                        &state.model,
+                        messages,
+                    );
                 });
         })
     }

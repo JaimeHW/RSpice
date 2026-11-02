@@ -15,7 +15,11 @@ use crate::state::{
 use crate::state::{ProjectSourceLanguage, ProjectSourceOwner};
 use crate::ui::accessibility::counted;
 use crate::workbench::RSpiceApp;
+use crate::workbench::documents::netlist_document::NetlistDocumentState;
+use rspice_app_services::workbench::slots::platform::PlatformState;
+use rspice_app_state::workbench::app_state::model::Model;
 
+use super::CodeWorkspaceRuntimeState;
 use super::language_services::{bundle_documents, source_line_preview};
 use super::{CodeSourceSearchScope, CodeSourceSearchState};
 
@@ -206,13 +210,31 @@ pub(crate) fn source_search_results(
     app: &RSpiceApp,
     search: &CodeSourceSearchState,
 ) -> Result<CodeSourceSearchResults, String> {
-    let bundle = current_bundle(app, search)?;
+    source_search_results_in(
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.code.netlist,
+        &app.state.platform,
+        search,
+    )
+}
+
+/// [`source_search_results`], over the model, the Code workspace's runtime
+/// state, the netlist editor's state and the platform's.
+pub(crate) fn source_search_results_in(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    netlist: &NetlistDocumentState,
+    platform: &PlatformState,
+    search: &CodeSourceSearchState,
+) -> Result<CodeSourceSearchResults, String> {
+    let bundle = current_bundle(model, netlist, search)?;
     if search.query.is_empty() {
         return Ok(CodeSourceSearchResults::default());
     }
     let options = search_options(search);
     let mut output = CodeSourceSearchResults::default();
-    let documents = search_documents(app, bundle, search)?;
+    let documents = search_documents(model, code, bundle, search)?;
     for (index, document) in documents.iter().enumerate() {
         let searchable_source = searchable_document_source(document, search)?;
         let remaining = SOURCE_SEARCH_STREAM_LIMIT.saturating_sub(output.total_matches);
@@ -232,8 +254,10 @@ pub(crate) fn source_search_results(
             find_all_in_source_bounded(&searchable_source, &search.query, options, remaining)
                 .map_err(|error| error.to_string())?;
         let editable = document.editable
-            && super::source_bundle_document_is_editable(
-                app,
+            && super::source_bundle_document_is_editable_in(
+                model,
+                code,
+                platform,
                 search.language,
                 search.bundle_id,
                 document.logical_path,
@@ -285,11 +309,16 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
             "More than {SOURCE_SEARCH_STREAM_LIMIT} matches exist. Narrow the search before replacing so the transaction remains bounded."
         ));
     }
-    let bundle = current_bundle(app, &search)?;
+    let bundle = current_bundle(&app.state.model, &app.state.code.netlist, &search)?;
     let options = search_options(&search);
     let mut replacements = Vec::new();
     let mut replacement_count = 0_usize;
-    for document in search_documents(app, bundle, &search)? {
+    for document in search_documents(
+        &app.state.model,
+        &app.state.code.code_workspace,
+        bundle,
+        &search,
+    )? {
         if !document.editable
             || !super::source_bundle_document_is_editable(
                 app,
@@ -394,15 +423,14 @@ pub(crate) fn commit_source_search_replace(app: &mut RSpiceApp) -> Result<String
 }
 
 fn current_bundle<'a>(
-    app: &'a RSpiceApp,
+    model: &'a Model,
+    netlist: &NetlistDocumentState,
     search: &CodeSourceSearchState,
 ) -> Result<&'a ProjectSourceBundle, String> {
-    if search.project_id != app.state.model.workspace.content.project.id() {
+    if search.project_id != model.workspace.content.project.id() {
         return Err("The active project changed while search results were open.".to_owned());
     }
-    let bundle = app
-        .state
-        .model
+    let bundle = model
         .workspace
         .content
         .project_sources
@@ -418,16 +446,9 @@ fn current_bundle<'a>(
         );
     }
     if search.include_generated_references
-        && (app.state.code.netlist.revision != search.generated_reference_revision
+        && (netlist.revision != search.generated_reference_revision
             || ContentDigest::from_bytes(
-                Sha256::digest(
-                    app.state
-                        .model
-                        .netlist_artifacts
-                        .generated_source
-                        .as_bytes(),
-                )
-                .into(),
+                Sha256::digest(model.netlist_artifacts.generated_source.as_bytes()).into(),
             ) != search.generated_reference_digest)
     {
         return Err(
@@ -448,7 +469,8 @@ struct SearchDocument<'a> {
 }
 
 fn search_documents<'a>(
-    app: &'a RSpiceApp,
+    model: &'a Model,
+    code: &CodeWorkspaceRuntimeState,
     bundle: &'a ProjectSourceBundle,
     search: &'a CodeSourceSearchState,
 ) -> Result<Vec<SearchDocument<'a>>, String> {
@@ -457,12 +479,10 @@ fn search_documents<'a>(
             CodeSourceSearchScope::ActiveLanguageProject => true,
             CodeSourceSearchScope::OpenDocuments => {
                 crate::state::project_source_paths_equal(logical_path, &search.active_path)
-                    || app.state.code.code_workspace.source_carets.keys().any(
-                        |(bundle_id, path)| {
-                            *bundle_id == search.bundle_id
-                                && crate::state::project_source_paths_equal(path, logical_path)
-                        },
-                    )
+                    || code.source_carets.keys().any(|(bundle_id, path)| {
+                        *bundle_id == search.bundle_id
+                            && crate::state::project_source_paths_equal(path, logical_path)
+                    })
             }
             CodeSourceSearchScope::Selection | CodeSourceSearchScope::CurrentDocument => {
                 crate::state::project_source_paths_equal(logical_path, &search.active_path)
@@ -478,14 +498,9 @@ fn search_documents<'a>(
         .collect::<Vec<_>>();
     if search.include_generated_references
         && search.scope == CodeSourceSearchScope::ActiveLanguageProject
-        && !app
-            .state
-            .model
-            .netlist_artifacts
-            .generated_source
-            .is_empty()
+        && !model.netlist_artifacts.generated_source.is_empty()
     {
-        let generated = app.state.model.netlist_artifacts.generated_source.as_str();
+        let generated = model.netlist_artifacts.generated_source.as_str();
         documents.push(SearchDocument {
             logical_path: GENERATED_REFERENCE_PATH,
             searchable_source: generated,

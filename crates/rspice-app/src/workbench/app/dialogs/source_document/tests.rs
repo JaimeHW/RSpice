@@ -105,6 +105,16 @@ fn english() -> MessageCatalog {
     MessageCatalog::new(crate::workbench::UiTextLocale::EnglishUnitedStates)
 }
 
+fn facts_of(app: &RSpiceApp) -> Option<DocumentFacts> {
+    document_facts(
+        app.state.workbench.workspace,
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.platform,
+        english(),
+    )
+}
+
 #[test]
 fn line_endings_are_measured_rather_than_assumed() {
     let english = english();
@@ -162,11 +172,15 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
     assert!(!original.is_empty(), "the fixture project owns a bundle");
 
     open_source_document_dialog(&mut app.state).expect("the Automation page owns a source bundle");
-    let facts = document_facts(&app, english()).expect("the page states a document");
+    let facts = facts_of(&app).expect("the page states a document");
     assert_eq!(facts.logical_path, original);
     assert!(facts.is_root, "the bundle root is the default document");
 
-    app.apply_lifecycle_action(LifecycleAction::Begin(CodeSourceFileAction::Rename), &facts);
+    app.apply_lifecycle_action(
+        LifecycleAction::Begin(CodeSourceFileAction::Rename),
+        facts.language,
+        &facts.logical_path,
+    );
     let draft = app
         .state
         .code
@@ -176,7 +190,7 @@ fn a_rename_transaction_runs_end_to_end_through_the_dialog_entry_points() {
         .expect("Rename opens a transaction");
     draft.proposed_path = "workflows/renamed_entry.py".to_owned();
 
-    app.apply_lifecycle_action(LifecycleAction::Commit, &facts);
+    app.apply_lifecycle_action(LifecycleAction::Commit, facts.language, &facts.logical_path);
     assert!(
         app.state.code.code_workspace.source_file_dialog.is_none(),
         "a committed transaction closes"
@@ -220,16 +234,20 @@ fn reassigning_a_role_lifts_the_environment_lock_refusal() {
     assert!(!locked.is_empty(), "the fixture bundle pins an environment");
     app.state.code.code_workspace.automation.selected_file = Some(locked.clone());
 
-    let before = document_facts(&app, english()).expect("the lock is a document");
+    let before = facts_of(&app).expect("the lock is a document");
     assert!(before.is_environment_lock);
     assert!(
         refusal_reason(&before, CodeSourceFileAction::Rename).is_some(),
         "the lock refuses graph mutation"
     );
 
-    app.apply_lifecycle_action(LifecycleAction::AssignRole(None), &before);
+    app.apply_lifecycle_action(
+        LifecycleAction::AssignRole(None),
+        before.language,
+        &before.logical_path,
+    );
 
-    let after = document_facts(&app, english()).expect("the document survives the role change");
+    let after = facts_of(&app).expect("the document survives the role change");
     assert!(!after.is_environment_lock, "the role was reassigned");
     assert!(
         refusal_reason(&after, CodeSourceFileAction::Rename).is_none(),
@@ -272,7 +290,7 @@ fn a_generated_netlist_page_refuses_the_lifecycle_until_a_deck_is_owned() {
     ));
     open_source_document_dialog(&mut app.state).unwrap();
     assert!(app.state.code.code_workspace.source_document_dialog);
-    let facts = netlist_lifecycle_facts(&app).unwrap();
+    let facts = netlist_lifecycle_facts(&app.state.model, &app.state.code.netlist).unwrap();
     assert!(facts.deck_id.is_some());
     assert_eq!(facts.decks.len(), 1);
 }
@@ -321,7 +339,7 @@ fn an_owned_deck_states_its_properties_without_identity_jargon() {
                 )),
                 ..egui::RawInput::default()
             },
-            |ui| app.render_source_document_dialog(ui.ctx()),
+            |ui| app.render_frame_dialogs(ui.ctx()),
         );
         if let Some(update) = output.platform_output.accesskit_update {
             nodes.extend(update.nodes);
@@ -369,7 +387,7 @@ fn a_source_document_states_its_properties_without_identity_jargon() {
                 )),
                 ..egui::RawInput::default()
             },
-            |ui| app.render_source_document_dialog(ui.ctx()),
+            |ui| app.render_frame_dialogs(ui.ctx()),
         );
         if let Some(update) = output.platform_output.accesskit_update {
             nodes.extend(update.nodes);
@@ -430,7 +448,7 @@ fn dialog_nodes(app: &mut RSpiceApp) -> Vec<egui::accesskit::Node> {
                 )),
                 ..egui::RawInput::default()
             },
-            |ui| app.render_source_document_dialog(ui.ctx()),
+            |ui| app.render_frame_dialogs(ui.ctx()),
         );
         if let Some(update) = output.platform_output.accesskit_update {
             nodes.extend(update.nodes);

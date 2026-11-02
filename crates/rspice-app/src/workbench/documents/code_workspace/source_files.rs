@@ -9,8 +9,11 @@ use crate::state::{
     ProjectSourceOwner, ProjectSourceRole, ProjectSourceRoleBinding,
 };
 use crate::workbench::RSpiceApp;
+use rspice_app_services::workbench::slots::platform::PlatformState;
+use rspice_app_state::workbench::app_state::model::Model;
 
 use super::CodeSourceImportState;
+use super::CodeWorkspaceRuntimeState;
 use super::{
     CodeSourceFileAction, CodeSourceFileDialogState, CodeSourceHistoryState, VerilogAFileSelection,
 };
@@ -32,20 +35,34 @@ pub(crate) fn source_file_mutation_block_reason(
     app: &RSpiceApp,
     language: ProjectSourceLanguage,
 ) -> Option<&'static str> {
-    if !app.state.platform.project_lifecycle.is_open() {
+    source_file_mutation_block_reason_in(
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.platform,
+        language,
+    )
+}
+
+/// [`source_file_mutation_block_reason`], over the model, the Code
+/// workspace's runtime state and the platform's.
+pub(crate) fn source_file_mutation_block_reason_in(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    language: ProjectSourceLanguage,
+) -> Option<&'static str> {
+    if !platform.project_lifecycle.is_open() {
         return Some("Open a project before changing project source files.");
     }
-    if app.state.model.safe_mode.project_read_only() {
+    if model.safe_mode.project_read_only() {
         return Some("The project is open read-only.");
     }
     match language {
-        ProjectSourceLanguage::VerilogA
-            if app.state.code.code_workspace.veriloga.pending.is_some() =>
-        {
+        ProjectSourceLanguage::VerilogA if code.veriloga.pending.is_some() => {
             Some("Wait for the Verilog-A compile to finish or cancel it first.")
         }
         ProjectSourceLanguage::RSpiceAutomation => {
-            let runtime = &app.state.code.code_workspace.automation;
+            let runtime = &code.automation;
             (runtime.pending_runtime_validation.is_some()
                 || runtime.runtime_execution.is_some()
                 || runtime.execution.is_active())
@@ -366,14 +383,32 @@ pub(crate) fn source_bundle_document_is_editable(
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    if source_file_mutation_block_reason(app, language).is_some() {
+    source_bundle_document_is_editable_in(
+        &app.state.model,
+        &app.state.code.code_workspace,
+        &app.state.platform,
+        language,
+        bundle_id,
+        logical_path,
+    )
+}
+
+/// [`source_bundle_document_is_editable`], over the model, the Code
+/// workspace's runtime state and the platform's.
+pub(crate) fn source_bundle_document_is_editable_in(
+    model: &Model,
+    code: &CodeWorkspaceRuntimeState,
+    platform: &PlatformState,
+    language: ProjectSourceLanguage,
+    bundle_id: crate::state::ProjectSourceId,
+    logical_path: &str,
+) -> bool {
+    if source_file_mutation_block_reason_in(model, code, platform, language).is_some() {
         return false;
     }
-    source_bundle_contains_document(app, language, bundle_id, logical_path)
+    source_bundle_contains_document_in(model, platform, language, bundle_id, logical_path)
         && (language != ProjectSourceLanguage::RSpiceAutomation
-            || app
-                .state
-                .model
+            || model
                 .workspace
                 .content
                 .project_sources
@@ -392,11 +427,28 @@ pub(crate) fn source_bundle_contains_document(
     bundle_id: crate::state::ProjectSourceId,
     logical_path: &str,
 ) -> bool {
-    if !app.state.platform.project_lifecycle.is_open() {
+    source_bundle_contains_document_in(
+        &app.state.model,
+        &app.state.platform,
+        language,
+        bundle_id,
+        logical_path,
+    )
+}
+
+/// [`source_bundle_contains_document`], over the model and the platform's
+/// state.
+pub(crate) fn source_bundle_contains_document_in(
+    model: &Model,
+    platform: &PlatformState,
+    language: ProjectSourceLanguage,
+    bundle_id: crate::state::ProjectSourceId,
+    logical_path: &str,
+) -> bool {
+    if !platform.project_lifecycle.is_open() {
         return false;
     }
-    app.state
-        .model
+    model
         .workspace
         .content
         .project_sources
