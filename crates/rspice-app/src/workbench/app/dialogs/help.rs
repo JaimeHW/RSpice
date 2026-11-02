@@ -23,7 +23,6 @@ pub(in crate::workbench) mod site;
 pub(crate) struct HelpCenterDialogState {
     pub(crate) open: bool,
     pub(crate) page: HelpCenterPage,
-    pub(crate) query: String,
     pub(crate) include_session_log: bool,
     pub(crate) disclosure_reviewed: bool,
     /// Whether this dialog owns the canonical `?surface=help-center` route.
@@ -34,8 +33,7 @@ impl Default for HelpCenterDialogState {
     fn default() -> Self {
         Self {
             open: false,
-            page: HelpCenterPage::Help,
-            query: String::new(),
+            page: HelpCenterPage::LegalPrivacy,
             include_session_log: true,
             disclosure_reviewed: false,
             route_owned: false,
@@ -59,7 +57,6 @@ impl HelpCenterDialogState {
 
     pub(crate) fn close(&mut self) {
         self.open = false;
-        self.query.clear();
         self.disclosure_reviewed = false;
         self.route_owned = false;
     }
@@ -81,15 +78,6 @@ const VERSION_LINE: &str = concat!(
 const ENGINE_LINE: &str = concat!("rspice-core ", env!("CARGO_PKG_VERSION"));
 /// The product mark beside the line under About's title.
 const MARK_SIDE: f32 = 32.0;
-/// One topic row of the Help page: the air above and below its words, and
-/// between its title and what it covers.
-const TOPIC_PAD: f32 = 8.0;
-const TOPIC_LINE_GAP: f32 = 2.0;
-
-#[derive(Debug, Clone, Copy)]
-enum HelpAction {
-    Command(Command),
-}
 
 /// One command reference row: the command's shortcut, empty for a command
 /// with none, and its name.
@@ -158,48 +146,16 @@ impl RSpiceApp {
             return;
         }
 
-        let mut page = self.state.shell.help_center.page;
-        let mut query = self.state.shell.help_center.query.clone();
-        let mut action = None;
-
-        let choice = Dialog::new(page.label(), "Close")
-            .description("Browse product guidance and legal notices.")
+        // Legal & privacy is the one page left to draw here: Help and
+        // Release notes open rspice.app, and Report a problem has its own
+        // dialog.
+        let choice = Dialog::new(HelpCenterPage::LegalPrivacy.label(), "Close")
+            .description("Read how support data is handled, the product license, and the third-party notices.")
             .size(DialogSize::Manager)
-            .show(ctx, |ui| {
-                ui.horizontal_wrapped(|ui| {
-                    for candidate in HelpCenterPage::ALL
-                        .into_iter()
-                        .filter(|candidate| !report_problem::is_report_page(*candidate))
-                    {
-                        if ui
-                            .selectable_label(page == candidate, candidate.label())
-                            .clicked()
-                        {
-                            page = candidate;
-                        }
-                    }
-                });
-                ui.separator();
-                match page {
-                    HelpCenterPage::Help => render_help_page(ui, &mut query, &mut action),
-                    HelpCenterPage::LegalPrivacy => render_legal_privacy(ui),
-                    // Report a problem draws these; the strip above never
-                    // offers them.
-                    HelpCenterPage::Diagnostics | HelpCenterPage::SupportBundle => {}
-                }
-            });
-
-        self.state.shell.help_center.page = page;
-        self.state.shell.help_center.query = query;
+            .show(ctx, render_legal_privacy);
 
         if choice != DialogChoice::None {
             self.close_help_center_route();
-            return;
-        }
-
-        if let Some(HelpAction::Command(command)) = action {
-            self.close_help_center_route();
-            command.execute(self);
         }
     }
 
@@ -405,111 +361,6 @@ impl RSpiceApp {
             self.state.shell.shortcuts_filter.clear();
         }
     }
-}
-
-fn render_help_page(ui: &mut egui::Ui, query: &mut String, action: &mut Option<HelpAction>) {
-    ui.add(
-        egui::TextEdit::singleline(query)
-            .hint_text("Search tasks, commands, analysis, errors, or compatibility")
-            .desired_width(f32::INFINITY),
-    );
-    ui.add_space(8.0);
-    let filter = query.trim().to_ascii_lowercase();
-    let topics = [
-        (
-            "Schematic authoring",
-            "Place and edit components, wires, buses, ports, hierarchy, annotations, and design checks.",
-        ),
-        (
-            "Simulation setup",
-            "Configure analyses, dependencies, outputs, PVT, models, solvers, preflight, and execution.",
-        ),
-        (
-            "Results and measurements",
-            "Inspect retained datasets, plots, cursors, expressions, measurements, comparisons, and exports.",
-        ),
-        (
-            "Project recovery",
-            "Review accepted baselines, autosave checkpoints, project revisions, and non-destructive recovery.",
-        ),
-        (
-            "Automation and netlists",
-            "Open owned or generated decks, validate sources, and run reproducible workflows.",
-        ),
-        (
-            "Verilog-A modules",
-            "A module is a cell view: create one with New View or File > Import Verilog-A, then edit and compile it in Design.",
-        ),
-    ];
-    ui.scope(|ui| {
-        // The rows are ruled off from each other; no gap between them.
-        ui.spacing_mut().item_spacing.y = 0.0;
-        for (title, detail) in topics {
-            if !filter.is_empty()
-                && !title.to_ascii_lowercase().contains(&filter)
-                && !detail.to_ascii_lowercase().contains(&filter)
-            {
-                continue;
-            }
-            topic_row(ui, title, detail);
-        }
-    });
-    ui.add_space(10.0);
-    ui.horizontal(|ui| {
-        if ui.button("Keyboard shortcuts").clicked() {
-            *action = Some(HelpAction::Command(Command::KeyboardShortcuts));
-        }
-    });
-}
-
-/// One Help topic: a row the width of the page, its title over what it
-/// covers, both from the page's left edge, ruled off from the next.
-fn topic_row(ui: &mut egui::Ui, title: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    let width = ui.available_width();
-    let title_galley = ui.fonts_mut(|fonts| {
-        fonts.layout_no_wrap(
-            title.to_owned(),
-            theme::sans(tokens::FS_1, FontWeight::Medium),
-            t.color.text,
-        )
-    });
-    let detail_galley = ui.fonts_mut(|fonts| {
-        fonts.layout(
-            detail.to_owned(),
-            theme::sans(tokens::FS_0, FontWeight::Regular),
-            t.color.text_dim,
-            width,
-        )
-    });
-    let height = TOPIC_PAD * 2.0 + title_galley.size().y + TOPIC_LINE_GAP + detail_galley.size().y;
-    let enabled = ui.is_enabled();
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(width, height), egui::Sense::hover());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Label,
-            enabled,
-            format!("{title}: {detail}"),
-        )
-    });
-    let painter = ui.painter();
-    let title_top = rect.top() + TOPIC_PAD;
-    let detail_top = title_top + title_galley.size().y + TOPIC_LINE_GAP;
-    painter.galley(
-        egui::pos2(rect.left(), title_top),
-        title_galley,
-        t.color.text,
-    );
-    painter.galley(
-        egui::pos2(rect.left(), detail_top),
-        detail_galley,
-        t.color.text_dim,
-    );
-    painter.hline(
-        rect.x_range(),
-        rect.bottom() - 0.5,
-        egui::Stroke::new(1.0, t.color.border),
-    );
 }
 
 fn render_legal_privacy(ui: &mut egui::Ui) {
@@ -764,8 +615,7 @@ mod tests {
 
     /// Examples… is a Help menu row: it opens the Examples dialog on its
     /// first circuit, and the Help Center no longer offers a button of its
-    /// own. The button beside it names the reference it opens as the menu
-    /// does.
+    /// own.
     #[test]
     fn examples_open_from_the_help_menu_and_not_from_the_help_center() {
         let mut app = RSpiceApp::test_instance();
@@ -773,15 +623,51 @@ mod tests {
         assert_eq!(app.state.project.examples_selection, Some(0));
 
         let mut app = RSpiceApp::test_instance();
-        app.state.shell.help_center.open(HelpCenterPage::Help);
+        app.state.shell.help_center.open(HelpCenterPage::default());
         let shown = shown_texts(app);
         assert!(
             !shown.iter().any(|text| text == "Examples\u{2026}"),
             "{shown:?}"
         );
+    }
+
+    /// The Help Center draws the legal and privacy notices and nothing else:
+    /// its page of six topics restated rspice.app/docs, which RSpice Help
+    /// opens, so there is no topic, search field or page strip.
+    #[test]
+    fn the_help_center_offers_the_legal_notices_only() {
+        assert_eq!(HelpCenterPage::default(), HelpCenterPage::LegalPrivacy);
+        let mut app = RSpiceApp::test_instance();
+        app.state.shell.help_center.open(HelpCenterPage::default());
+        let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
         assert!(
-            shown.iter().any(|text| text == "Keyboard shortcuts"),
-            "{shown:?}"
+            shown.iter().any(|shown| shown.text == "Legal & privacy"),
+            "the dialog is titled Legal & privacy"
+        );
+        for gone in [
+            "Help center",
+            "Schematic authoring",
+            "Simulation setup",
+            "Keyboard shortcuts",
+        ] {
+            assert!(
+                !shown.iter().any(|shown| shown.text.starts_with(gone)),
+                "{gone:?} is still offered"
+            );
+        }
+        assert!(
+            !shown
+                .iter()
+                .any(|shown| shown.role == egui::accesskit::Role::TextInput),
+            "the topic search field is gone"
+        );
+        assert!(
+            !shown.iter().any(|shown| shown.text == "Legal & privacy"
+                && matches!(
+                    shown.role,
+                    egui::accesskit::Role::Button | egui::accesskit::Role::Tab
+                )),
+            "the title alone names the page; no one-tab strip repeats it"
         );
     }
 
@@ -848,42 +734,6 @@ mod tests {
             .expect("some listed command has no shortcut");
         let (shortcut, name) = shortcut_help_row(&shortcuts, unbound, CommandPlatform::Desktop, os);
         assert_eq!(shortcut, "", "{name} shows a blank shortcut cell");
-    }
-
-    /// The Help page's topics are rows the width of the page, every one on
-    /// the same two edges, rather than boxes as wide as their words.
-    #[test]
-    fn the_help_topics_are_full_width_rows_on_one_edge() {
-        let mut app = RSpiceApp::test_instance();
-        app.state.shell.help_center.open(HelpCenterPage::Help);
-        let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
-        let rows: Vec<_> = shown
-            .iter()
-            .filter(|shown| {
-                shown.text.starts_with("Schematic authoring: ")
-                    || shown.text.starts_with("Simulation setup: ")
-                    || shown.text.starts_with("Results and measurements: ")
-                    || shown.text.starts_with("Project recovery: ")
-                    || shown.text.starts_with("Automation and netlists: ")
-                    || shown.text.starts_with("Verilog-A modules: ")
-            })
-            .filter_map(|shown| shown.bounds)
-            .collect();
-        assert_eq!(rows.len(), 6, "every topic is one row");
-        let field = shown
-            .iter()
-            .find(|shown| shown.role == egui::accesskit::Role::TextInput)
-            .and_then(|shown| shown.bounds);
-        for row in &rows {
-            assert_eq!(row.x0.round(), rows[0].x0.round(), "one left edge");
-            assert_eq!(row.x1.round(), rows[0].x1.round(), "one right edge");
-        }
-        if let Some(field) = field {
-            assert!(
-                (rows[0].x1 - field.x1).abs() < 1.0,
-                "the rows are as wide as the page"
-            );
-        }
     }
 
     /// The legal page's captions are headings in the kit's section face.
@@ -955,7 +805,7 @@ mod tests {
             }
         }
         let mut app = RSpiceApp::test_instance();
-        app.state.shell.help_center.open(HelpCenterPage::Help);
+        app.state.shell.help_center.open(HelpCenterPage::default());
         let shown = shown_texts(app);
         assert!(
             !shown

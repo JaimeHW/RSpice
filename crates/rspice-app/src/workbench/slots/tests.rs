@@ -36,7 +36,7 @@ fn assert_blocks_shortcuts(configure: impl FnOnce(&mut AppState)) {
 fn every_retained_dialog_owner_blocks_background_shortcuts() {
     assert_blocks_shortcuts(|dialogs| dialogs.shell.about = true);
     assert_blocks_shortcuts(|dialogs| dialogs.shell.shortcuts_help = true);
-    assert_blocks_shortcuts(|dialogs| dialogs.shell.help_center.open(HelpCenterPage::Help));
+    assert_blocks_shortcuts(|dialogs| dialogs.shell.help_center.open(HelpCenterPage::LegalPrivacy));
     assert_blocks_shortcuts(|dialogs| {
         dialogs
             .workbench
@@ -208,7 +208,7 @@ const DIALOG_GATE: &[DialogRow] = &[
         dialogs.shell.shortcuts_help = true
     }),
     ("help_center", |dialogs| {
-        dialogs.shell.help_center.open(HelpCenterPage::Help);
+        dialogs.shell.help_center.open(HelpCenterPage::LegalPrivacy);
     }),
     ("window_session", |dialogs| {
         dialogs

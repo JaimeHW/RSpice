@@ -963,7 +963,7 @@ impl RSpiceApp {
                 self.state
                     .shell
                     .help_center
-                    .open_routed(crate::workbench::app::HelpCenterPage::Help);
+                    .open_routed(crate::workbench::app::HelpCenterPage::LegalPrivacy);
             }
         } else if self.state.shell.help_center.route_owned {
             self.state.shell.help_center.close();
@@ -1999,6 +1999,11 @@ mod tests {
         assert!(!app.state.workbench.command_palette.open);
         assert!(app.state.shell.help_center.open);
         assert!(app.state.shell.help_center.route_owned);
+        assert_eq!(
+            app.state.shell.help_center.page,
+            crate::workbench::app::HelpCenterPage::LegalPrivacy,
+            "the help-center route opens on the legal notices, its one page"
+        );
 
         app.state
             .workbench
