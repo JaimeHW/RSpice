@@ -1333,6 +1333,23 @@ fn a_dollar_naming_no_variable_stays_as_ngspice_keeps_it() {
     assert_eq!(texts(&presented), ["e $ f", "k$"]);
 }
 
+/// ngspice `set curplot = name` selects a plot as `setplot` does and keeps
+/// no variable (frontend/options.c:377 `cp_usrset`); ngspice-46 echoes
+/// `unknown1`, `op1` and `unknown1 0 1` for the same script.
+#[test]
+fn set_curplot_selects_the_plot_as_ngspice_does() {
+    let source = "set curplot\nV1 1 0 5\nR1 1 0 1k\n.control\nset curplot = new\n\
+        set curplottitle = \"results\"\nset out = $curplot\necho $out\nlet x = vector(2)\nop\n\
+        echo $curplot\nset curplot = $out\necho $curplot $&x\n.endc\n.end\n";
+    let (presented, error) = run_until_error(source);
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["unknown1", "op1", "unknown1 0 1"]);
+    let (_, error) = run_until_error(
+        "no plot\nV1 1 0 5\nR1 1 0 1k\n.control\nset curplot = nowhere\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("no plot named 'nowhere'"));
+}
+
 /// ngspice `let name[index] = expression` (frontend/com_let.c:115) fills the
 /// elements the index selects, which the values must fit exactly: an index
 /// rounds to the nearest integer, a blank bound is the vector's end, and a

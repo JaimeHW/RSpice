@@ -108,9 +108,19 @@ impl ControlCircuit {
         // Validate every assignment before applying any, so a refused
         // variable leaves the session's settings as they were.
         let mut settings = self.settings.clone();
+        let mut plot = None;
         for assignment in &assignments {
             let name = assignment.name.to_ascii_lowercase();
-            if name == "noinit" || name == "noacct" {
+            if name == "curplot" {
+                // frontend/options.c:377 cp_usrset: `plot_setcur`, as
+                // `setplot` does.
+                let SetValue::Word(value) = &assignment.value else {
+                    return Err(command_error(command.line, "curplot requires a plot name").into());
+                };
+                plot = Some(value.text.clone());
+            } else if name == "plots" {
+                return Err(command_error(command.line, "plots is a read-only variable").into());
+            } else if name == "noinit" || name == "noacct" {
                 // ngspice frontend/options.c sets ft_noinitprint (noinit) or
                 // ft_noacctprint (noacct). Both suppress the initial transient
                 // listing (spicelib/analysis/dctran.c:251); noacct also drops
@@ -148,7 +158,12 @@ impl ControlCircuit {
             }
             // Any other name is a shell variable, which the session keeps;
             // it steers nothing here, as interactive, plotting and hardcopy
-            // variables steer nothing in a batch run.
+            // variables steer nothing in a batch run. The plot labels
+            // (curplotname, curplottitle, curplotdate) label nothing a batch
+            // run prints.
+        }
+        if let Some(plot) = plot {
+            self.set_plot(&plot, command.line)?;
         }
         self.settings = settings;
         Ok(())

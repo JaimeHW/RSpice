@@ -695,10 +695,18 @@ impl ControlSession<'_> {
                     match name.as_str() {
                         "set" | "setcs" => {
                             for assignment in shell::assignments(&arguments, line)? {
-                                self.shell.insert(
-                                    assignment.name.to_ascii_lowercase(),
-                                    ShellValue::assigned(&assignment.value),
-                                );
+                                let name = assignment.name.to_ascii_lowercase();
+                                // ngspice records no variable of these
+                                // (frontend/options.c:377 cp_usrset,
+                                // US_DONTRECORD): they set the current
+                                // plot and its labels, which the host keeps.
+                                if !matches!(
+                                    name.as_str(),
+                                    "curplot" | "curplotname" | "curplottitle" | "curplotdate"
+                                ) {
+                                    self.shell
+                                        .insert(name, ShellValue::assigned(&assignment.value));
+                                }
                             }
                         }
                         "unset" => {

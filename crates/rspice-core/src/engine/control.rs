@@ -222,6 +222,32 @@ impl ControlCircuit {
         self.current.and_then(|index| self.datasets.get(index))
     }
 
+    /// ngspice `plot_setcur` (frontend/vectors.c:1160): `new` makes an empty
+    /// plot current, any other name the plot of that name.
+    fn set_plot(&mut self, name: &str, line: usize) -> Result<(), ControlError> {
+        if name.eq_ignore_ascii_case("new") {
+            // frontend/vectors.c:1164 plot_alloc("unknown").
+            let ordinal = self
+                .ordinals
+                .get("unknown")
+                .copied()
+                .unwrap_or(0)
+                .checked_add(1)
+                .ok_or_else(|| command_error(line, "plot ordinal overflow"))?;
+            self.ordinals.insert("unknown", ordinal);
+            self.vectors.new_plot(format!("unknown{ordinal}"));
+        } else if let Some(index) = self.dataset_index(name) {
+            self.current = Some(index);
+            self.vectors.leave_plot();
+        } else if !self.vectors.select_plot(name) {
+            return Err(command_error(
+                line,
+                format!("setplot: no plot named '{name}'"),
+            ));
+        }
+        Ok(())
+    }
+
     /// Consume the completed session for publication without cloning results.
     pub fn into_datasets(self) -> Vec<ControlNamedDataset> {
         self.datasets
@@ -400,27 +426,7 @@ impl ControlCircuit {
                     }
                     return Err(command_error(line, "setplot takes one plot name").into());
                 };
-                if name.text.eq_ignore_ascii_case("new") {
-                    // frontend/vectors.c:1164 plot_alloc("unknown").
-                    let ordinal = self
-                        .ordinals
-                        .get("unknown")
-                        .copied()
-                        .unwrap_or(0)
-                        .checked_add(1)
-                        .ok_or_else(|| command_error(line, "plot ordinal overflow"))?;
-                    self.ordinals.insert("unknown", ordinal);
-                    self.vectors.new_plot(format!("unknown{ordinal}"));
-                } else if let Some(index) = self.dataset_index(&name.text) {
-                    self.current = Some(index);
-                    self.vectors.leave_plot();
-                } else if !self.vectors.select_plot(&name.text) {
-                    return Err(command_error(
-                        line,
-                        format!("setplot: no plot named '{}'", name.text),
-                    )
-                    .into());
-                }
+                self.set_plot(&name.text, line)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
