@@ -27,8 +27,8 @@ use crate::workbench::commands::vocabulary::{Command as ShortcutCommand, Command
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::app_state::session::shortcuts::{
-    ShortcutEnvironment, ShortcutInputSnapshot, engineering_canvas_has_focus,
-    escape_owner_was_let_go, runtime_command_platform,
+    ShortcutEnvironment, ShortcutInputSnapshot, ShortcutResolverState,
+    engineering_canvas_has_focus, escape_owner_was_let_go, runtime_command_platform,
 };
 
 fn shortcut_dispatch_blocked(state: &AppState, ctx: &Context) -> bool {
@@ -40,6 +40,7 @@ impl RSpiceApp {
     pub(crate) fn handle_shortcuts(&mut self, ctx: &Context) {
         if shortcut_dispatch_blocked(&self.state, ctx) {
             self.state.shortcut_resolver.reset();
+            self.answer_help_over_dialog(ctx);
             return;
         }
         let active_view = self.state.model.workspace.content.active_view_type();
@@ -122,6 +123,56 @@ impl RSpiceApp {
                 super::command_palette::route_opening_input(ctx, input);
                 self.state.shortcut_resolver.reset();
             }
+        }
+    }
+
+    /// Help's key while a dialog holds the keyboard: it still opens the
+    /// documentation, for that dialog. No other command answers there, and
+    /// only a one-chord key does, as nothing is held between frames while a
+    /// dialog is open.
+    fn answer_help_over_dialog(&mut self, ctx: &Context) {
+        let pressed = ctx.input(|input| {
+            input
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::Key { pressed: true, .. }))
+        });
+        if !pressed
+            || !self.state.application_modal_open()
+            || self.state.workbench.drawer.is_some()
+            || Popup::is_any_open(ctx)
+        {
+            return;
+        }
+        let help = ShortcutCommand::HelpCenter.key();
+        let snapshot = ctx.input(|input| ShortcutInputSnapshot::from_input_state(input, true));
+        let now = ctx.input(|input| std::time::Duration::from_secs_f64(input.time.max(0.0)));
+        let environment = ShortcutEnvironment {
+            workspace: self.state.workbench.workspace,
+            active_view: self.state.model.workspace.content.active_view_type(),
+            canvas_focus: false,
+            source_editor_focus: false,
+        };
+        let profile = self.state.model.preferences.shortcuts().clone();
+        let resolution = ShortcutResolverState::default().resolve(
+            &snapshot,
+            &profile,
+            &CommandRegistry,
+            runtime_command_platform(ctx),
+            environment,
+            now,
+            |command| command == help,
+        );
+        if resolution.command == Some(help)
+            && ctx.input_mut(|input| {
+                ShortcutInputSnapshot::consume_keys(
+                    input,
+                    &resolution.consume,
+                    resolution.deferred_start,
+                )
+            })
+        {
+            self.execute_command_key(help);
         }
     }
 

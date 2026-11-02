@@ -773,7 +773,7 @@ mod tests {
         assert_eq!(app.state.project.examples_selection, Some(0));
 
         let mut app = RSpiceApp::test_instance();
-        Command::HelpCenter.execute(&mut app);
+        app.state.shell.help_center.open(HelpCenterPage::Help);
         let shown = shown_texts(app);
         assert!(
             !shown.iter().any(|text| text == "Examples\u{2026}"),
@@ -855,7 +855,7 @@ mod tests {
     #[test]
     fn the_help_topics_are_full_width_rows_on_one_edge() {
         let mut app = RSpiceApp::test_instance();
-        Command::HelpCenter.execute(&mut app);
+        app.state.shell.help_center.open(HelpCenterPage::Help);
         let shown = shown_nodes(&mut app, RSpiceApp::render_help_center_dialog);
         let rows: Vec<_> = shown
             .iter()
@@ -955,7 +955,7 @@ mod tests {
             }
         }
         let mut app = RSpiceApp::test_instance();
-        Command::HelpCenter.execute(&mut app);
+        app.state.shell.help_center.open(HelpCenterPage::Help);
         let shown = shown_texts(app);
         assert!(
             !shown

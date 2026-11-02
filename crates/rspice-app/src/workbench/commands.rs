@@ -1191,7 +1191,7 @@ impl Command {
             Self::CommandPalette => open_command_palette(&mut app.state),
             Self::KeyboardShortcuts => app.state.shell.shortcuts_help = true,
             Self::HelpCenter => {
-                open_help_center(&mut app.state, crate::workbench::app::HelpCenterPage::Help)
+                crate::workbench::app::dialogs::help::site::open_docs(&mut app.state)
             }
             Self::Examples => app.state.project.open_examples(),
             Self::ReleaseNotes => crate::workbench::app::dialogs::help::site::open_release_notes(
