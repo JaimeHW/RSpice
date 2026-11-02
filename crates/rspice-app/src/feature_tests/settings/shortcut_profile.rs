@@ -24,6 +24,8 @@ fn sequence(key: Key, primary: bool) -> ShortcutSequence {
     ShortcutSequence::single(ShortcutStroke::new(key, primary, false, false))
 }
 
+/// The labels are read as Windows and Linux write them on every host; a
+/// Mac writes the same chords `⌥4` and `⌥5`.
 #[test]
 fn immutable_workspace_ownership_projects_to_results_and_verify() {
     let preferences = ShortcutPreferences::default();
@@ -32,7 +34,8 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
             &CommandRegistry,
             Command::OpenWorkspace(Workspace::Results).key()
         )[0]
-        .display_label(),
+        .sequence()
+        .display_label_for(OperatingSystem::Windows),
         "Alt+4"
     );
     assert_eq!(
@@ -40,7 +43,8 @@ fn immutable_workspace_ownership_projects_to_results_and_verify() {
             &CommandRegistry,
             Command::OpenWorkspace(Workspace::Verify).key()
         )[0]
-        .display_label(),
+        .sequence()
+        .display_label_for(OperatingSystem::Windows),
         "Alt+5"
     );
     assert!(
@@ -129,7 +133,11 @@ fn default_profile_keeps_place_pin_on_the_mockup_binding() {
             .resolved_bindings(&CommandRegistry, Command::PlacePin.key())
             .into_iter()
             .filter(|binding| binding.supports(platform))
-            .map(|binding| binding.display_label())
+            .map(|binding| {
+                binding
+                    .sequence()
+                    .display_label_for(OperatingSystem::Windows)
+            })
             .collect::<Vec<_>>();
         assert_eq!(labels, ["Shift+P"]);
     }
@@ -146,7 +154,11 @@ fn default_profile_keeps_place_text_on_the_mockup_binding() {
             .resolved_bindings(&CommandRegistry, Command::PlaceText.key())
             .into_iter()
             .filter(|binding| binding.supports(platform))
-            .map(|binding| binding.display_label())
+            .map(|binding| {
+                binding
+                    .sequence()
+                    .display_label_for(OperatingSystem::Windows)
+            })
             .collect::<Vec<_>>();
         assert_eq!(labels, ["Shift+T"]);
     }
