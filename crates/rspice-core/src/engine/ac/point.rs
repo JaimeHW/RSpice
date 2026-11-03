@@ -266,6 +266,9 @@ impl AcLinearization {
         if !excitation.projection.is_empty() {
             excitation.projection.project(&mut solution)?;
             if let Err(error) = ac_matrix.certify_solution(&solution, rhs) {
+                if !matches!(error, SolverError::InaccurateSolution(_)) {
+                    return Err(SimulationError::Solver(error));
+                }
                 // The denominator floor admits roundoff leakage on a
                 // homogeneous source row (`V(ctrl) = 0` solved as 2e-16), and
                 // homogeneous equations carry it to the unknowns they tie to
@@ -274,17 +277,32 @@ impl AcLinearization {
                 // node holding the leak, which its equation then rejects with
                 // a backward error of one. Those equations prove every such
                 // unknown zero: set them so and project again.
-                if !matches!(error, SolverError::InaccurateSolution(_))
-                    || !ac_matrix
-                        .canonicalize_homogeneous_zeros(rhs, &mut solution)
-                        .map_err(SimulationError::Solver)?
-                {
-                    return Err(SimulationError::Solver(error));
-                }
-                excitation.projection.project(&mut solution)?;
-                ac_matrix
-                    .certify_solution(&solution, rhs)
+                let canonicalized = ac_matrix
+                    .canonicalize_homogeneous_zeros(rhs, &mut solution)
                     .map_err(SimulationError::Solver)?;
+                if canonicalized {
+                    excitation.projection.project(&mut solution)?;
+                }
+                if !canonicalized || ac_matrix.certify_solution(&solution, rhs).is_err() {
+                    // Zeroing an idle source's leak also moves the current
+                    // through its resistor, and the node across that resistor
+                    // can sit far below a volt: a coupled line's isolated port
+                    // near a half-wave resonance holds about a millivolt, and
+                    // its equation then rejects a leak of 1e-16 V. One step of
+                    // iterative refinement on the cached factorization solves
+                    // for the residual of the projected point, whose source
+                    // rows are already exact, so the corrected point projects
+                    // without moving. A point that still fails is refused.
+                    if self
+                        .refine_projected_solution(ac_matrix, excitation, &mut solution)
+                        .is_err()
+                    {
+                        return Err(SimulationError::Solver(error));
+                    }
+                    ac_matrix
+                        .certify_solution(&solution, rhs)
+                        .map_err(SimulationError::Solver)?;
+                }
             }
             if abort.is_aborted() {
                 return Err(SimulationError::Aborted);
@@ -292,5 +310,34 @@ impl AcLinearization {
         }
 
         Ok(solution)
+    }
+
+    /// One step of fixed-precision iterative refinement of a projected
+    /// solution: solve `A*d = b - A*x` on the cached factorization, add `d`
+    /// and project again.
+    fn refine_projected_solution(
+        &self,
+        ac_matrix: &mut ComplexMatrix,
+        excitation: &AcExcitation,
+        solution: &mut [Complex64],
+    ) -> Result<(), SimulationError> {
+        let product = ac_matrix
+            .multiply_vector(solution)
+            .map_err(SimulationError::Solver)?;
+        let residual = excitation
+            .rhs
+            .iter()
+            .zip(&product)
+            .map(|(&rhs, &product)| rhs - product)
+            .collect::<Vec<_>>();
+        let correction = match self.denominator_floor.as_deref() {
+            Some(floor) => ac_matrix.solve_with_row_denominator_floors(&residual, floor),
+            None => ac_matrix.solve(&residual),
+        }
+        .map_err(SimulationError::Solver)?;
+        for (value, delta) in solution.iter_mut().zip(correction) {
+            *value += delta;
+        }
+        excitation.projection.project(solution)
     }
 }

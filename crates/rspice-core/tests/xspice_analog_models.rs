@@ -318,6 +318,33 @@ fn xspice_cpline_ac_partials_match_official_even_odd_matrix() {
     assert!((complex_partial(&p3, "p4", "cpline p3") - z12).norm() < 1.0e-9);
 }
 
+/// Port 1 driven through 50 Ohm at 3.2303 GHz, just below the even mode's
+/// half-wave resonance, with the other ports idle on `ac 0` sources. Port 4
+/// then holds under 2 mV, and the exact zero the idle sources' nodes are
+/// projected onto used to leave its resistor's equation failing the
+/// backward-error check. The values are ngspice-46's.
+#[test]
+fn xspice_cpline_ac_solves_beside_idle_port_sources_near_resonance() {
+    const DECK: &str = "cpline idle ports\nV1 i1 0 dc 0 ac 1\nR1 i1 p1 50\nV2 i2 0 dc 0 ac 0\nR2 i2 p2 50\n\
+        V3 i3 0 dc 0 ac 0\nR3 i3 p3 50\nV4 i4 0 dc 0 ac 0\nR4 i4 p4 50\n\
+        A1 %hd(p1 0) %hd(p2 0) %hd(p3 0) %hd(p4 0) %vd(p1 0) %vd(p2 0) %vd(p3 0) %vd(p4 0) CPLINE1\n\
+        .MODEL CPLINE1 CPLINE(ze=84.48 zo=53.99 l=25e-3 ere=3.34 ero=2.829 ao=0 ae=0)\n.end\n";
+    let frequency = 3_230_303_030.303_030_5;
+    for (node, re, im) in [
+        ("p1", 0.5019908692034314, -0.011956319794390331),
+        ("p2", -0.4886298114839953, -0.0865802519417866),
+        ("p3", -0.010435135795750696, 0.05904009161621743),
+        ("p4", -0.00126047515817607, -0.001279408007470757),
+    ] {
+        let ngspice = Complex64::new(re, im);
+        let value = ac_voltage_at(DECK, node, frequency);
+        assert!(
+            (value - ngspice).norm() <= 1.0e-9 * ngspice.norm(),
+            "V({node}) = {value}, ngspice-46 {ngspice}"
+        );
+    }
+}
+
 #[test]
 fn xspice_cpline_transient_uses_delayed_even_odd_modal_history() {
     let model = rspice_core::xspice::models::CoupledTransmissionLine;
