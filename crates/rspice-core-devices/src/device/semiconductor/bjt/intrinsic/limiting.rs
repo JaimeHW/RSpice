@@ -543,10 +543,10 @@ impl Bjt {
         // a base at its drive rail over a grounded collector, and a first load
         // at that `vbc` overflows. So outside the Xyce dialect the operating
         // point's MODEINITJCT load (`legacy_initial_junction_pending`) zeroes
-        // `vbc` and `vsub` as bjtload.c does. Any other load without a
-        // previous iterate, such as the first after a GMIN change, keeps the
-        // incoming collector bias, which is real information ngspice would be
-        // reading out of MODEINITFLOAT.
+        // `vbc` and `vsub` as bjtload.c does. Any other load that arrives
+        // here without a previous iterate keeps the incoming collector bias,
+        // which is real information ngspice would be reading out of
+        // MODEINITFLOAT.
         // `vbcx` and `vrci` have no counterpart to zero at all — this port
         // carries no quasi-saturation epi branch, and the promoted topology's
         // extrinsic base node is a matrix unknown rather than a junction

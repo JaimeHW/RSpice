@@ -521,6 +521,51 @@ mod tests {
         }
     }
 
+    /// Only the operating point's first load is MODEINITJCT. ngspice runs
+    /// every gmin stage after the first in `continuemode` (cktop.c:203),
+    /// MODEINITFLOAT, where bjtload.c:410-412 limits the incoming junctions
+    /// against the last load's. A GMIN change invalidates the cached
+    /// linearization but not that history, so the first load after it
+    /// passes a bias pnjlim accepts through unchanged instead of replaying
+    /// the tVcrit state.
+    #[test]
+    fn legacy_bjt_load_after_a_gmin_change_limits_against_the_previous_iterate() {
+        for xyce in [false, true] {
+            for polarity in [1.0, -1.0] {
+                let mut bjt = if polarity > 0.0 {
+                    Bjt::new_npn("q".into(), 1, 2, 3)
+                } else {
+                    Bjt::new_pnp("q".into(), 1, 2, 3)
+                };
+                bjt.set_xyce_compatibility(xyce);
+                let (_vt, vcrit, _sub_vcrit) = bjt.legacy_limiting_parameters(0.0);
+                // ngspice's pnjlim also caps a reverse step from zero at -1 V,
+                // so the collector-base drop stays above that.
+                let bias = [0.8 * polarity, 0.5 * polarity, 0.0];
+                bjt.update(&bias);
+                assert!(bjt.legacy_junction_limited_for_trace());
+                bjt.update(&bias);
+                assert!(!bjt.legacy_junction_limited_for_trace());
+                let settled = bjt.vbe;
+                assert!(
+                    vcrit - settled * polarity > 0.1,
+                    "the settled bias must sit well below tVcrit (xyce={xyce}), \
+                     vbe={settled:.17e} vcrit={vcrit:.17e}"
+                );
+
+                bjt.set_junction_gmin(1e-9);
+                bjt.update(&bias);
+                assert!(
+                    !bjt.legacy_junction_limited_for_trace(),
+                    "the first load after a GMIN change replayed the tVcrit state \
+                     (xyce={xyce}, polarity={polarity}), vbe={:.17e}",
+                    bjt.vbe
+                );
+                assert!((bjt.vbe - settled).abs() <= 1e-6);
+            }
+        }
+    }
+
     #[test]
     fn small_saturation_bjt_limiting_keeps_the_logarithmic_threshold() {
         for vt in [0.005_f64, 0.02585, 0.2] {

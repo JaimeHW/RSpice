@@ -1231,7 +1231,8 @@ pub struct Bjt {
     /// The next legacy load is the operating point's MODEINITJCT load: the
     /// first of a freshly built instance, or the first after
     /// [`Self::reset_legacy_operating_point_history`]. A load that only lacks
-    /// a previous iterate, such as the first after a GMIN change, is not.
+    /// a cached linearization, such as the first after a GMIN change, is not:
+    /// it limits against the previous iterate.
     legacy_initial_junction_pending: bool,
     ic: Value,
     ib: Value,
@@ -2678,19 +2679,26 @@ impl NonlinearDevice for Bjt {
         // the limited state value rather than the raw solution bias.
         let mut anchor = [vc, vb, ve, vs];
         self.legacy_junction_limited = false;
+        // Only the operating point's MODEINITJCT load lacks a previous
+        // iterate. A GMIN change invalidates the cached linearization but
+        // keeps the junction voltages of the last load, and ngspice limits
+        // against exactly those: every gmin stage after the first runs in
+        // `continuemode`, MODEINITFLOAT (cktop.c:203 and :392), where
+        // bjtload.c:410-419 applies pnjlim against CKTstate0 instead of
+        // reassigning tVcrit.
+        let previous_iterate_available =
+            previous_linearization_available || !self.legacy_initial_junction_pending;
         // OFF initialization applies even with VOLTLIM disabled. Its replaced
         // bias owns the first load and must be released on the next update.
         if self.uses_legacy_junction_limiting()
             || (self.charge_model == BjtChargeModel::LegacyGummelPoon
                 && self.initial_off
-                && !previous_linearization_available)
+                && !previous_iterate_available)
         {
             let raw_vbe = state.vbi - state.vei;
             let raw_vbc = state.vbi - state.vci;
-            state = self.limit_legacy_terminal_state_against_iterate(
-                state,
-                previous_linearization_available,
-            );
+            state =
+                self.limit_legacy_terminal_state_against_iterate(state, previous_iterate_available);
             // A replaced iterate is a non-converged one, and the MODEINITJCT
             // device state counts: ngspice sets `icheck` before its whole
             // initialization chain and never clears it on those arms, so
