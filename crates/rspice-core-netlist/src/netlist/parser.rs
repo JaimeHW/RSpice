@@ -3988,8 +3988,9 @@ fn pspice_utgate_alias_model(
         pspice_timing_delay_estimate(timing_model, &["TPLHTY", "TPLHMN", "TPLHMX"], delay_mode);
     let falling =
         pspice_timing_delay_estimate(timing_model, &["TPHLTY", "TPHLMN", "TPHLMX"], delay_mode);
-    let delay =
-        pspice_select_shorter_delay(rising, falling).unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
+    let delay = pspice_select_shorter_delay(rising, falling)
+        .or_else(|| pspice_utgate_enable_delay(timing_model, delay_mode))
+        .unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
     push_pspice_timing_delay("delay", delay, &mut params, &mut expr_params);
 
     ModelDef {
@@ -4003,6 +4004,26 @@ fn pspice_utgate_alias_model(
         real_vector_expr_params: Vec::new(),
         integer_vector_params: Vec::new(),
     }
+}
+
+/// A UTGATE without TPLH or TPHL delays: the shorter of its TPLZ and TPHZ
+/// delays against the shorter of its TPZL and TPZH, as ngspice-46 gives
+/// d_tristate by its default ps_tpz_delays of 1 (frontend/udevices.c:952,
+/// get_delays_utgate :3153).
+fn pspice_utgate_enable_delay(
+    timing_model: &ModelDef,
+    delay_mode: PspiceUTimingMode,
+) -> Option<PspiceTimingDelay> {
+    let estimate = |names: &[&str]| pspice_timing_delay_estimate(timing_model, names, delay_mode);
+    let release = pspice_select_shorter_delay(
+        estimate(&["TPLZTY", "TPLZMN", "TPLZMX"]),
+        estimate(&["TPHZTY", "TPHZMN", "TPHZMX"]),
+    );
+    let drive = pspice_select_shorter_delay(
+        estimate(&["TPZLTY", "TPZLMN", "TPZLMX"]),
+        estimate(&["TPZHTY", "TPZHMN", "TPZHMX"]),
+    );
+    pspice_select_shorter_delay(release, drive)
 }
 
 fn pspice_ugff_alias_model(

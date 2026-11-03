@@ -13820,6 +13820,41 @@ mod tests {
         }
     }
 
+    /// ngspice-46 gives a UTGATE that has only enable delays the shortest of
+    /// them (frontend/udevices.c:3153 get_delays_utgate): ex5.cir's 74LV374A
+    /// model, TPLZ and TPHZ 5.9 ns and TPZL and TPZH 7.7 ns, releases its
+    /// BUF3 output 5.9 ns after the enable falls.
+    #[test]
+    fn pspice_u_buf3a_utgate_with_only_enable_delays_takes_the_shortest() {
+        let netlist = Netlist::parse(
+            "pspice u buf3a enable timing\n\
+             U1 BUF3A(2) $G_DPWR $G_DGND a1 a2 en y1 y2 DLY IO_STD\n\
+             .model DLY UTGATE (TPLZTY=5.9n TPHZTY=5.9n TPZLTY=7.7n TPZHTY=7.7n)\n\
+             .end\n",
+        )
+        .expect("PSpice UTGATE enable timing should create d_tristate model aliases");
+
+        let ElementKind::Xspice { model, .. } = &netlist.elements[0].kind else {
+            panic!(
+                "expected XSPICE tristate, got {:?}",
+                netlist.elements[0].kind
+            );
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|alias| &alias.name == model)
+            .expect("generated UTGATE alias exists");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| name == "delay" && (*value - 5.9e-9).abs() < 1.0e-21),
+            "{:?}",
+            alias.params
+        );
+    }
+
     #[test]
     fn pspice_u_inv3a_lowers_to_tristate_with_inverted_input() {
         let netlist = Netlist::parse(
