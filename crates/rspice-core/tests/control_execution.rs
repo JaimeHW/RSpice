@@ -1178,6 +1178,60 @@ fn printed(request: &ControlPresentation) -> &[rspice_core::engine::ControlTrace
     }
 }
 
+/// `print all`, `allv` and `alli` print the vectors of the current plot that
+/// `display` lists (frontend/vectors.c:259 findvec_all), in its order. For 1 V
+/// across a 1k-1k divider into an inductor to ground, ngspice-46 prints aa =
+/// 0.000000e+00, bb = 5.000000e-01, l1#branch = 5.000000e-04, vz#branch =
+/// -5.00000e-04 and zz = 1.000000e+00 after op; allv the three nodes and
+/// alli the two branches. After the DC sweep the columns are the same five,
+/// the scale shown once, and after noise from 1k to 10k Hz they are
+/// inoise_total = 5.462318e-07 and onoise_total = 2.731159e-07.
+#[test]
+fn print_all_prints_the_vectors_of_the_current_plot() {
+    let (presented, error) = run_until_error(
+        "printall\nvz zz 0 dc 1 ac 1\nr1 zz bb 1k\nr2 bb aa 1k\nl1 aa 0 1u\n.control\nop\n\
+         print all\nprint allv\nprint alli\ndc vz 0 1 0.5\nprint all\n\
+         noise v(bb) vz dec 1 1k 10k\nprint all\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let listed = |request: &ControlPresentation| -> Vec<(String, f64)> {
+        printed(request)
+            .iter()
+            .map(|trace| {
+                let last = trace.y.samples.last().expect("a printed row");
+                (trace.y.expression.clone(), last.re)
+            })
+            .collect()
+    };
+    let op = [
+        ("aa", 0.0),
+        ("bb", 0.5),
+        ("l1#branch", 5e-4),
+        ("vz#branch", -5e-4),
+        ("zz", 1.0),
+    ];
+    let expected = [
+        op.to_vec(),
+        vec![op[0], op[1], op[4]],
+        vec![op[2], op[3]],
+        op.to_vec(),
+        vec![("inoise_total", 5.462318e-7), ("onoise_total", 2.731159e-7)],
+    ];
+    assert_eq!(presented.len(), expected.len());
+    for (request, expected) in presented.iter().zip(expected) {
+        let listed = listed(request);
+        let names: Vec<_> = listed.iter().map(|(name, _)| name.as_str()).collect();
+        let expected_names: Vec<_> = expected.iter().map(|(name, _)| *name).collect();
+        assert_eq!(names, expected_names);
+        for ((_, value), (_, expected)) in listed.iter().zip(&expected) {
+            assert!(
+                (value - expected).abs() <= 2e-6 * expected.abs().max(1e-6),
+                "{listed:?}"
+            );
+        }
+    }
+}
+
 /// `settype` takes every vector type ngspice names (frontend/typesdef.c:38);
 /// ngspice's sp examples mark their dB and phase vectors `decibel` and
 /// `phase`.

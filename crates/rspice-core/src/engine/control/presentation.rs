@@ -733,32 +733,6 @@ impl ControlCircuit {
         }
     }
 
-    fn group<'a>(
-        &'a self,
-        expression: &Expr,
-        line: usize,
-    ) -> Result<Option<Vec<Selected<'a>>>, ControlError> {
-        let Expr::Param(name) = expression else {
-            return Ok(None);
-        };
-        let (dataset, name) = self.qualified(name, line)?;
-        if !name.eq_ignore_ascii_case("alli") {
-            return Ok(None);
-        }
-        let values = dataset
-            .branch_names()
-            .iter()
-            .map(|name| self.select(dataset, name, Some("I"), line))
-            .collect::<Result<Vec<_>, _>>()?;
-        if values.is_empty() {
-            return Err(command_error(
-                line,
-                format!("{}.alli contains no retained currents", dataset.name),
-            ));
-        }
-        Ok(Some(values))
-    }
-
     pub(super) fn present(
         &mut self,
         engine: &Engine,
@@ -807,18 +781,19 @@ impl ControlCircuit {
             let mut user = Vec::new();
             while !input.is_empty() {
                 let (expression, _) = expression(&mut input, line, abort)?;
-                if let Expr::Param(name) = &expression
-                    && let Some((index, id)) = self.user_vector_id(name)
-                {
-                    user.push(index);
-                    vectors.push(id);
-                    continue;
-                }
-                let selected = match self.group(&expression, line)? {
-                    Some(group) => group,
-                    None => vec![self.direct(&expression, variables, line, abort)?],
+                let expressions = match self.plot_group(&expression, line)? {
+                    Some(names) => names.into_iter().map(Expr::Param).collect(),
+                    None => vec![expression],
                 };
-                for selected in selected {
+                for expression in expressions {
+                    if let Expr::Param(name) = &expression
+                        && let Some((index, id)) = self.user_vector_id(name)
+                    {
+                        user.push(index);
+                        vectors.push(id);
+                        continue;
+                    }
+                    let selected = self.direct(&expression, variables, line, abort)?;
                     if selected.sample(0).is_none() {
                         return Err(unavailable(line, selected.dataset, &selected.id.signal).into());
                     }
@@ -850,19 +825,33 @@ impl ControlCircuit {
             };
             let mut traces = Vec::new();
             let mut options = ControlPlotOptions::default();
-            while !input.is_empty() {
+            // The vectors an `all`, `allv`, `alli` or `ally` names, each read
+            // as if the script had named it.
+            let mut group = std::collections::VecDeque::<String>::new();
+            while !input.is_empty() || !group.is_empty() {
                 check_abort(abort, line)?;
-                if command.name == "plot"
-                    && parse_option(&mut input, &mut options, variables, line, abort)?
-                {
-                    continue;
-                }
-                let (y, label) = expression(&mut input, line, abort)?;
-                let x = if first_word(input).eq_ignore_ascii_case("vs") {
-                    word(&mut input, line)?;
-                    Some(expression(&mut input, line, abort)?)
+                let (y, label, x) = if let Some(name) = group.pop_front() {
+                    (Expr::Param(name.clone()), name, None)
                 } else {
-                    None
+                    if command.name == "plot"
+                        && parse_option(&mut input, &mut options, variables, line, abort)?
+                    {
+                        continue;
+                    }
+                    let (y, label) = expression(&mut input, line, abort)?;
+                    let x = if first_word(input).eq_ignore_ascii_case("vs") {
+                        word(&mut input, line)?;
+                        Some(expression(&mut input, line, abort)?)
+                    } else {
+                        None
+                    };
+                    if x.is_none()
+                        && let Some(names) = self.plot_group(&y, line)?
+                    {
+                        group.extend(names);
+                        continue;
+                    }
+                    (y, label, x)
                 };
                 if self.needs_vector_path(&y, variables)
                     || x.as_ref()
@@ -916,54 +905,37 @@ impl ControlCircuit {
                     scalars.push(scalar);
                     continue;
                 }
-                let ys = if let Some(group) = self.group(&y, line)? {
-                    group
-                        .into_iter()
-                        .map(|selected| {
-                            let label = format!("{}.{}", selected.id.dataset, selected.id.signal);
-                            resolver.materialize(
-                                Expr::Param("\0V0".into()),
-                                vec![selected],
-                                label,
-                                None,
-                            )
-                        })
-                        .collect::<Result<Vec<_>, _>>()?
+                let y = resolver.evaluate(y, label, None)?;
+                let dataset = self.dataset(&y.dataset).expect("resolved dataset exists");
+                let x = if let Some((expression, label)) = &x {
+                    resolver.evaluate(expression.clone(), label.clone(), Some(dataset))?
                 } else {
-                    vec![resolver.evaluate(y, label, None)?]
+                    resolver.charge(dataset.length().saturating_mul(2))?;
+                    let mut samples = Vec::with_capacity(dataset.length());
+                    for row in 0..dataset.length() {
+                        check_abort(abort, line)?;
+                        let value = dataset
+                            .scale_value(row)
+                            .filter(|v| v.is_finite())
+                            .ok_or_else(|| {
+                                command_error(line, "dataset scale is unavailable or nonfinite")
+                            })?;
+                        samples.push(value.into());
+                    }
+                    ControlVector {
+                        expression: dataset.scale_name().into(),
+                        dataset: dataset.name.clone(),
+                        unit: dataset.scale_unit(),
+                        samples,
+                        current_sources: Vec::new(),
+                        voltage_sources: Vec::new(),
+                    }
                 };
-                for y in ys {
-                    let dataset = self.dataset(&y.dataset).expect("resolved dataset exists");
-                    let x = if let Some((expression, label)) = &x {
-                        resolver.evaluate(expression.clone(), label.clone(), Some(dataset))?
-                    } else {
-                        resolver.charge(dataset.length().saturating_mul(2))?;
-                        let mut samples = Vec::with_capacity(dataset.length());
-                        for row in 0..dataset.length() {
-                            check_abort(abort, line)?;
-                            let value = dataset
-                                .scale_value(row)
-                                .filter(|v| v.is_finite())
-                                .ok_or_else(|| {
-                                    command_error(line, "dataset scale is unavailable or nonfinite")
-                                })?;
-                            samples.push(value.into());
-                        }
-                        ControlVector {
-                            expression: dataset.scale_name().into(),
-                            dataset: dataset.name.clone(),
-                            unit: dataset.scale_unit(),
-                            samples,
-                            current_sources: Vec::new(),
-                            voltage_sources: Vec::new(),
-                        }
-                    };
-                    resolver.same_grid(
-                        dataset,
-                        self.dataset(&x.dataset).expect("resolved dataset exists"),
-                    )?;
-                    traces.push(ControlTrace { x, y });
-                }
+                resolver.same_grid(
+                    dataset,
+                    self.dataset(&x.dataset).expect("resolved dataset exists"),
+                )?;
+                traces.push(ControlTrace { x, y });
             }
             if traces.is_empty() && scalars.is_empty() {
                 return Err(

@@ -342,6 +342,94 @@ impl ControlCircuit {
         listed(command, header, lines, requested)
     }
 
+    /// ngspice's `all`, `allv`, `alli` and `ally` (frontend/vectors.c:259
+    /// FINDVEC_ALL_GEN): the vectors of the current plot that `display`
+    /// lists, its voltages, its currents, or all but its scale, in the
+    /// listing's order. A swept dataset's scale is every trace's abscissa,
+    /// so it is not a trace of its own, as ngspice's column print shows it
+    /// once. `tran1.alli` takes the group from the plot it names (vec_get,
+    /// vectors.c:588), and its vectors keep that prefix.
+    pub(super) fn plot_group(
+        &self,
+        expression: &Expr,
+        line: usize,
+    ) -> Result<Option<Vec<String>>, ControlError> {
+        let Expr::Param(word) = expression else {
+            return Ok(None);
+        };
+        let (prefix, word) = match word.split_once('.') {
+            Some((prefix, rest))
+                if self.vectors.has_plot(prefix) || self.dataset(prefix).is_some() =>
+            {
+                (Some(prefix), rest)
+            }
+            _ => (None, word.as_str()),
+        };
+        let word = word.to_ascii_lowercase();
+        let kind = match word.as_str() {
+            "all" | "ally" => None,
+            "allv" => Some("voltage"),
+            "alli" => Some("current"),
+            _ => return Ok(None),
+        };
+        let user_plot = match prefix {
+            Some(prefix) => self.vectors.has_plot(prefix).then_some(prefix),
+            None => self.vectors.current_plot(),
+        };
+        let dataset = match prefix {
+            Some(prefix) => self.dataset(prefix),
+            None => self.current_dataset(),
+        };
+        let (plot, scale, mut names) = if let Some(plot) = user_plot {
+            let scale = self
+                .vectors
+                .plot_scale(plot)
+                .filter(|_| word == "ally")
+                .map(str::to_ascii_lowercase);
+            (plot.to_owned(), scale, Vec::new())
+        } else if let Some(dataset) = dataset {
+            let policy = self.netlist.ground_policy();
+            let names =
+                dataset.vectors(|name| policy.is_ground(name) || dataset.is_event_node(name));
+            (dataset.name.clone(), dataset.scale_vector(), names)
+        } else {
+            return Err(command_error(
+                line,
+                format!("{word}: there are no vectors currently active"),
+            ));
+        };
+        // A `let` of a dataset vector's name replaces it in the plot.
+        for (vector, value) in self.vectors.vectors_in(&plot) {
+            let vector = vector.to_ascii_lowercase();
+            let vector_kind = match value.unit {
+                SignalUnit::Volt => "voltage",
+                SignalUnit::Ampere => "current",
+                _ => "notype",
+            };
+            names.retain(|(name, _)| *name != vector);
+            names.push((vector, vector_kind));
+        }
+        names.retain(|(name, vector_kind)| {
+            Some(name) != scale.as_ref() && kind.is_none_or(|kind| kind == *vector_kind)
+        });
+        names.sort();
+        if names.is_empty() {
+            return Err(command_error(
+                line,
+                format!("{plot}.{word} names no vectors"),
+            ));
+        }
+        Ok(Some(
+            names
+                .into_iter()
+                .map(|(name, _)| match prefix {
+                    Some(prefix) => format!("{prefix}.{name}"),
+                    None => name,
+                })
+                .collect(),
+        ))
+    }
+
     /// ngspice `destroy [all | plot ...]` (frontend/postcoms.c:891): the
     /// plots leave the plot list with their vectors, and `destroy` alone
     /// takes the current plot. The constants plot stays. A destroyed
