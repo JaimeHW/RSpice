@@ -505,10 +505,11 @@ fn render_plan_scope(
         });
 }
 
-/// What this scope holds, and the runtime it runs on.
+/// What this scope holds, and the runtime it runs on. Nothing while the
+/// scope holds no run: the queue's own empty row says so, once.
 fn jobs_summary_line(snapshot: &JobsSnapshot) -> String {
     if snapshot.rows.is_empty() {
-        return "No runs \u{00b7} run the active plan to create one".to_owned();
+        return String::new();
     }
     format!(
         "{} run{} \u{00b7} {}",
@@ -723,7 +724,9 @@ fn render_inspector(
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
             crate::workbench::design_system::property_card(ui, "Execution target", |ui| {
-                crate::workbench::design_system::property_row(
+                // A name in words, so the body face, as the Status row
+                // under it reads; mono is for the run's codes and counts.
+                crate::workbench::design_system::property_row_wrapped(
                     ui,
                     "Runtime",
                     snapshot.current_target.label(),
@@ -1034,7 +1037,8 @@ fn empty_row(ui: &mut Ui, width: f32, message: &str) {
         pos2(rect.left() + DIALOG_BODY_INSET, rect.center().y),
         Align2::LEFT_CENTER,
         message,
-        theme::mono(tokens::FS_0, FontWeight::Regular),
+        // A sentence, so the body face at the values' size.
+        theme::field_sans(),
         t.color.text_dim,
     );
 }
@@ -1720,10 +1724,9 @@ mod tests {
             cancelling: false,
             current_target: ExecutionTarget::LocalDesktop,
         };
-        assert_eq!(
-            jobs_summary_line(&snapshot),
-            format!("No runs \u{00b7} run the active plan to create one")
-        );
+        // The queue's empty row says there are no runs; the line does not
+        // say it again.
+        assert_eq!(jobs_summary_line(&snapshot), "");
 
         let state = AppState::default();
         snapshot = JobsSnapshot::capture(&state.model, None, JobsPlanScope::AllPlans);
@@ -1734,7 +1737,7 @@ mod tests {
             snapshot.current_target.label()
         );
         if snapshot.rows.is_empty() {
-            assert!(jobs_summary_line(&snapshot).starts_with("No runs"));
+            assert!(jobs_summary_line(&snapshot).is_empty());
         } else {
             assert_eq!(jobs_summary_line(&snapshot), expected);
         }
