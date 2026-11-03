@@ -881,6 +881,35 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// `alterparam` changes a `.param` of the deck that `reset` loads, with the
+/// parameters that depend on it, and the change stays through later resets.
+/// For 1 V into 1k over {pr2} in parallel with {2*pr2}, ngspice-46 prints
+/// v(n2) = 4.000000e-01, the same after `alterparam pr2 = 3k` until `reset`,
+/// then 6.666667e-01, again after an `alter r1 3k` that the next reset
+/// drops, and 4.000000e-01 after `alterparam pr2 = 1k` and `reset`.
+#[test]
+fn alterparam_changes_the_parameter_reset_loads() {
+    let deck = "alterparam\n.param pr2 = 1k\n.param other = {2*pr2}\nv1 n1 0 1\nr1 n1 n2 1k\n\
+                r2 n2 0 {pr2}\nr3 n2 0 {other}\n.control\nop\nprint v(n2)\n\
+                alterparam pr2 = 3k\nop\nprint v(n2)\nreset\nop\nprint v(n2)\n\
+                alter r1 3k\nreset\nop\nprint v(n2)\nalterparam pr2 = 1k\nreset\nop\n\
+                print v(n2)\n.endc\n.end\n";
+    let (presented, error) = run_until_error(deck);
+    assert_eq!(error, None);
+    let voltages: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(|request| printed(request)[0].y.samples[0].re)
+        .collect();
+    assert_eq!(voltages.len(), 5);
+    for (voltage, expected) in voltages.iter().zip([0.4, 0.4, 2.0 / 3.0, 2.0 / 3.0, 0.4]) {
+        assert!((voltage / expected - 1.0).abs() < 1e-9, "{voltages:?}");
+    }
+    let (_, error) =
+        run_until_error(&deck.replace("alterparam pr2 = 3k", "alterparam nothere = 3k"));
+    assert!(error.unwrap().contains("parameter 'nothere' not found"));
+}
+
 /// A `pre_` command runs without its prefix before the rest of the script
 /// (frontend/inp.c:786), so a later `set` overrides a `pre_set`, and blocks
 /// after it still run in order. ngspice-46 echoes `first 1`, `second 1`, `in

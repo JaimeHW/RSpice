@@ -608,7 +608,7 @@ impl Engine {
         Self::replay_parameter_overrides(netlist, overrides, None, resource_limits, abort)
     }
 
-    fn replay_parameter_overrides(
+    pub(super) fn replay_parameter_overrides(
         netlist: &Netlist,
         overrides: &[(String, Value)],
         direction: Option<&str>,

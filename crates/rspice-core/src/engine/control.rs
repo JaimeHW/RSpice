@@ -105,6 +105,8 @@ enum CommandKind {
     Alter,
     /// `altermod`: set a parameter of a model card.
     AlterModel,
+    /// `alterparam`: change a `.param` of the deck `reset` loads.
+    AlterParam,
     Analysis,
     Run,
     Presentation,
@@ -167,6 +169,7 @@ impl CommandKind {
             "reset" => Self::Reset,
             "alter" => Self::Alter,
             "altermod" => Self::AlterModel,
+            "alterparam" => Self::AlterParam,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" | "sp" => Self::Analysis,
             "run" => Self::Run,
@@ -471,6 +474,12 @@ impl ControlCircuit {
             }
             CommandKind::AlterModel => {
                 self.alter_model(command, variables, abort)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::AlterParam => {
+                self.alter_parameter(engine, command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
@@ -1125,6 +1134,56 @@ impl ControlCircuit {
             parameter.to_ascii_uppercase(),
         );
         self.netlist.retain_model_parameter(key, value);
+        Ok(())
+    }
+
+    /// `alterparam name = value` (frontend/inp.c:1742 com_alterparam) changes
+    /// a `.param` of the deck that `reset` loads, not the circuit: the change
+    /// takes effect at the next `reset`, with every parameter and device
+    /// value that depends on it, and stays for each `reset` after.
+    fn alter_parameter(
+        &mut self,
+        engine: &Engine,
+        command: &ControlCommand,
+        variables: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ControlExecutionError> {
+        let line = command.line;
+        let (target, value) = command
+            .arguments
+            .split_once('=')
+            .ok_or_else(|| command_error(line, "alterparam requires name = value"))?;
+        let name = match target.split_whitespace().collect::<Vec<_>>().as_slice() {
+            [name] => name.to_ascii_uppercase(),
+            [_, _] => {
+                return Err(command_error(
+                    line,
+                    "alterparam of a subcircuit parameter is not supported",
+                )
+                .into());
+            }
+            _ => return Err(command_error(line, "alterparam requires name = value").into()),
+        };
+        let value = scalar(value.trim(), variables, line, abort)?;
+        if !self.authored.params.has_any_parameter_binding(&name) {
+            return Err(command_error(
+                line,
+                format!(
+                    "alterparam: parameter '{}' not found",
+                    name.to_ascii_lowercase()
+                ),
+            )
+            .into());
+        }
+        let (authored, _) = Engine::replay_parameter_overrides(
+            &self.authored,
+            &[(name, value)],
+            None,
+            engine.config().resource_limits,
+            abort,
+        )
+        .map_err(|error| simulation_error(line, error))?;
+        self.authored = authored;
         Ok(())
     }
 }
