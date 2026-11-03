@@ -628,8 +628,12 @@ impl SignalProjection {
             .iter()
             .map(crate::analysis::NoiseResult::input_referred_rms)
             .collect::<Vec<_>>();
-        let printed_measures =
-            crate::analysis::measure_signals::printed_noise_measure_traces(netlist, sweep, abort)?;
+        let printed_measures = crate::analysis::measure_signals::printed_noise_measure_traces(
+            netlist,
+            sweep,
+            &crate::ResourceLimits::default(),
+            abort,
+        )?;
         let mut lookup = series.signal_map();
         lookup.retain(|name, _| {
             !name.eq_ignore_ascii_case("onoise_spectrum")

@@ -776,6 +776,7 @@ fn finish_ac(
         results,
         &frequencies,
         &inventory,
+        &ctx.engine.config().resource_limits,
         &crate::abort::ProcessAbort,
     )
     .map_err(ac_projection_error)?;

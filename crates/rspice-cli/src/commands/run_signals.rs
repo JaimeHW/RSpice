@@ -857,11 +857,13 @@ pub(crate) fn ac_export_signals(
     results: &[rspice_core::analysis::AcResult],
     axis: &[Value],
     signals: &[ComplexSignal],
+    limits: &rspice_core::ResourceLimits,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
-    let measures =
-        rspice_core::analysis::evaluate_ac_printed_measures_with_abort(netlist, results, abort)?;
+    let measures = rspice_core::analysis::evaluate_ac_printed_measures_with_limits_and_abort(
+        netlist, results, limits, abort,
+    )?;
     let lookup = measures
         .iter()
         .map(|trace| (trace.name.clone(), trace.values.as_slice()))

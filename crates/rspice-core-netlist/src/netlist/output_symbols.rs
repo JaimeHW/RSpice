@@ -1282,9 +1282,8 @@ fn output_runtime_scalar_identifiers(
         }
     }
     let offset = names.len();
-    // Xyce reads any measure of the print's analysis by name, as its value at
-    // each row (N_IO_OpBuilders.C:1590-1601); a continuous `_CONT` measure
-    // has no single running value to print.
+    // Xyce reads any measure of the print's analysis by name, `_CONT` ones
+    // included, as its value at each row (N_IO_OpBuilders.C:1590-1601).
     let xyce = netlist.parse_dialect() == crate::config::SpiceDialect::Xyce;
     if analysis.is_some() {
         for (index, measurement) in netlist.measurements.iter().enumerate() {
@@ -1297,13 +1296,7 @@ fn output_runtime_scalar_identifiers(
                     measurement.measure_type,
                     super::measure::MeasureType::Equation { .. }
                 );
-            let printed = xyce
-                && !measurement
-                    .analysis
-                    .trim()
-                    .to_ascii_uppercase()
-                    .ends_with("_CONT");
-            if tran_equation || printed {
+            if tran_equation || xyce {
                 names.insert(canonical_symbol(&measurement.name));
             }
         }

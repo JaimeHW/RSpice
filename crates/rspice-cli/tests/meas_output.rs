@@ -662,3 +662,55 @@ fn xyce_prints_a_measure_by_name_as_its_running_value() {
         "{refused}"
     );
 }
+
+/// A continuous `_CONT` measure named on a Xyce `.PRINT` card prints its
+/// latest record at each row, its default before the first: Xyce 7.10 steps
+/// `WHEN v(1)=0.2` of this PWL through 6.25e-4, 4e-3, 6.25e-3 and 8.75e-3 on
+/// the first row at or after each crossing, the `CROSS=2` one starts at the
+/// second crossing, `CROSS=LAST` follows every crossing and `CROSS=-2`
+/// trails one crossing behind (MEASURE_CONT/FindWhenTestTran.cir.prn).
+#[test]
+fn xyce_prints_a_continuous_measure_as_its_latest_record() {
+    let tran = print_run(
+        "print_measure_cont",
+        "xyce",
+        "* continuous WHEN\nV1 1 0 pwl(0 0.1 2.5m 0.5 5m 0 7.5m 0.4 10m 0)\nR1 1 0 100\n\
+         .tran 0 10m\n.print tran v(1) wc wc2 wlast wneg2\n\
+         .measure tran_cont wc when v(1)=0.2\n.measure tran_cont wc2 when v(1)=0.2 cross=2\n\
+         .measure tran_cont wlast when v(1)=0.2 cross=last\n\
+         .measure tran_cont wneg2 when v(1)=0.2 cross=-2\n.end\n",
+    )
+    .expect("TRAN run");
+    let time = csv_column(&tran, "time");
+    // The `from_end`-th latest of `crossings` each row has reached, else 0.
+    let expected = |crossings: &[f64], from_end: usize| {
+        time.iter()
+            .map(|&point| {
+                let reached = crossings
+                    .iter()
+                    .filter(|&&crossing| crossing <= point * (1.0 + 1e-12))
+                    .count();
+                reached
+                    .checked_sub(from_end)
+                    .map_or(0.0, |index| crossings[index])
+            })
+            .collect::<Vec<_>>()
+    };
+    let crossings = [6.25e-4, 4e-3, 6.25e-3, 8.75e-3];
+    for (name, expected) in [
+        ("wc", expected(&crossings, 1)),
+        ("wc2", expected(&crossings[1..], 1)),
+        ("wlast", expected(&crossings, 1)),
+        ("wneg2", expected(&crossings, 2)),
+    ] {
+        let printed = csv_column(&tran, name);
+        assert_eq!(printed.len(), time.len(), "{name}");
+        for (row, (actual, expected)) in printed.iter().zip(expected).enumerate() {
+            assert!(
+                (actual - expected).abs() <= 1e-9 * expected.max(1e-3),
+                "{name} row {row} at {}: {actual}, expected {expected}",
+                time[row]
+            );
+        }
+    }
+}

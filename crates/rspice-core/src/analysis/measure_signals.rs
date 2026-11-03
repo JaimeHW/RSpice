@@ -1960,6 +1960,11 @@ fn evaluate_tran_output_columns_with_abort(
             &result.time,
             &measure_signals,
             Some(result),
+            |measured| {
+                evaluate_tran_continuous_measurements_with_limits_and_abort(
+                    measured, result, &limits, abort,
+                )
+            },
             abort,
         )?
     } else {
@@ -2259,6 +2264,11 @@ fn evaluate_dc_output_columns_with_abort(
                 measure_series.axis(),
                 &measure_signals,
                 None,
+                |measured| {
+                    evaluate_dc_continuous_measurements_with_limits_and_abort(
+                        measured, sweep, &limits, abort,
+                    )
+                },
                 abort,
             )?
         }
@@ -3128,12 +3138,13 @@ impl DcOutputSeries {
 /// Xyce prints such a measure as a real column beside the probes, as its
 /// running maximum `MX` beside `VR(2)`. Other dialects name no measures on a
 /// print card, so their decks get no traces.
-pub fn evaluate_ac_printed_measures_with_abort(
+pub fn evaluate_ac_printed_measures_with_limits_and_abort(
     netlist: &Netlist,
     sweep: &[AcResult],
+    limits: &ResourceLimits,
     abort: &dyn AbortSignal,
 ) -> Result<Vec<EquationMeasureTrace>, SimulationError> {
-    printed::printed_ac_measure_traces(netlist, sweep, abort)
+    printed::printed_ac_measure_traces(netlist, sweep, limits, abort)
 }
 
 /// Evaluate Xyce continuous equation measurements over an AC sweep.
