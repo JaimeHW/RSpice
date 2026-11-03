@@ -91,6 +91,8 @@ fn rc_noise_control_matches_direct_and_johnson_nyquist_equations() {
         );
         relative(actual.input_gain_squared, 1.0 / (1.0 + omega_rc * omega_rc));
     }
+    // ngspice leaves the integrated-noise plot current; the spectra are noise1's.
+    execute(&mut circuit, &engine, "setplot", "noise1").unwrap();
     let traces = print(
         &mut circuit,
         &engine,
@@ -136,6 +138,7 @@ fn current_referred_noise_and_contribution_vectors_keep_ampere_units() {
     )
     .unwrap();
     execute(&mut circuit, &engine, "noise", "V(out) I1 lin 3 10 100").unwrap();
+    execute(&mut circuit, &engine, "setplot", "noise1").unwrap();
     let traces = print(
         &mut circuit,
         &engine,
@@ -184,11 +187,12 @@ fn noise_options_and_alterations_preserve_earlier_datasets_and_ordinal_order() {
     execute(&mut circuit, &engine, "option", "temp=127").unwrap();
     execute(&mut circuit, &engine, "alter", "R1 2k").unwrap();
     execute(&mut circuit, &engine, "noise", "V(out) I1 lin 3 1 100").unwrap();
-    assert_eq!(circuit.datasets()[2].name, "noise2");
+    // The first noise's integrated-noise plot took noise2.
+    assert_eq!(circuit.datasets()[2].name, "noise3");
     let traces = print(
         &mut circuit,
         &engine,
-        "noise1.onoise noise2.onoise noise1.dni(R1)",
+        "noise1.onoise noise3.onoise noise1.dni(R1)",
     );
     assert_eq!(traces[0].y.samples, before);
     relative(
@@ -256,7 +260,8 @@ fn noise_failure_and_cumulative_limits_are_typed_and_atomic() {
     }
     assert_eq!(circuit.datasets().len(), 1);
     execute(&mut circuit, &engine, "noise", "V(out) V1 lin 3 10 100").unwrap();
-    assert_eq!(circuit.datasets()[1].name, "noise2");
+    // The first noise's integrated-noise plot took noise2.
+    assert_eq!(circuit.datasets()[1].name, "noise3");
 }
 
 #[cfg_attr(target_arch = "wasm32", wasm_bindgen_test::wasm_bindgen_test)]

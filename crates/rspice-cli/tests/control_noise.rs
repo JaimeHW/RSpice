@@ -11,7 +11,7 @@ fn control_noise_publication_matches_direct_and_preserves_current_density_units(
         ("direct", ".noise V(out) I1 lin 3 10 100"),
         (
             "explicit",
-            ".control\nnoise V(out) I1 lin 3 10 100\nprint inoise_spectrum dni(R1)\n.endc",
+            ".control\nnoise V(out) I1 lin 3 10 100\nsetplot noise1\nprint inoise_spectrum dni(R1)\n.endc",
         ),
         ("run", ".noise V(out) I1 lin 3 10 100\n.control\nrun\n.endc"),
     ] {

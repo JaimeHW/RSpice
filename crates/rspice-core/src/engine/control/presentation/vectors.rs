@@ -38,6 +38,9 @@ struct UserPlot {
     /// How many datasets existed when it was made, which places it among
     /// them in ngspice's plot list.
     after: usize,
+    /// The analysis plot type (`pl_name`) of a plot an analysis made, such
+    /// as noise's "Integrated Noise"; `setplot new` makes an untyped one.
+    kind: Option<&'static str>,
 }
 
 #[derive(Debug, Default)]
@@ -65,8 +68,30 @@ impl VectorStore {
             name,
             scale: None,
             after,
+            kind: None,
         });
         self.current = Some(self.plots.len() - 1);
+    }
+
+    /// A plot of vectors an analysis made beside its dataset becomes current.
+    pub(in crate::engine::control) fn new_analysis_plot(
+        &mut self,
+        name: String,
+        after: usize,
+        kind: &'static str,
+    ) {
+        self.new_plot(name, after);
+        if let Some(plot) = self.plots.last_mut() {
+            plot.kind = Some(kind);
+        }
+    }
+
+    /// The analysis plot type of a plot made beside a dataset.
+    pub(in crate::engine::control) fn plot_kind(&self, plot: &str) -> Option<&'static str> {
+        self.plots
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(plot))
+            .and_then(|plot| plot.kind)
     }
 
     /// `setplot name` of a user plot; false when there is none of that name.
@@ -112,10 +137,12 @@ impl VectorStore {
 
     /// Each plot `setplot new` made, oldest first, with the number of
     /// datasets that existed when it was made.
-    pub(in crate::engine::control) fn plots_made(&self) -> Vec<(&str, usize)> {
+    pub(in crate::engine::control) fn plots_made(
+        &self,
+    ) -> Vec<(&str, usize, Option<&'static str>)> {
         self.plots
             .iter()
-            .map(|plot| (plot.name.as_str(), plot.after))
+            .map(|plot| (plot.name.as_str(), plot.after, plot.kind))
             .collect()
     }
 
@@ -601,7 +628,7 @@ impl ControlCircuit {
 
     /// Add a vector to the current plot. A user plot's first vector is its
     /// scale (frontend/vectors.c:921 vec_new).
-    fn push_vector(&mut self, name: &str, value: VectorValue, scalar: bool) {
+    pub(super) fn push_vector(&mut self, name: &str, value: VectorValue, scalar: bool) {
         let plot = self.current_plot().map(str::to_owned);
         if let Some(index) = self.vectors.current
             && self.vectors.plots[index].scale.is_none()

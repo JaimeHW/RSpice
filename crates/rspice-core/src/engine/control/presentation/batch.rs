@@ -275,8 +275,14 @@ impl ControlCircuit {
                     (name, line)
                 })
                 .collect();
+            let (title, kind) = self
+                .vectors
+                .plot_kind(plot)
+                .map_or(("Anonymous".to_owned(), "unknown"), |kind| {
+                    (self.title(), kind)
+                });
             let header = format!(
-                "Here are the vectors currently active:\n\nTitle: Anonymous\nName: {plot} (unknown)\n\n"
+                "Here are the vectors currently active:\n\nTitle: {title}\nName: {plot} ({kind})\n\n"
             );
             return listed(command, header, lines, requested);
         }
@@ -391,9 +397,14 @@ impl ControlCircuit {
         let mut made = made.iter().peekable();
         let title = self.title();
         let mut plots = Vec::new();
+        let made_line = |kind: Option<&str>| {
+            kind.map_or("Anonymous (unknown)".to_string(), |kind| {
+                format!("{title} ({kind})")
+            })
+        };
         for (index, dataset) in self.datasets.iter().enumerate() {
-            while let Some((name, _)) = made.next_if(|(_, after)| *after <= index) {
-                plots.push((name.to_string(), "Anonymous (unknown)".to_string()));
+            while let Some((name, _, kind)) = made.next_if(|(_, after, _)| *after <= index) {
+                plots.push((name.to_string(), made_line(*kind)));
             }
             if !self.destroyed.contains(&index) {
                 plots.push((
@@ -402,8 +413,8 @@ impl ControlCircuit {
                 ));
             }
         }
-        for (name, _) in made {
-            plots.push((name.to_string(), "Anonymous (unknown)".to_string()));
+        for (name, _, kind) in made {
+            plots.push((name.to_string(), made_line(*kind)));
         }
         let mut text = String::from("List of plots available:\n\n");
         let constants = (

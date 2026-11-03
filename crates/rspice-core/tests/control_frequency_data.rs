@@ -322,7 +322,9 @@ fn tables_share_analysis_ordinals_with_ordinary_runs_in_a_mixed_session() {
             .iter()
             .map(|d| d.name.as_str())
             .collect::<Vec<_>>(),
-        ["op1", "dc1", "ac1", "noise1", "tran1", "ac2", "noise2"]
+        // noise1's integrated-noise plot is noise2, which advances the plot
+        // number as ngspice-46 does: its plots here are tran2 and noise3.
+        ["op1", "dc1", "ac1", "noise1", "tran2", "ac2", "noise3"]
     );
     assert_ne!(
         circuit.datasets()[2].analysis_id,

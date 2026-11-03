@@ -1063,6 +1063,61 @@ fn reset_reloads_the_deck_and_keeps_the_plots() {
     assert_eq!(texts(&presented), ["Reset re-loads circuit reset", "op2"]);
 }
 
+/// ngspice's noise makes the spectrum plot and the integrated-noise plot
+/// (`noise2`), which becomes current (spicelib/analysis/noisean.c:285);
+/// each source's density is integrated as a power law between frequencies
+/// (ninteg.c:27). The listings and totals are ngspice-46's: a flat divider
+/// (2.731159e-07 and 5.462318e-07 V) and an RC low-pass whose spectrum falls.
+#[test]
+fn noise_leaves_its_integrated_noise_in_a_second_plot() {
+    let (presented, error) = run_until_error(
+        "noise plots\nV1 in 0 dc 0 ac 1\nR1 in out 1k\nR2 out 0 1k\n.control\n\
+         noise v(out) v1 dec 2 1k 10k\nsetplot\ndisplay\nprint onoise_total inoise_total\n\
+         setplot noise1\necho $curplot\nnoise v(out) v1 dec 2 1k 10k\nsetplot\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "List of plots available:\n\nCurrent noise2\tnoise plots (Integrated Noise)\n\
+             \tnoise1\tnoise plots (Noise Spectral Density Curves)\n\
+             \tconst\tConstant values (constants)",
+            "Here are the vectors currently active:\n\nTitle: noise plots\n\
+             Name: noise2 (Integrated Noise)\n\n\
+             \x20   inoise_total        : voltage, real, 1 long\n\
+             \x20   onoise_total        : voltage, real, 1 long [default scale]",
+            "noise1",
+            "List of plots available:\n\nCurrent noise4\tnoise plots (Integrated Noise)\n\
+             \tnoise3\tnoise plots (Noise Spectral Density Curves)\n\
+             \tnoise2\tnoise plots (Integrated Noise)\n\
+             \tnoise1\tnoise plots (Noise Spectral Density Curves)\n\
+             \tconst\tConstant values (constants)",
+        ]
+    );
+    let close = |request: &ControlPresentation, expected: [f64; 2]| {
+        for (trace, expected) in printed(request).iter().zip(expected) {
+            let actual = trace.y.samples[0].re;
+            assert!(
+                ((actual - expected) / expected).abs() < 2e-6,
+                "{actual} != {expected}"
+            );
+        }
+    };
+    close(
+        presented
+            .iter()
+            .find(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+            .unwrap(),
+        [2.731159e-07, 5.462318e-07],
+    );
+    let (presented, error) = run_until_error(
+        "rc noise\nV1 in 0 dc 0 ac 1\nR1 in out 1k\nC1 out 0 1u\nR2 out 0 10k\n.control\n\
+         noise v(out) v1 dec 5 1 100k\nprint onoise_total inoise_total\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    close(&presented[0], [6.393845e-08, 1.698928e-06]);
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.

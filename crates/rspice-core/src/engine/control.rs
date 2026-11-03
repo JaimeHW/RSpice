@@ -945,6 +945,7 @@ impl ControlCircuit {
         self.vectors.leave_plot();
         self.ordinals.insert(kind, ordinal);
         self.retained_values = retained_values;
+        self.integrated_noise_plot(line)?;
         Ok(name)
     }
 
