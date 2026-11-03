@@ -13855,6 +13855,40 @@ mod tests {
         );
     }
 
+    /// ngspice-46 supplies D0_GATE when a deck names it without defining it
+    /// (frontend/udevices.c:1029, rise and fall in 1 ps, inertially): ex5.cir's
+    /// enable inverters switch 1 ps after their input, not 1 ns.
+    #[test]
+    fn pspice_u_inv_with_an_undefined_d0_gate_switches_in_a_picosecond() {
+        let netlist = Netlist::parse(
+            "pspice u builtin zero delay gate\n\
+             U1 INV $G_DPWR $G_DGND a y D0_GATE IO_STD\n\
+             .end\n",
+        )
+        .expect("PSpice INV with the built-in D0_GATE should lower");
+
+        let ElementKind::Xspice { model, .. } = &netlist.elements[0].kind else {
+            panic!("expected XSPICE gate, got {:?}", netlist.elements[0].kind);
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|alias| &alias.name == model)
+            .expect("generated D0_GATE alias exists");
+        assert_eq!(alias.model_type, "d_inverter");
+        for (name, value) in [
+            ("inertial_delay", 1.0),
+            ("rise_delay", 1.0e-12),
+            ("fall_delay", 1.0e-12),
+        ] {
+            assert!(
+                alias.params.iter().any(|(n, v)| n == name && *v == value),
+                "{name}: {:?}",
+                alias.params
+            );
+        }
+    }
+
     #[test]
     fn pspice_u_inv3a_lowers_to_tristate_with_inverted_input() {
         let netlist = Netlist::parse(

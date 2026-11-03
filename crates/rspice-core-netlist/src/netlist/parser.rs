@@ -3780,6 +3780,23 @@ fn normalize_pspice_u_timing_in_elements_with_abort(
             .iter()
             .find(|candidate| candidate.name.eq_ignore_ascii_case(&timing.timing_model))
         else {
+            if let Some(params) = pspice_u_builtin_timing_params(&timing.timing_model, model) {
+                pspice_u_timing.take();
+                let alias_name =
+                    unique_pspice_u_timing_model_name(scope, &element.name, existing_names);
+                generated_models.push(ModelDef {
+                    name: alias_name.clone(),
+                    model_type: model.clone(),
+                    params,
+                    expr_params: Vec::new(),
+                    string_params: Vec::new(),
+                    string_vector_params: Vec::new(),
+                    real_vector_params: Vec::new(),
+                    real_vector_expr_params: Vec::new(),
+                    integer_vector_params: Vec::new(),
+                });
+                *model = alias_name;
+            }
             continue;
         };
         if !pspice_u_timing_model_supported(model, timing_model) {
@@ -3797,6 +3814,63 @@ fn normalize_pspice_u_timing_in_elements_with_abort(
         generated_models.push(alias);
     }
     Ok(())
+}
+
+/// The timing models ngspice-46 supplies for a U device that names one the
+/// deck does not define (frontend/udevices.c:1029): D0_GATE, D0_GFF, D0_EFF
+/// and D0_TGATE switch in 1 ps, the gate and the tristate inertially.
+fn pspice_u_builtin_timing_params(
+    timing_model: &str,
+    code_model: &str,
+) -> Option<Vec<(String, Value)>> {
+    let (inertial, names): (bool, &[&str]) = match timing_model.to_ascii_lowercase().as_str() {
+        "d0_gate" if pspice_u_gate_model_accepts_ugate_timing(code_model) => {
+            (true, &["rise_delay", "fall_delay"])
+        }
+        "d0_tgate" if pspice_u_tristate_model_accepts_utgate_timing(code_model) => {
+            (true, &["delay"])
+        }
+        "d0_eff" if pspice_u_edge_ff_model_accepts_ueff_timing(code_model) => (
+            false,
+            &[
+                "clk_delay",
+                "set_delay",
+                "reset_delay",
+                "rise_delay",
+                "fall_delay",
+            ],
+        ),
+        "d0_gff" if pspice_u_latch_model_accepts_ugff_timing(code_model) => (
+            false,
+            if code_model.eq_ignore_ascii_case("d_srlatch") {
+                &[
+                    "sr_delay",
+                    "enable_delay",
+                    "set_delay",
+                    "reset_delay",
+                    "rise_delay",
+                    "fall_delay",
+                ]
+            } else {
+                &[
+                    "data_delay",
+                    "enable_delay",
+                    "set_delay",
+                    "reset_delay",
+                    "rise_delay",
+                    "fall_delay",
+                ]
+            },
+        ),
+        _ => return None,
+    };
+    let inertial = inertial.then(|| ("inertial_delay".to_string(), 1.0));
+    Some(
+        inertial
+            .into_iter()
+            .chain(names.iter().map(|name| (name.to_string(), 1.0e-12)))
+            .collect(),
+    )
 }
 
 fn pspice_u_timing_model_supported(code_model: &str, timing_model: &ModelDef) -> bool {
