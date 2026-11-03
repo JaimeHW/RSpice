@@ -44,7 +44,16 @@ impl NoGainVoltageBox {
             || !circuit.vdmoses.is_empty()
             || !circuit.ekv26s.is_empty()
             || !circuit.ekv3s.is_empty()
-            || circuit.bjts.devices.iter().any(|bjt| bjt.node_rth != 0)
+            // A transistor is a no-gain element only while its forward and
+            // reverse transport currents are the same function of their
+            // junction voltages: with NF < NR a saturated collector settles
+            // below every source potential (V(c) = -64.8 mV under 0 and 5 V
+            // sources in ngspice-46).
+            || circuit
+                .bjts
+                .devices
+                .iter()
+                .any(|bjt| bjt.node_rth != 0 || !bjt.has_reciprocal_transport())
             // An inductor IC the operating point enforces is a current source.
             || circuit.inductors.has_dc_initial_conditions()
             // BSIM gate tunnelling splits the gate-to-channel current between
@@ -991,6 +1000,34 @@ mod tests {
             assert_eq!(NoGainVoltageBox::of(&built(&deck(card))), None, "{card}");
         }
         for card in ["level=54", "level=49"] {
+            assert!(
+                NoGainVoltageBox::of(&built(&deck(card))).is_some(),
+                "{card}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_transistor_without_reciprocal_transport_has_no_voltage_box() {
+        let deck = |card: &str| {
+            format!(
+                "bjt\nV1 a 0 5\nR1 a b 220\nQ1 c b 0 qm\nR2 c 0 50\n.model qm npn({card})\n.op\n.end\n"
+            )
+        };
+        for card in [
+            "is=1.3e-14 nf=0.9 nr=0.99",
+            "is=1.3e-14 nr=1.2",
+            "level=4 is=1e-16 nf=1.05",
+            "level=4 is=1e-16 isrr=2",
+            "level=4 is=1e-16 avc1=2 avc2=15",
+            "level=4 is=1e-16 isp=1e-15",
+        ] {
+            assert_eq!(NoGainVoltageBox::of(&built(&deck(card))), None, "{card}");
+        }
+        for card in [
+            "is=1.3e-14 bf=150 nf=0.99 nr=0.99 vaf=80 var=14 ikf=0.9 ise=5e-15 ne=1.3",
+            "level=4 is=1e-16",
+        ] {
             assert!(
                 NoGainVoltageBox::of(&built(&deck(card))).is_some(),
                 "{card}"

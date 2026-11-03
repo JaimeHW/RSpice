@@ -2884,6 +2884,41 @@ impl Bjt {
     pub fn uses_legacy_gummel_poon(&self) -> bool {
         self.charge_model == BjtChargeModel::LegacyGummelPoon
     }
+
+    /// Whether no DC terminal current of this device can flow towards the
+    /// higher potential, the no-gain element of Willson's theorem. The
+    /// transport current `IS/qb * (exp(vbe/(NF*Vt)) - exp(vbc/(NR*Vt)))`
+    /// vanishes at `vce = 0` for any `qb` only when both exponentials share
+    /// their operating saturation current and emission coefficient. With
+    /// `NF < NR`, a saturated collector draws current at `vce <= 0`, and its
+    /// node settles below every source potential. VBIC's weak avalanche drives
+    /// collector current into the base by `vbc` alone, and its parasitic
+    /// transistor carries a second transport current.
+    #[doc(hidden)]
+    pub fn has_reciprocal_transport(&self) -> bool {
+        match self.charge_model {
+            BjtChargeModel::LegacyGummelPoon => {
+                let forward = self.legacy_current_scale(LegacyCurrent::Forward);
+                let reverse = self.legacy_current_scale(LegacyCurrent::Reverse);
+                let same_scale = match (forward, reverse) {
+                    (None, None) => true,
+                    (Some(forward), Some(reverse)) => {
+                        forward.mantissa == reverse.mantissa
+                            && forward.binary_exponent == reverse.binary_exponent
+                            && forward.thermal_exponent == reverse.thermal_exponent
+                    }
+                    _ => false,
+                };
+                same_scale
+                    && self.is == self.legacy_reverse_saturation_current()
+                    && self.legacy_junction_emission(LegacyCurrent::Forward, self.nf)
+                        == self.legacy_junction_emission(LegacyCurrent::Reverse, self.nr)
+            }
+            BjtChargeModel::Vbic => {
+                self.nf == self.nr && self.isrr == 1.0 && self.avc1 <= 0.0 && self.isp <= 0.0
+            }
+        }
+    }
 }
 
 #[cfg(test)]

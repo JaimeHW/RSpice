@@ -3045,6 +3045,43 @@ mod correction_constraint_tests {
         );
     }
 
+    /// With NF = 0.9 below NR = 0.99, [`DRIVEN_BJT_DECK`]'s saturated
+    /// transistor draws collector current at vce = 0, and its collector
+    /// settles below ground, outside the 0 to 5 V its sources span. ngspice-46
+    /// reaches V(b) = 0.8348307, V(c) = -0.0648011 in 11 iterations. Held to
+    /// the sources' range, the collector stopped at 0 V with a 0.19 A KCL
+    /// residual until the residual-stall polish found the root.
+    #[test]
+    fn an_operating_point_lets_a_saturated_collector_settle_below_ground() {
+        use crate::engine::SimulationConfig;
+        use crate::netlist::Netlist;
+        let netlist = Netlist::parse(DRIVEN_BJT_DECK).unwrap();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Ngspice,
+            ..Default::default()
+        })
+        .resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let solution = engine
+            .solve_dc_operating_point(&netlist, &mut circuit, &mut matrix)
+            .unwrap();
+        let voltage = |node| solution[circuit.get_node_by_name(node).unwrap() - 1];
+        let values = [voltage("b"), voltage("c")];
+        for (value, ngspice) in values.into_iter().zip([0.8348307, -0.0648011]) {
+            assert!(
+                (value - ngspice).abs() <= 1e-3 * ngspice.abs() + 1e-6,
+                "{values:?}, ngspice {ngspice}"
+            );
+        }
+        let iterations = engine.convergence_quality().total_iterations;
+        assert!(
+            iterations <= 12,
+            "{iterations} Newton iterations, ngspice 11"
+        );
+    }
+
     #[test]
     fn steep_vbic_thermal_slope_converges_through_startup_and_corrector_paths() {
         use crate::engine::convergence::fallback::CorrectorSeedMode;
