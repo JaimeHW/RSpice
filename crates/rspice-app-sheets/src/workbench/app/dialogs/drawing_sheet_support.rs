@@ -15,7 +15,7 @@ use crate::state::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, select};
 use crate::workbench::app_state::{DesignManagementHistoryEntry, Model};
 use crate::workbench::framework::feature::CanvasGesturePort;
 use crate::workbench::state::WorkbenchSession;
@@ -217,17 +217,11 @@ fn sheet_format_manager_body(
     }
     manager_format_table(ui, &mut state.rows, &t);
     ui.add_space(11.0);
-    Frame::NONE
-        .fill(t.color.bg_panel)
-        .stroke(Stroke::new(1.0, t.color.border))
-        .corner_radius(t.radius)
-        .inner_margin(Margin::same(11))
-        .show(ui, |ui| {
-            // Only the selector: two notes beside it said the same thing
-            // about every application, so they said nothing about this one.
-            ui.set_min_width(ui.available_width());
-            manager_format_selector(ui, state, &t);
-        });
+    // Only the selector, on the body's own edge: it sat in a bordered panel
+    // inside the dialog, which put its label and select twelve points in from
+    // the table above them. Two notes beside it said the same thing about
+    // every application, so they said nothing about this one.
+    manager_format_selector(ui, state, &t);
     // Allocated only when there is something to say. A reserved band held an
     // empty strip of dialog above the footer on every well-formed selection.
     let error = authority_error.or(state.error.as_deref());
@@ -262,12 +256,41 @@ pub const MANAGER_COLUMNS: [(&str, f32, f32); 8] = [
     ("State", 0.0, 120.0),
 ];
 
+/// The width of each of [`MANAGER_COLUMNS`] across `table_width`: each stated
+/// column its share, never under its minimum, and the last the remainder.
+///
+/// Where the shares would leave the last column under its own minimum, the
+/// stated columns give the difference back from what they hold above their
+/// minimums, so the columns always add up to the table. Left at their shares,
+/// the eight overran a 986 pt touch body by ten points and the table scrolled
+/// sideways under a scrollbar for nothing.
+pub fn manager_column_widths(table_width: f32) -> [f32; 8] {
+    let mut widths = MANAGER_COLUMNS.map(|(_, share, minimum)| (table_width * share).max(minimum));
+    let last = MANAGER_COLUMNS.len() - 1;
+    let stated: f32 = widths[..last].iter().sum();
+    let deficit = stated + MANAGER_COLUMNS[last].2 - table_width;
+    let slack: f32 = widths[..last]
+        .iter()
+        .zip(MANAGER_COLUMNS)
+        .map(|(width, (_, _, minimum))| width - minimum)
+        .sum();
+    if deficit > 0.0 && slack > 0.0 {
+        let give = (deficit / slack).min(1.0);
+        for (width, (_, _, minimum)) in widths[..last].iter_mut().zip(MANAGER_COLUMNS) {
+            *width -= (*width - minimum) * give;
+        }
+    }
+    widths[last] = (table_width - widths[..last].iter().sum::<f32>()).max(MANAGER_COLUMNS[last].2);
+    widths
+}
+
 /// Every sheet of the document, one row each, across the full width of the
 /// dialog. Column widths are stated as shares of that width rather than left to
 /// the widest cell: content-sized columns left the whole table hugging the left
 /// half of the surface with its rules and row bands stopping in mid-air.
 fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tokens) {
     let table_width = ui.available_width().max(MANAGER_TABLE_MIN_WIDTH);
+    let widths = manager_column_widths(table_width);
     ScrollArea::horizontal()
         .id_salt("sheet-format-manager-table")
         .auto_shrink([false, true])
@@ -282,10 +305,8 @@ fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tok
                 .vscroll(false)
                 .cell_layout(Layout::left_to_right(Align::Center));
             let (last, leading) = MANAGER_COLUMNS.split_last().expect("eight fixed columns");
-            for (_, share, minimum) in leading {
-                table = table.column(
-                    Column::initial((table_width * share).max(*minimum)).at_least(*minimum),
-                );
+            for ((_, _, minimum), width) in leading.iter().zip(widths) {
+                table = table.column(Column::initial(width).at_least(*minimum));
             }
             table
                 .column(Column::remainder().at_least(last.2))
@@ -303,8 +324,9 @@ fn manager_format_table(ui: &mut Ui, rows: &mut [SheetFormatManagerRow], t: &Tok
                                 Stroke::new(1.0, t.color.border),
                             );
                             ui.add_space(MANAGER_CELL_PAD);
+                            // Sentence case, as every table heading is.
                             ui.label(
-                                RichText::new(heading.to_uppercase())
+                                RichText::new(heading)
                                     .font(theme::sans(tokens::FS_0, FontWeight::Medium))
                                     .color(t.color.text_dim),
                             );
@@ -415,38 +437,25 @@ fn manager_format_selector(ui: &mut Ui, state: &mut SheetFormatManagerState, t: 
             .color(t.color.text_dim),
     );
     ui.add_space(6.0);
-    crate::ui::widgets::Combo::from_id_salt("sheet-format-manager-apply")
-        .width(ui.available_width())
-        .selected_text(manager_source_label(state))
-        .show_ui(ui, |ui| {
-            ui.selectable_value(
-                &mut state.source,
-                SheetManagerFormatSource::ActiveSheet,
-                format!(
-                    "Match the open sheet \u{00b7} {}",
-                    state
-                        .active_format
-                        .as_ref()
-                        .map_or_else(|| "unavailable".to_owned(), format_label_with_dimensions,)
-                ),
-            );
-            ui.selectable_value(
-                &mut state.source,
-                SheetManagerFormatSource::ProjectDefault,
-                format!(
-                    "Project default \u{00b7} {}",
-                    state
-                        .project_default
-                        .as_ref()
-                        .map_or_else(|| "unavailable".to_owned(), format_label_with_dimensions,)
-                ),
-            );
-            ui.selectable_value(
-                &mut state.source,
-                SheetManagerFormatSource::SheetProperties,
-                SHEET_PROPERTIES_INSTEAD,
-            );
-        });
+    // The design system's select: the old combo drew egui's filled triangle.
+    const SOURCES: [SheetManagerFormatSource; 3] = [
+        SheetManagerFormatSource::ActiveSheet,
+        SheetManagerFormatSource::ProjectDefault,
+        SheetManagerFormatSource::SheetProperties,
+    ];
+    let options = SOURCES
+        .map(|source| source_option_label(state, source))
+        .to_vec();
+    if let Some(index) = select(
+        ui,
+        "sheet-format-manager-apply",
+        "Format to apply",
+        &manager_source_label(state),
+        &options,
+        ui.available_width(),
+    ) {
+        state.source = SOURCES[index];
+    }
 }
 
 /// The selector's way out to the open sheet's own properties.
@@ -794,7 +803,14 @@ fn manager_thumbnails(
 }
 
 fn manager_source_label(state: &SheetFormatManagerState) -> String {
-    match state.source {
+    source_option_label(state, state.source)
+}
+
+fn source_option_label(
+    state: &SheetFormatManagerState,
+    source: SheetManagerFormatSource,
+) -> String {
+    match source {
         SheetManagerFormatSource::ActiveSheet => format!(
             "Match the open sheet \u{00b7} {}",
             state

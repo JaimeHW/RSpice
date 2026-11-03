@@ -371,3 +371,87 @@ fn the_manager_hands_the_open_sheet_to_sheet_properties() {
     );
     assert!(!app.state.model.can_undo_project_design());
 }
+
+/// Sheet formats reads as the rest of the application on a touch screen:
+/// sentence-case headings, the format chosen in the design system's select on
+/// the body's own edge, and a table that fits its body. The headings were
+/// upper case, the select egui's own filled-triangle combo in a bordered panel,
+/// and at 1024 pt the table overran its body by ten points and scrolled
+/// sideways under a scrollbar.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sheet_formats_fit_a_touch_screen_in_the_design_systems_controls() {
+    use egui::accesskit::Role;
+
+    let mut app = RSpiceApp::test_instance();
+    app.state.workbench.coarse_pointer = true;
+    open_manager(&mut app.state).expect("the manager opens");
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    ctx.enable_accesskit();
+    let mut frame = eframe::Frame::_new_kittest();
+    let mut output = None;
+    for index in 0..4u32 {
+        output = Some(ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1024.0, 768.0),
+                )),
+                time: Some(f64::from(index) * 0.25),
+                focused: true,
+                ..Default::default()
+            },
+            |ui| eframe::App::ui(&mut app, ui, &mut frame),
+        ));
+    }
+    let output = output.expect("frames ran");
+    let painted = output
+        .shapes
+        .iter()
+        .filter_map(|clipped| match &clipped.shape {
+            egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    for heading in ["Sheet", "Dimensions", "Title block"] {
+        assert!(
+            painted.iter().any(|text| text == heading),
+            "{heading:?} was not painted"
+        );
+    }
+    assert!(
+        !painted.iter().any(|text| text == "DIMENSIONS"),
+        "the headings are still upper case"
+    );
+    let tree = output
+        .platform_output
+        .accesskit_update
+        .expect("an AccessKit tree");
+    let dialog = tree
+        .nodes
+        .iter()
+        .find(|(_, node)| node.role() == Role::Dialog && node.label() == Some("Sheet formats"))
+        .and_then(|(_, node)| node.bounds())
+        .expect("the dialog is open");
+    assert!(
+        tree.nodes
+            .iter()
+            .any(|(_, node)| node.role() == Role::ComboBox
+                && node.label() == Some("Format to apply")),
+        "the format is not chosen in a select named for it"
+    );
+    let sideways = tree
+        .nodes
+        .iter()
+        .filter(|(_, node)| node.role() == Role::ScrollBar)
+        .filter_map(|(_, node)| node.bounds())
+        .filter(|bar| {
+            bar.x0 >= dialog.x0 && bar.x1 <= dialog.x1 && bar.x1 - bar.x0 > bar.y1 - bar.y0
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        sideways.is_empty(),
+        "the table scrolls sideways: {sideways:?}"
+    );
+}
