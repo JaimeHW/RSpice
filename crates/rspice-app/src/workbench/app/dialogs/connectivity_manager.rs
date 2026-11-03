@@ -1743,7 +1743,7 @@ fn connectivity_manager_body(
     write_allowed: bool,
     current: bool,
 ) -> ConnectivityBodyAction {
-    inset_block(ui, 0, |ui| connectivity_tabs(ui, &mut dialog.active_tab));
+    connectivity_tabs(ui, &mut dialog.active_tab);
     let action = match dialog.active_tab {
         ConnectivityManagerTab::Connectivity => connectivity_tab(ui, &dialog.report),
         ConnectivityManagerTab::Buses => buses_tab(ui, dialog, write_allowed, current),
@@ -1797,27 +1797,13 @@ fn connectivity_manager_body(
 }
 
 fn connectivity_tabs(ui: &mut Ui, active: &mut ConnectivityManagerTab) {
-    let tokens = Tokens::get(ui.ctx());
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing.x = 0.0;
-        for tab in ConnectivityManagerTab::ALL {
-            let selected = *active == tab;
-            let response = ui.add_sized(
-                Vec2::new(132.0, 34.0),
-                egui::Button::selectable(selected, tab.label()),
-            );
-            if response.clicked() {
-                *active = tab;
-            }
-            if selected {
-                ui.painter().hline(
-                    response.rect.x_range(),
-                    response.rect.bottom() - 1.0,
-                    egui::Stroke::new(2.0, tokens.color.accent),
-                );
-            }
-        }
-    });
+    let labels = ConnectivityManagerTab::ALL.map(ConnectivityManagerTab::label);
+    let mut index = ConnectivityManagerTab::ALL
+        .iter()
+        .position(|tab| tab == active)
+        .unwrap_or_default();
+    let _ = crate::ui::widgets::dialog_tabs(ui, "connectivity-tabs", &labels, &mut index);
+    *active = ConnectivityManagerTab::ALL[index];
 }
 
 /// Content on the body's left edge and as far in from its right, `vertical`
@@ -1830,7 +1816,7 @@ fn inset_block<R>(ui: &mut Ui, vertical: i8, add: impl FnOnce(&mut Ui) -> R) -> 
 }
 
 fn connectivity_tab(ui: &mut Ui, report: &ConnectivityReport) -> ConnectivityBodyAction {
-    band_header(ui, "Extracted connectivity", None);
+    // No band: the tab above already names what the table is.
     inset_block(ui, 10, |ui| connectivity_table(ui, report))
 }
 

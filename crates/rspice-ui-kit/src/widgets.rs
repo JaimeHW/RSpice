@@ -25,6 +25,7 @@ mod chip;
 mod combo;
 mod command_form;
 mod dialog;
+mod dialog_tabs;
 mod docbar;
 mod form;
 pub mod notice;
@@ -51,6 +52,7 @@ pub use dialog::{
     DIALOG_BODY_INSET, Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogResponse,
     DialogSize, DialogTransactionTone, band_header, focus_is_within_modal,
 };
+pub use dialog_tabs::dialog_tabs;
 pub use docbar::docbar_at_height;
 pub use form::name_control;
 pub use form::{

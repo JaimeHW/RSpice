@@ -11,7 +11,15 @@ pub(super) fn split_surface(
     let available = ui.available_width().max(1.0);
     let stacked = available < SPLIT_BREAKPOINT;
     let origin = ui.next_widget_position();
-    let padding = tokens::SP_5;
+    // A pane's rows stand [`PANE_INSET`] in from its edge, so a pane stands
+    // the rest of the dialog's inset in from the body's: every row then
+    // starts where the title and the footer do. The panes were bordered
+    // boxes a further 12 points in, and their rows started 10 right of the
+    // title.
+    let padding = vec2(
+        crate::ui::widgets::DIALOG_BODY_INSET - PANE_INSET,
+        tokens::SP_5,
+    );
     let extent = 10_000.0;
 
     if stacked {
@@ -30,12 +38,12 @@ pub(super) fn split_surface(
         };
     let divider_x = origin.x + left_width;
     let left_rect = egui::Rect::from_min_size(
-        origin + vec2(padding, padding),
-        vec2((left_width - padding * 2.0).max(1.0), extent),
+        origin + padding,
+        vec2((left_width - padding.x * 2.0).max(1.0), extent),
     );
     let right_rect = egui::Rect::from_min_size(
-        egui::pos2(divider_x + padding, origin.y + padding),
-        vec2((right_width - padding * 2.0).max(1.0), extent),
+        egui::pos2(divider_x + padding.x, origin.y + padding.y),
+        vec2((right_width - padding.x * 2.0).max(1.0), extent),
     );
     let mut left_ui = ui.new_child(
         egui::UiBuilder::new()
@@ -52,18 +60,12 @@ pub(super) fn split_surface(
         .min_rect()
         .height()
         .max(right_ui.min_rect().height())
-        + padding * 2.0;
+        + padding.y * 2.0;
     let surface = egui::Rect::from_min_size(origin, vec2(available, height.max(80.0)));
-    ui.painter().rect_stroke(
-        surface,
-        0.0,
-        Stroke::new(1.0, t.color.border_strong),
-        egui::StrokeKind::Inside,
-    );
     ui.painter().vline(
         divider_x,
         surface.y_range(),
-        Stroke::new(1.0, t.color.border_strong),
+        Stroke::new(1.0, t.color.border),
     );
     ui.advance_cursor_after_rect(surface);
 }
@@ -176,13 +178,33 @@ pub(super) fn paint_table_cells(
     }
 }
 
+/// A table's one row when it has none: a sentence, so the body face, at the
+/// size a value reads. It was a cell in the rows' small mono.
 pub(super) fn empty_table_row(ui: &mut Ui, text: &str) {
-    paint_table_row(
-        ui,
-        &[1.0],
-        &[text.to_owned()],
-        Some(Tokens::get(ui.ctx()).color.text_dim),
+    let t = Tokens::get(ui.ctx());
+    let (rect, response) = ui.allocate_exact_size(vec2(ui.available_width(), 29.0), Sense::hover());
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), text));
+    ui.painter().rect_filled(rect, 0.0, t.color.bg_inset);
+    ui.painter().hline(
+        rect.x_range(),
+        rect.bottom(),
+        Stroke::new(1.0, t.color.border),
     );
+    ui.painter()
+        .with_clip_rect(rect.shrink2(vec2(PANE_INSET, 2.0)))
+        .text(
+            rect.left_center() + vec2(PANE_INSET, 0.0),
+            egui::Align2::LEFT_CENTER,
+            text,
+            theme::field_sans(),
+            t.color.text_dim,
+        );
+}
+
+/// A count or a state on a pane's label/value grid: words, so the body face.
+pub(super) fn fact_row(ui: &mut Ui, label: &str, value: &str) {
+    crate::workbench::design_system::property_row_wrapped(ui, label, value);
 }
 
 pub(super) fn muted_note(ui: &mut Ui, text: &str) {
@@ -215,16 +237,24 @@ pub(super) fn combo_field<T: Copy + PartialEq>(
         .iter()
         .find(|(value, _)| value == selected)
         .map_or("Select", |(_, text)| *text);
+    let labels = options
+        .iter()
+        .map(|(_, text)| (*text).to_owned())
+        .collect::<Vec<_>>();
     ui.add_enabled_ui(enabled, |ui| {
-        crate::ui::widgets::Combo::from_id_salt((id_namespace, label))
-            .selected_text(selected_text)
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                for (value, text) in options {
-                    ui.selectable_value(selected, *value, *text);
-                }
-            })
-            .response
+        let width = ui.available_width();
+        let output = crate::ui::widgets::select_with_response(
+            ui,
+            &format!("{id_namespace}.{label}"),
+            label,
+            selected_text,
+            &labels,
+            width,
+        );
+        if let Some(index) = output.picked {
+            *selected = options[index].0;
+        }
+        output.response
     })
     .inner
 }
@@ -238,31 +268,76 @@ pub(super) fn setting_combo<T: Copy + PartialEq>(
     selected: &mut T,
     enabled: bool,
 ) -> bool {
-    let mut key = options
+    let shown = options
         .iter()
-        .position(|(value, _)| value == selected)
-        .map_or_else(String::new, |index| index.to_string());
-    let choices = options
+        .find(|(value, _)| value == selected)
+        .map_or("", |(_, text)| *text);
+    let labels = options
         .iter()
-        .enumerate()
-        .map(|(index, (_, text))| (index.to_string(), (*text).to_owned()))
+        .map(|(_, text)| (*text).to_owned())
         .collect::<Vec<_>>();
-    let changed = crate::workbench::design_system::property_row_combo(
+    match setting_select(
         ui,
+        "design-management-setting",
         label,
-        ("design-management-setting", label),
-        &mut key,
-        &choices,
+        shown,
+        &labels,
         enabled,
-    );
-    if let Some((value, _)) = key
-        .parse::<usize>()
-        .ok()
-        .and_then(|index| options.get(index))
-    {
-        *selected = *value;
+    ) {
+        Some(index) if options[index].0 != *selected => {
+            *selected = options[index].0;
+            true
+        }
+        _ => false,
     }
-    changed
+}
+
+/// A setting's row: its label in the property rows' label column and the
+/// kit's select in their value column, so a pane's facts and choices share
+/// one grid. The settings were the inspector's 22 point drop-downs with a
+/// filled triangle, beside 28 point selects everywhere else.
+fn setting_select(
+    ui: &mut Ui,
+    id_namespace: &str,
+    label: &str,
+    shown: &str,
+    options: &[String],
+    enabled: bool,
+) -> Option<usize> {
+    let t = Tokens::get(ui.ctx());
+    let width = ui.available_width();
+    let (label_x, value_x) =
+        crate::workbench::design_system::property_row_control_columns(ui, width);
+    let row = vec2(width, t.metrics.ctl_h + 4.0);
+    ui.allocate_ui_with_layout(row, Layout::left_to_right(Align::Center), |ui| {
+        ui.spacing_mut().item_spacing.x = 0.0;
+        ui.add_space(label_x);
+        let (label_rect, label_response) =
+            ui.allocate_exact_size(vec2(value_x - label_x, row.y), Sense::hover());
+        label_response.widget_info(|| {
+            egui::WidgetInfo::labeled(egui::WidgetType::Label, ui.is_enabled(), label)
+        });
+        ui.painter().with_clip_rect(label_rect).text(
+            label_rect.left_center(),
+            egui::Align2::LEFT_CENTER,
+            label,
+            theme::sans(tokens::FS_0, FontWeight::Regular),
+            t.color.text_dim,
+        );
+        let select_width = (width - value_x - label_x).max(1.0);
+        ui.add_enabled_ui(enabled, |ui| {
+            crate::ui::widgets::select(
+                ui,
+                &format!("{id_namespace}.{label}"),
+                label,
+                shown,
+                options,
+                select_width,
+            )
+        })
+        .inner
+    })
+    .inner
 }
 
 pub(super) fn field_combo<T: Copy + PartialEq>(
@@ -303,19 +378,30 @@ pub(super) fn id_combo<T: Copy + PartialEq + std::fmt::Display>(
             || base.unwrap_or("Select").to_owned(),
             |(_, name)| name.clone(),
         );
+    // The base, when there is one, is the list's first choice: no id.
+    let choices = base
+        .map(|base| (None, base.to_owned()))
+        .into_iter()
+        .chain(options.iter().map(|(id, name)| (Some(*id), name.clone())))
+        .collect::<Vec<_>>();
+    let labels = choices
+        .iter()
+        .map(|(_, name)| name.clone())
+        .collect::<Vec<_>>();
     ui.add_enabled_ui(enabled, |ui| {
-        crate::ui::widgets::Combo::from_id_salt((id_namespace, label))
-            .selected_text(selected_text)
-            .width(ui.available_width())
-            .show_ui(ui, |ui| {
-                if let Some(base) = base {
-                    ui.selectable_value(selected, None, base);
-                }
-                for (id, name) in options {
-                    ui.selectable_value(selected, Some(*id), name);
-                }
-            })
-            .response
+        let width = ui.available_width();
+        let output = crate::ui::widgets::select_with_response(
+            ui,
+            &format!("{id_namespace}.{label}"),
+            label,
+            &selected_text,
+            &labels,
+            width,
+        );
+        if let Some(index) = output.picked {
+            *selected = choices[index].0;
+        }
+        output.response
     })
     .inner
 }
@@ -328,30 +414,27 @@ pub(super) fn setting_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(
     selected: &mut Option<T>,
     enabled: bool,
 ) -> bool {
-    let mut key = selected
-        .and_then(|id| options.iter().position(|(candidate, _)| *candidate == id))
-        .map_or_else(String::new, |index| index.to_string());
-    let choices = options
+    let shown = selected
+        .and_then(|id| options.iter().find(|(candidate, _)| *candidate == id))
+        .map_or("", |(_, name)| name.as_str());
+    let labels = options
         .iter()
-        .enumerate()
-        .map(|(index, (_, name))| (index.to_string(), name.clone()))
+        .map(|(_, name)| name.clone())
         .collect::<Vec<_>>();
-    let changed = crate::workbench::design_system::property_row_combo(
+    match setting_select(
         ui,
+        "design-management-setting-id",
         label,
-        ("design-management-setting-id", label),
-        &mut key,
-        &choices,
+        shown,
+        &labels,
         enabled,
-    );
-    if let Some((id, _)) = key
-        .parse::<usize>()
-        .ok()
-        .and_then(|index| options.get(index))
-    {
-        *selected = Some(*id);
+    ) {
+        Some(index) if *selected != Some(options[index].0) => {
+            *selected = Some(options[index].0);
+            true
+        }
+        _ => false,
     }
-    changed
 }
 
 pub(super) fn field_combo_by_id<T: Copy + PartialEq + std::fmt::Display>(

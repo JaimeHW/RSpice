@@ -41,8 +41,6 @@ const MANAGER_DESCRIPTION: &str =
     "Manage sheets, assembly variants, reference designators, and how the hierarchy resolves.";
 const MANAGER_INITIAL_HEIGHT: f32 = 590.0;
 const SUBFLOW_INITIAL_HEIGHT: f32 = 610.0;
-const TAB_HEIGHT: f32 = 34.0;
-const TAB_MIN_WIDTH: f32 = 112.0;
 const SPLIT_BREAKPOINT: f32 = 720.0;
 const MAIN_SPLIT_LEFT_FRACTION: f32 = 0.5;
 const SUBFLOW_LEFT_FRACTION: f32 = 0.66;

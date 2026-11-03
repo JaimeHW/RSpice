@@ -198,6 +198,37 @@ fn the_manager_tabs_stand_their_settings_on_one_grid_at_the_subflow_width() {
                 "{tab:?}: {selects:?} do not share one column"
             );
         }
+        // The settings are the kit's 28 point selects, not the inspector's
+        // 22 point drop-downs.
+        for select in &selects {
+            assert!(
+                (select.y1 - select.y0 - 28.0).abs() < 0.5,
+                "{tab:?}: a setting is {} pt tall",
+                select.y1 - select.y0
+            );
+        }
+        // The left pane's rows start where the title and the footer do: as
+        // far in from the surface's left edge as the primary ends from its
+        // right. They stood 10 points further in, inside a bordered box.
+        let heading = match tab {
+            DesignManagementTab::Sheets => "Multi-sheet design",
+            DesignManagementTab::Variants => "Assembly variants",
+            DesignManagementTab::Annotation => "Reference-designator ownership",
+            DesignManagementTab::Hierarchy => "Hierarchy and view resolution",
+        };
+        let header = nodes
+            .values()
+            .filter(|node| node.role() != egui::accesskit::Role::Dialog)
+            .find(|node| node.label().is_some_and(|label| label.starts_with(heading)))
+            .and_then(egui::accesskit::Node::bounds)
+            .unwrap_or_else(|| panic!("{tab:?}: {heading} has bounds"));
+        let surface_left = primary.x1 + 13.0 - width;
+        let text_left = header.x0 + f64::from(crate::workbench::design_system::PANEL_INSET);
+        assert!(
+            (text_left - (surface_left + 13.0)).abs() < 0.5,
+            "{tab:?}: the left pane's rows start at {text_left}, the title at {}",
+            surface_left + 13.0
+        );
     }
     assert_eq!(widgets::counted(1, "sheet"), "1 sheet");
     assert_eq!(widgets::counted(2, "view"), "2 views");

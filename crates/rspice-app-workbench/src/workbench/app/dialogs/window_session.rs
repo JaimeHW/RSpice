@@ -8,7 +8,9 @@ use egui::{Context, Grid, RichText};
 
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{CommandForm, Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{
+    CommandForm, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogSize, dialog_tabs,
+};
 use crate::workbench::framework::command_registry::ids;
 use crate::workbench::framework::workbench_host::WorkbenchHost;
 use crate::workbench::lifecycle::window_session::ApplicationWindowId;
@@ -180,25 +182,34 @@ fn render_window_manager(app: &mut impl WorkbenchHost, ctx: &Context) {
         // A bar would only ever show while the surface settles; the
         // gutter it withheld was bare surface down the right edge.
         .overlay_scrollbar()
+        // The page tabs run edge to edge, as every dialog's tab strip does;
+        // the page under them keeps the body's inset.
+        .flush_body()
         .show(ctx, |ui| {
-            ui.horizontal(|ui| {
-                for candidate in WindowSessionPage::ALL {
-                    if ui
-                        .selectable_label(page == candidate, candidate.label())
-                        .clicked()
-                    {
-                        page = candidate;
+            let mut index = WindowSessionPage::ALL
+                .iter()
+                .position(|candidate| *candidate == page)
+                .unwrap_or_default();
+            let _ = dialog_tabs(
+                ui,
+                "window-session-pages",
+                &WindowSessionPage::ALL.map(WindowSessionPage::label),
+                &mut index,
+            );
+            page = WindowSessionPage::ALL[index];
+            egui::Frame::NONE
+                .inner_margin(egui::Margin::same(DIALOG_BODY_INSET as i8))
+                .show(ui, |ui| match page {
+                    WindowSessionPage::Windows => {
+                        render_windows_page(ui, app, &documents, &mut action)
                     }
-                }
-            });
-            ui.separator();
-            match page {
-                WindowSessionPage::Windows => render_windows_page(ui, app, &documents, &mut action),
-                WindowSessionPage::Documents => render_documents_page(ui, &documents, &mut action),
-                WindowSessionPage::SessionRestore => {
-                    render_session_page(ui, app, open_count, dirty_count, &mut action)
-                }
-            }
+                    WindowSessionPage::Documents => {
+                        render_documents_page(ui, &documents, &mut action)
+                    }
+                    WindowSessionPage::SessionRestore => {
+                        render_session_page(ui, app, open_count, dirty_count, &mut action)
+                    }
+                });
         });
 
     app.workbench_mut().window_session_dialog.page = page;
@@ -602,15 +613,16 @@ fn render_windows_page(
                         .count()
                         .to_string(),
                 );
-                ui.label(if window.bounds.recovery_pending {
-                    "recovery pending"
+                let state = if window.bounds.recovery_pending {
+                    "Recovery pending"
                 } else if id == current {
-                    "active"
+                    "Active"
                 } else {
-                    "open"
-                });
+                    "Open"
+                };
                 if actions {
-                    ui.horizontal(|ui| {
+                    ui.label(state);
+                    last_cell(ui, |ui| {
                         // The window this dialog is in already has the focus.
                         if id != current && ui.button("Focus").clicked() {
                             *action = Some(WindowSessionAction::Focus(id));
@@ -619,10 +631,23 @@ fn render_windows_page(
                             *action = Some(WindowSessionAction::CloseWindow(id));
                         }
                     });
+                } else {
+                    last_cell(ui, |ui| ui.label(state));
                 }
                 ui.end_row();
             }
         });
+}
+
+/// A striped table's last cell, as wide as what is left of the row, so the
+/// row's band runs to the body's right edge instead of stopping at the last
+/// value with bare surface beside it.
+fn last_cell<R>(ui: &mut egui::Ui, add: impl FnOnce(&mut egui::Ui) -> R) -> R {
+    ui.horizontal(|ui| {
+        ui.set_min_width(ui.available_width());
+        add(ui)
+    })
+    .inner
 }
 
 fn render_documents_page(
@@ -687,12 +712,14 @@ fn render_documents_page(
                     "Closed"
                 });
                 ui.label(if document.dirty { "Modified" } else { "Saved" });
-                if ui
-                    .add_enabled(document.open, egui::Button::new("Show"))
-                    .clicked()
-                {
-                    *action = Some(WindowSessionAction::Activate(document.id.clone()));
-                }
+                last_cell(ui, |ui| {
+                    if ui
+                        .add_enabled(document.open, egui::Button::new("Show"))
+                        .clicked()
+                    {
+                        *action = Some(WindowSessionAction::Activate(document.id.clone()));
+                    }
+                });
                 ui.end_row();
             }
         });

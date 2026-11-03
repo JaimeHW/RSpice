@@ -33,68 +33,14 @@ pub(super) fn design_management_tabs(
     ui: &mut Ui,
     active: &mut DesignManagementTab,
 ) -> egui::Response {
-    let t = Tokens::get(ui.ctx());
-    let available = ui.available_width();
-    let (strip_rect, strip_response) =
-        ui.allocate_exact_size(vec2(available, TAB_HEIGHT), Sense::hover());
-    ui.painter().rect_filled(strip_rect, 0.0, t.color.bg_panel);
-    ui.painter().hline(
-        strip_rect.x_range(),
-        strip_rect.bottom(),
-        Stroke::new(1.0, t.color.border_strong),
-    );
-    let mut x = strip_rect.left();
-    let mut first = None;
-    for tab in DesignManagementTab::ALL {
-        let rect = egui::Rect::from_min_size(
-            egui::pos2(x, strip_rect.top()),
-            vec2(TAB_MIN_WIDTH, TAB_HEIGHT),
-        );
-        let response = ui.interact(
-            rect,
-            ui.id().with(("design-management-tab", tab.label())),
-            Sense::click(),
-        );
-        response.widget_info(|| {
-            egui::WidgetInfo::selected(
-                egui::WidgetType::SelectableLabel,
-                ui.is_enabled(),
-                *active == tab,
-                tab.label(),
-            )
-        });
-        if response.clicked() {
-            *active = tab;
-        }
-        if *active == tab {
-            ui.painter().rect_filled(rect, 0.0, t.color.bg_elevated);
-            ui.painter().hline(
-                egui::Rangef::new(rect.left(), rect.right()),
-                rect.bottom() - 1.0,
-                Stroke::new(2.0, t.color.accent),
-            );
-        }
-        ui.painter().vline(
-            rect.right(),
-            rect.y_range(),
-            Stroke::new(1.0, t.color.border),
-        );
-        ui.painter().text(
-            rect.left_center() + vec2(12.0, 0.0),
-            egui::Align2::LEFT_CENTER,
-            tab.label(),
-            theme::sans(tokens::FS_1, FontWeight::Regular),
-            if *active == tab {
-                t.color.text
-            } else {
-                t.color.text_dim
-            },
-        );
-        crate::ui::theme::paint_focus_ring(ui, &response, rect);
-        first.get_or_insert(response);
-        x += TAB_MIN_WIDTH;
-    }
-    first.unwrap_or(strip_response)
+    let labels = DesignManagementTab::ALL.map(DesignManagementTab::label);
+    let mut index = DesignManagementTab::ALL
+        .iter()
+        .position(|tab| tab == active)
+        .unwrap_or_default();
+    let first = crate::ui::widgets::dialog_tabs(ui, "design-management-tabs", &labels, &mut index);
+    *active = DesignManagementTab::ALL[index];
+    first
 }
 
 /// How many cross-sheet ports reach `sheet`, and how many nets leave it
@@ -381,7 +327,7 @@ pub(super) fn variants_manager_body(
         // With no variant there is nothing to choose: the row says so,
         // rather than offering an empty list.
         if names.is_empty() {
-            property_row(right, ACTIVE_VARIANT, "None");
+            fact_row(right, ACTIVE_VARIANT, "None");
         } else {
             let mut selected = active;
             if setting_combo_by_id(right, ACTIVE_VARIANT, &names, &mut selected, write_allowed)
@@ -482,12 +428,12 @@ pub(super) fn variants_manager_body(
             })
             .count();
         // Both rows are counts, and a count reads as a count.
-        property_row(
+        fact_row(
             right,
             "Port equivalence",
-            &format!("{equivalent} / {}", substitutions.len()),
+            &format!("{equivalent} of {}", substitutions.len()),
         );
-        property_row(right, "Model sections", &format!("{model_reviews} reviews"));
+        fact_row(right, "Model sections", &counted(model_reviews, "review"));
     });
     action
 }
@@ -799,7 +745,7 @@ pub(super) fn hierarchy_manager_body(
                     }
                     .to_owned()
                 });
-        property_row(right, "Protected boundaries", &protected);
+        fact_row(right, "Protected boundaries", &protected);
         let digest = resolution
             .configuration_digest
             .map_or_else(|| "active-project".to_owned(), |digest| digest.to_string());

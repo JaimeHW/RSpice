@@ -139,7 +139,7 @@ fn the_active_window_offers_no_focus() {
             .values()
             .any(|node| node.label() == Some(text) || node.value() == Some(text))
     };
-    assert!(says("active"), "the main window's row is missing");
+    assert!(says("Active"), "the main window's row is missing");
     assert!(!says("Focus"), "the active window offers Focus");
     assert!(!says("Action"), "an Action column with no actions");
 }
