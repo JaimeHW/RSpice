@@ -29,6 +29,20 @@ const CREATABLE_VIEW_TYPES: [crate::state::ViewType; 5] = [
     crate::state::ViewType::VerilogA,
 ];
 
+/// What a Type segment says: the view type in sentence case. The view keeps
+/// its lowercase name in the library and the project; the segments read
+/// "schematic testbench symbol layout veriloga" beside capitalised labels.
+const fn view_type_label(view_type: crate::state::ViewType) -> &'static str {
+    match view_type {
+        crate::state::ViewType::Schematic => "Schematic",
+        crate::state::ViewType::Testbench => "Testbench",
+        crate::state::ViewType::Symbol => "Symbol",
+        crate::state::ViewType::Layout => "Layout",
+        crate::state::ViewType::VerilogA => "Verilog-A",
+        _ => "Other",
+    }
+}
+
 const fn is_creatable_view_type(view_type: crate::state::ViewType) -> bool {
     matches!(
         view_type,
@@ -168,7 +182,7 @@ impl ProjectFeature {
             && catalog_current;
         let error = dialogs.new_view_error.clone();
         let name_id = egui::Id::new("library.new-view.name");
-        let type_names = CREATABLE_VIEW_TYPES.map(|view_type| view_type.display_name());
+        let type_names = CREATABLE_VIEW_TYPES.map(view_type_label);
         let mut type_index = CREATABLE_VIEW_TYPES
             .iter()
             .position(|view_type| *view_type == dialogs.new_view_type)
@@ -892,12 +906,17 @@ mod tests {
         assert!(width <= 524.0, "New view is {width} pt wide");
         // The types are one row of equal segments: none wraps to a line of
         // its own, and no two are spaced apart unevenly.
+        // Each reads in sentence case; the view keeps its lowercase name.
+        assert_eq!(
+            CREATABLE_VIEW_TYPES.map(view_type_label),
+            ["Schematic", "Testbench", "Symbol", "Layout", "Verilog-A"]
+        );
         let types = CREATABLE_VIEW_TYPES.map(|view_type| {
             nodes
                 .values()
-                .find(|node| node.label() == Some(view_type.display_name()))
+                .find(|node| node.label() == Some(view_type_label(view_type)))
                 .and_then(egui::accesskit::Node::bounds)
-                .unwrap_or_else(|| panic!("{} is published", view_type.display_name()))
+                .unwrap_or_else(|| panic!("{} is published", view_type_label(view_type)))
         });
         for pair in types.windows(2) {
             assert!(
