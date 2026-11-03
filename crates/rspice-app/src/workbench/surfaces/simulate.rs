@@ -112,7 +112,9 @@ const CONTRACT_SPLIT_MIN_WIDTH: f32 =
 const STACKED_WORKSPACE_GAP: f32 = 9.0;
 const ANALYSIS_CATALOG_GROUP_HEIGHT: f32 = 29.0;
 const ANALYSIS_CATALOG_ROW_HEIGHT: f32 = 57.0;
-const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 142.0;
+/// The action column: as wide as its longest line, "Add another · 9 in plan",
+/// set on one line.
+const ANALYSIS_CATALOG_READINESS_WIDTH: f32 = 160.0;
 const ANALYSIS_CATEGORY_ORDER: [&str; 10] = [
     "Core analyses",
     "Transfer & linearization",
