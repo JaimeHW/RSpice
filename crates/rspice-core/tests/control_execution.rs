@@ -1023,6 +1023,30 @@ fn display_leaves_event_nodes_out_of_the_transient_plot() {
     }
 }
 
+/// ngspice's `run` executes the deck's own analysis cards
+/// (frontend/spiceif.c:347), so after the script's `tran` it finds none and
+/// does nothing: ngspice-46 runs this deck's transient once and exits 0.
+#[test]
+fn run_after_the_scripts_own_analysis_does_nothing() {
+    let (presented, error) = run_until_error(
+        "run twice\nV1 in 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 in 0 1k\n.control\n\
+         tran 1n 10n\nrun\necho $curplot\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert!(matches!(
+        presented[0].kind,
+        ControlPresentationKind::Ignored(_)
+    ));
+    assert_eq!(texts(&presented), ["tran1"]);
+    let (_, error) =
+        run_until_error("nothing\nV1 in 0 1\nR1 in 0 1k\n.control\nrun\n.endc\n.end\n");
+    assert!(
+        error
+            .unwrap()
+            .contains("run has no declarative analysis to execute")
+    );
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.

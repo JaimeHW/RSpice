@@ -500,9 +500,25 @@ impl ControlCircuit {
                     .map(|(index, command)| (command.clone(), Some(index)))
                     .collect::<Vec<_>>();
                 if analyses.is_empty() {
-                    return Err(
-                        command_error(line, "run has no declarative analysis to execute").into(),
-                    );
+                    // ngspice's `run` executes the deck's own analysis cards
+                    // (frontend/spiceif.c:347 ci_defTask), so after the script
+                    // ran its own it does nothing. With nothing run at all, the
+                    // script produces no result, which is a mistake to report.
+                    if self.datasets.is_empty() {
+                        return Err(command_error(
+                            line,
+                            "run has no declarative analysis to execute",
+                        )
+                        .into());
+                    }
+                    return Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Ignored(
+                            "run: the deck has no analysis card, and the script's own analyses \
+                             already ran"
+                                .into(),
+                        ),
+                    ));
                 }
                 Ok(PreparedCommand::Analyses(analyses))
             }

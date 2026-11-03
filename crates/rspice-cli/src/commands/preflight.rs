@@ -261,6 +261,11 @@ pub(crate) fn check_requests(
         return self::netlist(netlist, input, limits, None).map(|()| Vec::new());
     };
     let program = control_program(script, input, limits)?;
+    // A `run` with no analysis card left is harmless once the script runs an
+    // analysis of its own, as ngspice's `tran` before `run` does.
+    let runs_analysis = program
+        .authored_commands()
+        .any(|command| ControlCircuit::is_analysis_command(&command));
     let mut deferred = Vec::new();
     for command in program.authored_commands() {
         ControlCircuit::validate_command_name(&command)
@@ -298,7 +303,7 @@ pub(crate) fn check_requests(
                 analysis_request(netlist, analysis, limits, None).map_err(located)?;
                 count += 1;
             }
-            if count == 0 {
+            if count == 0 && !runs_analysis {
                 return Err(located(invalid(
                     "run has no declarative analysis to execute",
                 )));
