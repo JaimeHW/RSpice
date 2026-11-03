@@ -975,6 +975,42 @@ a_adc [in] [dout] adc
     );
 }
 
+/// Outside a transient analysis ngspice applies a code model's output at
+/// once, whatever its delay (xspice/evt/evtload.c:542 EVTprocess_output). A
+/// 10 ns d_tristate released at the operating point and enabled at 100 ns
+/// prints `1z` at 0 and `1s` at 110 ns in ngspice-46; one enabled at the
+/// operating point prints `1s` at 0.
+#[test]
+fn d_tristate_drives_its_operating_point_output_at_time_zero_like_ngspice() {
+    let result = run_temp_deck(
+        "rspice-tristate-operating-point",
+        "0ns 1s 0s 1s\n100ns 1s 1s 1s\n",
+        "\
+* d_tristate at the operating point
+a_src [a en on] src
+.model src d_source (input_file=\"stim.stim\")
+a_off a en released tri
+a_on a on driven tri
+.model tri d_tristate (delay=10n)
+.end
+",
+        200.0e-9,
+        1.0e-9,
+    );
+
+    let tokens = |node: &str| -> Vec<(f64, String)> {
+        digital_tokens(&result, node)
+            .into_iter()
+            .map(|(time, token)| ((time * 1e15).round() / 1e15, token))
+            .collect()
+    };
+    assert_eq!(
+        tokens("released"),
+        [(0.0, "1z".to_string()), (110e-9, "1s".to_string())]
+    );
+    assert_eq!(tokens("driven"), [(0.0, "1s".to_string())]);
+}
+
 #[test]
 fn digital_oscillators_accept_and_clamp_table_values_outside_official_limits() {
     let registry = CodeModelRegistry::with_builtins();
@@ -2591,8 +2627,8 @@ a_tri [din] [en] [out] tri
     assert!(
         trace
             .iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "1s"),
-        "d_tristate initial output should clamp zero delay to 1ps like ngspice, got {trace:?}"
+            .any(|(time, token)| *time == 0.0 && token == "1s"),
+        "d_tristate drives its operating-point output at t=0 like ngspice-46, got {trace:?}"
     );
     assert!(
         trace
@@ -2606,7 +2642,7 @@ a_tri [din] [en] [out] tri
 fn d_tristate_uses_official_delay_parameter() {
     let result = run_temp_deck(
         "rspice-d-tristate-delay",
-        "0 1s 1s\n",
+        "0 1s 1s\n0.5n 0s 1s\n",
         "\
 * d_tristate has a single official delay parameter
 a_src [din en] src
@@ -2619,12 +2655,13 @@ a_tri [din] [en] [out] tri
         50.0e-12,
     );
 
+    // ngspice-46 prints 1s at 0 and 0s at 0.75 ns.
     let trace = digital_tokens(&result, "out");
     assert!(
         trace
             .iter()
-            .any(|(time, token)| (*time - 250.0e-12).abs() <= 1.0e-18 && token == "1s"),
-        "d_tristate must use delay=250p for the initial enabled output, got {trace:?}"
+            .any(|(time, token)| (*time - 0.75e-9).abs() <= 1.0e-18 && token == "0s"),
+        "d_tristate must use delay=250p for the falling input, got {trace:?}"
     );
     assert!(
         !trace
@@ -2655,8 +2692,8 @@ a_tri [din] [en] [out] tri
     assert!(
         trace
             .iter()
-            .any(|(time, token)| (*time - 1.0e-12).abs() <= 1.0e-18 && token == "1z"),
-        "disabled d_tristate with high input must emit 1z after delay, got {trace:?}"
+            .any(|(time, token)| *time == 0.0 && token == "1z"),
+        "disabled d_tristate with high input must emit 1z at the operating point, got {trace:?}"
     );
     assert!(
         trace

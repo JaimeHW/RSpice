@@ -344,7 +344,15 @@ fn set_tristate_output(
         return Ok(());
     }
 
-    if !gate_inertial_delay_enabled(ctx)? || !ctx.is_transient() {
+    // At the operating point, which this host evaluates at time zero, ngspice
+    // applies an output at once, whatever its delay (xspice/evt/evtload.c:542
+    // EVTprocess_output), and keeps the inertial bookkeeping for a transient
+    // analysis: a tristate released at the operating point is `1z` at t=0.
+    // Later, outside a transient, the output keeps its delay, which the
+    // engine honours.
+    let operating_point = ctx.time == 0.0;
+    if !gate_inertial_delay_enabled(ctx)? || !ctx.is_transient() || operating_point {
+        let delay = if operating_point { 0.0 } else { delay };
         ctx.set_output_digital("out", value, delay);
         gate_set_int_state(ctx, 0, state);
         gate_set_int_state(ctx, 1, strength);
