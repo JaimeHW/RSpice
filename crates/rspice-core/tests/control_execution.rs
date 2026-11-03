@@ -749,7 +749,7 @@ fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
         text(kind(&mut circuit, "display", "")),
         "Here are the vectors currently active:\n\nTitle: batch deck\n\
          Name: op1 (Operating Point)\n\n\
-         \x20   in                  : voltage, real, 1 long\n\
+         \x20   in                  : voltage, real, 1 long [default scale]\n\
          \x20   out                 : voltage, real, 1 long\n\
          \x20   v1#branch           : current, real, 1 long\n"
     );
@@ -859,6 +859,28 @@ fn set_accepts_shell_variables_and_applies_assignments_atomically() {
 
 /// Run a script to its first failure, returning what it presented and that
 /// failure's message.
+/// An operating point sweeps nothing, so `display` marks its first vector,
+/// the circuit's first node, as the plot's scale (frontend/vectors.c
+/// vec_new). The listing is ngspice-46's.
+#[test]
+fn display_marks_an_operating_points_first_node_as_its_scale() {
+    let (presented, error) = run_until_error(
+        "opscale\nR1 out in 1k\nV1 in 0 dc 2\nR2 out 0 3k\nL1 out mid 1u\nR3 mid 0 1k\n\
+         .control\nop\ndisplay\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["Here are the vectors currently active:\n\nTitle: opscale\n\
+          Name: op1 (Operating Point)\n\n\
+          \x20   in                  : voltage, real, 1 long\n\
+          \x20   l1#branch           : current, real, 1 long\n\
+          \x20   mid                 : voltage, real, 1 long\n\
+          \x20   out                 : voltage, real, 1 long [default scale]\n\
+          \x20   v1#branch           : current, real, 1 long"]
+    );
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.

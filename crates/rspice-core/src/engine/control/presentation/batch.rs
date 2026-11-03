@@ -146,7 +146,15 @@ impl ControlCircuit {
         } else {
             "real"
         };
-        let scale = dataset.scale_vector();
+        let policy = self.netlist.ground_policy();
+        let mut vectors = dataset.vectors(|name| policy.is_ground(name));
+        // An operating point sweeps nothing, so its first vector is its scale
+        // (frontend/vectors.c vec_new): the circuit's first node.
+        let scale = dataset.scale_vector().or_else(|| {
+            matches!(dataset.result, ControlAnalysisResult::OperatingPoint(_))
+                .then(|| vectors.first().map(|(name, _)| name.clone()))
+                .flatten()
+        });
         let line = |name: &str, kind: &str| {
             let mark = if Some(name) == scale.as_deref() {
                 " [default scale]"
@@ -155,8 +163,6 @@ impl ControlCircuit {
             };
             format!("    {name:<20}: {kind}, {numeric}, {length} long{mark}\n")
         };
-        let policy = self.netlist.ground_policy();
-        let mut vectors = dataset.vectors(|name| policy.is_ground(name));
         let requested = crate::engine::control::shell::words(&command.arguments);
         if !requested.is_empty() {
             let mut text = String::new();
