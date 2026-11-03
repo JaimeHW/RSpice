@@ -289,19 +289,39 @@ impl Engine {
         }
         let size = circuit.matrix_size();
         let mut rhs = vec![0.0; size];
-
-        matrix.clear_values();
-        rhs.fill(0.0);
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
-        self.stamp_dc_direct(circuit, matrix, &mut rhs, gmin_floor);
-        if !circuit.behavioral_sources.is_empty()
-            && !circuit.behavioral_sources.has_solution_dependent_sources()
-        {
-            let zero_solution = vec![0.0; size];
-            circuit
-                .stamp_behavioral_sources(matrix, &mut rhs, &zero_solution, 0.0)
-                .map_err(SimulationError::from)?;
+        let assemble = |circuit: &mut CircuitData,
+                        matrix: &mut StaticMatrix,
+                        rhs: &mut Vec<Value>,
+                        gmin_floor: Value|
+         -> Result<(), SimulationError> {
+            matrix.clear_values();
+            rhs.fill(0.0);
+            self.stamp_dc_direct(circuit, matrix, rhs, gmin_floor);
+            if !circuit.behavioral_sources.is_empty()
+                && !circuit.behavioral_sources.has_solution_dependent_sources()
+            {
+                let zero_solution = vec![0.0; size];
+                circuit
+                    .stamp_behavioral_sources(matrix, rhs, &zero_solution, 0.0)
+                    .map_err(SimulationError::from)?;
+            }
+            Ok(())
+        };
+        if self.tries_zero_dc_nodal_floor(circuit) {
+            assemble(circuit, matrix, &mut rhs, 0.0)?;
+            let direct_result = matrix.solve(&rhs);
+            if abort.is_aborted() {
+                return Err(SimulationError::Aborted);
+            }
+            match direct_result {
+                Ok(solution) => return Ok(solution),
+                Err(error) => {
+                    self.retain_dc_nodal_floor(circuit, matrix, &SimulationError::Solver(error))
+                }
+            }
         }
+        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+        assemble(circuit, matrix, &mut rhs, gmin_floor)?;
 
         let direct_result = matrix.solve(&rhs);
         if abort.is_aborted() {
@@ -1025,6 +1045,79 @@ impl Engine {
         }
     }
 
+    /// ngspice's direct solve and the last stage of its GMIN stepping run at
+    /// CKTdiagGmin = CKTgshunt, zero unless the deck sets RSHUNT (niiter.c,
+    /// cktop.c), where RSpice keeps a GMIN floor from every node to ground.
+    /// Outside the Xyce dialect the operating-point solve runs without the
+    /// floor first.
+    fn tries_zero_dc_nodal_floor(&self, circuit: &CircuitData) -> bool {
+        self.config.spice_dialect != SpiceDialect::Xyce
+            && self
+                .config
+                .convergence_config
+                .nonlinear_continuation
+                .is_none()
+            && !circuit.zero_dc_nodal_floor
+            && !circuit.dc_nodal_floor_retained
+            && self.dc_nodal_gmin_floor(circuit) > 0.0
+    }
+
+    /// The operating-point solve without the nodal floor: the direct solve,
+    /// and the aids if it does not converge. A singular direct system warns
+    /// as ngspice's does, naming the unconstrained node (niiter.c). When the
+    /// solve fails, it runs again at the floor, as before, and the circuit
+    /// keeps the floor from then on.
+    fn solve_at_zero_dc_nodal_floor(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        initial_guess: Option<&[Value]>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Option<Vec<Value>>, SimulationError> {
+        let entry_state = circuit.nonlinear_state_snapshot();
+        circuit.zero_dc_nodal_floor = true;
+        let attempt =
+            self.solve_nonlinear_with_guess_unchecked(circuit, matrix, initial_guess, abort);
+        circuit.zero_dc_nodal_floor = false;
+        let error = match attempt {
+            Ok(solution) => return Ok(Some(solution)),
+            Err(SimulationError::Aborted) => return Err(SimulationError::Aborted),
+            Err(_) if abort.is_aborted() => return Err(SimulationError::Aborted),
+            Err(error) => error,
+        };
+        circuit.restore_nonlinear_state(entry_state);
+        self.retain_dc_nodal_floor(circuit, matrix, &error);
+        Ok(None)
+    }
+
+    /// Keep the nodal floor on a circuit whose solve without it failed.
+    fn retain_dc_nodal_floor(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &StaticMatrix,
+        error: &SimulationError,
+    ) {
+        circuit.dc_nodal_floor_retained = true;
+        let floor = self.dc_nodal_gmin_floor(circuit);
+        if matches!(error, SimulationError::Solver(SolverError::SingularMatrix)) {
+            let node_names = circuit.node_names_sorted();
+            let unconstrained: Vec<&str> = matrix
+                .deficient_rows()
+                .into_iter()
+                .filter_map(|row| node_names.get(row).map(String::as_str))
+                .collect();
+            match unconstrained.first() {
+                Some(node) => log::warn!("singular matrix: check node {node}"),
+                None => log::warn!("singular matrix"),
+            }
+            log::info!("Solving the operating point with GMIN = {floor:e} S from every node.");
+        } else {
+            log::debug!(
+                "Direct DC solve without a nodal GMIN floor failed ({error}); solving with GMIN = {floor:e} S from every node."
+            );
+        }
+    }
+
     /// Whether the configured DC solve opens with exactly the direct Newton
     /// its aid-free twin runs: no Xyce continuation mode replaces that Newton
     /// with an aid, and the limit-cycle tracker, which only an aided solve
@@ -1052,6 +1145,12 @@ impl Engine {
         initial_guess: Option<&[Value]>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<Value>, SimulationError> {
+        if self.tries_zero_dc_nodal_floor(circuit)
+            && let Some(solution) =
+                self.solve_at_zero_dc_nodal_floor(circuit, matrix, initial_guess, abort)?
+        {
+            return Ok(solution);
+        }
         let size = circuit.matrix_size();
         let seed_was_nonfinite = initial_guess.is_some_and(|guess| {
             let normalized = Self::normalize_initial_guess(guess, size);
@@ -1336,6 +1435,18 @@ impl Engine {
             } else {
                 residual_stall_iterations = 0;
             }
+        }
+        // A system singular without the nodal floor goes no further: its
+        // caller solves again at the floor (`solve_at_zero_dc_nodal_floor`).
+        // A Newton that only failed to converge goes on to the aids, which
+        // end at the same zero floor, as ngspice's GMIN stepping does.
+        if circuit.zero_dc_nodal_floor
+            && matches!(
+                direct_solver_error,
+                Some(SimulationError::Solver(SolverError::SingularMatrix))
+            )
+        {
+            return Err(direct_solver_error.unwrap_or(SimulationError::ConvergenceFailed(0)));
         }
         // Name the KCL equations the abort iterate left worst-violated, while
         // the linearization that produced it is still stamped. Reaching here
@@ -2726,6 +2837,65 @@ mod correction_constraint_tests {
                 1,
                 "{route}: Newton iterations run before the stop was seen"
             );
+        }
+    }
+
+    fn operating_point(deck: &str) -> Vec<(String, Value)> {
+        let netlist = crate::netlist::Netlist::parse(deck).unwrap();
+        let engine = Engine::default().resolved_for_netlist(&netlist);
+        let result = engine.run_dc_op(&netlist).unwrap();
+        result
+            .node_names
+            .iter()
+            .cloned()
+            .zip(result.node_voltages.iter().copied())
+            .collect()
+    }
+
+    fn voltage(point: &[(String, Value)], node: &str) -> Value {
+        point
+            .iter()
+            .find(|(name, _)| name.eq_ignore_ascii_case(node))
+            .map(|&(_, value)| value)
+            .unwrap()
+    }
+
+    /// ngspice solves its operating point at CKTdiagGmin = 0, so a current
+    /// into a resistor gives I*R exactly (its lib-processing/scope-3 deck
+    /// checks 47.666666666666666 V this way), and a node fed only by a
+    /// junction's leakage takes the value the junction and its own GMIN
+    /// give it.
+    #[test]
+    fn an_operating_point_that_solves_without_the_nodal_floor_carries_none() {
+        let point = operating_point("exact\nI1 0 n 1m\nR1 n 0 47.666666666666666k\n.op\n.end\n");
+        let exact = 47.666666666666666;
+        let value = voltage(&point, "n");
+        assert!((value - exact).abs() <= 1e-13 * exact, "V(n) = {value}");
+
+        // 5 V across a reverse-biased diode (IS = 1e-14 A, GMIN = 1e-12 S)
+        // into 100 GOhm: V(n) = (5 GMIN + IS) / (1/R + GMIN), and ngspice-46
+        // prints 4.554545e-01.
+        let point = operating_point(
+            "leak\nV1 a 0 5\nD1 n a dm\nR1 n 0 1e11\n.model dm d is=1e-14\n.op\n.end\n",
+        );
+        let exact = (5.0 * 1e-12 + 1e-14) / (1e-11 + 1e-12);
+        let value = voltage(&point, "n");
+        assert!((value - exact).abs() <= 1e-7 * exact, "V(n) = {value}");
+    }
+
+    /// A node only the floor defines, here one between two capacitors,
+    /// leaves the system singular without it; ngspice warns "singular matrix:
+    /// check node" there, and the solve goes on at the floor.
+    #[test]
+    fn a_node_only_the_nodal_floor_defines_keeps_the_floor() {
+        for deck in [
+            "floating linear\nV1 a 0 1\nR1 a b 1k\nR2 b 0 1k\nC1 b c 1p\nC2 c 0 1p\n.op\n.end\n",
+            "floating nonlinear\nV1 a 0 1\nR1 a b 1k\nD1 b 0 dm\nC1 b c 1p\nC2 c 0 1p\n\
+             .model dm d is=1e-14\n.op\n.end\n",
+        ] {
+            let point = operating_point(deck);
+            assert!(voltage(&point, "b") > 0.4, "{deck}: {point:?}");
+            assert!(voltage(&point, "c").abs() < 1e-6, "{deck}: {point:?}");
         }
     }
 

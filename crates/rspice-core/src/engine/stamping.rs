@@ -87,7 +87,8 @@ impl Engine {
     /// fixed-current network without a numerical shunt absorbing a mismatch.
     pub(in crate::engine) fn dc_nodal_gmin_floor(&self, circuit: &CircuitData) -> Value {
         let gmin = self.config.convergence_config.gmin_target.max(0.0);
-        if circuit.has_b3soi_devices()
+        if circuit.zero_dc_nodal_floor
+            || circuit.has_b3soi_devices()
             || circuit.has_global_shunt()
             || circuit.inductors.has_dc_initial_conditions()
         {

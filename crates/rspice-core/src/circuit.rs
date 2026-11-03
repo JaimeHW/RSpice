@@ -632,6 +632,13 @@ pub struct CircuitData {
     /// Selects each family-specific state equation during a DC/startup
     /// operating-point solve instead of its transient dynamic equation.
     pub(crate) xyce_memristor_operating_point_mode: bool,
+    /// The DC operating-point solve runs without the nodal GMIN floor, as
+    /// ngspice's NIiter does at CKTdiagGmin = 0, while the engine tries its
+    /// operating-point solve there.
+    pub(crate) zero_dc_nodal_floor: bool,
+    /// The solve without the nodal floor failed once on this circuit,
+    /// so its later operating points keep the floor.
+    pub(crate) dc_nodal_floor_retained: bool,
 
     // Controlled sources
     pub(crate) vcvs: Vcvs,

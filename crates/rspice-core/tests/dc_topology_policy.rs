@@ -245,16 +245,34 @@ fn a_sensed_loop_that_nothing_drives_solves_to_zero_on_the_faer_backend() {
     }
 }
 
-/// The deck's only conductance cancels the 1e-15 S GMIN floor exactly, so
-/// the circuit's own system is singular while every GMIN stage above the
-/// floor solves. GMIN stepping used to answer with the stage just above the
-/// floor, about 1.1e8 V at `n`, which is the solution of a different circuit.
-/// The operating point does not exist, and the refusal names the aid and the
-/// stage it could not solve, whether or not source stepping runs after it.
+/// A conductance of -1e-15 S is the whole circuit at `n`, and without a
+/// GMIN floor that system is regular: ngspice-46 prints
+/// v(n) = -9.9999999999999988e+08.
+#[test]
+fn a_negative_conductance_solves_without_the_nodal_floor() {
+    let netlist = parse(
+        "Negative conductance cancelling the GMIN floor\nI1 0 n 1u\nR1 n 0 -1e15\n.op\n.end\n",
+    );
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("the circuit's own system is regular");
+    let n = voltage(&result, "n");
+    assert!((n + 1.0e9).abs() <= 1.0e-6, "v(n) = {n:e}, ngspice-46 -1e9");
+}
+
+/// `p`'s own conductances cancel, so the circuit's system is singular and
+/// the solve goes back to the 1e-15 S GMIN floor, which `n`'s conductance
+/// cancels exactly; every GMIN stage above the floor solves. GMIN stepping
+/// used to answer with the stage just above the floor, about 1.1e8 V at
+/// `n`, which is the solution of a different circuit. The operating point
+/// does not exist (ngspice-46: singular matrix at `p`, GMIN stepping
+/// fails), and the refusal names the aid and the stage it could not solve,
+/// whether or not source stepping runs after it.
 #[test]
 fn a_singular_floor_is_refused_rather_than_answered_by_a_shunted_gmin_stage() {
     let netlist = parse(
-        "Negative conductance cancelling the GMIN floor\nI1 0 n 1u\nR1 n 0 -1e15\n.op\n.end\n",
+        "Negative conductance cancelling the GMIN floor\nI1 0 n 1u\nR1 n 0 -1e15\n\
+         I2 0 p 1u\nR2 p 0 1e15\nR3 p 0 -1e15\n.op\n.end\n",
     );
     for source_stepping in [true, false] {
         let mut config = SimulationConfig::default();

@@ -12447,7 +12447,9 @@ mod tests {
 
         assert_eq!(results.len(), 1);
         let result = &results[0];
-        assert_eq!(result.value, Some(4.9999999999975));
+        // ngspice-46 measures MAX v(out) = 5 exactly: its direct solve puts
+        // no GMIN on the divider's node.
+        assert_eq!(result.value, Some(5.0));
         assert_eq!(result.expected, Some(4.0));
         assert_eq!(result.tolerance, Some(0.1));
         assert!(!result.passed);

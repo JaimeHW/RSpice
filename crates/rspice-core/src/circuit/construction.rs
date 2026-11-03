@@ -71,6 +71,8 @@ impl CircuitData {
             compact_model_dc_driven_nodes: HashSet::new(),
             compact_model_read_nodes: HashSet::new(),
             xyce_memristor_operating_point_mode: false,
+            zero_dc_nodal_floor: false,
+            dc_nodal_floor_retained: false,
             vcvs: Vcvs::new(),
             vccs: Vccs::new(),
             cccs: Cccs::new(),
