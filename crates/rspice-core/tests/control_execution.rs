@@ -1047,6 +1047,22 @@ fn run_after_the_scripts_own_analysis_does_nothing() {
     );
 }
 
+/// `reset` loads the deck again (frontend/runcoms2.c:175): the alteration
+/// and the option go, the first plot stays. ngspice-46 prints 1.5 V, the
+/// reload line, then 1 V, and names the second plot op2.
+#[test]
+fn reset_reloads_the_deck_and_keeps_the_plots() {
+    let (presented, error) = run_until_error(
+        "Reset\nV1 in 0 dc 2\nR1 in out 1k\nR2 out 0 1k\n.control\nalter r2 3k\n\
+         option temp=100\nop\nprint v(out)\nreset\nop\nprint v(out)\necho $curplot\n\
+         .endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert!((printed(&presented[0])[0].y.samples[0].re - 1.5).abs() < 1e-9);
+    assert!((printed(&presented[2])[0].y.samples[0].re - 1.0).abs() < 1e-9);
+    assert_eq!(texts(&presented), ["Reset re-loads circuit reset", "op2"]);
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.

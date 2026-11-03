@@ -100,6 +100,8 @@ enum CommandKind {
     Destroy,
     /// `unlet vectors`.
     Unlet,
+    /// `reset`: reload the deck.
+    Reset,
     Alter,
     Analysis,
     Run,
@@ -160,6 +162,7 @@ impl CommandKind {
             "save" => Self::Save,
             "destroy" => Self::Destroy,
             "unlet" => Self::Unlet,
+            "reset" => Self::Reset,
             "alter" => Self::Alter,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" | "sp" => Self::Analysis,
@@ -203,6 +206,8 @@ impl CommandKind {
 /// program's `ControlSession`. This preserves one execution path on all targets.
 pub struct ControlCircuit {
     netlist: Netlist,
+    /// The deck as the script found it, which `reset` reloads.
+    authored: Netlist,
     datasets: Vec<ControlNamedDataset>,
     /// The dataset unqualified vector names resolve against: the newest,
     /// unless `setplot` selected another (ngspice `plot_cur`).
@@ -242,6 +247,7 @@ impl ControlCircuit {
             return Err(command_error(0, "construct the control circuit from the program's declarative source; promoted script commands would duplicate execution").into());
         }
         Ok(Self {
+            authored: netlist.clone(),
             netlist,
             datasets: Vec::new(),
             current: None,
@@ -431,6 +437,21 @@ impl ControlCircuit {
                 self.destroy(command)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Reset => {
+                // ngspice `reset` (frontend/runcoms2.c:175) removes the circuit
+                // and loads its deck again: alterations and `option` values
+                // go, the plots and the script's variables stay
+                // (frontend/inp.c:549 names the deck it reloads).
+                self.netlist = self.authored.clone();
+                self.runtime_options = crate::netlist::SimulationOptions::default();
+                Ok(Self::batch_output(
+                    command,
+                    ControlPresentationKind::Text(format!(
+                        "Reset re-loads circuit {}\n",
+                        self.title()
+                    )),
                 ))
             }
             CommandKind::Unlet => {
