@@ -19,8 +19,6 @@
 
 use super::*;
 
-use crate::workbench::models::workspace_state::ModelsAttemptedOperation;
-
 /// The held catalog's identity, its acceptance contract, and the last attempt.
 pub(super) fn dialog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &hub::HubCatalog) {
     // Reference material, not a transaction: the footer states what is being
@@ -244,7 +242,7 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
     let state = app.state.models_view.operational_state;
     card(ui, |ui| {
         card_title(ui, "Last attempt", Some("this session only"));
-        let Some(ModelsAttemptedOperation { label, .. }) = attempted else {
+        let Some(attempted) = attempted else {
             empty_state(
                 ui,
                 "Nothing has been attempted this session.",
@@ -253,7 +251,12 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
             );
             return;
         };
-        property(ui, "Operation", &label, "as the operation named itself");
+        property(
+            ui,
+            "Operation",
+            &attempted.label,
+            "as the operation named itself",
+        );
         match receipt {
             Some(Ok(receipt)) => {
                 property(ui, "Outcome", "accepted", "published");
@@ -263,7 +266,7 @@ fn last_attempt(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
                 property(ui, "Outcome", state.label(), "refused");
                 problem_line(ui, Problem::Failure, &reason);
                 ui.label(
-                    RichText::new(state.consequence())
+                    RichText::new(state.consequence_of(Some(&attempted)))
                         .small()
                         .color(t.color.text_dim),
                 );

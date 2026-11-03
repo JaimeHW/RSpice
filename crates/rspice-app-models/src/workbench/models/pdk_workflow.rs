@@ -36,22 +36,13 @@ const MODEL_OPERATION_RUNNING: &str = "A model import or refresh is already runn
 /// twenty-odd places that write a receipt: a receipt knows its outcome and
 /// nothing about its cause.
 ///
-/// `landing_pack` names the pack the operation puts on this machine, when
-/// there is one. It is taken here for the same reason the label is: this is
-/// the one place that still holds the request, and the ledger's in-flight cell
-/// otherwise had nothing but a formatted progress sentence to recover a pack
-/// identifier from.
-fn note_models_operation(
-    cx: &mut Cx<'_, ModelsFeature>,
-    label: String,
-    reissuable: bool,
-    landing_pack: Option<String>,
-) {
-    cx.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
-        label,
-        reissuable,
-        landing_pack,
-    });
+/// The record names the pack the operation puts on this machine, when there
+/// is one, and whether it only reads. Both are taken here for the same reason
+/// the label is: this is the one place that still holds the request, and the
+/// ledger's in-flight cell otherwise had nothing but a formatted progress
+/// sentence to recover a pack identifier from.
+fn note_models_operation(cx: &mut Cx<'_, ModelsFeature>, attempted: ModelsAttemptedOperation) {
+    cx.state.models_view.attempted_operation = Some(attempted);
 }
 
 #[cfg(target_arch = "wasm32")]
@@ -171,20 +162,23 @@ impl NativeModelCatalogOperation {
         }
     }
 
-    /// The pack this operation puts on the machine, when it is one that does.
+    /// What a refusal of this operation names itself by.
     ///
-    /// Only a hub request can be one. Attaching a shipped-corpus pack names a
+    /// Only a hub request can land a pack, read without publishing, or be
+    /// re-issued from the record alone. Attaching a shipped-corpus pack names a
     /// pack too, but it copies a source tree this machine already has rather
     /// than fetching a signed archive, so nothing about it is a transfer to
     /// report.
-    fn landing_pack(&self) -> Option<String> {
+    fn attempted(&self) -> ModelsAttemptedOperation {
         match self {
-            Self::ModelHub(request) => request.landing_pack(),
+            Self::ModelHub(request) => request.attempted(),
             Self::ImportFile { .. }
             | Self::RefreshLibrary { .. }
             | Self::AttachPack { .. }
             | Self::AddPart { .. }
-            | Self::ApplyConfiguration(_) => None,
+            | Self::ApplyConfiguration(_) => {
+                ModelsAttemptedOperation::model_source(self.description())
+            }
         }
     }
 }
@@ -421,7 +415,7 @@ impl ModelsFeature {
         }
         #[cfg(target_arch = "wasm32")]
         {
-            note_models_operation(cx, "model import".to_owned(), false, None);
+            note_models_operation(cx, ModelsAttemptedOperation::model_source("model import"));
             cx.state.models_view.model_import_in_progress = true;
             cx.state.models_view.model_import_label =
                 Some("Selecting and reading browser model sources…".to_owned());
@@ -567,9 +561,9 @@ impl ModelsFeature {
             }
             note_models_operation(
                 cx,
-                format!("model-library refresh for '{library_name}'"),
-                false,
-                None,
+                ModelsAttemptedOperation::model_source(format!(
+                    "model-library refresh for '{library_name}'"
+                )),
             );
             cx.state.models_view.model_import_in_progress = true;
             cx.state.models_view.model_import_label = Some(format!(
@@ -670,7 +664,7 @@ impl ModelsFeature {
         attempted: String,
         reason: String,
     ) {
-        note_models_operation(cx, attempted, false, None);
+        note_models_operation(cx, ModelsAttemptedOperation::model_source(attempted));
         cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&reason);
         cx.state.models_view.action_receipt = Some(Err(reason.clone()));
         cx.wb.prompt(reason);
@@ -812,12 +806,7 @@ impl ModelsFeature {
                 .unavailable_reason()
                 .unwrap_or("The model hub is unavailable on this machine.")
                 .to_owned();
-            note_models_operation(
-                cx,
-                operation.description(),
-                matches!(operation, ModelHubRequest::FetchSnapshot),
-                operation.landing_pack(),
-            );
+            note_models_operation(cx, operation.attempted());
             cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&reason);
             cx.state.models_view.action_receipt = Some(Err(reason.clone()));
             cx.wb.prompt(reason);
@@ -847,15 +836,7 @@ impl ModelsFeature {
         let candidate = cx.model.model_library_manager.clone();
         let store = cx.handles.model_hub.store().cloned();
         let transport_provider = cx.handles.model_hub.transport_provider();
-        note_models_operation(
-            cx,
-            operation.description(),
-            matches!(
-                operation,
-                NativeModelCatalogOperation::ModelHub(ModelHubRequest::FetchSnapshot)
-            ),
-            operation.landing_pack(),
-        );
+        note_models_operation(cx, operation.attempted());
         cx.state.models_view.model_import_in_progress = true;
         cx.state.models_view.model_import_label = Some(operation.progress_label());
         model_hub_progress().clear();
@@ -1681,12 +1662,7 @@ impl ModelsFeature {
         };
         let transport_provider = cx.handles.model_hub.transport_provider();
         let candidate = cx.model.model_library_manager.clone();
-        note_models_operation(
-            cx,
-            request.description(),
-            matches!(request, ModelHubRequest::FetchSnapshot),
-            request.landing_pack(),
-        );
+        note_models_operation(cx, request.attempted());
         cx.state.models_view.model_import_in_progress = true;
         cx.state.models_view.model_import_label = Some(request.progress_label());
         model_hub_progress().clear();

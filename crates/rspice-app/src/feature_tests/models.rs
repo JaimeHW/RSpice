@@ -4,6 +4,8 @@
 //! the Model Hub placed, the project history undoing a PDK transaction, the
 //! shell answering what the Models workspace raised in a frame).
 
+#[cfg(not(target_arch = "wasm32"))]
+mod browser_path;
 mod commands;
 #[cfg(not(target_arch = "wasm32"))]
 mod model_hub;

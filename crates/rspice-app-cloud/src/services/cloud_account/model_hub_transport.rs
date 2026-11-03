@@ -33,6 +33,12 @@ use crate::state::model_hub::{
 pub struct CloudModelHubTransportProvider;
 
 impl ModelHubTransportProvider for CloudModelHubTransportProvider {
+    /// Only a build that carries its endpoints has a catalog to fetch; every
+    /// other one would fail every fetch at the same step, before any network.
+    fn reaches_catalog(&self) -> bool {
+        super::config::CloudAccountConfig::resolve().is_some()
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     fn open(&self, progress: ArchiveProgress) -> Result<Box<dyn ModelHubTransport>, String> {
         // The hub pipeline is synchronous, so it needs a runtime whose own threads

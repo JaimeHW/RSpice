@@ -168,6 +168,10 @@ pub struct ModelHubService {
     /// takes it from the shell, so a session never holds a service that
     /// cannot reach the network its build has.
     transport_provider: &'static dyn ModelHubTransportProvider,
+    /// What the provider answered when the service was built: whether this
+    /// build has a published catalog to fetch at all. It is a property of how
+    /// the build was made, so it is asked once rather than every frame.
+    reaches_catalog: bool,
 }
 
 impl ModelHubService {
@@ -186,6 +190,7 @@ impl ModelHubService {
             hub,
             unavailable,
             transport_provider,
+            reaches_catalog: transport_provider.reaches_catalog(),
         }
     }
 
@@ -197,6 +202,7 @@ impl ModelHubService {
             hub: None,
             unavailable: Some(reason.into()),
             transport_provider: &OfflineTransportProvider,
+            reaches_catalog: true,
         }
     }
 
@@ -209,7 +215,18 @@ impl ModelHubService {
             hub: Some(hub),
             unavailable: None,
             transport_provider: &OfflineTransportProvider,
+            reaches_catalog: true,
         }
+    }
+
+    /// The same service, opening its transports through `provider`: a test
+    /// that needs the shell's own provider over a fixture store.
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn through(mut self, provider: &'static dyn ModelHubTransportProvider) -> Self {
+        self.transport_provider = provider;
+        self.reaches_catalog = provider.reaches_catalog();
+        self
     }
 
     pub fn hub(&self) -> Option<&ModelHub> {
@@ -222,6 +239,15 @@ impl ModelHubService {
     /// lookup is a copied reference and never an allocation.
     pub fn transport_provider(&self) -> &'static dyn ModelHubTransportProvider {
         self.transport_provider
+    }
+
+    /// Whether this build has a published catalog to fetch at all.
+    ///
+    /// A build made without cloud endpoints has none, however the network
+    /// behaves. A workspace that fetched anyway reported the same refusal on
+    /// every visit, about a fact no reader could change.
+    pub fn reaches_catalog(&self) -> bool {
+        self.reaches_catalog
     }
 
     /// The unified part index, whether or not this machine has a pack store.

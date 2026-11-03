@@ -426,6 +426,10 @@ pub(super) struct HubCatalog {
     pub signed: Option<String>,
     /// Why there is no hub at all, in words a user can act on.
     pub unavailable: Option<String>,
+    /// This build has no published catalog to fetch: it was made without
+    /// cloud endpoints. Installed packs still list and still work; nothing
+    /// new can be offered, and nothing should be asked for.
+    pub catalog_unreachable: bool,
     pub stale: bool,
     /// The instant the held catalog stopped standing, when this clock is past
     /// it.
@@ -485,6 +489,7 @@ pub(super) fn hub_catalog(service: &ModelHubService, model: &Model) -> HubCatalo
     let mut catalog = HubCatalog {
         age_days: service.catalog_age_days(),
         unavailable: service.unavailable_reason().map(str::to_owned),
+        catalog_unreachable: !service.reaches_catalog(),
         stale: service.catalog_is_stale(),
         expired: service.catalog_expired().map(str::to_owned),
         catalog_time_issue: service.catalog_time_issue(),
@@ -663,9 +668,11 @@ pub(super) fn ledger_row(
 /// Both halves need the session hub, which the render context deliberately
 /// does not carry. A cached catalog old enough that showing it without
 /// checking would report last week's answer to this week's question asks for a
-/// refresh — once per session, which is what the latch is for. The selected
-/// pack's "what changed" answer is settled here too, and only when the
-/// catalog, the pack or either release actually moved.
+/// refresh — once per session, which is what the latch is for. A build with
+/// no catalog to reach asks for nothing: the fetch could only fail, and it
+/// failed on every visit to the page. The selected pack's "what changed"
+/// answer is settled here too, and only when the catalog, the pack or either
+/// release actually moved.
 pub(super) fn prepare(
     service: &ModelHubService,
     state: &mut ModelsState,
@@ -674,6 +681,7 @@ pub(super) fn prepare(
     super::adoption::refresh_release_diff(service, state, hub);
     let view = &mut state.models_view;
     if hub.unavailable.is_some()
+        || hub.catalog_unreachable
         || !hub.stale
         || view.model_import_in_progress
         || view.catalog_refresh_requested
@@ -683,6 +691,9 @@ pub(super) fn prepare(
     view.catalog_refresh_requested = true;
     Some(ModelHubRequest::FetchSnapshot)
 }
+
+/// What the packs page says in a build made without cloud endpoints.
+pub(super) const NOT_IN_THIS_BUILD: &str = "Published model packs are not available in this build.";
 
 /// The pack the ledger has selected, or the first one it lists.
 ///
@@ -897,7 +908,9 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
     // under this line, which is where a reader looking at an empty pane is
     // already looking. Saying it here as well put the same sentence twice on
     // one screen, and neither copy offered anything to do about it.
-    if hub.unavailable.is_some() {
+    // The same holds for a build with no catalog to reach and nothing
+    // installed: the empty state says so, once.
+    if hub.unavailable.is_some() || (hub.catalog_unreachable && hub.packs.is_empty()) {
         return;
     }
     egui::Frame::NONE
@@ -909,6 +922,19 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
                 // zeroes item spacing to do it; a line of separate phrases has
                 // to ask for its own gaps back or it reads as one run-on word.
                 ui.spacing_mut().item_spacing.x = 10.0;
+                // Packs this machine already holds still list, under one
+                // quiet line and nothing to press: there is no catalog to
+                // describe and none to refresh.
+                if hub.catalog_unreachable {
+                    announced(
+                        ui,
+                        RichText::new(NOT_IN_THIS_BUILD)
+                            .small()
+                            .color(t.color.text_dim),
+                        NOT_IN_THIS_BUILD,
+                    );
+                    return;
+                }
                 if let Some(reason) = hub.catalog_time_issue.as_deref() {
                     marked_line(ui, Problem::Failure, reason);
                     return;
@@ -990,7 +1016,7 @@ fn catalog_status(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCata
             if let Some(note) = hub
                 .host
                 .scope_note(&hub.storage)
-                .filter(|_| hub.unavailable.is_none())
+                .filter(|_| hub.unavailable.is_none() && !hub.catalog_unreachable)
             {
                 announced(
                     ui,
@@ -1063,17 +1089,21 @@ fn exception_banner(ui: &mut Ui, app: &mut ManagerRenderContext<'_>) {
         return;
     };
     let state = app.state.models_view.operational_state;
-    let attempted = app.state.models_view.attempted_operation.clone().unwrap_or(
-        crate::workbench::models::workspace_state::ModelsAttemptedOperation {
-            label: "model-source operation".to_owned(),
-            reissuable: false,
-            landing_pack: None,
-        },
-    );
+    let attempted = app
+        .state
+        .models_view
+        .attempted_operation
+        .clone()
+        .unwrap_or_else(|| {
+            crate::workbench::models::workspace_state::ModelsAttemptedOperation::model_source(
+                "model-source operation",
+            )
+        });
     let text_dim = Tokens::get(ui.ctx()).color.text_dim;
     refusal_frame(
         ui,
         state,
+        state.consequence_of(Some(&attempted)),
         &reason,
         |ui| {
             announced(
@@ -1106,9 +1136,11 @@ pub(super) fn page_refusal(ui: &mut Ui, state: &ModelsState) {
     let Some(Err(reason)) = &state.models_view.action_receipt else {
         return;
     };
+    let operational = state.models_view.operational_state;
     refusal_frame(
         ui,
-        state.models_view.operational_state,
+        operational,
+        operational.consequence_of(state.models_view.attempted_operation.as_ref()),
         reason,
         |_| {},
         |_| {},
@@ -1116,11 +1148,12 @@ pub(super) fn page_refusal(ui: &mut Ui, state: &ModelsState) {
 }
 
 /// A refusal's frame: the failure mark and its state, `beside` them whatever
-/// names the operation, then the reason and its consequence, and `after` them
-/// whatever offers to run it again.
+/// names the operation, then the reason and its consequence for the operation
+/// it refused, and `after` them whatever offers to run it again.
 fn refusal_frame(
     ui: &mut Ui,
     state: ModelsOperationalState,
+    consequence: &str,
     reason: &str,
     beside: impl FnOnce(&mut Ui),
     after: impl FnOnce(&mut Ui),
@@ -1145,10 +1178,8 @@ fn refusal_frame(
             );
             announced(
                 ui,
-                RichText::new(state.consequence())
-                    .small()
-                    .color(t.color.text_dim),
-                state.consequence(),
+                RichText::new(consequence).small().color(t.color.text_dim),
+                consequence,
             );
             after(ui);
         });
@@ -1253,6 +1284,15 @@ fn ledger(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, hub: &HubCatalog, fil
         return;
     }
     if hub.packs.is_empty() {
+        if hub.catalog_unreachable {
+            page_empty_state(
+                ui,
+                NOT_IN_THIS_BUILD.trim_end_matches('.'),
+                "This build has no connection to the service that publishes them. Model \
+                 libraries added from files and the RSpice library are unaffected.",
+            );
+            return;
+        }
         if let Some(reason) = hub.catalog_time_issue.as_deref() {
             page_empty_state(ui, "Catalog validity cannot be checked", reason);
             return;

@@ -340,6 +340,36 @@ impl ModelsOperationalState {
         }
     }
 
+    /// [`Self::consequence`], for the operation that was attempted.
+    ///
+    /// "Nothing was published" is a sentence about an operation that would
+    /// have published something. Under a failed catalog refresh it told the
+    /// reader something had been held back that never could have been; what a
+    /// refused read leaves is a machine unchanged, and that is what it says.
+    #[must_use]
+    pub fn consequence_of(self, attempted: Option<&ModelsAttemptedOperation>) -> &'static str {
+        if !attempted.is_some_and(|operation| operation.reads_only) {
+            return self.consequence();
+        }
+        match self {
+            Self::InvalidInput => {
+                "Nothing changed on this machine. Correct the value the operation named and run \
+                 it again."
+            }
+            Self::ExecutionError => {
+                "Nothing changed on this machine. The step that failed names what it was reading."
+            }
+            Self::Conflict => {
+                "Nothing changed on this machine. Resolve the contested identity before running \
+                 this again."
+            }
+            Self::Cancelled => {
+                "Nothing changed on this machine. The operation stopped where it was asked to."
+            }
+            other => other.consequence(),
+        }
+    }
+
     #[must_use]
     pub fn from_failure(message: &str) -> Self {
         let normalized = message.to_ascii_lowercase();
@@ -429,6 +459,24 @@ pub struct ModelsAttemptedOperation {
     /// `None` for a catalog refresh, a removal, a re-proof and every
     /// model-source import: none of them puts a release on this machine.
     pub landing_pack: Option<String>,
+    /// Whether the operation only reads: a catalog refresh or a re-proof,
+    /// which publish nothing whichever way they end. A refusal of one leaves
+    /// this machine as it was, and its consequence says that instead.
+    pub reads_only: bool,
+}
+
+impl ModelsAttemptedOperation {
+    /// A model-source operation: it publishes what it reads, lands no pack,
+    /// and is retried from wherever it was asked for.
+    #[must_use]
+    pub fn model_source(label: impl Into<String>) -> Self {
+        Self {
+            label: label.into(),
+            reissuable: false,
+            landing_pack: None,
+            reads_only: false,
+        }
+    }
 }
 
 /// What re-proving one installed release concluded, this session.

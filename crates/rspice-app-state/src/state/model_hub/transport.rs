@@ -146,6 +146,17 @@ pub type ArchiveProgress = std::rc::Rc<dyn Fn(u64, u64)>;
 /// short lived and because a session that never installs a pack should never
 /// have opened a network client at all.
 pub trait ModelHubTransportProvider: std::fmt::Debug + Sync {
+    /// Whether this provider has anywhere to fetch a published catalog from.
+    ///
+    /// `false` is a fact about the build rather than the network: a build
+    /// compiled without cloud endpoints has no catalog to reach however the
+    /// network behaves, so a workspace asks this before it starts a fetch that
+    /// could only fail. A network that is down is still the transport's to
+    /// report, when an operation runs.
+    fn reaches_catalog(&self) -> bool {
+        true
+    }
+
     /// The transport one operation drives from its worker thread, reporting
     /// archive progress to `progress`.
     #[cfg(not(target_arch = "wasm32"))]

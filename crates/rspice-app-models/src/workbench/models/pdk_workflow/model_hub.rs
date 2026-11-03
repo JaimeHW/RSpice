@@ -23,7 +23,7 @@ use crate::workbench::app_state::design_history::publish_model_library_candidate
 use crate::workbench::framework::feature::{Cx, Session};
 use crate::workbench::framework::requests::ArmPartPlacement;
 use crate::workbench::models::ModelsFeature;
-use crate::workbench::models::workspace_state::ModelsOperationalState;
+use crate::workbench::models::workspace_state::{ModelsAttemptedOperation, ModelsOperationalState};
 
 /// One unit of Model Hub work, on either target.
 ///
@@ -141,6 +141,21 @@ impl ModelHubRequest {
             | Self::UpdatePack { pack_id, .. }
             | Self::AdoptPart { pack_id, .. } => Some(pack_id.clone()),
             Self::FetchSnapshot | Self::RemovePack { .. } | Self::VerifyInstalled { .. } => None,
+        }
+    }
+
+    /// What a refusal of this request names itself by.
+    ///
+    /// Only the refresh takes no argument a reader would have to choose again,
+    /// so only it can be re-issued from the record. It and the re-proof are
+    /// the two that only read: neither publishes anything, whichever way it
+    /// ends.
+    pub(crate) fn attempted(&self) -> ModelsAttemptedOperation {
+        ModelsAttemptedOperation {
+            label: self.description(),
+            reissuable: matches!(self, Self::FetchSnapshot),
+            landing_pack: self.landing_pack(),
+            reads_only: matches!(self, Self::FetchSnapshot | Self::VerifyInstalled { .. }),
         }
     }
 

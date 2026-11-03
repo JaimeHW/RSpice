@@ -123,6 +123,7 @@ fn apply_restored_packs(parts: &mut PackRestoreParts<'_>, persisted: PersistedHu
                 // row the reader picks rather than a button that guesses.
                 reissuable: false,
                 landing_pack: None,
+                reads_only: false,
             },
         );
         parts.models_view.operational_state = ModelsOperationalState::from_failure(&refusal);

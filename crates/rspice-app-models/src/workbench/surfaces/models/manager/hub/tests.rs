@@ -150,6 +150,7 @@ fn catalog(packs: Vec<HubLedgerRow>, age_days: Option<u64>, stale: bool) -> HubC
         age_days,
         signed: Some("2026-08-14".to_owned()),
         unavailable: None,
+        catalog_unreachable: false,
         stale,
         expired: None,
         catalog_time_issue: None,
@@ -806,6 +807,7 @@ fn a_pack_being_fetched_says_so_until_the_operation_resolves() {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: Some(landing.pack_id.clone()),
+            reads_only: false,
         });
     };
 
@@ -959,6 +961,7 @@ fn every_operational_state_paints_its_word_and_its_consequence() {
             label: "model-pack install of 'rspice-proving 1.0.0'".to_owned(),
             reissuable: false,
             landing_pack: None,
+            reads_only: false,
         });
         let listed = catalog(
             vec![pack(
@@ -1009,6 +1012,7 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
         label: "model-catalog refresh".to_owned(),
         reissuable: true,
         landing_pack: None,
+        reads_only: true,
     });
     let offline = catalog(
         vec![pack(
@@ -1041,6 +1045,159 @@ fn a_failed_catalog_refresh_offers_the_one_retry_it_can_re_issue() {
         !labelled(&nodes, ModelsOperationalState::Ready.consequence()),
         "the healthy state is silent"
     );
+}
+
+/// A refused catalog refresh says the machine is unchanged, not that
+/// nothing was published: a refresh publishes nothing whichever way it ends.
+#[test]
+fn a_refused_catalog_refresh_says_what_a_read_leaves_behind() {
+    use crate::workbench::models::workspace_state::{
+        ModelsAttemptedOperation, ModelsOperationalState,
+    };
+
+    let refresh = ModelHubRequest::FetchSnapshot.attempted();
+    assert!(refresh.reads_only && refresh.reissuable);
+    for state in ModelsOperationalState::ALL {
+        assert!(
+            !state.consequence_of(Some(&refresh)).contains("published"),
+            "{}: {}",
+            state.label(),
+            state.consequence_of(Some(&refresh))
+        );
+    }
+    let install = ModelHubRequest::InstallPack {
+        pack_id: "rspice-proving".to_owned(),
+        version: "1.0.0".to_owned(),
+        part: None,
+    }
+    .attempted();
+    assert!(!install.reads_only);
+    for state in ModelsOperationalState::ALL {
+        assert_eq!(state.consequence_of(Some(&install)), state.consequence());
+        assert_eq!(state.consequence_of(None), state.consequence());
+    }
+
+    let mut app_state = harness();
+    app_state.state.models_view.operational_state = ModelsOperationalState::ExecutionError;
+    app_state.state.models_view.action_receipt =
+        Some(Err("This build carries no cloud endpoints.".to_owned()));
+    app_state.state.models_view.attempted_operation = Some(ModelsAttemptedOperation {
+        label: "model-catalog refresh".to_owned(),
+        ..refresh
+    });
+    let listed = catalog(Vec::new(), None, true);
+    let nodes = accessibility_nodes(&mut app_state, egui::vec2(1100.0, 760.0), |ui, app| {
+        packs_page(ui, app, &listed);
+    });
+    assert!(labelled(
+        &nodes,
+        "Nothing changed on this machine. The step that failed names what it was reading."
+    ));
+    assert!(!labelled(
+        &nodes,
+        ModelsOperationalState::ExecutionError.consequence()
+    ));
+}
+
+/// A transport provider standing for a build made without cloud endpoints.
+#[derive(Debug)]
+struct NoCloudEndpoints;
+
+impl crate::state::model_hub::ModelHubTransportProvider for NoCloudEndpoints {
+    fn reaches_catalog(&self) -> bool {
+        false
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn open(
+        &self,
+        _progress: crate::state::model_hub::ArchiveProgress,
+    ) -> Result<Box<dyn crate::state::model_hub::ModelHubTransport>, String> {
+        Err("This build carries no cloud endpoints.".to_owned())
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn prime(
+        &self,
+        _catalog: bool,
+        _archive: Option<(String, String, u64)>,
+        _progress: crate::state::model_hub::ArchiveProgress,
+    ) -> crate::state::model_hub::PrimingTransport<'_> {
+        Box::pin(std::future::ready(Err(
+            "This build carries no cloud endpoints.".to_owned(),
+        )))
+    }
+}
+
+/// A build with no catalog to reach asks for none, and says so once.
+///
+/// It used to fetch on every visit to the workspace, at the step that
+/// resolves the endpoints, and report that failure as an error card about a
+/// fact nobody could change.
+#[test]
+fn a_build_with_no_catalog_to_reach_asks_for_none_and_says_so_once() {
+    use crate::services::model_hub::ModelHubStoreHandle;
+    use crate::state::model_hub::tests::{anchor_for, hub_signing_key};
+    use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
+
+    let fresh = || {
+        let store = std::sync::Arc::new(MemoryModelHubStore::new());
+        let hub = ModelHub::open(
+            anchor_for(&hub_signing_key()),
+            Box::new(std::sync::Arc::clone(&store)),
+            None,
+        )
+        .expect("a memory hub opens");
+        ModelHubService::with_store(ModelHubStoreHandle::Memory(store), hub)
+    };
+
+    // A hub that has never fetched refreshes on the first frame it is shown...
+    let mut state = harness();
+    let reachable = fresh();
+    let projected = hub_catalog(&reachable, &state.model);
+    assert!(projected.stale && !projected.catalog_unreachable);
+    assert_eq!(
+        prepare(&reachable, &mut state.state, &projected),
+        Some(ModelHubRequest::FetchSnapshot)
+    );
+    // ...unless this build has nowhere to fetch from.
+    let mut state = harness();
+    let unreachable = fresh().through(&NoCloudEndpoints);
+    let projected = hub_catalog(&unreachable, &state.model);
+    assert!(projected.catalog_unreachable);
+    assert_eq!(prepare(&unreachable, &mut state.state, &projected), None);
+
+    // With nothing installed, the empty pane is where it is said.
+    let nodes = accessibility_nodes(&mut harness(), egui::vec2(1100.0, 760.0), move |ui, app| {
+        packs_page(ui, app, &projected);
+    });
+    let stated = nodes
+        .iter()
+        .filter_map(|(_, node)| node.label())
+        .filter(|label| label.starts_with(NOT_IN_THIS_BUILD))
+        .count();
+    assert_eq!(stated, 1, "said once, by the empty state");
+    assert!(button(&nodes, "Refresh catalog").is_none());
+    assert!(button(&nodes, "Retry the catalog refresh").is_none());
+
+    // Packs already here still list, under the one quiet line.
+    let holding = HubCatalog {
+        catalog_unreachable: true,
+        ..catalog(
+            vec![pack(
+                vec![row("Proving", "1.0.0", HubPackState::Installed)],
+                Some(held("1.0.0", Some(ArchiveEvidence::MatchesCatalog))),
+            )],
+            None,
+            true,
+        )
+    };
+    let nodes = accessibility_nodes(&mut harness(), egui::vec2(1100.0, 760.0), move |ui, app| {
+        packs_page(ui, app, &holding);
+    });
+    assert!(labelled(&nodes, NOT_IN_THIS_BUILD));
+    assert!(button(&nodes, "Refresh catalog").is_none());
+    assert!(button(&nodes, "Catalog details…").is_none());
 }
 
 /// The Catalog pane states what is wrong with an installed release, and
