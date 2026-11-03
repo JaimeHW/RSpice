@@ -389,8 +389,10 @@ use rspice_core::analysis::harmonic_balance::{
 // it to 5,240. `netlist::measure::FftMetric`, which Xyce `.MEASURE FFT`
 // figure (ENOB, SFDR, SNR, SNDR or THD) a `MeasureType::FftMetric` reads,
 // and `analysis::evaluate_fft_measurements_with_abort`, which the CLI calls
-// on a transient's spectra, bring it to 5,242.
-const MAX_PUBLIC_ITEMS: usize = 5242;
+// on a transient's spectra, bring it to 5,242. `ParamContext::remove`,
+// through which a control script's `unlet` drops the parameter of a scalar
+// `let`, brings it to 5,243.
+const MAX_PUBLIC_ITEMS: usize = 5243;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
