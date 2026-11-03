@@ -213,6 +213,13 @@ fn node_form(word: &str) -> Option<String> {
 }
 
 impl ControlCircuit {
+    /// ngspice `pl_title`: the deck's title line, which ngspice reads in
+    /// lower case as it reads every line of the deck (frontend/inpcom.c:3421
+    /// inp_casefix).
+    pub(in crate::engine::control) fn title(&self) -> String {
+        self.netlist.title.to_ascii_lowercase()
+    }
+
     /// `echo [-n] words...`: the words after substitution, unquoted and
     /// joined by single spaces.
     pub(in crate::engine) fn echo(command: &ControlCommand) -> String {
@@ -302,7 +309,7 @@ impl ControlCircuit {
         }
         let header = format!(
             "Here are the vectors currently active:\n\nTitle: {}\nName: {} ({})\n\n",
-            self.netlist.title,
+            self.title(),
             dataset.name,
             dataset.plot_title()
         );
@@ -362,6 +369,7 @@ impl ControlCircuit {
         let current = self.plot_name();
         let made = self.vectors.plots_made();
         let mut made = made.iter().peekable();
+        let title = self.title();
         let mut plots = Vec::new();
         for (index, dataset) in self.datasets.iter().enumerate() {
             while let Some((name, _)) = made.next_if(|(_, after)| *after <= index) {
@@ -370,7 +378,7 @@ impl ControlCircuit {
             if !self.destroyed.contains(&index) {
                 plots.push((
                     dataset.name.clone(),
-                    format!("{} ({})", self.netlist.title, dataset.plot_title()),
+                    format!("{title} ({})", dataset.plot_title()),
                 ));
             }
         }

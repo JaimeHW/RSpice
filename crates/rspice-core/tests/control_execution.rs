@@ -969,6 +969,29 @@ fn display_marks_a_log_sweeps_scale_xlog() {
     );
 }
 
+/// ngspice reads the deck in lower case, its title line too
+/// (frontend/inpcom.c:3421 inp_casefix), so `display`, the plot list and
+/// wrs2p name the plots by the lower-case title. The lines are ngspice-46's.
+#[test]
+fn the_plots_carry_the_title_in_lower_case() {
+    let (presented, error) = run_until_error(
+        "Mixed CASE \"Title\"\nV1 in 0 dc 2\nR1 in 0 1k\n.control\nop\ndisplay\nsetplot\n\
+         .endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "Here are the vectors currently active:\n\nTitle: mixed case \"title\"\n\
+             Name: op1 (Operating Point)\n\n\
+             \x20   in                  : voltage, real, 1 long [default scale]\n\
+             \x20   v1#branch           : current, real, 1 long",
+            "List of plots available:\n\nCurrent op1\tmixed case \"title\" (Operating Point)\n\
+             \tconst\tConstant values (constants)",
+        ]
+    );
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
