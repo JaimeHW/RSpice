@@ -392,12 +392,117 @@ fn render_legal_privacy(ui: &mut egui::Ui) {
     legal_document(ui, THIRD_PARTY_NOTICES);
 }
 
-/// A shipped legal file as written. A Windows checkout gives the embedded
-/// text carriage returns, which are not text to a reader.
+/// A shipped legal file, wrapped once, at the dialog's width.
+///
+/// Each paragraph and list item is laid as one block: the file's own hard
+/// line breaks would otherwise break every line twice, at 79 columns and
+/// again at the dialog's edge, and an item's wrapped lines fell back to the
+/// left margin under its marker. An item keeps its indent and its marker,
+/// and its further lines hang under the text after the marker.
 fn legal_document(ui: &mut egui::Ui, source: &'static str) {
-    ui.label(
-        RichText::new(legal_text(source)).font(theme::mono(tokens::FS_0, FontWeight::Regular)),
-    );
+    let t = Tokens::get(ui.ctx());
+    let font = theme::mono(tokens::FS_0, FontWeight::Regular);
+    let column = ui.fonts_mut(|fonts| fonts.glyph_width(&font, ' '));
+    let line = ui.fonts_mut(|fonts| fonts.row_height(&font));
+    let text = |text: &str| RichText::new(text).font(font.clone()).color(t.color.text);
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+        for block in legal_blocks(&legal_text(source)) {
+            let Some(block) = block else {
+                ui.add_space(line);
+                continue;
+            };
+            ui.horizontal_top(|ui| {
+                ui.add_space(block.indent as f32 * column);
+                if !block.marker.is_empty() {
+                    ui.label(text(&block.marker));
+                }
+                ui.vertical(|ui| {
+                    ui.add(egui::Label::new(text(&block.text)).wrap());
+                });
+            });
+        }
+    });
+}
+
+/// One paragraph or list item of a legal file: its indent in columns, its
+/// list marker with the space after it, and its words on one line.
+#[derive(Debug, PartialEq)]
+struct LegalBlock {
+    indent: usize,
+    marker: String,
+    text: String,
+}
+
+/// A line at least this long ended where the file's author wrapped it, so
+/// the line after it continues the same paragraph. Headings and list items
+/// that end short stand alone.
+const HARD_WRAP_COLUMN: usize = 60;
+
+/// `source` as its paragraphs and list items, a blank line as `None`.
+fn legal_blocks(source: &str) -> Vec<Option<LegalBlock>> {
+    let mut blocks: Vec<Option<LegalBlock>> = Vec::new();
+    let mut previous_wrapped = false;
+    for raw in source.lines() {
+        let line = raw.trim_end();
+        if line.is_empty() {
+            blocks.push(None);
+            previous_wrapped = false;
+            continue;
+        }
+        let indent = line.len() - line.trim_start().len();
+        let body = line.trim_start();
+        let rule = is_rule(body);
+        let marker = if rule { None } else { list_marker(body) };
+        if previous_wrapped
+            && !rule
+            && marker.is_none()
+            && let Some(Some(open)) = blocks.last_mut()
+            && indent == open.indent + open.marker.len()
+        {
+            open.text.push(' ');
+            open.text.push_str(body);
+        } else {
+            let (marker, text) = marker.map_or(("", body), |marker| body.split_at(marker));
+            blocks.push(Some(LegalBlock {
+                indent,
+                marker: marker.to_owned(),
+                text: text.to_owned(),
+            }));
+        }
+        previous_wrapped = !rule && line.chars().count() >= HARD_WRAP_COLUMN;
+    }
+    blocks
+}
+
+/// A line of one repeated `=` or `-`: a heading's underline or a divider.
+fn is_rule(body: &str) -> bool {
+    let mut chars = body.chars();
+    chars
+        .next()
+        .is_some_and(|first| (first == '=' || first == '-') && chars.all(|c| c == first))
+        && body.len() >= 3
+}
+
+/// The length of the list marker `body` opens with, with its trailing space:
+/// "- ", "* ", "1. " or "(a) ".
+fn list_marker(body: &str) -> Option<usize> {
+    if body.starts_with("- ") || body.starts_with("* ") {
+        return Some(2);
+    }
+    let (open, close) = if body.starts_with('(') {
+        (1, ')')
+    } else {
+        (0, '.')
+    };
+    let label = &body[open..];
+    let end = label.find(close)?;
+    let name = &label[..end];
+    let numbered = !name.is_empty()
+        && name.len() <= 4
+        && name.chars().all(|c| c.is_ascii_alphanumeric())
+        && (open == 1 || name.chars().all(|c| c.is_ascii_digit()));
+    (numbered && label[end + 1..].starts_with(' ')).then_some(open + end + 2)
 }
 
 fn legal_text(source: &'static str) -> std::borrow::Cow<'static, str> {
@@ -539,6 +644,63 @@ fn section_heading(ui: &mut egui::Ui, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    /// The notices' hard-wrapped paragraphs read as one block each, and a
+    /// list item keeps its marker and its indent with its wrapped lines
+    /// joined behind them.
+    #[test]
+    fn legal_files_reflow_into_paragraphs_and_hanging_items() {
+        let blocks = super::legal_blocks(&super::legal_text(super::THIRD_PARTY_NOTICES));
+        let paragraph = blocks
+            .iter()
+            .flatten()
+            .find(|block| block.text.starts_with("Portions of RSpice's device models"))
+            .expect("the ngspice paragraph");
+        assert!(
+            paragraph.text.contains("version 46. All such files"),
+            "the paragraph stops at its file's line break: {:?}",
+            paragraph.text
+        );
+        let item = blocks
+            .iter()
+            .flatten()
+            .find(|block| block.text.starts_with("BSIM3SOI DD/FD/PD"))
+            .expect("the BSIM3SOI item");
+        assert_eq!((item.indent, item.marker.as_str()), (2, "- "));
+        assert!(item.text.contains("ported from ngspice"), "{:?}", item.text);
+
+        let blocks = super::legal_blocks(&super::legal_text(super::PRODUCT_LICENSE));
+        let heading = blocks
+            .iter()
+            .flatten()
+            .find(|block| block.text == "GRANT OF LICENSE")
+            .expect("a short heading stands alone");
+        assert_eq!(heading.marker, "2. ");
+        let definition = blocks
+            .iter()
+            .flatten()
+            .find(|block| block.text.starts_with("\"Software\" means"))
+            .expect("the first definition");
+        assert_eq!((definition.indent, definition.marker.as_str()), (3, "(a) "));
+        assert!(
+            blocks
+                .iter()
+                .flatten()
+                .all(|block| !block.text.contains('\n')),
+            "a block keeps a line break"
+        );
+        // Reflowing loses no word and moves none.
+        for source in [super::PRODUCT_LICENSE, super::THIRD_PARTY_NOTICES] {
+            let words = |text: &str| text.split_whitespace().collect::<Vec<_>>().join(" ");
+            let blocks = super::legal_blocks(&super::legal_text(source))
+                .into_iter()
+                .flatten()
+                .map(|block| format!("{}{}", block.marker, block.text))
+                .collect::<Vec<_>>()
+                .join(" ");
+            assert_eq!(words(&blocks), words(source));
+        }
+    }
+
     use super::*;
 
     #[test]
@@ -758,7 +920,7 @@ mod tests {
     }
 
     /// The legal page shows the license and the third-party notices the
-    /// repository ships, each whole and as written.
+    /// repository ships, each whole: every paragraph and item of each file.
     #[test]
     fn the_legal_page_shows_the_shipped_license_and_third_party_notices() {
         let mut app = RSpiceApp::test_instance();
@@ -769,10 +931,13 @@ mod tests {
             let file = std::fs::read_to_string(root.join(name))
                 .expect("the repository ships the file")
                 .replace("\r\n", "\n");
-            assert!(
-                shown.contains(&file),
-                "the legal page shows {name} as shipped"
-            );
+            for block in super::legal_blocks(&file).into_iter().flatten() {
+                assert!(
+                    shown.contains(&block.text),
+                    "the legal page leaves out {:?} from {name}",
+                    block.text
+                );
+            }
         }
     }
 
