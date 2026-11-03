@@ -21,16 +21,16 @@ use crate::state::{ProjectSourceBundle, ProjectSourceLanguage};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, Problem,
-    paint_problem_mark,
+    Button, CommandForm, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogInitialFocus, DialogSize,
+    DialogTransactionTone, Problem, band_header, paint_problem_mark,
 };
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::AppState;
 use crate::workbench::design_system::inspector::{muted_inspector_copy, toned_inspector_copy};
 use crate::workbench::design_system::{
-    code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
-    property_row_height, property_row_input, property_row_problem, section_block_gap,
-    subsection_header,
+    PANEL_INSET, code_inspector_section, panel_bleed, panel_body, panel_inset, property_row,
+    property_row_height, property_row_input, property_row_problem, property_row_wrapped,
+    section_block_gap, subsection_header,
 };
 use crate::workbench::documents::code_workspace::{self, CodeSourceFileAction};
 use crate::workbench::{MessageCatalog, MessageId};
@@ -475,6 +475,7 @@ impl RSpiceApp {
             &[("document", &facts.leaf)],
         ))
         .size(DialogSize::SimulationWorkflow)
+        .flush_body()
         .overlay_scrollbar()
         .primary_on_enter(false)
         .initial_focus(DialogInitialFocus::BodyControl);
@@ -608,6 +609,10 @@ impl RSpiceApp {
             self.state.code.netlist.lifecycle_dialog.include_transaction = None;
             return;
         };
+        if facts.decks.is_empty() && facts.include_identity.is_none() {
+            self.render_new_top_deck_form(ctx, messages);
+            return;
+        }
         let mut dialog = Dialog::new(
             messages.text(MessageId::CodeSourceLifecycleTitle),
             messages.text(MessageId::CommonClose),
@@ -617,6 +622,7 @@ impl RSpiceApp {
             &[("document", &facts.logical_path)],
         ))
         .size(DialogSize::SimulationWorkflow)
+        .flush_body()
         // The rows fit at every desktop size; a bar would only reserve a
         // gutter that left the right edge wider than the left.
         .overlay_scrollbar()
@@ -792,6 +798,86 @@ impl RSpiceApp {
         }
     }
 
+    /// New source document on a project that owns no deck: a form that makes
+    /// one. There is no current document to state and nothing to operate on,
+    /// so the lifecycle's sections would be a page of disabled controls.
+    fn render_new_top_deck_form(&mut self, ctx: &Context, messages: MessageCatalog) {
+        let Some(transaction) = self
+            .state
+            .code
+            .netlist
+            .lifecycle_dialog
+            .transaction
+            .as_mut()
+            .filter(|transaction| transaction.action == CodeSourceFileAction::New)
+        else {
+            self.state.code.code_workspace.source_document_dialog = false;
+            self.state.code.netlist.lifecycle_dialog.transaction = None;
+            return;
+        };
+        let title = messages.text(MessageId::CodeSourceCreateTitle);
+        let primary = messages.text(MessageId::CodeSourceCreatePrimary);
+        let path_label = messages.text(MessageId::CodeSourceLogicalPath);
+        let against_label = messages.text(MessageId::CodeSourceAgainst);
+        let against = messages.text(MessageId::CodeSourceAgainstEmptyNetlist);
+        let needs_path = messages.text(MessageId::CodeSourceCreateNeedsPath);
+        let error = transaction.error.clone();
+        let path_missing = transaction.proposed_path.trim().is_empty();
+        let status = match (error.as_deref(), path_missing) {
+            (Some(error), _) => Err(error),
+            (None, true) => Ok(Some(needs_path.as_str())),
+            (None, false) => Ok(None),
+        };
+        let choice = CommandForm::new(&title, &primary)
+            .primary_enabled(!path_missing)
+            .status(status)
+            .show(ctx, |rows| {
+                let field = rows.text(
+                    &path_label,
+                    egui::Id::new("netlist-new-top-deck-path"),
+                    &mut transaction.proposed_path,
+                    "",
+                );
+                if field.changed() {
+                    // A refusal names the path it refused.
+                    transaction.error = None;
+                }
+                rows.value(&against_label, &against);
+                Some(field.id)
+            });
+        match choice {
+            DialogChoice::Primary => {
+                match crate::workbench::documents::netlist_document::commit_netlist_lifecycle_action(
+                    &mut self.state,
+                ) {
+                    Ok(message) => {
+                        self.state
+                            .record(LogSeverity::Info, LogSource::Studio, message);
+                        self.state.code.code_workspace.source_document_dialog = false;
+                        self.state.code.netlist.lifecycle_dialog.transaction = None;
+                    }
+                    Err(error) => {
+                        if let Some(transaction) = self
+                            .state
+                            .code
+                            .netlist
+                            .lifecycle_dialog
+                            .transaction
+                            .as_mut()
+                        {
+                            transaction.error = Some(error);
+                        }
+                    }
+                }
+            }
+            DialogChoice::Ghost | DialogChoice::Cancelled => {
+                self.state.code.code_workspace.source_document_dialog = false;
+                self.state.code.netlist.lifecycle_dialog.transaction = None;
+            }
+            DialogChoice::None | DialogChoice::Secondary => {}
+        }
+    }
+
     /// The transaction that creates the Automation workspace a project has
     /// none of. It is opened straight from the empty state, so it renders
     /// whenever the draft exists rather than waiting for the lifecycle dialog
@@ -904,6 +990,34 @@ impl RSpiceApp {
     }
 }
 
+/// The sections of a Manage source document dialog, stacked down its flush
+/// body.
+fn sections<R>(ui: &mut Ui, add: impl FnOnce(&mut Ui) -> R) -> R {
+    ui.scope(|ui| {
+        ui.spacing_mut().item_spacing.y = 0.0;
+        add(ui)
+    })
+    .inner
+}
+
+/// One section of a Manage source document dialog: the dialog's band across
+/// its flush body, then `body` on the panel rhythm with every row on the left
+/// edge of the dialog's title and footer.
+fn dialog_section(ui: &mut Ui, title: &str, meta: Option<&str>, body: impl FnOnce(&mut Ui)) {
+    band_header(ui, title, meta);
+    // The panel body insets its rows by its own inset; this frame makes up
+    // the difference to the dialog's.
+    let edge = (DIALOG_BODY_INSET - PANEL_INSET) as i8;
+    egui::Frame::NONE
+        .inner_margin(egui::Margin::symmetric(edge, 0))
+        .show(ui, |ui| {
+            panel_body(ui, |ui| {
+                ui.spacing_mut().item_spacing = egui::Vec2::ZERO;
+                body(ui);
+            });
+        });
+}
+
 fn lifecycle_body(
     ui: &mut Ui,
     state: &mut AppState,
@@ -911,10 +1025,9 @@ fn lifecycle_body(
     messages: MessageCatalog,
 ) -> LifecycleAction {
     let mut action = LifecycleAction::None;
-    // One body around every section, so they stack on the section gap. The
-    // dialog's body scrolls when the sections outgrow it; a scroll area of
-    // its own here held the dialog at full height and withheld a gutter.
-    panel_body(ui, |ui| {
+    // The dialog's body scrolls when the sections outgrow it; a scroll area
+    // of its own here held the dialog at full height and withheld a gutter.
+    sections(ui, |ui| {
         if let Some(chosen) = current_document(ui, facts, messages) {
             action = chosen;
         }
@@ -939,11 +1052,10 @@ fn netlist_lifecycle_body(
     let mut action = NetlistLifecycleAction::None;
     // The dialog's body scrolls when a review opened below the rows outgrows
     // it; a scroll area of its own here only withheld a gutter on the right.
-    panel_body(ui, |ui| {
-        code_inspector_section(
+    sections(ui, |ui| {
+        dialog_section(
             ui,
             &messages.text(MessageId::CodeSourceCurrentDocument),
-            None,
             None,
             |ui| {
                 if facts.include_identity.is_some() {
@@ -993,17 +1105,16 @@ fn netlist_lifecycle_body(
                 } else if let Some(path) = facts.native_path.as_deref() {
                     property_row(ui, &messages.text(MessageId::CodeSourcePath), path);
                 }
-                property_row(
+                property_row_wrapped(
                     ui,
                     &messages.text(MessageId::CodeSourceLineEndings),
                     &messages.text(facts.line_endings),
                 );
             },
         );
-        code_inspector_section(
+        dialog_section(
             ui,
             &messages.text(MessageId::CodeSourceFileOperations),
-            None,
             None,
             |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -1131,14 +1242,13 @@ fn include_search_paths(
         .to_vec();
     let unsaved = state.model.workspace.content.project.data_root().is_none();
     let mut action = None;
-    code_inspector_section(
+    dialog_section(
         ui,
         &messages.text(MessageId::NetlistIncludeSearchPaths),
         Some(&messages.format(
             MessageId::NetlistIncludeSearchPathCount,
             &[("count", &authored.len().to_string())],
         )),
-        None,
         |ui| {
             // The chain goes on into the library folders set in Preferences,
             // so a list that ended here would misstate where a name is found.
@@ -1358,7 +1468,7 @@ fn netlist_operation_review(
     };
     let deleting = transaction.action == CodeSourceFileAction::Delete;
     let mut action = None;
-    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+    dialog_section(ui, &messages.text(title), None, |ui| {
         if deleting {
             property_row(
                 ui,
@@ -1373,18 +1483,27 @@ fn netlist_operation_review(
                 transaction.error.is_some(),
             );
         }
-        property_row(
-            ui,
-            &messages.text(MessageId::CodeSourceAgainst),
-            &match (transaction.document_revision, transaction.content_digest) {
-                (Some(revision), Some(digest)) => format!(
-                    "doc rev {} · {}",
-                    revision.get(),
-                    digest.to_string().chars().take(12).collect::<String>()
-                ),
-                _ => "empty project netlist workspace".to_owned(),
-            },
-        );
+        let against = messages.text(MessageId::CodeSourceAgainst);
+        match (transaction.document_revision, transaction.content_digest) {
+            (Some(revision), Some(digest)) => {
+                property_row(
+                    ui,
+                    &against,
+                    &format!(
+                        "doc rev {} · {}",
+                        revision.get(),
+                        digest.to_string().chars().take(12).collect::<String>()
+                    ),
+                );
+            }
+            _ => {
+                property_row_wrapped(
+                    ui,
+                    &against,
+                    &messages.text(MessageId::CodeSourceAgainstEmptyNetlist),
+                );
+            }
+        }
         if let Some(error) = transaction.error.as_deref() {
             toned_inspector_copy(ui, error, t.color.err);
         }
@@ -1439,7 +1558,7 @@ fn netlist_include_operation_review(
         )
     };
     let mut action = None;
-    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+    dialog_section(ui, &messages.text(title), None, |ui| {
         property_row(
             ui,
             &messages.text(MessageId::NetlistRequestedAs),
@@ -1490,11 +1609,10 @@ fn current_document(
     // Every project document is editable; only one that is not is news.
     let ownership = (!facts.editable).then(|| messages.text(MessageId::CodeSourceOwnedReadOnly));
     let mut action = None;
-    code_inspector_section(
+    dialog_section(
         ui,
         &messages.text(MessageId::CodeSourceCurrentDocument),
         ownership.as_deref(),
-        None,
         |ui| {
             property_row(
                 ui,
@@ -1504,7 +1622,7 @@ fn current_document(
             if let Some(chosen) = role_control(ui, facts, messages) {
                 action = Some(chosen);
             }
-            property_row(
+            property_row_wrapped(
                 ui,
                 &messages.text(MessageId::CodeSourceLineEndings),
                 &messages.text(facts.line_endings),
@@ -1581,10 +1699,9 @@ fn operations(
     action: &mut LifecycleAction,
     messages: MessageCatalog,
 ) {
-    code_inspector_section(
+    dialog_section(
         ui,
         &messages.text(MessageId::CodeSourceFileOperations),
-        None,
         None,
         |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -1718,7 +1835,7 @@ fn operation_review(
     };
     let deleting = draft.action == CodeSourceFileAction::Delete;
     let mut action = None;
-    code_inspector_section(ui, &messages.text(title), None, None, |ui| {
+    dialog_section(ui, &messages.text(title), None, |ui| {
         if deleting {
             property_row(
                 ui,
@@ -1776,11 +1893,10 @@ fn operation_review(
 
 fn includes(ui: &mut Ui, facts: &DocumentFacts, messages: MessageCatalog) {
     let total = facts.imports.len() + facts.imported_by.len();
-    code_inspector_section(
+    dialog_section(
         ui,
         &messages.text(MessageId::CodeSourceRecordedIncludes),
         Some(&total.to_string()),
-        None,
         |ui| {
             if total == 0 {
                 muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceNoIncludes));
@@ -1809,11 +1925,10 @@ fn revision_history(
     let selected = history.selected_revision;
     let error = history.error.clone();
     let mut action = None;
-    code_inspector_section(
+    dialog_section(
         ui,
         &messages.text(MessageId::CodeSourceRetainedRevisions),
         Some(&facts.history.len().to_string()),
-        None,
         |ui| {
             if facts.history.is_empty() {
                 muted_inspector_copy(ui, &messages.text(MessageId::CodeSourceNoRetainedRevision));
@@ -2335,6 +2450,132 @@ mod tests {
         .unwrap();
         open_source_document_dialog(&mut app.state).unwrap();
         app
+    }
+
+    /// Every AccessKit node the dialog shows over three 1440x900 frames.
+    fn dialog_nodes(app: &mut RSpiceApp) -> Vec<egui::accesskit::Node> {
+        let ctx = Context::default();
+        ctx.enable_accesskit();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut nodes = std::collections::HashMap::new();
+        for _ in 0..3 {
+            let output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1440.0, 900.0),
+                    )),
+                    ..egui::RawInput::default()
+                },
+                |ui| app.render_source_document_dialog(ui.ctx()),
+            );
+            if let Some(update) = output.platform_output.accesskit_update {
+                nodes.extend(update.nodes);
+            }
+        }
+        nodes.into_values().collect()
+    }
+
+    fn node_left(nodes: &[egui::accesskit::Node], label: &str) -> f64 {
+        nodes
+            .iter()
+            .filter(|node| node.role() != egui::accesskit::Role::Dialog)
+            .find(|node| node.label() == Some(label))
+            .and_then(egui::accesskit::Node::bounds)
+            .unwrap_or_else(|| panic!("no {label:?} node"))
+            .x0
+    }
+
+    /// On a project that owns no deck, New source document is a form that
+    /// makes one: its path, what it is made against, Create and Cancel. It
+    /// was Manage source document with "No top deck", every file operation
+    /// disabled and a Create button inside the body above a footer Close.
+    #[test]
+    fn new_source_document_on_a_deckless_project_is_a_creation_form() {
+        let mut app = RSpiceApp::test_instance();
+        app.state.code.code_workspace.page = CodeWorkspacePage::Netlist;
+        begin_new_top_deck(&mut app.state).unwrap();
+        let nodes = dialog_nodes(&mut app);
+        let says = |text: &str| {
+            nodes.iter().any(|node| {
+                node.label().is_some_and(|label| label.contains(text))
+                    || node.value().is_some_and(|value| value.contains(text))
+            })
+        };
+        assert!(
+            nodes
+                .iter()
+                .any(|node| node.role() == egui::accesskit::Role::Dialog
+                    && node.label() == Some("New source document")),
+            "the dialog is not titled New source document"
+        );
+        assert!(says("Logical path") && says("Against"));
+        for gone in [
+            "Manage source document",
+            "Current document",
+            "File operations",
+            "No top deck",
+            "Include search paths",
+        ] {
+            assert!(!says(gone), "the creation form states {gone:?}");
+        }
+        assert!(says("Cancel"), "the form has no Cancel");
+
+        // Create says why it is refused while there is no path.
+        app.state
+            .code
+            .netlist
+            .lifecycle_dialog
+            .transaction
+            .as_mut()
+            .unwrap()
+            .proposed_path
+            .clear();
+        let nodes = dialog_nodes(&mut app);
+        let create = nodes
+            .iter()
+            .find(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Create")
+            })
+            .expect("the footer's Create");
+        assert!(create.is_disabled());
+        assert!(nodes.iter().any(|node| {
+            node.label()
+                .or_else(|| node.value())
+                .is_some_and(|text| text.contains("Enter a logical path"))
+        }));
+    }
+
+    /// Manage source document's rows start where its title does. Its
+    /// sections were panel sections inside the padded dialog body, so every
+    /// row stood 10 points right of the title and the footer.
+    #[test]
+    fn the_lifecycle_rows_share_the_dialog_titles_left_edge() {
+        let mut app = owned_deck_app();
+        let nodes = dialog_nodes(&mut app);
+        // The title and the footer stand as far in from the surface's left
+        // edge as the footer's last button does from its right.
+        let surface = nodes
+            .iter()
+            .find(|node| node.role() == egui::accesskit::Role::Dialog)
+            .and_then(egui::accesskit::Node::bounds)
+            .expect("the dialog has bounds");
+        let footer = nodes
+            .iter()
+            .filter(|node| {
+                node.role() == egui::accesskit::Role::Button && node.label() == Some("Close")
+            })
+            .filter_map(egui::accesskit::Node::bounds)
+            .max_by(|a, b| a.y1.total_cmp(&b.y1))
+            .expect("the footer's Close");
+        let title = surface.x0 + (surface.x1 - footer.x1);
+        for row in ["Top deck", "Line endings"] {
+            let left = node_left(&nodes, row);
+            assert!(
+                (left - title).abs() < 1.0,
+                "{row} starts at x={left}, the title at x={title}"
+            );
+        }
     }
 }
 

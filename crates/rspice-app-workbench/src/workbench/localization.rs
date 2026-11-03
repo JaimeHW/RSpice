@@ -515,6 +515,8 @@ define_messages! {
     CodeSourceLogicalPath => "Logical path",
     CodeSourceAgainst => "Against",
     CodeSourceAgainstRevision => "revision {revision} · {digest}",
+    CodeSourceAgainstEmptyNetlist => "Empty netlist workspace",
+    CodeSourceCreateNeedsPath => "Enter a logical path for the document.",
     CodeSourceDeleteWarning => "Removing a document rewrites the source graph as a new bundle revision.",
     CodeSourceRecordedIncludes => "Includes",
     CodeSourceNoIncludes => "This document includes no file, and no file includes it.",
