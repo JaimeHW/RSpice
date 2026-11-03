@@ -158,15 +158,21 @@ fn parameters_contents(
     let groups = group_by_category(&inline);
 
     let mut first_control = None;
+    // What of the last row's height lies below what it draws: a row of checks
+    // alone is a control-high target with a smaller box in its middle.
+    let mut trailing_slack = 0.0_f32;
+    let inset = if pane.beside_another {
+        PANE_INSET
+    } else {
+        FORM_INSET
+    };
     egui::Frame::NONE
-        .inner_margin(Margin::symmetric(
-            if pane.beside_another {
-                PANE_INSET
-            } else {
-                FORM_INSET
-            },
-            10,
-        ))
+        .inner_margin(Margin {
+            left: inset,
+            right: inset,
+            top: FORM_TOP_AIR,
+            bottom: 0,
+        })
         .show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             // The instance first and unheaded, as the dialog's title names
@@ -176,7 +182,7 @@ fn parameters_contents(
             for (category, definitions) in &groups {
                 ui.add_space(GROUP_GAP);
                 property_group_heading(ui, category);
-                let control = property_grid(
+                let (control, slack) = property_grid(
                     ui,
                     definitions,
                     draft,
@@ -186,9 +192,11 @@ fn parameters_contents(
                     browse,
                 );
                 first_control = first_control.or(control);
+                trailing_slack = slack;
             }
 
             if component_type.is_pwl_source() {
+                trailing_slack = 0.0;
                 // No heading here: the point table heads itself, and two
                 // stacked headings over one table read as two tables.
                 ui.add_space(GROUP_GAP);
@@ -214,6 +222,7 @@ fn parameters_contents(
             if !advanced.is_empty() {
                 ui.add_space(GROUP_GAP);
                 advanced_disclosure(ui, advanced.len(), &mut draft.show_advanced);
+                trailing_slack = 0.0;
                 if draft.show_advanced {
                     for (index, (category, definitions)) in
                         group_by_category(&advanced).into_iter().enumerate()
@@ -222,7 +231,7 @@ fn parameters_contents(
                         // after the first are spaced as the ones above it are.
                         ui.add_space(if index == 0 { 4.0 } else { GROUP_GAP });
                         property_group_heading(ui, &category);
-                        let control = property_grid(
+                        let (control, slack) = property_grid(
                             ui,
                             &definitions,
                             draft,
@@ -232,6 +241,7 @@ fn parameters_contents(
                             browse,
                         );
                         first_control = first_control.or(control);
+                        trailing_slack = slack;
                     }
                 }
             }
@@ -246,6 +256,7 @@ fn parameters_contents(
                 .as_deref()
                 .or(draft.global_error.as_deref())
             {
+                trailing_slack = 0.0;
                 ui.add_space(ROW_GAP);
                 let (rect, _) =
                     ui.allocate_exact_size(vec2(ui.available_width(), 16.0), Sense::hover());
@@ -257,9 +268,23 @@ fn parameters_contents(
                     Tokens::get(ui.ctx()).color.err,
                 );
             }
+            // As much air under the last thing drawn as over the first
+            // caption's ink. A trailing row of checks already has the lower
+            // half of its target under its boxes; that counts towards it.
+            ui.add_space((FORM_BOTTOM_AIR - trailing_slack).max(0.0));
         });
     first_control
 }
+
+/// The form's inset above its first row. The first row is captions, whose
+/// ink starts [`CAPTION_INK_TOP`] below their line's top.
+const FORM_TOP_AIR: i8 = 10;
+/// How far below its line's top a caption's ink starts.
+const CAPTION_INK_TOP: f32 = 3.0;
+/// The air under the form's last row: the same as over its first caption's
+/// ink, so the body is padded alike above and below. It was 13 above and 25
+/// under a touch-high row of checks.
+const FORM_BOTTOM_AIR: f32 = FORM_TOP_AIR as f32 + CAPTION_INK_TOP;
 
 /// Air above a group's heading, between it and the last row of the group
 /// before.
@@ -399,7 +424,9 @@ fn group_by_category(properties: &[PropertyDefinition]) -> Vec<(String, Vec<Prop
 }
 
 /// Lay one category out on the two-column field grid, from its first row's
-/// top to its last row's bottom.
+/// top to its last row's bottom. Returns the first control, and how much of
+/// the last row's height lies under what it draws: half a control's height
+/// less half a box, for a row of checks alone, and nothing otherwise.
 ///
 /// Rows are packed first, then measured, so every field block on a row shares
 /// one height and the columns below it stay aligned no matter how long an
@@ -412,7 +439,9 @@ fn property_grid(
     quantity_policy: QuantityPresentationPolicy,
     number_locale: UiNumberLocale,
     browse: &mut impl FnMut(PropertyBrowseRequest<'_>, &mut ComponentPropertyDraft),
-) -> Option<Id> {
+) -> (Option<Id>, f32) {
+    let control_h = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let mut slack = 0.0;
     let available = ui.available_width();
     let columns = if available >= MIN_CELL_WIDTH * 2.0 + CELL_GAP {
         2
@@ -446,6 +475,11 @@ fn property_grid(
                 field_block_height(ui, definition, draft, advisories, *width)
             })
             .fold(0.0_f32, f32::max);
+        slack = if row.iter().all(is_check) && height <= control_h {
+            (control_h - CHECK_BOX_SIDE) * 0.5
+        } else {
+            0.0
+        };
 
         ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x = CELL_GAP;
@@ -474,7 +508,7 @@ fn property_grid(
             }
         });
     }
-    first_control
+    (first_control, slack)
 }
 
 /// Pack definitions into grid rows, honoring each field's column span.
@@ -1117,6 +1151,66 @@ mod tests {
                 });
             });
         })
+    }
+
+    /// The form is padded alike above and below: as much air under its
+    /// last row of checks as over its first caption's ink. Under the Noisy
+    /// check there was the lower half of its control-high target and then
+    /// the form's inset again, 25 points on a touch screen against 13 above.
+    #[test]
+    fn the_form_is_padded_alike_above_its_first_caption_and_under_its_checks() {
+        for target in [None, Some(44.0)] {
+            let (sheet, mut draft) = opened(ComponentType::Resistor);
+            let ctx = egui::Context::default();
+            rspice_ui_kit::Theme::default().apply(&ctx);
+            rspice_ui_kit::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
+            let mut form = egui::Rect::NOTHING;
+            let mut painted = Vec::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        form = ui
+                            .scope(|ui| {
+                                render_component_parameters(
+                                    ui,
+                                    &mut draft,
+                                    &sheet,
+                                    &[],
+                                    QuantityPresentationPolicy::default(),
+                                    UiNumberLocale::default(),
+                                    ParametersPane {
+                                        identity: InstanceIdentity {
+                                            name: Some("R1"),
+                                            device: "Resistor",
+                                            master: "",
+                                        },
+                                        beside_another: false,
+                                    },
+                                    &mut |_, _| {},
+                                );
+                            })
+                            .response
+                            .rect;
+                    });
+                });
+                painted = texts(output);
+            }
+            let rect_of = |wanted: &str| {
+                painted
+                    .iter()
+                    .find(|(text, _)| text == wanted)
+                    .map(|(_, rect)| *rect)
+                    .unwrap_or_else(|| panic!("{wanted} is not painted"))
+            };
+            let above = rect_of("Name").top() - form.top() + CAPTION_INK_TOP;
+            let box_bottom = rect_of("Noisy").center().y + CHECK_BOX_SIDE * 0.5;
+            let below = form.bottom() - box_bottom;
+            let half_target = (Tokens::get(&ctx).metrics.ctl_h - CHECK_BOX_SIDE) * 0.5;
+            assert!(
+                (below - above.max(half_target)).abs() < 1.0,
+                "touch target {target:?}: {above} above the first caption, {below} under the checks"
+            );
+        }
     }
 
     fn texts(output: egui::FullOutput) -> Vec<(String, egui::Rect)> {
