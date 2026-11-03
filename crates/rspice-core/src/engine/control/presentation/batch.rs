@@ -68,7 +68,7 @@ impl ControlNamedDataset {
     /// Whether a node is an XSPICE event node. ngspice keeps those out of the
     /// analog plot (frontend/outitf.c names only analog nodes and branches);
     /// they answer `eprint` and `edisplay`.
-    fn is_event_node(&self, name: &str) -> bool {
+    pub(super) fn is_event_node(&self, name: &str) -> bool {
         let ControlAnalysisResult::Transient(result) = &self.result else {
             return false;
         };
@@ -105,7 +105,7 @@ impl ControlNamedDataset {
     }
 
     /// The scale vector's name; a one-point result has none.
-    fn scale_vector(&self) -> Option<String> {
+    pub(super) fn scale_vector(&self) -> Option<String> {
         (!matches!(
             self.result,
             ControlAnalysisResult::OperatingPoint(_)
@@ -116,7 +116,7 @@ impl ControlNamedDataset {
     }
 
     /// `(name, type)` for every retained raw vector; ground is no vector.
-    fn vectors(&self, is_ground: impl Fn(&str) -> bool) -> Vec<(String, &'static str)> {
+    pub(super) fn vectors(&self, is_ground: impl Fn(&str) -> bool) -> Vec<(String, &'static str)> {
         let mut vectors: Vec<_> = self
             .scale_vector()
             .map(|name| (name, type_name(&self.scale_unit())))

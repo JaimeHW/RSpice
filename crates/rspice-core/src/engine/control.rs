@@ -128,6 +128,10 @@ enum CommandKind {
     WriteSParameters,
     /// `wrdata file vectors`.
     WriteData,
+    /// `cutout`: a transient plot of a window of the current one.
+    Cutout,
+    /// `linearize`: a transient plot of the current one on an even grid.
+    Linearize,
     /// `meas` and `measure`.
     Measure,
     /// A command ngspice -b accepts with no batch effect.
@@ -186,6 +190,8 @@ impl CommandKind {
             "compose" => Self::Compose,
             "wrs2p" => Self::WriteSParameters,
             "wrdata" => Self::WriteData,
+            "cutout" => Self::Cutout,
+            "linearize" => Self::Linearize,
             "meas" | "measure" => Self::Measure,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
@@ -444,6 +450,25 @@ impl ControlCircuit {
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
+            }
+            CommandKind::Cutout => {
+                self.cutout(command, variables, abort)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::Linearize => {
+                let report = self.linearize(command, variables, abort)?;
+                if report.is_empty() {
+                    Ok(PreparedCommand::Complete(
+                        ControlCommandEffect::CircuitChanged,
+                    ))
+                } else {
+                    Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Text(report),
+                    ))
+                }
             }
             CommandKind::Reset => {
                 // ngspice `reset` (frontend/runcoms2.c:175) removes the circuit

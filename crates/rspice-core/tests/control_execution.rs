@@ -881,6 +881,76 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// `linearize` interpolates the transient plot onto the analysis's own even
+/// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
+/// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
+/// past `cut-tstart` to the last before the first past `cut-tstop`
+/// (linear.c:173). For a 0-1 V ramp over 10 ms into an RC of 1 ms,
+/// ngspice-46 prints v(1) = 0, 0.1, ... 1 at 0, 1m, ... 10m; with the
+/// bounds 2m, 4m and 0.5m it reports "linearize tstart is set to:
+/// 2.000000e-03" and the others, then v(1) = 0.2, 0.25, ... 0.4 and v(2) =
+/// 1.135044e-01, 1.581752e-01, 2.049514e-01, 2.529974e-01 and
+/// 3.018154e-01. Its cut plot runs from 2.145209e-03 to 3.945209e-03 on its
+/// own time points, v(1) a hundred times each.
+#[test]
+fn linearize_and_cutout_make_transient_plots() {
+    let (presented, error) = run_until_error(
+        "linearize\nv1 1 0 pwl(0 0 10m 1)\nr1 1 2 1k\nc1 2 0 1u\n.control\ntran 1m 10m\n\
+         linearize\nprint v(1)\nsetplot tran1\nlet lin-tstart = 2m\nlet lin-tstop = 4m\n\
+         let lin-tstep = 0.5m\nlinearize v(1) 2\nprint v(1) v(2)\nsetplot tran1\n\
+         let cut-tstart = 2m\nlet cut-tstop = 4m\ncutout\nprint v(1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["linearize tstart is set to: 2.000000e-03\n\
+          linearize tstop is set to: 4.000000e-03\n\
+          linearize tstep is set to: 5.000000e-04"]
+    );
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    assert_eq!(prints.len(), 3);
+    let grid = &prints[0][0];
+    assert_eq!(grid.x.samples.len(), 11);
+    for (index, (time, voltage)) in grid.x.samples.iter().zip(&grid.y.samples).enumerate() {
+        assert!((time.re - index as f64 * 1e-3).abs() < 1e-15, "{time:?}");
+        assert!(
+            (voltage.re - index as f64 * 0.1).abs() < 1e-9,
+            "{voltage:?}"
+        );
+    }
+    let bounded = &prints[1];
+    for (trace, expected) in bounded.iter().zip([
+        [0.2, 0.25, 0.3, 0.35, 0.4],
+        [
+            1.135044e-1,
+            1.581752e-1,
+            2.049514e-1,
+            2.529974e-1,
+            3.018154e-1,
+        ],
+    ]) {
+        let values: Vec<_> = trace.y.samples.iter().map(|value| value.re).collect();
+        assert_eq!(values.len(), 5);
+        for (value, expected) in values.iter().zip(expected) {
+            assert!((value / expected - 1.0).abs() < 1e-3, "{values:?}");
+        }
+    }
+    let cut = &prints[2][0];
+    let times: Vec<_> = cut.x.samples.iter().map(|time| time.re).collect();
+    assert!(times[0] > 2e-3 && times[0] < 2.3e-3, "{times:?}");
+    assert!(*times.last().unwrap() <= 4e-3 && *times.last().unwrap() > 3.7e-3);
+    for (time, voltage) in times.iter().zip(&cut.y.samples) {
+        assert!(
+            (voltage.re - 100.0 * time).abs() < 1e-9,
+            "{time} {voltage:?}"
+        );
+    }
+}
+
 /// A control line that starts with `+` continues the line before it, past
 /// the comment lines between them (frontend/inpcom.c:674). ngspice-46 echoes
 /// `first second third fourth` and prints v(1) twice for `print v(1)` and
