@@ -168,7 +168,7 @@ fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                 } else {
                     (WorkbenchIcon::ChevronUp, "Expand console")
                 };
-                if console_action(ui, icon, label, false, control_size).clicked() {
+                if console_action(ui, "toggle", icon, label, false, control_size).clicked() {
                     if open {
                         app.workbench_mut().console_maximized = false;
                     }
@@ -178,6 +178,7 @@ fn header(ui: &mut Ui, app: &mut impl WorkbenchHost, layout: LayoutSpec) {
                     ui.add_space(CONSOLE_ACTION_MARGIN_RIGHT);
                     if console_action(
                         ui,
+                        "maximize",
                         WorkbenchIcon::Focus,
                         if app.workbench().console_maximized {
                             "Restore console"
@@ -390,7 +391,7 @@ fn console_tab(
     if !current {
         sense = sense.difference(Sense::focusable_noninteractive());
     }
-    let (rect, response) = ui.allocate_exact_size(Vec2::new(width, height), sense);
+    let (rect, response) = strip_control(ui, page.label(), Vec2::new(width, height), sense);
     response.widget_info(|| {
         egui::WidgetInfo::selected(
             egui::WidgetType::SelectableLabel,
@@ -461,15 +462,28 @@ fn console_tab(
     }
 }
 
+/// Lay out one of the strip's controls under an id of its own.
+///
+/// An automatic id counts what the frame laid out before it, and that count
+/// changes the frame a run finishes. A press on a tab in that frame was
+/// released on a control with another id, and the click was dropped.
+fn strip_control(ui: &mut Ui, key: &str, size: Vec2, sense: Sense) -> (egui::Rect, egui::Response) {
+    let (_, slot) = ui.allocate_space(size);
+    let rect = ui.layout().align_size_within_rect(size, slot);
+    let id = ui.id().with(("workbench.console.strip", key));
+    (rect, ui.interact(rect, id, sense))
+}
+
 fn console_action(
     ui: &mut Ui,
+    key: &str,
     icon: WorkbenchIcon,
     label: &str,
     selected: bool,
     size: f32,
 ) -> egui::Response {
     let t = Tokens::get(ui.ctx());
-    let (rect, response) = ui.allocate_exact_size(Vec2::splat(size), Sense::click());
+    let (rect, response) = strip_control(ui, key, Vec2::splat(size), Sense::click());
     response.widget_info(|| {
         egui::WidgetInfo::selected(egui::WidgetType::Button, ui.is_enabled(), selected, label)
     });

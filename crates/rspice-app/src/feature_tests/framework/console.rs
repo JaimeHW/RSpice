@@ -918,34 +918,38 @@ fn the_task_status_column_fits_every_status() {
     });
 }
 
+/// Where `label` is painted, as the pointer aims at it.
+fn label_center(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
+    shapes.iter().find_map(|clipped| match &clipped.shape {
+        egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+            Some(text.pos + text.galley.rect.center().to_vec2())
+        }
+        _ => None,
+    })
+}
+
+/// The primary button going down or up at `at`.
+fn press(at: egui::Pos2, pressed: bool) -> egui::Event {
+    egui::Event::PointerButton {
+        pos: at,
+        button: egui::PointerButton::Primary,
+        pressed,
+        modifiers: egui::Modifiers::NONE,
+    }
+}
+
 /// A press on a console tab opens its page and leaves keyboard focus where it
 /// was. Taking focus on a press drew the keyboard focus ring all the way
 /// around the tab the pointer chose, over its underline. The keys still move
 /// focus along the strip, and only they draw the ring.
 #[test]
 fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
-    fn label_center(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
-        shapes.iter().find_map(|clipped| match &clipped.shape {
-            egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
-                Some(text.pos + text.galley.rect.center().to_vec2())
-            }
-            _ => None,
-        })
-    }
     fn key(key: egui::Key) -> egui::Event {
         egui::Event::Key {
             key,
             physical_key: Some(key),
             pressed: true,
             repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        }
-    }
-    fn press(at: egui::Pos2, pressed: bool) -> egui::Event {
-        egui::Event::PointerButton {
-            pos: at,
-            button: egui::PointerButton::Primary,
-            pressed,
             modifiers: egui::Modifiers::NONE,
         }
     }
@@ -990,6 +994,51 @@ fn a_pressed_console_tab_opens_its_page_without_taking_keyboard_focus() {
     let (_, page) = frame(Vec::new());
     assert_eq!(page, ConsolePage::Measurements);
     assert!(ctx.memory(|memory| memory.focused()).is_some());
+}
+
+/// A press on a tab opens its page when the frame between the press and the
+/// release laid out a different number of widgets before the strip, as the
+/// frame a run finishes does. The tabs took their ids from that count: a
+/// press in that frame was released on a tab with another id, and the page
+/// never opened.
+#[test]
+fn a_console_tab_press_survives_widgets_coming_and_going_before_the_strip() {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let mut app = RSpiceApp::test_instance();
+    let mut frame = |before: usize, events: Vec<egui::Event>| {
+        let output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    Vec2::new(900.0, 200.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    // What the frame laid out before the strip.
+                    ui.skip_ahead_auto_ids(before);
+                    let problems = active_problem_count(&app.state, ui.ctx().cumulative_pass_nr());
+                    console_tabs(ui, &mut app, problems, CONSOLE_HEADER_HEIGHT, true);
+                });
+            },
+        );
+        (output.shapes, app.state.workbench.console_page)
+    };
+
+    let (shapes, page) = frame(1, Vec::new());
+    assert_eq!(page, ConsolePage::Console);
+    let at = label_center(&shapes, ConsolePage::TaskLog.label()).expect("the Task log tab");
+    frame(1, vec![egui::Event::PointerMoved(at), press(at, true)]);
+    frame(0, vec![press(at, false)]);
+    let (_, page) = frame(0, Vec::new());
+    assert_eq!(
+        page,
+        ConsolePage::TaskLog,
+        "the press on Task log opened its page"
+    );
 }
 
 #[test]
