@@ -413,7 +413,7 @@ struct ReferenceOutput {
 /// Configuration for the test runner
 #[derive(Debug, Clone)]
 pub struct TestRunnerConfig {
-    /// Relative tolerance for value comparison (default: 1%)
+    /// Relative tolerance for value comparison (default: 2%)
     pub relative_tolerance: f64,
     /// Absolute tolerance for very small values (default: 1e-12)
     pub absolute_tolerance: f64,
