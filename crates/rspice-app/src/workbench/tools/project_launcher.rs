@@ -963,6 +963,15 @@ fn launcher_body(
             .max_rect(list_rect)
             .layout(egui::Layout::top_down(Align::Min)),
     );
+    if project_entries(app).is_empty() {
+        empty_project_list(
+            &mut list_ui,
+            app.state.project.project_launcher_query.is_empty()
+                && app.state.project.project_launcher_filter == ProjectLauncherFilter::All,
+            action,
+        );
+        return;
+    }
     egui::ScrollArea::vertical()
         .id_salt("workbench.project_launcher.projects")
         .auto_shrink([false, false])
@@ -1025,15 +1034,6 @@ fn project_list(
     ui.spacing_mut().item_spacing = Vec2::ZERO;
     ui.set_min_width(ui.available_width());
     let entries = project_entries(app);
-    if entries.is_empty() {
-        empty_project_list(
-            ui,
-            app.state.project.project_launcher_query.is_empty()
-                && app.state.project.project_launcher_filter == ProjectLauncherFilter::All,
-        );
-        return;
-    }
-
     for group in ProjectGroup::ALL {
         let group_entries = entries
             .iter()
@@ -1621,33 +1621,78 @@ fn recent_project_state(
     }
 }
 
-fn empty_project_list(ui: &mut Ui, query_empty: bool) {
+/// The list area with no project in it, at the launcher's size: it is a list
+/// surface whether or not it lists anything. Its message and, with nothing
+/// recent at all, the two ways to a project stand in the middle of the area;
+/// at its top they left a 650 pt shell empty under two lines.
+fn empty_project_list(ui: &mut Ui, query_empty: bool, action: &mut Option<LauncherAction>) {
     let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .inner_margin(Margin::symmetric(18, 28))
-        .show(ui, |ui| {
-            ui.vertical_centered(|ui| {
-                ui.label(
-                    egui::RichText::new(if query_empty {
-                        "No recent projects"
-                    } else {
-                        "No projects match this view"
-                    })
-                    .font(theme::sans(tokens::FS_2, FontWeight::SemiBold))
-                    .color(t.color.text),
-                );
-                ui.label(
-                    egui::RichText::new(if query_empty {
-                        "Browse to an existing project or create a new one."
-                    } else {
-                        "Change the search term. Project data has not been modified."
-                    })
-                    .font(theme::sans(tokens::FS_2, FontWeight::Regular))
-                    .color(t.color.text_dim),
-                );
-            });
+    let (title, body) = if query_empty {
+        (
+            "No recent projects",
+            "Browse to an existing project or create a new one.",
+        )
+    } else {
+        (
+            "No projects match this view",
+            "Change the search term. Project data has not been modified.",
+        )
+    };
+    let title_font = theme::sans(tokens::FS_2, FontWeight::SemiBold);
+    let body_font = theme::sans(tokens::FS_2, FontWeight::Regular);
+    let line = |text: &str, font: &egui::FontId| {
+        ui.painter()
+            .layout_no_wrap(text.to_owned(), font.clone(), t.color.text)
+            .size()
+            .y
+    };
+    let browse = Button::new("Browse\u{2026}").icon(Icon::Folder);
+    let create = Button::new("New project").icon(Icon::Add).accent();
+    let actions_h = if query_empty {
+        EMPTY_ACTIONS_GAP + t.metrics.ctl_h
+    } else {
+        0.0
+    };
+    let block_h = line(title, &title_font) + EMPTY_LINE_GAP + line(body, &body_font) + actions_h;
+    ui.add_space(((ui.available_height() - block_h) * 0.5).max(28.0));
+    ui.vertical_centered(|ui| {
+        ui.spacing_mut().item_spacing = Vec2::ZERO;
+        ui.label(
+            egui::RichText::new(title)
+                .font(title_font.clone())
+                .color(t.color.text),
+        );
+        ui.add_space(EMPTY_LINE_GAP);
+        ui.label(
+            egui::RichText::new(body)
+                .font(body_font.clone())
+                .color(t.color.text_dim),
+        );
+        if !query_empty {
+            return;
+        }
+        ui.add_space(EMPTY_ACTIONS_GAP);
+        let gap = 6.0;
+        let row = Vec2::new(
+            browse.measured_width(ui) + gap + create.measured_width(ui),
+            t.metrics.ctl_h,
+        );
+        ui.allocate_ui_with_layout(row, egui::Layout::left_to_right(Align::Center), |ui| {
+            ui.spacing_mut().item_spacing.x = gap;
+            if browse.show(ui).clicked() {
+                *action = Some(LauncherAction::Browse);
+            }
+            if create.show(ui).clicked() {
+                *action = Some(LauncherAction::NewProject);
+            }
         });
+    });
 }
+
+/// Air between the empty list's message and the sentence under it.
+const EMPTY_LINE_GAP: f32 = 4.0;
+/// Air between that sentence and the actions under it.
+const EMPTY_ACTIONS_GAP: f32 = 14.0;
 
 fn launcher_search_field(
     ui: &mut Ui,
@@ -2207,6 +2252,40 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// With no project the list area keeps the launcher's size and holds its
+    /// message and the two ways to a project in its middle, not two lines at
+    /// the top of an empty shell.
+    #[test]
+    fn an_empty_project_list_centres_its_message_and_actions() {
+        let size = vec2(1440.0, 900.0);
+        let layout = LauncherLayout::resolve(Rect::from_min_size(egui::Pos2::ZERO, size));
+        let painted = painted_launcher_page(size, false, ProjectLauncherPage::Projects);
+        let rects = |wanted: &str| {
+            painted
+                .iter()
+                .filter(|(text, _)| text == wanted)
+                .map(|(_, rect)| *rect)
+                .collect::<Vec<_>>()
+        };
+        let message = rects("No recent projects");
+        assert_eq!(message.len(), 1, "{painted:?}");
+        let message = message[0];
+        let body = layout.surface.y_range();
+        assert!(
+            message.center().y > body.min + 0.35 * body.span()
+                && message.center().y < body.min + 0.65 * body.span(),
+            "the message stands at {message:?} in a surface over {body:?}"
+        );
+        // The heading's actions, and the empty list's under its message.
+        for action in ["Browse\u{2026}", "New project"] {
+            let under = rects(action)
+                .into_iter()
+                .filter(|rect| rect.top() > message.bottom())
+                .collect::<Vec<_>>();
+            assert_eq!(under.len(), 1, "{action} under the message: {painted:?}");
+        }
     }
 
     #[test]
