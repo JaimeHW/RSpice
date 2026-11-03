@@ -69,6 +69,21 @@ const RESULT_ROW_HEIGHT: f32 = 24.0;
 const RESULT_LIST_MAX_HEIGHT: f32 = 168.0;
 /// Below this width the labels stack over their fields.
 const COMPACT_FIELDS_WIDTH: f32 = 360.0;
+/// The label column of every kit form, Go to line's among them: its
+/// fields start 100 pt in, past this column and the 8 pt gap after it.
+const LABEL_COLUMN: f32 = 92.0;
+const LABEL_GAP: f32 = 8.0;
+
+/// A field's label as the kit's forms state theirs: the secondary size in
+/// the dimmed ink, so the values beside it carry the weight.
+fn field_label(ui: &mut Ui, text: &str) {
+    let t = Tokens::get(ui.ctx());
+    ui.label(
+        egui::RichText::new(text)
+            .font(theme::sans(tokens::FS_1, FontWeight::Regular))
+            .color(t.color.text_dim),
+    );
+}
 
 /// What the body asked for, applied after rendering.
 enum FindAction {
@@ -301,28 +316,29 @@ fn find_body(
         );
     };
     if compact_fields {
-        ui.label(messages.text(MessageId::CommonFind));
+        field_label(ui, &messages.text(MessageId::CommonFind));
         find_field(ui, &mut search.query);
         if replaceable {
-            ui.label(messages.text(MessageId::CommonReplace));
+            field_label(ui, &messages.text(MessageId::CommonReplace));
             replace_field(ui, &mut search.replacement);
         }
-        ui.label(messages.text(MessageId::CommonScope));
+        field_label(ui, &messages.text(MessageId::CommonScope));
         scope_select(ui, search, has_selection, messages);
     } else {
         egui::Grid::new("source-find-fields")
             .num_columns(2)
-            .spacing([10.0, 8.0])
+            .spacing([LABEL_GAP, 8.0])
+            .min_col_width(LABEL_COLUMN)
             .show(ui, |ui| {
-                ui.label(messages.text(MessageId::CommonFind));
+                field_label(ui, &messages.text(MessageId::CommonFind));
                 find_field(ui, &mut search.query);
                 ui.end_row();
                 if replaceable {
-                    ui.label(messages.text(MessageId::CommonReplace));
+                    field_label(ui, &messages.text(MessageId::CommonReplace));
                     replace_field(ui, &mut search.replacement);
                     ui.end_row();
                 }
-                ui.label(messages.text(MessageId::CommonScope));
+                field_label(ui, &messages.text(MessageId::CommonScope));
                 scope_select(ui, search, has_selection, messages);
                 ui.end_row();
             });
@@ -665,6 +681,23 @@ mod tests {
                 "fields of {} and {} points",
                 height(field),
                 height(&fields[0])
+            );
+        }
+        // Labelled as Go to line labels its field: the kit form's label
+        // column, so every field starts 100 pt past its label's left edge.
+        let find_label = nodes
+            .values()
+            .filter(|node| {
+                node.role() == Role::Label
+                    && (node.label() == Some("Find") || node.value() == Some("Find"))
+            })
+            .find_map(Node::bounds)
+            .expect("the Find label is laid out");
+        for field in &fields {
+            assert!(
+                (field.x0 - find_label.x0 - f64::from(LABEL_COLUMN + LABEL_GAP)).abs() <= 1.0,
+                "a field starts {} pt past its label",
+                field.x0 - find_label.x0
             );
         }
     }
