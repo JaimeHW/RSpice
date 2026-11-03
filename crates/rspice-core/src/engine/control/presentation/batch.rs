@@ -65,6 +65,26 @@ impl ControlNamedDataset {
         )
     }
 
+    /// Whether a node is an XSPICE event node. ngspice keeps those out of the
+    /// analog plot (frontend/outitf.c names only analog nodes and branches);
+    /// they answer `eprint` and `edisplay`.
+    fn is_event_node(&self, name: &str) -> bool {
+        let ControlAnalysisResult::Transient(result) = &self.result else {
+            return false;
+        };
+        result
+            .digital_traces
+            .iter()
+            .map(|trace| trace.node_name.as_str())
+            .chain(
+                result
+                    .real_traces
+                    .iter()
+                    .map(|trace| trace.node_name.as_str()),
+            )
+            .any(|node| node.eq_ignore_ascii_case(name))
+    }
+
     /// Whether the analysis swept its frequency by decade or octave, which
     /// ngspice records as the scale's GRID_XLOG (spicelib/analysis/acan.c:177,
     /// noisean.c:284, distoan.c:521, cktsens.c:296, span.c:567).
@@ -270,7 +290,7 @@ impl ControlCircuit {
             "real"
         };
         let policy = self.netlist.ground_policy();
-        let vectors = dataset.vectors(|name| policy.is_ground(name));
+        let vectors = dataset.vectors(|name| policy.is_ground(name) || dataset.is_event_node(name));
         // An operating point sweeps nothing, so its first vector is its scale
         // (frontend/vectors.c vec_new): the circuit's first node.
         let scale = dataset.scale_vector().or_else(|| {

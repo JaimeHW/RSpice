@@ -992,6 +992,37 @@ fn the_plots_carry_the_title_in_lower_case() {
     );
 }
 
+/// An XSPICE event node is no vector of the transient plot: ngspice-46
+/// lists `in` and `aout` here, never `dig` or `dout`, which only `eprint`
+/// and `edisplay` read.
+#[test]
+fn display_leaves_event_nodes_out_of_the_transient_plot() {
+    let (presented, error) = run_until_error(
+        "events\nV1 in 0 pulse(0 1 0 1n 1n 5n 10n)\nR1 in 0 1k\nabridge [in] [dig] adc\n\
+         .model adc adc_bridge(in_low=0.3 in_high=0.7)\nainv dig dout inv1\n\
+         .model inv1 d_inverter\nadac [dout] [aout] dac1\n.model dac1 dac_bridge\n\
+         R2 aout 0 1k\n.control\ntran 1n 20n\ndisplay\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let listed: Vec<String> = texts(&presented)[0]
+        .lines()
+        .filter_map(|line| line.strip_prefix("    "))
+        .map(|line| line.split(':').next().unwrap().trim().to_owned())
+        .collect();
+    for name in ["aout", "in", "time", "v1#branch"] {
+        assert!(
+            listed.iter().any(|listed| listed == name),
+            "{name}: {listed:?}"
+        );
+    }
+    for name in ["dig", "dout"] {
+        assert!(
+            !listed.iter().any(|listed| listed == name),
+            "{name}: {listed:?}"
+        );
+    }
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
