@@ -521,7 +521,7 @@ impl EventLattice {
 /// rounding, never a delay a model meant, however large a minimum step the
 /// deck declares. The snap is onto the lattice, never onto a neighbouring
 /// event, so it cannot chain; it is idempotent; and it never moves a key
-/// before the instant that scheduled it, so a zero-delay output at an off-grid
+/// across the instant that scheduled it, so a zero-delay output at an off-grid
 /// "now" stays at "now". Two bit-equal keys are then ordered by the declared
 /// same-instant rule — HDL events first, then the code models' wave — rather
 /// than by rounding. An uncoupled run has no lattice, and its keys are the sums
@@ -613,13 +613,19 @@ impl Instant {
     /// is within one coincidence window of, or itself when it is near none.
     ///
     /// `scheduled_from` is the instant whose evaluation scheduled this one,
-    /// and the snap never moves a key before it: an image earlier than both
-    /// this instant and `scheduled_from` is refused, and the instant keeps its
-    /// own bits. A zero-delay output at an off-lattice "now" therefore stays at
-    /// "now" rather than moving into a slot the run has already left. An
-    /// instant a negative delay — an output dated from a crossing inside the
-    /// step — already put before `scheduled_from` may still move later onto
-    /// its image.
+    /// and the snap never moves a key across it, in either direction: an image
+    /// earlier than both this instant and `scheduled_from` is refused, and so
+    /// is an image after `scheduled_from` for an instant at or before it. The
+    /// instant then keeps its own bits. A zero-delay output at an off-lattice
+    /// "now" therefore stays at "now", on whichever side of a tick image "now"
+    /// fell: moved back, it would land in a slot the run has already left;
+    /// moved on, onto an image a rounding after the point that produced it, it
+    /// would become a future instant less than one solver floor away, which
+    /// the stepper can only reach a whole floor later. An accepted point a few
+    /// ulps short of a tick image then took a 1e-20 s step and restarted its
+    /// integration from there. An instant a negative delay — an output dated
+    /// from a crossing inside the step — already put before `scheduled_from`
+    /// may still move later onto its image, up to `scheduled_from`.
     ///
     /// A pure function of the instant, the lattice and `scheduled_from`, and
     /// idempotent: a tick image is its own nearest tick at distance zero. See
@@ -634,7 +640,7 @@ impl Instant {
         else {
             return self;
         };
-        if image < self.min(scheduled_from) {
+        if image < self.min(scheduled_from) || (self <= scheduled_from && image > scheduled_from) {
             self
         } else {
             image
@@ -2604,10 +2610,11 @@ mod tests {
         }
     }
 
-    /// The snap never moves a key before the instant that scheduled it. A
-    /// zero-delay output at an off-lattice "now" keeps "now"; one scheduled
-    /// from just before the image moves later onto it; and an output a
-    /// positive delay puts a rounding past a later image takes that image.
+    /// The snap never moves a key across the instant that scheduled it. A
+    /// zero-delay output at an off-lattice "now" keeps "now" on either side
+    /// of the image; an instant scheduled from long before it still moves onto
+    /// it; and an output a positive delay puts a rounding past a later image
+    /// takes that image.
     #[test]
     fn the_snap_never_moves_a_key_before_the_instant_that_scheduled_it() {
         let (lattice, tick, image) = picosecond_lattice_at_a_millisecond();
@@ -2623,7 +2630,18 @@ mod tests {
         );
 
         let just_before = instant(image.seconds().next_down().next_down());
-        assert_eq!(just_before.canonical(lattice, just_before), image);
+        assert_eq!(
+            just_before.canonical(lattice, just_before),
+            just_before,
+            "zero delay keeps a now just short of the image too"
+        );
+        assert_eq!(just_before.canonical(lattice, Instant::ZERO), image);
+        let negative_delay = instant(image.seconds().next_down().next_down().next_down());
+        assert_eq!(
+            negative_delay.canonical(lattice, just_before),
+            negative_delay,
+            "the image is after the instant that scheduled it"
+        );
 
         let next = Instant::from_tick(tick + 1_000, resolution).expect("in range");
         let sum = instant(now.seconds() + 1.0e-9);
