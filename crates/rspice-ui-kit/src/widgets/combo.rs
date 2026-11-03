@@ -4,6 +4,7 @@ use egui::style::StyleModifier;
 use egui::{AsIdSalt, FontId, InnerResponse, Ui, WidgetText};
 
 use crate::theme;
+use crate::tokens::Tokens;
 
 /// egui's combo box, drawing its value and its list at the field size.
 ///
@@ -58,9 +59,19 @@ impl Combo {
     ) -> InnerResponse<Option<R>> {
         let Self { inner, font } = self;
         let list_font = font.clone();
-        let inner = inner.popup_style(StyleModifier::new(move |style| {
-            style.override_font_id = Some(list_font.clone());
-        }));
+        let inner = inner
+            .popup_style(StyleModifier::new(move |style| {
+                style.override_font_id = Some(list_font.clone());
+            }))
+            // The select's own chevron: egui's filled triangle marked every
+            // combo box as the odd control out in a form of selects.
+            .icon(|ui, rect, _visuals, _open| {
+                super::select::paint_select_chevron(
+                    ui.painter(),
+                    rect.center(),
+                    Tokens::get(ui.ctx()).color.text_dim,
+                );
+            });
         // The closed value is laid out in `ui`'s style; set the field size on
         // it for this one call and give the caller's style back after, so the
         // box keeps the id it would have had and nothing beside it moves.
@@ -94,6 +105,45 @@ mod tests {
             walk(&clipped.shape, &mut texts);
         }
         texts
+    }
+
+    /// A combo box marks its list with the select's stroked chevron, not
+    /// egui's filled triangle, so it reads as the selects beside it.
+    #[test]
+    fn a_combo_box_draws_the_selects_chevron_and_no_filled_triangle() {
+        let ctx = Context::default();
+        crate::Theme::default().apply(&ctx);
+        let mut shapes = Vec::new();
+        for _ in 0..2 {
+            shapes = ctx
+                .run_ui(Default::default(), |ctx| {
+                    egui::CentralPanel::default().show(ctx, |ui| {
+                        let mut choice = 0;
+                        Combo::from_id_salt("chevron")
+                            .selected_text("Orthogonal")
+                            .width(160.0)
+                            .show_ui(ui, |ui| {
+                                ui.selectable_value(&mut choice, 0, "Orthogonal");
+                            });
+                    });
+                })
+                .shapes;
+        }
+        let mut triangles = 0;
+        let mut chevrons = 0;
+        for clipped in &shapes {
+            if let egui::Shape::Path(path) = &clipped.shape
+                && path.points.len() == 3
+            {
+                if path.closed {
+                    triangles += 1;
+                } else {
+                    chevrons += 1;
+                }
+            }
+        }
+        assert_eq!(triangles, 0, "a filled triangle is still drawn");
+        assert_eq!(chevrons, 1, "the select's chevron is not drawn");
     }
 
     /// The value a closed combo box shows and every choice its open list

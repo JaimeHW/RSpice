@@ -267,7 +267,7 @@ pub fn render_hardcopy_dialog(parts: &mut HardcopyParts<'_>, ctx: &Context) {
                     || "Hardcopy configuration blocked".to_owned(),
                     |section| format!("Blocked in {}", section.label()),
                 ),
-            error,
+            sentence_case(error),
         );
     }
     let choice = dialog.show(ctx, |ui| {
@@ -1216,6 +1216,16 @@ pub fn output_summary(format: OutputFormat) -> String {
 /// The editor column. `height` fills the studio's assigned track; `None` sizes
 /// to the section's own content, which is what the stacked layout needs — a
 /// fixed track there would strand the preview a screen below the form.
+/// A refusal as the strip states it, in sentence case. The errors behind it
+/// are written as Rust errors are, in lower case, and the strip read
+/// "select a printer and resolve its current capabilities before printing".
+fn sentence_case(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 pub fn editor_column(
     ui: &mut Ui,
     draft: &mut HardcopyDialogState,

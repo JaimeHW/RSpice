@@ -13,6 +13,25 @@ const CHEVRON_ROOM: f32 = 24.0;
 /// Options a drop-down shows before its list scrolls.
 const SELECT_VISIBLE_OPTIONS: usize = 12;
 
+/// The open chevron a select draws at its trailing edge, centred on `center`.
+/// Stroked, not filled: egui's own filled triangle is what set an old combo
+/// box apart from this design system's selects.
+pub(crate) fn paint_select_chevron(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    color: egui::Color32,
+) {
+    let (cx, cy) = (center.x, center.y - 0.5);
+    painter.add(Shape::line(
+        vec![
+            egui::pos2(cx - 3.5, cy - 1.5),
+            egui::pos2(cx, cy + 2.5),
+            egui::pos2(cx + 3.5, cy - 1.5),
+        ],
+        Stroke::new(1.4, color),
+    ));
+}
+
 pub struct SelectOutput {
     pub picked: Option<usize>,
     pub response: egui::Response,
@@ -165,16 +184,11 @@ fn select_with_font(
             value_font.clone(),
             c.text,
         );
-    let cx = rect.right() - 11.0;
-    let cy = rect.center().y - 0.5;
-    painter.add(Shape::line(
-        vec![
-            egui::pos2(cx - 3.5, cy - 1.5),
-            egui::pos2(cx, cy + 2.5),
-            egui::pos2(cx + 3.5, cy - 1.5),
-        ],
-        Stroke::new(1.4, c.text_dim),
-    ));
+    paint_select_chevron(
+        painter,
+        egui::pos2(rect.right() - 11.0, rect.center().y),
+        c.text_dim,
+    );
     theme::paint_focus_ring_outset(ui, &response, rect);
 
     let popup_id = ui.make_persistent_id(("rspice.select", id_salt));

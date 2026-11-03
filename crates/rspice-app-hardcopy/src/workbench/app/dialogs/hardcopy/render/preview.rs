@@ -154,6 +154,9 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
     });
 }
 
+/// The preview toolbar's side inset.
+const TOOLBAR_INSET_X: i8 = 8;
+
 pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) -> f32 {
     // With no page there is nothing to page through or zoom, and the desk
     // above already says why there is no page. The band this drew instead
@@ -167,43 +170,50 @@ pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, w
     let t = Tokens::get(ui.ctx());
     let toolbar = Frame::NONE
         .fill(t.color.bg_panel)
-        .inner_margin(Margin::symmetric(10, 6))
+        .inner_margin(Margin::symmetric(TOOLBAR_INSET_X, 6))
         .show(ui, |ui| {
-            ui.set_width((width - 20.0).max(0.0));
+            ui.set_width((width - 2.0 * f32::from(TOOLBAR_INSET_X)).max(0.0));
             // Wrapped, not fixed to one row: a column narrow enough to need a
             // second row would otherwise run its last control off the right
             // edge, and the band above reserves whichever count this produces.
+            // The row is sized to hold one row in the touch studio's 349 pt
+            // preview column: page controls only where there is a page to turn
+            // to, the page as "2 / 4", and a 4 pt gap. At "Page 1 / 1" beside
+            // two chevrons that could not move and 6 pt gaps, it took 386 pt
+            // there and set the fit control alone on a second row.
             ui.horizontal_wrapped(|ui| {
-                ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                if IconButton::new(Icon::ChevronLeft)
-                    .tooltip("Previous page")
-                    .enabled(view.page > 0)
-                    .show(ui)
-                    .clicked()
-                {
-                    view.page -= 1;
+                ui.spacing_mut().item_spacing = vec2(4.0, 4.0);
+                if count > 1 {
+                    if IconButton::new(Icon::ChevronLeft)
+                        .tooltip("Previous page")
+                        .enabled(view.page > 0)
+                        .show(ui)
+                        .clicked()
+                    {
+                        view.page -= 1;
+                    }
+                    ui.monospace(format!("{} / {}", view.page.saturating_add(1), count));
+                    if IconButton::new(Icon::ChevronRight)
+                        .tooltip("Next page")
+                        .enabled(view.page + 1 < count)
+                        .show(ui)
+                        .clicked()
+                    {
+                        view.page += 1;
+                    }
+                    // Painted rather than `ui.separator()`, which takes the
+                    // band's whole height and would set the wrapped row's height
+                    // from a rule instead of from the controls beside it.
+                    let (rule, _) = ui.allocate_exact_size(
+                        vec2(1.0, Tokens::get(ui.ctx()).metrics.ctl_h),
+                        Sense::hover(),
+                    );
+                    ui.painter().vline(
+                        rule.center().x,
+                        rule.y_range().shrink(5.0),
+                        Stroke::new(1.0, t.color.border),
+                    );
                 }
-                ui.monospace(format!("Page {} / {}", view.page.saturating_add(1), count));
-                if IconButton::new(Icon::ChevronRight)
-                    .tooltip("Next page")
-                    .enabled(view.page + 1 < count)
-                    .show(ui)
-                    .clicked()
-                {
-                    view.page += 1;
-                }
-                // Painted rather than `ui.separator()`, which takes the band's
-                // whole height and would set the wrapped row's height from a
-                // rule instead of from the controls beside it.
-                let (rule, _) = ui.allocate_exact_size(
-                    vec2(1.0, Tokens::get(ui.ctx()).metrics.ctl_h),
-                    Sense::hover(),
-                );
-                ui.painter().vline(
-                    rule.center().x,
-                    rule.y_range().shrink(5.0),
-                    Stroke::new(1.0, t.color.border),
-                );
                 if IconButton::new(Icon::ZoomOut)
                     .tooltip("Zoom out")
                     .show(ui)
@@ -244,25 +254,27 @@ pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, w
 
 /// What this configuration will actually produce, as facts rather than as the
 /// settings that produced them.
+/// What this configuration produces. With no valid page there is no page
+/// count to state: the desk above says why there is no page, once.
 fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
-    let pages = draft.preview_plan.as_ref().map_or_else(
-        || "no valid page".to_owned(),
-        |plan| {
-            let pagination = plan.pagination();
-            let count = pagination.pages().len();
-            let arrangement = if pagination.sections().is_empty() {
-                format!(" · {} × {} tiles", pagination.columns(), pagination.rows())
-            } else {
-                " · section-aware".to_owned()
-            };
-            format!(
-                "{count} page{}{arrangement}",
-                if count == 1 { "" } else { "s" }
-            )
-        },
-    );
-    vec![
-        ("Pages", pages),
+    let pages = draft.preview_plan.as_ref().map(|plan| {
+        let pagination = plan.pagination();
+        let count = pagination.pages().len();
+        let arrangement = if pagination.sections().is_empty() {
+            format!(" · {} × {} tiles", pagination.columns(), pagination.rows())
+        } else {
+            " · section-aware".to_owned()
+        };
+        format!(
+            "{count} page{}{arrangement}",
+            if count == 1 { "" } else { "s" }
+        )
+    });
+    let mut facts = Vec::with_capacity(5);
+    if let Some(pages) = pages {
+        facts.push(("Pages", pages));
+    }
+    facts.extend([
         (
             "Media",
             format!(
@@ -274,7 +286,8 @@ fn preview_facts(draft: &HardcopyDialogState) -> Vec<(&'static str, String)> {
         ("Target", output_summary(draft.format)),
         ("Scale", scale_label(scale_key(draft.scale)).to_owned()),
         ("Color", color_mapping_label(draft.color_mapping).to_owned()),
-    ]
+    ]);
+    facts
 }
 
 fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32, height: f32) {
@@ -298,17 +311,20 @@ fn preview_facts_strip(ui: &mut Ui, facts: &[(&'static str, String)], width: f32
                             vec2(label_width, FACT_ROW_HEIGHT),
                             Layout::left_to_right(Align::Center),
                             |ui| {
+                                // Sentence case, as every label is.
                                 ui.label(
-                                    egui::RichText::new(label.to_uppercase())
-                                        .font(theme::sans(tokens::FS_MICRO, FontWeight::Regular))
+                                    egui::RichText::new(*label)
+                                        .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                         .color(t.color.text_faint),
                                 );
                             },
                         );
+                        // The facts are prose, so the body face: the strip set
+                        // "Print-safe engineering palette" in mono.
                         ui.add(
                             egui::Label::new(
                                 egui::RichText::new(value)
-                                    .font(theme::mono(tokens::FS_0, FontWeight::Regular))
+                                    .font(theme::sans(tokens::FS_0, FontWeight::Regular))
                                     .color(t.color.text),
                             )
                             .truncate(),

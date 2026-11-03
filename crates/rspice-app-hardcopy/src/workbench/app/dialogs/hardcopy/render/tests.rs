@@ -224,22 +224,28 @@ fn a_preview_with_no_page_reserves_the_band_it_draws() {
 /// and the page desk keeps only the column the form does not need. The
 /// toolbar has to hold that column in one row: wrapping there costs the
 /// page a whole row and buys a strip with one control stranded under six.
+///
+/// At 780 pt, the census's touch studio, "Page 1 / 1" between two chevrons
+/// that could not move set the fit control alone on a second row; one page
+/// has no page controls, and more than one reads "2 / 4".
 #[test]
 fn the_preview_toolbar_holds_one_row_at_the_tablet_width() {
     let ctx = Context::default();
     crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, Some(44.0));
-    let (_, desk) = column_widths(820.0, STACKED_FORM_HEIGHT);
-    let mut band = 0.0;
-    let _ = ctx.run_ui(Default::default(), |ctx| {
-        egui::CentralPanel::default().show(ctx, |ui| {
-            let view = PreviewView { page: 0, zoom: 100 };
-            band = preview_toolbar_height(ui, &view, 4, desk);
+    for (track, pages) in [(820.0, 4), (780.0, 1), (780.0, 4)] {
+        let (_, desk) = column_widths(track, STACKED_FORM_HEIGHT);
+        let mut band = 0.0;
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let view = PreviewView { page: 0, zoom: 100 };
+                band = preview_toolbar_height(ui, &view, pages, desk);
+            });
         });
-    });
-    assert!(
-        band < 44.0 + 12.0 + 6.0,
-        "the toolbar took {band:.0} pt of a {desk:.0} pt column, which is more than one row"
-    );
+        assert!(
+            band < 44.0 + 12.0 + 6.0,
+            "{pages} pages: the toolbar took {band:.0} pt of a {desk:.0} pt column, which is more than one row"
+        );
+    }
 }
 
 #[test]

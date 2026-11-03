@@ -40,7 +40,7 @@ const FIT_VIEWPORTS: [(f32, f32); 9] = [
 /// bounds alone cannot tell a control that fits from one that was never
 /// drawn.
 #[cfg(not(target_arch = "wasm32"))]
-const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "COLOR"];
+const PREVIEW_TAIL_CONTROLS: [&str; 2] = ["Fit page", "Color"];
 
 /// Where `DialogSize::SchematicPageSetup` puts the surface: 1280 × 760 pt
 /// inside a 12 pt viewport gutter, edge to edge at or below the 820 pt
