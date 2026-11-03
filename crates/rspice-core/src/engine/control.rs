@@ -292,7 +292,7 @@ impl ControlCircuit {
         if name.eq_ignore_ascii_case("new") {
             // frontend/vectors.c:1164 plot_alloc("unknown").
             let name = self.new_plot_name("unknown", line)?;
-            self.vectors.new_plot(name);
+            self.vectors.new_plot(name, self.datasets.len());
         } else if let Some(index) = self.dataset_index(name) {
             self.current = Some(index);
             self.vectors.leave_plot();

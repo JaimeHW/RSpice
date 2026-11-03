@@ -35,6 +35,9 @@ struct UserVector {
 struct UserPlot {
     name: String,
     scale: Option<String>,
+    /// How many datasets existed when it was made, which places it among
+    /// them in ngspice's plot list.
+    after: usize,
 }
 
 #[derive(Debug, Default)]
@@ -57,8 +60,12 @@ impl VectorStore {
     }
 
     /// `setplot new`: an empty plot of this name becomes current.
-    pub(in crate::engine::control) fn new_plot(&mut self, name: String) {
-        self.plots.push(UserPlot { name, scale: None });
+    pub(in crate::engine::control) fn new_plot(&mut self, name: String, after: usize) {
+        self.plots.push(UserPlot {
+            name,
+            scale: None,
+            after,
+        });
         self.current = Some(self.plots.len() - 1);
     }
 
@@ -77,6 +84,15 @@ impl VectorStore {
     /// The plots `setplot new` made, oldest first.
     pub(in crate::engine::control) fn plot_names(&self) -> Vec<String> {
         self.plots.iter().map(|plot| plot.name.clone()).collect()
+    }
+
+    /// Each plot `setplot new` made, oldest first, with the number of
+    /// datasets that existed when it was made.
+    pub(in crate::engine::control) fn plots_made(&self) -> Vec<(&str, usize)> {
+        self.plots
+            .iter()
+            .map(|plot| (plot.name.as_str(), plot.after))
+            .collect()
     }
 
     /// Drop the vectors bound in a plot.

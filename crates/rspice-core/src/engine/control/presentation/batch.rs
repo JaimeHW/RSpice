@@ -232,25 +232,40 @@ impl ControlCircuit {
         Ok(())
     }
 
-    /// `setplot` with no plot name: ngspice lists the plots, newest first.
+    /// `setplot` with no plot name: ngspice lists the plots newest first,
+    /// the plots `setplot new` made among them, and the constants plot last
+    /// (frontend/vectors.c:902 `plot_add` puts each new plot at the head).
     pub(in crate::engine) fn plot_list(&self) -> String {
-        let mut text = String::from("List of plots available:\n\n");
-        let current = self.current_dataset().map(|dataset| dataset.name.as_str());
-        for (index, dataset) in self.datasets.iter().enumerate().rev() {
-            if self.destroyed.contains(&index) {
-                continue;
+        let current = self.plot_name();
+        let made = self.vectors.plots_made();
+        let mut made = made.iter().peekable();
+        let mut plots = Vec::new();
+        for (index, dataset) in self.datasets.iter().enumerate() {
+            while let Some((name, _)) = made.next_if(|(_, after)| *after <= index) {
+                plots.push((name.to_string(), "Anonymous (unknown)".to_string()));
             }
-            let prefix = if Some(dataset.name.as_str()) == current {
+            if !self.destroyed.contains(&index) {
+                plots.push((
+                    dataset.name.clone(),
+                    format!("{} ({})", self.netlist.title, dataset.plot_title()),
+                ));
+            }
+        }
+        for (name, _) in made {
+            plots.push((name.to_string(), "Anonymous (unknown)".to_string()));
+        }
+        let mut text = String::from("List of plots available:\n\n");
+        let constants = (
+            "const".to_string(),
+            "Constant values (constants)".to_string(),
+        );
+        for (name, description) in plots.iter().rev().chain([&constants]) {
+            let prefix = if name.eq_ignore_ascii_case(&current) {
                 "Current "
             } else {
                 "\t"
             };
-            text.push_str(&format!(
-                "{prefix}{}\t{} ({})\n",
-                dataset.name,
-                self.netlist.title,
-                dataset.plot_title()
-            ));
+            text.push_str(&format!("{prefix}{name}\t{description}\n"));
         }
         text
     }

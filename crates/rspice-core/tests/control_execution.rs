@@ -757,7 +757,7 @@ fn batch_commands_print_or_continue_as_ngspice_b_runs_them() {
     assert_eq!(
         text(kind(&mut circuit, "setplot", "")),
         "List of plots available:\n\nCurrent dc1\tbatch deck (DC transfer characteristic)\n\
-         \top1\tbatch deck (Operating Point)\n"
+         \top1\tbatch deck (Operating Point)\n\tconst\tConstant values (constants)\n"
     );
     // setplot selects the plot unqualified names resolve against.
     assert!(kind(&mut circuit, "setplot", "op1").is_none());
@@ -859,6 +859,37 @@ fn set_accepts_shell_variables_and_applies_assignments_atomically() {
 
 /// Run a script to its first failure, returning what it presented and that
 /// failure's message.
+/// A bare `setplot` lists every plot newest first, the plots `setplot new`
+/// made among the analyses' and the constants plot last
+/// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
+#[test]
+fn setplot_lists_every_plot_newest_first_as_ngspice_does() {
+    let (presented, error) = run_until_error(
+        "plots\nV1 in 0 dc 2\nR1 in out 1k\nR2 out 0 3k\n.control\nsetplot\n\
+         dc v1 0 1 0.5\nsetplot new\nop\nsetplot\nsetplot unknown1\nsetplot\n\
+         destroy all\nsetplot\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let constants = "\tconst\tConstant values (constants)";
+    assert_eq!(
+        texts(&presented),
+        [
+            "List of plots available:\n\nCurrent const\tConstant values (constants)".to_string(),
+            format!(
+                "List of plots available:\n\nCurrent op1\tplots (Operating Point)\n\
+                 \tunknown1\tAnonymous (unknown)\n\
+                 \tdc1\tplots (DC transfer characteristic)\n{constants}"
+            ),
+            format!(
+                "List of plots available:\n\n\top1\tplots (Operating Point)\n\
+                 Current unknown1\tAnonymous (unknown)\n\
+                 \tdc1\tplots (DC transfer characteristic)\n{constants}"
+            ),
+            "List of plots available:\n\nCurrent const\tConstant values (constants)".to_string(),
+        ]
+    );
+}
+
 fn run_until_error(source: &str) -> (Vec<ControlPresentation>, Option<String>) {
     let engine = Engine::new(SimulationConfig::default());
     let program =
