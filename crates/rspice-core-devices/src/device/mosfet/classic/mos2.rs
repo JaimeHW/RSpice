@@ -44,6 +44,20 @@ pub(in crate::device::mosfet::classic) struct Mos2Evaluation {
     pub(in crate::device::mosfet::classic) vdsat: Value,
 }
 
+impl Mos2Evaluation {
+    /// A forward-frame evaluation outside the strong-inversion equations,
+    /// with a non-finite current read as none.
+    #[inline]
+    fn cutoff(id: Value, von: Value, vdsat: Value) -> Self {
+        Self {
+            id: if id.is_finite() { id } else { 0.0 },
+            region: MosRegion::Cutoff,
+            von,
+            vdsat,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct Mos2ForwardOperatingPoint {
     gm: Value,
@@ -175,7 +189,6 @@ impl Mosfet {
         (Value, MosRegion, Value, Value, Value, Value),
         Mos2Evaluation,
     ) {
-        let eval = self.level2_evaluate(vgs, vds, vbs);
         let p = self.polarity();
         let vgs_m = p * vgs;
         let vds_m = p * vds;
@@ -187,10 +200,19 @@ impl Mosfet {
         let lvbs = if mode > 0.0 { vbs_m } else { vbd_m };
         let lvgs = if mode > 0.0 { vgs_m } else { vgd_m };
 
-        let forward = self.level2_forward_operating_point(lvgs, lvds, lvbs);
+        let (forward, forward_eval) = self.level2_forward_operating_point(lvgs, lvds, lvbs);
         let (gm, gds, gmb, gss) =
             Self::terminal_channel_derivatives(mode < 0.0, forward.gm, forward.gds, forward.gmb);
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
+        // The dual pass carries the scalar evaluation in its values.
+        let eval = if vgs.is_finite() && vds.is_finite() && vbs.is_finite() {
+            Mos2Evaluation {
+                id: p * mode * forward_eval.id,
+                ..forward_eval
+            }
+        } else {
+            self.level2_evaluate(vgs, vds, vbs)
+        };
 
         (
             (
@@ -590,7 +612,7 @@ impl Mosfet {
         lvgs: Value,
         lvds: Value,
         lvbs: Value,
-    ) -> Mos2ForwardOperatingPoint {
+    ) -> (Mos2ForwardOperatingPoint, Mos2Evaluation) {
         let lvgs = Dual3::variable(lvgs, 0);
         let lvds = Dual3::variable(lvds, 1);
         let lvbs = Dual3::variable(lvbs, 2);
@@ -667,7 +689,10 @@ impl Mosfet {
                 argg = surface_argg;
             }
         } else if lvgs.value <= self.level2_cutoff_voltage(vbin.value, von.value) {
-            return Mos2ForwardOperatingPoint::from_dual(0.0);
+            return (
+                Mos2ForwardOperatingPoint::from_dual(0.0),
+                Mos2Evaluation::cutoff(0.0, von.value, 0.0),
+            );
         }
 
         let vgst = lvgs - von;
@@ -876,35 +901,9 @@ impl Mosfet {
                 beta1 * (lvgs - vbin - gamasd * sarg)
             };
 
-            return Mos2ForwardOperatingPoint::channel_conductance(gds.value);
-        }
-
-        if fast_surface && lvgs.value <= von.value {
-            return self.level2_fast_surface_state_operating_point(
-                lvgs.value,
-                lvds.value,
-                lvbs.value,
-                von.value,
-                vbin.value,
-                vdsat.value,
-                argg.value,
-                eta,
-                factor,
-                beta1.value,
-                clfact.value,
-                xlamda.value,
-                gamasd.value,
-                sarg.value,
-                barg.value,
-                body.value,
-                dsrgdb,
-                dbrgdb,
-                gamasd.derivative[2],
-                gamasd.derivative[1],
-                channel_length_derivatives,
-                xd,
-                effective_length,
-                vmax_vdsat_derivatives,
+            return (
+                Mos2ForwardOperatingPoint::channel_conductance(gds.value),
+                Mos2Evaluation::cutoff(0.0, von.value, vdsat.value),
             );
         }
 
@@ -932,7 +931,58 @@ impl Mosfet {
             beta1 * ((lvgs - vbin - eta * vdsat / 2.0) * vdsat - gamasd * bodys / 1.5)
         };
 
-        Mos2ForwardOperatingPoint::from_dual(cdrain)
+        if fast_surface && lvgs.value <= von.value {
+            let derivatives = self.level2_fast_surface_state_operating_point(
+                lvgs.value,
+                lvds.value,
+                lvbs.value,
+                von.value,
+                vbin.value,
+                vdsat.value,
+                argg.value,
+                eta,
+                factor,
+                beta1.value,
+                clfact.value,
+                xlamda.value,
+                gamasd.value,
+                sarg.value,
+                barg.value,
+                body.value,
+                dsrgdb,
+                dbrgdb,
+                gamasd.derivative[2],
+                gamasd.derivative[1],
+                channel_length_derivatives,
+                xd,
+                effective_length,
+                vmax_vdsat_derivatives,
+            );
+            return (
+                derivatives,
+                Mos2Evaluation::cutoff(cdrain.value, von.value, vdsat.value),
+            );
+        }
+
+        let region = if lvds.value <= vdsat.value {
+            MosRegion::Linear
+        } else {
+            MosRegion::Saturation
+        };
+        let id = if cdrain.value.is_finite() {
+            cdrain.value
+        } else {
+            0.0
+        };
+        (
+            Mos2ForwardOperatingPoint::from_dual(cdrain),
+            Mos2Evaluation {
+                id,
+                region,
+                von: von.value,
+                vdsat: vdsat.value,
+            },
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1157,7 +1207,18 @@ impl Mosfet {
         }
 
         let cfs = XYCE_CHARGE * self.mos2_fast_surface_state_density * 1.0e4;
-        let cdonco = -(gamasd.value * dsrgdb + gamasd.derivative[2] * sarg.value) + factor;
+        // The shift's value takes the analytic body derivative of the
+        // short-channel gamma, as the scalar evaluation and Xyce's cdonco
+        // do, so the current it shifts is the scalar current to the bit.
+        let (_, dgddvb) = self.level2_short_channel_gamma_with_body_derivative(
+            sarg.value,
+            barg,
+            dsrgdb,
+            dbrgdb,
+            effective_length,
+            xd,
+        );
+        let cdonco = -(gamasd.value * dsrgdb + dgddvb * sarg.value) + factor;
         let xn = 1.0 + cfs / cox + cdonco;
         let thermal_slope = self.level2_xyce_thermal_voltage() * xn;
         if thermal_slope.is_finite() && thermal_slope > 0.0 {
@@ -1376,6 +1437,76 @@ mod tests {
             assert_relative(gm, finite_difference(1.0, 0.0, 0.0), 2.0e-5);
             assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-5);
             assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-5);
+        }
+    }
+
+    /// A card with fast surface states, VMAX and a narrow-width DELTA.
+    fn surface_state_vmax_device(pmos: bool) -> Mosfet {
+        let mut params = HashMap::new();
+        for (name, value) in [
+            ("LEVEL", 2.0),
+            ("VTO", if pmos { -0.988 } else { 0.779 }),
+            ("KP", 3.52e-5),
+            ("GAMMA", 1.04),
+            ("PHI", 0.6),
+            ("TOX", 5.0e-8),
+            ("NSUB", 1.0e16),
+            ("NFS", 1.306e11),
+            ("XJ", 3.85e-8),
+            ("LD", 1.0e-7),
+            ("UO", 400.0),
+            ("UCRIT", 999000.0),
+            ("UEXP", 0.001001),
+            ("VMAX", 32585.3),
+            ("NEFF", 0.01001),
+            ("DELTA", 1.33),
+        ] {
+            params.insert(name.to_string(), value);
+        }
+        let mos = if pmos {
+            Mosfet::new_pmos("m1".to_string(), 1, 2, 3, 4)
+        } else {
+            Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4)
+        };
+        mos.with_params(&params).with_geometry(22.5e-6, 3.0e-6)
+    }
+
+    #[test]
+    fn level2_derivative_pass_carries_the_scalar_evaluation() {
+        let mut no_doping = mos2_vmax_device();
+        no_doping.mos2_substrate_doping = 0.0;
+        let devices = [
+            mos2_reference_device(),
+            mos2_vmax_device(),
+            no_doping,
+            mcnc_weak_inversion_nmos(),
+            surface_state_vmax_device(false),
+            surface_state_vmax_device(true),
+        ];
+        let drains = (0..21)
+            .map(|step| -5.0 + 0.5 * step as Value)
+            .chain([0.0, 1.0e-11, -1.0e-11, 0.03]);
+        let drains: Vec<Value> = drains.collect();
+        for mut mos in devices {
+            for ngspice in [true, false] {
+                mos.set_ngspice_dialect(ngspice);
+                let p = mos.polarity();
+                for gate in (0..25).map(|step| -1.0 + 0.25 * step as Value) {
+                    for &drain in &drains {
+                        for body in [-3.0, -1.1, -0.2, 0.0, 0.3] {
+                            let (vgs, vds, vbs) = (p * gate, p * drain, p * body);
+                            let (_, carried) =
+                                mos.level2_operating_point_with_evaluation(vgs, vds, vbs);
+                            let scalar = mos.level2_evaluate(vgs, vds, vbs);
+                            let bias = (vgs, vds, vbs);
+                            assert_eq!(carried.id.to_bits(), scalar.id.to_bits(), "{bias:?}");
+                            assert_eq!(carried.region, scalar.region, "{bias:?}");
+                            assert_eq!(carried.von.to_bits(), scalar.von.to_bits(), "{bias:?}");
+                            assert_eq!(carried.vdsat.to_bits(), scalar.vdsat.to_bits(), "{bias:?}");
+                        }
+                    }
+                }
+            }
         }
     }
 
