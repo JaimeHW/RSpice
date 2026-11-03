@@ -73,6 +73,43 @@ fn active_model_and_instance_paths_use_builder_precedence_without_reading_files(
     );
 }
 
+/// ngspice's examples/sp/file.cir hands an `xfer` model its Touchstone file
+/// through a subcircuit parameter whose default is an expression, bound per
+/// instance to a string `.param`. The file is that parameter's value, beside
+/// the deck, never a file named after the parameter.
+#[test]
+fn a_subcircuit_file_parameter_bound_to_a_string_parameter_names_its_file() {
+    let root = std::env::temp_dir().join("rspice-touchstone-parameter-paths");
+    let deck = |instance: &str| {
+        format!(
+            "touchstone parameter\n\
+             .param in_file=\"filter.s2p\"\n\
+             .subckt s2p 1 2 touchstone={{touchstone}}\n\
+             A1 %vd 1 0 %vd 2 0 m_a\n\
+             .model m_a xfer file=touchstone span=9\n\
+             .ends\n\
+             {instance}\n.end\n"
+        )
+    };
+    let netlist = Netlist::parse_with_path(
+        &deck("X1 in out s2p touchstone=in_file"),
+        &root.join("deck.cir"),
+    )
+    .unwrap();
+    assert_eq!(candidates(&netlist), vec![root.join("filter.s2p")]);
+
+    // An instance that leaves the parameter unbound is refused by name.
+    let error = Netlist::parse_with_path(&deck("X1 in out s2p"), &root.join("deck.cir"))
+        .map_err(|error| error.to_string())
+        .and_then(|netlist| {
+            Engine::default()
+                .data_file_candidates_with_abort(&netlist, &NoAbort)
+                .map_err(|error| error.to_string())
+        })
+        .expect_err("an unbound file parameter must be refused");
+    assert!(error.to_ascii_lowercase().contains("touchstone"), "{error}");
+}
+
 #[test]
 fn reader_defaults_and_optional_files_are_reported() {
     let netlist = Netlist::parse(

@@ -876,7 +876,15 @@ fn bare_model_ident_string_value(
     model_type: Option<&str>,
 ) -> Option<BareModelIdentString> {
     if model_param_accepts_bare_string(name, model_type) {
-        if defer_expression_params && params.get_string(value).is_some() {
+        // Inside a subcircuit, a bare name its header declares with an
+        // expression default is that parameter too, and each instance binds
+        // it: ngspice passes `.model ... xfer file=touchstone` its Touchstone
+        // file through `.subckt ... touchstone={touchstone}` and
+        // `X1 ... touchstone=in_file` (examples/sp/file.cir).
+        if defer_expression_params
+            && (params.get_string(value).is_some()
+                || params.get_parameter_expression(value).is_some())
+        {
             return Some(BareModelIdentString::Deferred(value.to_string()));
         }
         if let Some(value) = params.get_string(value) {
