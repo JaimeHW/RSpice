@@ -881,6 +881,25 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// A control line that starts with `+` continues the line before it, past
+/// the comment lines between them (frontend/inpcom.c:674). ngspice-46 echoes
+/// `first second third fourth` and prints v(1) twice for `print v(1)` and
+/// `+ v(1)`.
+#[test]
+fn a_plus_line_continues_the_control_line_before_it() {
+    let (presented, error) = run_until_error(
+        "cont\nv1 1 0 1\nr1 1 0 1k\n.control\necho first\n+ second\n+third\n* comment\n\
+         + fourth\nop\nprint v(1)\n+ v(1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(texts(&presented), ["first second third fourth"]);
+    let print = presented
+        .iter()
+        .find(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .expect("print");
+    assert_eq!(printed(print).len(), 2);
+}
+
 /// `alterparam` changes a `.param` of the deck that `reset` loads, with the
 /// parameters that depend on it, and the change stays through later resets.
 /// For 1 V into 1k over {pr2} in parallel with {2*pr2}, ngspice-46 prints

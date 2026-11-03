@@ -141,7 +141,9 @@ impl ControlProgram {
         let mut in_control = false;
         let mut blocks: Vec<(usize, Option<usize>)> = Vec::new();
         let mut early = Vec::new();
-        for (index, text) in source.lines().enumerate() {
+        let lines = control_continuations(source);
+        for (index, text) in lines.iter().enumerate() {
+            let text: &str = text;
             let line = index + 1;
             check_abort(abort, line)?;
             check_limit(line, limits.max_source_lines, line, "source lines")?;
@@ -1048,6 +1050,42 @@ fn vector_reference(chars: &mut std::iter::Peekable<std::str::Chars<'_>>) -> Str
         }
     }
     name
+}
+
+/// ngspice joins a line that starts with `+` to the line before it, in a
+/// control section as in the netlist, past the comment lines between them
+/// (frontend/inpcom.c:674 inp_stitch_continuation_lines). The joined line
+/// keeps the first line's number, and each continuation line reads as a
+/// blank one, so every other line keeps its own.
+fn control_continuations(source: &str) -> Vec<std::borrow::Cow<'_, str>> {
+    let raw: Vec<&str> = source.lines().collect();
+    let mut lines: Vec<std::borrow::Cow<'_, str>> = raw
+        .iter()
+        .map(|text| std::borrow::Cow::Borrowed(*text))
+        .collect();
+    let mut in_control = false;
+    let mut last: Option<usize> = None;
+    for (index, text) in raw.iter().enumerate().skip(1) {
+        let body = control_body(text);
+        let head = split_head(body).0;
+        if head.eq_ignore_ascii_case(".control") || head.eq_ignore_ascii_case(".endc") {
+            in_control = head.eq_ignore_ascii_case(".control");
+            last = None;
+        } else if !in_control {
+            continue;
+        } else if let Some(rest) = text.trim_start().strip_prefix('+') {
+            if let Some(target) = last.and_then(|target| lines.get_mut(target)) {
+                let joined = format!("{} {}", control_body(target), control_body(rest));
+                *target = std::borrow::Cow::Owned(joined);
+                if let Some(line) = lines.get_mut(index) {
+                    *line = std::borrow::Cow::Borrowed("");
+                }
+            }
+        } else if !body.is_empty() {
+            last = Some(index);
+        }
+    }
+    lines
 }
 
 fn control_body(text: &str) -> &str {
