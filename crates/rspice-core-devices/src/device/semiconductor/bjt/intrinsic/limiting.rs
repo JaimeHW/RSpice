@@ -537,12 +537,16 @@ impl Bjt {
         // The two references differ on the collector-base drop of an unmarked
         // instance: ngspice zeroes `vbc`, `vbcx`, `vbx`, `vsub` and `vrci`,
         // flagging the last three in its own source as a stopgap, while Xyce
-        // leaves `vBC` and `vCS` at the incoming bias. They coincide where
-        // MODEINITJCT actually means what it says, at a solution vector that
-        // is still zero, so the assignment stays confined to `vbe`: the
-        // condition here is RSpice's per-device "no previous iterate", which
-        // is also reached mid-continuation where the incoming collector bias
-        // is real information ngspice would be reading out of MODEINITFLOAT.
+        // leaves `vBC` and `vCS` at the incoming bias. They coincide at a
+        // solution vector that is still zero, where Xyce starts. RSpice's
+        // operating point can start from a linear seed instead, which can put
+        // a base at its drive rail over a grounded collector, and a first load
+        // at that `vbc` overflows. So outside the Xyce dialect the operating
+        // point's MODEINITJCT load (`legacy_initial_junction_pending`) zeroes
+        // `vbc` and `vsub` as bjtload.c does. Any other load without a
+        // previous iterate, such as the first after a GMIN change, keeps the
+        // incoming collector bias, which is real information ngspice would be
+        // reading out of MODEINITFLOAT.
         // `vbcx` and `vrci` have no counterpart to zero at all — this port
         // carries no quasi-saturation epi branch, and the promoted topology's
         // extrinsic base node is a matrix unknown rather than a junction
@@ -550,14 +554,19 @@ impl Bjt {
         if !previous_iterate_available {
             let raw_branches = self.legacy_nonlinear_branch_voltages(raw);
             let (_vt, vcrit, _sub_vcrit) = self.legacy_limiting_parameters(state.vrth);
+            let initial_junction = self.legacy_initial_junction_pending && !self.xyce_compatibility;
             let initialized_branches = LegacyNonlinearBranchVoltages {
                 vbe: if self.initial_off { 0.0 } else { vcrit },
-                vbc: if self.initial_off {
+                vbc: if self.initial_off || initial_junction {
                     0.0
                 } else {
                     raw_branches.vbc
                 },
-                vsub: raw_branches.vsub,
+                vsub: if initial_junction {
+                    0.0
+                } else {
+                    raw_branches.vsub
+                },
             };
             let initialized =
                 self.project_legacy_limited_branches_onto_internal_state(raw, initialized_branches);

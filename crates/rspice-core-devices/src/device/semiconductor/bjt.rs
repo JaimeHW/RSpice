@@ -1228,6 +1228,11 @@ pub struct Bjt {
     /// No matrix load and no second `update` has seen the iterate the last
     /// legacy `update` limited yet.
     legacy_update_open: Cell<bool>,
+    /// The next legacy load is the operating point's MODEINITJCT load: the
+    /// first of a freshly built instance, or the first after
+    /// [`Self::reset_legacy_operating_point_history`]. A load that only lacks
+    /// a previous iterate, such as the first after a GMIN change, is not.
+    legacy_initial_junction_pending: bool,
     ic: Value,
     ib: Value,
     ie: Value,
@@ -1861,6 +1866,8 @@ impl Bjt {
         checkpoint: &AcceptedBjtNonlinearCheckpoint,
     ) -> Result<(), String> {
         self.validate_accepted_nonlinear_checkpoint(checkpoint)?;
+        // An accepted transient state lies past the operating point.
+        self.legacy_initial_junction_pending = false;
         if self.mna_promoted {
             self.restore_mna_checkpoint(checkpoint);
             return Ok(());
@@ -2169,6 +2176,7 @@ impl Bjt {
             eval_anchor: [0.0; EXTERNAL_DIM],
             legacy_junction_limited: false,
             legacy_update_open: Cell::new(false),
+            legacy_initial_junction_pending: true,
             ic: 0.0,
             ib: 0.0,
             ie: 0.0,
@@ -2707,6 +2715,7 @@ impl NonlinearDevice for Bjt {
                 anchor[EXT_S] = state.vsi;
             }
         }
+        self.legacy_initial_junction_pending = false;
         self.eval_anchor = anchor;
         let eval = self.evaluate_state(
             BjtNodeVoltages {
@@ -2812,6 +2821,7 @@ impl Bjt {
         self.charge_snapshot_cache_valid.set(false);
         self.legacy_junction_limited = false;
         self.legacy_update_open.set(false);
+        self.legacy_initial_junction_pending = true;
         if self.mna_promoted {
             self.mna_eval = None;
             self.mna_limited_from.set(None);

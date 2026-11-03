@@ -433,7 +433,8 @@ mod tests {
     /// same state. Neither arm is behind a compatibility mode, so the first
     /// load lands on tVcrit under every dialect. A raw bias below tVcrit is the
     /// discriminator: pnjlim against a tVcrit reference returns it unchanged,
-    /// so only the explicit assignment moves the junction there.
+    /// so only the explicit assignment moves the junction there. ngspice also
+    /// zeroes `vbc` on that load, where Xyce keeps the incoming bias.
     #[test]
     fn legacy_bjt_first_iteration_uses_explicit_vcrit_state_in_every_dialect() {
         for (mut bjt, xyce) in [
@@ -484,7 +485,24 @@ mod tests {
                 "pnjlim against the tVcrit reference must leave this bias alone (xyce={xyce})"
             );
             assert!((initialized_branches.vbe - vcrit).abs() <= 1e-14);
-            assert!((initialized_branches.vbc - raw_branches.vbc).abs() <= 1e-14);
+            let initial_vbc = if xyce { raw_branches.vbc } else { 0.0 };
+            assert!(
+                (initialized_branches.vbc - initial_vbc).abs() <= 1e-14,
+                "MODEINITJCT vbc (xyce={xyce}) = {:.17e}",
+                initialized_branches.vbc
+            );
+
+            // A later load without a previous iterate is not MODEINITJCT,
+            // and keeps the incoming collector-base bias under every dialect.
+            bjt.legacy_initial_junction_pending = false;
+            let later = bjt.limit_legacy_terminal_state_against_iterate(raw, false);
+            let later_branches = bjt.legacy_nonlinear_branch_voltages([
+                later.vcx, later.vci, later.vbx, later.vbi, later.vei, later.vbp, later.vsi,
+                later.vrth,
+            ]);
+            assert!((later_branches.vbe - vcrit).abs() <= 1e-14);
+            assert!((later_branches.vbc - raw_branches.vbc).abs() <= 1e-14);
+            bjt.legacy_initial_junction_pending = true;
 
             bjt.initial_off = true;
             let initialized_off = bjt.limit_legacy_terminal_state_against_iterate(raw, false);

@@ -2971,21 +2971,20 @@ mod correction_constraint_tests {
         }
     }
 
-    #[test]
-    fn a_xyce_dialect_transient_operating_point_starts_from_zero() {
+    /// A transistor whose base sits behind 220 Ohm on a 5 V drive, over a
+    /// collector at ground beside a 100 GOhm divider. The linear seed leaves
+    /// the base at the drive, 5 V over the collector.
+    const DRIVEN_BJT_DECK: &str = "driven bjt\nV1 a 0 5\nR1 a b 220\nQ1 c b 0 qm\nR2 c 0 50\nR3 c d 1e11\nR4 d 0 1e11\n\
+         .model qm NPN(IS=1.3e-14 BF=150 NF=0.9 NR=0.99 RB=6.848 IRB=0.004878 ISE=5e-15 NE=1.3 BR=8.5 ISC=3e-13 NC=1.484 VAF=80 VAR=14 IKF=0.9 IKR=0.11)\n.end\n";
+
+    /// The transient operating point of [`DRIVEN_BJT_DECK`] in `dialect`:
+    /// V(b) and V(c), and the Newton iterations the solve took.
+    fn driven_bjt_transient_operating_point(dialect: SpiceDialect) -> ([Value; 2], usize) {
         use crate::engine::SimulationConfig;
         use crate::netlist::Netlist;
-        // The linear seed puts the base at the 5 V drive over a collector at
-        // ground, and the base-collector conductance there leaves the matrix
-        // singular beside the 100 GOhm divider. Xyce 7.10 starts its tran OP
-        // from zero: V(b) = 0.834811494, V(c) = -0.0647992803.
-        let netlist = Netlist::parse(
-            "zero start\nV1 a 0 5\nR1 a b 220\nQ1 c b 0 qm\nR2 c 0 50\nR3 c d 1e11\nR4 d 0 1e11\n\
-             .model qm NPN(IS=1.3e-14 BF=150 NF=0.9 NR=0.99 RB=6.848 IRB=0.004878 ISE=5e-15 NE=1.3 BR=8.5 ISC=3e-13 NC=1.484 VAF=80 VAR=14 IKF=0.9 IKR=0.11)\n.end\n",
-        )
-        .unwrap();
+        let netlist = Netlist::parse(DRIVEN_BJT_DECK).unwrap();
         let engine = Engine::new(SimulationConfig {
-            spice_dialect: SpiceDialect::Xyce,
+            spice_dialect: dialect,
             ..Default::default()
         })
         .resolved_for_netlist(&netlist);
@@ -3004,14 +3003,46 @@ mod correction_constraint_tests {
                 &[],
                 &crate::NoAbort,
             )
-            .expect("the Xyce-dialect transient operating point converges");
-        for (node, xyce) in [("b", 0.834811494), ("c", -0.0647992803)] {
-            let value = point.values[circuit.get_node_by_name(node).unwrap() - 1];
+            .unwrap_or_else(|error| panic!("{dialect:?} transient operating point: {error}"));
+        let voltage = |node| point.values[circuit.get_node_by_name(node).unwrap() - 1];
+        (
+            [voltage("b"), voltage("c")],
+            engine.convergence_quality().total_iterations,
+        )
+    }
+
+    /// The base-collector conductance at the linear seed leaves the matrix
+    /// singular beside the divider. Xyce 7.10 starts its tran OP from zero:
+    /// V(b) = 0.834811494, V(c) = -0.0647992803.
+    #[test]
+    fn a_xyce_dialect_transient_operating_point_starts_from_zero() {
+        let (values, _) = driven_bjt_transient_operating_point(SpiceDialect::Xyce);
+        for (value, xyce) in values.into_iter().zip([0.834811494, -0.0647992803]) {
             assert!(
                 (value - xyce).abs() <= 1e-3 * xyce.abs() + 1e-6,
-                "V({node}) = {value}, Xyce {xyce}"
+                "{values:?}, Xyce {xyce}"
             );
         }
+    }
+
+    /// ngspice's first transient-OP load of a transistor is its MODEINITJCT
+    /// load, `vbe = tVcrit, vbc = 0` whatever the solution vector holds
+    /// (bjtload.c:253-257). Linearized at the seed's 5 V `vbc` instead, the
+    /// first load overflows. ngspice-46 reaches V(b) = 0.8348307,
+    /// V(c) = -0.0648011 in 11 iterations.
+    #[test]
+    fn a_transient_operating_point_opens_a_bjt_on_its_initial_junction_bias() {
+        let (values, iterations) = driven_bjt_transient_operating_point(SpiceDialect::Ngspice);
+        for (value, ngspice) in values.into_iter().zip([0.8348307, -0.0648011]) {
+            assert!(
+                (value - ngspice).abs() <= 1e-3 * ngspice.abs() + 1e-6,
+                "{values:?}, ngspice {ngspice}"
+            );
+        }
+        assert!(
+            iterations <= 22,
+            "{iterations} Newton iterations, ngspice 11"
+        );
     }
 
     #[test]

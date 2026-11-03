@@ -1157,6 +1157,9 @@ impl Bjt {
                     vs = state[IDX_VSI];
                 }
             }
+            if apply_limiting {
+                self.legacy_initial_junction_pending = false;
+            }
             state
         } else if let Some(startup) = startup_load
             .then(|| self.vbic_startup_load_internal_state(raw))
