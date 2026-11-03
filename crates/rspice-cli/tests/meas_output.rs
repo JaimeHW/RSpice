@@ -4,7 +4,7 @@
 
 mod common;
 
-use common::{run_rspice, test_dir};
+use common::{csv_column, run_rspice, test_dir};
 
 /// RC low-pass with tau = 100ns: risetime (10%..90% of a 5V step) is
 /// ln(9)*tau ~= 219.7ns, far below fixed-point display resolution.
@@ -531,4 +531,134 @@ fn two_signal_conditions_count_edges_by_their_difference_in_every_dialect() {
     }
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+/// Run `deck` in `dialect` and return its CSV export.
+fn print_run(tag: &str, dialect: &str, deck: &str) -> Result<String, String> {
+    let dir = test_dir(tag);
+    let path = dir.join("deck.cir");
+    let csv = dir.join("out.csv");
+    std::fs::write(&path, deck).expect("write deck");
+    let output = run_rspice(&[
+        "run",
+        path.to_str().unwrap(),
+        "--spice-dialect",
+        dialect,
+        "-o",
+        csv.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    let result = if output.status.success() {
+        Ok(std::fs::read_to_string(&csv).expect("read CSV"))
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).into_owned())
+    };
+    let _ = std::fs::remove_dir_all(&dir);
+    result
+}
+
+fn assert_rows(name: &str, actual: &[f64], expected: impl IntoIterator<Item = f64>) {
+    let expected = expected.into_iter().collect::<Vec<_>>();
+    assert_eq!(actual.len(), expected.len(), "{name}: row count");
+    for (row, (actual, expected)) in actual.iter().zip(&expected).enumerate() {
+        assert!(
+            (actual - expected).abs() <= 1e-12 * expected.abs().max(1.0),
+            "{name} row {row}: {actual}, expected {expected}"
+        );
+    }
+}
+
+/// A measure named on a Xyce `.PRINT` card prints its value as it stands at
+/// each row, after taking in that row's point, in every analysis: Xyce 7.10
+/// prints `.MEASURE AC MX MAX VR(2)` of this RC as 7.16956800e-01, the first
+/// point's VR(2), on all nine rows. Other dialects have no such operand.
+#[test]
+fn xyce_prints_a_measure_by_name_as_its_running_value() {
+    let rc = "V1 1 0 DC 0 AC 1 SIN(0 1 1k)\nR1 1 2 1k\nC1 2 0 1u\n";
+    let tran = print_run(
+        "print_measure_tran",
+        "xyce",
+        &format!(
+            "* running max\n{rc}.tran 0 1m\n.print tran v(2) mx {{2*mx}}\n\
+             .measure tran mx max v(2)\n.end\n"
+        ),
+    )
+    .expect("TRAN run");
+    let voltage = csv_column(&tran, "v(2)");
+    let running_max = voltage
+        .iter()
+        .scan(f64::NEG_INFINITY, |max, value| {
+            *max = max.max(*value);
+            Some(*max)
+        })
+        .collect::<Vec<_>>();
+    assert!(voltage.len() > 10 && running_max.last() > voltage.last());
+    assert_rows("TRAN mx", &csv_column(&tran, "mx"), running_max.clone());
+    assert_rows(
+        "TRAN {2*mx}",
+        &csv_column(&tran, "{2*mx}"),
+        running_max.iter().map(|value| 2.0 * value),
+    );
+
+    let ac = print_run(
+        "print_measure_ac",
+        "xyce",
+        &format!(
+            "* running extrema\n{rc}.ac dec 2 100 1meg\n.print ac vr(2) mx mn pp\n\
+             .measure ac mx max vr(2)\n.measure ac mn min vr(2)\n.measure ac pp pp vr(2)\n.end\n"
+        ),
+    )
+    .expect("AC run");
+    let real = csv_column(&ac, "vr(2)");
+    let first = 1.0 / (1.0 + (2.0 * std::f64::consts::PI * 100.0 * 1e-3_f64).powi(2));
+    assert!(
+        (real[0] - first).abs() < 1e-12,
+        "VR(2) at 100 Hz: {}",
+        real[0]
+    );
+    assert_rows("AC mx", &csv_column(&ac, "mx"), real.iter().map(|_| first));
+    assert_rows("AC mn", &csv_column(&ac, "mn"), real.clone());
+    assert_rows(
+        "AC pp",
+        &csv_column(&ac, "pp"),
+        real.iter().map(|value| first - value),
+    );
+
+    let noise = print_run(
+        "print_measure_noise",
+        "xyce",
+        &format!(
+            "* running min\n{rc}.noise v(2) V1 dec 2 100 1meg\n.print noise vr(2) mn\n\
+             .measure noise mn min vr(2)\n.end\n"
+        ),
+    )
+    .expect("NOISE run");
+    assert_rows(
+        "NOISE mn",
+        &csv_column(&noise, "mn"),
+        csv_column(&noise, "vr(2)"),
+    );
+
+    let divider = "V1 1 0 DC 0\nR1 1 2 1k\nR2 2 0 1k\n.dc V1 0 1 0.25\n.print dc v(2) mx mn\n\
+                   .measure dc mx max v(2)\n.measure dc mn min v(2)\n.end\n";
+    let dc =
+        print_run("print_measure_dc", "xyce", &format!("* divider\n{divider}")).expect("DC run");
+    assert_rows(
+        "DC mx",
+        &csv_column(&dc, "mx"),
+        [0.0, 0.125, 0.25, 0.375, 0.5],
+    );
+    assert_rows("DC mn", &csv_column(&dc, "mn"), [0.0; 5]);
+
+    let refused = print_run(
+        "print_measure_ngspice",
+        "ngspice",
+        &format!("* divider\n{divider}"),
+    )
+    .expect_err("ngspice has no measure operand on .print");
+    assert!(
+        refused.contains("'mx'") && refused.contains("is unavailable"),
+        "{refused}"
+    );
 }

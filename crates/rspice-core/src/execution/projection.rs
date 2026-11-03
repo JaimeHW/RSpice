@@ -330,6 +330,12 @@ impl<'a> ProjectionSource<'a> {
         )
     }
 
+    /// Whether `name` is one of the additional lookup spellings itself.
+    fn looks_up(&self, name: &str) -> bool {
+        let name = name.trim();
+        self.lookup.keys().any(|key| key.eq_ignore_ascii_case(name))
+    }
+
     /// The real-valued signal table the core output resolver searches.
     fn real_signal_map(&self) -> HashMap<String, &[Value]> {
         let mut signals = self.lookup.clone();
@@ -622,6 +628,8 @@ impl SignalProjection {
             .iter()
             .map(crate::analysis::NoiseResult::input_referred_rms)
             .collect::<Vec<_>>();
+        let printed_measures =
+            crate::analysis::measure_signals::printed_noise_measure_traces(netlist, sweep, abort)?;
         let mut lookup = series.signal_map();
         lookup.retain(|name, _| {
             !name.eq_ignore_ascii_case("onoise_spectrum")
@@ -634,6 +642,10 @@ impl SignalProjection {
             lookup.insert(name.to_string(), values.as_slice());
             lookup.insert(format!("V({name})"), values.as_slice());
         }
+        crate::analysis::measure_signals::insert_printed_measure_traces(
+            &mut lookup,
+            &printed_measures,
+        );
         let source = ProjectionSource::new(AnalysisResultKind::Noise, "NOISE")
             .with_axis(series.axis())
             .with_signals(noise_inventory(sweep)?)
@@ -797,6 +809,11 @@ impl SignalProjection {
             return Ok(column);
         }
         match source_value_type(source) {
+            // A real series the caller looked up for a complex result, as the
+            // running value of a measure Xyce prints by name, prints as is.
+            SignalValueType::Complex if source.looks_up(authored) => {
+                self.resolve_real_operand(params, source, card, authored, kind, abort)
+            }
             SignalValueType::Complex => {
                 resolve_complex_operand(source, authored, kind, self.phase_unit)
             }

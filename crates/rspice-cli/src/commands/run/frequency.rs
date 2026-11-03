@@ -771,10 +771,9 @@ fn finish_ac(
         analysis: Some("AC output projection".to_string()),
     };
     let inventory = ac_signals(results).map_err(ac_projection_error)?;
-    let signals = crate::commands::run_signals::complex_export_signals(
+    let signals = crate::commands::run_signals::ac_export_signals(
         ctx.netlist,
-        rspice_core::execution::AnalysisResultKind::Ac,
-        "AC",
+        results,
         &frequencies,
         &inventory,
         &crate::abort::ProcessAbort,

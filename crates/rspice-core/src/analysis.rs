@@ -132,7 +132,7 @@ pub use {
         evaluate_ac_continuous_measurements,
         evaluate_ac_continuous_measurements_with_limits_and_abort,
         evaluate_ac_equation_measurements, evaluate_ac_measurements,
-        evaluate_ac_measurements_with_abort,
+        evaluate_ac_measurements_with_abort, evaluate_ac_printed_measures_with_abort,
         evaluate_ac_table_continuous_measurements_with_limits_and_abort,
         evaluate_ac_table_measurements_with_abort, evaluate_dc_continuous_measurements,
         evaluate_dc_continuous_measurements_with_limits_and_abort,

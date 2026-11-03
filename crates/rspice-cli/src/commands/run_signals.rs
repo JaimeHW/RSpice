@@ -211,13 +211,18 @@ pub(crate) fn project_scalar(
 }
 
 /// Project a complex-valued analysis result onto the deck's output contract.
-pub(crate) fn project_complex(
+///
+/// `lookup` carries real series a print operand may name beside the complex
+/// inventory, such as the running value of a measure Xyce prints by name.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn project_complex<'a>(
     netlist: &rspice_core::Netlist,
     projection: &SignalProjection,
     kind: AnalysisResultKind,
     instance: &str,
-    axis: &[Value],
-    signals: &[ComplexSignal],
+    axis: &'a [Value],
+    signals: &'a [ComplexSignal],
+    lookup: HashMap<String, &'a [Value]>,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
     let source_signals = signals
@@ -237,7 +242,8 @@ pub(crate) fn project_complex(
         .collect::<Result<Vec<_>, _>>()?;
     let source = ProjectionSource::new(kind, instance)
         .with_axis(axis)
-        .with_signals(source_signals);
+        .with_signals(source_signals)
+        .with_lookup(lookup);
     let projected = projection.project(&netlist.params, &source, abort)?;
     complex_signals(instance, projected)
 }
@@ -832,7 +838,44 @@ pub(crate) fn complex_export_signals(
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
     let projection = projection(netlist)?;
-    project_complex(netlist, &projection, kind, instance, axis, signals, abort)
+    project_complex(
+        netlist,
+        &projection,
+        kind,
+        instance,
+        axis,
+        signals,
+        HashMap::new(),
+        abort,
+    )
+}
+
+/// Project an AC sweep onto the deck's output contract, with the running
+/// value of each measure a Xyce `.PRINT AC` card names.
+pub(crate) fn ac_export_signals(
+    netlist: &rspice_core::Netlist,
+    results: &[rspice_core::analysis::AcResult],
+    axis: &[Value],
+    signals: &[ComplexSignal],
+    abort: &dyn rspice_core::AbortSignal,
+) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
+    let projection = projection(netlist)?;
+    let measures =
+        rspice_core::analysis::evaluate_ac_printed_measures_with_abort(netlist, results, abort)?;
+    let lookup = measures
+        .iter()
+        .map(|trace| (trace.name.clone(), trace.values.as_slice()))
+        .collect();
+    project_complex(
+        netlist,
+        &projection,
+        AnalysisResultKind::Ac,
+        "AC",
+        axis,
+        signals,
+        lookup,
+        abort,
+    )
 }
 
 /// The columns a deck's `.PRINT NOISE` card prints over one noise sweep;

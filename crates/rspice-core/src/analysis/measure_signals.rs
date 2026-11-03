@@ -39,6 +39,9 @@ pub use continuous::*;
 mod impulse_measure;
 pub(crate) mod impulse_observation;
 
+mod printed;
+pub(crate) use printed::{insert_printed_measure_traces, printed_noise_measure_traces};
+
 /// Whether the first adjacent pair that differs is ascending.
 ///
 /// `slice::windows(2)` yields exactly two samples, and matching on that shape
@@ -1552,6 +1555,7 @@ pub fn evaluate_tran_equation_measurements(
         None,
         Some(result),
         None,
+        &HashSet::new(),
         &NoAbort,
     )
     .map_err(|error| match error {
@@ -1943,10 +1947,29 @@ fn evaluate_tran_output_columns_with_abort(
             output_request_error(first_request, OutputAnalysisKind::Tran, 0, None, detail)
         }
     })?;
+    let printed = if printed::prints_measures(netlist, "TRAN") {
+        let mut measure_signals = retained_transient_signal_map(result);
+        alias_projection
+            .augment(&mut measure_signals)
+            .map_err(|detail| {
+                output_request_error(first_request, OutputAnalysisKind::Tran, 0, None, detail)
+            })?;
+        printed::printed_real_measure_traces(
+            netlist,
+            OutputAnalysisKind::Tran,
+            &result.time,
+            &measure_signals,
+            Some(result),
+            abort,
+        )?
+    } else {
+        Vec::new()
+    };
     let mut signals = transient_signal_map(result);
     alias_projection.augment(&mut signals).map_err(|detail| {
         output_request_error(first_request, OutputAnalysisKind::Tran, 0, None, detail)
     })?;
+    insert_printed_measure_traces(&mut signals, &printed);
     evaluate_real_output_requests(
         &requests,
         OutputAnalysisKind::Tran,
@@ -2217,11 +2240,36 @@ fn evaluate_dc_output_columns_with_abort(
             output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
         }
     })?;
+    let measure_error =
+        |detail| output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail);
+    let printed = match printed::prints_measures(netlist, "DC")
+        .then(|| DcSweepSeries::from_sweep(sweep))
+        .transpose()
+        .map_err(|error| measure_error(error.to_string()))?
+        .flatten()
+    {
+        Some(measure_series) => {
+            let mut measure_signals = measure_series.signal_map();
+            alias_projection
+                .augment(&mut measure_signals)
+                .map_err(measure_error)?;
+            printed::printed_real_measure_traces(
+                netlist,
+                OutputAnalysisKind::Dc,
+                measure_series.axis(),
+                &measure_signals,
+                None,
+                abort,
+            )?
+        }
+        None => Vec::new(),
+    };
     let sweep_variables = DcSweepVariables::of(netlist, series.axis.len());
     let mut signals = series.signal_map();
     alias_projection.augment(&mut signals).map_err(|detail| {
         output_request_error(first_request, OutputAnalysisKind::Dc, 0, None, detail)
     })?;
+    insert_printed_measure_traces(&mut signals, &printed);
     sweep_variables.insert(
         &mut signals,
         &series.axis,
@@ -3074,6 +3122,20 @@ impl DcOutputSeries {
     }
 }
 
+/// The value of every measure a Xyce `.PRINT AC` card names, at each
+/// frequency of the sweep, for the AC output projection.
+///
+/// Xyce prints such a measure as a real column beside the probes, as its
+/// running maximum `MX` beside `VR(2)`. Other dialects name no measures on a
+/// print card, so their decks get no traces.
+pub fn evaluate_ac_printed_measures_with_abort(
+    netlist: &Netlist,
+    sweep: &[AcResult],
+    abort: &dyn AbortSignal,
+) -> Result<Vec<EquationMeasureTrace>, SimulationError> {
+    printed::printed_ac_measure_traces(netlist, sweep, abort)
+}
+
 /// Evaluate Xyce continuous equation measurements over an AC sweep.
 ///
 /// AC equation probes follow Xyce's scalar accessor semantics: bare `V()`
@@ -3223,6 +3285,7 @@ fn evaluate_equation_measurements_with_abort(
         dc_sweep_ascending,
         None,
         None,
+        &HashSet::new(),
         abort,
     )
     .map(|evaluation| evaluation.traces)
@@ -3244,6 +3307,7 @@ fn evaluate_equation_measurements_with_observations(
     dc_sweep_ascending: Option<bool>,
     current_result: Option<&TransientResult>,
     parameters: Option<&MeasureParameterSeries>,
+    printed: &HashSet<String>,
     abort: &dyn AbortSignal,
 ) -> Result<LiveMeasurementEvaluation, EquationMeasurementEvaluationError> {
     if abort.is_aborted() {
@@ -3332,7 +3396,8 @@ fn evaluate_equation_measurements_with_observations(
         }
         program.store_trace =
             matches!(program.statement.measure_type, MeasureType::Equation { .. })
-                || referenced_measure_names.contains(&program.canonical_name);
+                || referenced_measure_names.contains(&program.canonical_name)
+                || printed.contains(&program.canonical_name);
         if program.store_trace {
             program.values.reserve(axis.len());
             program.valid.reserve(axis.len());
@@ -6062,6 +6127,7 @@ fn evaluate_noise_measurements_with_parameters(
         None,
         None,
         parameters,
+        &HashSet::new(),
         abort,
     ) {
         Ok(evaluation) => Ok(evaluation.traces),
@@ -7057,6 +7123,7 @@ pub(crate) fn evaluate_tran_measurements_with_signals_and_abort(
         None,
         current_result,
         None,
+        &HashSet::new(),
         abort,
     ) {
         Ok(evaluation) => {
@@ -7499,6 +7566,7 @@ fn evaluate_ac_measurements_with_parameters(
         None,
         None,
         parameters,
+        &HashSet::new(),
         abort,
     ) {
         Ok(evaluation) => Ok(evaluation.traces),
