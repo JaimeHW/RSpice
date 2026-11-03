@@ -6967,6 +6967,10 @@ impl Engine {
 
         // Main transient loop
         let mut retry_count = 0;
+        // A plain Newton attempt that failed retries its step once with the
+        // merit globalization before the timestep is cut.
+        let mut merit_retry_pending = false;
+        let mut total_merit_retries: usize = 0;
         // The part of `retry_count` spent moving a converged candidate's
         // endpoint back onto a Verilog-A event root. Those rejections are
         // timestep control, not evidence that Newton needs its trust region
@@ -8963,6 +8967,7 @@ impl Engine {
             let mut penultimate_stamped_iterate: Vec<Value> = Vec::new();
             let mut merit_cycle_detected = false;
             let mut last_stamped_merit = Value::INFINITY;
+            let merit_globalization_retry = std::mem::take(&mut merit_retry_pending);
 
             // Newton-Raphson iteration for this timestep.
             // Classic SPICE transient analysis uses the transient-specific ITL4
@@ -9216,9 +9221,13 @@ impl Engine {
                 // basin — the saturation-boundary limit cycles this breaks
                 // are unreachable by timestep reduction alone (the cycle is
                 // driven by the static nonlinearity, not by stiffness).
+                // ngspice's NIiter has no line search, so a step's first
+                // attempt runs plain Newton; only its retry after a Newton
+                // failure is globalized, ahead of the timestep cut.
                 let globalization_active = !is_strictly_linear_transient
                     && ((self.config.spice_dialect != SpiceDialect::Xyce
-                        && circuit.has_nonlinear_devices())
+                        && circuit.has_nonlinear_devices()
+                        && merit_globalization_retry)
                         || (self.config.spice_dialect == SpiceDialect::Xyce
                             && circuit.has_xyce_core_inductors()
                             && uses_xyce_nox_status));
@@ -10214,6 +10223,23 @@ impl Engine {
                     had_solver_candidate = true;
                     converged = true;
                 }
+            }
+
+            if !converged
+                && !merit_globalization_retry
+                && self.config.spice_dialect != SpiceDialect::Xyce
+                && !is_strictly_linear_transient
+                && circuit.has_nonlinear_devices()
+            {
+                // Spectre-style fallback: retry the same step, order and
+                // timestep with the merit-gated globalization before the
+                // timestep is cut.
+                total_failed_attempts += 1;
+                total_merit_retries += 1;
+                merit_retry_pending = true;
+                restore_rejected_transient_nonlinear_state!();
+                total_postloop_nanos += postloop_phase_start.elapsed().as_nanos();
+                continue;
             }
 
             if !converged {
@@ -13138,9 +13164,10 @@ impl Engine {
         }
         let transient_wall = transient_wall_start.elapsed();
         log::debug!(
-            "Transient Newton phases: {} step attempts, {} merit trials, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, acceptance {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
+            "Transient Newton phases: {} step attempts, {} merit trials, {} merit retries, {} failed attempts (v={} d={} r={}), top {:.3}s, setup {:.3}s, stamp {:.3}s, solve {:.3}s, merit {:.3}s, postsolve {:.3}s, postloop {:.3}s, trunc {:.3}s, trap-trial {:.3}s, acceptance {:.3}s, tail {:.3}s, middle {:.3}s, other {:.3}s (wall {:.3}s)",
             total_step_attempts,
             total_merit_trials,
+            total_merit_retries,
             total_failed_attempts,
             failed_voltage_conv,
             failed_device_conv,
