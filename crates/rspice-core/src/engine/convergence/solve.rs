@@ -2448,17 +2448,9 @@ impl Engine {
         node_constraints: &[StartupVoltageConstraint],
         abort: &dyn AbortSignal,
     ) -> Result<TransientOperatingPointSolution, SimulationError> {
-        let node_hints = &hints.constraints;
         let size = circuit.matrix_size();
-        let gmin_floor =
-            if self.config.spice_dialect == SpiceDialect::Xyce && !node_hints.is_empty() {
-                0.0
-            } else {
-                self.transient_operating_point_nodal_gmin_floor(circuit)
-            };
-        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
-        let mut use_transient_current_seed = false;
-        let mut solution = match self.linear_presolve_for_guess_with_linear_stamp(
+        let mut current_seeded_inductors = false;
+        let linear_guess = match self.linear_presolve_for_guess_with_linear_stamp(
             circuit,
             matrix,
             |circuit, matrix, rhs| {
@@ -2489,12 +2481,83 @@ impl Engine {
                     },
                 );
                 if seeded.is_some() {
-                    use_transient_current_seed = true;
+                    current_seeded_inductors = true;
                 }
                 seeded.unwrap_or_else(|| vec![0.0; size])
             }
             None => vec![0.0; size],
         };
+        // Xyce's transient operating point starts its Newton solve from the
+        // zero solution with the `.IC` values written in (N_ANP_Transient.C:
+        // 917-931, N_IO_InitialConditions.C:249-253), as its DC operating
+        // point does (see `solve_nonlinear_with_node_hints_and_abort`). The
+        // linear seed can instead put a junction deep in forward bias, such
+        // as a transistor's base at its drive rail over a collector at
+        // ground: Newton walks that junction down by about one emission
+        // voltage per iteration, and its exponential conductance leaves the
+        // matrix singular before the walk arrives. A failed zero start
+        // retries from the linear seed.
+        if self.config.spice_dialect == SpiceDialect::Xyce {
+            let entry_state = circuit.nonlinear_state_snapshot();
+            let zero_start = TransientOpStart {
+                time,
+                guess: vec![0.0; size],
+                current_seeded_inductors,
+            };
+            match self.solve_nonlinear_transient_op_from_start(
+                circuit,
+                matrix,
+                zero_start,
+                hints,
+                node_constraints,
+                abort,
+            ) {
+                Err(error) if Self::is_recoverable_startup_error(&error) && !abort.is_aborted() => {
+                    circuit.restore_nonlinear_state(entry_state);
+                    log::debug!(
+                        "Xyce-compatible zero-start transient operating point failed ({error}); retrying from the linear startup seed."
+                    );
+                }
+                outcome => return outcome,
+            }
+        }
+        self.solve_nonlinear_transient_op_from_start(
+            circuit,
+            matrix,
+            TransientOpStart {
+                time,
+                guess: linear_guess,
+                current_seeded_inductors,
+            },
+            hints,
+            node_constraints,
+            abort,
+        )
+    }
+
+    fn solve_nonlinear_transient_op_from_start(
+        &self,
+        circuit: &mut CircuitData,
+        matrix: &mut StaticMatrix,
+        start: TransientOpStart,
+        hints: &StartupVoltageHints,
+        node_constraints: &[StartupVoltageConstraint],
+        abort: &dyn AbortSignal,
+    ) -> Result<TransientOperatingPointSolution, SimulationError> {
+        let TransientOpStart {
+            time,
+            guess: mut solution,
+            current_seeded_inductors: mut use_transient_current_seed,
+        } = start;
+        let node_hints = &hints.constraints;
+        let size = circuit.matrix_size();
+        let gmin_floor =
+            if self.config.spice_dialect == SpiceDialect::Xyce && !node_hints.is_empty() {
+                0.0
+            } else {
+                self.transient_operating_point_nodal_gmin_floor(circuit)
+            };
+        let junction_gmin = self.effective_device_junction_gmin(gmin_floor);
 
         Self::seed_node_voltage_hints(circuit, &mut solution, node_hints);
 
@@ -2781,6 +2844,15 @@ impl Engine {
     }
 }
 
+/// Where a transient operating-point Newton solve starts: the analysis time,
+/// the initial guess, and whether ideal inductor shorts give way to the
+/// current-seeded startup equations.
+struct TransientOpStart {
+    time: Value,
+    guess: Vec<Value>,
+    current_seeded_inductors: bool,
+}
+
 #[cfg(test)]
 mod correction_constraint_tests {
     use super::*;
@@ -2896,6 +2968,49 @@ mod correction_constraint_tests {
             let point = operating_point(deck);
             assert!(voltage(&point, "b") > 0.4, "{deck}: {point:?}");
             assert!(voltage(&point, "c").abs() < 1e-6, "{deck}: {point:?}");
+        }
+    }
+
+    #[test]
+    fn a_xyce_dialect_transient_operating_point_starts_from_zero() {
+        use crate::engine::SimulationConfig;
+        use crate::netlist::Netlist;
+        // The linear seed puts the base at the 5 V drive over a collector at
+        // ground, and the base-collector conductance there leaves the matrix
+        // singular beside the 100 GOhm divider. Xyce 7.10 starts its tran OP
+        // from zero: V(b) = 0.834811494, V(c) = -0.0647992803.
+        let netlist = Netlist::parse(
+            "zero start\nV1 a 0 5\nR1 a b 220\nQ1 c b 0 qm\nR2 c 0 50\nR3 c d 1e11\nR4 d 0 1e11\n\
+             .model qm NPN(IS=1.3e-14 BF=150 NF=0.9 NR=0.99 RB=6.848 IRB=0.004878 ISE=5e-15 NE=1.3 BR=8.5 ISC=3e-13 NC=1.484 VAF=80 VAR=14 IKF=0.9 IKR=0.11)\n.end\n",
+        )
+        .unwrap();
+        let engine = Engine::new(SimulationConfig {
+            spice_dialect: SpiceDialect::Xyce,
+            ..Default::default()
+        })
+        .resolved_for_netlist(&netlist);
+        let mut circuit = engine.build_circuit(&netlist).unwrap();
+        let mut matrix = engine.build_matrix(&circuit).unwrap();
+        circuit.link_indices(&matrix);
+        let point = engine
+            .solve_nonlinear_transient_op_with_node_hints_and_abort(
+                &mut circuit,
+                &mut matrix,
+                0.0,
+                &StartupVoltageHints {
+                    constraints: Vec::new(),
+                    has_nodesets: false,
+                },
+                &[],
+                &crate::NoAbort,
+            )
+            .expect("the Xyce-dialect transient operating point converges");
+        for (node, xyce) in [("b", 0.834811494), ("c", -0.0647992803)] {
+            let value = point.values[circuit.get_node_by_name(node).unwrap() - 1];
+            assert!(
+                (value - xyce).abs() <= 1e-3 * xyce.abs() + 1e-6,
+                "V({node}) = {value}, Xyce {xyce}"
+            );
         }
     }
 
