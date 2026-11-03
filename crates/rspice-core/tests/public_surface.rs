@@ -541,12 +541,16 @@ const MAX_PUBLIC_ITEMS: usize = 5243;
 // two: the builder (`rspice-core` engine/builder.rs) holds a Xyce-dialect
 // `OFF` instance through Xyce's initFixFlag, and the circuit store (circuit/
 // storage/nonlinear.rs) begins each classic MOS load with it. The census is
-// 1,609, with no slack.
+// 1,609.
 // `Netlist::retain_model_parameter` adds one: the engine's control host keeps
 // the model parameter a script's `altermod` set through a later replay of the
 // source, as `retain_device_parameter` keeps what `alter` set. The census is
-// 1,610, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1610;
+// 1,610.
+// `Bjt::has_reciprocal_transport` adds one: the DC Newton loop (`rspice-core`
+// engine/convergence/damping.rs) projects onto the no-gain box only while
+// every transistor's forward and reverse transport currents match. The
+// census is 1,611, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1611;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
