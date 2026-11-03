@@ -156,6 +156,10 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
                         }
                     }
                     ui.end_row();
+                    // The project column is as wide as its widest choice, so
+                    // no row shows its choice cut.
+                    let select_width =
+                        super::review_primitives::fitted_select_width(ui, &severity_options());
                     let mut category: Option<DrcRuleCategory> = None;
                     for rule in DrcViolationType::ALL {
                         if category != Some(rule.category()) {
@@ -167,17 +171,33 @@ fn rule_table(ui: &mut Ui, session: &mut RuleSetupDialogState, editable: bool) {
                             );
                             ui.end_row();
                         }
-                        rule_row(ui, session, rule, editable);
+                        rule_row(ui, session, rule, editable, select_width);
                     }
                 });
         });
 }
+
+/// What a project-severity option says. The inheriting one is "Default":
+/// the Default column beside the select already says which severity that is,
+/// and "Default (Warning)" was cut to fit the column on half the rows.
+fn severity_options() -> Vec<String> {
+    std::iter::once(INHERIT_DEFAULT.to_owned())
+        .chain(
+            DrcSeverity::ALL
+                .iter()
+                .map(|severity| severity.display_name().to_owned()),
+        )
+        .collect()
+}
+
+const INHERIT_DEFAULT: &str = "Default";
 
 fn rule_row(
     ui: &mut Ui,
     session: &mut RuleSetupDialogState,
     rule: DrcViolationType,
     editable: bool,
+    select_width: f32,
 ) {
     let entry = rule.rule();
     ui.label(entry.title).on_hover_text(entry.explanation);
@@ -186,15 +206,7 @@ fn rule_row(
 
     let effective = session.draft.effective_severity(rule);
     let decided = session.draft.severity(rule).is_some();
-    let mut options = vec![format!(
-        "Default ({})",
-        entry.default_severity.display_name()
-    )];
-    options.extend(
-        DrcSeverity::ALL
-            .iter()
-            .map(|severity| severity.display_name().to_owned()),
-    );
+    let options = severity_options();
     let disabled = refused_options(rule);
     let selected = if decided {
         effective.display_name().to_owned()
@@ -209,7 +221,7 @@ fn rule_row(
             &selected,
             &options,
             &disabled,
-            120.0,
+            select_width,
         );
         if let Some(index) = picked {
             let result = match index {
@@ -407,5 +419,14 @@ mod tests {
         }
         assert!(texts.iter().all(|(text, _)| text != "Floor"));
         let _ = at(UNCHANGED);
+        // Every project select shows its whole choice, and the inheriting
+        // one does not restate the Default column beside it.
+        let _ = at(INHERIT_DEFAULT);
+        for (text, _) in &texts {
+            assert!(
+                !text.contains('\u{2026}') && !text.starts_with("Default ("),
+                "a severity reads {text:?}"
+            );
+        }
     }
 }

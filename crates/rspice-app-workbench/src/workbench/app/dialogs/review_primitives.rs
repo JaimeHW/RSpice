@@ -15,6 +15,28 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::Problem;
 
+/// The width a select needs to show the widest of `options` whole: the kit's
+/// select starts its value 8 points into the well and keeps 24 clear at the
+/// right for its chevron. A select laid at a guessed width cut its longer
+/// choices to "Current revisio…carried forward".
+pub fn fitted_select_width<S: AsRef<str>>(ui: &Ui, options: &[S]) -> f32 {
+    let font = theme::field_sans();
+    let widest = options
+        .iter()
+        .map(|option| {
+            ui.painter()
+                .layout_no_wrap(
+                    option.as_ref().to_owned(),
+                    font.clone(),
+                    egui::Color32::PLACEHOLDER,
+                )
+                .size()
+                .x
+        })
+        .fold(0.0_f32, f32::max);
+    (widest + 8.0 + 24.0).ceil()
+}
+
 pub const PURPOSE_HEIGHT: f32 = 35.0;
 
 pub fn purpose_line(ui: &mut Ui, description: &str) {
