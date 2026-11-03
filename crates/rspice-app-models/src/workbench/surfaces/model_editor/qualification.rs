@@ -119,7 +119,7 @@ pub(super) fn qualification_plan_dialog(
                         DisplayCell::mono(&row.vectors),
                         DisplayCell::plain(&row.desktop),
                         DisplayCell::plain(&row.wasm),
-                        DisplayCell::mono(&row.reference_error),
+                        row.reference_error.clone(),
                         row.status.clone(),
                     ]
                 })

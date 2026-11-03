@@ -218,6 +218,152 @@ fn qualification_selection_falls_back_deterministically() {
     assert!(plan.selected_vector_id.is_empty());
 }
 
+/// The open candidate with one suite of one vector, and one platform's run of
+/// it recorded against the open source, passing or not.
+#[cfg(not(target_arch = "wasm32"))]
+fn one_platform_ran(
+    platform: QualificationPlatform,
+    passed: bool,
+) -> (FeatureHarness<ModelsFeature>, PersistedModelRecords) {
+    use crate::state::model_library::{
+        MODEL_QUALIFICATION_SCHEMA_VERSION, PlatformQualificationOutcome,
+        QualificationPlatformVectorOutcome,
+    };
+    use rspice_model_library::qualification::ReferenceErrorEvidence;
+
+    let app = app_with_open_candidate();
+    let draft = app
+        .state
+        .model_editor
+        .draft
+        .as_ref()
+        .expect("open candidate");
+    let source = ModelSourceEvidenceBinding {
+        model_id: draft.model_name.clone(),
+        source_id: Some(draft.source_id),
+        source_digest: draft.base_source_digest,
+        source_revision: draft.base_source_revision,
+    };
+    let input_digest = crate::product::ContentDigest::from_bytes([0x61; 32]);
+    let suite = QualificationSuite {
+        schema_version: MODEL_QUALIFICATION_SCHEMA_VERSION,
+        id: "worker".to_owned(),
+        name: "Worker transport proof".to_owned(),
+        revision: crate::product::ObjectRevision::INITIAL,
+        vectors: vec![QualificationVector {
+            id: "dc-001".to_owned(),
+            name: "Forward-biased diode at 1 mA".to_owned(),
+            source: source.clone(),
+            model_source: Vec::new(),
+            model_section: None,
+            execution_model_source: Vec::new(),
+            executable_input: Vec::new(),
+            input_digest,
+            analysis: QualificationAnalysis::DcOperatingPoint,
+            outputs: Vec::new(),
+            references: Vec::new(),
+        }],
+    };
+    let observed = if passed { 0.6550 } else { 0.7 };
+    let reference = ReferenceErrorEvidence::try_new("v(a)", 0.6549, observed, 0.001, 0.0)
+        .expect("a finite reference");
+    let run = QualificationPlatformRun {
+        schema_version: MODEL_QUALIFICATION_SCHEMA_VERSION,
+        platform,
+        source,
+        suite_id: suite.id.clone(),
+        suite_revision: suite.revision,
+        vector_outcomes: vec![QualificationPlatformVectorOutcome {
+            vector_id: "dc-001".to_owned(),
+            input_digest,
+            outcome: PlatformQualificationOutcome {
+                platform,
+                references: vec![reference],
+                failure: None,
+                passed,
+            },
+        }],
+        passed,
+    };
+    let mut qualification = ModelQualificationState::default();
+    qualification.suites.push(suite);
+    qualification.platform_runs.push(run);
+    let records = PersistedModelRecords {
+        metadata: None,
+        qualification: Some(qualification),
+        metadata_error: None,
+        qualification_error: None,
+    };
+    (app, records)
+}
+
+/// A vector that passed on the one platform that ran it counts as passed in
+/// the row's Status, the section header and the rail, and every column says
+/// "not run" the same way and in the same face.
+///
+/// In the browser, after a WebAssembly pass, the row said Desktop "no run",
+/// WASM "1 pass", Reference error "not available" in monospace and Status
+/// "not run", while the header said "0 / 1 WebAssembly" and the rail
+/// "Tests 0/1": all three counted cross-platform evidence, which exists only
+/// once both platforms have run.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn a_pass_one_platform_recorded_counts_in_the_row_the_header_and_the_rail() {
+    let (mut app, records) = one_platform_ran(QualificationPlatform::WebAssembly, true);
+    let rows = qualification_rows(&app.cx(), &records);
+    let [row] = rows.as_slice() else {
+        panic!("one suite, one row: {rows:?}");
+    };
+    assert_eq!(row.desktop, "not run");
+    assert_eq!(row.wasm, "1 pass");
+    assert_eq!(row.status, DisplayCell::plain("pass"));
+    assert!(
+        row.reference_error.mono && row.reference_error.text.ends_with('%'),
+        "a measured error is a number, set in the numeric face: {:?}",
+        row.reference_error
+    );
+    assert_eq!(
+        section_header_fact(&app.cx(), &records, ModelEditorSection::Tests).as_deref(),
+        Some("1 / 1 WebAssembly")
+    );
+    assert_eq!(
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Tests).as_deref(),
+        Some("1/1")
+    );
+
+    // The desktop's own pass counts the same way, and a failure on either is
+    // a failure of the suite.
+    let (mut app, records) = one_platform_ran(QualificationPlatform::Desktop, true);
+    assert_eq!(
+        navigation_meta(&app.cx(), &records, ModelEditorSection::Tests).as_deref(),
+        Some("1/1")
+    );
+    let (mut app_failed, failed) = one_platform_ran(QualificationPlatform::WebAssembly, false);
+    let rows = qualification_rows(&app_failed.cx(), &failed);
+    assert_eq!(
+        rows[0].status,
+        DisplayCell::toned("1 failed", MetricTone::Error)
+    );
+    assert_eq!(
+        navigation_meta(&app_failed.cx(), &failed, ModelEditorSection::Tests).as_deref(),
+        Some("0/1")
+    );
+
+    // Nothing ran: one wording, one proportional face, in every column.
+    let (_, mut unrun) = one_platform_ran(QualificationPlatform::Desktop, true);
+    unrun
+        .qualification
+        .as_mut()
+        .expect("qualification")
+        .platform_runs
+        .clear();
+    let rows = qualification_rows(&app.cx(), &unrun);
+    assert_eq!(rows[0].desktop, "not run");
+    assert_eq!(rows[0].wasm, "not run");
+    assert_eq!(rows[0].reference_error, DisplayCell::plain("not run"));
+    assert_eq!(rows[0].status, DisplayCell::plain("not run"));
+}
+
 #[test]
 fn retained_platform_runs_project_before_cross_platform_evidence_exists() {
     let source_digest = crate::product::ContentDigest::from_bytes([0x51; 32]);
@@ -284,7 +430,7 @@ fn retained_platform_runs_project_before_cross_platform_evidence_exists() {
     assert!(state.evidence.is_empty());
     assert_eq!(platform_run_summary(retained_desktop), "1 pass");
     assert!(missing_wasm.is_none());
-    assert_eq!(platform_run_summary(missing_wasm), "no run");
+    assert_eq!(platform_run_summary(missing_wasm), "not run");
     assert!(
         exact_platform_run(
             &state,
@@ -368,10 +514,7 @@ fn the_navigation_rail_projects_only_section_owned_counts() {
     );
     assert_eq!(
         navigation_meta(&app.cx(), &records, ModelEditorSection::Tests),
-        Some(format!(
-            "{}/{}",
-            qualification.desktop_passed, qualification.total
-        ))
+        Some(format!("{}/{}", qualification.passed, qualification.total))
     );
     for section in [
         ModelEditorSection::Statistics,

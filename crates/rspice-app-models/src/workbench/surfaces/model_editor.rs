@@ -23,8 +23,8 @@ use crate::state::model_library::{
     ApprovalDecision, CompatibilityDisposition, ConsumerChange, LicenseScope, LookupInterpolation,
     ModelDefinitionMetadata, ModelQualificationState, ModelReleaseCandidate,
     ModelSectionQualification, ModelSourceEvidenceBinding, ParameterDefinition, ParameterSource,
-    QualificationAnalysis, QualificationEvidence, QualificationPlatform, QualificationPlatformRun,
-    QualificationProbe, QualificationSample, QualificationSuite, QualificationVector,
+    QualificationAnalysis, QualificationPlatform, QualificationPlatformRun, QualificationProbe,
+    QualificationSample, QualificationSuite, QualificationVector,
     QualificationVectorDispositionCause, QualificationVectorRequiredAction,
     StatisticalDistribution, StatisticalHierarchyScope, TemperatureExtrapolationPolicy,
     TemperatureLawRepresentation,
@@ -154,7 +154,7 @@ struct QualificationRow {
     vectors: String,
     desktop: String,
     wasm: String,
-    reference_error: String,
+    reference_error: DisplayCell,
     status: DisplayCell,
 }
 
@@ -575,12 +575,11 @@ fn navigation_meta(
                 .map_or(0, |metadata| metadata.sections.len())
                 .to_string(),
         ),
+        // Vectors that passed wherever they ran: a pass this browser recorded
+        // counts as surely as one recorded on a desktop.
         ModelEditorSection::Tests => {
             let qualification = qualification_totals(cx, records);
-            Some(format!(
-                "{}/{}",
-                qualification.desktop_passed, qualification.total
-            ))
+            Some(format!("{}/{}", qualification.passed, qualification.total))
         }
         ModelEditorSection::Statistics
         | ModelEditorSection::Temperature
@@ -620,9 +619,18 @@ fn section_header_fact(
     }
 }
 
+/// What the Tests section counts, read off the recorded platform runs bound
+/// to the open source.
+///
+/// Each platform's run is its own record: a browser session records a
+/// WebAssembly run and no desktop one, and a desktop session the reverse.
+/// Cross-platform evidence exists only once both have run, so counting from
+/// it said "0 / 1" beside a row that had just passed in the browser.
 #[derive(Debug, Clone, PartialEq, Eq)]
 struct QualificationTotals {
     total: usize,
+    /// Vectors that ran on at least one platform and failed on none.
+    passed: usize,
     desktop_passed: usize,
     wasm_passed: usize,
 }
@@ -631,50 +639,31 @@ fn qualification_totals(
     cx: &Cx<'_, ModelsFeature>,
     records: &PersistedModelRecords,
 ) -> QualificationTotals {
-    let Some(qualification) = records.qualification.as_ref() else {
-        return QualificationTotals {
-            total: 0,
-            desktop_passed: 0,
-            wasm_passed: 0,
-        };
+    let mut totals = QualificationTotals {
+        total: 0,
+        passed: 0,
+        desktop_passed: 0,
+        wasm_passed: 0,
     };
+    let Some(qualification) = records.qualification.as_ref() else {
+        return totals;
+    };
+    totals.total = qualification
+        .suites
+        .iter()
+        .map(|suite| suite.vectors.len())
+        .sum();
     if records.qualification_error.is_some() {
-        return QualificationTotals {
-            total: qualification
-                .suites
-                .iter()
-                .map(|suite| suite.vectors.len())
-                .sum(),
-            desktop_passed: 0,
-            wasm_passed: 0,
-        };
+        return totals;
     }
     let source = cx.state.model_editor.draft.as_ref();
-    let mut total = 0;
-    let mut desktop_passed = 0;
-    let mut wasm_passed = 0;
     for suite in &qualification.suites {
-        total += suite.vectors.len();
-        if let Some(evidence) = bound_suite_evidence(qualification, suite, source) {
-            desktop_passed += evidence
-                .vector_outcomes
-                .iter()
-                .filter(|outcome| platform_outcome_passed(outcome, QualificationPlatform::Desktop))
-                .count();
-            wasm_passed += evidence
-                .vector_outcomes
-                .iter()
-                .filter(|outcome| {
-                    platform_outcome_passed(outcome, QualificationPlatform::WebAssembly)
-                })
-                .count();
-        }
+        let runs = SuiteRuns::bound(qualification, suite, source);
+        totals.passed += runs.verdict().passed;
+        totals.desktop_passed += passed_on(runs.desktop);
+        totals.wasm_passed += passed_on(runs.wasm);
     }
-    QualificationTotals {
-        total,
-        desktop_passed,
-        wasm_passed,
-    }
+    totals
 }
 
 fn workspace_body(
@@ -1397,7 +1386,7 @@ fn qualification_table(ui: &mut Ui, cx: &Cx<'_, ModelsFeature>, records: &Persis
                 DisplayCell::mono(row.vectors),
                 DisplayCell::plain(row.desktop),
                 DisplayCell::plain(row.wasm),
-                DisplayCell::mono(row.reference_error),
+                row.reference_error,
                 row.status,
             ]
         })
@@ -1424,45 +1413,110 @@ fn qualification_rows(
         .iter()
         .map(|suite| {
             let total = suite.vectors.len();
-            let evidence = bound_suite_evidence(state, suite, source);
-            let desktop = bound_platform_run(state, suite, source, QualificationPlatform::Desktop);
-            let wasm = bound_platform_run(state, suite, source, QualificationPlatform::WebAssembly);
-            let worst = evidence.and_then(worst_relative_error);
-            // The suite's verdict. A suite that passed is the normal case and
-            // reads in the same ink as the rest of its row; a suite with
-            // failures is the one the column exists to find. A state too
-            // broken to read is not a verdict at all, so it carries a mark.
+            let runs = SuiteRuns::bound(state, suite, source);
+            let verdict = runs.verdict();
+            // The suite's verdict, from what its platforms recorded. A suite
+            // that passed is the normal case and reads in the same ink as the
+            // rest of its row; a suite with failures is the one the column
+            // exists to find. A state too broken to read is not a verdict at
+            // all, so it carries a mark.
             let status = if records.qualification_error.is_some() {
                 DisplayCell::problem("unreadable", Problem::Failure)
-            } else if evidence.is_none() {
-                DisplayCell::plain("not run")
-            } else if evidence.is_some_and(|evidence| evidence.passed) {
-                DisplayCell::plain("pass")
+            } else if verdict.failed > 0 {
+                DisplayCell::toned(format!("{} failed", verdict.failed), MetricTone::Error)
+            } else if verdict.passed == 0 {
+                DisplayCell::plain(NOT_RUN)
+            } else if verdict.passed < total {
+                DisplayCell::plain(format!("{} / {total} pass", verdict.passed))
             } else {
-                let unresolved = evidence.map_or(total, |evidence| {
-                    evidence
-                        .vector_outcomes
-                        .iter()
-                        .filter(|outcome| !outcome.passed)
-                        .count()
-                });
-                DisplayCell::toned(
-                    format!("{unresolved} unresolved or failed"),
-                    MetricTone::Error,
-                )
+                DisplayCell::plain("pass")
             };
             QualificationRow {
                 suite: suite.name.clone(),
                 vectors: total.to_string(),
-                desktop: platform_run_summary(desktop),
-                wasm: platform_run_summary(wasm),
-                reference_error: worst
-                    .map(format_percentage)
-                    .unwrap_or_else(|| "not available".to_owned()),
+                desktop: platform_run_summary(runs.desktop),
+                wasm: platform_run_summary(runs.wasm),
+                // A measured error is a number and is set like one; the words
+                // for its absence are the same words, in the same face, as
+                // every other column's.
+                reference_error: runs.worst_relative_error().map_or_else(
+                    || DisplayCell::plain(NOT_RUN),
+                    |worst| DisplayCell::mono(format_percentage(worst)),
+                ),
                 status,
             }
         })
         .collect()
+}
+
+/// What every column of the Tests table says of a platform, a measurement or
+/// a suite that has not run.
+const NOT_RUN: &str = "not run";
+
+/// One suite's recorded platform runs, bound to the open source.
+#[derive(Debug, Clone, Copy)]
+struct SuiteRuns<'a> {
+    desktop: Option<&'a QualificationPlatformRun>,
+    wasm: Option<&'a QualificationPlatformRun>,
+}
+
+/// How a suite's vectors stand across the platforms that ran them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SuiteVerdict {
+    /// Ran on at least one platform and failed on none.
+    passed: usize,
+    /// Failed on at least one platform.
+    failed: usize,
+}
+
+impl<'a> SuiteRuns<'a> {
+    fn bound(
+        state: &'a ModelQualificationState,
+        suite: &QualificationSuite,
+        draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
+    ) -> Self {
+        Self {
+            desktop: bound_platform_run(state, suite, draft, QualificationPlatform::Desktop),
+            wasm: bound_platform_run(state, suite, draft, QualificationPlatform::WebAssembly),
+        }
+    }
+
+    fn runs(self) -> impl Iterator<Item = &'a QualificationPlatformRun> {
+        self.desktop.into_iter().chain(self.wasm)
+    }
+
+    fn verdict(self) -> SuiteVerdict {
+        let mut vectors: BTreeMap<String, bool> = BTreeMap::new();
+        for outcome in self.runs().flat_map(|run| &run.vector_outcomes) {
+            let passed = vectors
+                .entry(outcome.vector_id.to_ascii_lowercase())
+                .or_insert(true);
+            *passed &= outcome.outcome.passed;
+        }
+        let passed = vectors.values().filter(|passed| **passed).count();
+        SuiteVerdict {
+            passed,
+            failed: vectors.len() - passed,
+        }
+    }
+
+    fn worst_relative_error(self) -> Option<f64> {
+        self.runs()
+            .flat_map(|run| &run.vector_outcomes)
+            .flat_map(|outcome| &outcome.outcome.references)
+            .map(|reference| reference.relative_error.get())
+            .max_by(f64::total_cmp)
+    }
+}
+
+/// Vectors one platform's run passed.
+fn passed_on(run: Option<&QualificationPlatformRun>) -> usize {
+    run.map_or(0, |run| {
+        run.vector_outcomes
+            .iter()
+            .filter(|outcome| outcome.outcome.passed)
+            .count()
+    })
 }
 
 fn bound_platform_run<'a>(
@@ -1510,62 +1564,9 @@ fn exact_platform_run<'a>(
 
 fn platform_run_summary(run: Option<&QualificationPlatformRun>) -> String {
     run.map_or_else(
-        || "no run".to_owned(),
-        |run| {
-            format!(
-                "{} pass",
-                run.vector_outcomes
-                    .iter()
-                    .filter(|outcome| outcome.outcome.passed)
-                    .count()
-            )
-        },
+        || NOT_RUN.to_owned(),
+        |run| format!("{} pass", passed_on(Some(run))),
     )
-}
-
-fn bound_suite_evidence<'a>(
-    state: &'a ModelQualificationState,
-    suite: &QualificationSuite,
-    draft: Option<&crate::workbench::documents::model_editor::ModelEditorDraft>,
-) -> Option<&'a QualificationEvidence> {
-    let draft = draft?;
-    if draft.definition_is_dirty() {
-        return None;
-    }
-    let mut matches = state.evidence.iter().filter(|evidence| {
-        evidence.suite_id.eq_ignore_ascii_case(&suite.id)
-            && evidence.suite_revision == suite.revision
-            && evidence
-                .source
-                .model_id
-                .eq_ignore_ascii_case(&draft.model_name)
-            && evidence.source.source_id == Some(draft.source_id)
-            && evidence.source.source_digest == draft.base_source_digest
-            && evidence.source.source_revision == draft.base_source_revision
-    });
-    let first = matches.next()?;
-    matches.next().is_none().then_some(first)
-}
-
-fn platform_outcome_passed(
-    outcome: &crate::state::model_library::QualificationVectorOutcome,
-    platform: QualificationPlatform,
-) -> bool {
-    outcome
-        .platforms
-        .iter()
-        .find(|value| value.platform == platform)
-        .is_some_and(|value| value.passed)
-}
-
-fn worst_relative_error(evidence: &QualificationEvidence) -> Option<f64> {
-    evidence
-        .vector_outcomes
-        .iter()
-        .flat_map(|vector| &vector.platforms)
-        .flat_map(|platform| &platform.references)
-        .map(|reference| reference.relative_error.get())
-        .max_by(f64::total_cmp)
 }
 
 fn format_percentage(value: f64) -> String {
