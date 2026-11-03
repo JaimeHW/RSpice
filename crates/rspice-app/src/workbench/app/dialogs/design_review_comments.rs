@@ -534,7 +534,7 @@ fn review_body(
                     "Comment status filter",
                     &dialog.status_filter.label(open_count, all_count),
                     &status_options,
-                    190.0,
+                    super::review_primitives::fitted_select_width(ui, &status_options),
                 ) {
                     dialog.status_filter = DesignReviewStatusFilter::ALL[index];
                 }
@@ -548,7 +548,7 @@ fn review_body(
                     "Comment revision scope",
                     dialog.revision_scope.label(),
                     &scope_options,
-                    220.0,
+                    super::review_primitives::fitted_select_width(ui, &scope_options),
                 ) {
                     dialog.revision_scope = DesignReviewRevisionScope::ALL[index];
                 }
@@ -1442,5 +1442,42 @@ mod tests {
         };
         assert!(says(NO_THREADS));
         assert!(says(NO_THREAD_SELECTED), "Post reply does not say why");
+    }
+
+    /// The filter selects show their whole choice. The revision scope was a
+    /// 220 pt select that read "Current revisio…carried forward".
+    #[test]
+    fn the_filter_selects_show_their_whole_choice() {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        let mut app = RSpiceApp::test_instance();
+        open_design_review_comments(&mut app.state);
+        let mut shapes = Vec::new();
+        for _ in 0..3 {
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ctx| app.render_design_review_comments_dialog(ctx),
+                )
+                .shapes;
+        }
+        let painted = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some(text.galley.text().to_owned()),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let scope = DesignReviewRevisionScope::CurrentAndCarried.label();
+        assert!(
+            painted.iter().any(|text| text == scope),
+            "the scope select does not read {scope:?}: {painted:?}"
+        );
     }
 }
