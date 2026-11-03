@@ -13973,6 +13973,35 @@ mod tests {
         }
     }
 
+    /// ngspice-46 lowers a PINDLY output to the shortest of its CASE's
+    /// delays (frontend/udevices.c:955, logicexp.c:1754 extract_delay): the
+    /// 74HCT125 of behav-tristate.cir, DELAY(-1,15NS,28NS) among
+    /// DELAY(-1,16NS,29NS), drives its output 15 ns after the input changes.
+    #[test]
+    fn pspice_u_pindly_takes_the_shortest_case_delay() {
+        let netlist = Netlist::parse(
+            "pspice u pindly shortest delay\n\
+             U24 PINDLY(1,1,0) $G_DPWR $G_DGND internal oebar output IO_HCT\n\
+             + TRISTATE:\n\
+             +   ENABLE LO = oebar\n\
+             +   output = {CASE(TRN_Z$, DELAY(-1,16NS,28NS), (TRN_LH | TRN_HL), DELAY(-1,15NS,25NS), DELAY(-1,17NS,29NS))}\n\
+             .end\n",
+        )
+        .expect("PSpice PINDLY TRISTATE should lower to d_tristate");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert!(
+                    params
+                        .iter()
+                        .any(|(name, value)| name == "delay" && (*value - 15.0e-9).abs() < 1.0e-21),
+                    "{params:?}"
+                );
+            }
+            other => panic!("expected PINDLY tristate lowering, got {other:?}"),
+        }
+    }
+
     #[test]
     fn pspice_u_pindly_honors_mntymxdly_max_mode() {
         let netlist = Netlist::parse(

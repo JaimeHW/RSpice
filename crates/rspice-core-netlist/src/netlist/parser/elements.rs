@@ -3533,6 +3533,10 @@ impl<'a> PspicePindlySectionParser<'a> {
     }
 }
 
+/// The one delay an output's PINDLY block lowers to: the shortest of its
+/// CASE's `DELAY(min, typ, max)` estimates, as ngspice-46 chooses by default
+/// (frontend/udevices.c:955 ps_use_mntymx 4, "typ + shorter delays";
+/// logicexp.c:1754 extract_delay).
 fn pspice_u_pindly_delay_from_block(block: &str, delay_mode: PspiceUTimingMode) -> Option<Value> {
     let upper = block.to_ascii_uppercase();
     let mut search_start = 0usize;
@@ -3544,7 +3548,7 @@ fn pspice_u_pindly_delay_from_block(block: &str, delay_mode: PspiceUTimingMode) 
             break;
         };
         if let Some(delay) = pspice_u_pindly_delay_args(&rest[..args_end], delay_mode)
-            && selected.is_none_or(|current| delay > current)
+            && selected.is_none_or(|current| delay < current)
         {
             selected = Some(delay);
         }
