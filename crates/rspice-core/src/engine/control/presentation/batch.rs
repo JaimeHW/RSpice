@@ -65,6 +65,25 @@ impl ControlNamedDataset {
         )
     }
 
+    /// Whether the analysis swept its frequency by decade or octave, which
+    /// ngspice records as the scale's GRID_XLOG (spicelib/analysis/acan.c:177,
+    /// noisean.c:284, distoan.c:521, cktsens.c:296, span.c:567).
+    fn log_scale(&self) -> bool {
+        let variation = match &self.command {
+            AnalysisCommand::Ac { variation, .. }
+            | AnalysisCommand::Sp { variation, .. }
+            | AnalysisCommand::Stb { variation, .. }
+            | AnalysisCommand::Disto { variation, .. }
+            | AnalysisCommand::Noise { variation, .. } => variation,
+            AnalysisCommand::Sensitivity {
+                ac_sweep: Some(sweep),
+                ..
+            } => &sweep.variation,
+            _ => return false,
+        };
+        !matches!(variation, crate::netlist::FreqVariation::Lin)
+    }
+
     /// The scale vector's name; a one-point result has none.
     fn scale_vector(&self) -> Option<String> {
         (!matches!(
@@ -252,13 +271,18 @@ impl ControlCircuit {
                 .then(|| vectors.first().map(|(name, _)| name.clone()))
                 .flatten()
         });
+        let grid = if dataset.log_scale() {
+            ", grid = xlog"
+        } else {
+            ""
+        };
         let line = |name: &str, kind: &str| {
-            let mark = if Some(name) == scale.as_deref() {
-                " [default scale]"
+            let (grid, mark) = if Some(name) == scale.as_deref() {
+                (grid, " [default scale]")
             } else {
-                ""
+                ("", "")
             };
-            format!("    {name:<20}: {kind}, {numeric}, {length} long{mark}\n")
+            format!("    {name:<20}: {kind}, {numeric}, {length} long{grid}{mark}\n")
         };
         // A `let` of a dataset vector's name replaces it in the plot.
         let mut lines: Vec<_> = self

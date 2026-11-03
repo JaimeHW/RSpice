@@ -946,6 +946,29 @@ fn display_finds_a_vector_as_vec_get_does() {
     assert!(error.unwrap().contains("no such vector as i(in)"));
 }
 
+/// A decade or octave sweep's scale carries GRID_XLOG, which `display` shows
+/// as `, grid = xlog` (spicelib/analysis/acan.c:177, span.c:567,
+/// frontend/plotting/pvec.c:36); a linear sweep's does not. The lines are
+/// ngspice-46's.
+#[test]
+fn display_marks_a_log_sweeps_scale_xlog() {
+    let (presented, error) = run_until_error(
+        "grids\nV1 in 0 dc 0 ac 1 portnum 1 z0 50\nR1 in out 1k\nR2 out x 3k\n\
+         V2 x 0 dc 0 ac 0 portnum 2 z0 50\n.control\nsp dec 2 1k 10k\ndisplay frequency\n\
+         ac oct 1 1k 4k\ndisplay frequency\nac lin 3 1k 3k\ndisplay frequency\n\
+         .endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "    frequency           : frequency, complex, 3 long, grid = xlog [default scale]",
+            "    frequency           : frequency, complex, 3 long, grid = xlog [default scale]",
+            "    frequency           : frequency, complex, 3 long [default scale]",
+        ]
+    );
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
