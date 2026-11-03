@@ -546,7 +546,7 @@ mod tests {
             (1.0, 1000.0, 10, FrequencySweep::Decade, 31),
             (10.0, 80.0, 2, FrequencySweep::Octave, 7),
             (0.0, 100.0, 3, FrequencySweep::Linear, 3),
-            (0.0, 100.0, 2, FrequencySweep::Linear, 1),
+            (0.0, 100.0, 2, FrequencySweep::Linear, 2),
             (100.0, 100.0, 10, FrequencySweep::Decade, 1),
         ] {
             let spec = AnalysisSpec::Ac {
