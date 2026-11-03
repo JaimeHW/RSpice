@@ -317,9 +317,16 @@ impl ExactHbOperator<'_> {
     }
 
     /// Stream the exact realified Jacobian entries without materializing the
-    /// global matrix. The same stream drives both matvecs and the independent
-    /// componentwise backward-error certificate.
+    /// global matrix. The same stream drives the preconditioner blocks and the
+    /// independent componentwise backward-error certificate.
     fn visit_entries(&self, mut visitor: impl FnMut(usize, usize, Value)) {
+        self.visit_linear_entries(&mut visitor);
+        self.visit_spectral_entries(&mut visitor);
+    }
+
+    /// Stream the per-harmonic entries: the linear network, GMIN and the MNA
+    /// branches.
+    fn visit_linear_entries(&self, visitor: &mut dyn FnMut(usize, usize, Value)) {
         let n = self.num_nodes;
         let h = self.num_components;
         for k in 0..h {
@@ -327,12 +334,12 @@ impl ExactHbOperator<'_> {
             let jw = Complex64::new(0.0, omega_k);
             for &(i, j, g) in self.g_matrix {
                 if i < n && j < n {
-                    self.visit_linear_term(i, k, j, k, Complex64::new(-g, 0.0), &mut visitor);
+                    self.visit_linear_term(i, k, j, k, Complex64::new(-g, 0.0), visitor);
                 }
             }
             for &(i, j, c) in self.c_matrix {
                 if i < n && j < n {
-                    self.visit_linear_term(i, k, j, k, -jw * c, &mut visitor);
+                    self.visit_linear_term(i, k, j, k, -jw * c, visitor);
                 }
             }
             for &(i, j, l) in self.l_matrix {
@@ -342,21 +349,14 @@ impl ExactHbOperator<'_> {
                     } else {
                         Complex64::new(0.0, -1.0 / (omega_k * l))
                     };
-                    self.visit_linear_term(i, k, j, k, -admittance, &mut visitor);
+                    self.visit_linear_term(i, k, j, k, -admittance, visitor);
                 }
             }
             for node in 0..n {
                 if self.non_electrical_nodes.binary_search(&node).is_ok() {
                     continue;
                 }
-                self.visit_linear_term(
-                    node,
-                    k,
-                    node,
-                    k,
-                    Complex64::new(-self.gmin, 0.0),
-                    &mut visitor,
-                );
+                self.visit_linear_term(node, k, node, k, Complex64::new(-self.gmin, 0.0), visitor);
             }
 
             for (branch_index, branch) in self.mna_branches.iter().enumerate() {
@@ -370,7 +370,7 @@ impl ExactHbOperator<'_> {
                         branch_entity,
                         k,
                         Complex64::new(-1.0, 0.0),
-                        &mut visitor,
+                        visitor,
                     );
                     if !matches!(
                         branch,
@@ -383,7 +383,7 @@ impl ExactHbOperator<'_> {
                             node,
                             k,
                             Complex64::new(-1.0, 0.0),
-                            &mut visitor,
+                            visitor,
                         );
                     }
                 }
@@ -395,7 +395,7 @@ impl ExactHbOperator<'_> {
                         branch_entity,
                         k,
                         Complex64::new(1.0, 0.0),
-                        &mut visitor,
+                        visitor,
                     );
                     if !matches!(
                         branch,
@@ -408,7 +408,7 @@ impl ExactHbOperator<'_> {
                             node,
                             k,
                             Complex64::new(1.0, 0.0),
-                            &mut visitor,
+                            visitor,
                         );
                     }
                 }
@@ -419,7 +419,7 @@ impl ExactHbOperator<'_> {
                         branch_entity,
                         k,
                         jw * *inductance,
-                        &mut visitor,
+                        visitor,
                     );
                 }
                 if let ExactMnaBranch::Resistor { resistance, .. } = branch {
@@ -429,32 +429,30 @@ impl ExactHbOperator<'_> {
                         branch_entity,
                         k,
                         Complex64::new(*resistance, 0.0),
-                        &mut visitor,
+                        visitor,
                     );
                 }
             }
             for &(row, column, value) in self.mna_static_entries {
-                self.visit_linear_term(
-                    row,
-                    k,
-                    column,
-                    k,
-                    Complex64::new(-value, 0.0),
-                    &mut visitor,
-                );
+                self.visit_linear_term(row, k, column, k, Complex64::new(-value, 0.0), visitor);
             }
             for &(row, column, inductance) in self.mna_inductance_entries {
-                self.visit_linear_term(row, k, column, k, jw * inductance, &mut visitor);
+                self.visit_linear_term(row, k, column, k, jw * inductance, visitor);
             }
             for network in self.periodic_networks {
                 network
                     .try_visit_direct_entries(jw.im, self.entity_count(), |row, column, value| {
-                        self.visit_linear_term(row, k, column, k, -value, &mut visitor);
+                        self.visit_linear_term(row, k, column, k, -value, visitor);
                     })
                     .expect("validated exact HB distributed network remains representable");
             }
         }
+    }
 
+    /// Stream the periodic conductance and charge couplings, the part of the
+    /// operator whose entry count grows with the square of the harmonic count.
+    fn visit_spectral_entries(&self, visitor: &mut dyn FnMut(usize, usize, Value)) {
+        let h = self.num_components;
         for &(i, j, ref spectrum) in self.g_spectra {
             for k in 0..h {
                 for l in 0..h {
@@ -465,12 +463,12 @@ impl ExactHbOperator<'_> {
                         } else {
                             coefficient.conj()
                         };
-                        self.visit_linear_term(i, k, j, l, -coefficient, &mut visitor);
+                        self.visit_linear_term(i, k, j, l, -coefficient, visitor);
                     }
                 }
                 for m in 1..h {
                     if let Some(&coefficient) = spectrum.get(k + m) {
-                        self.visit_antilinear_term(i, k, j, m, -coefficient, &mut visitor);
+                        self.visit_antilinear_term(i, k, j, m, -coefficient, visitor);
                     }
                 }
             }
@@ -486,18 +484,20 @@ impl ExactHbOperator<'_> {
                         } else {
                             coefficient.conj()
                         };
-                        self.visit_linear_term(i, k, j, l, -jw * coefficient, &mut visitor);
+                        self.visit_linear_term(i, k, j, l, -jw * coefficient, visitor);
                     }
                 }
                 for m in 1..h {
                     if let Some(&coefficient) = spectrum.get(k + m) {
-                        self.visit_antilinear_term(i, k, j, m, -jw * coefficient, &mut visitor);
+                        self.visit_antilinear_term(i, k, j, m, -jw * coefficient, visitor);
                     }
                 }
             }
         }
     }
 
+    /// The streamed product, the reference [`CollocationCouplings::apply`]
+    /// reproduces and the product a stalled refinement falls back to.
     fn apply(&self, input: &[Complex64]) -> Vec<Complex64> {
         let size = self.entity_count() * self.real_width;
         debug_assert_eq!(input.len(), size);
@@ -612,6 +612,121 @@ impl ExactHbOperator<'_> {
             }
         });
         blocks
+    }
+}
+
+/// The operator's periodic couplings applied through the collocation grid, as
+/// Xyce applies its HB Jacobian (N_LOA_HBLoader.C:264-301): an inverse
+/// transform of each coupled column, the sampled conductance and charge
+/// derivatives, a forward transform of each coupled row.
+///
+/// The product equals the streamed Toeplitz and Hankel entries to rounding:
+/// the stream's couplings past the grid's last harmonic are the grid's own
+/// aliased products. It costs O(pairs * grid) per product instead of
+/// O(pairs * harmonics^2), the term that dominates a Krylov solve.
+struct CollocationCouplings {
+    grid: std::cell::RefCell<HbFft>,
+    conductances: Vec<(usize, usize, Vec<Value>)>,
+    capacitances: Vec<(usize, usize, Vec<Value>)>,
+}
+
+impl CollocationCouplings {
+    fn sample(operator: &ExactHbOperator<'_>, mut grid: HbFft) -> Self {
+        let mut sample = |spectra: &[PeriodicSpectrum]| {
+            spectra
+                .iter()
+                .filter(|(_, _, spectrum)| !spectrum.is_empty())
+                .map(|(row, column, spectrum)| (*row, *column, grid.to_time_domain(spectrum)))
+                .collect::<Vec<_>>()
+        };
+        let conductances = sample(operator.g_spectra);
+        let capacitances = sample(operator.c_spectra);
+        Self {
+            grid: std::cell::RefCell::new(grid),
+            conductances,
+            capacitances,
+        }
+    }
+
+    fn apply(&self, operator: &ExactHbOperator<'_>, input: &[Complex64]) -> Vec<Complex64> {
+        let size = operator.entity_count() * operator.real_width;
+        debug_assert_eq!(input.len(), size);
+        let mut output = vec![Complex64::new(0.0, 0.0); size];
+        operator.visit_linear_entries(&mut |row, column, value| {
+            output[row] += value * input[column];
+        });
+        if self.conductances.is_empty() && self.capacitances.is_empty() {
+            return output;
+        }
+        let entities = operator.entity_count();
+        let components = operator.num_components;
+        let mut grid = self.grid.borrow_mut();
+        let samples = grid.size();
+        // The realified operator is real: apply it to the real and the
+        // imaginary lane of the Krylov vector separately.
+        for lane in [Complex64::new(1.0, 0.0), Complex64::new(0.0, 1.0)] {
+            let part = |value: Complex64| if lane.re == 1.0 { value.re } else { value.im };
+            if input.iter().all(|&value| part(value) == 0.0) {
+                continue;
+            }
+            let mut waves: Vec<Option<Vec<Value>>> = vec![None; entities];
+            for &(_, column, _) in self.conductances.iter().chain(&self.capacitances) {
+                if waves[column].is_none() {
+                    let spectrum = (0..components)
+                        .map(|k| {
+                            let re = part(input[operator.re_idx(column, k)]);
+                            let im = if k > 0 {
+                                part(input[operator.im_idx(column, k)])
+                            } else {
+                                0.0
+                            };
+                            Complex64::new(re, im)
+                        })
+                        .collect::<Vec<_>>();
+                    waves[column] = Some(grid.to_time_domain(&spectrum));
+                }
+            }
+            let mut currents: Vec<Option<Vec<Value>>> = vec![None; entities];
+            let mut charges: Vec<Option<Vec<Value>>> = vec![None; entities];
+            for (couplings, products) in [
+                (&self.conductances, &mut currents),
+                (&self.capacitances, &mut charges),
+            ] {
+                for (row, column, derivative) in couplings {
+                    let wave = waves[*column].as_ref().expect("coupled column sampled");
+                    let product = products[*row].get_or_insert_with(|| vec![0.0; samples]);
+                    for ((product, &slope), &value) in product.iter_mut().zip(derivative).zip(wave)
+                    {
+                        *product += slope * value;
+                    }
+                }
+            }
+            for row in 0..entities {
+                let current = currents[row]
+                    .as_ref()
+                    .map(|wave| grid.to_frequency_domain_n(wave, components - 1));
+                let charge = charges[row]
+                    .as_ref()
+                    .map(|wave| grid.to_frequency_domain_n(wave, components - 1));
+                if current.is_none() && charge.is_none() {
+                    continue;
+                }
+                for k in 0..components {
+                    let mut value = Complex64::new(0.0, 0.0);
+                    if let Some(current) = &current {
+                        value -= current[k];
+                    }
+                    if let Some(charge) = &charge {
+                        value -= Complex64::new(0.0, k as Value * operator.omega0) * charge[k];
+                    }
+                    output[operator.re_idx(row, k)] += lane * value.re;
+                    if k > 0 {
+                        output[operator.im_idx(row, k)] += lane * value.im;
+                    }
+                }
+            }
+        }
+        output
     }
 }
 
@@ -2056,6 +2171,10 @@ impl HbSolver {
             };
             operator.validate()?;
             let one_entry_rows = operator.one_entry_rows();
+            let couplings = CollocationCouplings::sample(
+                &operator,
+                HbFft::try_with_size(self.fft.num_harmonics(), self.fft.size())?,
+            );
             let preconditioner = ExactHbPreconditioner::build(&operator);
             let rhs_complex = rhs
                 .iter()
@@ -2063,7 +2182,7 @@ impl HbSolver {
                 .collect::<Vec<_>>();
             let restart = super::krylov::bounded_gmres_restart(self.config.gmres_restart, size);
             let mut outcome = super::krylov::gmres_with_abort(
-                &|input| operator.apply(input),
+                &|input| couplings.apply(&operator, input),
                 &preconditioner,
                 &rhs_complex,
                 restart,
@@ -2134,7 +2253,14 @@ impl HbSolver {
                 {
                     qualification = Err(rspice_matrix::SolverError::OutOfMemory);
                 }
-                for _ in 0..MAX_REFINEMENTS {
+                // The collocation product rounds relative to each waveform's
+                // peak, and the row scaling below can magnify that past a
+                // small row's acceptance threshold. A refinement that stalls
+                // on it finishes on the streamed entries.
+                let mut streamed_products = false;
+                let mut refinements = 0;
+                while refinements < MAX_REFINEMENTS {
+                    refinements += 1;
                     if matches!(&qualification, Err(rspice_matrix::SolverError::OutOfMemory)) {
                         break;
                     }
@@ -2176,7 +2302,11 @@ impl HbSolver {
                     };
                     let correction = super::krylov::gmres_with_abort(
                         &|input| {
-                            let mut output = operator.apply(input);
+                            let mut output = if streamed_products {
+                                operator.apply(input)
+                            } else {
+                                couplings.apply(&operator, input)
+                            };
                             for (value, &scale) in output.iter_mut().zip(&row_scale) {
                                 *value *= scale;
                             }
@@ -2245,8 +2375,12 @@ impl HbSolver {
                     let improved = refined_report.acceptance_ratio()
                         < previous_acceptance_ratio * MIN_IMPROVEMENT_FACTOR;
                     current_report = refined_report;
-                    if !improved {
-                        break;
+                    if !improved || refinements == MAX_REFINEMENTS {
+                        if streamed_products {
+                            break;
+                        }
+                        streamed_products = true;
+                        refinements = 0;
                     }
                 }
             }
@@ -3739,6 +3873,65 @@ mod exact_matrix_free_tests {
                 mismatch < 1e-3,
                 "krylov {use_krylov}: the Newton step misses {mismatch:e} of the residual's linear change"
             );
+        }
+    }
+
+    #[test]
+    fn collocation_couplings_reproduce_the_streamed_operator() {
+        let g = [(0, 0, 1e-3), (0, 1, -1e-3), (1, 0, -1e-3), (1, 1, 2e-3)];
+        let c = [(1, 1, 1e-12)];
+        let coefficient = |seed: Value, k: usize| {
+            let im = if k == 0 {
+                0.0
+            } else {
+                (seed * k as Value).cos()
+            };
+            Complex64::new((seed + k as Value).sin(), im)
+        };
+        // A branch entity carries couplings too, as a device's auxiliary
+        // state does.
+        let branches = [ExactMnaBranch::VoltageSource {
+            branch_ordinal: 1,
+            node_pos: 1,
+            node_neg: 0,
+            source_index: 0,
+            source: None,
+        }];
+        // Two harmonics couple through grid coefficients up to index four:
+        // a minimal grid aliases them, a short one truncates them, and an
+        // oversampled one resolves them.
+        for grid in [5, 7, 9, 16] {
+            let kept = ((grid - 1) / 2).min(4) + 1;
+            let spectrum = |seed: Value, scale: Value| {
+                (0..kept)
+                    .map(|k| scale * coefficient(seed, k))
+                    .collect::<Vec<_>>()
+            };
+            let mut g_spectra = vec![
+                (0, 0, spectrum(0.3, 1e-3)),
+                (1, 0, spectrum(1.1, 1e-3)),
+                (1, 1, spectrum(2.0, 1e-3)),
+                (2, 0, spectrum(1.7, 1e-3)),
+            ];
+            let mut c_spectra = vec![(1, 1, spectrum(0.7, 1e-12)), (0, 2, spectrum(2.4, 1e-12))];
+            unfold_collocation_spectra(&mut g_spectra, grid, 4);
+            unfold_collocation_spectra(&mut c_spectra, grid, 4);
+            let operator = ExactHbOperator {
+                mna_branches: &branches,
+                ..fixture(&g, &c, &g_spectra, &c_spectra)
+            };
+            let couplings =
+                CollocationCouplings::sample(&operator, HbFft::try_with_size(2, grid).unwrap());
+            let input = (0..15)
+                .map(|i| Complex64::new((i as Value * 0.37).sin(), (i as Value * 0.11).cos()))
+                .collect::<Vec<_>>();
+            for (actual, expected) in couplings
+                .apply(&operator, &input)
+                .into_iter()
+                .zip(operator.apply(&input))
+            {
+                assert_close(actual, expected);
+            }
         }
     }
 
