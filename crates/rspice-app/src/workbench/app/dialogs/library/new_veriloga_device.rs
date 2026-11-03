@@ -9,10 +9,11 @@
 //! is invented in its place.
 //!
 //! Each field states what it declares, or why it is refused, in the one line
-//! under it, which is always there; so nothing moves while the reader types,
-//! and the form reserves no status band. The status line is left for a
-//! failure that belongs to no field: a library that cannot be written, or a
-//! create that the project refused.
+//! under it, which is always there; so nothing moves while the reader types.
+//! The footer's status says what Create waits for while there is no name, as
+//! New cell's does in the same words, and why it is refused for a failure
+//! that belongs to no field: a library that cannot be written, or a create
+//! that the project refused.
 //!
 //! Nothing is created unless all of it is. The cell, its `veriloga` view, the
 //! view's source bundle and the generated `symbol` view are made on copies of
@@ -190,6 +191,8 @@ fn typed_ports(typed: &str, messages: &MessageCatalog) -> Result<Vec<PortSpec>, 
 /// What one field's line says, owned for the frame it is drawn in.
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum Line {
+    /// Nothing declared yet: the slot keeps its height and stays blank.
+    Blank,
     Derived(String),
     Error(String),
 }
@@ -197,17 +200,19 @@ enum Line {
 impl Line {
     fn field_line(&self) -> FieldLine<'_> {
         match self {
+            Self::Blank => FieldLine::Blank,
             Self::Derived(text) => FieldLine::Derived(text),
             Self::Error(text) => FieldLine::Error(text),
         }
     }
 }
 
-/// The line under Cell name: what Create waits for while there is none, the
-/// module the cell's view will declare, or why the name is refused.
+/// The line under Cell name: blank while there is none (the footer says
+/// what Create waits for), the module the cell's view will declare, or why
+/// the name is refused.
 fn cell_line(state: &AppState, messages: &MessageCatalog) -> Line {
     match typed_cell(state, messages) {
-        None => Line::Derived(messages.text(MessageId::VerilogADeviceCellMissing)),
+        None => Line::Blank,
         Some(Err(refusal)) => Line::Error(refusal),
         Some(Ok(cell)) => Line::Derived(messages.format(
             MessageId::VerilogADeviceModule,
@@ -242,12 +247,17 @@ impl RSpiceApp {
         let current = draft(&self.state);
         let form = &self.state.code.new_veriloga_device;
         // A refusal about a field stands under that field. The status line
-        // holds only what belongs to none: no library to write, or a create
-        // the project refused.
+        // holds what belongs to none: no library to write, or a create the
+        // project refused; and, as every form's does, what Create waits for.
         let status = form.error.clone().or_else(|| {
             (!libraries.contains(&form.library))
                 .then(|| messages.text(MessageId::VerilogADeviceNoLibrary))
         });
+        let waiting = form
+            .name
+            .trim()
+            .is_empty()
+            .then(|| messages.text(MessageId::VerilogADeviceCellMissing));
         let cell = cell_line(&self.state, &messages);
         let ports = ports_line(&form.ports, &messages);
         let title = messages.text(MessageId::VerilogADeviceTitle);
@@ -269,7 +279,7 @@ impl RSpiceApp {
             .fields_enabled(!libraries.is_empty())
             .status(match status.as_deref() {
                 Some(message) => Err(message),
-                None => Ok(None),
+                None => Ok(waiting.as_deref()),
             })
             .show(ctx, |rows| {
                 picked = rows.select(
