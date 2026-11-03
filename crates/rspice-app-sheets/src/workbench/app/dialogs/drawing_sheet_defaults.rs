@@ -262,7 +262,12 @@ pub fn sheet_names(names: &[String]) -> String {
 
 // ── Fused-shell geometry ────────────────────────────────────────────────────
 
+/// The first row's least height: the two target cards' four lines.
 const SHELL_ROW1_H: f32 = 84.0;
+/// The behaviour card's insets and the gap between its rows.
+const BEHAVIOR_INSET_TOP: f32 = 8.0;
+const BEHAVIOR_INSET_BOTTOM: f32 = 6.0;
+const BEHAVIOR_ROW_GAP: f32 = 4.0;
 /// A size chip states its name over its dimensions, so a family of six fits
 /// one row of the catalog's grid.
 const CHIP_H: f32 = 38.0;
@@ -363,12 +368,13 @@ fn drawing_sheet_defaults_body(
     let series_list = build_chip_series(ui, target, &record, &presets, left_w);
     let catalog_h = catalog_height(&series_list);
     let frame_h = frame_row_height(&t, stacked);
+    let row1_h = shell_row1_height(ui);
 
     let mut target_click: Option<DrawingSheetDefaultsTarget> = None;
     let mut edits: Vec<RecordEdit> = Vec::new();
 
     if stacked {
-        let band_h = SHELL_ROW1_H;
+        let band_h = row1_h;
         let preview_h = 250.0;
         let total_h = 2.0 + band_h * 3.0 + 2.0 + 1.0 + catalog_h + 1.0 + preview_h + 1.0 + frame_h;
         let (shell, _) = ui.allocate_exact_size(vec2(avail, total_h), Sense::hover());
@@ -413,7 +419,7 @@ fn drawing_sheet_defaults_body(
         let band_unit = (left_w - 2.0) / 2.9;
         let band1_w = band_unit.floor();
         let band3_w = left_w - 2.0 - band1_w * 2.0;
-        let total_h = 2.0 + SHELL_ROW1_H + 1.0 + catalog_h + 1.0 + frame_h;
+        let total_h = 2.0 + row1_h + 1.0 + catalog_h + 1.0 + frame_h;
         let (shell, _) = ui.allocate_exact_size(vec2(avail, total_h), Sense::hover());
         ui.painter().rect_filled(shell, 3.0, t.color.border);
         let x0 = shell.left() + 1.0;
@@ -432,17 +438,17 @@ fn drawing_sheet_defaults_body(
                 band1_w,
             ),
         ] {
-            let rect = Rect::from_min_size(pos2(x, y0), vec2(width, SHELL_ROW1_H));
+            let rect = Rect::from_min_size(pos2(x, y0), vec2(width, row1_h));
             if target_band(ui, rect, state, band_target, salt) {
                 target_click = Some(band_target);
             }
             x += width + 1.0;
         }
-        let rect = Rect::from_min_size(pos2(x, y0), vec2(band3_w, SHELL_ROW1_H));
+        let rect = Rect::from_min_size(pos2(x, y0), vec2(band3_w, row1_h));
         behavior_band(ui, rect, state, project_editable);
 
         let catalog_rect =
-            Rect::from_min_size(pos2(x0, y0 + SHELL_ROW1_H + 1.0), vec2(left_w, catalog_h));
+            Rect::from_min_size(pos2(x0, y0 + row1_h + 1.0), vec2(left_w, catalog_h));
         if let Some(action) = catalog_region(ui, catalog_rect, &series_list, record_enabled) {
             match action {
                 ChipAction::NewPreset => *open_presets = true,
@@ -452,12 +458,12 @@ fn drawing_sheet_defaults_body(
 
         let preview_rect = Rect::from_min_size(
             pos2(x0 + left_w + 1.0, y0),
-            vec2(preview_w, SHELL_ROW1_H + 1.0 + catalog_h),
+            vec2(preview_w, row1_h + 1.0 + catalog_h),
         );
         preview_region(ui, preview_rect, &record, target, following_sheets);
 
         let frame_rect = Rect::from_min_size(
-            pos2(x0, y0 + SHELL_ROW1_H + 1.0 + catalog_h + 1.0),
+            pos2(x0, y0 + row1_h + 1.0 + catalog_h + 1.0),
             vec2(inner_w, frame_h),
         );
         frame_row(
@@ -664,6 +670,27 @@ fn target_band(
 
 // ── Row 1: new-sheet behavior band ──────────────────────────────────────────
 
+/// The first row's height: the behaviour card's caption, policy select and
+/// checkbox, each control at the theme's control height, between the card's
+/// insets; never less than the target cards need.
+///
+/// The row was a fixed 84 points, which held the stack only at the pointer
+/// control height. On touch both controls take the touch height and the
+/// checkbox ran 33 points past the bottom of its card, under the catalog.
+fn shell_row1_height(ui: &Ui) -> f32 {
+    let caption =
+        ui.fonts_mut(|fonts| fonts.row_height(&theme::sans(tokens::FS_MICRO, FontWeight::Medium)));
+    let control = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let stack = BEHAVIOR_INSET_TOP
+        + caption
+        + BEHAVIOR_ROW_GAP
+        + control
+        + BEHAVIOR_ROW_GAP
+        + control.max(ui.spacing().interact_size.y)
+        + BEHAVIOR_INSET_BOTTOM;
+    stack.max(SHELL_ROW1_H)
+}
+
 fn behavior_band(
     ui: &mut Ui,
     rect: Rect,
@@ -673,15 +700,15 @@ fn behavior_band(
     let t = Tokens::get(ui.ctx());
     ui.painter().rect_filled(rect, 0.0, t.color.bg_panel_2);
     let inner = Rect::from_min_max(
-        pos2(rect.left() + 11.0, rect.top() + 8.0),
-        pos2(rect.right() - 11.0, rect.bottom() - 6.0),
+        pos2(rect.left() + 11.0, rect.top() + BEHAVIOR_INSET_TOP),
+        pos2(rect.right() - 11.0, rect.bottom() - BEHAVIOR_INSET_BOTTOM),
     );
     ui.scope_builder(
         UiBuilder::new()
             .max_rect(inner)
             .layout(Layout::top_down(Align::Min)),
         |ui| {
-            ui.spacing_mut().item_spacing.y = 4.0;
+            ui.spacing_mut().item_spacing.y = BEHAVIOR_ROW_GAP;
             ui.label(
                 RichText::new("New sheets")
                     .font(theme::sans(tokens::FS_MICRO, FontWeight::Medium))

@@ -516,3 +516,65 @@ fn the_defaults_speak_in_sentence_case_through_named_selects() {
         );
     }
 }
+
+/// The new-sheets card holds its own controls at both control heights. Its
+/// row was a fixed 84 points, enough for the pointer stack; on touch the
+/// select and the checkbox take the touch height and the checkbox ran past
+/// the bottom of the card, under the size catalog.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_new_sheets_card_holds_its_checkbox_at_every_control_height() {
+    use egui::accesskit::Role;
+
+    for (coarse, size) in [
+        (false, egui::vec2(1440.0, 900.0)),
+        (true, egui::vec2(1024.0, 768.0)),
+    ] {
+        let mut app = RSpiceApp::test_instance();
+        app.state.open_project_session();
+        app.state.workbench.coarse_pointer = coarse;
+        open_drawing_sheet_defaults(
+            &mut app.state.sheets.drawing_sheet_defaults,
+            &app.state.model,
+        );
+        let ctx = egui::Context::default();
+        crate::ui::Theme::default().apply(&ctx);
+        ctx.enable_accesskit();
+        let mut frame = eframe::Frame::_new_kittest();
+        let mut output = None;
+        for index in 0..4u32 {
+            output = Some(ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    time: Some(f64::from(index) * 0.25),
+                    focused: true,
+                    ..Default::default()
+                },
+                |ui| eframe::App::ui(&mut app, ui, &mut frame),
+            ));
+        }
+        let tree = output
+            .expect("frames ran")
+            .platform_output
+            .accesskit_update
+            .expect("an AccessKit tree");
+        let bounds = |role: Role, label: &str| {
+            tree.nodes
+                .iter()
+                .find(|(_, node)| {
+                    node.role() == role && node.label().is_some_and(|text| text.starts_with(label))
+                })
+                .and_then(|(_, node)| node.bounds())
+                .unwrap_or_else(|| panic!("no {role:?} named {label:?}"))
+        };
+        // The target cards are buttons as tall as the row the new-sheets card
+        // shares with them.
+        let card = bounds(Role::Button, "Project default");
+        let select = bounds(Role::ComboBox, "New sheets");
+        let checkbox = bounds(Role::CheckBox, "Remember the last explicit choice");
+        assert!(
+            select.y1 <= checkbox.y0 && checkbox.y1 <= card.y1,
+            "touch {coarse}: the checkbox {checkbox:?} leaves its card {card:?}"
+        );
+    }
+}
