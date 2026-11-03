@@ -4,13 +4,9 @@
 //! edit-in-place preference. The menu workflow exposes the upgraded mockup's
 //! target, explicit edit mode, and working-checkpoint contract.
 
-use egui::{Context, Frame, Margin, Ui, vec2};
+use egui::Context;
 
-use crate::ui::theme::{self, FontWeight};
-use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{
-    Dialog, DialogChoice, DialogInitialFocus, DialogSize, select_mono_with_response,
-};
+use crate::ui::widgets::{CommandForm, DialogChoice, FormRows};
 
 use crate::workbench::app::{RSpiceApp, SchematicEditAuthority};
 use crate::workbench::app_state::AppState;
@@ -109,24 +105,22 @@ impl RSpiceApp {
             .descend_hierarchy
             .reference
             .as_ref()
-            .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view))
-            .unwrap_or_else(|| "Selection no longer resolves".to_owned());
+            .map(|reference| format!("{} \u{00b7} {}", reference.cell, reference.view));
         let instance = self.state.design.descend_hierarchy.instance_name.clone();
         let occurrence_path = descend_target_path(&self.state.model.workspace, &instance);
-        let choice = Dialog::new(TITLE, PRIMARY)
-            .description(DESCRIPTION)
-            .size(DialogSize::Transaction)
-            // The Edit mode list ends where the footer's buttons do, not a
-            // scroll bar's width in.
-            .overlay_scrollbar()
-            .ghost("Cancel")
-            .initial_focus(DialogInitialFocus::BodyControl)
-            .show_with_initial_body_focus(ctx, |ui| {
-                Some(descend_body(
-                    ui,
-                    &mut self.state.design.descend_hierarchy,
+        let error = self.state.design.descend_hierarchy.validation_error.clone();
+        let draft = &mut self.state.design.descend_hierarchy;
+        let choice = CommandForm::new(TITLE, PRIMARY)
+            .describe(DESCRIPTION)
+            // Wide enough for "Unsaved parent changes" on one line.
+            .label_column(136.0)
+            .status(error.as_deref().map_or(Ok(None), Err))
+            .show(ctx, |rows| {
+                Some(descend_rows(
+                    rows,
+                    draft,
                     &occurrence_path,
-                    &target,
+                    target.as_deref(),
                 ))
             });
 
@@ -214,24 +208,21 @@ fn commit_descend_context(state: &mut AppState) -> Result<(), String> {
     Ok(())
 }
 
-fn descend_body(
-    ui: &mut Ui,
+/// The form: what is opened, how, and what becomes of the parent's unsaved
+/// work, each a row on the form's one label column with its value in the
+/// kit's face. Each row used to carry a bold title over a sentence that
+/// restated it, beside a mono select and a small-bold value.
+fn descend_rows(
+    rows: &mut FormRows<'_>,
     draft: &mut DescendHierarchyDialogState,
     occurrence_path: &str,
-    target: &str,
+    target: Option<&str>,
 ) -> egui::Id {
-    ui.spacing_mut().item_spacing = vec2(0.0, 0.0);
-    // One copy column for every row, sized once from the body, so every value
-    // starts at one left edge whatever its own row's copy says.
-    let copy_width = (ui.available_width() * 0.43).clamp(190.0, 270.0);
-    let first = grid_row(
-        ui,
-        copy_width,
-        "Target",
-        "Selected hierarchical instance and bound view.",
-        |ui| target_value(ui, occurrence_path, target),
-    );
-
+    rows.value_mono("Instance", occurrence_path);
+    match target {
+        Some(target) => rows.value_mono("Cell view", target),
+        None => rows.value("Cell view", "The selection no longer resolves"),
+    }
     let options = [
         "Edit in place",
         "Open isolated cell view",
@@ -239,23 +230,11 @@ fn descend_body(
         "Edit symbol in place",
     ]
     .map(str::to_owned);
-    let selected = edit_mode_label(draft.edit_mode);
-    let edit_mode = grid_row(
-        ui,
-        copy_width,
+    let edit_mode = rows.select_with_response(
         "Edit mode",
-        "Controls who owns the opened cell view.",
-        |ui| {
-            let width = ui.available_width();
-            select_mono_with_response(
-                ui,
-                "descend-hierarchy-edit-mode",
-                "Edit mode",
-                selected,
-                &options,
-                width,
-            )
-        },
+        "descend-hierarchy-edit-mode",
+        edit_mode_label(draft.edit_mode),
+        &options,
     );
     if let Some(index) = edit_mode.picked {
         draft.edit_mode = match index {
@@ -266,115 +245,11 @@ fn descend_body(
         };
         draft.validation_error = None;
     }
-
-    grid_row(
-        ui,
-        copy_width,
-        "Unsaved parent changes",
-        "Preserved as a transactional working checkpoint.",
-        |ui| checkpoint_value(ui, draft.parent_dirty),
-    );
-    if let Some(error) = draft.validation_error.as_deref() {
-        validation_error(ui, error);
+    // With nothing unsaved there is nothing to say.
+    if draft.parent_dirty {
+        rows.value("Unsaved parent changes", "Kept as a working checkpoint");
     }
-    first
-}
-
-/// One fact on the label/value grid: its title and detail in the copy column,
-/// its value or control beside them. A row has no inset or rule of its own:
-/// it starts at the body's edge, as the title and the footer do.
-fn grid_row<R>(
-    ui: &mut Ui,
-    copy_width: f32,
-    title: &str,
-    detail: &str,
-    value: impl FnOnce(&mut Ui) -> R,
-) -> R {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .inner_margin(Margin::symmetric(0, 9))
-        .show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            if ui.available_width() < 520.0 {
-                setting_copy(ui, title, detail);
-                ui.add_space(7.0);
-                value(ui)
-            } else {
-                ui.horizontal_top(|ui| {
-                    ui.allocate_ui_with_layout(
-                        vec2(copy_width, t.metrics.ctl_h),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            ui.set_min_width(copy_width);
-                            setting_copy(ui, title, detail);
-                        },
-                    );
-                    ui.add_space(12.0);
-                    value(ui)
-                })
-                .inner
-            }
-        })
-        .inner
-}
-
-fn validation_error(ui: &mut Ui, error: &str) {
-    let t = Tokens::get(ui.ctx());
-    Frame::new()
-        .inner_margin(Margin::symmetric(0, 8))
-        .show(ui, |ui| {
-            ui.label(
-                egui::RichText::new(error)
-                    .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-                    .color(t.color.err),
-            );
-        });
-}
-
-fn setting_copy(ui: &mut Ui, title: &str, detail: &str) {
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new(title)
-            .font(theme::sans(tokens::FS_0, FontWeight::SemiBold))
-            .color(t.color.text),
-    );
-    ui.label(
-        egui::RichText::new(detail)
-            .font(theme::sans(tokens::FS_0, FontWeight::Regular))
-            .color(t.color.text_dim),
-    );
-}
-
-fn target_value(ui: &mut Ui, occurrence_path: &str, target: &str) -> egui::Id {
-    let t = Tokens::get(ui.ctx());
-    ui.vertical(|ui| {
-        ui.label(
-            egui::RichText::new(occurrence_path)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text),
-        );
-        ui.label(
-            egui::RichText::new(target)
-                .font(theme::mono(tokens::FS_0, FontWeight::Regular))
-                .color(t.color.text_dim),
-        )
-        .id
-    })
-    .inner
-}
-
-/// What happens to the parent's unsaved work. With nothing unsaved there is
-/// nothing to say, and "safe to descend" was saying it anyway.
-fn checkpoint_value(ui: &mut Ui, parent_dirty: bool) {
-    if !parent_dirty {
-        return;
-    }
-    let t = Tokens::get(ui.ctx());
-    ui.label(
-        egui::RichText::new("working checkpoint preserved")
-            .font(theme::sans(tokens::FS_0, FontWeight::Medium))
-            .color(t.color.text_dim),
-    );
+    edit_mode.response.id
 }
 
 const fn edit_mode_label(mode: HierarchyDescendEditMode) -> &'static str {
@@ -428,68 +303,71 @@ mod tests {
         (state, parent, child)
     }
 
-    /// Every row's value starts at one left edge and every row's copy at the
-    /// body's own edge: no row sizes its copy column to its own words or
-    /// insets itself a second time.
+    /// The form states each fact once, in its one label style, with every
+    /// value in the kit's 13 point face: mono for the instance and its cell
+    /// view, the body face for a choice named in words. Each row was a bold
+    /// title over a helper sentence that restated it, beside a mono select
+    /// and a small-bold value.
     #[test]
-    fn every_row_shares_one_value_column_at_the_body_edge() {
-        use egui::accesskit::Role;
+    fn the_form_has_one_label_style_and_values_in_the_kit_face() {
+        let (mut state, _, _) = hierarchy_state();
+        assert!(open_descend_hierarchy_dialog(&mut state));
+        state.design.descend_hierarchy.parent_dirty = true;
+        let mut app = RSpiceApp::test_instance();
+        app.state = state;
         let ctx = Context::default();
         crate::ui::Theme::default().apply(&ctx);
-        ctx.enable_accesskit();
-        let mut draft = DescendHierarchyDialogState {
-            parent_dirty: true,
-            ..Default::default()
-        };
-        let body = egui::Rect::from_min_size(egui::pos2(100.0, 50.0), vec2(734.0, 400.0));
-        let mut nodes = std::collections::HashMap::new();
+        let mut shapes = Vec::new();
         for _ in 0..3 {
-            let output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        vec2(1440.0, 900.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    ui.scope_builder(egui::UiBuilder::new().max_rect(body), |ui| {
-                        descend_body(ui, &mut draft, "/XAFE", "afe_core \u{00b7} schematic");
-                    });
-                },
-            );
-            nodes.extend(
-                output
-                    .platform_output
-                    .accesskit_update
-                    .expect("AccessKit tree update")
-                    .nodes,
-            );
+            shapes = ctx
+                .run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| app.render_descend_hierarchy_dialog(ui.ctx()),
+                )
+                .shapes;
         }
-        let left = |text: &str, role: Role| {
-            nodes
-                .values()
-                .find(|node| {
-                    node.role() == role
-                        && (node.label() == Some(text) || node.value() == Some(text))
-                })
-                .and_then(egui::accesskit::Node::bounds)
-                .map(|bounds| bounds.x0 as f32)
-                .unwrap_or_else(|| panic!("{text} is published"))
+        let painted = shapes
+            .iter()
+            .filter_map(|clipped| match &clipped.shape {
+                egui::Shape::Text(text) => Some((
+                    text.galley.text().to_owned(),
+                    text.galley.job.sections[0].format.font_id.clone(),
+                )),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        let font = |wanted: &str| {
+            painted
+                .iter()
+                .find(|(text, _)| text == wanted)
+                .map(|(_, font)| font.clone())
+                .unwrap_or_else(|| panic!("{wanted:?} is not painted: {painted:?}"))
         };
-        for title in ["Target", "Edit mode", "Unsaved parent changes"] {
-            let x = left(title, Role::Label);
-            assert!((x - body.left()).abs() < 0.5, "{title} at {x}");
+        let label = font("Instance");
+        for other in ["Cell view", "Edit mode", "Unsaved parent changes"] {
+            assert_eq!(font(other), label, "{other} is not in the label style");
         }
-        let values = [
-            left("/XAFE", Role::Label),
-            left("Edit mode", Role::ComboBox),
-            left("working checkpoint preserved", Role::Label),
-        ];
-        assert!(
-            values.iter().all(|x| (x - values[0]).abs() < 0.5) && values[0] > body.left() + 190.0,
-            "values start at {values:?}"
+        assert_eq!(font("/XAFE"), crate::ui::theme::field_mono());
+        assert_eq!(font("Edit in place"), crate::ui::theme::field_sans());
+        assert_eq!(
+            font("Kept as a working checkpoint"),
+            crate::ui::theme::field_sans()
         );
+        for (text, _) in &painted {
+            for gone in [
+                "Selected hierarchical",
+                "Controls who owns",
+                "transactional",
+            ] {
+                assert!(!text.contains(gone), "{text:?} is painted");
+            }
+        }
     }
 
     #[test]
