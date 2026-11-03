@@ -158,16 +158,39 @@ fn listed(
             text
         }));
     }
+    // frontend/vectors.c:183 findvec: a name matches without regard to case,
+    // then as `v(name)`.
+    let find = |name: &str| {
+        lines
+            .iter()
+            .find(|(vector, _)| vector.eq_ignore_ascii_case(name))
+    };
     let mut text = String::new();
     for word in requested {
-        let name = word.text.to_ascii_lowercase();
-        let (_, line) = lines
-            .iter()
-            .find(|(vector, _)| *vector == name)
+        let name = word.text.as_str();
+        let (_, line) = find(name)
+            .or_else(|| find(&format!("v({name})")))
+            .or_else(|| node_form(name).and_then(|node| find(&node)))
             .ok_or_else(|| command_error(command.line, format!("no such vector as {name}")))?;
         text.push_str(line);
     }
     Ok(text)
+}
+
+/// ngspice vec_fromplot (frontend/vectors.c:528): `x(node)` names the node,
+/// and `i(node)` its branch current `node#branch`.
+fn node_form(word: &str) -> Option<String> {
+    let mut chars = word.chars();
+    let kind = chars.next().filter(|kind| *kind != '(')?;
+    let node = chars.as_str().strip_prefix('(')?.strip_suffix(')')?;
+    if node.is_empty() {
+        return None;
+    }
+    Some(if kind.eq_ignore_ascii_case(&'i') {
+        format!("{node}#branch")
+    } else {
+        node.to_owned()
+    })
 }
 
 impl ControlCircuit {

@@ -911,6 +911,41 @@ fn display_lists_the_let_vectors_of_the_current_plot() {
     );
 }
 
+/// `display name` finds the vector as ngspice's vec_get does: without regard
+/// to case, `v(node)` as the node and `i(source)` as its branch, and prints
+/// its own name (frontend/vectors.c:183, 528). The lines are ngspice-46's.
+#[test]
+fn display_finds_a_vector_as_vec_get_does() {
+    let (presented, error) = run_until_error(
+        "lookup\nV1 in 0 dc 2\nR1 in out 1k\nR2 out 0 3k\n.control\nop\n\
+         display V(OUT) i(V1) IN v(in)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["    out                 : voltage, real, 1 long\n\
+          \x20   v1#branch           : current, real, 1 long\n\
+          \x20   in                  : voltage, real, 1 long [default scale]\n\
+          \x20   in                  : voltage, real, 1 long [default scale]"]
+    );
+    let (presented, error) = run_until_error(
+        "lookup\nV1 in 0 dc 2 ac 1 portnum 1 z0 50\nR1 in out 1k\nR2 out x 3k\n\
+         V2 x 0 dc 0 ac 0 portnum 2 z0 50\n.control\nsp lin 3 1k 3k 0\n\
+         display s_1_1 S_2_1 Frequency\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["    S_1_1               : s-param, complex, 3 long\n\
+          \x20   S_2_1               : s-param, complex, 3 long\n\
+          \x20   frequency           : frequency, complex, 3 long [default scale]"]
+    );
+    let (_, error) = run_until_error(
+        "lookup\nV1 in 0 dc 2\nR1 in 0 1k\n.control\nop\ndisplay i(in)\n.endc\n.end\n",
+    );
+    assert!(error.unwrap().contains("no such vector as i(in)"));
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
