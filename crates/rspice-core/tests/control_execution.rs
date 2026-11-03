@@ -2126,6 +2126,70 @@ fn meas_measures_the_current_plot_as_ngspice_does() {
     assert_eq!(twice[0].y.samples[0].re, 2e-3);
 }
 
+/// A deck's `.meas` and a script's `meas` cross two vectors alike: both count
+/// the RISE, FALL and CROSS of `WHEN v(a)=v(b)` by the slope of v(a) - v(b)
+/// (com_measure2.c:563). v(a) - v(b) falls through zero at 0.5 s and 2.5 s
+/// and rises through it at 1.5 s and 3.5 s, the crossings ngspice-46 prints
+/// for this deck.
+#[test]
+fn a_decks_measures_and_a_scripts_meas_cross_two_vectors_alike() {
+    let measures = [
+        ("r1", "rise=1", 1.5),
+        ("r2", "rise=2", 3.5),
+        ("f1", "fall=1", 0.5),
+        ("f2", "fall=2", 2.5),
+        ("c3", "cross=3", 2.5),
+    ];
+    let mut deck = String::from(
+        "two-signal when\nVa a 0 PWL(0 0 4 4)\nVb b 0 PWL(0 -1 1 2 2 1 3 4 4 3)\n\
+         Ra a 0 1k\nRb b 0 1k\n.tran 1m 4 0 1m\n",
+    );
+    for (name, edge, _) in measures {
+        deck += &format!(".meas tran {name} when v(a)=v(b) {edge}\n");
+    }
+    deck += ".control\nrun\n";
+    for (name, edge, _) in measures {
+        deck += &format!("meas tran s{name} when v(a)=v(b) {edge}\n");
+    }
+    deck += ".endc\n.end\n";
+
+    let (presented, error) = run_until_error(&deck);
+    assert_eq!(error, None);
+    let script = texts(&presented);
+    let program =
+        ControlProgram::parse_deck_with_abort(&deck, ControlLimits::default(), &NoAbort).unwrap();
+    let netlist = Netlist::parse(program.declarative_source()).unwrap();
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 4.0, 1e-3)
+        .expect("transient runs");
+    let from_deck = rspice_core::analysis::evaluate_tran_measurements(&netlist, &result);
+    for (name, _, expected) in measures {
+        let deck_value = from_deck
+            .iter()
+            .find(|measure| measure.name.eq_ignore_ascii_case(name))
+            .and_then(|measure| measure.value)
+            .unwrap_or_else(|| panic!("no deck {name} in {from_deck:?}"));
+        let prefix = format!("s{name} ");
+        let line = script
+            .iter()
+            .find(|line| line.starts_with(&prefix))
+            .unwrap_or_else(|| panic!("no script s{name} in {script:?}"));
+        let script_value: f64 = line
+            .split('=')
+            .nth(1)
+            .and_then(|value| value.trim().parse().ok())
+            .unwrap_or_else(|| panic!("unreadable {line}"));
+        assert!(
+            (deck_value - expected).abs() <= 1e-9 * expected,
+            "deck {name}: {deck_value}, expected {expected}"
+        );
+        assert!(
+            (script_value - expected).abs() <= 1e-5 * expected,
+            "script {line}, expected {expected}"
+        );
+    }
+}
+
 /// `wrdata` (com_gnuplot.c:44, gnuplot.c:684) writes each vector after its
 /// scale in `% .8e` columns, a complex one as its real and imaginary parts.
 /// `wr_vecnames` heads the columns, `wr_singlescale` writes the first scale
