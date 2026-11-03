@@ -917,12 +917,14 @@ fn a_model_card_part_arms_its_native_device_and_symbol_skin() {
 }
 
 #[test]
-fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
-    // Opening the Models workspace refreshes a stale catalog once, latched so
-    // it does not fire every frame the workspace is visible. The latch was
-    // never released, so a session that happened to be offline the first time
-    // the workspace opened spent its only attempt and never retried — the
-    // workspace went on reporting a week-old catalog for the rest of the day.
+fn a_failed_catalog_refresh_is_not_asked_again_in_the_same_visit() {
+    // Opening the catalog refreshes a stale one once per visit, latched so it
+    // does not fire every frame the page is visible. A refusal released the
+    // latch, so a network that refused at once was asked again the next frame,
+    // without end. The refusal holds it now, and the first frame of a later
+    // visit releases it, so a session that happened to be offline when the
+    // page first opened still tries again
+    // (`hub::tests::a_stale_catalog_is_refreshed_once_per_visit`).
     let mut state = AppState::default();
     state.models.models_view.catalog_refresh_requested = true;
     emit_errors(
@@ -935,8 +937,8 @@ fn a_failed_catalog_refresh_lets_a_later_visit_try_again() {
         ModelsOperationalState::Offline
     );
     assert!(
-        !state.models.models_view.catalog_refresh_requested,
-        "a failed refresh must not consume the session's only attempt"
+        state.models.models_view.catalog_refresh_requested,
+        "a refused refresh must not be asked again while the page stays open"
     );
 }
 

@@ -1255,6 +1255,17 @@ fn poll_native_model_imports(ctx: &Context, cx: &mut Cx<'_, ModelsFeature>) {
                     }
                 }
             }
+            // A hub operation's refusal is recorded the way the browser
+            // records it, so the two hosts cannot disagree about what a
+            // refused refresh leaves behind.
+            Err(errors)
+                if matches!(
+                    completion.operation,
+                    NativeModelCatalogOperation::ModelHub(_)
+                ) =>
+            {
+                model_hub::emit_model_hub_errors(cx, errors);
+            }
             Err(errors) => {
                 emit_native_model_catalog_errors(cx, errors);
             }

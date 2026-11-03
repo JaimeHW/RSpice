@@ -299,7 +299,12 @@ pub(super) fn show(ui: &mut Ui, cx: &mut Cx<'_, ModelsFeature>) {
     // the render borrow does not carry.
     let hub_catalog = hub::hub_catalog(cx.handles.model_hub, cx.model);
     if page == ModelsPage::Models
-        && let Some(request) = hub::prepare(cx.handles.model_hub, cx.state, &hub_catalog)
+        && let Some(request) = hub::prepare(
+            cx.handles.model_hub,
+            cx.state,
+            &hub_catalog,
+            ui.ctx().cumulative_frame_nr(),
+        )
     {
         pending_actions.push(ManagerAction::ModelHub(request));
     }
@@ -1098,10 +1103,22 @@ fn project_model_row(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, row: &Proj
             row_label.clone(),
         )
     });
-    theme::paint_focus_ring(ui, &response, rect);
+    // A pressed row takes the keyboard, and the arrow keys then walk the
+    // catalog: egui moves focus to the row above or below, and the focused
+    // row takes the selection and is scrolled into view. It is the focus that
+    // is followed, not a gained-focus event, because egui settles an arrow's
+    // move at the end of a frame and reports no gain for it. Focus a press
+    // gave draws no ring; the selection already marks the row.
+    if response.clicked() {
+        response.request_focus();
+    }
+    if theme::focus_is_visible(ui.ctx(), &response) {
+        theme::paint_focus_ring(ui, &response, rect);
+    }
     // A family already selected keeps the bin its detail shows.
-    if response.clicked() && !selected {
+    if (response.clicked() || response.has_focus()) && !selected {
         select_catalog_row(app, row);
+        response.scroll_to_me(None);
     }
     let used_by = used_by_cell(row);
     // A drifted row sets its mark at the source column's own right edge, so

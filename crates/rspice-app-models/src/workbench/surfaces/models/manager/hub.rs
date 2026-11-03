@@ -668,18 +668,30 @@ pub(super) fn ledger_row(
 /// Both halves need the session hub, which the render context deliberately
 /// does not carry. A cached catalog old enough that showing it without
 /// checking would report last week's answer to this week's question asks for a
-/// refresh — once per session, which is what the latch is for. A build with
-/// no catalog to reach asks for nothing: the fetch could only fail, and it
-/// failed on every visit to the page. The selected pack's "what changed"
-/// answer is settled here too, and only when the catalog, the pack or either
-/// release actually moved.
+/// refresh — once per visit to the page, which is what the latch is for. The
+/// first frame of a visit, `frame` being more than one past the last frame
+/// that drew the page, releases it. A refusal does not: released on refusal,
+/// a network that refused at once was asked again the next frame, without
+/// end, and the rows of the catalog jumped under the pointer with every
+/// attempt. A build with no catalog to reach asks for nothing: the fetch could
+/// only fail, and it failed on every visit to the page. The selected pack's
+/// "what changed" answer is settled here too, and only when the catalog, the
+/// pack or either release actually moved.
 pub(super) fn prepare(
     service: &ModelHubService,
     state: &mut ModelsState,
     hub: &HubCatalog,
+    frame: u64,
 ) -> Option<ModelHubRequest> {
     super::adoption::refresh_release_diff(service, state, hub);
     let view = &mut state.models_view;
+    if view
+        .catalog_page_frame
+        .is_none_or(|last| frame > last.saturating_add(1))
+    {
+        view.catalog_refresh_requested = false;
+    }
+    view.catalog_page_frame = Some(frame);
     if hub.unavailable.is_some()
         || hub.catalog_unreachable
         || !hub.stale

@@ -581,13 +581,21 @@ pub struct ModelsWorkbenchViewState {
     /// Which distributed releases the pack table lists.
     #[serde(default)]
     pub hub_facet: ModelHubFacet,
-    /// Whether this session already asked to refresh a stale catalog.
+    /// Whether this visit to the catalog already asked to refresh a stale
+    /// catalog.
     ///
-    /// Opening the workspace refreshes a catalog older than a week, once. The
-    /// latch is what makes it once rather than every frame the workspace is
+    /// Opening the catalog refreshes one older than a week, once per visit.
+    /// The latch is what makes it once rather than every frame the page is
     /// visible, which is the shape a per-frame condition would otherwise have.
+    /// It holds whichever way the refresh ends and is released when a later
+    /// visit begins (see [`Self::catalog_page_frame`]).
     #[serde(skip)]
     pub catalog_refresh_requested: bool,
+    /// The last frame the catalog page was drawn, which is how a visit is told
+    /// from the frame after it: a visit is an unbroken run of frames showing
+    /// the page, and the first frame of a later one releases the latch above.
+    #[serde(skip)]
+    pub catalog_page_frame: Option<u64>,
     /// What the last recall report was about: which catalog, and which pins.
     ///
     /// A project pinned to a recalled release is told once per (catalog, pins)
@@ -645,6 +653,7 @@ impl Default for ModelsWorkbenchViewState {
             dialog: None,
             hub_facet: ModelHubFacet::default(),
             catalog_refresh_requested: false,
+            catalog_page_frame: None,
             recall_notice: None,
         }
     }

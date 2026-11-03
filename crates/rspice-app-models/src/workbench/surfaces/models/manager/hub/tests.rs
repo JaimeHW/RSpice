@@ -1129,6 +1129,48 @@ impl crate::state::model_hub::ModelHubTransportProvider for NoCloudEndpoints {
     }
 }
 
+/// A session hub over an empty store: it holds no catalog, so it is stale.
+fn never_fetched() -> ModelHubService {
+    use crate::services::model_hub::ModelHubStoreHandle;
+    use crate::state::model_hub::tests::{anchor_for, hub_signing_key};
+    use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
+
+    let store = std::sync::Arc::new(MemoryModelHubStore::new());
+    let hub = ModelHub::open(
+        anchor_for(&hub_signing_key()),
+        Box::new(std::sync::Arc::clone(&store)),
+        None,
+    )
+    .expect("a memory hub opens");
+    ModelHubService::with_store(ModelHubStoreHandle::Memory(store), hub)
+}
+
+/// A stale catalog is refreshed once per visit to the page, whichever way
+/// the refresh ends, and again on a later visit.
+///
+/// The latch used to be released when a refresh was refused, so a network
+/// that refused at once was asked again on the next frame, without end.
+#[test]
+fn a_stale_catalog_is_refreshed_once_per_visit() {
+    let service = never_fetched();
+    let mut state = harness();
+    let projected = hub_catalog(&service, &state.model);
+    assert_eq!(
+        prepare(&service, &mut state.state, &projected, 10),
+        Some(ModelHubRequest::FetchSnapshot)
+    );
+    // The refresh ran and was refused; the page stays open frame after frame.
+    for frame in 11..40 {
+        assert_eq!(prepare(&service, &mut state.state, &projected, frame), None);
+    }
+    // A frame that did not draw the page ended the visit; the next may ask.
+    assert_eq!(
+        prepare(&service, &mut state.state, &projected, 41),
+        Some(ModelHubRequest::FetchSnapshot)
+    );
+    assert_eq!(prepare(&service, &mut state.state, &projected, 42), None);
+}
+
 /// A build with no catalog to reach asks for none, and says so once.
 ///
 /// It used to fetch on every visit to the workspace, at the step that
@@ -1136,36 +1178,21 @@ impl crate::state::model_hub::ModelHubTransportProvider for NoCloudEndpoints {
 /// fact nobody could change.
 #[test]
 fn a_build_with_no_catalog_to_reach_asks_for_none_and_says_so_once() {
-    use crate::services::model_hub::ModelHubStoreHandle;
-    use crate::state::model_hub::tests::{anchor_for, hub_signing_key};
-    use crate::state::model_hub::{MemoryModelHubStore, ModelHub};
-
-    let fresh = || {
-        let store = std::sync::Arc::new(MemoryModelHubStore::new());
-        let hub = ModelHub::open(
-            anchor_for(&hub_signing_key()),
-            Box::new(std::sync::Arc::clone(&store)),
-            None,
-        )
-        .expect("a memory hub opens");
-        ModelHubService::with_store(ModelHubStoreHandle::Memory(store), hub)
-    };
-
     // A hub that has never fetched refreshes on the first frame it is shown...
     let mut state = harness();
-    let reachable = fresh();
+    let reachable = never_fetched();
     let projected = hub_catalog(&reachable, &state.model);
     assert!(projected.stale && !projected.catalog_unreachable);
     assert_eq!(
-        prepare(&reachable, &mut state.state, &projected),
+        prepare(&reachable, &mut state.state, &projected, 1),
         Some(ModelHubRequest::FetchSnapshot)
     );
     // ...unless this build has nowhere to fetch from.
     let mut state = harness();
-    let unreachable = fresh().through(&NoCloudEndpoints);
+    let unreachable = never_fetched().through(&NoCloudEndpoints);
     let projected = hub_catalog(&unreachable, &state.model);
     assert!(projected.catalog_unreachable);
-    assert_eq!(prepare(&unreachable, &mut state.state, &projected), None);
+    assert_eq!(prepare(&unreachable, &mut state.state, &projected, 1), None);
 
     // With nothing installed, the empty pane is where it is said.
     let nodes = accessibility_nodes(&mut harness(), egui::vec2(1100.0, 760.0), move |ui, app| {

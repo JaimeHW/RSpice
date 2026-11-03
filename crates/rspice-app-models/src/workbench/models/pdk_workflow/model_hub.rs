@@ -734,11 +734,9 @@ pub fn emit_model_hub_errors(cx: &mut Cx<'_, ModelsFeature>, errors: Vec<String>
         cx.model
             .record(LogSeverity::Error, LogSource::Studio, error.clone());
     }
-    // Release the once-per-session stale-catalog latch. It exists to stop the
-    // automatic refresh firing every frame the workspace is visible, not to
-    // spend a session's only attempt on a machine that happened to be offline
-    // when the workspace first opened: a later visit must be allowed to retry.
-    cx.state.models_view.catalog_refresh_requested = false;
+    // The stale-catalog latch is not released here. It holds for the rest of
+    // the visit that asked, and the next visit releases it: released here, a
+    // refusal that came back at once was asked again the next frame.
     cx.state.models_view.operational_state = ModelsOperationalState::from_failure(&first);
     cx.state.models_view.action_receipt = Some(Err(errors.join("; ")));
 }
