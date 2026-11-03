@@ -1508,7 +1508,6 @@ fn manager_body(
     }
     if let Some(preview_action) = engineering_grid_preview(
         ui,
-        view,
         &projection,
         &mut state.selected_row_ids,
         &mut state.active_cell,
@@ -1560,6 +1559,72 @@ fn heading_row<R>(ui: &mut Ui, title: &str, verbs: impl FnOnce(&mut Ui) -> R) ->
     .inner
 }
 
+/// Room a table cell keeps between its text and each of its edges.
+const TABLE_CELL_PAD: f32 = 4.0;
+
+fn table_cell_font(ui: &Ui, kind: TableCell) -> egui::FontId {
+    match kind {
+        TableCell::Heading => theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        TableCell::Value { .. } => egui::TextStyle::Body.resolve(ui.style()),
+    }
+}
+
+/// Rows a column's width is measured over. Past this a table is a list to
+/// search rather than read, and measuring every row each frame would cost
+/// more than the rows it saves from elision.
+const MEASURED_ROWS: usize = 512;
+
+/// Every column as wide as its widest heading or value, so nothing is cut
+/// while the table has room: a share of the room in proportion to authored
+/// widths cut the Owner column to "Active schema…" on every row while the
+/// empty Parameters column kept a wide share. Room left over is spread
+/// evenly; a table wider than its room gives it up in proportion to width.
+fn content_column_widths(
+    ui: &Ui,
+    projection: &crate::state::engineering_table::EngineeringProjection,
+    headings: &[String],
+    room: f32,
+) -> Vec<f32> {
+    let measure = |text: &str, kind: TableCell| {
+        ui.painter()
+            .layout_no_wrap(
+                text.to_owned(),
+                table_cell_font(ui, kind),
+                egui::Color32::PLACEHOLDER,
+            )
+            .size()
+            .x
+    };
+    let content = projection
+        .columns
+        .iter()
+        .zip(headings)
+        .map(|(column, heading)| {
+            let widest_value = projection
+                .rows
+                .iter()
+                .take(MEASURED_ROWS)
+                .filter_map(|row| row.cells.get(&column.id))
+                .map(|cell| measure(&cell.display, TableCell::Value { active: false }))
+                .fold(0.0_f32, f32::max);
+            (measure(heading, TableCell::Heading).max(widest_value) + 2.0 * TABLE_CELL_PAD).ceil()
+        })
+        .collect::<Vec<_>>();
+    let total = content.iter().sum::<f32>().max(1.0);
+    if total <= room {
+        let extra = (room - total) / content.len().max(1) as f32;
+        content
+            .iter()
+            .map(|width| (width + extra).floor())
+            .collect()
+    } else {
+        content
+            .iter()
+            .map(|width| (width * room / total).floor())
+            .collect()
+    }
+}
+
 /// What a table cell holds.
 #[derive(Clone, Copy)]
 enum TableCell {
@@ -1575,19 +1640,17 @@ enum TableCell {
 /// text and grew past the share to fit it, so the rows ran out from under
 /// their headings and past the dialog's edge.
 fn table_cell(ui: &mut Ui, size: Vec2, text: &str, kind: TableCell) -> egui::Response {
-    const PAD: f32 = 4.0;
+    const PAD: f32 = TABLE_CELL_PAD;
     let tokens = Tokens::get(ui.ctx());
     let sense = match kind {
         TableCell::Heading => egui::Sense::hover(),
         TableCell::Value { .. } => egui::Sense::click(),
     };
     let (rect, response) = ui.allocate_exact_size(size, sense);
-    let (font, color) = match kind {
-        TableCell::Heading => (
-            theme::sans(tokens::FS_0, FontWeight::SemiBold),
-            tokens.color.text_dim,
-        ),
-        TableCell::Value { .. } => (egui::TextStyle::Body.resolve(ui.style()), tokens.color.text),
+    let font = table_cell_font(ui, kind);
+    let color = match kind {
+        TableCell::Heading => tokens.color.text_dim,
+        TableCell::Value { .. } => tokens.color.text,
     };
     if let TableCell::Value { active } = kind {
         response.widget_info(|| {
@@ -1620,7 +1683,6 @@ fn table_cell(ui: &mut Ui, size: Vec2, text: &str, kind: TableCell) -> egui::Res
 
 fn engineering_grid_preview(
     ui: &mut Ui,
-    view: &EngineeringTableView,
     projection: &crate::state::engineering_table::EngineeringProjection,
     selected_rows: &mut std::collections::BTreeSet<String>,
     active_cell: &mut Option<(usize, usize)>,
@@ -1637,166 +1699,169 @@ fn engineering_grid_preview(
     const CELL_HEIGHT: f32 = 24.0;
     const ROW_STRIDE: f32 = 28.0;
     const SHOWN_ROWS: f32 = 6.0;
-    // The columns share the width the dialog gives the table, in the
-    // proportions of their authored widths, with the rows' scroll bar kept
-    // out of it. Taken at their authored widths they ran past the dialog's
-    // edge behind a sideways scroll.
-    let authored = projection
+    let headings = projection
         .columns
         .iter()
         .map(|column| {
-            view.columns
-                .iter()
-                .find(|candidate| candidate.column_id == column.id)
-                .map_or(120.0, |candidate| f32::from(candidate.width))
+            column.unit.as_ref().map_or_else(
+                || column.label.clone(),
+                |unit| format!("{} [{}]", column.label, unit),
+            )
         })
         .collect::<Vec<_>>();
-    let room = (ui.available_width()
-        - CHECK_WIDTH
-        - GAP * authored.len() as f32
-        - ui.spacing().scroll.allocated_width())
-    .max(0.0);
-    let total = authored.iter().sum::<f32>().max(1.0);
-    let column_widths = authored
-        .iter()
-        .map(|width| width * room / total)
-        .collect::<Vec<_>>();
+    // On touch the manager's controls fill the dialog's height above the
+    // table, so a scroller of the table's own showed one row inside the
+    // body's scroller. There the rows lie in the body, and the body's one
+    // scroller reaches them all.
+    let rows_scroll = !tokens.metrics.is_touch();
+    // The rows' scroll bar has a gutter of its own at the table's right: the
+    // columns stop short of it rather than run under the bar.
+    let gutter = if rows_scroll {
+        ui.spacing().scroll.allocated_width() + GAP
+    } else {
+        0.0
+    };
+    let room = (ui.available_width() - CHECK_WIDTH - GAP * headings.len() as f32 - gutter).max(0.0);
+    let column_widths = content_column_widths(ui, projection, &headings, room);
     let mut action = None;
     Grid::new("engineering-table-preview-grid")
         .min_col_width(0.0)
         .spacing(Vec2::new(GAP, 4.0))
         .show(ui, |ui| {
             ui.allocate_exact_size(Vec2::new(CHECK_WIDTH, CELL_HEIGHT), egui::Sense::hover());
-            for (column, width) in projection.columns.iter().zip(&column_widths) {
-                let heading = column.unit.as_ref().map_or_else(
-                    || column.label.clone(),
-                    |unit| format!("{} [{}]", column.label, unit),
-                );
+            for (heading, width) in headings.iter().zip(&column_widths) {
                 table_cell(
                     ui,
                     Vec2::new(*width, CELL_HEIGHT),
-                    &heading,
+                    heading,
                     TableCell::Heading,
                 )
                 .on_hover_text(heading.as_str());
             }
             ui.end_row();
         });
-    ScrollArea::vertical()
-        .id_salt("engineering-table-preview-vertical")
-        .max_height(ROW_STRIDE * SHOWN_ROWS)
-        .auto_shrink([false, false])
-        .show_rows(ui, ROW_STRIDE, projection.rows.len(), |ui, visible| {
-            Grid::new("engineering-table-preview-rows")
-                .striped(true)
-                .min_col_width(0.0)
-                .spacing(Vec2::new(8.0, 4.0))
-                .show(ui, |ui| {
-                    for row_index in visible {
-                        let row = &projection.rows[row_index];
-                        let mut selected = selected_rows.contains(&row.stable_id);
-                        let selected_response = ui
-                            .allocate_ui_with_layout(
-                                Vec2::new(CHECK_WIDTH, CELL_HEIGHT),
-                                egui::Layout::left_to_right(egui::Align::Center),
-                                |ui| {
-                                    ui.set_min_size(Vec2::new(CHECK_WIDTH, CELL_HEIGHT));
-                                    ui.checkbox(&mut selected, "")
-                                },
-                            )
-                            .inner
-                            .on_hover_text("Select row for copy or export");
-                        if selected_response.changed() {
-                            if selected {
-                                selected_rows.insert(row.stable_id.clone());
-                            } else {
+    let mut rows = |ui: &mut Ui, visible: std::ops::Range<usize>| {
+        Grid::new("engineering-table-preview-rows")
+            .striped(true)
+            .min_col_width(0.0)
+            .spacing(Vec2::new(8.0, 4.0))
+            .show(ui, |ui| {
+                for row_index in visible {
+                    let row = &projection.rows[row_index];
+                    let mut selected = selected_rows.contains(&row.stable_id);
+                    let selected_response = ui
+                        .allocate_ui_with_layout(
+                            Vec2::new(CHECK_WIDTH, CELL_HEIGHT),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                ui.set_min_size(Vec2::new(CHECK_WIDTH, CELL_HEIGHT));
+                                ui.checkbox(&mut selected, "")
+                            },
+                        )
+                        .inner
+                        .on_hover_text("Select row for copy or export");
+                    if selected_response.changed() {
+                        if selected {
+                            selected_rows.insert(row.stable_id.clone());
+                        } else {
+                            selected_rows.remove(&row.stable_id);
+                        }
+                    }
+                    for (column_index, (column, width)) in
+                        projection.columns.iter().zip(&column_widths).enumerate()
+                    {
+                        let selected_cell = *active_cell == Some((row_index, column_index));
+                        let text = row
+                            .cells
+                            .get(&column.id)
+                            .map(|cell| cell.display.as_str())
+                            .unwrap_or_default();
+                        let response = table_cell(
+                            ui,
+                            Vec2::new(*width, CELL_HEIGHT),
+                            text,
+                            TableCell::Value {
+                                active: selected_cell,
+                            },
+                        )
+                        .on_hover_text(text);
+                        if *focus_cell == Some((row_index, column_index)) {
+                            response.request_focus();
+                            *focus_cell = None;
+                        }
+                        if response.clicked() {
+                            *active_cell = Some((row_index, column_index));
+                            response.request_focus();
+                        }
+                        if response.has_focus() {
+                            let modifiers = ui.input(|input| input.modifiers);
+                            let move_to = ui.input(|input| {
+                                if input.key_pressed(egui::Key::ArrowLeft) {
+                                    Some((row_index, column_index.saturating_sub(1)))
+                                } else if input.key_pressed(egui::Key::ArrowRight) {
+                                    Some((
+                                        row_index,
+                                        (column_index + 1)
+                                            .min(projection.columns.len().saturating_sub(1)),
+                                    ))
+                                } else if input.key_pressed(egui::Key::ArrowUp) {
+                                    Some((row_index.saturating_sub(1), column_index))
+                                } else if input.key_pressed(egui::Key::ArrowDown) {
+                                    Some((
+                                        (row_index + 1)
+                                            .min(projection.rows.len().saturating_sub(1)),
+                                        column_index,
+                                    ))
+                                } else if input.key_pressed(egui::Key::Home) {
+                                    Some((if modifiers.ctrl { 0 } else { row_index }, 0))
+                                } else if input.key_pressed(egui::Key::End) {
+                                    Some((
+                                        if modifiers.ctrl {
+                                            projection.rows.len().saturating_sub(1)
+                                        } else {
+                                            row_index
+                                        },
+                                        projection.columns.len().saturating_sub(1),
+                                    ))
+                                } else {
+                                    None
+                                }
+                            });
+                            if let Some(target) = move_to {
+                                *active_cell = Some(target);
+                                *focus_cell = Some(target);
+                            }
+                            if modifiers.shift
+                                && ui.input(|input| input.key_pressed(egui::Key::Space))
+                                && !selected_rows.insert(row.stable_id.clone())
+                            {
                                 selected_rows.remove(&row.stable_id);
                             }
-                        }
-                        for (column_index, (column, width)) in
-                            projection.columns.iter().zip(&column_widths).enumerate()
-                        {
-                            let selected_cell = *active_cell == Some((row_index, column_index));
-                            let text = row
-                                .cells
-                                .get(&column.id)
-                                .map(|cell| cell.display.as_str())
-                                .unwrap_or_default();
-                            let response = table_cell(
-                                ui,
-                                Vec2::new(*width, CELL_HEIGHT),
-                                text,
-                                TableCell::Value {
-                                    active: selected_cell,
-                                },
-                            )
-                            .on_hover_text(text);
-                            if *focus_cell == Some((row_index, column_index)) {
-                                response.request_focus();
-                                *focus_cell = None;
+                            if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
+                                action = Some(BodyAction::OpenDetails(row.stable_id.clone()));
                             }
-                            if response.clicked() {
-                                *active_cell = Some((row_index, column_index));
-                                response.request_focus();
-                            }
-                            if response.has_focus() {
-                                let modifiers = ui.input(|input| input.modifiers);
-                                let move_to = ui.input(|input| {
-                                    if input.key_pressed(egui::Key::ArrowLeft) {
-                                        Some((row_index, column_index.saturating_sub(1)))
-                                    } else if input.key_pressed(egui::Key::ArrowRight) {
-                                        Some((
-                                            row_index,
-                                            (column_index + 1)
-                                                .min(projection.columns.len().saturating_sub(1)),
-                                        ))
-                                    } else if input.key_pressed(egui::Key::ArrowUp) {
-                                        Some((row_index.saturating_sub(1), column_index))
-                                    } else if input.key_pressed(egui::Key::ArrowDown) {
-                                        Some((
-                                            (row_index + 1)
-                                                .min(projection.rows.len().saturating_sub(1)),
-                                            column_index,
-                                        ))
-                                    } else if input.key_pressed(egui::Key::Home) {
-                                        Some((if modifiers.ctrl { 0 } else { row_index }, 0))
-                                    } else if input.key_pressed(egui::Key::End) {
-                                        Some((
-                                            if modifiers.ctrl {
-                                                projection.rows.len().saturating_sub(1)
-                                            } else {
-                                                row_index
-                                            },
-                                            projection.columns.len().saturating_sub(1),
-                                        ))
-                                    } else {
-                                        None
-                                    }
-                                });
-                                if let Some(target) = move_to {
-                                    *active_cell = Some(target);
-                                    *focus_cell = Some(target);
-                                }
-                                if modifiers.shift
-                                    && ui.input(|input| input.key_pressed(egui::Key::Space))
-                                    && !selected_rows.insert(row.stable_id.clone())
-                                {
-                                    selected_rows.remove(&row.stable_id);
-                                }
-                                if ui.input(|input| input.key_pressed(egui::Key::Enter)) {
-                                    action = Some(BodyAction::OpenDetails(row.stable_id.clone()));
-                                }
-                                if modifiers.command
-                                    && ui.input(|input| input.key_pressed(egui::Key::C))
-                                {
-                                    action = Some(BodyAction::Copy);
-                                }
+                            if modifiers.command
+                                && ui.input(|input| input.key_pressed(egui::Key::C))
+                            {
+                                action = Some(BodyAction::Copy);
                             }
                         }
-                        ui.end_row();
                     }
-                });
-        });
+                    ui.end_row();
+                }
+            });
+    };
+    if rows_scroll {
+        ScrollArea::vertical()
+            .id_salt("engineering-table-preview-vertical")
+            .max_height(ROW_STRIDE * SHOWN_ROWS)
+            .auto_shrink([false, true])
+            .show_rows(ui, ROW_STRIDE, projection.rows.len(), |ui, visible| {
+                rows(ui, visible);
+            });
+    } else {
+        rows(ui, 0..projection.rows.len());
+    }
     action
 }
 
@@ -2154,6 +2219,26 @@ mod tests {
         // The footer's last button ends its padding past its label: the
         // dialog's content edge, which no cell may cross.
         let edge = at("Apply table view").right() + 12.0;
+        // Every column is as wide as what it holds: no value is cut while
+        // the table has room, and the last column stops short of the rows'
+        // scroll bar. Owner read "Active schema…" on every row under it.
+        for (text, rect) in &texts {
+            // A row that asks for more says so with an ellipsis; nothing
+            // else ends in one.
+            let asks = ["Save view\u{2026}", "Saved views\u{2026}", "Export\u{2026}"];
+            assert!(
+                !text.ends_with('\u{2026}') || asks.contains(&text.as_str()),
+                "{text:?} is cut"
+            );
+            if text == "Active schematic" {
+                assert!(
+                    rect.right() <= edge - 13.0,
+                    "an owner ends at {}, under the rows' scroll bar",
+                    rect.right()
+                );
+            }
+        }
+        let _ = at("Active schematic");
         for (text, rect) in &texts {
             assert!(
                 rect.right() <= edge,
