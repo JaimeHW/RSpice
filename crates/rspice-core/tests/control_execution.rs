@@ -881,6 +881,31 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// A `pre_` command runs without its prefix before the rest of the script
+/// (frontend/inp.c:786), so a later `set` overrides a `pre_set`, and blocks
+/// after it still run in order. ngspice-46 echoes `first 1`, `second 1`, `in
+/// the loop` twice and `done 1`.
+#[test]
+fn a_pre_command_runs_before_the_rest_of_the_script() {
+    let (presented, error) = run_until_error(
+        "preset\nv1 1 0 1\nr1 1 0 1k\n.control\nset myvar = 1\necho first $myvar\n\
+         pre_set myvar = 5\necho second $myvar\nrepeat 2\necho in the loop\nend\n\
+         if $myvar = 1\necho done $myvar\nelse\necho wrong\nend\n\
+         pre_set strict_errorhandling\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "first 1",
+            "second 1",
+            "in the loop",
+            "in the loop",
+            "done 1"
+        ]
+    );
+}
+
 /// `let` takes a vector name with a `-` in it, as ngspice's com_let does
 /// (frontend/com_let.c:95), and refuses one that starts with a digit or
 /// holds an `@`. ngspice-46 lists `lin-tstart : notype, real, 1 long`.

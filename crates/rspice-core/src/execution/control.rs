@@ -140,6 +140,7 @@ impl ControlProgram {
         };
         let mut in_control = false;
         let mut blocks: Vec<(usize, Option<usize>)> = Vec::new();
+        let mut early = Vec::new();
         for (index, text) in source.lines().enumerate() {
             let line = index + 1;
             check_abort(abort, line)?;
@@ -178,6 +179,24 @@ impl ControlProgram {
             }
             program.declarative_source.push('\n');
             if head.is_empty() {
+                continue;
+            }
+            // inp.c:786: ngspice strips `pre_` from a control line and runs
+            // the command before it sets the circuit up, so before every
+            // other line of the script.
+            if let Some(name) = head
+                .get(..4)
+                .filter(|prefix| prefix.eq_ignore_ascii_case("pre_"))
+                .and_then(|_| head.get(4..))
+                .filter(|name| !name.is_empty())
+            {
+                early.push(Instruction {
+                    line,
+                    op: Op::Command {
+                        name: name.to_ascii_lowercase(),
+                        arguments: rest.to_owned(),
+                    },
+                });
                 continue;
             }
             let pc = program.instructions.len();
@@ -353,6 +372,24 @@ impl ControlProgram {
                 .to_ascii_lowercase();
             program.unclosed = Some((line, keyword));
             program.instructions.truncate(opening);
+        }
+        if !early.is_empty() {
+            let shift = early.len();
+            for instruction in &mut program.instructions {
+                match &mut instruction.op {
+                    Op::Loop { end, .. } | Op::Else { end } => *end += shift,
+                    Op::If {
+                        alternative, end, ..
+                    } => {
+                        *alternative += shift;
+                        *end += shift;
+                    }
+                    Op::End { opening } => *opening += shift,
+                    _ => {}
+                }
+            }
+            early.append(&mut program.instructions);
+            program.instructions = early;
         }
         Ok(program)
     }
