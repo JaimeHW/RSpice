@@ -23,7 +23,8 @@ use crate::state::{
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
+    Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
+    name_control, select,
 };
 use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
@@ -800,10 +801,11 @@ fn saved_filter_controls(
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label("Filter name");
-        ui.add_sized(
+        let response = ui.add_sized(
             [220.0, tokens.metrics.ctl_h],
             TextEdit::singleline(&mut dialog.save_filter_name),
         );
+        name_control(ui, &response, "Filter name");
         if Button::new("Save").accent().show(ui).clicked() {
             *action = SelectionBulkBodyAction::SaveFilter;
         }
@@ -875,24 +877,24 @@ fn selection_filter_fields(
     ui.add_space(9.0);
     ui.columns(2, |columns| {
         columns[0].label("Model / cell");
-        if columns[0]
-            .add(
-                TextEdit::singleline(&mut dialog.filter.model_cell)
-                    .desired_width(columns[0].available_width())
-                    .hint_text("Any"),
-            )
-            .changed()
+        if field(
+            &mut columns[0],
+            "Model / cell",
+            &mut dialog.filter.model_cell,
+            "Any",
+        )
+        .changed()
         {
             *action = SelectionBulkBodyAction::FilterChanged;
         }
         columns[1].label("Current property");
-        if columns[1]
-            .add(
-                TextEdit::singleline(&mut dialog.filter.current_property)
-                    .desired_width(columns[1].available_width())
-                    .hint_text("name = value"),
-            )
-            .changed()
+        if field(
+            &mut columns[1],
+            "Current property",
+            &mut dialog.filter.current_property,
+            "name = value",
+        )
+        .changed()
         {
             *action = SelectionBulkBodyAction::FilterChanged;
         }
@@ -1150,6 +1152,22 @@ fn impact_row(ui: &mut Ui, label: &str, value: &str) {
 
 const IMPACT_ROW_H: f32 = 22.0;
 
+/// A text field across `ui`'s width at the selects' height, named by the
+/// label its column states above it.
+fn field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> egui::Response {
+    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+    let response = ui.add_sized(
+        [ui.available_width(), height],
+        TextEdit::singleline(value)
+            .font(theme::field_mono())
+            .hint_text(hint)
+            .vertical_align(egui::Align::Center)
+            .margin(egui::Margin::symmetric(8, 4)),
+    );
+    name_control(ui, &response, label);
+    response
+}
+
 fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> bool {
     match dialog.property {
         SelectionBulkProperty::ModelSection => {
@@ -1205,9 +1223,9 @@ fn new_value_control(ui: &mut Ui, dialog: &mut SelectionBulkEditDialogState) -> 
         }
         SelectionBulkProperty::Temperature
         | SelectionBulkProperty::Tolerance
-        | SelectionBulkProperty::ParameterOverride => ui
-            .add(TextEdit::singleline(&mut dialog.new_value).desired_width(ui.available_width()))
-            .changed(),
+        | SelectionBulkProperty::ParameterOverride => {
+            field(ui, "New value", &mut dialog.new_value, "").changed()
+        }
     }
 }
 
@@ -2270,6 +2288,60 @@ mod tests {
                 && node.label() == Some("Select X1")
                 && node.toggled() == Some(egui::accesskit::Toggled::True)
         }));
+    }
+
+    /// The filter's text fields stand as tall as the selects above them and
+    /// are named by their labels, on desktop and on touch. They were 21 pt
+    /// beside 28 pt selects (44 on touch), and a screen reader heard nothing.
+    #[test]
+    fn the_filter_fields_match_the_selects_and_say_their_names() {
+        for coarse in [false, true] {
+            let ctx = Context::default();
+            ctx.enable_accesskit();
+            crate::ui::Theme::default().apply(&ctx);
+            crate::ui::Theme::default().apply_responsive_metrics_with_target(
+                &ctx,
+                coarse.then_some(crate::ui::tokens::TOUCH_TARGET),
+            );
+            let mut app = RSpiceApp::test_instance();
+            app.state.model.schematic.document_mut_for_test().components =
+                vec![component(1, "X1", Some("tt"))];
+            open_selection_bulk_edit_dialog(&mut app.state);
+            let mut nodes = std::collections::HashMap::new();
+            for _ in 0..3 {
+                let output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1440.0, 900.0),
+                        )),
+                        ..egui::RawInput::default()
+                    },
+                    |ctx| app.render_selection_bulk_edit_dialog(ctx),
+                );
+                if let Some(update) = output.platform_output.accesskit_update {
+                    nodes.extend(update.nodes);
+                }
+            }
+            let height = |label: &str| {
+                let bounds = nodes
+                    .values()
+                    .find(|node| {
+                        node.label() == Some(label) && node.role() != egui::accesskit::Role::Label
+                    })
+                    .and_then(egui::accesskit::Node::bounds)
+                    .unwrap_or_else(|| panic!("no control named {label:?}"));
+                bounds.y1 - bounds.y0
+            };
+            let select = height("Object kinds");
+            for field in ["Model / cell", "Current property"] {
+                assert!(
+                    (height(field) - select).abs() < 0.5,
+                    "{field} is {} pt beside a {select} pt select (touch {coarse})",
+                    height(field)
+                );
+            }
+        }
     }
 
     /// Nothing in the body reaches past the footer's right edge. With no
