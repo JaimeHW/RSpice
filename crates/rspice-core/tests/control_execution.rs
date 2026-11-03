@@ -881,6 +881,37 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// `let` takes a vector name with a `-` in it, as ngspice's com_let does
+/// (frontend/com_let.c:95), and refuses one that starts with a digit or
+/// holds an `@`. ngspice-46 lists `lin-tstart : notype, real, 1 long`.
+#[test]
+fn let_takes_a_vector_name_with_a_dash() {
+    let (presented, error) = run_until_error(
+        "dashname\nv1 1 0 1\nr1 1 0 1k\n.control\nop\nlet lin-tstart = 4n\n\
+         display lin-tstart\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        ["    lin-tstart          : notype, real, 1 long"]
+    );
+    for name in ["1x", "a@b", "all"] {
+        let error = ControlProgram::parse_deck_with_abort(
+            &format!("dashname\nv1 1 0 1\n.control\nlet {name} = 3\n.endc\n.end\n"),
+            ControlLimits::default(),
+            &NoAbort,
+        )
+        .err()
+        .map(|error| error.to_string());
+        assert!(
+            error
+                .as_deref()
+                .is_some_and(|error| error.contains("invalid variable name")),
+            "{name}: {error:?}"
+        );
+    }
+}
+
 /// `display` lists the `let` vectors bound in the current plot with its
 /// own, and a plot `setplot new` made holds only what was bound in it, the
 /// first of them its scale (frontend/vectors.c vec_new). The listings are

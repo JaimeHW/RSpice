@@ -281,7 +281,7 @@ impl ControlProgram {
                         Some((name, index)) => (name.trim(), Some(index.trim().to_owned())),
                         None => (target.trim(), None),
                     };
-                    require_identifier(name, line)?;
+                    require_vector_name(name, line)?;
                     if expression.trim().is_empty() {
                         return Err(syntax(line, "let requires an expression"));
                     }
@@ -1151,6 +1151,22 @@ fn require_identifier(name: &str, line: usize) -> Result<(), ControlError> {
         .next()
         .is_some_and(|character| character.is_ascii_alphabetic() || character == '_')
         || !chars.all(|character| character.is_ascii_alphanumeric() || character == '_')
+    {
+        return Err(syntax(line, format!("invalid variable name '{name}'")));
+    }
+    Ok(())
+}
+
+/// com_let (frontend/com_let.c:95) refuses a vector name that is `all`,
+/// holds an `@`, is empty or starts with a digit. Any other word names a
+/// vector, as `cut-tstart` and `lin-tstep` name the bounds `cutout` and
+/// `linearize` read.
+fn require_vector_name(name: &str, line: usize) -> Result<(), ControlError> {
+    if name.is_empty()
+        || name.eq_ignore_ascii_case("all")
+        || name.contains('@')
+        || name.contains(char::is_whitespace)
+        || name.starts_with(|character: char| character.is_ascii_digit())
     {
         return Err(syntax(line, format!("invalid variable name '{name}'")));
     }
