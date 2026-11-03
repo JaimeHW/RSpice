@@ -102,7 +102,8 @@ impl ControlNamedDataset {
     }
 }
 
-/// ngspice `ft_typenames` for the units a raw vector can carry.
+/// ngspice `ft_typenames` (frontend/typesdef.c:38) for the units a vector
+/// can carry, as `settype` spells them in this host.
 fn type_name(unit: &SignalUnit) -> &'static str {
     match unit {
         SignalUnit::Volt => "voltage",
@@ -111,8 +112,62 @@ fn type_name(unit: &SignalUnit) -> &'static str {
         SignalUnit::Hertz => "frequency",
         SignalUnit::Ohm => "impedance",
         SignalUnit::Siemens => "admittance",
+        SignalUnit::Watt => "power",
+        SignalUnit::Radian => "phase",
+        SignalUnit::Custom(unit) => match unit.as_str() {
+            "dB" => "decibel",
+            "degC" => "temperature",
+            "F" => "capacitance",
+            "C" => "charge",
+            "V/sqrt(Hz)" => "voltage-density",
+            "A/sqrt(Hz)" => "current-density",
+            "V^2/Hz" => "voltage^2-density",
+            "A^2/Hz" => "current^2-density",
+            "V^2" => "voltage^2",
+            "A^2" => "current^2",
+            _ => "notype",
+        },
         _ => "notype",
     }
+}
+
+/// A `let` vector's `display` line (frontend/plotting/pvec.c).
+fn vector_line(name: &str, value: &VectorValue, scale: bool) -> String {
+    let numeric = if value.complex { "complex" } else { "real" };
+    let mark = if scale { " [default scale]" } else { "" };
+    format!(
+        "    {name:<20}: {}, {numeric}, {} long{mark}\n",
+        type_name(&value.unit),
+        value.samples.len()
+    )
+}
+
+/// `display` of a plot's `(name, line)` pairs: every line under the header,
+/// sorted by name as frontend/com_display.c sorts them unless `nosort` is
+/// set, or only the requested vectors' lines.
+fn listed(
+    command: &ControlCommand,
+    header: String,
+    mut lines: Vec<(String, String)>,
+    requested: Vec<crate::engine::control::shell::Word>,
+) -> Result<String, ControlError> {
+    if requested.is_empty() {
+        lines.sort();
+        return Ok(lines.into_iter().fold(header, |mut text, (_, line)| {
+            text.push_str(&line);
+            text
+        }));
+    }
+    let mut text = String::new();
+    for word in requested {
+        let name = word.text.to_ascii_lowercase();
+        let (_, line) = lines
+            .iter()
+            .find(|(vector, _)| *vector == name)
+            .ok_or_else(|| command_error(command.line, format!("no such vector as {name}")))?;
+        text.push_str(line);
+    }
+    Ok(text)
 }
 
 impl ControlCircuit {
@@ -132,11 +187,30 @@ impl ControlCircuit {
         format!("{}{newline}", words.join(" "))
     }
 
-    /// `display [vectors...]` on the current dataset.
+    /// `display [vectors...]` on the current plot: a dataset's vectors with
+    /// the `let` vectors bound in it, or a plot `setplot new` made.
     pub(in crate::engine) fn display(
         &self,
         command: &ControlCommand,
     ) -> Result<String, ControlError> {
+        let requested = crate::engine::control::shell::words(&command.arguments);
+        if let Some(plot) = self.vectors.current_plot() {
+            let scale = self.vectors.plot_scale(plot);
+            let lines = self
+                .vectors
+                .vectors_in(plot)
+                .map(|(name, value)| {
+                    let name = name.to_ascii_lowercase();
+                    let scale = scale.is_some_and(|scale| scale.eq_ignore_ascii_case(&name));
+                    let line = vector_line(&name, value, scale);
+                    (name, line)
+                })
+                .collect();
+            let header = format!(
+                "Here are the vectors currently active:\n\nTitle: Anonymous\nName: {plot} (unknown)\n\n"
+            );
+            return listed(command, header, lines, requested);
+        }
         let Some(dataset) = self.current_dataset() else {
             return Ok("There are no vectors currently active.\n".into());
         };
@@ -147,7 +221,7 @@ impl ControlCircuit {
             "real"
         };
         let policy = self.netlist.ground_policy();
-        let mut vectors = dataset.vectors(|name| policy.is_ground(name));
+        let vectors = dataset.vectors(|name| policy.is_ground(name));
         // An operating point sweeps nothing, so its first vector is its scale
         // (frontend/vectors.c vec_new): the circuit's first node.
         let scale = dataset.scale_vector().or_else(|| {
@@ -163,33 +237,29 @@ impl ControlCircuit {
             };
             format!("    {name:<20}: {kind}, {numeric}, {length} long{mark}\n")
         };
-        let requested = crate::engine::control::shell::words(&command.arguments);
-        if !requested.is_empty() {
-            let mut text = String::new();
-            for word in requested {
-                let name = word.text.to_ascii_lowercase();
-                let (_, kind) = vectors
-                    .iter()
-                    .find(|(vector, _)| *vector == name)
-                    .ok_or_else(|| {
-                        command_error(command.line, format!("no such vector as {name}"))
-                    })?;
-                text.push_str(&line(&name, kind));
+        // A `let` of a dataset vector's name replaces it in the plot.
+        let mut lines: Vec<_> = self
+            .vectors
+            .vectors_in(&dataset.name)
+            .map(|(name, value)| {
+                let name = name.to_ascii_lowercase();
+                let line = vector_line(&name, value, false);
+                (name, line)
+            })
+            .collect();
+        for (name, kind) in vectors {
+            if !lines.iter().any(|(bound, _)| *bound == name) {
+                let line = line(&name, kind);
+                lines.push((name, line));
             }
-            return Ok(text);
         }
-        // com_display.c sorts by name unless `nosort` is set.
-        vectors.sort();
-        let mut text = format!(
+        let header = format!(
             "Here are the vectors currently active:\n\nTitle: {}\nName: {} ({})\n\n",
             self.netlist.title,
             dataset.name,
             dataset.plot_title()
         );
-        for (name, kind) in &vectors {
-            text.push_str(&line(name, kind));
-        }
-        Ok(text)
+        listed(command, header, lines, requested)
     }
 
     /// ngspice `destroy [all | plot ...]` (frontend/postcoms.c:891): the

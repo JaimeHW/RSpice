@@ -86,6 +86,30 @@ impl VectorStore {
         self.plots.iter().map(|plot| plot.name.clone()).collect()
     }
 
+    /// The scale of a plot `setplot new` made: the first vector bound in it.
+    pub(in crate::engine::control) fn plot_scale(&self, plot: &str) -> Option<&str> {
+        self.plots
+            .iter()
+            .find(|candidate| candidate.name.eq_ignore_ascii_case(plot))
+            .and_then(|plot| plot.scale.as_deref())
+    }
+
+    /// The vectors bound in a plot, by their bound names.
+    pub(in crate::engine::control) fn vectors_in<'a>(
+        &'a self,
+        plot: &'a str,
+    ) -> impl Iterator<Item = (&'a str, &'a VectorValue)> + 'a {
+        self.vectors
+            .iter()
+            .filter(move |vector| {
+                vector
+                    .plot
+                    .as_deref()
+                    .is_some_and(|owner| owner.eq_ignore_ascii_case(plot))
+            })
+            .map(|vector| (vector.name.as_str(), &vector.value))
+    }
+
     /// Each plot `setplot new` made, oldest first, with the number of
     /// datasets that existed when it was made.
     pub(in crate::engine::control) fn plots_made(&self) -> Vec<(&str, usize)> {

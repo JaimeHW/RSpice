@@ -881,6 +881,36 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// `display` lists the `let` vectors bound in the current plot with its
+/// own, and a plot `setplot new` made holds only what was bound in it, the
+/// first of them its scale (frontend/vectors.c vec_new). The listings are
+/// ngspice-46's for the script.
+#[test]
+fn display_lists_the_let_vectors_of_the_current_plot() {
+    let (presented, error) = run_until_error(
+        "listing\nV1 in 0 2\nR1 in out 1k\nR2 out 0 3k\n.control\nop\n\
+         let a = v(out)\nlet s = 5\nsetplot new\nlet b = vector(3)\ndisplay\n\
+         setplot op1\ndisplay\ndisplay s\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    assert_eq!(
+        texts(&presented),
+        [
+            "Here are the vectors currently active:\n\nTitle: Anonymous\n\
+             Name: unknown1 (unknown)\n\n\
+             \x20   b                   : notype, real, 3 long [default scale]",
+            "Here are the vectors currently active:\n\nTitle: listing\n\
+             Name: op1 (Operating Point)\n\n\
+             \x20   a                   : voltage, real, 1 long\n\
+             \x20   in                  : voltage, real, 1 long [default scale]\n\
+             \x20   out                 : voltage, real, 1 long\n\
+             \x20   s                   : notype, real, 1 long\n\
+             \x20   v1#branch           : current, real, 1 long",
+            "    s                   : notype, real, 1 long",
+        ]
+    );
+}
+
 /// A bare `setplot` lists every plot newest first, the plots `setplot new`
 /// made among the analyses' and the constants plot last
 /// (frontend/vectors.c:902). These are ngspice-46's listings for the script.
