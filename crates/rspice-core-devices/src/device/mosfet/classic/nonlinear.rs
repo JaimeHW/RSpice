@@ -226,16 +226,22 @@ impl Mosfet {
         self.eval_vds = eval_vds;
         self.eval_vbs = eval_vbs;
 
-        let (id, region, gm, gds, gmb, gss, id_eq) = if let Some(constants) = constants {
-            self.linearized_transient_operating_point(
-                self.eval_vgs,
-                self.eval_vds,
-                self.eval_vbs,
-                constants,
-            )
-        } else {
-            self.linearized_operating_point(self.eval_vgs, self.eval_vds, self.eval_vbs)
-        };
+        let (id, region, gm, gds, gmb, gss, id_eq) =
+            if self.level == 2 && self.legacy_bsim_model.is_none() {
+                let (operating_point, evaluation) =
+                    self.level2_operating_point_with_evaluation(eval_vgs, eval_vds, eval_vbs);
+                self.remember_level2_bias_state(eval_vgs, eval_vds, eval_vbs, &evaluation);
+                self.with_equivalent_current(eval_vgs, eval_vds, eval_vbs, operating_point)
+            } else if let Some(constants) = constants {
+                self.linearized_transient_operating_point(
+                    self.eval_vgs,
+                    self.eval_vds,
+                    self.eval_vbs,
+                    constants,
+                )
+            } else {
+                self.linearized_operating_point(self.eval_vgs, self.eval_vds, self.eval_vbs)
+            };
         self.id = id;
         self.region = region;
         self.gm = gm;

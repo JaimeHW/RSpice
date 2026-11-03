@@ -342,8 +342,8 @@ impl Mosfet {
             return self.level6_meyer_state(vgs, vds, vbs);
         }
         if self.level == 2 {
-            let eval = self.level2_evaluate(vgs, vds, vbs);
-            return (mode, eval.von, eval.vdsat);
+            let (von, vdsat) = self.level2_onset_and_saturation(vgs, vds, vbs);
+            return (mode, von, vdsat);
         }
         if self.uses_mos3_core() {
             let state = self.mos3_state(vgs, vds, vbs);

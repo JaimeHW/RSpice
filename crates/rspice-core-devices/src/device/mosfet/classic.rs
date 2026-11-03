@@ -25,6 +25,7 @@ mod current;
 mod junctions;
 mod meyer;
 mod mos2;
+use mos2::Level2BiasState;
 mod mos3;
 mod nonlinear;
 mod operating_point;
@@ -497,6 +498,9 @@ pub struct Mosfet {
     /// Runtime GMIN/temperature/model changes invalidate this independently
     /// from branch history, which remains necessary for Newton convergence.
     linearization_cache_valid: bool,
+    /// Level-2 onset and saturation voltages at the last two biases an
+    /// update evaluated, for the Meyer state and the limiting that follow.
+    level2_bias_states: [Level2BiasState; 2],
     /// The deck marked this instance `OFF`.
     initial_off: bool,
     /// The instance `IC=` vector and the operating-point startup state, never
@@ -696,6 +700,7 @@ impl Mosfet {
 
     #[doc(hidden)]
     pub fn restore_nonlinear_state(&mut self, state: MosfetNonlinearState) {
+        self.forget_level2_bias_states();
         self.junction_gmin = state.junction_gmin;
         self.vt = state.vt;
         self.vgs = state.vgs;
@@ -764,6 +769,7 @@ impl Mosfet {
     #[doc(hidden)]
     pub fn set_ngspice_dialect(&mut self, enabled: bool) {
         self.ngspice_dialect = enabled;
+        self.forget_level2_bias_states();
     }
 
     /// Hold an `OFF` instance through Xyce's initFixFlag instead of ngspice's
@@ -968,9 +974,11 @@ mod layout_tests {
 
     #[test]
     fn classic_mos_hot_instance_layout_stays_compact() {
+        // The level-2 bias states are hot: the same load's Meyer state and
+        // limiting read them in place of two model evaluations.
         let bytes = std::mem::size_of::<Mosfet>();
         assert!(
-            bytes <= 1_224,
+            bytes <= 1_304,
             "classic MOS hot instance regressed to {bytes} bytes; keep cold model-family payloads indirect"
         );
     }

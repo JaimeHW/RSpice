@@ -128,6 +128,7 @@ impl Mosfet {
         state: &AcceptedMosfetNonlinearCheckpoint,
     ) -> Result<(), String> {
         self.validate_accepted_nonlinear_checkpoint(state)?;
+        self.forget_level2_bias_states();
         [
             self.junction_gmin,
             self.vt,

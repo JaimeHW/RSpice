@@ -51,6 +51,22 @@ struct Mos2ForwardOperatingPoint {
     gmb: Value,
 }
 
+/// A level-2 evaluation's onset and saturation voltages at an exact bias.
+#[derive(Debug, Clone, Copy)]
+pub(in crate::device::mosfet::classic) struct Level2BiasState {
+    bias: [u64; 3],
+    von: Value,
+    vdsat: Value,
+}
+
+impl Level2BiasState {
+    pub(in crate::device::mosfet::classic) const EMPTY: Self = Self {
+        bias: [u64::MAX; 3],
+        von: Value::NAN,
+        vdsat: Value::NAN,
+    };
+}
+
 impl Mosfet {
     #[inline]
     fn level2_xyce_thermal_voltage(&self) -> Value {
@@ -79,7 +95,63 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> Value {
-        self.level2_evaluate(vgs, vds, vbs).von
+        self.level2_onset_and_saturation(vgs, vds, vbs).0
+    }
+
+    /// The onset and saturation voltages of [`Self::level2_evaluate`] at a
+    /// bias. One of the last two biases an update evaluated reads them back,
+    /// as mos2load.c reuses its load's `von` and `vdsat` for the Meyer
+    /// charges and the next iterate's limiting instead of re-running the
+    /// model.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn level2_onset_and_saturation(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (Value, Value) {
+        // Only finite biases are recorded.
+        if vgs.is_finite() && vds.is_finite() && vbs.is_finite() {
+            let bias = [vgs.to_bits(), vds.to_bits(), vbs.to_bits()];
+            for state in &self.level2_bias_states {
+                if state.bias == bias {
+                    return (state.von, state.vdsat);
+                }
+            }
+        }
+        let eval = self.level2_evaluate(vgs, vds, vbs);
+        (eval.von, eval.vdsat)
+    }
+
+    /// Record an update's evaluation at a bias, keeping the bias it replaces
+    /// for the limiting of a repeated or stamped iterate.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn remember_level2_bias_state(
+        &mut self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        eval: &Mos2Evaluation,
+    ) {
+        if !(vgs.is_finite() && vds.is_finite() && vbs.is_finite()) {
+            return;
+        }
+        let state = Level2BiasState {
+            bias: [vgs.to_bits(), vds.to_bits(), vbs.to_bits()],
+            von: eval.von,
+            vdsat: eval.vdsat,
+        };
+        if self.level2_bias_states[0].bias != state.bias {
+            self.level2_bias_states[1] = self.level2_bias_states[0];
+        }
+        self.level2_bias_states[0] = state;
+    }
+
+    /// Drop the recorded evaluations once the device law or its thermal
+    /// voltage may have changed.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn forget_level2_bias_states(&mut self) {
+        self.level2_bias_states = [Level2BiasState::EMPTY; 2];
     }
 
     #[inline]
@@ -89,6 +161,20 @@ impl Mosfet {
         vds: Value,
         vbs: Value,
     ) -> (Value, MosRegion, Value, Value, Value, Value) {
+        self.level2_operating_point_with_evaluation(vgs, vds, vbs).0
+    }
+
+    /// [`Self::level2_operating_point`] with the evaluation it linearized.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn level2_operating_point_with_evaluation(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+    ) -> (
+        (Value, MosRegion, Value, Value, Value, Value),
+        Mos2Evaluation,
+    ) {
         let eval = self.level2_evaluate(vgs, vds, vbs);
         let p = self.polarity();
         let vgs_m = p * vgs;
@@ -107,12 +193,15 @@ impl Mosfet {
         let sanitize = |value: Value| if value.is_finite() { value } else { 0.0 };
 
         (
-            eval.id,
-            eval.region,
-            sanitize(gm),
-            sanitize(gds),
-            sanitize(gmb),
-            gss,
+            (
+                eval.id,
+                eval.region,
+                sanitize(gm),
+                sanitize(gds),
+                sanitize(gmb),
+                gss,
+            ),
+            eval,
         )
     }
 
@@ -1255,6 +1344,50 @@ mod tests {
             assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-5);
             assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-5);
         }
+    }
+
+    #[test]
+    fn level2_recorded_bias_states_match_a_fresh_evaluation() {
+        use crate::device::NonlinearDevice;
+
+        let mut mos = mos2_vmax_device();
+        let assert_matches_fresh = |mos: &Mosfet, (vgs, vds, vbs): (Value, Value, Value)| {
+            let fresh = mos.level2_evaluate(vgs, vds, vbs);
+            let (von, vdsat) = mos.level2_onset_and_saturation(vgs, vds, vbs);
+            assert_eq!(von.to_bits(), fresh.von.to_bits());
+            assert_eq!(vdsat.to_bits(), fresh.vdsat.to_bits());
+        };
+        for (vds, vgs, vbs) in [
+            (2.0, 1.5, 0.0),
+            (0.3, 1.2, -0.5),
+            (-1.0, 0.4, -1.0),
+            (3.0, 2.5, -0.2),
+            (3.0, 2.5, -0.2),
+        ] {
+            mos.update(&[vds, vgs, 0.0, vbs]);
+            let evaluated = (mos.eval_vgs, mos.eval_vds, mos.eval_vbs);
+            assert_eq!(
+                mos.level2_bias_states[0].bias,
+                [
+                    evaluated.0.to_bits(),
+                    evaluated.1.to_bits(),
+                    evaluated.2.to_bits()
+                ]
+            );
+            assert_matches_fresh(&mos, evaluated);
+            assert_matches_fresh(
+                &mos,
+                (mos.eval_vgs_prev, mos.eval_vds_prev, mos.eval_vbs_prev),
+            );
+        }
+
+        // A new temperature changes the device law under the same bias.
+        let evaluated = (mos.eval_vgs, mos.eval_vds, mos.eval_vbs);
+        let before = mos.level2_onset_and_saturation(evaluated.0, evaluated.1, evaluated.2);
+        mos.set_temperature(400.0, 300.15);
+        assert_matches_fresh(&mos, evaluated);
+        let after = mos.level2_onset_and_saturation(evaluated.0, evaluated.1, evaluated.2);
+        assert_ne!(after.0, before.0);
     }
 
     fn mos2_vmax_device() -> Mosfet {

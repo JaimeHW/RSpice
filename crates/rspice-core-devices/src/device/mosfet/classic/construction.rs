@@ -185,6 +185,7 @@ impl Mosfet {
             gbd_prev: 0.0,
             has_branch_history: false,
             linearization_cache_valid: false,
+            level2_bias_states: [Level2BiasState::EMPTY; 2],
             initial_off: false,
             cold: None,
             initial_off_seed_pending: true,
@@ -523,6 +524,19 @@ impl Mosfet {
             let (gm, gds, gmb) = self.small_signal(vgs, vds, vbs);
             (id, region, gm, gds, gmb, gm + gds + gmb)
         };
+        self.with_equivalent_current(vgs, vds, vbs, (id, region, gm, gds, gmb, gss))
+    }
+
+    /// Append the Newton equivalent drain current to a channel operating
+    /// point linearized at the given bias.
+    #[inline]
+    pub(in crate::device::mosfet::classic) fn with_equivalent_current(
+        &self,
+        vgs: Value,
+        vds: Value,
+        vbs: Value,
+        (id, region, gm, gds, gmb, gss): (Value, MosRegion, Value, Value, Value, Value),
+    ) -> (Value, MosRegion, Value, Value, Value, Value, Value) {
         let id_eq = if self.polarity() * vds < 0.0 {
             id - gm * (vgs - vds) - gss * vds - gmb * (vbs - vds)
         } else {
@@ -549,12 +563,7 @@ impl Mosfet {
             constants.level1_sqrt_phi,
             constants.level1_beta,
         );
-        let id_eq = if self.polarity() * vds < 0.0 {
-            id - gm * (vgs - vds) - gss * vds - gmb * (vbs - vds)
-        } else {
-            id - gm * vgs - gds * vds - gmb * vbs
-        };
-        (id, region, gm, gds, gmb, gss, id_eq)
+        self.with_equivalent_current(vgs, vds, vbs, (id, region, gm, gds, gmb, gss))
     }
 
     /// Whether the linearization cached by `update` is valid for the given
@@ -1189,6 +1198,7 @@ impl Mosfet {
         if self.body_junction_model != model {
             self.body_junction_model = model;
             self.linearization_cache_valid = false;
+            self.forget_level2_bias_states();
         }
     }
 
@@ -1214,6 +1224,7 @@ impl Mosfet {
             return;
         }
         self.linearization_cache_valid = false;
+        self.forget_level2_bias_states();
 
         // The engine's single SI k/q ratio, not a local quotient of the two
         // rounded CODATA constants: those differ in the last bit, and a device
