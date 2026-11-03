@@ -53,6 +53,7 @@ mesa/mesa-12.cir	scripted_control
 mesa/mesa12.cir	smoke
 mesa/mesa13.cir	smoke
 mesa/mesa21.cir	smoke
+mesa/mesosc.cir	measures
 regression/lib-processing/ex1a.cir	smoke
 regression/lib-processing/ex1b.cir	smoke
 regression/lib-processing/ex2a.cir	smoke

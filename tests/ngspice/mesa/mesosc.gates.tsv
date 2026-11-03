@@ -1,0 +1,26 @@
+# Measure gates for mesosc (validation-manifest contract: measures).
+#
+# Why measures: an eleven-stage MESFET ring started from its metastable
+# operating point by a 0.1 V PWL kick, printed from TSTART = 1 ns. The
+# pointwise gate reads one free-running sample at 5 ns, on a 4.5 V/ns
+# rising edge, where 1.2 ps of phase is 2.3 percent of the value: the
+# vendored table and ngspice-46 disagree there by 1.8 percent, and RSpice
+# reads 0.5 percent from ngspice-46 and 2.3 percent from the table, a
+# 0.5 ps phase difference. All three agree on the period to 0.03 percent
+# and on the levels to 10 uV. These gates assert that engineering content:
+# the startup crossings after the kick, the settled period on both edges,
+# and the high and low logic levels.
+#
+# Source: vdd 1.6 V; vnoise kicks the ring at 0.2-0.4 ns; maximum step
+# 20 ps. v(8) = output of the sixth stage, swinging 0.115 V to 0.554 V
+# (0.446 V); level 0.34 V is mid-swing. Crossings and periods take the
+# ro_17_4_startup ring's bounds at the same 20 ps maximum step: one
+# maximum timestep for the startup crossings and 0.66 percent for the
+# period, which a run with a 1 percent integration error in its period
+# fails. Levels take the ltra2_2_line floor of 1 percent of the swing.
+v(8)	cross	level=0.34	dir=fall	n=1	tol=20e-12
+v(8)	cross	level=0.34	dir=rise	n=1	tol=20e-12
+v(8)	period	level=0.34	dir=rise	t0=1.4e-9	t1=5e-9	tol_abs=0	tol_rel=0.0066
+v(8)	period	level=0.34	dir=fall	t0=1.4e-9	t1=5e-9	tol_abs=0	tol_rel=0.0066
+v(8)	mean	t0=3.43e-9	t1=3.55e-9	tol_abs=4.5e-3
+v(8)	mean	t0=3.87e-9	t1=3.99e-9	tol_abs=4.5e-3
