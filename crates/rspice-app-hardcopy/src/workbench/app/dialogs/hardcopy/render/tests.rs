@@ -186,6 +186,40 @@ fn the_preview_toolbar_reserves_exactly_the_band_it_draws() {
     );
 }
 
+/// A preview with no page reserves exactly the band its toolbar draws, at
+/// the touch control height too. The no-page band was measured in a pass where
+/// its justified row did not stretch, so it reserved the text's height while
+/// it drew a touch control's: the preview column ran 29 points past the body
+/// and pushed the dialog's footer off a 768-point touch screen.
+#[test]
+fn a_preview_with_no_page_reserves_the_band_it_draws() {
+    for target in [None, Some(44.0)] {
+        let ctx = Context::default();
+        crate::ui::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
+        let mut band = (0.0, 0.0);
+        let _ = ctx.run_ui(Default::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                let view = PreviewView { page: 0, zoom: 100 };
+                let reserved = preview_toolbar_height(ui, &view, 0, 340.0);
+                let drawn = ui
+                    .allocate_ui_with_layout(
+                        vec2(340.0, 400.0),
+                        Layout::top_down(Align::Min),
+                        |ui| preview_toolbar(ui, &mut { view }, 0, 340.0),
+                    )
+                    .inner;
+                band = (reserved, drawn);
+            });
+        });
+        assert!(
+            (band.0 - band.1).abs() < 0.5,
+            "target {target:?}: the desk gave up {:.0} pt for a band that drew {:.0}",
+            band.0,
+            band.1
+        );
+    }
+}
+
 /// The tablet width the studio ships to is edge to edge and touch-sized,
 /// and the page desk keeps only the column the form does not need. The
 /// toolbar has to hold that column in one row: wrapping there costs the

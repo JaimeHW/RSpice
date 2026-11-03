@@ -155,25 +155,21 @@ fn preview_desk(ui: &mut Ui, draft: &mut HardcopyDialogState, width: f32, height
 }
 
 pub(super) fn preview_toolbar(ui: &mut Ui, view: &mut PreviewView, count: u32, width: f32) -> f32 {
+    // With no page there is nothing to page through or zoom, and the desk
+    // above already says why there is no page. The band this drew instead
+    // restated it, and its measuring pass, where a justified row does not
+    // stretch, reserved the text's height rather than the control height the
+    // drawing pass took: the column ran past the body by the difference and
+    // pushed the dialog's footer off a touch screen.
+    if count == 0 {
+        return 0.0;
+    }
     let t = Tokens::get(ui.ctx());
     let toolbar = Frame::NONE
         .fill(t.color.bg_panel)
         .inner_margin(Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_width((width - 20.0).max(0.0));
-            if count == 0 {
-                // Sized rather than justified: a justified row claims the whole
-                // rectangle the column had left, and the band is exactly what
-                // this function reports back to it.
-                ui.allocate_ui_with_layout(
-                    vec2(ui.available_width(), t.metrics.ctl_h),
-                    Layout::centered_and_justified(egui::Direction::LeftToRight),
-                    |ui| {
-                        ui.monospace("No valid page");
-                    },
-                );
-                return;
-            }
             // Wrapped, not fixed to one row: a column narrow enough to need a
             // second row would otherwise run its last control off the right
             // edge, and the band above reserves whichever count this produces.
