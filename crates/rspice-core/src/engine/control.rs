@@ -103,6 +103,8 @@ enum CommandKind {
     /// `reset`: reload the deck.
     Reset,
     Alter,
+    /// `altermod`: set a parameter of a model card.
+    AlterModel,
     Analysis,
     Run,
     Presentation,
@@ -164,6 +166,7 @@ impl CommandKind {
             "unlet" => Self::Unlet,
             "reset" => Self::Reset,
             "alter" => Self::Alter,
+            "altermod" => Self::AlterModel,
             "op" | "dc" | "ac" | "noise" | "tran" | "tf" | "pz" | "sens" | "disto" | "stb"
             | "dcmatch" | "sp" => Self::Analysis,
             "run" => Self::Run,
@@ -462,6 +465,12 @@ impl ControlCircuit {
             }
             CommandKind::Alter => {
                 self.alter(engine, command, variables, abort)?;
+                Ok(PreparedCommand::Complete(
+                    ControlCommandEffect::CircuitChanged,
+                ))
+            }
+            CommandKind::AlterModel => {
+                self.alter_model(command, variables, abort)?;
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
@@ -1025,6 +1034,97 @@ impl ControlCircuit {
             self.netlist
                 .retain_device_parameter((element_name.clone(), parameter), value);
         }
+        Ok(())
+    }
+
+    /// `altermod model parameter = value`, `altermod @model[parameter] = value`
+    /// and `altermod instance parameter = value` (frontend/device.c:1194
+    /// com_altermod, through com_alter_common with do_model). A name is looked
+    /// up as an instance first and as a model after (spiceif.c:1240 finddev);
+    /// an instance names the model it uses (spiceif.c:967), so every instance
+    /// of that model sees the new value. Each analysis builds the circuit
+    /// again, which re-runs the model's setup and temperature update, as
+    /// ngspice's CKTtemp after the change does (spiceif.c:979).
+    fn alter_model(
+        &mut self,
+        command: &ControlCommand,
+        variables: &ParamContext,
+        abort: &dyn AbortSignal,
+    ) -> Result<(), ControlExecutionError> {
+        let line = command.line;
+        let text = command.arguments.trim();
+        if text.split_whitespace().any(|word| {
+            word.get(..4)
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case("file"))
+        }) {
+            return Err(command_error(line, "altermod from a model file is not supported").into());
+        }
+        let (target, value) = match text.split_once('=') {
+            Some((target, value)) => (target.trim(), value.trim()),
+            // The pre-3f4 form `altermod model parameter value`
+            // (device.c:1290).
+            None => {
+                let split = text.rfind(char::is_whitespace).unwrap_or(0);
+                (text[..split].trim(), text[split..].trim())
+            }
+        };
+        let (name, parameter) = if let Some(target) = target
+            .strip_prefix('@')
+            .or_else(|| target.strip_prefix('#'))
+        {
+            let (name, parameter) = target
+                .split_once('[')
+                .ok_or_else(|| command_error(line, "@altermod target requires [parameter]"))?;
+            let parameter = parameter
+                .strip_suffix(']')
+                .ok_or_else(|| command_error(line, "unterminated altermod parameter"))?;
+            (name.trim(), parameter.trim())
+        } else {
+            let mut words = target.split_whitespace();
+            let name = words.next().unwrap_or_default();
+            let parameter = words.next().unwrap_or_default();
+            if words.next().is_some() {
+                return Err(command_error(line, "altermod takes one model parameter").into());
+            }
+            (name, parameter)
+        };
+        if name.is_empty() || parameter.is_empty() || value.is_empty() {
+            return Err(
+                command_error(line, "altermod requires a model, a parameter and a value").into(),
+            );
+        }
+        let model_name = match self
+            .netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case(name))
+        {
+            Some(element) => super::builder::element_model_name(&element.kind)
+                .ok_or_else(|| {
+                    command_error(line, format!("altermod instance '{name}' has no model"))
+                })?
+                .to_owned(),
+            None => name.to_owned(),
+        };
+        let value = scalar(value, variables, line, abort)?;
+        let model = self
+            .netlist
+            .models
+            .iter_mut()
+            .find(|model| model.name.eq_ignore_ascii_case(&model_name))
+            .ok_or_else(|| {
+                command_error(
+                    line,
+                    format!("altermod model or instance '{name}' was not found"),
+                )
+            })?;
+        Engine::apply_model_step_value(model, parameter, value);
+        // The overlay keeps the change through later source replay.
+        let key = (
+            model.name.to_ascii_uppercase(),
+            parameter.to_ascii_uppercase(),
+        );
+        self.netlist.retain_model_parameter(key, value);
         Ok(())
     }
 }

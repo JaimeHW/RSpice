@@ -2014,6 +2014,49 @@ fn alter_changes_a_mosfet_instance_parameter() {
     assert!(error.unwrap().contains("Unsupported MOSFET step parameter"));
 }
 
+/// `altermod` sets a model card's parameter, named through an instance of the
+/// model or as the model itself, so every instance of the model changes. Two
+/// level-1 NMOS of KP 100u share one model, and a resistor takes its value
+/// from its model's `r`. ngspice-46 prints v(n2) = 5.000000e-01 and i(vd) =
+/// -6.40000e-04, then 7.500000e-01 and -1.28000e-03 after `altermod R2 r =
+/// 3k` and `altermod m1 kp=200u`, then 5.000000e-01 and -2.00000e-03 after
+/// `altermod @rmod[r]=1k` and `altermod nch vto = 0.5`.
+#[test]
+fn altermod_changes_the_model_of_every_instance() {
+    let deck = "altermod\nv1 n1 0 1\nr1 n1 n2 1k\nr2 n2 0 rmod\n.model rmod r (r=1k)\n\
+                m1 d g 0 0 nch L=1u W=10u\nm2 d g 0 0 nch L=1u W=10u\nvg g 0 1.5\nvd d 0 1\n\
+                .model nch nmos level=1 vto=0.7 kp=100u\n.control\nop\nprint v(n2) i(vd)\n\
+                altermod R2 r = 3k\naltermod m1 kp=200u\nop\nprint v(n2) i(vd)\n\
+                altermod @rmod[r]=1k\naltermod nch vto = 0.5\nop\nprint v(n2) i(vd)\n\
+                .endc\n.end\n";
+    let (presented, error) = run_until_error(deck);
+    assert_eq!(error, None);
+    let values: Vec<_> = presented
+        .iter()
+        .map(|request| {
+            let traces = printed(request);
+            (traces[0].y.samples[0].re, traces[1].y.samples[0].re)
+        })
+        .collect();
+    assert_eq!(values.len(), 3);
+    for ((voltage, current), (expected_voltage, expected_current)) in
+        values
+            .iter()
+            .zip([(0.5, -6.4e-4), (0.75, -1.28e-3), (0.5, -2e-3)])
+    {
+        assert!(
+            (voltage / expected_voltage - 1.0).abs() < 1e-9,
+            "{values:?}"
+        );
+        assert!(
+            (current / expected_current - 1.0).abs() < 1e-6,
+            "{values:?}"
+        );
+    }
+    let (_, error) = run_until_error(&deck.replace("altermod m1 kp", "altermod nothere kp"));
+    assert!(error.unwrap().contains("'nothere' was not found"));
+}
+
 /// `wrs2p` (postcoms.c:624, rawfile.c:765) writes ports 1 and 2 of the sp
 /// plot as Touchstone real and imaginary parts, labelled with `Rbase`. The
 /// rows are ngspice-46's for a tee of 10 and 20 ohms and 1 uF between a 50

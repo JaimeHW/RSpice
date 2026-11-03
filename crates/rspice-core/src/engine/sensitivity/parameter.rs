@@ -260,6 +260,7 @@ impl Engine {
         if netlist.source_text.is_none()
             || !netlist.params.has_any_parameter_binding(parameter)
             || !netlist.ast_overlay().device_parameters.is_empty()
+            || !netlist.ast_overlay().model_parameters.is_empty()
             || !netlist.ast_overlay().terminal_current_probes.is_empty()
             || netlist.ast_overlay().control_options.is_some()
             || !netlist.spectre_statistics.variations.is_empty()

@@ -836,6 +836,9 @@ pub struct NetlistAstOverlay {
     /// Root parameter values retained across nested studies and source replay.
     pub parameters: BTreeMap<String, Value>,
     pub device_parameters: BTreeMap<(String, String), crate::Value>,
+    /// Model parameter values a control script's `altermod` set, by model
+    /// card and parameter.
+    pub model_parameters: BTreeMap<(String, String), crate::Value>,
     /// Only options explicitly changed by executed control commands. Replay
     /// overlays these on freshly evaluated authored options, so unrelated
     /// parameter-dependent bindings remain live.
@@ -1230,6 +1233,13 @@ impl Netlist {
     #[doc(hidden)]
     pub fn retain_device_parameter(&mut self, key: (String, String), value: Value) {
         self.ast_overlay.device_parameters.insert(key, value);
+    }
+
+    /// Retain one model parameter value the engine has applied to the model
+    /// card named by `key.0`.
+    #[doc(hidden)]
+    pub fn retain_model_parameter(&mut self, key: (String, String), value: Value) {
+        self.ast_overlay.model_parameters.insert(key, value);
     }
 
     /// Retain the options a control script changed, so a replay overlays them

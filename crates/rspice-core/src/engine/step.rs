@@ -1642,7 +1642,7 @@ impl Engine {
     /// `scoped_model.params.push` arm of its scoped-model resolution), so the
     /// authored spelling has to go with the number or the sweep is undone the
     /// moment the design elaborates.
-    fn apply_model_step_value(model: &mut ModelDef, param_name: &str, value: Value) {
+    pub(super) fn apply_model_step_value(model: &mut ModelDef, param_name: &str, value: Value) {
         let param_upper = param_name.to_ascii_uppercase();
         model
             .expr_params

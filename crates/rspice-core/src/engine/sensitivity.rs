@@ -807,6 +807,18 @@ impl Engine {
                 })?;
             Self::apply_device_step_value(&mut element.kind, Some(parameter_name), *value)?;
         }
+        for ((model_name, parameter_name), value) in &overlay.model_parameters {
+            let model = netlist
+                .models
+                .iter_mut()
+                .find(|model| model.name.eq_ignore_ascii_case(model_name))
+                .ok_or_else(|| {
+                    SimulationError::Circuit(format!(
+                        "retained model override '{model_name}:{parameter_name}' no longer resolves after source replay"
+                    ))
+                })?;
+            Self::apply_model_step_value(model, parameter_name, *value);
+        }
         netlist.replace_ast_overlay(overlay.clone());
         Ok(())
     }

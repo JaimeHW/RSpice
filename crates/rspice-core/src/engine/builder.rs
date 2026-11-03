@@ -950,7 +950,7 @@ fn materialize_statistical_element(
 }
 
 /// The model card an element names, as the deck names it.
-fn element_model_name(kind: &ElementKind) -> Option<&str> {
+pub(super) fn element_model_name(kind: &ElementKind) -> Option<&str> {
     match kind {
         ElementKind::Resistor { model, .. }
         | ElementKind::Capacitor { model, .. }
