@@ -3989,7 +3989,7 @@ fn pspice_utgate_alias_model(
     let falling =
         pspice_timing_delay_estimate(timing_model, &["TPHLTY", "TPHLMN", "TPHLMX"], delay_mode);
     let delay =
-        pspice_select_longer_delay(rising, falling).unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
+        pspice_select_shorter_delay(rising, falling).unwrap_or(PspiceTimingDelay::Numeric(1.0e-12));
     push_pspice_timing_delay("delay", delay, &mut params, &mut expr_params);
 
     ModelDef {
@@ -4027,7 +4027,7 @@ fn pspice_ugff_alias_model(
         &["TPDQHLTY", "TPDQHLMN", "TPDQHLMX"],
         delay_mode,
     );
-    if let Some(delay) = pspice_select_longer_delay(data_rise, data_fall) {
+    if let Some(delay) = pspice_select_shorter_delay(data_rise, data_fall) {
         let target = if code_model.eq_ignore_ascii_case("d_srlatch") {
             "sr_delay"
         } else {
@@ -4046,7 +4046,7 @@ fn pspice_ugff_alias_model(
         &["TPGQHLTY", "TPGQHLMN", "TPGQHLMX"],
         delay_mode,
     );
-    if let Some(delay) = pspice_select_longer_delay(gate_rise, gate_fall) {
+    if let Some(delay) = pspice_select_shorter_delay(gate_rise, gate_fall) {
         push_pspice_timing_delay("enable_delay", delay, &mut params, &mut expr_params);
     }
 
@@ -4087,7 +4087,7 @@ fn pspice_ueff_alias_model(
         &["TPCLKQHLTY", "TPCLKQHLMN", "TPCLKQHLMX"],
         delay_mode,
     );
-    if let Some(delay) = pspice_select_longer_delay(clk_rise, clk_fall) {
+    if let Some(delay) = pspice_select_shorter_delay(clk_rise, clk_fall) {
         push_pspice_timing_delay("clk_delay", delay, &mut params, &mut expr_params);
     }
 
@@ -4197,13 +4197,16 @@ fn pspice_timing_delay_source_order<'a>(
         .filter_map(|index| source_names.get(index).copied())
 }
 
-fn pspice_select_longer_delay(
+/// The one delay a code model takes for a rising and a falling one: the
+/// shorter, as ngspice-46 picks by default (frontend/udevices.c:3019
+/// select_delay under ps_use_mntymx 4, "typ + shorter delays", :955).
+fn pspice_select_shorter_delay(
     first: Option<PspiceTimingDelay>,
     second: Option<PspiceTimingDelay>,
 ) -> Option<PspiceTimingDelay> {
     match (first, second) {
         (Some(PspiceTimingDelay::Numeric(lhs)), Some(PspiceTimingDelay::Numeric(rhs))) => {
-            Some(PspiceTimingDelay::Numeric(lhs.max(rhs)))
+            Some(PspiceTimingDelay::Numeric(lhs.min(rhs)))
         }
         (Some(delay), None) | (None, Some(delay)) => Some(delay),
         (Some(delay), Some(_)) => Some(delay),

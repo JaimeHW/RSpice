@@ -12689,7 +12689,7 @@ mod tests {
             alias
                 .params
                 .iter()
-                .any(|(name, value)| { name == "clk_delay" && (*value - 9.0e-9).abs() < 1.0e-21 })
+                .any(|(name, value)| { name == "clk_delay" && (*value - 8.0e-9).abs() < 1.0e-21 })
         );
         assert!(
             alias
@@ -13383,7 +13383,7 @@ mod tests {
             alias
                 .params
                 .iter()
-                .any(|(name, value)| { name == "data_delay" && (*value - 8.0e-9).abs() < 1.0e-21 })
+                .any(|(name, value)| { name == "data_delay" && (*value - 5.0e-9).abs() < 1.0e-21 })
         );
         assert!(
             alias.params.iter().any(|(name, value)| {
@@ -13588,7 +13588,7 @@ mod tests {
             alias
                 .params
                 .iter()
-                .any(|(name, value)| { name == "delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+                .any(|(name, value)| { name == "delay" && (*value - 4.0e-9).abs() < 1.0e-21 })
         );
     }
 
@@ -13812,7 +13812,7 @@ mod tests {
                 alias
                     .params
                     .iter()
-                    .any(|(name, value)| { name == "delay" && (*value - 6.0e-9).abs() < 1.0e-21 })
+                    .any(|(name, value)| { name == "delay" && (*value - 4.0e-9).abs() < 1.0e-21 })
             );
             assert!(alias.params.iter().any(|(name, value)| {
                 name == "inertial_delay" && (*value - 1.0).abs() < f64::EPSILON
