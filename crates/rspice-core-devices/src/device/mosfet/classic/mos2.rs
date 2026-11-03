@@ -605,12 +605,8 @@ impl Mosfet {
         let oxide_cap = cox * effective_length * effective_width;
         let beta = self.kp * effective_width / effective_length * self.multiplicity;
         let xd = self.level2_depletion_width_factor();
-        let model_vto = if self.polarity() < 0.0 {
-            -self.vto.abs()
-        } else {
-            self.vto
-        };
-        let t_vbi = model_vto - self.polarity() * self.gamma * sqrt_phi;
+        // The signed card VTO, as the current above and N_DEV_MOSFET2.C:3037.
+        let t_vbi = self.vto - self.polarity() * self.gamma * sqrt_phi;
 
         let sarg = if lvbs.value <= 0.0 {
             phi_min_vbs.sqrt()
@@ -1328,6 +1324,43 @@ mod tests {
     fn level2_exact_jacobian_matches_centered_difference() {
         let mos = mos2_reference_device();
         let cases = [(1.2, 0.15, -0.02), (3.5, 1.8, -0.35), (2.0, -0.4, -0.1)];
+
+        for (vgs, vds, vbs) in cases {
+            let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
+            let finite_difference = |dvgs: Value, dvds: Value, dvbs: Value| {
+                let step = 1.0e-7;
+                let plus =
+                    mos.level2_evaluate(vgs + dvgs * step, vds + dvds * step, vbs + dvbs * step);
+                let minus =
+                    mos.level2_evaluate(vgs - dvgs * step, vds - dvds * step, vbs - dvbs * step);
+                (plus.id - minus.id) / (2.0 * step)
+            };
+
+            assert_relative(gm, finite_difference(1.0, 0.0, 0.0), 2.0e-5);
+            assert_relative(gds, finite_difference(0.0, 1.0, 0.0), 2.0e-5);
+            assert_relative(gmb, finite_difference(0.0, 0.0, 1.0), 2.0e-5);
+        }
+    }
+
+    #[test]
+    fn level2_depletion_pmos_jacobian_matches_centered_difference() {
+        let mut params = HashMap::new();
+        params.insert("LEVEL".to_string(), 2.0);
+        params.insert("VTO".to_string(), 0.5);
+        params.insert("KP".to_string(), 1.2e-5);
+        params.insert("GAMMA".to_string(), 0.6);
+        params.insert("PHI".to_string(), 0.6);
+        params.insert("TOX".to_string(), 50.0e-9);
+        params.insert("NSUB".to_string(), 8.0e14);
+        let mos = Mosfet::new_pmos("m1".to_string(), 1, 2, 3, 4)
+            .with_params(&params)
+            .with_geometry(20.0e-6, 3.0e-6);
+        let cases = [
+            (-1.2, -0.15, 0.02),
+            (-3.0, -1.8, 0.35),
+            (0.2, -2.0, 0.1),
+            (-2.0, 0.4, 0.1),
+        ];
 
         for (vgs, vds, vbs) in cases {
             let (_, _, gm, gds, gmb, _) = mos.level2_operating_point(vgs, vds, vbs);
