@@ -391,8 +391,10 @@ use rspice_core::analysis::harmonic_balance::{
 // and `analysis::evaluate_fft_measurements_with_abort`, which the CLI calls
 // on a transient's spectra, bring it to 5,242. `ParamContext::remove`,
 // through which a control script's `unlet` drops the parameter of a scalar
-// `let`, brings it to 5,243.
-const MAX_PUBLIC_ITEMS: usize = 5243;
+// `let`, brings it to 5,243. `analysis::evaluate_ac_printed_measures_with_abort`,
+// the running value of each measure a Xyce `.PRINT AC` card names, which the
+// CLI's AC projection prints, brings it to 5,244.
+const MAX_PUBLIC_ITEMS: usize = 5244;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
