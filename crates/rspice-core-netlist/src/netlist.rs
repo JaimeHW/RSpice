@@ -12582,15 +12582,51 @@ mod tests {
         );
     }
 
+    /// PSpice's MNTYMXDLY=2 is typical timing: a NAND(2) with TPHLTY=5n and
+    /// TPLHTY=2n falls 5 ns and rises 2 ns after its inputs, as in ngspice-46,
+    /// which reads every MNTYMXDLY as typical.
     #[test]
-    fn pspice_u_gate_ugate_timing_honors_mntymxdly_max_mode() {
+    fn pspice_u_gate_ugate_timing_reads_mntymxdly_two_as_typical() {
         let netlist = Netlist::parse(
-            "pspice u gate max timing\n\
+            "pspice u gate typical timing\n\
              U1 NAND(2) $G_DPWR $G_DGND a b y DLY MNTYMXDLY=2 IO_LEVEL=0\n\
              .model DLY UGATE (TPLHMN=1n TPLHTY=2n TPLHMX=3n TPHLMN=4n TPHLTY=5n TPHLMX=6n)\n\
              .end\n",
         )
-        .expect("PSpice UGATE timing should honor MNTYMXDLY=2");
+        .expect("PSpice UGATE timing should read MNTYMXDLY=2");
+
+        let alias_name = match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, .. } => model.as_str(),
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "rise_delay" && (*value - 2.0e-9).abs() < 1.0e-21 })
+        );
+        assert!(
+            alias
+                .params
+                .iter()
+                .any(|(name, value)| { name == "fall_delay" && (*value - 5.0e-9).abs() < 1.0e-21 })
+        );
+    }
+
+    #[test]
+    fn pspice_u_gate_ugate_timing_honors_mntymxdly_max_mode() {
+        let netlist = Netlist::parse(
+            "pspice u gate max timing\n\
+             U1 NAND(2) $G_DPWR $G_DGND a b y DLY MNTYMXDLY=3 IO_LEVEL=0\n\
+             .model DLY UGATE (TPLHMN=1n TPLHTY=2n TPLHMX=3n TPHLMN=4n TPHLTY=5n TPHLMX=6n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGATE timing should honor MNTYMXDLY=3");
 
         let alias_name = match &netlist.elements[0].kind {
             ElementKind::Xspice { model, .. } => model.as_str(),
@@ -14003,15 +14039,36 @@ mod tests {
     }
 
     #[test]
-    fn pspice_u_pindly_honors_mntymxdly_max_mode() {
+    fn pspice_u_pindly_reads_mntymxdly_two_as_typical() {
         let netlist = Netlist::parse(
-            "pspice u pindly max delay mode\n\
+            "pspice u pindly typical delay mode\n\
              U22 PINDLY(1,0,0) $G_DPWR $G_DGND internal output IO_STD MNTYMXDLY=2\n\
              + PINDLY:\n\
              +   output = {CASE(DELAY(2ns,4ns,8ns))}\n\
              .end\n",
         )
-        .expect("PSpice PINDLY should honor MNTYMXDLY=2 as max delay");
+        .expect("PSpice PINDLY should read MNTYMXDLY=2 as typical delay");
+
+        match &netlist.elements[0].kind {
+            ElementKind::Xspice { params, .. } => {
+                assert!(params.iter().any(|(name, value)| {
+                    name == "rise_delay" && (*value - 4.0e-9).abs() < 1.0e-21
+                }));
+            }
+            other => panic!("expected PINDLY buffer lowering, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn pspice_u_pindly_honors_mntymxdly_max_mode() {
+        let netlist = Netlist::parse(
+            "pspice u pindly max delay mode\n\
+             U22 PINDLY(1,0,0) $G_DPWR $G_DGND internal output IO_STD MNTYMXDLY=3\n\
+             + PINDLY:\n\
+             +   output = {CASE(DELAY(2ns,4ns,8ns))}\n\
+             .end\n",
+        )
+        .expect("PSpice PINDLY should honor MNTYMXDLY=3 as max delay");
 
         match &netlist.elements[0].kind {
             ElementKind::Xspice { params, .. } => {

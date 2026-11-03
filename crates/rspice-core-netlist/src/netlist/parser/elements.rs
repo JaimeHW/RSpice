@@ -3358,9 +3358,13 @@ fn pspice_u_delay_mode(
         return PspiceUTimingMode::Typ;
     };
 
+    // PSpice's delay selector: 1 minimum, 2 typical, 3 maximum, and 0 the
+    // circuit default, typical. Worst case, 4, simulates the ambiguity from
+    // minimum to maximum, which has no counterpart here; it reads typical,
+    // as ngspice-46 reads every value (frontend/udevices.c:955).
     match value.round() as i64 {
         1 => PspiceUTimingMode::Min,
-        2 => PspiceUTimingMode::Max,
+        3 => PspiceUTimingMode::Max,
         _ => PspiceUTimingMode::Typ,
     }
 }
