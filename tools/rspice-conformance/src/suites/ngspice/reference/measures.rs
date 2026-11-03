@@ -161,7 +161,12 @@ impl TestRunner {
                             cir_path.display()
                         )
                     })?;
-            let actual = Self::evaluate_measure(&gate.kind, &result.time, &sim_y);
+            let actual = Self::evaluate_simulated_measure(
+                &gate.kind,
+                &reference_series.x,
+                &result.time,
+                &sim_y,
+            );
 
             let (tol_abs, tol_rel) = match gate.kind {
                 MeasureKind::Cross { tol, .. } => (tol, 0.0),
@@ -401,6 +406,40 @@ impl TestRunner {
             }
         }
         times
+    }
+
+    /// A measure of the simulation, read over the reference table's span.
+    ///
+    /// A deck with a nonzero TSTART prints its table from TSTART on, while
+    /// the simulation keeps every accepted step from time zero, so a cross
+    /// gate's n-th crossing would otherwise count crossings the reference
+    /// never saw. A cross gate counts only the simulated crossings at or
+    /// after the table's first row; the other kinds carry their own window.
+    fn evaluate_simulated_measure(
+        kind: &MeasureKind,
+        reference_x: &[f64],
+        x: &[f64],
+        y: &[f64],
+    ) -> Option<f64> {
+        let (
+            MeasureKind::Cross {
+                level,
+                direction,
+                n,
+                ..
+            },
+            Some(&start),
+        ) = (kind, reference_x.first())
+        else {
+            return Self::evaluate_measure(kind, x, y);
+        };
+        if x.len() != y.len() {
+            return None;
+        }
+        Self::crossing_times(x, y, *level, *direction)
+            .into_iter()
+            .filter(|&t| t >= start)
+            .nth(n.checked_sub(1)?)
     }
 
     fn evaluate_measure(kind: &MeasureKind, x: &[f64], y: &[f64]) -> Option<f64> {
@@ -733,5 +772,28 @@ mod tests {
         let third = nth(3).expect("third rising crossing");
         assert!((third - first - 4.0e-9).abs() < 1.0e-20);
         assert!(nth(9).is_none(), "there are only four rising crossings");
+    }
+
+    /// A reference printed from TSTART = 3 ns against a simulation that
+    /// kept its steps from zero: the first rising crossing both sides see
+    /// is the one at 4.5 ns, not the simulation's 0.5 ns startup edge.
+    #[test]
+    fn cross_counts_from_the_reference_tables_first_row() {
+        let (x, y) = triangle(2.0e-9, 4, 0.0, 2.0);
+        let first_row = x.partition_point(|&t| t < 3.0e-9);
+        let (reference_x, reference_y) = (&x[first_row..], &y[first_row..]);
+        let kind = MeasureKind::Cross {
+            level: 1.0,
+            direction: CrossDirection::Rise,
+            n: 1,
+            tol: 0.0,
+        };
+
+        let expected = TestRunner::evaluate_measure(&kind, reference_x, reference_y)
+            .expect("the reference has a rising crossing");
+        let actual = TestRunner::evaluate_simulated_measure(&kind, reference_x, &x, &y)
+            .expect("the simulation has a rising crossing");
+        assert!((expected - 4.5e-9).abs() < 1.0e-20, "reference {expected}");
+        assert_eq!(actual, expected);
     }
 }
