@@ -11,9 +11,6 @@ use crate::workbench::app_state::AppState;
 
 use super::wire::{UiSessionWire, WorkbenchWire, WorkbenchWireRef};
 
-const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
-    uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
-
 impl AppState {
     /// Restore the session the last run stored.
     ///
@@ -194,8 +191,8 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license_key: Option<String>,
             #[serde(default)]
             simulation_results: Box<ProjectSimulationResults>,
-            // A context that reads but no longer restores is set aside below
-            // on its own; the rest of the session is kept.
+            // A context that decodes but does not restore is reported below,
+            // and the rest of the session is kept.
             #[serde(default)]
             execution_context: Option<Box<ProjectExecutionContext>>,
             #[serde(default)]
@@ -212,36 +209,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
         // JSON tree first can exhaust the browser WASM stack before any domain
         // validation or recovery policy gets a chance to run.
         let de = AppStateDe::deserialize(deserializer)?;
-        let needs_session_identity = de.project_workspace.as_ref().is_none_or(|workspace| {
-            workspace
-                .content
-                .project
-                .has_descriptor_local_legacy_identity()
-        });
-        let migrated_session_identity = if needs_session_identity {
-            let identity_value = serde_json::to_value((
-                de.project_workspace.as_deref(),
-                &de.library_manager,
-                &de.ui,
-                WorkbenchWireRef::from(&*de.workbench),
-                &de.recent_files,
-                &de.license_key,
-                &de.simulation_results,
-                &de.execution_context,
-                &de.native_project_binding_receipt,
-                &de.browser_project_binding_receipt,
-            ))
-            .map_err(serde::de::Error::custom)?;
-            let canonical_material = canonical_session_identity_value(&identity_value);
-            let canonical_bytes =
-                serde_json::to_vec(&canonical_material).map_err(serde::de::Error::custom)?;
-            Some(crate::product::ProjectId::from_namespace(
-                LEGACY_SESSION_PROJECT_ID_NAMESPACE,
-                &canonical_bytes,
-            ))
-        } else {
-            None
-        };
 
         // Deserialize minimal persisted data and use defaults for the rest.
         let mut library_manager = *de.library_manager;
@@ -250,12 +217,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .map_or_else(crate::state::ProjectWorkspace::default, |workspace| {
                 *workspace
             });
-        if let Some(identity) = migrated_session_identity {
-            project_workspace
-                .content
-                .project
-                .bind_legacy_session_identity(identity);
-        }
         let project_id = project_workspace.content.project.id();
         project_workspace.ensure_library_model(&mut library_manager);
         // Documents skip their runtime dirty flag. The session's open tabs
@@ -441,27 +402,6 @@ where
     D: serde::Deserializer<'de>,
 {
     <Box<crate::state::ProjectWorkspace> as serde::Deserialize>::deserialize(deserializer).map(Some)
-}
-
-fn canonical_session_identity_value(value: &serde_json::Value) -> serde_json::Value {
-    match value {
-        serde_json::Value::Array(values) => serde_json::Value::Array(
-            values
-                .iter()
-                .map(canonical_session_identity_value)
-                .collect(),
-        ),
-        serde_json::Value::Object(values) => {
-            let mut entries = values.iter().collect::<Vec<_>>();
-            entries.sort_unstable_by(|(left, _), (right, _)| left.cmp(right));
-            let mut canonical = serde_json::Map::new();
-            for (key, value) in entries {
-                canonical.insert(key.clone(), canonical_session_identity_value(value));
-            }
-            serde_json::Value::Object(canonical)
-        }
-        scalar => scalar.clone(),
-    }
 }
 
 #[cfg(test)]
@@ -904,97 +844,6 @@ mod tests {
                 .message
                 .contains("legacy session predates durable simulation plans")
         }));
-    }
-
-    #[test]
-    fn legacy_session_without_project_id_restores_a_reproducible_identity() {
-        let state = AppState::default();
-        let original_id = state.model.workspace.content.project.id();
-        let mut session = serde_json::to_value(&state).expect("session serializes");
-        session["project_workspace"]["project"]
-            .as_object_mut()
-            .expect("project descriptor object")
-            .remove("id");
-        session["project_workspace"]["project"]
-            .as_object_mut()
-            .expect("project descriptor object")
-            .remove("schema_version");
-        session["project_workspace"]["project"]
-            .as_object_mut()
-            .expect("project descriptor object")
-            .remove("revision");
-        session
-            .as_object_mut()
-            .expect("session object")
-            .remove("execution_context");
-        let legacy_json = serde_json::to_string(&session).expect("legacy session serializes");
-
-        let first: AppState = serde_json::from_str(&legacy_json).expect("legacy session restores");
-        let second: AppState =
-            serde_json::from_str(&legacy_json).expect("identical legacy session restores");
-
-        assert_eq!(
-            first.model.workspace.content.project.id(),
-            second.model.workspace.content.project.id()
-        );
-        assert_ne!(first.model.workspace.content.project.id(), original_id);
-        assert!(
-            !first
-                .model
-                .workspace
-                .content
-                .project
-                .id()
-                .as_uuid()
-                .is_nil()
-        );
-    }
-
-    #[test]
-    fn distinct_legacy_session_workspaces_do_not_alias_project_identity() {
-        fn legacy_value(mut state: AppState) -> serde_json::Value {
-            state
-                .model
-                .workspace
-                .save_active_schematic(&state.model.schematic);
-            let mut value = serde_json::to_value(state).expect("session serializes");
-            let descriptor = value["project_workspace"]["project"]
-                .as_object_mut()
-                .expect("project descriptor object");
-            descriptor.remove("id");
-            descriptor.remove("schema_version");
-            descriptor.remove("revision");
-            value
-                .as_object_mut()
-                .expect("session object")
-                .remove("execution_context");
-            value
-        }
-
-        let first = AppState::default();
-        let mut second = AppState::default();
-        second.model.schematic.add_component(
-            crate::state::ComponentType::Resistor,
-            crate::state::Point::new(40, 40),
-        );
-        let first_value = legacy_value(first);
-        let second_value = legacy_value(second);
-
-        let first_restored: AppState =
-            serde_json::from_value(first_value.clone()).expect("first legacy session restores");
-        let first_replay: AppState =
-            serde_json::from_value(first_value).expect("identical legacy session replays");
-        let second_restored: AppState =
-            serde_json::from_value(second_value).expect("second legacy session restores");
-
-        assert_eq!(
-            first_restored.model.workspace.content.project.id(),
-            first_replay.model.workspace.content.project.id()
-        );
-        assert_ne!(
-            first_restored.model.workspace.content.project.id(),
-            second_restored.model.workspace.content.project.id()
-        );
     }
 
     #[test]
