@@ -2,7 +2,7 @@
 
 use crate::{
     DeviceModel, ModelLevel, ModelLibrary, ModelSubcircuitInterface, ModelType, ProcessCorner,
-    subcircuit_interface_key,
+    SkippedDefinition, subcircuit_interface_key,
 };
 use std::{collections::HashMap, path::Path};
 
@@ -182,6 +182,7 @@ impl ModelLibrary {
         self.model_correlation.clear();
         self.corners.clear();
         self.selected_corner = None;
+        self.skipped_definitions = skipped_definitions(result);
 
         for section_name in result.section_names() {
             // Build the corner through its section contract rather than by
@@ -213,14 +214,14 @@ impl ModelLibrary {
         // Every section's interfaces are retained, not just the selected one:
         // a subcircuit is addressable by section-qualified identity, and a
         // library that declares only `.subckt` definitions is still a library.
-        insert_parsed_subcircuits(&mut self, &result.top_level_subcircuits, root, None)?;
+        insert_parsed_subcircuits(&mut self, &result.top_level_subcircuits, root, None);
         for lib_section in &result.sections {
             insert_parsed_subcircuits(
                 &mut self,
                 &lib_section.subcircuits,
                 root,
                 Some(&lib_section.name),
-            )?;
+            );
         }
 
         for lib_section in &result.sections {
@@ -263,31 +264,83 @@ impl ModelLibrary {
     }
 }
 
+/// The definitions a parse refused on their own: a card that failed to parse
+/// and an encrypted block. Errors that concern the file or its dependencies
+/// are not here; they refuse the whole import.
+fn skipped_definitions(
+    result: &rspice_core_netlist::library::LibParseResult,
+) -> Vec<SkippedDefinition> {
+    let broken = result.errors.iter().filter_map(|error| {
+        error.definition.as_ref().map(|name| SkippedDefinition {
+            name: name.clone(),
+            file: error.file.clone(),
+            line: error.line,
+            reason: sentence(&error.message),
+        })
+    });
+    let encrypted = result.encrypted.iter().map(|block| SkippedDefinition {
+        name: block.name.clone().unwrap_or_else(|| {
+            block
+                .file
+                .as_deref()
+                .and_then(Path::file_name)
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        }),
+        file: block.file.clone(),
+        line: Some(block.line),
+        reason: block.message(),
+    });
+    broken.chain(encrypted).collect()
+}
+
+/// A parser diagnostic as a sentence: capitalized and stopped.
+fn sentence(message: &str) -> String {
+    let mut characters = message.chars();
+    let mut sentence = characters
+        .next()
+        .map(|first| first.to_uppercase().chain(characters).collect::<String>())
+        .unwrap_or_default();
+    if !sentence.ends_with('.') {
+        sentence.push('.');
+    }
+    sentence
+}
+
 /// Project one parsed subcircuit onto its callable interface. A subcircuit
 /// carries its own source file when it was reached through an include, so
-/// that path wins over the root being scanned.
+/// that path wins over the root being scanned. A second definition of a name
+/// already in the section is skipped and reported; the first one stands, as
+/// it does for the engine's own first-definition lookup.
 fn insert_parsed_subcircuits(
     library: &mut ModelLibrary,
     parsed: &[rspice_core_netlist::library::ParsedSubcircuit],
     file_path: &Path,
     section: Option<&str>,
-) -> Result<(), String> {
+) {
     for subcircuit in parsed {
         let interface = ModelSubcircuitInterface::from_parsed(subcircuit, file_path, section);
         let key = subcircuit_interface_key(interface.section.as_deref(), &interface.name);
-        if let Some(existing) = library
-            .subcircuits
-            .keys()
-            .find(|existing| existing.eq_ignore_ascii_case(&key))
-        {
-            return Err(format!(
-                "Subcircuit '{}' is defined more than once in the same library section (first identity '{}')",
-                interface.name, existing
-            ));
+        if let Some(existing) = library.subcircuits.values().find(|existing| {
+            subcircuit_interface_key(existing.section.as_deref(), &existing.name)
+                .eq_ignore_ascii_case(&key)
+        }) {
+            library.skipped_definitions.push(SkippedDefinition {
+                name: interface.name.clone(),
+                file: interface.file_path.clone(),
+                line: interface.source_line,
+                reason: format!(
+                    "Subcircuit {} is defined again; the definition at line {} is kept.",
+                    interface.name,
+                    existing
+                        .source_line
+                        .map_or_else(|| "unknown".to_owned(), |line| line.to_string())
+                ),
+            });
+            continue;
         }
         library.subcircuits.insert(key, interface);
     }
-    Ok(())
 }
 
 /// Recognize HDL imports through the parser's captured resolution edges.

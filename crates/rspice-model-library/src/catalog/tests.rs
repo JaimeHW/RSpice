@@ -233,3 +233,78 @@ fn snapshot_replacement_preserves_retained_state_and_rejects_duplicates_atomical
     assert!(catalog.get_library("owned").unwrap().expanded);
     assert_eq!(serde_json::to_value(&catalog).unwrap(), before);
 }
+
+/// A parse captured exactly as `captured_parse` does, errors included.
+fn captured_parse_with_errors(root: &Path, source: &str) -> LibParseResult {
+    let mut parsed = LibParser::new(root.parent().unwrap()).parse_string(source);
+    parsed.resolved_sources = vec![ResolvedLibSource {
+        path: root.to_path_buf(),
+        bytes: Arc::from(source.as_bytes()),
+        content: Arc::from(source),
+    }];
+    parsed
+}
+
+const LIMITS: ImportLimits = ImportLimits {
+    max_files: 10,
+    max_total_bytes: 1 << 20,
+};
+
+#[test]
+fn a_broken_or_repeated_definition_is_skipped_and_the_rest_of_its_file_imports() {
+    let root = Path::new("/models/vendor.lib");
+    let source = ".model D1N D (IS=1e-14)\n\
+                  .model BROKEN D (IS=1e-14 N=1\n\
+                  .subckt BUF IN OUT\nR1 IN OUT 1k\n.ends BUF\n\
+                  .subckt BUF IN OUT\nR1 IN OUT 2k\n.ends BUF\n";
+    let mut catalog = ModelCatalog::default();
+    let name = catalog
+        .import_external_library(
+            root,
+            captured_parse_with_errors(root, source),
+            None,
+            LIMITS,
+            |_| panic!("no HDL root"),
+        )
+        .expect("the good definitions import");
+    let library = catalog.get_library(&name).unwrap();
+    assert!(library.models.contains_key("D1N"));
+    assert_eq!(library.subcircuits["BUF"].source_line, Some(3));
+    let skipped = library
+        .skipped_definitions
+        .iter()
+        .map(|skip| (skip.name.as_str(), skip.line))
+        .collect::<Vec<_>>();
+    assert_eq!(skipped, [("BROKEN", Some(2)), ("BUF", Some(6))]);
+    assert!(
+        library.skipped_definitions[1]
+            .reason
+            .contains("the definition at line 3 is kept"),
+        "{:?}",
+        library.skipped_definitions
+    );
+    assert!(library.skipped_definitions[0].reason.ends_with('.'));
+}
+
+#[test]
+fn a_file_with_only_encrypted_definitions_is_refused_by_name() {
+    let root = Path::new("/models/sealed.lib");
+    let source = "* vendor header\n.subckt SEALED IN+ IN- V+ V- OUT\n.prot\n\
+                  Zk3Qw8Ur1Ty6Op4As9Df2Gh7Jk5Lz0Xc\n.unprot\n.ends SEALED\n";
+    let error = ModelCatalog::default()
+        .import_external_library(
+            root,
+            captured_parse_with_errors(root, source),
+            None,
+            LIMITS,
+            |_| panic!("no HDL root"),
+        )
+        .unwrap_err();
+    assert!(
+        error.contains(
+            "Subcircuit SEALED is an HSPICE/QSPICE protected block (.prot), which RSpice cannot \
+             read; ask the vendor for an unencrypted SPICE or Verilog-A model."
+        ),
+        "{error}"
+    );
+}

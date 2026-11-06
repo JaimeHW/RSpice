@@ -21,6 +21,7 @@ mod providers;
 mod tests;
 
 pub use external_import::CapturedHdlSources;
+pub(crate) use external_import::refuse_unimportable_parse;
 #[cfg(any(test, feature = "catalog-test-observation"))]
 pub use identity::CATALOG_LIBRARY_SERIALIZATIONS;
 pub use identity::model_library_source_digest;

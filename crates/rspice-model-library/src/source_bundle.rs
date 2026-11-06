@@ -531,17 +531,7 @@ impl SourceBundlePreparation<'_> {
             .map_err(|error| {
                 format!("Uploaded model bundle could not be authenticated: {error}")
             })?;
-        if !result.is_ok() {
-            return Err(format!(
-                "Uploaded model bundle contains parse or unresolved dependency errors: {}",
-                result
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
+        crate::catalog::refuse_unimportable_parse(&result, "Uploaded model bundle")?;
 
         let mut library = ModelLibrary::new(&lib_name);
         library.root_path = Some(root.clone());

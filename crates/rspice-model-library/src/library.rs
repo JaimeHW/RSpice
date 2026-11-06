@@ -265,6 +265,17 @@ pub fn subcircuit_interface_key(section: Option<&str>, name: &str) -> String {
     )
 }
 
+/// One definition an import refused while keeping the rest of its file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SkippedDefinition {
+    /// The `.model` or `.subckt` name, or the file name for a file-wide refusal.
+    pub name: String,
+    pub file: Option<PathBuf>,
+    pub line: Option<usize>,
+    /// Why it was refused, as a sentence.
+    pub reason: String,
+}
+
 /// Exact, source-authenticated public interface of one executable `.SUBCKT`.
 ///
 /// This is intentionally separate from a schematic symbol. Import establishes
@@ -363,6 +374,10 @@ pub struct ModelLibrary {
     pub version: String,
     /// Legacy catalog presentation state retained in serialized catalog identities.
     pub expanded: bool,
+    /// Definitions the last import refused: broken, duplicated or encrypted.
+    /// Every import recomputes it, so it is never persisted.
+    #[serde(skip)]
+    pub skipped_definitions: Vec<SkippedDefinition>,
 }
 
 impl ModelLibrary {

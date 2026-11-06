@@ -40,18 +40,7 @@ impl ModelCatalog {
             .unwrap_or("unnamed")
             .to_string();
 
-        if !result.is_ok() {
-            return Err(format!(
-                "Model library '{}' contains parse or dependency errors: {}",
-                path.display(),
-                result
-                    .errors
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>()
-                    .join("; ")
-            ));
-        }
+        refuse_unimportable_parse(&result, &format!("Model library '{}'", path.display()))?;
         extend_hdl_closure(&mut result, &mut capture_hdl)?;
         result
             .resolved_sources
@@ -171,6 +160,41 @@ impl ModelCatalog {
                 )
             })
     }
+}
+
+/// Refuse a parse that leaves nothing to import, or whose errors concern the
+/// file rather than one definition. A definition that fails on its own is
+/// skipped and reported by the projection; the rest of its file imports.
+pub(crate) fn refuse_unimportable_parse(
+    result: &LibParseResult,
+    subject: &str,
+) -> Result<(), String> {
+    let file_errors = result
+        .errors
+        .iter()
+        .filter(|error| error.definition.is_none())
+        .map(ToString::to_string)
+        .collect::<Vec<_>>();
+    if !file_errors.is_empty() {
+        return Err(format!(
+            "{subject} contains parse or dependency errors: {}",
+            file_errors.join("; ")
+        ));
+    }
+    let definitions = result.model_count() + result.subcircuit_count();
+    if definitions == 0 && !(result.errors.is_empty() && result.encrypted.is_empty()) {
+        let refused = result
+            .encrypted
+            .iter()
+            .map(|block| block.message())
+            .chain(result.errors.iter().map(ToString::to_string))
+            .collect::<Vec<_>>();
+        return Err(format!(
+            "{subject} has no definition RSpice can import. {}",
+            refused.join(" ")
+        ));
+    }
+    Ok(())
 }
 
 fn extend_hdl_closure(

@@ -656,6 +656,7 @@ impl ProjectModelLibrary {
             selected_corner: self.selected_corner,
             version: self.version,
             expanded: false,
+            skipped_definitions: Vec::new(),
         };
         library.refresh_effective_model_projection();
         library
