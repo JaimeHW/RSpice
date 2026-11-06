@@ -2,11 +2,11 @@
 {
   "schema_version": 7,
   "source_tree_digest": "0febd9bb71655709a7ecd81019ac54de51927675a0b9b2a58c0e0a9e116788ad",
-  "generator_digest": "1a5393f9114d2bb4c73c5d895840074cf58591e295a1748e59d9c79e8576ab8b",
-  "bundle_digest": "a8117c01b40fb7f157bc76988be67f63e99bffca0ca90aa59d544ad12605984e",
+  "generator_digest": "cec88c8df8d332cc7226e09060ea5651bcb1183f725581e1ff9fcd6f161e1b2f",
+  "bundle_digest": "d940e2e5b69d278260a78f95eb7fb90af89331f1477238bd8b18ae391a282885",
   "device_count": 43,
   "file_count": 348,
-  "source_bytes": 35036948,
+  "source_bytes": 35036949,
   "devices": [
     {
       "module_name": "DIODE_CMC",
@@ -2908,8 +2908,8 @@
     },
     {
       "relative_path": "src/registry.rs",
-      "bytes": 366906,
-      "blake3": "f7d5da404762d186d852eacd13618aac1188156855041102420e8a920f4723e2"
+      "bytes": 366907,
+      "blake3": "de46a8867d560f5241c064892382185c0263bb7cbd4d5fa3e3c3f855c657910a"
     }
   ]
 }

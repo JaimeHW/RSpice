@@ -3814,7 +3814,7 @@ pub fn builtin_names() -> &'static [&'static str] {
     BUILTIN_NAMES
 }
 
-pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[
+pub static BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[
     #[cfg(feature = "veriloga-model-diode-cmc")]
     super::GeneratedVerilogAModelDescriptor { abi_version: super::GENERATED_VERILOGA_DESCRIPTOR_ABI_VERSION, model_name: "DIODE_CMC", module_name: "DIODE_CMC", source_digest: "ef273ad5fba2dc5d", source_identity: "2b31910517ca80af09c5c25a5896a01eabc639adc9b025def8a5804167fb8932", checkpoint_identity: diode_cmc__diode_cmc__cdfab304::Instance::CHECKPOINT_MODEL_IDENTITY, accepted_state_shape_identity: diode_cmc__diode_cmc__cdfab304::Instance::ACCEPTED_STATE_SHAPE_IDENTITY, terminals: &diode_cmc__diode_cmc__cdfab304::Instance::TERMINALS, parameters: &diode_cmc__diode_cmc__cdfab304::Instance::PARAMETER_DESCRIPTORS, total_node_count: diode_cmc__diode_cmc__cdfab304::Instance::NODE_COUNT, internal_node_names: &diode_cmc__diode_cmc__cdfab304::Instance::INTERNAL_NODE_NAMES, internal_state_nodes: diode_cmc__diode_cmc__cdfab304::Instance::INTERNAL_STATE_NODES, branch_count: diode_cmc__diode_cmc__cdfab304::Instance::BRANCH_COUNT, stamp_pattern: diode_cmc__diode_cmc__cdfab304::Instance::STAMP_PATTERN },
     #[cfg(feature = "veriloga-model-epfl-hemt-10a")]

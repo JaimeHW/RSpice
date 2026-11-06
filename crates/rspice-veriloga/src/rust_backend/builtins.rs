@@ -2712,7 +2712,7 @@ mod tests {
         );
         assert!(!registry.contains("TERMINAL_NAMES"), "{registry}");
         assert!(
-            registry.contains("pub const BUILTIN_DESCRIPTORS:"),
+            registry.contains("pub static BUILTIN_DESCRIPTORS:"),
             "{registry}"
         );
         assert!(
@@ -3700,8 +3700,11 @@ fn write_registry(
     out.push_str("    BUILTIN_NAMES\n");
     out.push_str("}\n");
     out.push('\n');
+    // A static, not a const: every crate that reads a const, or inlines the
+    // accessor below, compiles its own copy of the whole table and of each
+    // model's parameter descriptors, and the browser image carried two.
     out.push_str(
-        "pub const BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[\n",
+        "pub static BUILTIN_DESCRIPTORS: &[super::GeneratedVerilogAModelDescriptor] = &[\n",
     );
     for ((device, registry_name), feature) in devices
         .iter()
