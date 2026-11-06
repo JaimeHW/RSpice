@@ -401,6 +401,50 @@ fn browser_bundle_rejects_missing_dependencies_without_partial_publication() {
     assert_eq!(manager.library_count(), 0);
 }
 
+/// A vendor file whose import skipped a definition still runs a deck that
+/// uses one of its good definitions: the run reads the file as the import
+/// did, so neither the broken card nor the repeated subcircuit reaches it.
+#[test]
+fn a_definition_the_import_skipped_never_reaches_the_run() {
+    let mut manager = ModelLibraryManager::new();
+    let name = manager
+        .load_library_bytes(
+            "vendor.lib",
+            b"* vendor macro library\n.model DBROKEN\n+ IS=1e-14\n.subckt HALF IN OUT\n\
+              R1 IN OUT 1k\nR2 OUT 0 1k\n.ends HALF\n.subckt HALF IN OUT\nR1 IN OUT 3k\n\
+              R2 OUT 0 1k\n.ends HALF\n"
+                .to_vec(),
+            None,
+        )
+        .expect("the good definitions import");
+    let skipped = manager
+        .get_library(&name)
+        .expect("the library is published")
+        .skipped_definitions
+        .iter()
+        .map(|definition| (definition.name.as_str(), definition.line))
+        .collect::<Vec<_>>();
+    assert_eq!(skipped, [("DBROKEN", Some(2)), ("HALF", Some(8))]);
+
+    let cards = manager
+        .reference_process_model_cards(crate::product::ProcessCorner::TT)
+        .expect("the library materializes without its skipped definitions")
+        .join("\n");
+    assert!(
+        !cards.contains("DBROKEN") && !cards.contains("3k"),
+        "{cards}"
+    );
+    let deck = format!("vendor deck\n{cards}\nV1 IN 0 1\nX1 IN OUT HALF\n.op\n.end\n");
+    let netlist = rspice_core::Netlist::parse(&deck).expect("the deck parses");
+    let out = rspice_core::Engine::new(rspice_core::SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("the deck solves")
+        .try_voltage_named("OUT")
+        .expect("OUT is solved");
+    // The first HALF divides by two; the repeated one would give a quarter.
+    assert!((out - 0.5).abs() < 1e-9, "V(OUT) = {out}");
+}
+
 #[test]
 fn scs_import_requires_and_executes_only_the_explicit_spice_interoperability_profile() {
     let mut manager = ModelLibraryManager::new();

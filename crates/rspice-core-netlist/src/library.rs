@@ -7,6 +7,7 @@
 
 mod encrypted;
 mod foundation_defaults;
+mod importable;
 pub mod lib_parser;
 mod manager;
 mod parser;
@@ -17,6 +18,7 @@ pub use encrypted::{EncryptedDefinition, EncryptionScheme};
 pub use foundation_defaults::{
     FoundationDeviceFamily, foundation_card_source, foundation_library_source,
 };
+pub use importable::importable_source_text;
 pub use lib_parser::{
     LibParseResult, LibParser, LibSection, LibSectionSummary, ParseError, ParsedModel,
     ParsedSubcircuit, ResolvedLibDependency, ResolvedLibSource, enumerate_lib_sections,

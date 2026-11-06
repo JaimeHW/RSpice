@@ -496,7 +496,8 @@ impl SealedModelExecutionSources {
                         let mut processor = rspice_core::netlist::IncludeProcessor::new_sealed(
                             &library.root_path,
                             self.bundle.clone(),
-                        );
+                        )
+                        .reading_sources_through(rspice_core::library::importable_source_text);
                         let (materialized_model_cards, root_veriloga) = processor
                             .process_sealed_root_reading_veriloga(&library.root_path, None)
                             .map_err(|error| {
@@ -640,7 +641,8 @@ impl SealedModelExecutionSources {
             domains.sort();
             domains.dedup();
             let mut processor =
-                rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone());
+                rspice_core::netlist::IncludeProcessor::new_sealed(&path, self.bundle.clone())
+                    .reading_sources_through(rspice_core::library::importable_source_text);
             let (materialized_model_cards, section_veriloga) = processor
                 .process_sealed_root_reading_veriloga(&path, Some(&section))
                 .map_err(|error| {

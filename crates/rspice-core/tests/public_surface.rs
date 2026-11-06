@@ -403,7 +403,11 @@ use rspice_core::analysis::harmonic_balance::{
 // their re-export bring it to 5,251: the model catalog import (`rspice-model-
 // library` projection) refuses an encrypted vendor definition by name with
 // that sentence.
-const MAX_PUBLIC_ITEMS: usize = 5251;
+// `library::importable_source_text`, its re-export and
+// `IncludeProcessor::reading_sources_through` bring it to 5,254: a run reads a
+// model library's sources as their import did, so a definition the import
+// skipped can neither fail the run nor stand in for the one it kept.
+const MAX_PUBLIC_ITEMS: usize = 5254;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

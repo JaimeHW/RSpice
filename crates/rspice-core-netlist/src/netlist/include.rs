@@ -325,7 +325,13 @@ pub struct IncludeProcessor {
     /// Spectre source shares the deck's top level, so two of its files that
     /// spell one name in two cases are refused as one file would be.
     spectre_names: super::spectre_adapter::SpectreDeckNames,
+    /// How each source's text is read before it is expanded; `None` reads it
+    /// as written.
+    source_text_filter: Option<SourceTextFilter>,
 }
+
+/// A reading of one source's text, given its path.
+type SourceTextFilter = for<'a> fn(&Path, &'a str) -> std::borrow::Cow<'a, str>;
 
 #[derive(Debug, Default)]
 struct DependencySourceCache {
@@ -746,6 +752,7 @@ impl IncludeProcessor {
             resolved_dependencies: Vec::new(),
             expression_dialect: ExpressionDialect::default(),
             spectre_names: super::spectre_adapter::SpectreDeckNames::default(),
+            source_text_filter: None,
         }
     }
 
@@ -753,6 +760,30 @@ impl IncludeProcessor {
     pub fn with_resource_limits(mut self, resource_limits: ResourceLimits) -> Self {
         self.resource_limits = resource_limits;
         self
+    }
+
+    /// Expand every source as `filter` reads it rather than as written. A
+    /// model library's materialization reads each source as its import did,
+    /// so a run binds exactly the definitions the import listed.
+    #[must_use]
+    pub fn reading_sources_through(
+        mut self,
+        filter: for<'a> fn(&Path, &'a str) -> std::borrow::Cow<'a, str>,
+    ) -> Self {
+        self.source_text_filter = Some(filter);
+        self
+    }
+
+    /// The text an expansion reads for the source at `path`.
+    fn expansion_text(&self, path: &Path, content: Arc<str>) -> Arc<str> {
+        let Some(filter) = self.source_text_filter else {
+            return content;
+        };
+        let filtered = match filter(path, &content) {
+            std::borrow::Cow::Borrowed(_) => None,
+            std::borrow::Cow::Owned(text) => Some(text),
+        };
+        filtered.map_or(content, Arc::from)
     }
 
     /// Read included sources under `dialect`'s rules.
@@ -937,6 +968,7 @@ impl IncludeProcessor {
         let result = (|| {
             let content =
                 self.read_source_with_abort(&canonical, &canonical.display().to_string(), abort)?;
+            let content = self.expansion_text(&canonical, content);
             let expanded = self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,
@@ -1361,6 +1393,7 @@ impl IncludeProcessor {
                 source: Arc::clone(&content),
                 resolution: resolution.clone(),
             });
+            let content = self.expansion_text(&canonical, content);
             self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,
@@ -1417,6 +1450,7 @@ impl IncludeProcessor {
                 source: Arc::clone(&content),
                 resolution: resolution.clone(),
             });
+            let content = self.expansion_text(&canonical, content);
             self.expand_content_from_mapped_with_abort(
                 &content,
                 &canonical,

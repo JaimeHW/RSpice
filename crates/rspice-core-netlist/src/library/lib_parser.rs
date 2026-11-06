@@ -416,6 +416,20 @@ impl LibParser {
         self.build_result()
     }
 
+    /// Parse one source on its own. Every dependency it names is left
+    /// unresolved, so nothing outside `content` is read, and every error and
+    /// line number in the result is that source's own.
+    pub(crate) fn parse_single_source(path: &Path, content: &str) -> LibParseResult {
+        let mut parser = Self::new(path.parent().unwrap_or_else(|| Path::new("")));
+        parser.current_file = Some(path.to_path_buf());
+        parser.authenticated_sources = Some(HashMap::new());
+        parser.authenticated_dependencies = Some(HashMap::new());
+        parser
+            .parse_source_content(content, &NoAbort)
+            .expect("NoAbort cannot cancel string parsing");
+        parser.build_result()
+    }
+
     /// Parse a complete authenticated source closure without consulting the
     /// host filesystem. Every dependency must resolve through the exact
     /// retained `(owner, normalized literal) -> target` edge supplied by the
