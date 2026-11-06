@@ -17,7 +17,7 @@ use crate::services::update_check::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogHintTone, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
 
 const TITLE: &str = "Check for updates";
 
@@ -182,9 +182,13 @@ pub fn render_update_check_dialog(dialog: &mut UpdateCheckDialogState, ctx: &Con
             "RSpice {} is available, released {}. You have {INSTALLED_VERSION}.",
             release.version, release.date
         ),
-        UpdateCheckPhase::Failed(_) => {
-            format!("RSpice {INSTALLED_VERSION} could not be compared with the latest version.")
-        }
+        // What failed and why, in one place: the body. The footer stated
+        // the cause under a body that stated the consequence, two lines of
+        // status beside two buttons for one fact.
+        UpdateCheckPhase::Failed(failure) => format!(
+            "RSpice {INSTALLED_VERSION} could not be compared with the latest version. {}",
+            failure.sentence()
+        ),
     };
     let primary = match &phase {
         UpdateCheckPhase::Checking => "Cancel",
@@ -198,12 +202,7 @@ pub fn render_update_check_dialog(dialog: &mut UpdateCheckDialogState, ctx: &Con
         .overlay_scrollbar();
     match &phase {
         UpdateCheckPhase::Newer(_) => card = card.secondary("Release notes").ghost("Close"),
-        UpdateCheckPhase::Failed(failure) => {
-            card = card
-                .ghost("Close")
-                .hint(failure.sentence())
-                .hint_tone(DialogHintTone::Error);
-        }
+        UpdateCheckPhase::Failed(_) => card = card.ghost("Close"),
         UpdateCheckPhase::Checking | UpdateCheckPhase::UpToDate => {}
     }
     let choice = card.show(ctx, |ui| {
