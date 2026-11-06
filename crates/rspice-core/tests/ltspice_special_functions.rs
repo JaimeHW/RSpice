@@ -1,6 +1,8 @@
 //! LTspice special-function `A` devices against LTspice.
 //!
-//! Reference values are LTspice 26.1.1 batch runs of the same decks.
+//! Reference values are LTspice 26.1.1 batch runs of the same decks. QSPICE
+//! cannot read these `A` lines, so where it votes it runs an equivalent
+//! circuit; LTspice alone decides each device's parameter defaults.
 
 use rspice_core::Complex64;
 use rspice_core::analysis::NoiseContributionProbe;
@@ -256,6 +258,8 @@ A2 in 0 0 0 0 qb2 0 0 SCHMITT Vhigh=3 Vt=1
 A3 b in 0 0 0 0 q3 0 SCHMITT Vt=0.6 Vh=0.3
 .end
 ";
+    // QSPICE's HMITT device with the same thresholds trips at 52.50 and
+    // 152.50 ns, 35.00 and 168.33 ns, and 56.67 and 163.33 ns.
     let probes = [
         // Defaults Vt = 1.5, Vh = Vt/20: trips at 1.575 V (52.5 ns) and
         // 1.425 V (152.5 ns).
@@ -305,6 +309,8 @@ A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=10n enk=10
 .end
 ";
     // LTspice 26.1.1 batch, V(A1.en): en*sqrt(1 + enk/f) through G*Rout = 10.
+    // QSPICE, with a 6.0328k resistor's thermal noise for en into an ideal
+    // transconductor and a noiseless load: 1.000e-7 white, as here.
     let densities = ota_noise_density(voltage, "en", &[1.0, 10.0, 1e4]);
     for (actual, expected) in densities
         .into_iter()
@@ -320,6 +326,8 @@ A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=1p ink=10
 .end
 ";
     // LTspice 26.1.1 batch, V(A1.in): in*sqrt(1 + ink/f) across Ra + Rb, times 10.
+    // QSPICE, with a 16.576k resistor between the inputs for in (its loading
+    // cancelled) and noiseless Ra, Rb and load: 4.000e-8 white, as here.
     let densities = ota_noise_density(current, "in", &[1.0, 1e4]);
     for (actual, expected) in densities.into_iter().zip([1.326_650e-7, 4.001_999e-8]) {
         assert_close("in", actual, expected, 1e-6 * expected);
