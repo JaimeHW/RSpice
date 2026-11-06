@@ -4478,6 +4478,19 @@ fn add_generated_xspice_auto_bridge_capacitor(
 }
 
 #[inline]
+/// The state capacitor of a behavioral `idt()` holds its initial condition
+/// through every operating point in all dialects: the integral is defined
+/// there, not an equilibrium of its input.
+fn holds_integral_initial_condition(element: &Element) -> bool {
+    matches!(
+        element.provenance,
+        crate::netlist::ElementProvenance::GeneratedDynamicInternalNode {
+            form: crate::netlist::SynthesizedTransferForm::Integral,
+            ..
+        }
+    )
+}
+
 fn capacitor_ic_dc_mode(spice_dialect: SpiceDialect) -> crate::netlist::CapacitorIcDcMode {
     if spice_dialect == SpiceDialect::Xyce {
         crate::netlist::CapacitorIcDcMode::EnforcedConstraint
@@ -6962,6 +6975,7 @@ impl Engine {
                     if let Some(ic) = *initial_voltage {
                         if capacitor_ic_dc_mode(self.config.spice_dialect)
                             == crate::netlist::CapacitorIcDcMode::EnforcedConstraint
+                            || holds_integral_initial_condition(element)
                         {
                             let branch = circuit.allocate_branch_named(&element.name);
                             circuit.capacitors.add_with_ic_branch(

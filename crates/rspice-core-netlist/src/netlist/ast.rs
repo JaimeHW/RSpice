@@ -225,7 +225,8 @@ pub enum ElementProvenance {
     },
 }
 
-/// How a realized rational transfer function was authored.
+/// How a dynamic controlled source realized from existing elements was
+/// authored.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SynthesizedTransferForm {
     /// `LAPLACE {input} = {N(s)/D(s)}` — the transfer written out directly.
@@ -233,6 +234,13 @@ pub enum SynthesizedTransferForm {
     /// `CHEBYSHEV {input} = FAMILY (edges) ripple stop` — a transfer designed
     /// from requirements.
     Chebyshev,
+    /// `ddt(x)` inside a behavioral expression.
+    Derivative,
+    /// `idt(x[,ic[,reset]])` inside a behavioral expression. Its state
+    /// capacitor holds its initial condition through the operating point.
+    Integral,
+    /// `delay(x,td[,tdmax])` or `absdelay(...)` inside a behavioral expression.
+    Delay,
 }
 
 impl SynthesizedTransferForm {
@@ -242,6 +250,9 @@ impl SynthesizedTransferForm {
         match self {
             Self::Laplace => "LAPLACE",
             Self::Chebyshev => "CHEBYSHEV",
+            Self::Derivative => "ddt",
+            Self::Integral => "idt",
+            Self::Delay => "delay",
         }
     }
 }

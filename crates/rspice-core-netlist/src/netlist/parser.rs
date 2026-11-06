@@ -176,6 +176,7 @@ fn options_overlay(
 mod conditionals;
 mod dcmatch_card;
 mod dialect_instances;
+mod dynamic_operators;
 mod elements;
 mod hb_card;
 mod laplace_synthesis;
@@ -199,6 +200,7 @@ pub(in crate::netlist) use chebyshev_synthesis::{ChebyshevSpec, synthesize_cheby
 use command_parsers::*;
 use commands::*;
 use conditionals::*;
+use dynamic_operators::*;
 pub(in crate::netlist) use elements::lower_deferred_rf_port;
 use elements::*;
 use laplace_synthesis::*;

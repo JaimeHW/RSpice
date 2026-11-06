@@ -1,0 +1,386 @@
+//! Time-domain operators inside behavioral expressions: `ddt`, `idt` and
+//! `delay` (with `absdelay` as an alias).
+//!
+//! Each call is realized at parse time by a private node and existing,
+//! fully validated elements, and the call is replaced by that node's voltage.
+//! Every analysis then sees an ordinary circuit:
+//!
+//! - `ddt(x)` drives the current `x` through a 1 H inductor, whose voltage is
+//!   `dx/dt`: zero at DC, `jω·x` in AC, and step-controlled by the inductor's
+//!   truncation error in transient.
+//! - `idt(x[,ic[,reset]])` integrates the current `x` on a 1 F capacitor whose
+//!   zero initial condition is held through the operating point, so the
+//!   integral is `ic` at DC, `x/(jω)` in AC, and starts from `ic` in transient.
+//!   While `reset` exceeds 0.5 during a transient the capacitor is held at zero.
+//! - `delay(x,td[,tdmax])` launches `x` into a matched lossless line of delay
+//!   `td`. Its far end is `x(t-td)` with the operating point as the history
+//!   before time zero, `x·e^(-jω·td)` in AC; the line keeps the waveform
+//!   history and schedules the delayed breakpoints.
+
+use super::{Element, ElementKind, ParseError, SourceMultiplicity};
+use crate::netlist::lexer::parse_spice_value_complete;
+use crate::netlist::{ElementProvenance, SynthesizedTransferForm};
+
+/// Impedance of the delay line and its termination. A lossless line falls
+/// back to a milliohm series resistance at DC, so a high impedance keeps that
+/// fallback a part-per-billion error in the operating point and its history.
+const DELAY_LINE_IMPEDANCE: f64 = 1e6;
+
+/// One operator call located in an expression.
+struct Call {
+    form: SynthesizedTransferForm,
+    /// Byte range of the whole call, name through closing parenthesis.
+    start: usize,
+    end: usize,
+    args: Vec<String>,
+}
+
+fn operator_form(name: &str) -> Option<SynthesizedTransferForm> {
+    match name.to_ascii_uppercase().as_str() {
+        "DDT" => Some(SynthesizedTransferForm::Derivative),
+        "IDT" => Some(SynthesizedTransferForm::Integral),
+        "DELAY" | "ABSDELAY" => Some(SynthesizedTransferForm::Delay),
+        _ => None,
+    }
+}
+
+fn is_identifier_start(byte: u8) -> bool {
+    byte.is_ascii_alphabetic() || byte == b'_'
+}
+
+fn is_identifier_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'.' | b'$' | b'#')
+}
+
+/// Every identifier in `text` outside quoted strings, with the byte offset of
+/// the first non-blank character after it.
+fn identifiers(text: &str) -> Vec<(usize, &str, usize)> {
+    let bytes = text.as_bytes();
+    let mut found = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'"' {
+            index += 1;
+            while index < bytes.len() && bytes[index] != b'"' {
+                index += 1;
+            }
+            index += 1;
+        } else if is_identifier_start(byte) {
+            let start = index;
+            while index < bytes.len() && is_identifier_byte(bytes[index]) {
+                index += 1;
+            }
+            let mut next = index;
+            while next < bytes.len() && bytes[next].is_ascii_whitespace() {
+                next += 1;
+            }
+            found.push((start, &text[start..index], next));
+        } else if byte.is_ascii_digit() {
+            // A number with an exponent or scale suffix is not an identifier.
+            while index < bytes.len() && is_identifier_byte(bytes[index]) {
+                index += 1;
+            }
+        } else {
+            index += 1;
+        }
+    }
+    found
+}
+
+/// Split the parenthesized argument list opening at `open` into top-level
+/// arguments, returning them with the offset just past the closing parenthesis.
+fn call_arguments(text: &str, open: usize) -> Option<(Vec<String>, usize)> {
+    let bytes = text.as_bytes();
+    let mut depth = 0usize;
+    let mut args = Vec::new();
+    let mut argument_start = open + 1;
+    let mut index = open;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'"' => {
+                index += 1;
+                while index < bytes.len() && bytes[index] != b'"' {
+                    index += 1;
+                }
+            }
+            b'(' => depth += 1,
+            b')' => {
+                depth -= 1;
+                if depth == 0 {
+                    args.push(text[argument_start..index].trim().to_string());
+                    return Some((args, index + 1));
+                }
+            }
+            b',' if depth == 1 => {
+                args.push(text[argument_start..index].trim().to_string());
+                argument_start = index + 1;
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    None
+}
+
+/// The first operator call in `text`.
+fn first_call(text: &str, line: usize) -> Result<Option<Call>, ParseError> {
+    for (start, name, next) in identifiers(text) {
+        let Some(form) = operator_form(name) else {
+            continue;
+        };
+        if text.as_bytes().get(next) != Some(&b'(') {
+            continue;
+        }
+        let (args, end) = call_arguments(text, next).ok_or_else(|| ParseError::Syntax {
+            line,
+            message: format!("unbalanced parentheses in {name}() call"),
+        })?;
+        return Ok(Some(Call {
+            form,
+            start,
+            end,
+            args,
+        }));
+    }
+    Ok(None)
+}
+
+/// Whether an expression reads the circuit solution or simulation time, which
+/// a line's fixed delay cannot follow.
+fn varies_during_simulation(text: &str) -> bool {
+    identifiers(text).iter().any(|(_, name, next)| {
+        let upper = name.to_ascii_uppercase();
+        upper == "TIME"
+            || (text.as_bytes().get(*next) == Some(&b'(')
+                && matches!(
+                    upper.as_str(),
+                    "V" | "I"
+                        | "VM"
+                        | "VP"
+                        | "VR"
+                        | "VI"
+                        | "VDB"
+                        | "IM"
+                        | "IP"
+                        | "IR"
+                        | "II"
+                        | "IDB"
+                ))
+    })
+}
+
+/// Lower every `ddt`, `idt` and `delay` call in a behavioral expression owned
+/// by `owner`, appending the elements that realize them to `elements` and
+/// returning the rewritten expression.
+pub(super) fn lower_dynamic_operators(
+    owner: &str,
+    expression: String,
+    line: usize,
+    elements: &mut Vec<Element>,
+) -> Result<String, ParseError> {
+    let mut ordinal = 0usize;
+    lower_calls(owner, &expression, line, &mut ordinal, elements)
+}
+
+/// Replace every call in `text`, realizing the operators inside an argument
+/// before the call that reads them.
+fn lower_calls(
+    owner: &str,
+    text: &str,
+    line: usize,
+    ordinal: &mut usize,
+    elements: &mut Vec<Element>,
+) -> Result<String, ParseError> {
+    let mut text = text.to_string();
+    while let Some(mut call) = first_call(&text, line)? {
+        for arg in &mut call.args {
+            *arg = lower_calls(owner, arg, line, ordinal, elements)?;
+        }
+        *ordinal += 1;
+        let replacement = realize(owner, *ordinal, &call, line, elements)?;
+        text.replace_range(call.start..call.end, &replacement);
+    }
+    Ok(text)
+}
+
+fn realize(
+    owner: &str,
+    ordinal: usize,
+    call: &Call,
+    line: usize,
+    elements: &mut Vec<Element>,
+) -> Result<String, ParseError> {
+    let form = call.form;
+    let label = form.label();
+    let fail = |message: String| ParseError::Syntax {
+        line,
+        message: format!("behavioral source '{owner}': {message}"),
+    };
+    let (min_args, max_args) = match form {
+        SynthesizedTransferForm::Derivative => (1, 1),
+        SynthesizedTransferForm::Integral => (1, 3),
+        _ => (2, 3),
+    };
+    if !(min_args..=max_args).contains(&call.args.len()) || call.args.iter().any(String::is_empty) {
+        return Err(fail(format!(
+            "{label}() takes {min_args} to {max_args} arguments, got {}",
+            call.args.len()
+        )));
+    }
+    let input = &call.args[0];
+    let node = |role: &str| format!("{owner}.__{role}{ordinal}");
+    let internal = |node: &str| ElementProvenance::GeneratedDynamicInternalNode {
+        owner: owner.to_string(),
+        form,
+        node: node.to_string(),
+    };
+    let driven = ElementProvenance::GeneratedDynamicStateDerivative {
+        owner: owner.to_string(),
+        form,
+        dc_determined: true,
+    };
+    let current_into = |name: String, node: &str, expression: &str| Element {
+        name,
+        kind: ElementKind::BehavioralCurrent {
+            expression: expression.to_string(),
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+        nodes: vec!["0".to_string(), node.to_string()],
+        provenance: driven.clone(),
+    };
+
+    match form {
+        SynthesizedTransferForm::Derivative => {
+            let state = node("DDT");
+            elements.push(current_into(node("GDDT"), &state, input));
+            elements.push(Element {
+                name: node("LDDT"),
+                kind: ElementKind::Inductor {
+                    value: 1.0,
+                    value_expr: None,
+                    initial_current: None,
+                    model: None,
+                    instance_params: Vec::new(),
+                    deferred_params: Vec::new(),
+                },
+                nodes: vec![state.clone(), "0".to_string()],
+                provenance: internal(&state),
+            });
+            Ok(format!("V({state})"))
+        }
+        SynthesizedTransferForm::Integral => {
+            let state = node("IDT");
+            elements.push(current_into(node("GIDT"), &state, input));
+            elements.push(Element {
+                name: node("CIDT"),
+                kind: ElementKind::Capacitor {
+                    value: 1.0,
+                    value_expr: None,
+                    initial_voltage: Some(0.0),
+                    model: None,
+                    instance_params: Vec::new(),
+                    deferred_params: Vec::new(),
+                },
+                nodes: vec![state.clone(), "0".to_string()],
+                provenance: internal(&state),
+            });
+            if let Some(reset) = call.args.get(2) {
+                // An ideal switch across the capacitor: while reset is asserted
+                // the branch pins the state to zero; otherwise its equation
+                // reduces to a zero branch current.
+                let name = node("SIDT");
+                elements.push(Element {
+                    kind: ElementKind::BehavioralVoltage {
+                        expression: format!("if(time>0&&({reset})>0.5,0,V({state})-I({name}))"),
+                        tc1: 0.0,
+                        tc2: 0.0,
+                        multiplicity: SourceMultiplicity::default(),
+                    },
+                    name,
+                    nodes: vec![state.clone(), "0".to_string()],
+                    provenance: internal(&state),
+                });
+            }
+            Ok(match call.args.get(1) {
+                Some(initial) => format!("(({initial})+V({state}))"),
+                None => format!("V({state})"),
+            })
+        }
+        _ => {
+            let delay = &call.args[1];
+            if varies_during_simulation(delay) {
+                return Err(fail(format!(
+                    "{label}() needs a delay fixed before the simulation starts; \
+                     '{delay}' reads the circuit or time"
+                )));
+            }
+            let fixed = parse_spice_value_complete(delay).ok();
+            if let Some(value) = fixed {
+                if !(value.is_finite() && value >= 0.0) {
+                    return Err(fail(format!(
+                        "{label}() delay must be finite and non-negative, got {value}"
+                    )));
+                }
+                if value == 0.0 {
+                    return Ok(format!("({input})"));
+                }
+                if let Some(maximum) = call
+                    .args
+                    .get(2)
+                    .and_then(|text| parse_spice_value_complete(text).ok())
+                    && value > maximum
+                {
+                    return Err(fail(format!(
+                        "{label}() delay {value} exceeds its maximum {maximum}"
+                    )));
+                }
+            }
+            let launch = node("DLYI");
+            let far = node("DLYO");
+            elements.push(Element {
+                name: node("BDLY"),
+                kind: ElementKind::BehavioralVoltage {
+                    expression: input.clone(),
+                    tc1: 0.0,
+                    tc2: 0.0,
+                    multiplicity: SourceMultiplicity::default(),
+                },
+                nodes: vec![launch.clone(), "0".to_string()],
+                provenance: internal(&launch),
+            });
+            elements.push(Element {
+                name: node("TDLY"),
+                kind: ElementKind::TransmissionLine {
+                    z0: Some(DELAY_LINE_IMPEDANCE),
+                    td: fixed,
+                    freq: None,
+                    nl: None,
+                    model: None,
+                    deferred_params: if fixed.is_some() {
+                        Vec::new()
+                    } else {
+                        vec![("TD".to_string(), delay.clone())]
+                    },
+                },
+                nodes: vec![launch, "0".to_string(), far.clone(), "0".to_string()],
+                provenance: internal(&far),
+            });
+            elements.push(Element {
+                name: node("RDLY"),
+                kind: ElementKind::Resistor {
+                    value: DELAY_LINE_IMPEDANCE,
+                    value_expr: None,
+                    model: None,
+                    instance_params: Vec::new(),
+                    deferred_params: Vec::new(),
+                },
+                nodes: vec![far.clone(), "0".to_string()],
+                provenance: internal(&far),
+            });
+            Ok(format!("V({far})"))
+        }
+    }
+}

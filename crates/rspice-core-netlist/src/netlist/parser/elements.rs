@@ -8111,6 +8111,7 @@ fn parse_voltage_controlled_source(
             element_label,
             !is_voltage_output,
         )?;
+        let expression = lower_dynamic_operators(&name, expression, line_num, elements)?;
         elements.push(Element {
             name,
             kind: lower_behavioral(expression, multiplicity),
@@ -8170,6 +8171,7 @@ fn parse_voltage_controlled_source(
                 element_label,
                 !is_voltage_output,
             )?;
+            let expression = lower_dynamic_operators(&name, expression, line_num, elements)?;
             elements.push(Element {
                 name,
                 kind: lower_behavioral(expression, multiplicity),
@@ -8827,6 +8829,7 @@ pub(super) fn parse_behavioral(
     let expression =
         lower_behavioral_table_expression(&expression, line_num, params, defer_simple_param_refs)?
             .unwrap_or(expression);
+    let expression = lower_dynamic_operators(&name, expression, line_num, elements)?;
 
     let mut tc1 = 0.0;
     let mut tc2 = 0.0;
