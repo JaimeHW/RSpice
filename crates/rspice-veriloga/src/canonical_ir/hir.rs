@@ -1130,6 +1130,11 @@ pub struct HirModel {
     /// nodes, in call order; see [`HirNodeAlias`].
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub node_aliases: Vec<HirNodeAlias>,
+    /// Carried from [`crate::semantic::AnalyzedModule::noise_branches`]: the
+    /// branch, `[pos, neg]` with ground spelled `0`, that a noise process is
+    /// written on when its contribution now sits on another branch.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub noise_branches: std::collections::BTreeMap<u32, [SmolStr; 2]>,
 }
 
 /// A local net `$analog_node_alias(net, "path")` or
@@ -1489,6 +1494,7 @@ impl HirModel {
             external_leaves: module.external_leaves.clone(),
             hoisted_ports: module.hoisted_ports.clone(),
             node_aliases: module.node_aliases.clone(),
+            noise_branches: module.noise_branches.clone(),
             digital_observations: Vec::new(),
             discrete_selections: module
                 .discrete_selections

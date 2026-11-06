@@ -4352,7 +4352,7 @@ pub static GROUPED_NOISE_PROCESSES: [GeneratedNoiseProcessDescriptor; 18] = [
 	GeneratedNoiseProcessDescriptor { process_id: 12, mechanism: "WHITE_GI_SI_IGS", label: Some("igs"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 13, mechanism: "WHITE_GI_B_IGB", label: Some("igb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 14, mechanism: "WHITE_G_GM_RG", label: Some("rg"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
-	GeneratedNoiseProcessDescriptor { process_id: 15, mechanism: "WHITE_GI_GM_RG", label: Some("rg"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
+	GeneratedNoiseProcessDescriptor { process_id: 15, mechanism: "WHITE_GM_GI_RG", label: Some("rg"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 16, mechanism: "WHITE_B_DB_RBDB", label: Some("rbdb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 	GeneratedNoiseProcessDescriptor { process_id: 17, mechanism: "WHITE_B_SB_RBSB", label: Some("rbsb"), kind: GeneratedNoiseKind::White, table_len: 0, table_log_interp: false },
 ];

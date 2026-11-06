@@ -9706,6 +9706,7 @@ mod tests {
             default_transition: 1.0e-9,
             default_discipline: None,
             noise_process_count: 0,
+            noise_branches: Default::default(),
             ports: vec![
                 AnalyzedPort {
                     name: "p".into(),

@@ -89,6 +89,12 @@ impl BranchResolver<'_> {
             .unwrap_or((&contribution.branch, "0"));
         self.nodes(pos.trim(), neg.trim())
     }
+
+    /// The contribution's branch in the orientation the source writes it.
+    fn authored(&self, contribution: &AnalyzedContribution) -> [SmolStr; 2] {
+        let (_, pos, neg, sign) = self.contribution(contribution);
+        if sign > 0.0 { [pos, neg] } else { [neg, pos] }
+    }
 }
 
 /// Local branch keys must be resolved before hierarchy node bindings merge
@@ -480,11 +486,16 @@ pub(crate) fn lower<'a>(
                 .then_some((contribution.site, (key, sign)))
         })
         .collect();
+    let noise_branches =
+        authored_noise_branches(&module, &resolver, |site| rewrites.contains_key(&site));
     // Preserve the resolver's authored declarations while the owned module
     // gains its private nodes. No expression forest is cloned for this map.
     let declared = module.branches.clone();
     let ground_nodes = module.ground_nodes.clone();
     let target = module.to_mut();
+    for (process, branch) in noise_branches {
+        target.noise_branches.entry(process).or_insert(branch);
+    }
     for (ordinal, (key, branch)) in branches.iter_mut().enumerate() {
         let mut suffix = ordinal;
         loop {
@@ -709,7 +720,10 @@ fn normalize_potential_directions(module: &mut Cow<'_, AnalyzedModule>) {
     if rewrites.is_empty() {
         return;
     }
+    let noise_branches =
+        authored_noise_branches(module, &resolver, |site| rewrites.contains_key(&site));
     let target = module.to_mut();
+    target.noise_branches.extend(noise_branches);
     let redirect = |contribution: &mut AnalyzedContribution, flat| {
         if let Some(label) = rewrites.get(&contribution.site) {
             contribution.branch = label.clone();
@@ -752,6 +766,46 @@ pub(super) fn signed(expression: Expression, sign: f64) -> Expression {
             span,
         })
     }
+}
+
+/// The branch, as written, of each noise source in the contributions `moved`
+/// selects, taken before lowering moves those contributions onto a private
+/// unknown or reverses them. A source keeps the name of the branch the model
+/// writes it on, as Xyce's ADMS names it, even when another source on the
+/// same branch is written the other way round.
+fn authored_noise_branches(
+    module: &AnalyzedModule,
+    resolver: &BranchResolver<'_>,
+    moved: impl Fn(AnalogSiteId) -> bool,
+) -> BTreeMap<u32, [SmolStr; 2]> {
+    let mut authored = BTreeMap::new();
+    for contribution in module
+        .contributions
+        .iter()
+        .filter(|contribution| moved(contribution.site))
+    {
+        let branch = resolver.authored(contribution);
+        visit_expression(&contribution.expression, &mut |expression| {
+            if let Expression::NoiseSource(
+                NoiseSource::White {
+                    process_id: Some(process),
+                    ..
+                }
+                | NoiseSource::Flicker {
+                    process_id: Some(process),
+                    ..
+                }
+                | NoiseSource::Table {
+                    process_id: Some(process),
+                    ..
+                },
+            ) = expression
+            {
+                authored.entry(*process).or_insert_with(|| branch.clone());
+            }
+        });
+    }
+    authored
 }
 
 fn redirect_contribution(

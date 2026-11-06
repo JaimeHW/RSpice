@@ -854,12 +854,23 @@ fn uses_checked_runtime(body: &str) -> bool {
 }
 
 /// A grouped process's Xyce name, `<kind>_<pos>_<neg>_<label>`, taken from
-/// the branch of its first injection.
+/// the branch its source is written on, or else from the branch of its first
+/// injection.
 fn grouped_process_mechanism(
     artifact: &CanonicalIrArtifact,
     descriptors: &[(usize, usize)],
     process: &GroupedNoiseProcessPlan,
 ) -> smol_str::SmolStr {
+    if let Some(branch) = u32::try_from(process.process_id)
+        .ok()
+        .and_then(|process| artifact.hir.noise_branches.get(&process))
+    {
+        return crate::canonical_ir::noise::authored_branch_mechanism(
+            process.kind,
+            branch,
+            process.label.as_deref(),
+        );
+    }
     let (pos, neg) = descriptors
         .iter()
         .find(|(process_id, _)| *process_id == process.process_id)
@@ -879,7 +890,9 @@ fn grouped_process_mechanism(
 /// A probed flow source's contributions move onto its private flow unknown,
 /// which drives the authored branch through one `I(pos,neg) <+ V(state)`
 /// injection (see `semantic::flow_probes`). A noise source written on that
-/// branch is named after the branch, not after the unknown.
+/// branch is named after the branch, not after the unknown. Lowering records
+/// the written orientation of a source in the contribution itself; this is
+/// for one that reaches the branch through a variable.
 fn authored_branch(
     artifact: &CanonicalIrArtifact,
     pos: Option<NodeId>,
@@ -2230,6 +2243,57 @@ endmodule
         );
         assert_eq!(distinct, vec![(0, 1.0), (1, 1.0)]);
         assert_eq!(distinct.iter().map(|(_, power)| power).sum::<f64>(), 2.0);
+    }
+
+    /// Xyce's ADMS names a noise source after its branch as the source writes
+    /// it, one source at a time. Lowering moves a switch branch's and a probed
+    /// flow's contributions onto a private unknown whose injection runs in
+    /// lexical order; the names must still follow the source.
+    #[test]
+    fn a_noise_source_is_named_after_its_branch_as_written() {
+        let artifact = crate::VerilogACompiler::default()
+            .compile_canonical_ir(
+                r#"
+module written(a, b, c);
+    inout a, b, c; electrical a, b, c;
+    parameter real r = 1.0;
+    analog begin
+        if (r > 0.0) begin
+            I(b, a) <+ V(b, a) / r;
+            I(b, a) <+ white_noise(1.0);
+            I(a, b) <+ white_noise(2.0, "back");
+        end else
+            V(b, a) <+ 0.0;
+        I(c, a) <+ V(c, a) / r + white_noise(3.0);
+        I(b, c) <+ 1.0e-3 * I(c, a);
+        I(c, b) <+ flicker_noise(4.0, 1.0);
+    end
+endmodule
+"#,
+            )
+            .expect("written-orientation fixture compiles");
+        let plan = super::plan_grouped_noise(&artifact, &crate::metrics::NoPipelineControl)
+            .expect("grouped-noise planning succeeds")
+            .expect("fixture has grouped processes");
+        let mut names = plan
+            .processes
+            .iter()
+            .map(|process| {
+                (
+                    process.process_id,
+                    super::grouped_process_mechanism(&artifact, &plan.descriptors, process)
+                        .to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        names.sort();
+        assert_eq!(
+            names
+                .iter()
+                .map(|(_, name)| name.as_str())
+                .collect::<Vec<_>>(),
+            ["WHITE_B_A", "WHITE_A_B_BACK", "WHITE_C_A", "FLICKER_C_B"]
+        );
     }
 
     #[test]

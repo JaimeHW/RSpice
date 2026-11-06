@@ -1188,6 +1188,7 @@ impl SemanticAnalyzer {
             default_transition,
             default_discipline: None,
             noise_process_count: 0,
+            noise_branches: Default::default(),
             ports: Vec::new(),
             formal_ports: Vec::new(),
             parameters: Vec::new(),

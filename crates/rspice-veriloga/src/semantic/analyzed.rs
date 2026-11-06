@@ -91,6 +91,11 @@ pub struct AnalyzedModule {
     /// IDs are dense from zero and are remapped per instance during hierarchy
     /// elaboration so repeated children never alias one another.
     pub noise_process_count: u32,
+    /// The branch a noise process's contribution is written on, as
+    /// `[pos, neg]` with ground spelled `0`, for each process whose
+    /// contribution flow-probe lowering moved off that branch or reversed it.
+    /// A noise source is named after the branch as the model writes it.
+    pub noise_branches: std::collections::BTreeMap<u32, [SmolStr; 2]>,
     /// One entry per scalar terminal, in binding order: a vector port has
     /// already expanded into its lanes here.
     pub ports: Vec<AnalyzedPort>,

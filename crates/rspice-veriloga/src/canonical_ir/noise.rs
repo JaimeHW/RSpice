@@ -775,10 +775,41 @@ pub(crate) fn branch_mechanism(
     canonical_mechanism(kind, &endpoint(mir, pos), &endpoint(mir, neg), label)
 }
 
+/// [`branch_mechanism`] of a branch named by its endpoints as the source
+/// writes them, `[pos, neg]` with ground spelled `0`.
+#[cfg(feature = "rust-codegen")]
+pub(crate) fn authored_branch_mechanism(
+    kind: CanonicalNoiseSourceKind,
+    [pos, neg]: &[SmolStr; 2],
+    label: Option<&str>,
+) -> SmolStr {
+    compose_mechanism(
+        kind,
+        (pos != "0").then_some(pos.as_str()),
+        (neg != "0").then_some(neg.as_str()),
+        label,
+    )
+}
+
 fn canonical_mechanism(
     kind: CanonicalNoiseSourceKind,
     pos: &CanonicalNoiseEndpoint,
     neg: &CanonicalNoiseEndpoint,
+    label: Option<&str>,
+) -> SmolStr {
+    compose_mechanism(
+        kind,
+        pos.node.map(|_| pos.name.as_str()),
+        neg.node.map(|_| neg.name.as_str()),
+        label,
+    )
+}
+
+/// `<kind>_<pos>_<neg>[_<label>]`, where a `None` endpoint is ground.
+fn compose_mechanism(
+    kind: CanonicalNoiseSourceKind,
+    pos: Option<&str>,
+    neg: Option<&str>,
     label: Option<&str>,
 ) -> SmolStr {
     let kind = match kind {
@@ -786,11 +817,8 @@ fn canonical_mechanism(
         CanonicalNoiseSourceKind::Flicker => "FLICKER",
         CanonicalNoiseSourceKind::Table => "TABLE",
     };
-    let mut mechanism = format!(
-        "{kind}_{}_{}",
-        canonical_identifier(&pos.name, pos.node.is_none()),
-        canonical_identifier(&neg.name, neg.node.is_none())
-    );
+    let identifier = |node: Option<&str>| canonical_identifier(node.unwrap_or(""), node.is_none());
+    let mut mechanism = format!("{kind}_{}_{}", identifier(pos), identifier(neg));
     if let Some(label) = label {
         let label = canonical_identifier(label, false);
         if !label.is_empty() {
