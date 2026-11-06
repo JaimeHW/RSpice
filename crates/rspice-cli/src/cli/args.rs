@@ -463,7 +463,7 @@ pub struct RunArgs {
     #[arg(long, value_name = "MODE", value_parser = ["fast", "default", "robust"])]
     pub convergence: Option<String>,
 
-    /// Transient integration method (default: trapgear auto-switching)
+    /// Transient integration method (default: trap; trapgear switches to Gear-2 on ringing)
     #[arg(
         long,
         value_name = "METHOD",

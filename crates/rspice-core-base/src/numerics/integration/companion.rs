@@ -166,7 +166,7 @@ impl CompanionCoefficients {
             IntegrationMethod::BackwardEuler => Self::backward_euler(),
             IntegrationMethod::Trapezoidal => Self::trapezoidal(),
             IntegrationMethod::Gear2 => Self::gear2(),
-            IntegrationMethod::TrapGear => Self::trapezoidal(), // Default, actual method chosen dynamically
+            IntegrationMethod::TrapGear => Self::trapezoidal(), // Gear-2 is chosen per step
         }
     }
 

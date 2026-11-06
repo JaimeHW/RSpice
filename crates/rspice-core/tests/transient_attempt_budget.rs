@@ -152,6 +152,75 @@ fn xyce_dialect_integrates_with_one_step_trapezoidal_by_default() {
     assert_eq!(default.voltages, trapezoidal.voltages);
 }
 
+/// ngspice, Xyce, HSPICE and Spectre all integrate with the trapezoidal rule
+/// unless a deck asks otherwise, and so does RSpice: the trap/Gear-2 switch
+/// is an explicit choice. On this MOS2 inverter the switch's ringing detector
+/// fires at the first input edge (1.505 us), so the deck tells the two apart:
+/// a default run has to reproduce trapezoidal exactly, and a requested
+/// TrapGear has to take a different step sequence.
+fn assert_integrates_trapezoidally_by_default(spice_dialect: SpiceDialect) {
+    let netlist = Netlist::parse(
+        "mos2 inverter, M=2 devices\n\
+         vdddev vdd 0 5v\n\
+         rin in 1 1k\n\
+         vin1 1 0 5v pulse (5v 0v 1.5us 5ns 5ns 1.5us 3us)\n\
+         r1 vout 0 10k\n\
+         c2 vout 0 0.1p\n\
+         mn1 vout in 0 0 nch l=5u w=175u m=2\n\
+         mp1 vout in vdd vdd pch l=5u w=270u m=2\n\
+         .model pch pmos (level=2 uo=310 vto=-1.6 tox=6e-08 nsub=5.701e+15\n\
+         + nss=1e-10 rs=5.359 rd=93.66 rsh=2e-10 is=1e-14 ld=3e-08 kp=1.711e-05\n\
+         + lambda=0.02 gamma=0.37 phi=0.65 cbd=0.1p cbs=0.1p pb=0.81 cgso=2p\n\
+         + cgbo=4p cgdo=2p cj=2e-4 mj=0.5 cjsw=1e-9 mjsw=0.5 js=1e-8 tpg=0\n\
+         + fc=0.5 tnom=27)\n\
+         .model nch nmos (level=2 uo=190 vto=1.679 tox=6e-08 nsub=8.601e+15\n\
+         + nss=0 rs=13.21 rd=11.59 rsh=0 is=1e-14 ld=8.6e-07 kp=2.161e-05\n\
+         + lambda=0.02 gamma=0.37 phi=0.65 cbd=0.1p cbs=0.1p pb=0.81 cgso=2p\n\
+         + cgbo=4p cgdo=2p cj=2e-4 mj=0.5 cjsw=1e-9 mjsw=0.5 js=1e-8 tpg=0\n\
+         + fc=0.5 tnom=27)\n\
+         .tran 20ns 2us\n\
+         .end\n",
+    )
+    .expect("MOS2 inverter deck parses");
+    let run = |integration_method: Option<IntegrationMethod>| {
+        let mut config = SimulationConfig {
+            spice_dialect,
+            ..SimulationConfig::default()
+        };
+        if let Some(method) = integration_method {
+            config.integration_method = method;
+        }
+        let engine = Engine::new(rspice_core::engine::resolve_simulation_config(
+            &config,
+            Some(&netlist.options),
+            &Default::default(),
+        ));
+        engine
+            .run_tran(&netlist, 2.0e-6, 0.2e-6)
+            .expect("the inverter transient completes")
+    };
+
+    let default = run(None);
+    let trapezoidal = run(Some(IntegrationMethod::Trapezoidal));
+    let switched = run(Some(IntegrationMethod::TrapGear));
+    assert_eq!(default.time, trapezoidal.time);
+    assert_eq!(default.voltages, trapezoidal.voltages);
+    assert_ne!(
+        switched.time, trapezoidal.time,
+        "a requested TrapGear still switches to Gear-2 at the input edge"
+    );
+}
+
+#[test]
+fn ngspice_dialect_integrates_trapezoidally_by_default() {
+    assert_integrates_trapezoidally_by_default(SpiceDialect::Ngspice);
+}
+
+#[test]
+fn best_dialect_integrates_trapezoidally_by_default() {
+    assert_integrates_trapezoidally_by_default(SpiceDialect::BestAvailable);
+}
+
 #[test]
 fn xyce_breakpoint_restart_keeps_a_landing_step_below_a_tenth_of_the_interrupted_one() {
     // Xyce's completeStep leaves the step that landed on a breakpoint as it

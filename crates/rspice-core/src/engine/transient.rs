@@ -5837,13 +5837,13 @@ impl Engine {
         );
 
         // Integration method selection:
-        // - TrapGear => adaptive trap/gear switching
+        // - TrapGear => adaptive trap/gear switching, on explicit request
         // - Other modes => fixed method (honor SimulationConfig exactly)
         // Xyce's default integrator is OneStep (N_ANP_Transient.C:147), a
         // trapezoidal rule with its own order selection that never switches
         // to Gear on its own; Gear only runs when a deck selects METHOD=GEAR.
         // The oscillation-triggered Gear2 switch is RSpice's policy, so the
-        // Xyce dialect runs the adaptive default as plain trapezoidal.
+        // Xyce dialect runs even a requested TrapGear as plain trapezoidal.
         let fixed_method = match self.config.integration_method {
             IntegrationMethod::TrapGear if self.config.spice_dialect == SpiceDialect::Xyce => {
                 Some(IntegrationMethod::Trapezoidal)

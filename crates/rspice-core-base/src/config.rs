@@ -540,7 +540,9 @@ pub struct SimulationConfig {
     /// 0 = default transport, 1 = default inertial,
     /// 2 = force transport, 3 = force inertial.
     pub digital_delay_type: Option<i64>,
-    /// Integration method for transient analysis
+    /// Integration method for transient analysis. Trapezoidal by default,
+    /// the default of ngspice, Xyce, HSPICE and Spectre; the trap/Gear-2
+    /// switch is an explicit choice.
     pub integration_method: crate::numerics::integration::IntegrationMethod,
     /// Broad SPICE compatibility policy used by config resolution.
     pub spice_dialect: SpiceDialect,
@@ -1154,7 +1156,7 @@ impl Default for SimulationConfig {
             temperature: crate::constants::TEMP_REFERENCE,
             ramptime: 0.0,
             digital_delay_type: None,
-            integration_method: crate::numerics::integration::IntegrationMethod::TrapGear,
+            integration_method: crate::numerics::integration::IntegrationMethod::Trapezoidal,
             spice_dialect: SpiceDialect::BestAvailable,
             gp_transient_phase_model: GpTransientPhaseModel::ExactDelay,
             xyce_tra_interpolation: XyceTraInterpolation::default(),

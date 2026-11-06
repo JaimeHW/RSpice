@@ -308,7 +308,7 @@ Solver:
 | `--gmin G` | Initial GMIN for convergence aids |
 | `--trtol TOL` | Transient truncation-error tolerance (`TRTOL`) |
 | `--min-step TIME`, `--max-step TIME` | Transient timestep bounds |
-| `--integration-method METHOD` | `trap`, `gear`, `euler` or `trapgear` (the default, which switches automatically) |
+| `--integration-method METHOD` | `trap` (the default), `gear`, `euler` or `trapgear` (trapezoidal, switching to Gear-2 on ringing) |
 | `--convergence MODE` | DC convergence preset: `fast`, `default` or `robust` |
 
 Transient state:

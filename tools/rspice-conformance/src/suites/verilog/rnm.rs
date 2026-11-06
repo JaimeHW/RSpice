@@ -1289,9 +1289,10 @@ const RC_FULL_SCALE: f64 = 5.0;
 /// per-interval cost by `1/K`. That factor is carried on each term rather than
 /// applied once, because it is part of what each term *is*.
 ///
-/// * **Second-order truncation.** The default method is `TrapGear`, which is
-///   trapezoidal or Gear-2 as the step demands; both are second order, and
-///   Gear-2's local error constant `2/9` is the larger, so it is the one used.
+/// * **Second-order truncation.** The default method is trapezoidal, and a
+///   requested `TrapGear` runs Gear-2 where it detects ringing; both are
+///   second order, and Gear-2's local error constant `2/9` is the larger, so
+///   it is the one used.
 ///   Over the `Ts/h` steps of one interval that is `(2/9) * Ts * h^2 / tau^3`
 ///   relative, on an amplitude of at most full scale. Monotone in `h`, so the
 ///   `max_step` *ceiling* bounds it whatever step the controller actually
