@@ -62,6 +62,29 @@ pub fn select_with_disabled(
     disabled: &[(usize, &'static str)],
     width: f32,
 ) -> Option<usize> {
+    select_with_disabled_response(
+        ui,
+        id_salt,
+        accessible_label,
+        selected,
+        options,
+        disabled,
+        width,
+    )
+    .picked
+}
+
+/// [`select_with_disabled`] with the control's response, for a form that
+/// gives the select its first focus.
+pub fn select_with_disabled_response(
+    ui: &mut Ui,
+    id_salt: &str,
+    accessible_label: &str,
+    selected: &str,
+    options: &[String],
+    disabled: &[(usize, &'static str)],
+    width: f32,
+) -> SelectOutput {
     select_with_font(
         ui,
         id_salt,
@@ -72,7 +95,6 @@ pub fn select_with_disabled(
         false,
         disabled,
     )
-    .picked
 }
 
 pub fn select_with_response(

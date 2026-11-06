@@ -95,16 +95,19 @@ pub fn show_dataset_export_picker(
         .wide()
         .describe("Choose the file format for the displayed result.")
         .show(ctx, |rows| {
-            if let Some(index) = rows.select_with_disabled(
+            let format = rows.select_with_disabled(
                 "Format",
                 "results.export-dataset.format",
                 FORMATS[picker.format].0,
                 &labels,
                 &disabled,
-            ) {
+            );
+            if let Some(index) = format.picked {
                 picker.format = index;
             }
-            None
+            // The first field takes the focus, as Export generated netlist's
+            // does; the form opened with nothing focused.
+            Some(format.response.id)
         });
     match choice {
         DialogChoice::Primary => {

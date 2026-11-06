@@ -30,7 +30,7 @@ use crate::tokens::{self, Tokens};
 use super::dialog::{Dialog, DialogChoice, DialogHintTone, DialogInitialFocus, DialogSize};
 use super::form;
 use super::segmented::{SegmentedWidth, segmented};
-use super::select::{SelectOutput, select, select_with_disabled, select_with_response};
+use super::select::{SelectOutput, select, select_with_disabled_response, select_with_response};
 
 /// Air between a row's label column and its control.
 const LABEL_GAP: f32 = 8.0;
@@ -396,8 +396,8 @@ impl<'u> FormRows<'u> {
         })
     }
 
-    /// [`Self::select`] with choices the reader can see but not pick, each
-    /// listed with the reason it is unavailable.
+    /// [`Self::select_with_response`] with choices the reader can see but not
+    /// pick, each listed with the reason it is unavailable.
     pub fn select_with_disabled(
         &mut self,
         label: &str,
@@ -405,9 +405,9 @@ impl<'u> FormRows<'u> {
         selected: &str,
         options: &[String],
         disabled: &[(usize, &'static str)],
-    ) -> Option<usize> {
+    ) -> SelectOutput {
         self.row(label, |ui, width| {
-            select_with_disabled(ui, id_salt, label, selected, options, disabled, width)
+            select_with_disabled_response(ui, id_salt, label, selected, options, disabled, width)
         })
     }
 
