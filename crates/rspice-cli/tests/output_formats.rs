@@ -582,6 +582,64 @@ fn xyce_prints_temperature_coefficients_and_model_parameters_in_every_analysis()
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT AC` expression is evaluated in complex arithmetic: one
+/// column when its type is real, `Re()` and `Im()` columns when a `V()`
+/// phasor reaches its root. Xyce 7.10 prints, at 100 Hz and 200 Hz of this
+/// RC pole (H = 1/(1 + j f/159.15 Hz)), the values below.
+#[test]
+fn xyce_prints_an_ac_expression_in_complex_arithmetic() {
+    let dir = test_dir("print_ac_expression");
+    let deck = "* ac expression\nV1 1 0 AC 1\nR1 1 2 1k\nC1 2 0 1u\n.param k=2\n\
+                .ac lin 2 100 200\n.print ac {vr(2)*k} {(vm(2)-vr(2))/k} {v(2)*2} {vp(2)} \
+                {abs(v(2))}\n.end\n";
+    let path = run_export_with_args(&dir, "xyce", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    for (name, expected) in [
+        ("{vr(2)*k}", [1.43391360e+00, 7.75453273e-01]),
+        ("{(vm(2)-vr(2))/k}", [6.48881078e-02, 1.17475178e-01]),
+        ("Re({v(2)*2})", [1.43391360e+00, 7.75453273e-01]),
+        ("Im({v(2)*2})", [-9.00954487e-01, -9.74463323e-01]),
+        ("{vp(2)}", [-3.21419076e+01, -5.14881127e+01]),
+        ("{abs(v(2))}", [8.46733016e-01, 6.22676992e-01]),
+    ] {
+        let column = common::csv_column(&text, name);
+        assert_eq!(column.len(), 2, "{name}: {text}");
+        for (value, expected) in column.iter().zip(expected) {
+            assert!(
+                (value - expected).abs() <= 1e-8 * expected.abs(),
+                "{name}: {value}, expected {expected}"
+            );
+        }
+    }
+
+    let ngspice_deck = dir.join("ngspice.sp");
+    std::fs::write(
+        &ngspice_deck,
+        "* ac expression\nV1 1 0 AC 1\nR1 1 2 1k\nC1 2 0 1u\n.ac lin 2 100 200\n\
+         .print ac {v(2)*2}\n.end\n",
+    )
+    .expect("write deck");
+    let ngspice = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args([
+            "--quiet",
+            "run",
+            "--spice-dialect",
+            "ngspice",
+            "-f",
+            "csv",
+            "-o",
+        ])
+        .arg(dir.join("ngspice.csv"))
+        .arg(&ngspice_deck)
+        .output()
+        .expect("run rspice");
+    assert!(
+        !ngspice.status.success(),
+        "the ngspice dialect keeps its refusal"
+    );
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,

@@ -34,6 +34,8 @@ use crate::netlist::{
 use crate::{Value, netlist::SaveSet};
 
 use super::capability::AnalysisResultKind;
+
+mod complex_expression;
 use super::schema::{
     SignalDescriptor, SignalKind, SignalOwner, SignalSchema, SignalSchemaError, SignalShape,
     SignalUnit, SignalValueType,
@@ -479,6 +481,9 @@ pub struct SignalProjection {
     authored: bool,
     /// The unit a rendered phase (`VP(x)`, `ph(v(x))`) is printed in.
     phase_unit: PhaseUnit,
+    /// Whether an AC expression is evaluated in complex arithmetic, as Xyce
+    /// evaluates it ([`complex_expression`]).
+    complex_expressions: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -565,6 +570,7 @@ impl SignalProjection {
                 .any(|signal| matches!(signal, SaveSignal::All)),
             authored,
             phase_unit: PhaseUnit::of(netlist),
+            complex_expressions: netlist.parse_dialect() == crate::config::SpiceDialect::Xyce,
         })
     }
 
@@ -783,6 +789,21 @@ impl SignalProjection {
                     && let Ok(column) = complex_operand_column(source, authored, kind)
                 {
                     rendered_sources.push(column.identity());
+                }
+                if self.complex_expressions
+                    && source.kind == AnalysisResultKind::Ac
+                    && let OutputOperandKind::Expression { body } = kind
+                    && let Some(expression) = complex_expression::xyce_ac_expression_columns(
+                        source,
+                        params,
+                        authored,
+                        body,
+                        self.phase_unit,
+                        abort,
+                    )?
+                {
+                    columns.extend(expression);
+                    continue;
                 }
                 columns.push(self.resolve_operand(params, source, card, authored, kind, abort)?);
             }
