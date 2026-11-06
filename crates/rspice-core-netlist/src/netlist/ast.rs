@@ -5092,9 +5092,9 @@ pub struct SimulationOptions {
     pub timeint_nlmin: Option<usize>,
     /// Xyce iteration-count shrink/reversal threshold used by `ERROPTION=1`.
     pub timeint_nlmax: Option<usize>,
-    /// Xyce `TIMEINT MINORD`, restricted to 1 or 2.
+    /// Xyce `TIMEINT MINORD`, clamped to 1 or 2 and to at most MAXORD.
     pub timeint_min_order: Option<u8>,
-    /// Xyce `TIMEINT MAXORD`, restricted to 1 or 2.
+    /// Xyce `TIMEINT MAXORD`, clamped to 1 or 2.
     pub timeint_max_order: Option<u8>,
     /// Xyce `TIMESTEPSREVERSAL` acceptance policy.
     pub timeint_timesteps_reversal: Option<bool>,

@@ -989,7 +989,7 @@ fn parse_netlist_impl(
             )?;
         }
         normalize_pspice_u_timing_aliases_with_abort(&mut state, abort)?;
-        validate_timeint_option_aggregate(&state.options, lines.len())?;
+        validate_timeint_option_aggregate(&mut state.options, lines.len())?;
         if let Some(error) = state.temperature_options.take_error() {
             return Err(error.into());
         }
@@ -1158,7 +1158,7 @@ fn prescan_spectre_statistics_with_abort(
 }
 
 fn validate_timeint_option_aggregate(
-    options: &SimulationOptions,
+    options: &mut SimulationOptions,
     final_line: usize,
 ) -> Result<(), ParseError> {
     let nlmin = options.timeint_nlmin.unwrap_or(XYCE_DEFAULT_NLMIN);
@@ -1171,15 +1171,14 @@ fn validate_timeint_option_aggregate(
             ),
         });
     }
-    let min_order = options.timeint_min_order.unwrap_or(1);
+    // A MINORD above MAXORD falls to it, as Xyce's integrators lower it
+    // (N_TIA_Gear12.C:111).
     let max_order = options.timeint_max_order.unwrap_or(2);
-    if min_order > max_order {
-        return Err(ParseError::Syntax {
-            line: final_line,
-            message: format!(
-                "TIMEINT.MINORD ({min_order}) must be less than or equal to TIMEINT.MAXORD ({max_order})"
-            ),
-        });
+    if options
+        .timeint_min_order
+        .is_some_and(|order| order > max_order)
+    {
+        options.timeint_min_order = Some(max_order);
     }
     Ok(())
 }

@@ -2801,19 +2801,31 @@ fn parse_exact_xyce_nonnegative_integer_option(
     Ok(value as usize)
 }
 
+/// Xyce reads `TIMEINT MINORD` and `MAXORD` as integers and clamps them to
+/// the orders its one- and two-step integrators have: MAXORD to at most 2
+/// and MINORD to at least 1 (N_TIA_Gear12.C:108-109, N_TIA_OneStep.C:113-114).
+/// A MAXORD below 1, on which Xyce 7.10 crashes, is refused.
 fn parse_xyce_transient_order_option(
     name: &str,
     value: Value,
     line_num: usize,
+    maximum: bool,
 ) -> Result<u8, ParseError> {
-    if value == 1.0 || value == 2.0 {
-        Ok(value as u8)
-    } else {
-        Err(ParseError::Syntax {
+    let integer = value.is_finite()
+        && value == value.round()
+        && (i32::MIN as Value..=i32::MAX as Value).contains(&value);
+    if !integer || (maximum && value < 1.0) {
+        let domain = if maximum {
+            "an integer of at least 1"
+        } else {
+            "an integer"
+        };
+        return Err(ParseError::Syntax {
             line: line_num,
-            message: format!("{name} must be the integer 1 or 2, found {value}"),
-        })
+            message: format!("{name} must be {domain}, found {value}"),
+        });
     }
+    Ok(value.clamp(1.0, 2.0) as u8)
 }
 
 fn parse_transient_error_control_option(
@@ -8259,9 +8271,9 @@ mod tests {
             ".options timeint nlmax=2147483648",
             ".options timeint nlmax=2",
             ".options timeint timestepsreversal=2",
-            ".options timeint minord=0",
-            ".options timeint maxord=3",
-            ".options timeint minord=2 maxord=1",
+            ".options timeint minord=1.5",
+            ".options timeint maxord=0",
+            ".options timeint maxord=-2",
         ] {
             Netlist::parse(&deck_with_options(options))
                 .expect_err("invalid Xyce TIMEINT integer option must fail closed");
@@ -8284,6 +8296,30 @@ mod tests {
         .expect("valid aggregate split across TIMEINT cards is finalized once");
         assert_eq!(split.options.timeint_nlmin, Some(9));
         assert_eq!(split.options.timeint_nlmax, Some(9));
+    }
+
+    #[test]
+    fn xyce_timeint_orders_clamp_to_the_integrators_orders() {
+        // Xyce 7.10 runs each of these: MAXORD caps at 2, MINORD floors at 1,
+        // and a MINORD above MAXORD falls to it.
+        for (options, minimum, maximum) in [
+            (".options timeint maxord=5", None, Some(2)),
+            (".options timeint maxord=3 minord=0", Some(1), Some(2)),
+            (".options timeint minord=-3", Some(1), None),
+            (".options timeint maxord=5 minord=4", Some(2), Some(2)),
+            (".options timeint minord=2 maxord=1", Some(1), Some(1)),
+        ] {
+            let netlist = Netlist::parse(&deck_with_options(options))
+                .unwrap_or_else(|error| panic!("{options}: {error}"));
+            assert_eq!(
+                (
+                    netlist.options.timeint_min_order,
+                    netlist.options.timeint_max_order
+                ),
+                (minimum, maximum),
+                "{options}"
+            );
+        }
     }
 
     #[test]

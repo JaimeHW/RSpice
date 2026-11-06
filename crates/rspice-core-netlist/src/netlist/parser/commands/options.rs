@@ -834,6 +834,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             "TIMEINT.MINORD",
                             value,
                             line_num,
+                            false,
                         )?);
                     } else {
                         warn_duplicate_packaged_option("TIMEINT.MINORD", line_num, diagnostics);
@@ -846,6 +847,7 @@ pub(in crate::netlist::parser) fn parse_options_command(
                             "TIMEINT.MAXORD",
                             value,
                             line_num,
+                            true,
                         )?);
                     } else {
                         warn_duplicate_packaged_option("TIMEINT.MAXORD", line_num, diagnostics);
