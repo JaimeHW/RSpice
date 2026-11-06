@@ -416,7 +416,10 @@ fn drawing_sheet_defaults_body(
             &mut edits,
         );
     } else {
-        let band_unit = (left_w - 2.0) / 2.9;
+        // Three equal cards: the third, New sheets, was nine tenths of the
+        // other two, a card narrower than its siblings for no reason the
+        // reader could see.
+        let band_unit = (left_w - 2.0) / 3.0;
         let band1_w = band_unit.floor();
         let band3_w = left_w - 2.0 - band1_w * 2.0;
         let total_h = 2.0 + row1_h + 1.0 + catalog_h + 1.0 + frame_h;
@@ -1318,7 +1321,7 @@ fn frame_row(
                 unit_frame_block(ui, width, record, enabled, edits);
                 border_frame_block(ui, width, record, enabled, edits);
                 title_frame_block(ui, width, record, authority, enabled, edits);
-                reset_frame_block(ui, RESET_W, enabled, edits);
+                reset_frame_block(ui, width, enabled, edits);
             } else {
                 let select_w =
                     ((inner.width() - ORIENTATION_W - RESET_W - 4.0 * GAP) / 3.0).max(120.0);
@@ -1490,11 +1493,14 @@ fn title_frame_block(
     });
 }
 
+/// The reset action, at the trailing edge of its block: the row's last
+/// control ends on the body's right edge, as the footer's do. Set at the
+/// block's leading edge it stopped 13 pt short of it.
 fn reset_frame_block(ui: &mut Ui, width: f32, enabled: bool, edits: &mut Vec<RecordEdit>) {
     let t = Tokens::get(ui.ctx());
     ui.allocate_ui_with_layout(
         vec2(width, 13.0 + 5.0 + t.metrics.ctl_h),
-        Layout::bottom_up(Align::Min),
+        Layout::bottom_up(Align::Max),
         |ui| {
             if Button::new("Reset to built-in")
                 .ghost()
