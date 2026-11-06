@@ -348,10 +348,14 @@ impl<'a> ProjectionSource<'a> {
         )
     }
 
-    /// Whether `name` is one of the additional lookup spellings itself.
+    /// Whether `name` is one of the additional lookup spellings itself, in
+    /// any case and either hierarchy separator (`X1:RS:TC1` is the flattened
+    /// `X1.RS:TC1`).
     fn looks_up(&self, name: &str) -> bool {
-        let name = name.trim();
-        self.lookup.keys().any(|key| key.eq_ignore_ascii_case(name))
+        let name = crate::netlist::canonical_symbol(name);
+        self.lookup
+            .keys()
+            .any(|key| crate::netlist::canonical_symbol(key) == name)
     }
 
     /// The real-valued signal table the core output resolver searches.
@@ -869,6 +873,19 @@ impl SignalProjection {
             // running value of a measure Xyce prints by name, prints as is.
             SignalValueType::Complex if source.looks_up(authored) => {
                 self.resolve_real_operand(params, source, card, authored, kind, abort)
+            }
+            // An expression over those real series alone (`{R1:TC1*2}`)
+            // prints as a real column too; one that reads the complex
+            // result keeps the complex refusal.
+            SignalValueType::Complex
+                if matches!(kind, OutputOperandKind::Expression { .. })
+                    && !source.lookup.is_empty() =>
+            {
+                match self.resolve_real_operand(params, source, card, authored, kind, abort) {
+                    Err(SimulationError::Aborted) => Err(SimulationError::Aborted),
+                    Ok(column) => Ok(column),
+                    Err(_) => resolve_complex_operand(source, authored, kind, self.phase_unit),
+                }
             }
             SignalValueType::Complex => {
                 resolve_complex_operand(source, authored, kind, self.phase_unit)

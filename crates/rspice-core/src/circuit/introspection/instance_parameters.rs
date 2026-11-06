@@ -2,9 +2,14 @@
 //! ngspice's `@m1[w]` read them: the value installed in this circuit, not one
 //! reconstructed from the card. Only parameters that cannot move during a
 //! solve are answered, so one value stands for every point of an analysis.
+//! A temperature coefficient and a model card's parameter, which no installed
+//! device keeps, are read from the deck.
 
 use super::*;
-use crate::netlist::{OutputOperandKind, SaveSignal, canonical_symbol};
+use crate::netlist::{
+    Element, ElementKind, FlattenedNetlist, ModelDef, OutputOperandKind, SaveSignal,
+    canonical_symbol,
+};
 
 impl CircuitData {
     /// The installed value of one static instance parameter, with the
@@ -133,19 +138,111 @@ impl CircuitData {
 
     /// The installed values of every static instance parameter an output card
     /// names, as `(device, parameter, value)` with the parameter spelled as
-    /// authored.
+    /// authored. A pair no installed device answers is read from the deck
+    /// ([`authored_static_parameter`]).
     pub(crate) fn requested_static_instance_parameters(
         &self,
         netlist: &crate::netlist::Netlist,
     ) -> Vec<(String, String, Value)> {
+        let mut flattened = None;
         requested_instance_parameters(netlist)
             .into_iter()
             .filter_map(|(device, parameter)| {
                 self.static_instance_parameter(&device, &parameter)
+                    .or_else(|| {
+                        authored_static_parameter(netlist, &mut flattened, &device, &parameter)
+                    })
                     .map(|(device, value)| (device, parameter, value))
             })
             .collect()
     }
+}
+
+/// A `device:param` no installed device answers, read from the deck the way
+/// Xyce's `DeviceEntity::getParam` reads a value that cannot move during a
+/// solve, in every analysis: the `TC1` or `TC2` of a resistor, capacitor or
+/// inductor (the instance's, else its model card's, else 0), and a parameter
+/// a top-level model card authors (`DMOD:IS`, `NMOD:VTO`, `RMOD:TC1`). A model parameter
+/// left at its family default is not answered, nor is a model scoped inside a
+/// subcircuit, which Xyce refuses too. `flattened` caches the hierarchy, which
+/// is expanded only for a coefficient of an element no top-level card names.
+fn authored_static_parameter(
+    netlist: &crate::netlist::Netlist,
+    flattened: &mut Option<Option<FlattenedNetlist>>,
+    device: &str,
+    parameter: &str,
+) -> Option<(String, Value)> {
+    let key = canonical_symbol(device);
+    if ["TC1", "TC2"]
+        .iter()
+        .any(|name| parameter.trim().eq_ignore_ascii_case(name))
+    {
+        let coefficient = |elements: &[Element], scoped: &[ModelDef]| {
+            elements
+                .iter()
+                .find(|element| canonical_symbol(&element.name) == key)
+                .and_then(|element| {
+                    temperature_coefficient(element, netlist.models.iter().chain(scoped), parameter)
+                })
+        };
+        let element = coefficient(&netlist.elements, &[]).or_else(|| {
+            flattened
+                .get_or_insert_with(|| crate::netlist::flatten_netlist_with_models(netlist).ok())
+                .as_ref()
+                .and_then(|hierarchy| coefficient(&hierarchy.elements, &hierarchy.scoped_models))
+        });
+        if element.is_some() {
+            return element;
+        }
+    }
+    let model = netlist
+        .models
+        .iter()
+        .find(|model| canonical_symbol(&model.name) == key)?;
+    authored(&model.params, parameter).map(|value| (model.name.clone(), value))
+}
+
+/// The `TC1` or `TC2` a resistor, capacitor or inductor is built with: the
+/// instance's, else its model card's, else 0, as the builder resolves it.
+fn temperature_coefficient<'a>(
+    element: &Element,
+    mut models: impl Iterator<Item = &'a ModelDef>,
+    parameter: &str,
+) -> Option<(String, Value)> {
+    let (ElementKind::Resistor {
+        model,
+        instance_params,
+        ..
+    }
+    | ElementKind::Capacitor {
+        model,
+        instance_params,
+        ..
+    }
+    | ElementKind::Inductor {
+        model,
+        instance_params,
+        ..
+    }) = &element.kind
+    else {
+        return None;
+    };
+    let value = authored(instance_params, parameter)
+        .or_else(|| {
+            let model = model.as_deref()?;
+            let card = models.find(|card| card.name.eq_ignore_ascii_case(model))?;
+            authored(&card.params, parameter)
+        })
+        .unwrap_or(0.0);
+    Some((element.name.clone(), value))
+}
+
+/// The value a card authors for `parameter`, by name in any case.
+fn authored(params: &[(String, Value)], parameter: &str) -> Option<Value> {
+    params
+        .iter()
+        .find(|(name, _)| name.eq_ignore_ascii_case(parameter.trim()))
+        .map(|(_, value)| *value)
 }
 
 /// The `(device, parameter)` pairs the deck's output cards name, in Xyce's

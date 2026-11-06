@@ -520,6 +520,68 @@ fn xyce_prints_device_parameters_on_ac_and_noise_cards_at_their_bias() {
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT` card prints a temperature coefficient and a top-level
+/// model card's parameter in every analysis. Xyce 7.10 prints, on every DC,
+/// TRAN, AC and NOISE row of this deck: DMOD:IS 1e-14, R1:TC1 0.01, R2:TC1 0 and R1:TC2 0 (neither
+/// authored), R3:TC1 0.02 (its model card's), RMOD:TC1 0.02, C1:TC1 3e-3,
+/// L1:TC1 4e-3, X1:RS:TC1 5e-3 and {R1:TC1*2} 0.02.
+#[test]
+fn xyce_prints_temperature_coefficients_and_model_parameters_in_every_analysis() {
+    let dir = test_dir("print_model_parameters");
+    let devices = "V1 1 0 DC 1 AC 1\nR1 1 2 1k TC1=0.01\nR2 2 3 1k\nD1 3 0 DMOD\n\
+                   .model DMOD D IS=1e-14\n.model RMOD R TC1=0.02\nR3 2 0 RMOD 2k\n\
+                   C1 2 0 1u TC1=0.003\nL1 2 4 1m TC1=0.004\nR4 4 0 1k\nX1 2 0 SUB\n\
+                   .subckt SUB a b\nRS a c 1k TC1=0.005\nDS c b DMS\n.model DMS D IS=3e-14\n\
+                   .ends\n";
+    let parameters =
+        "DMOD:IS R1:TC1 R2:TC1 R1:TC2 R3:TC1 RMOD:TC1 C1:TC1 L1:TC1 X1:RS:TC1 {R1:TC1*2}";
+    for (tag, analysis) in [
+        ("dc", format!(".dc V1 1 2 1\n.print dc v(2) {parameters}\n")),
+        (
+            "tran",
+            format!(".tran 0 1u\n.print tran v(2) {parameters}\n"),
+        ),
+        (
+            "ac",
+            format!(".ac dec 1 100 1k\n.print ac vr(2) {parameters}\n"),
+        ),
+        (
+            "noise",
+            format!(".noise v(2) V1 dec 1 100 1k\n.print noise onoise {parameters}\n"),
+        ),
+    ] {
+        let deck = format!("* model parameters\n{devices}{analysis}.end\n");
+        let path = run_export_with_args(&dir, tag, &deck, "csv", &["--spice-dialect", "xyce"]);
+        let text = std::fs::read_to_string(&path).expect("read csv");
+        for (name, expected) in [
+            ("R1:TC1", 0.01),
+            ("R2:TC1", 0.0),
+            ("R1:TC2", 0.0),
+            ("R3:TC1", 0.02),
+            ("RMOD:TC1", 0.02),
+            ("C1:TC1", 3e-3),
+            ("L1:TC1", 4e-3),
+            ("X1:RS:TC1", 5e-3),
+            ("{R1:TC1*2}", 0.02),
+        ] {
+            let column = common::csv_column(&text, name);
+            assert!(column.len() >= 2, "{tag} {name}: {text}");
+            for value in column {
+                assert!(
+                    (value - expected).abs() <= 1e-12,
+                    "{tag} {name}: {value}, expected {expected}"
+                );
+            }
+        }
+        let is = common::csv_column(&text, "DMOD:IS");
+        assert!(is.len() >= 2, "{tag} DMOD:IS: {text}");
+        for value in is {
+            assert!((value - 1e-14).abs() <= 1e-23, "{tag} DMOD:IS: {value}");
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,
