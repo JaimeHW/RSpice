@@ -1047,8 +1047,24 @@ impl ControlCircuit {
             .find(|character: char| character.is_whitespace() || character == '=')
             .unwrap_or(text.len());
         let target = text.get(..split).unwrap_or_default();
-        let value = text.get(split..).unwrap_or_default().trim();
-        let value = value.strip_prefix('=').unwrap_or(value).trim();
+        let rest = text.get(split..).unwrap_or_default().trim();
+        // ngspice com_alter_common (frontend/device.c:1336) also reads
+        // `alter device parameter = value`, the word before `=` naming the
+        // parameter.
+        let (named, value) = match rest.strip_prefix('=') {
+            Some(value) => (None, value.trim()),
+            None => match rest.split_once('=') {
+                Some((parameter, value))
+                    if !parameter.trim().is_empty()
+                        && parameter.trim().chars().all(|character| {
+                            character.is_ascii_alphanumeric() || character == '_'
+                        }) =>
+                {
+                    (Some(parameter.trim()), value.trim())
+                }
+                _ => (None, rest),
+            },
+        };
         if target.is_empty() || value.is_empty() {
             return Err(command_error(line, "alter requires a target and value").into());
         }
@@ -1061,7 +1077,7 @@ impl ControlCircuit {
                 .ok_or_else(|| command_error(line, "unterminated alter parameter"))?;
             (name, Some(parameter))
         } else {
-            (target, None)
+            (target, named)
         };
         let element = self
             .netlist

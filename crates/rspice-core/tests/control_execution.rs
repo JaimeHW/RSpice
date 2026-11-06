@@ -1139,6 +1139,31 @@ fn mtimeavg_averages_a_vector_over_a_time_window() {
     }
 }
 
+/// `alter device parameter = value` changes that parameter, as `alter
+/// @device[parameter] = value` does (frontend/device.c:1336). ngspice-46
+/// prints v(1) = 4 and v(2) = 3 after `alter v1 dc = 4` and `alter r2 r =
+/// 3k` on a 1k-1k divider.
+#[test]
+fn alter_reads_the_parameter_word_before_the_equals_sign() {
+    let (presented, error) = run_until_error(
+        "alter param\nv1 1 0 dc 1\nr1 1 2 1k\nr2 2 0 1k\n.control\nalter v1 dc = 4\n\
+         alter r2 r = 3k\nop\nprint v(1) v(2)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    let values: Vec<Vec<_>> = prints
+        .iter()
+        .map(|traces| traces.iter().map(|trace| trace.y.samples[0]).collect())
+        .collect();
+    assert_eq!(values.len(), 1, "{values:?}");
+    assert!((values[0][0].re - 4.0).abs() < 1e-9, "{values:?}");
+    assert!((values[0][1].re - 3.0).abs() < 1e-9, "{values:?}");
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
