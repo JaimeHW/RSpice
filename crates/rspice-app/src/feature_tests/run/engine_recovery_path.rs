@@ -20,9 +20,9 @@ const DECK: &str = "* Engine recovery analytic check\nV1 in 0 1\nR1 in 0 1k\n.op
 
 /// `author_deck` and the native half of `run`: the Netlist & Script Editor's
 /// New source document opens its Logical path, Tab then Enter creates the
-/// deck, Close leaves the editor to take the typed deck, Validate source and
-/// Run deck run it to a DONE row in the Task log, and the palette opens the
-/// recovery center on its Create checkpoint.
+/// deck and closes the form, the editor takes the typed deck, Validate
+/// source and Run deck run it to a DONE row in the Task log, and the palette
+/// opens the recovery center on its Create checkpoint.
 #[test]
 fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
     let mut replay = Replay::new();
@@ -45,7 +45,6 @@ fn the_engine_recovery_script_authors_validates_and_runs_its_deck() {
             .is_some(),
         "Tab then Enter from Logical path creates the deck"
     );
-    replay.click("Close", Role::Button);
     replay.click("Project SPICE netlist editor", Role::MultilineTextInput);
     replay.key(Key::A, PRIMARY);
     replay.type_text(DECK);

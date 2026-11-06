@@ -67,13 +67,12 @@ def author_deck(browser):
     browser.click("Netlist & Script Editor", "button")
     browser.click("New source document", "button")
     browser.click("Logical path", "textInput")
-    # The transaction's Create action is inside a scrollable manager body.
-    # Keyboard traversal scrolls it into view on the next rendered frame.
+    # The creation form's Create action follows the field in keyboard order;
+    # Enter on it creates the deck and closes the form.
     browser.keys("\ue004")
     browser.snapshot()
     browser.keys("\ue007")
     browser.snapshot()
-    browser.click("Close", "button")
     browser.click("Project SPICE netlist editor", "multilineTextInput")
     browser.keys("a", ("\ue009",))
     browser.snapshot()
