@@ -576,15 +576,22 @@ fn discover_model_sources(root: &Path) -> io::Result<Vec<ModelSource>> {
         for include_dir in &include_dirs {
             preprocessor.add_include_path(include_dir);
         }
-        let preprocessed = preprocessor.preprocess_file(&path).map_err(|source| {
-            io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "preprocess shipped model `{}` during module discovery: {source}",
-                    path.display()
-                ),
-            )
-        })?;
+        let preprocessed = match preprocessor.preprocess_file(&path) {
+            Ok(preprocessed) => preprocessed,
+            // The generator's rule (`rust_backend/discover.rs`): a fragment
+            // that needs the macros of the file including it cannot be read
+            // on its own, so it is no compilation root.
+            Err(source) if source.names_an_undefined_macro() => continue,
+            Err(source) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "preprocess shipped model `{}` during module discovery: {source}",
+                        path.display()
+                    ),
+                ));
+            }
+        };
         let modules = extract_modules(&preprocessed);
         if modules.is_empty() {
             continue;
@@ -839,6 +846,38 @@ fn is_identifier(token: &str) -> bool {
         .chars()
         .next()
         .is_some_and(|ch| ch.is_ascii_alphabetic() || ch == '_' || ch == '$')
+}
+
+/// A `.va` fragment that uses the macros of the file including it (EKV3's
+/// `ekv3_include/*.va`) is no compilation root. Discovery skips it by the
+/// generator's own rule rather than stopping on its undefined macros.
+#[test]
+fn a_fragment_that_needs_its_includers_macros_is_not_a_compilation_root() {
+    let root = env::temp_dir().join(format!(
+        "rspice-cmc-compile-fragment-{}",
+        std::process::id()
+    ));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(root.join("inc")).unwrap();
+    fs::write(
+        root.join("top.va"),
+        "`define GAIN 2.0\nmodule top(p, n); inout p, n; electrical p, n;\n\
+         analog begin\n`include \"inc/body.va\"\nend\nendmodule\n",
+    )
+    .unwrap();
+    fs::write(
+        root.join("inc").join("body.va"),
+        "I(p, n) <+ `GAIN * V(p, n);\n",
+    )
+    .unwrap();
+    let found = discover_model_sources(&root);
+    let _ = fs::remove_dir_all(&root);
+    let modules: Vec<_> = found
+        .unwrap_or_else(|error| panic!("{error}"))
+        .into_iter()
+        .flat_map(|source| source.modules)
+        .collect();
+    assert_eq!(modules, ["top"]);
 }
 
 #[test]
