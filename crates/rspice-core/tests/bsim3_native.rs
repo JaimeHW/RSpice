@@ -1526,3 +1526,37 @@ fn bsim3_off_keyword_selects_the_bistable_operating_point_branch() {
          m2 OFF ({m2_off_d1}, {m2_off_d2})"
     );
 }
+
+/// Xyce's `DEVICE VOLTLIM=0` drops the BSIM3 fetlim/limvds/pnjlim sequence
+/// (N_DEV_MOSFET_B3.C:6072-6234). That changes the Newton path and nothing else: a CMOS inverter
+/// solves to the operating point the limited solve reaches.
+#[test]
+fn bsim3_inverter_solves_with_voltage_limiting_disabled() {
+    let netlist = Netlist::parse(
+        "BSIM3 inverter with and without voltage limiting\n\
+         mn out in 0 0 nch w=10u l=1u\n\
+         mp out in vdd vdd pch w=20u l=1u\n\
+         vdd vdd 0 3.3\n\
+         vin in 0 1\n\
+         .model nch nmos level=49\n\
+         .model pch pmos level=49\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("inverter deck parses");
+    let output = |device_voltage_limiting: bool| {
+        Engine::new(SimulationConfig {
+            device_voltage_limiting,
+            ..SimulationConfig::default()
+        })
+        .run_dc_op(&netlist)
+        .unwrap_or_else(|err| panic!("VOLTLIM={device_voltage_limiting} should run: {err}"))
+        .try_voltage_named("out")
+        .expect("V(out)")
+    };
+    let (limited, unlimited) = (output(true), output(false));
+    assert!(
+        (limited - unlimited).abs() <= 1.0e-6,
+        "V(out) {limited} limited, {unlimited} unlimited"
+    );
+}

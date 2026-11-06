@@ -114,6 +114,10 @@ pub struct Bsim3v3Device {
     /// Raw branch voltages the last update saw while the `OFF` startup state
     /// was still pending; `self.bias` holds the startup state instead.
     initial_off_seed_raw: Option<Bsim3v3Bias>,
+    /// Xyce's global `DEVICE VOLTLIM`: every iterate runs the
+    /// fetlim/limvds/pnjlim sequence. Cleared, each load reads the solution
+    /// as it stands.
+    voltage_limiting: bool,
 }
 
 impl Bsim3v3Device {
@@ -160,6 +164,7 @@ impl Bsim3v3Device {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_raw: None,
+            voltage_limiting: true,
         }
     }
 
@@ -167,6 +172,14 @@ impl Bsim3v3Device {
     /// linearization is b3ld.c's zero-bias MODEINITJCT state.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
+    /// the fetlim/limvds/pnjlim sequence (N_DEV_MOSFET_B3.C:6072-6234). An
+    /// `OFF` instance opens at zero bias either way.
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     /// Set the engine's junction GMIN (ngspice `CKTgmin`). The module's diode
@@ -222,7 +235,7 @@ impl Bsim3v3Device {
         }
         let raw = self.raw_branch_voltages(v);
         let anchor = self.limit_anchor(raw);
-        if !anchor.valid {
+        if !self.voltage_limiting || !anchor.valid {
             return (raw, false);
         }
         self.core.limit_voltages(raw, anchor.bias, anchor.von)
@@ -1296,6 +1309,19 @@ mod tests {
         let core = Bsim3v3::new("m1".to_string(), model, geometry, 300.15).expect("BSIM3 instance");
         // Drain on node 1, gate on node 2, source and body grounded.
         Bsim3v3Device::new("m1".to_string(), 1, 2, 0, 0, 0, 1.0, core)
+    }
+
+    /// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`, N_DEV_MOSFET_B3.C:6072)
+    /// takes the 4 V gate step the limited device holds to `von + 4`.
+    #[test]
+    fn voltlim_off_takes_every_iterate_unlimited() {
+        let mut device = nmos();
+        device.set_voltage_limiting_enabled(false);
+        device.update(&[0.0, 0.0]);
+        let iterate = [0.05, 4.0];
+        device.update(&iterate);
+        assert_eq!(device.bias, device.raw_branch_voltages(&iterate));
+        assert!(!device.last_limited.get());
     }
 
     #[test]

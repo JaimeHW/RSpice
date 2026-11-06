@@ -676,7 +676,7 @@ impl Engine {
             instance_params,
             deferred_params,
             temperature_kelvin,
-            voltage_limiting: _,
+            voltage_limiting,
         } = model;
         use crate::device::Bsim3v3Device;
         use crate::device::mosfet::bsim3v3::{
@@ -825,7 +825,7 @@ impl Engine {
             0
         };
 
-        circuit.bsim3v3.add(Bsim3v3Device::new(
+        let mut device = Bsim3v3Device::new(
             element.name.clone(),
             drain,
             gate,
@@ -834,7 +834,9 @@ impl Engine {
             charge_deficit,
             multiplier,
             core,
-        ));
+        );
+        device.set_voltage_limiting_enabled(voltage_limiting);
+        circuit.bsim3v3.add(device);
         Ok(())
     }
 

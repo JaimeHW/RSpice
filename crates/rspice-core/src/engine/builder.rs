@@ -8581,11 +8581,6 @@ impl Engine {
                     if (matches!(level, 8 | 49) || level9_is_bsim3)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        require_voltage_limiting(
-                            self.config.device_voltage_limiting,
-                            &element.name,
-                            "BSIM3 MOSFET",
-                        )?;
                         let bsim3_params = native_bsim3_model_params_upper_map(
                             &element.name,
                             model,
