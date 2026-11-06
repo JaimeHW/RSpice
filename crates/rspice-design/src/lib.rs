@@ -13,6 +13,7 @@ pub mod occurrence;
 pub mod owned_netlist;
 pub mod parameters;
 pub mod physical_layout;
+pub mod pin_roles;
 pub mod project_sources;
 pub mod projection;
 pub mod properties;

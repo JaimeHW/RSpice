@@ -17,7 +17,7 @@
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use rspice_design_model::Point;
-use rspice_design_model::port::{PortDirection, PortSpec};
+use rspice_design_model::port::{PinRole, PortDirection, PortSpec};
 
 /// Minimum generated block width in grid units (terminals at ±width/2).
 pub const GENERATED_WIDTH: i32 = 60;
@@ -55,6 +55,17 @@ pub struct GeneratedPin {
     pub offset: Point,
 }
 
+/// The body a generated symbol draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GeneratedBody {
+    /// A rectangle sized to the pin names.
+    Block,
+    /// The amplifier triangle: inverting input upper left, non-inverting
+    /// lower left, output at the apex, positive supply on top and negative
+    /// supply or ground below.
+    Amplifier,
+}
+
 /// A complete generated symbol: pins plus body extents.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct GeneratedSymbol {
@@ -64,6 +75,7 @@ pub struct GeneratedSymbol {
     pub width: i32,
     /// Full symbol height (rail terminal to rail terminal).
     pub height: i32,
+    pub body: GeneratedBody,
 }
 
 impl GeneratedSymbol {
@@ -89,6 +101,119 @@ impl GeneratedSymbol {
             Point::new(-half_width, -half_height),
             Point::new(half_width, half_height),
         )
+    }
+
+    /// The body as polylines, each with whether it closes. Every renderer
+    /// draws exactly these, so the canvas, the SVG export and the printed
+    /// sheet draw the same outline.
+    pub fn body_outline(&self) -> Vec<(Vec<Point>, bool)> {
+        let (min, max) = self.body_bounds();
+        match self.body {
+            GeneratedBody::Block => vec![(
+                vec![min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)],
+                true,
+            )],
+            GeneratedBody::Amplifier => {
+                // Rail terminals sit on the body box; their leads continue
+                // inside it to the sloped edges, which cross x = 0 halfway.
+                let edge = max.y / 2;
+                let mark = |y: i32| vec![Point::new(min.x + 4, y), Point::new(min.x + 12, y)];
+                vec![
+                    (
+                        vec![min, Point::new(max.x, 0), Point::new(min.x, max.y)],
+                        true,
+                    ),
+                    (vec![Point::new(0, min.y), Point::new(0, -edge)], false),
+                    (vec![Point::new(0, max.y), Point::new(0, edge)], false),
+                    (mark(-AMPLIFIER_INPUT_Y), false),
+                    (mark(AMPLIFIER_INPUT_Y), false),
+                    (
+                        vec![
+                            Point::new(min.x + 8, AMPLIFIER_INPUT_Y - 4),
+                            Point::new(min.x + 8, AMPLIFIER_INPUT_Y + 4),
+                        ],
+                        false,
+                    ),
+                ]
+            }
+        }
+    }
+}
+
+/// Full width and height of the amplifier template: terminals at ±40.
+const AMPLIFIER_SIZE: i32 = 80;
+/// Inputs sit one pin pitch apart, centered on the output.
+const AMPLIFIER_INPUT_Y: i32 = PIN_PITCH;
+
+/// Interface indices of an amplifier pin set: one input of each polarity,
+/// one output, a positive supply and a negative supply or ground, and
+/// nothing else. Comparators share the set.
+struct AmplifierPins {
+    non_inverting: usize,
+    inverting: usize,
+    output: usize,
+    positive: usize,
+    negative: usize,
+}
+
+fn amplifier_pins(roles: &[PinRole]) -> Option<AmplifierPins> {
+    let only = |wanted: &[PinRole]| {
+        let mut found = roles
+            .iter()
+            .enumerate()
+            .filter(|(_, role)| wanted.contains(role));
+        match (found.next(), found.next()) {
+            (Some((index, _)), None) => Some(index),
+            _ => None,
+        }
+    };
+    (roles.len() == 5).then_some(())?;
+    Some(AmplifierPins {
+        non_inverting: only(&[PinRole::NonInvertingInput])?,
+        inverting: only(&[PinRole::InvertingInput])?,
+        output: only(&[PinRole::Output])?,
+        positive: only(&[PinRole::PositiveSupply])?,
+        negative: only(&[PinRole::NegativeSupply, PinRole::Ground])?,
+    })
+}
+
+fn generate_amplifier(
+    ports: &[PortSpec],
+    roles: &[PinRole],
+    pins: &AmplifierPins,
+) -> GeneratedSymbol {
+    let half = AMPLIFIER_SIZE / 2;
+    let placement = |index: usize| {
+        if index == pins.inverting {
+            (SymbolPinSide::Left, Point::new(-half, -AMPLIFIER_INPUT_Y))
+        } else if index == pins.non_inverting {
+            (SymbolPinSide::Left, Point::new(-half, AMPLIFIER_INPUT_Y))
+        } else if index == pins.output {
+            (SymbolPinSide::Right, Point::new(half, 0))
+        } else if index == pins.positive {
+            (SymbolPinSide::Top, Point::new(0, -half))
+        } else {
+            (SymbolPinSide::Bottom, Point::new(0, half))
+        }
+    };
+    GeneratedSymbol {
+        pins: ports
+            .iter()
+            .zip(roles)
+            .enumerate()
+            .map(|(index, (port, role))| {
+                let (side, offset) = placement(index);
+                GeneratedPin {
+                    name: port.name.clone(),
+                    direction: role.direction(),
+                    side,
+                    offset,
+                }
+            })
+            .collect(),
+        width: AMPLIFIER_SIZE,
+        height: AMPLIFIER_SIZE,
+        body: GeneratedBody::Amplifier,
     }
 }
 
@@ -231,15 +356,50 @@ fn fitted_width(ports: &[PortSpec], left: &[usize], right: &[usize], rail_reach:
 /// Empty interfaces produce an empty pin list with the minimum body —
 /// callers treat that as "nothing to place yet".
 pub fn generate_symbol(ports: &[PortSpec]) -> GeneratedSymbol {
+    generate_symbol_with_roles(ports, &[])
+}
+
+/// Generate the symbol for an interface whose pin roles are known, parallel
+/// to `ports`. An amplifier pin set draws the amplifier triangle; any other
+/// set draws the block, with positive supplies on top and negative supplies
+/// and grounds below. Roles that do not match the interface are ignored.
+pub fn generate_symbol_with_roles(ports: &[PortSpec], roles: &[PinRole]) -> GeneratedSymbol {
+    let roles = (roles.len() == ports.len()).then_some(roles);
+    if let Some(roles) = roles
+        && let Some(pins) = amplifier_pins(roles)
+    {
+        return generate_amplifier(ports, roles, &pins);
+    }
+    let direction =
+        |index: usize| roles.map_or(ports[index].direction, |roles| roles[index].direction());
     // Bucket by edge, preserving interface order within each edge.
     let mut left = Vec::new();
     let mut right = Vec::new();
     let mut rails = Vec::new();
-    for (index, port) in ports.iter().enumerate() {
-        match port.direction {
+    for index in 0..ports.len() {
+        match direction(index) {
             PortDirection::In => left.push(index),
             PortDirection::Out | PortDirection::InOut => right.push(index),
             PortDirection::Supply => rails.push(index),
+        }
+    }
+    // Rails alternate top and bottom; with known roles, positive supplies
+    // take the top slots and negative supplies and grounds the bottom ones.
+    if let Some(roles) = roles {
+        let (positive, negative): (Vec<usize>, Vec<usize>) = rails
+            .iter()
+            .partition(|&&index| roles[index] == PinRole::PositiveSupply);
+        if !positive.is_empty() && !negative.is_empty() {
+            let mut ordered = Vec::with_capacity(rails.len());
+            let (mut top, mut bottom) = (positive.into_iter(), negative.into_iter());
+            loop {
+                match (top.next(), bottom.next()) {
+                    (None, None) => break,
+                    (Some(up), Some(down)) => ordered.extend([up, down]),
+                    (Some(only), None) | (None, Some(only)) => ordered.push(only),
+                }
+            }
+            rails = ordered;
         }
     }
 
@@ -282,15 +442,17 @@ pub fn generate_symbol(ports: &[PortSpec]) -> GeneratedSymbol {
         pins: ports
             .iter()
             .zip(placement)
-            .map(|(port, (side, offset))| GeneratedPin {
+            .enumerate()
+            .map(|(index, (port, (side, offset)))| GeneratedPin {
                 name: port.name.clone(),
-                direction: port.direction,
+                direction: direction(index),
                 side,
                 offset,
             })
             .collect(),
         width,
         height,
+        body: GeneratedBody::Block,
     }
 }
 
@@ -533,5 +695,94 @@ mod tests {
         );
         assert!(fit_pin_name(&long).ends_with('…'));
         assert_eq!(fit_pin_name("data_in[0]"), "data_in[0]");
+    }
+
+    fn role_ports(names: &[&str]) -> Vec<PortSpec> {
+        names
+            .iter()
+            .map(|name| spec(name, PortDirection::InOut))
+            .collect()
+    }
+
+    #[test]
+    fn an_amplifier_pin_set_draws_the_triangle_in_interface_order() {
+        // ADI order: noninverting, inverting, positive, negative, output.
+        let ports = role_ports(&["1", "2", "99", "50", "45"]);
+        let roles = [
+            PinRole::NonInvertingInput,
+            PinRole::InvertingInput,
+            PinRole::PositiveSupply,
+            PinRole::NegativeSupply,
+            PinRole::Output,
+        ];
+        let symbol = generate_symbol_with_roles(&ports, &roles);
+        assert_eq!(symbol.body, GeneratedBody::Amplifier);
+        let placed = symbol
+            .pins
+            .iter()
+            .map(|pin| (pin.name.as_str(), pin.side, pin.offset))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            placed,
+            [
+                ("1", SymbolPinSide::Left, Point::new(-40, 20)),
+                ("2", SymbolPinSide::Left, Point::new(-40, -20)),
+                ("99", SymbolPinSide::Top, Point::new(0, -40)),
+                ("50", SymbolPinSide::Bottom, Point::new(0, 40)),
+                ("45", SymbolPinSide::Right, Point::new(40, 0)),
+            ]
+        );
+        // Every terminal is on the routing grid and every lead lands on the
+        // body: inputs on the left edge, the output on the apex.
+        let (min, max) = symbol.body_bounds();
+        for pin in &symbol.pins {
+            assert_eq!((pin.offset.x % 10, pin.offset.y % 10), (0, 0));
+            let inner = lead_inner(pin.offset, pin.side, Some((min, max)));
+            match pin.side {
+                SymbolPinSide::Left => assert_eq!(inner.x, min.x),
+                SymbolPinSide::Right => assert_eq!(inner, Point::new(max.x, 0)),
+                SymbolPinSide::Top | SymbolPinSide::Bottom => assert_eq!(inner, pin.offset),
+            }
+        }
+        let outline = symbol.body_outline();
+        assert_eq!(
+            outline[0],
+            (
+                vec![Point::new(-30, -40), Point::new(30, 0), Point::new(-30, 40)],
+                true
+            )
+        );
+        // The rail stubs reach the sloped edges at x = 0.
+        assert!(outline.contains(&(vec![Point::new(0, -40), Point::new(0, -20)], false)));
+        assert!(outline.contains(&(vec![Point::new(0, 40), Point::new(0, 20)], false)));
+    }
+
+    #[test]
+    fn other_role_sets_draw_the_block_with_the_positive_rail_on_top() {
+        let ports = role_ports(&["VEE", "IN", "VCC", "OUT"]);
+        let roles = [
+            PinRole::NegativeSupply,
+            PinRole::Input,
+            PinRole::PositiveSupply,
+            PinRole::Output,
+        ];
+        let symbol = generate_symbol_with_roles(&ports, &roles);
+        assert_eq!(symbol.body, GeneratedBody::Block);
+        let side = |name: &str| {
+            symbol
+                .pins
+                .iter()
+                .find(|pin| pin.name == name)
+                .map(|pin| pin.side)
+        };
+        assert_eq!(side("VCC"), Some(SymbolPinSide::Top));
+        assert_eq!(side("VEE"), Some(SymbolPinSide::Bottom));
+        assert_eq!(side("IN"), Some(SymbolPinSide::Left));
+        assert_eq!(side("OUT"), Some(SymbolPinSide::Right));
+        // Roles that do not cover the interface leave the declared directions.
+        assert_eq!(
+            generate_symbol_with_roles(&ports, &roles[..2]),
+            generate_symbol(&ports)
+        );
     }
 }

@@ -42,6 +42,36 @@ impl PortDirection {
     }
 }
 
+/// Electrical role of one interface pin: its direction plus what a symbol
+/// needs to draw it in the conventional place. A SPICE port list is
+/// positional, so roles come from pin names and the vendor's pin-order
+/// comment, never from the netlist itself.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub enum PinRole {
+    NonInvertingInput,
+    InvertingInput,
+    /// Any other input: an enable, a reference, a single-ended input.
+    Input,
+    Output,
+    PositiveSupply,
+    NegativeSupply,
+    Ground,
+    /// Bidirectional or not recognized.
+    Bidirectional,
+}
+
+impl PinRole {
+    /// The direction a generated symbol places this role by.
+    pub const fn direction(self) -> PortDirection {
+        match self {
+            Self::NonInvertingInput | Self::InvertingInput | Self::Input => PortDirection::In,
+            Self::Output => PortDirection::Out,
+            Self::PositiveSupply | Self::NegativeSupply | Self::Ground => PortDirection::Supply,
+            Self::Bidirectional => PortDirection::InOut,
+        }
+    }
+}
+
 /// One pin of a cell's interface.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

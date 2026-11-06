@@ -4,7 +4,10 @@ use crate::library::{Cell, LibraryCatalog, View, ViewType};
 use crate::resolved_symbol::ResolvedCellSymbol;
 use crate::schematic::{component::LibraryCellInstance, document::SchematicDocument};
 use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, generated};
-use rspice_design_model::{cell_view::CellViewRef, port::PortSpec};
+use rspice_design_model::{
+    cell_view::CellViewRef,
+    port::{PinRole, PortSpec},
+};
 use std::collections::HashMap;
 
 pub struct SymbolResolver<'a, S: AsRef<SchematicDocument>> {
@@ -38,6 +41,7 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             &binding.cell,
             Some(&binding.view),
             binding.interface(),
+            binding.interface_roles(),
             PortPreference::ExplicitFirst,
         )
     }
@@ -48,6 +52,7 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             &reference.cell,
             Some(&reference.view),
             None,
+            &[],
             PortPreference::SchematicFirst,
         )
     }
@@ -58,6 +63,7 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
         cell_name: &str,
         requested_view: Option<&str>,
         fallback_ports: Option<Vec<PortSpec>>,
+        roles: &[PinRole],
         port_preference: PortPreference,
     ) -> Option<ResolvedCellSymbol> {
         let cell = self
@@ -85,11 +91,15 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
         if let Some(ports) = ports.as_deref().filter(|ports| !ports.is_empty())
             && let Some(view) = symbol_view.filter(|view| generated::is_generated_symbol(view))
         {
+            // Roles the stored document predates win: it was generated
+            // from directions alone.
             let document = match authored_document(Some(view)) {
-                AuthoredDocument::Loaded(document) if states_interface(&document, ports) => {
+                AuthoredDocument::Loaded(document)
+                    if roles.is_empty() && states_interface(&document, ports) =>
+                {
                     document
                 }
-                _ => SymbolDocument::generated_from_ports(ports),
+                _ => SymbolDocument::generated_from_interface(ports, roles),
             };
             return Some(ResolvedCellSymbol::from_authored_document(document, ports));
         }
@@ -106,7 +116,7 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             AuthoredDocument::Missing => {}
         }
 
-        ports.map(|ports| ResolvedCellSymbol::from_generated(&ports))
+        ports.map(|ports| ResolvedCellSymbol::from_generated_interface(&ports, roles))
     }
 
     fn resolve_ports(

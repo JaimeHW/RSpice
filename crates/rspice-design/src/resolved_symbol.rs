@@ -185,7 +185,15 @@ impl ResolvedCellSymbol {
     }
 
     pub fn from_generated(ports: &[PortSpec]) -> Self {
-        let document = SymbolDocument::generated_from_ports(ports);
+        Self::from_generated_interface(ports, &[])
+    }
+
+    /// The generated symbol for an interface whose pin roles are known.
+    pub fn from_generated_interface(
+        ports: &[PortSpec],
+        roles: &[rspice_design_model::port::PinRole],
+    ) -> Self {
+        let document = SymbolDocument::generated_from_interface(ports, roles);
         let pins = ports
             .iter()
             .filter_map(|port| {

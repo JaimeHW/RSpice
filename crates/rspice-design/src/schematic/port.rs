@@ -2,7 +2,7 @@
 
 use super::component::Component;
 use super::component_type::ComponentType;
-pub use rspice_design_model::port::{PortDirection, PortSpec};
+pub use rspice_design_model::port::{PinRole, PortDirection, PortSpec};
 use serde::{Deserialize, Serialize};
 
 /// Signal semantics declared by an interface port.

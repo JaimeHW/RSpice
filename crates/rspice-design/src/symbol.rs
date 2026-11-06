@@ -41,11 +41,11 @@ pub use rspice_design_model::symbol_geometry::{
 };
 
 use crate::library::View;
-use crate::symbol_generation::generate_symbol;
+use crate::symbol_generation::generate_symbol_with_roles;
 use rspice_design_model::{
     Point,
     bus::{BusDeclaration, declared_vector, declared_width},
-    port::{PortDirection, PortSpec},
+    port::{PinRole, PortDirection, PortSpec},
     symbol_pin::{SymbolElectricalType, SymbolPinSide},
 };
 
@@ -761,7 +761,18 @@ impl Default for SymbolDocument {
 
 impl SymbolDocument {
     pub fn generated_from_ports(ports: &[PortSpec]) -> Self {
-        let generated = generate_symbol(ports);
+        Self::generated_from_interface(ports, &[])
+    }
+
+    /// The generated symbol for an interface whose pin roles are known,
+    /// parallel to `ports`: an amplifier pin set draws the triangle.
+    pub fn generated_from_interface(ports: &[PortSpec], roles: &[PinRole]) -> Self {
+        let generated = generate_symbol_with_roles(ports, roles);
+        let body = generated
+            .body_outline()
+            .into_iter()
+            .map(|(points, closed)| SymbolShape::Polyline { points, closed })
+            .collect();
         let body_half_width = generated.body_half_width();
         let body_half_height = generated.body_half_height();
         // The generator already knows which edge every pin belongs to; record
@@ -785,15 +796,7 @@ impl SymbolDocument {
             .collect();
         Self {
             pins,
-            body: vec![SymbolShape::Polyline {
-                points: vec![
-                    Point::new(-body_half_width, -body_half_height),
-                    Point::new(body_half_width, -body_half_height),
-                    Point::new(body_half_width, body_half_height),
-                    Point::new(-body_half_width, body_half_height),
-                ],
-                closed: true,
-            }],
+            body,
             origin: Point::origin(),
             name_anchor: Point::new(
                 -body_half_width,

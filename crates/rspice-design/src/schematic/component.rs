@@ -83,6 +83,12 @@ pub struct LibraryCellInstance {
     /// generated symbol instead of the generic distributed block.
     #[serde(default)]
     pub terminal_dirs: Vec<super::port::PortDirection>,
+    /// Electrical roles parallel to `terminal_order`, read from the source
+    /// definition's pin names and pin-order comment. When present and
+    /// consistent, the generated symbol places pins by role, and an
+    /// amplifier pin set draws the amplifier triangle.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub terminal_roles: Vec<super::port::PinRole>,
     /// Distinguishes an explicitly bound zero-port interface from legacy
     /// bindings whose absent terminal metadata still requires compatibility
     /// fallback geometry.
@@ -247,6 +253,7 @@ impl LibraryCellInstance {
             parameters_declared: false,
             terminal_order: Vec::new(),
             terminal_dirs: Vec::new(),
+            terminal_roles: Vec::new(),
             interface_bound: false,
             builtin_xspice: None,
             generated_veriloga: None,
@@ -284,7 +291,31 @@ impl LibraryCellInstance {
     pub fn bind_interface(&mut self, ports: &[super::port::PortSpec]) {
         self.terminal_order = ports.iter().map(|port| port.name.clone()).collect();
         self.terminal_dirs = ports.iter().map(|port| port.direction).collect();
+        self.terminal_roles.clear();
         self.interface_bound = true;
+    }
+
+    /// Bind an interface whose pin roles are known, parallel to `ports`.
+    /// Each port's direction is its role's.
+    pub fn bind_interface_with_roles(
+        &mut self,
+        ports: &[super::port::PortSpec],
+        roles: &[super::port::PinRole],
+    ) {
+        self.bind_interface(ports);
+        if roles.len() == ports.len() {
+            self.terminal_dirs = roles.iter().map(|role| role.direction()).collect();
+            self.terminal_roles = roles.to_vec();
+        }
+    }
+
+    /// The bound pin roles, when they describe the bound interface.
+    pub fn interface_roles(&self) -> &[super::port::PinRole] {
+        if self.terminal_roles.len() == self.terminal_order.len() {
+            &self.terminal_roles
+        } else {
+            &[]
+        }
     }
 
     /// Conductors behind each bound terminal, parallel to `terminal_order`.
@@ -420,6 +451,8 @@ impl<'de> Deserialize<'de> for InstanceMultiplicity {
 pub struct InstanceBlock {
     pub pins: Vec<crate::symbol_generation::GeneratedPin>,
     pub body: (Point, Point),
+    /// The body as polylines, each with whether it closes.
+    pub outline: Vec<(Vec<Point>, bool)>,
 }
 
 /// A placed component on the schematic
@@ -863,15 +896,19 @@ impl Component {
             return InstanceBlock {
                 pins: Vec::new(),
                 body: (Point::origin(), Point::origin()),
+                outline: Vec::new(),
             };
         };
 
         if let Some(ports) = cell.interface() {
-            let generated = crate::symbol_generation::generate_symbol(&ports);
-            let body = generated.body_bounds();
+            let generated = crate::symbol_generation::generate_symbol_with_roles(
+                &ports,
+                cell.interface_roles(),
+            );
             return InstanceBlock {
+                body: generated.body_bounds(),
+                outline: generated.body_outline(),
                 pins: generated.pins,
-                body,
             };
         }
 
@@ -910,12 +947,17 @@ impl Component {
                 }
             })
             .collect();
+        let (min, max) = (
+            Point::new(-half_width, -half_height),
+            Point::new(half_width, half_height),
+        );
         InstanceBlock {
             pins,
-            body: (
-                Point::new(-half_width, -half_height),
-                Point::new(half_width, half_height),
-            ),
+            outline: vec![(
+                vec![min, Point::new(max.x, min.y), max, Point::new(min.x, max.y)],
+                true,
+            )],
+            body: (min, max),
         }
     }
 
@@ -1017,7 +1059,11 @@ impl Component {
     pub fn symbol_dimensions(&self) -> (i32, i32) {
         if let Some(cell) = &self.library_cell {
             if let Some(ports) = cell.interface() {
-                return crate::symbol_generation::generate_symbol(&ports).dimensions();
+                return crate::symbol_generation::generate_symbol_with_roles(
+                    &ports,
+                    cell.interface_roles(),
+                )
+                .dimensions();
             }
             let pin_count = if cell.terminal_order.is_empty() {
                 2
