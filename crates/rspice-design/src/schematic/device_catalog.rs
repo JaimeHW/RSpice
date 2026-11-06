@@ -32,6 +32,9 @@ pub struct CatalogXspiceDeviceDescriptor {
     pub aliases: &'static [&'static str],
     pub display_name: &'static str,
     pub symbol_asset: &'static str,
+    /// What a reader may type for this device on the Component shelf besides
+    /// its display name: synonyms and the family it belongs to.
+    pub keywords: &'static [&'static str],
 }
 
 /// User-configurable width contract for one vector port on a catalog device.
@@ -50,22 +53,24 @@ pub struct CatalogXspiceVectorPort {
 const MAX_BUILTIN_XSPICE_VECTOR_WIDTH: usize = 4096;
 
 macro_rules! xspice_device {
-    ($id:literal, $model:literal, $name:literal, $symbol:literal) => {
+    ($id:literal, $model:literal, $name:literal, $symbol:literal, [$($keyword:literal),* $(,)?]) => {
         CatalogXspiceDeviceDescriptor {
             stable_id: $id,
             model_type: $model,
             aliases: &[],
             display_name: $name,
             symbol_asset: $symbol,
+            keywords: &[$($keyword),*],
         }
     };
-    ($id:literal, $model:literal, [$($alias:literal),+ $(,)?], $name:literal, $symbol:literal) => {
+    ($id:literal, $model:literal, [$($alias:literal),+ $(,)?], $name:literal, $symbol:literal, [$($keyword:literal),* $(,)?]) => {
         CatalogXspiceDeviceDescriptor {
             stable_id: $id,
             model_type: $model,
             aliases: &[$($alias),+],
             display_name: $name,
             symbol_asset: $symbol,
+            keywords: &[$($keyword),*],
         }
     };
 }
@@ -77,395 +82,482 @@ const ENGINE_ONLY_XSPICE_DEVICES: &[CatalogXspiceDeviceDescriptor] = &[
         "rspice.xspice.astate",
         "astate",
         "Analog State",
-        "xspice_analog_state.svg"
+        "xspice_analog_state.svg",
+        ["state", "sample delay", "previous value"]
     ),
     xspice_device!(
         "rspice.xspice.aswitch",
         "aswitch",
         "Analog Switch",
-        "switch_voltage.svg"
+        "switch_voltage.svg",
+        ["switch", "transmission gate", "voltage controlled resistor"]
     ),
     xspice_device!(
         "rspice.xspice.bidi_bridge",
         "bidi_bridge",
         "Bidirectional Bridge",
-        "xspice_bidi_bridge.svg"
+        "xspice_bidi_bridge.svg",
+        ["bridge", "bidirectional", "level shifter"]
     ),
     xspice_device!(
         "rspice.xspice.capacitor",
         "capacitor",
         "XSPICE Capacitor",
-        "cap_unpolarized.svg"
+        "cap_unpolarized.svg",
+        ["cap"]
     ),
     xspice_device!(
         "rspice.xspice.capacitoric",
         "capacitoric",
         "XSPICE Capacitor with IC",
-        "cap_unpolarized.svg"
+        "cap_unpolarized.svg",
+        ["cap", "initial condition"]
     ),
     xspice_device!(
         "rspice.xspice.climit",
         "climit",
         "Controlled Limiter",
-        "xspice_controlled_limiter.svg"
+        "xspice_controlled_limiter.svg",
+        ["limiter", "clamp"]
     ),
     xspice_device!(
         "rspice.xspice.cmeter",
         "cmeter",
         "Capacitance Meter",
-        "xspice_capacitance_meter.svg"
+        "xspice_capacitance_meter.svg",
+        ["meter", "measure capacitance"]
     ),
     xspice_device!(
         "rspice.xspice.core",
         "core",
         "Magnetic Core",
-        "xspice_magnetic_core.svg"
+        "xspice_magnetic_core.svg",
+        ["ferrite", "magnetic", "bh curve"]
     ),
     xspice_device!(
         "rspice.xspice.cpline",
         "cpline",
         "Coupled Transmission Line",
-        "tline_coupled.svg"
+        "tline_coupled.svg",
+        ["cpl", "coupled line"]
     ),
     xspice_device!(
         "rspice.xspice.cpmlin",
         "cpmlin",
         "Coupled Microstrip Line",
-        "xspice_coupled_microstrip_line.svg"
+        "xspice_coupled_microstrip_line.svg",
+        ["microstrip", "pcb trace", "rf"]
     ),
     xspice_device!(
         "rspice.xspice.d_cosim",
         "d_cosim",
         "Digital Co-Simulation",
-        "xspice_digital_cosim.svg"
+        "xspice_digital_cosim.svg",
+        ["cosim", "co simulation", "verilator", "external digital"]
     ),
     xspice_device!(
         "rspice.xspice.d_dlatch",
         "d_dlatch",
         ["xyce_d_dlatch"],
         "D Latch",
-        "xspice_d_latch.svg"
+        "xspice_d_latch.svg",
+        ["latch", "transparent latch"]
     ),
     xspice_device!(
         "rspice.xspice.d_fdiv",
         "d_fdiv",
         "Frequency Divider",
-        "xspice_frequency_divider.svg"
+        "xspice_frequency_divider.svg",
+        ["divider", "prescaler", "counter"]
     ),
     xspice_device!(
         "rspice.xspice.d_lut",
         "d_lut",
         ["d_genlut"],
         "Digital Lookup Table",
-        "xspice_lut.svg"
+        "xspice_lut.svg",
+        ["lut", "lookup table", "truth table", "logic"]
     ),
     xspice_device!(
         "rspice.xspice.d_open_c",
         "d_open_c",
         "Open-Collector Buffer",
-        "xspice_open_collector.svg"
+        "xspice_open_collector.svg",
+        ["open collector", "open drain", "buffer"]
     ),
     xspice_device!(
         "rspice.xspice.d_open_e",
         "d_open_e",
         "Open-Emitter Buffer",
-        "xspice_open_emitter.svg"
+        "xspice_open_emitter.svg",
+        ["open emitter", "open source", "buffer"]
     ),
     xspice_device!(
         "rspice.xspice.d_osc",
         "d_osc",
         "Digital Oscillator",
-        "xspice_digital_oscillator.svg"
+        "xspice_digital_oscillator.svg",
+        ["oscillator", "vco", "clock"]
     ),
     xspice_device!(
         "rspice.xspice.d_process",
         "d_process",
         "External Digital Process",
-        "xspice_digital_process.svg"
+        "xspice_digital_process.svg",
+        ["external process", "ipc"]
     ),
     xspice_device!(
         "rspice.xspice.d_pulldown",
         "d_pulldown",
         "Digital Pulldown",
-        "xspice_pulldown.svg"
+        "xspice_pulldown.svg",
+        ["pull down", "pulldown"]
     ),
     xspice_device!(
         "rspice.xspice.d_pullup",
         "d_pullup",
         "Digital Pullup",
-        "xspice_pullup.svg"
+        "xspice_pullup.svg",
+        ["pull up", "pullup"]
     ),
     xspice_device!(
         "rspice.xspice.d_pwm",
         "d_pwm",
         "PWM Oscillator",
-        "xspice_pwm.svg"
+        "xspice_pwm.svg",
+        ["pwm", "pulse width modulation", "oscillator"]
     ),
     xspice_device!(
         "rspice.xspice.d_ram",
         "d_ram",
         "Digital RAM",
-        "xspice_ram.svg"
+        "xspice_ram.svg",
+        ["ram", "memory"]
     ),
     xspice_device!(
         "rspice.xspice.d_source",
         "d_source",
         "Digital File Source",
-        "xspice_digital_source.svg"
+        "xspice_digital_source.svg",
+        ["digital source", "vector file", "stimulus"]
     ),
     xspice_device!(
         "rspice.xspice.d_srff",
         "d_srff",
         "SR Flip-Flop",
-        "xspice_sr_flip_flop.svg"
+        "xspice_sr_flip_flop.svg",
+        ["flip flop", "flop", "set reset"]
     ),
     xspice_device!(
         "rspice.xspice.d_state",
         "d_state",
         "Digital State Machine",
-        "xspice_state_machine.svg"
+        "xspice_state_machine.svg",
+        ["state machine", "fsm", "finite state machine"]
     ),
     xspice_device!(
         "rspice.xspice.d_tff",
         "d_tff",
         ["xyce_d_tff"],
         "T Flip-Flop",
-        "xspice_tff.svg"
+        "xspice_tff.svg",
+        ["toggle", "flip flop", "flop"]
     ),
     xspice_device!(
         "rspice.xspice.d_to_real",
         "d_to_real",
         "Digital-to-Real Bridge",
-        "xspice_digital_to_real.svg"
+        "xspice_digital_to_real.svg",
+        ["bridge", "digital to real"]
     ),
     xspice_device!(
         "rspice.xspice.d_xnor",
         "d_xnor",
         ["xyce_d_xnor", "xyce_legacy_d_xnor"],
         "XNOR Gate",
-        "xspice_xnor.svg"
+        "xspice_xnor.svg",
+        ["xnor", "exclusive nor", "logic"]
     ),
     xspice_device!(
         "rspice.xspice.delay",
         "delay",
         "Analog Delay",
-        "xspice_delay.svg"
+        "xspice_delay.svg",
+        ["time delay", "transport delay"]
     ),
     xspice_device!(
         "rspice.xspice.file_source",
         "file_source",
         ["filesource"],
         "Analog File Source",
-        "xspice_file_source.svg"
+        "xspice_file_source.svg",
+        ["file", "waveform file", "csv"]
     ),
     xspice_device!(
         "rspice.xspice.hyst",
         "hyst",
         "Hysteresis",
-        "xspice_hysteresis.svg"
+        "xspice_hysteresis.svg",
+        ["schmitt", "schmitt trigger", "comparator"]
     ),
     xspice_device!(
         "rspice.xspice.ilimit",
         "ilimit",
         "Current-Limited Driver",
-        "xspice_current_limiter.svg"
+        "xspice_current_limiter.svg",
+        ["current limit", "output stage", "op amp output", "driver"]
     ),
     xspice_device!(
         "rspice.xspice.inductor",
         "inductor",
         "XSPICE Inductor",
-        "inductor.svg"
+        "inductor.svg",
+        ["ind"]
     ),
     xspice_device!(
         "rspice.xspice.inductoric",
         "inductoric",
         "XSPICE Inductor with IC",
-        "inductor.svg"
+        "inductor.svg",
+        ["ind", "initial condition"]
     ),
     xspice_device!(
         "rspice.xspice.lcouple",
         "lcouple",
         "Inductor/Core Coupling",
-        "xspice_lc_coupling.svg"
+        "xspice_lc_coupling.svg",
+        ["winding", "magnetic core", "coupling"]
     ),
     xspice_device!(
         "rspice.xspice.lmeter",
         "lmeter",
         "Inductance Meter",
-        "xspice_inductance_meter.svg"
+        "xspice_inductance_meter.svg",
+        ["meter", "measure inductance"]
     ),
     xspice_device!(
         "rspice.xspice.memristor",
         "memristor",
         "XSPICE Memristor",
-        "memristor.svg"
+        "memristor.svg",
+        ["memristive"]
     ),
     xspice_device!(
         "rspice.xspice.mlin",
         "mlin",
         "Microstrip Line",
-        "xspice_microstrip_line.svg"
+        "xspice_microstrip_line.svg",
+        ["microstrip", "pcb trace", "rf"]
     ),
     xspice_device!(
         "rspice.xspice.msopen",
         "msopen",
         "Microstrip Open",
-        "xspice_microstrip_open.svg"
+        "xspice_microstrip_open.svg",
+        ["microstrip", "open stub", "open end", "rf"]
     ),
     xspice_device!(
         "rspice.xspice.multi_input_pwl",
         "multi_input_pwl",
         "Multi-Input PWL",
-        "xspice_multi_input_pwl.svg"
+        "xspice_multi_input_pwl.svg",
+        ["pwl", "piecewise linear", "lookup"]
     ),
     xspice_device!(
         "rspice.xspice.nco",
         "nco",
         "Numerically Controlled Oscillator",
-        "xspice_nco.svg"
+        "xspice_nco.svg",
+        ["oscillator", "dds", "numerically controlled"]
     ),
     xspice_device!(
         "rspice.xspice.oneshot",
         "oneshot",
         "One Shot",
-        "xspice_one_shot.svg"
+        "xspice_one_shot.svg",
+        ["monostable", "pulse stretcher", "timer"]
     ),
     xspice_device!(
         "rspice.xspice.potentiometer",
         "potentiometer",
         "Potentiometer",
-        "xspice_potentiometer.svg"
+        "xspice_potentiometer.svg",
+        ["pot", "trimmer", "variable resistor", "rheostat", "wiper"]
     ),
     xspice_device!(
         "rspice.xspice.pspice_d_stim",
         "pspice_d_stim",
         "PSpice Digital Stimulus",
-        "xspice_digital_source.svg"
+        "xspice_digital_source.svg",
+        ["stimulus", "stim", "digital stimulus"]
     ),
     xspice_device!(
         "rspice.xspice.pswitch",
         "pswitch",
         "P-Switch",
-        "switch_voltage.svg"
+        "switch_voltage.svg",
+        ["switch"]
     ),
-    xspice_device!("rspice.xspice.pwl", "pwl", "PWL Transfer", "xspice_pwl.svg"),
+    xspice_device!(
+        "rspice.xspice.pwl",
+        "pwl",
+        "PWL Transfer",
+        "xspice_pwl.svg",
+        ["piecewise linear", "transfer curve", "lookup"]
+    ),
     xspice_device!(
         "rspice.xspice.pwlts",
         "pwlts",
         "PWL Time-Series Source",
-        "xspice_pwlts.svg"
+        "xspice_pwlts.svg",
+        ["pwl", "time series", "piecewise linear"]
     ),
     xspice_device!(
         "rspice.xspice.real_delay",
         "real_delay",
         "Real-Event Delay",
-        "xspice_real_delay.svg"
+        "xspice_real_delay.svg",
+        ["delay", "real event"]
     ),
     xspice_device!(
         "rspice.xspice.real_gain",
         "real_gain",
         "Real-Event Gain",
-        "xspice_real_gain.svg"
+        "xspice_real_gain.svg",
+        ["gain", "real event"]
     ),
     xspice_device!(
         "rspice.xspice.real_to_v",
         "real_to_v",
         ["r_to_v"],
         "Real-to-Voltage Bridge",
-        "xspice_real_to_voltage.svg"
+        "xspice_real_to_voltage.svg",
+        ["bridge", "real to voltage"]
     ),
     xspice_device!(
         "rspice.xspice.s_h",
         "s_h",
         "Sample and Hold",
-        "xspice_sample_hold.svg"
+        "xspice_sample_hold.svg",
+        ["sh", "sample hold", "track and hold"]
     ),
     xspice_device!(
         "rspice.xspice.s_xfer",
         "s_xfer",
         "S-Domain Transfer Function",
-        "xspice_s_xfer.svg"
+        "xspice_s_xfer.svg",
+        [
+            "laplace",
+            "transfer function",
+            "s domain",
+            "filter",
+            "pole zero"
+        ]
     ),
     xspice_device!(
         "rspice.xspice.seegenerator",
         "seegenerator",
         ["seegen"],
         "Single-Event Effect Generator",
-        "xspice_see_generator.svg"
+        "xspice_see_generator.svg",
+        ["see", "single event", "radiation", "heavy ion"]
     ),
-    xspice_device!("rspice.xspice.sidiode", "sidiode", "S-I Diode", "diode.svg"),
+    xspice_device!(
+        "rspice.xspice.sidiode",
+        "sidiode",
+        "S-I Diode",
+        "diode.svg",
+        ["ideal diode", "rectifier"]
+    ),
     xspice_device!(
         "rspice.xspice.sine",
         "sine",
         "Controlled Sine Oscillator",
-        "xspice_sine.svg"
+        "xspice_sine.svg",
+        ["vco", "sine", "oscillator"]
     ),
     xspice_device!(
         "rspice.xspice.slew",
         "slew",
         "Slew-Rate Limiter",
-        "xspice_slew.svg"
+        "xspice_slew.svg",
+        ["slew rate", "rate limiter"]
     ),
     xspice_device!(
         "rspice.xspice.spice2poly",
         "spice2poly",
         ["icm_spice2poly"],
         "SPICE2 Polynomial Source",
-        "xspice_spice2poly.svg"
+        "xspice_spice2poly.svg",
+        ["poly", "polynomial", "controlled source"]
     ),
     xspice_device!(
         "rspice.xspice.square",
         "square",
         "Controlled Square Oscillator",
-        "xspice_square.svg"
+        "xspice_square.svg",
+        ["vco", "square wave", "oscillator"]
     ),
     xspice_device!(
         "rspice.xspice.table2d",
         "table2d",
         "2-D Lookup Table",
-        "xspice_table2d.svg"
+        "xspice_table2d.svg",
+        ["lookup table", "lut", "table"]
     ),
     xspice_device!(
         "rspice.xspice.table3d",
         "table3d",
         "3-D Lookup Table",
-        "xspice_table3d.svg"
+        "xspice_table3d.svg",
+        ["lookup table", "lut", "table"]
     ),
     xspice_device!(
         "rspice.xspice.tline",
         "tline",
         "XSPICE Transmission Line",
-        "transmission_line.svg"
+        "transmission_line.svg",
+        ["tline"]
     ),
     xspice_device!(
         "rspice.xspice.triangle",
         "triangle",
         "Controlled Triangle Oscillator",
-        "xspice_triangle.svg"
+        "xspice_triangle.svg",
+        ["vco", "triangle wave", "sawtooth", "ramp", "oscillator"]
     ),
     xspice_device!(
         "rspice.xspice.v_to_real",
         "v_to_real",
         "Analog-to-Real Observer",
-        "xspice_adc_bridge.svg"
+        "xspice_adc_bridge.svg",
+        ["bridge", "voltage to real", "observer"]
     ),
     xspice_device!(
         "rspice.xspice.xfer",
         "xfer",
         "AC Transfer Table",
-        "xspice_xfer.svg"
+        "xspice_xfer.svg",
+        [
+            "ac transfer",
+            "frequency response",
+            "transfer table",
+            "filter"
+        ]
     ),
     xspice_device!(
         "rspice.xspice.xyce_d_add",
         "xyce_d_add",
         "Full Adder",
-        "xspice_full_adder.svg"
+        "xspice_full_adder.svg",
+        ["adder", "sum", "arithmetic"]
     ),
     xspice_device!(
         "rspice.xspice.zener",
         "zener",
         "XSPICE Zener",
-        "diode_zener.svg"
+        "diode_zener.svg",
+        ["zener"]
     ),
 ];
 

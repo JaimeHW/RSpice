@@ -180,9 +180,29 @@ pub fn panel_search(
     placeholder: &'static str,
     focus_pending: &mut bool,
 ) -> bool {
+    panel_search_keys(ui, query, id, placeholder, focus_pending).rows
+}
+
+/// The keys a filter field handed on this pass.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct PanelSearchKeys {
+    /// Down was pressed in the field: the reader steps into the rows.
+    pub rows: bool,
+    /// Enter was pressed in the field: the reader takes its best answer.
+    pub submitted: bool,
+}
+
+/// [`panel_search`], for a list whose best answer Enter takes.
+pub fn panel_search_keys(
+    ui: &mut Ui,
+    query: &mut String,
+    id: &'static str,
+    placeholder: &'static str,
+    focus_pending: &mut bool,
+) -> PanelSearchKeys {
     let t = Tokens::get(ui.ctx());
     let field_width = panel_search_field_width(ui.available_width());
-    let mut enter_rows = false;
+    let mut keys = PanelSearchKeys::default();
     ui.add_space(8.0);
     ui.horizontal(|ui| {
         ui.spacing_mut().item_spacing.x = 0.0;
@@ -240,11 +260,15 @@ pub fn panel_search(
             // The pointer emptied the field; the reader is still in it.
             response.request_focus();
         }
-        enter_rows = response.has_focus()
+        keys.rows = response.has_focus()
             && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::ArrowDown));
+        // A single-line field gives up the focus on the Enter it reads.
+        keys.submitted = response.lost_focus()
+            && !query.is_empty()
+            && ui.input(|input| input.key_pressed(Key::Enter));
     });
     ui.add_space(8.0);
-    enter_rows
+    keys
 }
 
 /// The control that empties the filter, drawn in the field's right inset.

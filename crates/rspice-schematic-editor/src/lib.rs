@@ -22,7 +22,9 @@ pub mod vector_preview;
 pub mod view;
 pub mod xspice_placement;
 
-pub use component_palette::{ComponentPaletteEntry, ComponentPaletteSection, component_palette};
+pub use component_palette::{
+    ComponentPaletteEntry, ComponentPaletteSection, component_palette, device_class_keywords,
+};
 pub use symbols::SymbolLibrary;
 
 pub mod requests;

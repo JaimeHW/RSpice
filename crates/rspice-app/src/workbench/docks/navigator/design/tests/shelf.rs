@@ -42,16 +42,6 @@ fn shelf_search_matches_labels_case_insensitively() {
 }
 
 #[test]
-fn shelf_match_count_drives_a_truthful_filtered_empty_state() {
-    let app = RSpiceApp::test_instance();
-    assert!(component_shelf_match_count(&app.state, "resistor") > 0);
-    assert_eq!(
-        component_shelf_match_count(&app.state, "no-such-component-or-cell"),
-        0
-    );
-}
-
-#[test]
 fn palette_placement_cancels_every_unfinished_conductor_route() {
     let mut app = RSpiceApp::test_instance();
     app.state
@@ -136,7 +126,10 @@ fn a_part_the_project_retained_arms_from_the_component_shelf() {
         .model_library_manager
         .add_library(retained_model_library("proving_parts"));
 
-    let rows = library_part_rows(&app, "proving_parts");
+    let rows = library_part_rows(
+        &app,
+        &super::super::shelf::search::ShelfQuery::new("proving_parts"),
+    );
     let row = |name: &str| {
         rows.iter()
             .find(|row| row.part_id == name)
@@ -204,7 +197,11 @@ fn a_foundation_part_arms_from_its_built_in_library() {
         None,
     );
 
-    let rows = shelf_rows(&index, &libraries, "");
+    let rows = shelf_rows(
+        &index,
+        &libraries,
+        &super::super::shelf::search::ShelfQuery::new(""),
+    );
     let row = rows
         .iter()
         .find(|row| row.part_id == "RSPICE_PROBE_NPN")
@@ -252,7 +249,11 @@ fn an_adopted_part_is_offered_once_as_the_retained_row() {
         source: None,
     });
 
-    let rows = shelf_rows(&index, &libraries, "");
+    let rows = shelf_rows(
+        &index,
+        &libraries,
+        &super::super::shelf::search::ShelfQuery::new(""),
+    );
     let zener = rows
         .iter()
         .filter(|row| row.part_id == "RSPICE_ZENER")
@@ -291,7 +292,11 @@ fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
         ),
     ];
 
-    let rows = shelf_rows(&index, &[], "");
+    let rows = shelf_rows(
+        &index,
+        &[],
+        &super::super::shelf::search::ShelfQuery::new(""),
+    );
     assert_eq!(
         rows[0].action,
         LibraryPartAction::Review {
@@ -1127,7 +1132,7 @@ fn the_recent_band_shows_only_its_newest_entries() {
     let (text, _) = shelf.frame(Vec::new());
     let painted = placed
         .iter()
-        .filter(|kind| paints_line(&text, kind.display_name()))
+        .filter(|kind| paints_line(&text, primitive_label(**kind)))
         .count();
     assert_eq!(
         painted, RECENT_SHOWN,
@@ -1135,9 +1140,9 @@ fn the_recent_band_shows_only_its_newest_entries() {
     );
     for dropped in &placed[..placed.len() - RECENT_SHOWN] {
         assert!(
-            !paints_line(&text, dropped.display_name()),
+            !paints_line(&text, primitive_label(*dropped)),
             "{} fell off the band and must not be painted: {text}",
-            dropped.display_name()
+            primitive_label(*dropped)
         );
     }
 }
@@ -1691,8 +1696,8 @@ fn a_stimulus_definition_is_listed_as_a_part_and_arms_the_cursor() {
     let mut shelf = shelf.settled();
     let (text, runs) = shelf.frame(Vec::new());
     assert!(
-        paints_line(&text, "Stimulus library"),
-        "the section states itself, in the sentence case every shelf header uses: {text}"
+        paints_line(&text, "Matches") && !paints_line(&text, "Stimulus library"),
+        "a query answers in one ranked list, not under the catalog's sections: {text}"
     );
     assert!(
         paints_line(&text, "V \u{00b7} SIN \u{00b7} 1kHz"),

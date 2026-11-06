@@ -15,12 +15,14 @@
 //! Those go through the command vocabulary, which is defined over the whole
 //! application.
 
+pub(super) mod search;
+
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{Response, ScrollArea, Ui};
 
 use crate::schematic::view::SchematicShelfDragPayload;
-use crate::schematic::{ComponentPaletteEntry, component_palette};
+use crate::schematic::{ComponentPaletteEntry, component_palette, device_class_keywords};
 use crate::state::model_hub::{
     ModelHubPartRow, PartPlacement, PartProvenance, PartState, plan_library_placement,
     refusal_sentence,
@@ -43,11 +45,11 @@ use super::super::super::super::design_system::{
 };
 use super::super::rail::{self, RailDisclosure, RailFold};
 use super::super::{
-    SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
-    empty_navigator_row, panel_search, schematic_nav_row_indented_drag_response,
+    PanelSearchKeys, SCHEMATIC_NAV_LABEL_SIZE, SCHEMATIC_NAV_META_SIZE, SCHEMATIC_NAV_ROW_HEIGHT,
+    empty_navigator_row, panel_search_keys, schematic_nav_row_indented_drag_response,
     schematic_nav_row_indented_response, search_focus_requested,
 };
-use super::{matches_query, normalized};
+use search::{MatchRank, ShelfQuery, ShelfTerms};
 
 /// The shelf's primitive groups: the band's name, the family glyph its group
 /// row carries, whether a fresh install shows the band open, and the palette
@@ -241,12 +243,34 @@ fn nav_row_indented_response(
 
 pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
     observe_placements(ui, &mut app.state);
-    let enter_rows = shelf_search(ui, &mut app.state);
+    let keys = shelf_search(ui, &mut app.state);
     rail::open(ui.ctx());
-    let query = normalized(&app.state.design.placement_query);
+    let query = ShelfQuery::new(&app.state.design.placement_query);
     let library_parts = library_part_rows(app, &query);
     let cells = cell_candidates(&app.state);
-    let visible_matches = component_shelf_match_count(&app.state, &query) + library_parts.len();
+    if !query.is_empty() {
+        let hits = shelf_hits(&app.state, &query, &library_parts, &cells);
+        let state = &mut app.state;
+        let clicked = ScrollArea::vertical()
+            .id_salt("workbench.design.component_shelf")
+            .auto_shrink([false, true])
+            .show(ui, |ui| {
+                let clicked = shelf_results(ui, state, &hits);
+                let _unmoved = rail::traverse(ui, keys.rows);
+                clicked
+            })
+            .inner;
+        // Enter in the field places the best answer, as a click on it would.
+        let submitted = keys
+            .submitted
+            .then(|| top_hit(&hits))
+            .flatten()
+            .map(|hit| hit.arm.clone());
+        if let Some(arm) = clicked.or(submitted) {
+            apply_shelf_arm(app, arm, ui.ctx());
+        }
+        return;
+    }
     let mut band = None;
     let mut primitive = None;
     let mut stimulus = None;
@@ -270,15 +294,12 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
             generated = generated_veriloga_catalog(ui, state);
             requested_part = library_parts_section(ui, state, &library_parts);
             cell = project_library(ui, state, &cells);
-            if !query.is_empty() && visible_matches == 0 {
-                empty_navigator_row(ui, "No component or cell matches this filter");
-            }
             // Every fold position on the shelf is persisted under its own
             // group row, so the traversal moves all of them itself and has
             // nothing to hand back. Bound rather than discarded, so a row
             // added later that folds a navigator-tree node is caught here
             // instead of quietly answering no key.
-            let _unmoved = rail::traverse(ui, enter_rows);
+            let _unmoved = rail::traverse(ui, keys.rows);
             debug_assert!(
                 _unmoved.is_none(),
                 "the shelf keeps every fold position under its own row"
@@ -317,6 +338,10 @@ fn apply_library_part_row(app: &mut RSpiceApp, row: LibraryPartRow, ctx: &egui::
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) struct LibraryPartRow {
     pub(super) part_id: String,
+    /// The part's device class, in the unified index's vocabulary.
+    pub(super) device: String,
+    /// The part's address: its pack, or the project library holding it.
+    pub(super) source: String,
     /// The meta column: the part's device class, and where it stands.
     pub(super) meta: String,
     pub(super) action: LibraryPartAction,
@@ -354,7 +379,7 @@ pub(super) enum LibraryPartAction {
 /// the only door such a definition has onto the canvas. Pack releases the
 /// project has not adopted sit beside them and go through the pack
 /// confirmation instead.
-pub(super) fn library_part_rows(app: &RSpiceApp, query: &str) -> Vec<LibraryPartRow> {
+pub(super) fn library_part_rows(app: &RSpiceApp, query: &ShelfQuery) -> Vec<LibraryPartRow> {
     let libraries = app.state.model.model_library_manager.libraries_sorted();
     let index = app.model_hub.part_index(&libraries);
     shelf_rows(&index, &libraries, query)
@@ -367,7 +392,7 @@ pub(super) fn library_part_rows(app: &RSpiceApp, query: &str) -> Vec<LibraryPart
 pub(super) fn shelf_rows(
     index: &[ModelHubPartRow],
     libraries: &[&ModelLibrary],
-    query: &str,
+    query: &ShelfQuery,
 ) -> Vec<LibraryPartRow> {
     /// Rows the shelf lists before asking the user to narrow the search.
     ///
@@ -396,20 +421,45 @@ pub(super) fn shelf_rows(
             PartProvenance::RemoteRelease { .. } => true,
         })
         .filter(|row| {
-            // The third search field is the row's address: the pack for a
-            // pack row, the holding library for a project one — the same
-            // column the Models workspace shelf searches.
-            let source = match &row.provenance {
-                PartProvenance::InstalledPack { pack_id, .. }
-                | PartProvenance::RemoteRelease { pack_id, .. } => pack_id.as_str(),
-                PartProvenance::ProjectRetained { library } => library.as_str(),
-                PartProvenance::Foundation => "",
-            };
-            matches_query(query, &[&row.part_id, &row.device, source])
+            library_part_rank(
+                query,
+                &row.part_id,
+                &row.device,
+                part_source(&row.provenance),
+            )
+            .is_some()
         })
         .take(SHELF_ROWS)
         .filter_map(|row| library_part_row(libraries, row))
         .collect()
+}
+
+/// The address a part row is searched by besides its number: the pack for a
+/// pack row, the holding library for a project one — the same column the
+/// Models workspace shelf searches.
+fn part_source(provenance: &PartProvenance) -> &str {
+    match provenance {
+        PartProvenance::InstalledPack { pack_id, .. }
+        | PartProvenance::RemoteRelease { pack_id, .. } => pack_id.as_str(),
+        PartProvenance::ProjectRetained { library } => library.as_str(),
+        PartProvenance::Foundation => "",
+    }
+}
+
+/// How one library part answers a query. Its number and address are part
+/// numbers and its device class supplies the words; it has no label beyond
+/// its number.
+fn library_part_rank(
+    query: &ShelfQuery,
+    part_id: &str,
+    device: &str,
+    source: &str,
+) -> Option<MatchRank> {
+    query.rank(&ShelfTerms {
+        label: "",
+        keywords: device_class_keywords(device),
+        part_numbers: &[part_id, source],
+    })
 }
 
 /// One shelf row, with the route its click takes.
@@ -458,6 +508,8 @@ fn library_part_row(libraries: &[&ModelLibrary], row: &ModelHubPartRow) -> Optio
     };
     Some(LibraryPartRow {
         part_id: row.part_id.clone(),
+        device: row.device.clone(),
+        source: part_source(&row.provenance).to_owned(),
         meta,
         action,
     })
@@ -494,21 +546,14 @@ fn library_parts_section(
     if rows.is_empty() {
         return None;
     }
-    let query = normalized(&state.design.placement_query);
-    let visible = if query.is_empty() {
-        catalog_group_row(
-            ui,
-            "component-shelf-library-parts",
-            ShelfGlyph::Icon(WorkbenchIcon::Models),
-            "Library parts",
-            rows.len(),
-            false,
-        )
-    } else {
-        shelf_section_header(ui, "Library parts", Some(&rows.len().to_string()));
-        true
-    };
-    if !visible {
+    if !catalog_group_row(
+        ui,
+        "component-shelf-library-parts",
+        ShelfGlyph::Icon(WorkbenchIcon::Models),
+        "Library parts",
+        rows.len(),
+        false,
+    ) {
         return None;
     }
 
@@ -523,7 +568,7 @@ fn library_parts_section(
                     &row.part_id,
                     false,
                     Some(&row.meta),
-                    if query.is_empty() { 2 } else { 0 },
+                    2,
                 );
                 match &row.action {
                     // The row stays searchable and stays readable; only the
@@ -590,61 +635,9 @@ fn request_library_part(app: &mut RSpiceApp, part_id: String, pack_id: String, v
     });
 }
 
-pub(super) fn component_shelf_match_count(state: &AppState, query: &str) -> usize {
-    let primitive_matches = PRIMITIVE_GROUPS
-        .iter()
-        .map(|(_, _, _, section_names)| {
-            primitive_entries(section_names)
-                .into_iter()
-                .filter(|entry| matches_query(query, &[entry.label, entry.kind.display_name()]))
-                .count()
-        })
-        .sum::<usize>();
-    let library_matches = cell_candidates(state)
-        .into_iter()
-        .filter(|candidate| {
-            matches_query(
-                query,
-                &[&candidate.library, &candidate.cell, &candidate.view],
-            )
-        })
-        .count();
-    let builtin_matches = engine_only_xspice_devices()
-        .iter()
-        .filter(|descriptor| {
-            matches_query(
-                query,
-                &[
-                    descriptor.display_name,
-                    descriptor.model_type,
-                    descriptor.stable_id,
-                ],
-            )
-        })
-        .count();
-    let generated_matches = generated_veriloga_devices()
-        .iter()
-        .filter(|descriptor| {
-            matches_query(
-                query,
-                &[
-                    descriptor.model_name,
-                    descriptor.module_name,
-                    descriptor.source_digest,
-                ],
-            )
-        })
-        .count();
-    primitive_matches
-        + builtin_matches
-        + generated_matches
-        + library_matches
-        + stimulus_library_rows(state, query).len()
-}
-
-fn shelf_search(ui: &mut Ui, state: &mut AppState) -> bool {
+fn shelf_search(ui: &mut Ui, state: &mut AppState) -> PanelSearchKeys {
     let mut focus = search_focus_requested::<FocusPlacementSearch>(ui, &mut state.workbench.outbox);
-    panel_search(
+    panel_search_keys(
         ui,
         &mut state.design.placement_query,
         "workbench.design.component_shelf.search",
@@ -992,6 +985,8 @@ enum ShelfArm {
     BuiltinXspice(String),
     Cell(Box<LibraryCellInstance>),
     Part(Box<LibraryPartRow>),
+    /// A project stimulus definition, by name.
+    Stimulus(String),
 }
 
 /// Resolve one stored entry into the row the band would paint.
@@ -1020,7 +1015,7 @@ fn resolve_shelf_entry(
         ShelfEntry::Primitive(kind) => Some(ShelfEntryRow {
             entry: entry.clone(),
             glyph: primitive_shelf_glyph(*kind),
-            label: kind.display_name().to_owned(),
+            label: primitive_label(*kind).to_owned(),
             meta: primitive_shelf_meta(*kind),
             selected: state.model.schematic.session.editor.tool == Tool::Place(*kind),
             arm: ShelfArm::Primitive(*kind),
@@ -1114,11 +1109,6 @@ fn pinned_band(
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
-    // Search asks the catalog a question; the personal rail is not an answer
-    // to it.
-    if !normalized(&state.design.placement_query).is_empty() {
-        return None;
-    }
     let rows = pinned_keys(state)
         .iter()
         .filter_map(|key| ShelfEntry::from_storage_key(key))
@@ -1152,9 +1142,6 @@ fn recent_band(
     library_parts: &[LibraryPartRow],
     cells: &[CellCandidate],
 ) -> Option<ShelfArm> {
-    if !normalized(&state.design.placement_query).is_empty() {
-        return None;
-    }
     let pinned = pinned_keys(state);
     let rows = state
         .model
@@ -1212,7 +1199,7 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
             .find(|descriptor| descriptor.stable_id == *id)
             .and_then(|descriptor| builtin_xspice_library_binding(descriptor).ok())
             .map(SchematicShelfDragPayload::library_cell),
-        ShelfArm::Part(_) => None,
+        ShelfArm::Part(_) | ShelfArm::Stimulus(_) => None,
     }
 }
 
@@ -1248,47 +1235,27 @@ fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
         }
         ShelfArm::Cell(binding) => arm_cell(&mut app.state, *binding, ctx),
         ShelfArm::Part(row) => apply_library_part_row(app, *row, ctx),
+        ShelfArm::Stimulus(name) => arm_stimulus_definition(&mut app.state, &name, ctx),
     }
 }
 
 pub(super) fn primitive_catalog(ui: &mut Ui, state: &mut AppState) -> Option<ComponentType> {
-    let query = normalized(&state.design.placement_query);
     let mut armed = None;
-    let visible_count = PRIMITIVE_GROUPS
-        .iter()
-        .map(|(_, _, _, section_names)| {
-            primitive_entries(section_names)
-                .into_iter()
-                .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
-                .count()
-        })
-        .sum::<usize>();
-    if visible_count == 0 && !query.is_empty() {
-        return None;
-    }
-    shelf_section_header(ui, "Primitives", Some(&visible_count.to_string()));
+    shelf_section_header(ui, "Primitives", Some(&primitive_entry_count().to_string()));
     for (group, glyph, open_default, section_names) in PRIMITIVE_GROUPS {
-        let entries = primitive_entries(section_names)
-            .into_iter()
-            .filter(|entry| matches_query(&query, &[entry.label, entry.kind.display_name()]))
-            .collect::<Vec<_>>();
+        let entries = primitive_entries(section_names);
         if entries.is_empty() {
             continue;
         }
-        if query.is_empty() {
-            if catalog_group_row(
-                ui,
-                ("component-shelf", group),
-                glyph,
-                group,
-                entries.len(),
-                open_default,
-            ) {
-                armed = primitive_rows(ui, state, &entries, 2).or(armed);
-            }
-        } else {
-            shelf_section_header(ui, group, Some(&entries.len().to_string()));
-            armed = primitive_rows(ui, state, &entries, 0).or(armed);
+        if catalog_group_row(
+            ui,
+            ("component-shelf", group),
+            glyph,
+            group,
+            entries.len(),
+            open_default,
+        ) {
+            armed = primitive_rows(ui, state, &entries, 2).or(armed);
         }
     }
     armed
@@ -1438,25 +1405,18 @@ fn primitive_rows(
 ///
 /// Returns the definition a click armed.
 fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String> {
-    let query = normalized(&state.design.placement_query);
-    let rows = stimulus_library_rows(state, &query);
+    let rows = stimulus_library_rows(state);
     if rows.is_empty() {
         return None;
     }
-    let visible = if query.is_empty() {
-        catalog_group_row(
-            ui,
-            "component-shelf-stimulus-library",
-            ShelfGlyph::Source,
-            "Stimulus library",
-            rows.len(),
-            false,
-        )
-    } else {
-        shelf_section_header(ui, "Stimulus library", Some(&rows.len().to_string()));
-        true
-    };
-    if !visible {
+    if !catalog_group_row(
+        ui,
+        "component-shelf-stimulus-library",
+        ShelfGlyph::Source,
+        "Stimulus library",
+        rows.len(),
+        false,
+    ) {
         return None;
     }
 
@@ -1475,7 +1435,7 @@ fn stimulus_library_section(ui: &mut Ui, state: &mut AppState) -> Option<String>
                 .as_ref()
                 .is_some_and(|held| held.definition().eq_ignore_ascii_case(&row.name)),
             Some(&row.meta),
-            if query.is_empty() { 2 } else { 0 },
+            2,
         )
         .on_hover_text(&row.hover);
         response.dnd_set_drag_payload(SchematicShelfDragPayload::stimulus(row.placement.clone()));
@@ -1492,11 +1452,13 @@ struct StimulusShelfRow {
     /// `V · SIN · 1 kHz`, from the instance this definition would place.
     meta: String,
     hover: String,
+    /// The definition's family and purpose, which a query reads as words.
+    keywords: Vec<String>,
     placement: crate::state::PendingStimulusPlacement,
 }
 
-/// Every definition the query keeps, in the library's own list order.
-fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow> {
+/// Every definition, in the library's own list order.
+fn stimulus_library_rows(state: &AppState) -> Vec<StimulusShelfRow> {
     state
         .model
         .workspace
@@ -1504,16 +1466,6 @@ fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow>
         .stimulus_library
         .definitions()
         .iter()
-        .filter(|definition| {
-            matches_query(
-                query,
-                &[
-                    definition.name(),
-                    definition.family().label(),
-                    &definition.purpose,
-                ],
-            )
-        })
         .map(|definition| {
             let instance = definition.transient_component();
             let meta = crate::simulation::placed_sources::source_identity_line(&instance)
@@ -1529,6 +1481,10 @@ fn stimulus_library_rows(state: &AppState, query: &str) -> Vec<StimulusShelfRow>
                 name: definition.name().to_owned(),
                 meta,
                 hover,
+                keywords: vec![
+                    definition.family().label().to_owned(),
+                    definition.purpose.clone(),
+                ],
                 placement: crate::state::PendingStimulusPlacement::of(definition),
             }
         })
@@ -1544,38 +1500,18 @@ fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context
 }
 
 fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.design.placement_query);
-    let descriptors = engine_only_xspice_devices()
-        .iter()
-        .filter(|descriptor| {
-            matches_query(
-                &query,
-                &[
-                    descriptor.display_name,
-                    descriptor.model_type,
-                    descriptor.stable_id,
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
+    let descriptors = engine_only_xspice_devices();
     if descriptors.is_empty() {
         return None;
     }
-
-    let visible = if query.is_empty() {
-        catalog_group_row(
-            ui,
-            "component-shelf-builtin-xspice",
-            ShelfGlyph::Event,
-            "Built-in XSPICE",
-            descriptors.len(),
-            false,
-        )
-    } else {
-        shelf_section_header(ui, "Built-in XSPICE", Some(&descriptors.len().to_string()));
-        true
-    };
-    if !visible {
+    if !catalog_group_row(
+        ui,
+        "component-shelf-builtin-xspice",
+        ShelfGlyph::Event,
+        "Built-in XSPICE",
+        descriptors.len(),
+        false,
+    ) {
         return None;
     }
 
@@ -1599,7 +1535,7 @@ fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCe
             descriptor.display_name,
             selected,
             Some(descriptor.model_type),
-            if query.is_empty() { 2 } else { 0 },
+            2,
         );
         let stable_id = descriptor.stable_id;
         match builtin_xspice_library_binding(descriptor) {
@@ -1662,41 +1598,18 @@ pub(super) fn place_builtin_xspice(
 }
 
 fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.design.placement_query);
-    let descriptors = generated_veriloga_devices()
-        .iter()
-        .filter(|descriptor| {
-            matches_query(
-                &query,
-                &[
-                    descriptor.model_name,
-                    descriptor.module_name,
-                    descriptor.source_digest,
-                ],
-            )
-        })
-        .collect::<Vec<_>>();
+    let descriptors = generated_veriloga_devices();
     if descriptors.is_empty() {
         return None;
     }
-    let visible = if query.is_empty() {
-        catalog_group_row(
-            ui,
-            "component-shelf-generated-veriloga",
-            ShelfGlyph::Text("VA"),
-            "Generated Verilog-A",
-            descriptors.len(),
-            false,
-        )
-    } else {
-        shelf_section_header(
-            ui,
-            "Generated Verilog-A",
-            Some(&descriptors.len().to_string()),
-        );
-        true
-    };
-    if !visible {
+    if !catalog_group_row(
+        ui,
+        "component-shelf-generated-veriloga",
+        ShelfGlyph::Text("VA"),
+        "Generated Verilog-A",
+        descriptors.len(),
+        false,
+    ) {
         return None;
     }
 
@@ -1724,7 +1637,7 @@ fn generated_veriloga_catalog(ui: &mut Ui, state: &mut AppState) -> Option<Libra
                 descriptor.terminals.len(),
                 descriptor.module_name
             )),
-            if query.is_empty() { 2 } else { 0 },
+            2,
         );
         match generated_veriloga_library_binding(descriptor) {
             Ok(binding) => {
@@ -1753,39 +1666,25 @@ fn project_library(
     state: &mut AppState,
     cells: &[CellCandidate],
 ) -> Option<LibraryCellInstance> {
-    let query = normalized(&state.design.placement_query);
     let mut grouped = BTreeMap::<String, Vec<CellCandidate>>::new();
     for candidate in cells.iter().cloned() {
-        if matches_query(
-            &query,
-            &[&candidate.library, &candidate.cell, &candidate.view],
-        ) {
-            grouped
-                .entry(candidate.library.clone())
-                .or_default()
-                .push(candidate);
-        }
-    }
-    if grouped.is_empty() && !query.is_empty() {
-        return None;
+        grouped
+            .entry(candidate.library.clone())
+            .or_default()
+            .push(candidate);
     }
     shelf_section_header(ui, "Project library", None);
     let mut armed = None;
     for (library, grouped_cells) in grouped {
-        if query.is_empty() {
-            if catalog_group_row(
-                ui,
-                ("component-shelf-library", library.as_str()),
-                ShelfGlyph::Icon(WorkbenchIcon::Models),
-                &library,
-                grouped_cells.len(),
-                false,
-            ) {
-                armed = cell_rows(ui, state, &grouped_cells, 2).or_else(|| armed.take());
-            }
-        } else {
-            shelf_section_header(ui, &library, Some(&grouped_cells.len().to_string()));
-            armed = cell_rows(ui, state, &grouped_cells, 0).or(armed);
+        if catalog_group_row(
+            ui,
+            ("component-shelf-library", library.as_str()),
+            ShelfGlyph::Icon(WorkbenchIcon::Models),
+            &library,
+            grouped_cells.len(),
+            false,
+        ) {
+            armed = cell_rows(ui, state, &grouped_cells, 2).or_else(|| armed.take());
         }
     }
     armed
@@ -1948,7 +1847,7 @@ fn catalog_group_row(
 
 type CellCandidate = LibraryCellPlacementCandidate;
 
-fn cell_candidates(state: &AppState) -> Vec<CellCandidate> {
+pub(super) fn cell_candidates(state: &AppState) -> Vec<CellCandidate> {
     library_cell_placement_candidates(&state.model.library_manager, &state.model.workspace)
 }
 
@@ -1991,10 +1890,254 @@ pub(super) fn primitive_entries(section_names: &[&str]) -> Vec<ComponentPaletteE
         .collect()
 }
 
-#[cfg(test)]
+/// The label a primitive's own shelf row carries.
+pub(super) fn primitive_label(kind: ComponentType) -> &'static str {
+    component_palette()
+        .iter()
+        .flat_map(|section| section.entries)
+        .find(|entry| entry.kind == kind)
+        .map_or(kind.display_name(), |entry| entry.label)
+}
+
 pub(super) fn primitive_entry_count() -> usize {
     component_palette()
         .iter()
         .map(|section| section.entries.len())
         .sum()
+}
+
+/// Answers a query lists before asking the reader to narrow it.
+const SHELF_HITS: usize = 200;
+
+/// One answer to a shelf query: the row it paints and where its click goes.
+pub(super) struct ShelfHit {
+    rank: MatchRank,
+    glyph: ShelfGlyph,
+    pub(super) label: String,
+    meta: Option<String>,
+    selected: bool,
+    arm: ShelfArm,
+    /// The pinnable identity; a stimulus definition is project state and has
+    /// none.
+    pin: Option<ShelfEntry>,
+    drag: Option<SchematicShelfDragPayload>,
+    /// Why the row cannot be placed, when it cannot.
+    pub(super) refusal: Option<String>,
+}
+
+impl ShelfHit {
+    fn of(rank: MatchRank, row: ShelfEntryRow) -> Self {
+        Self {
+            rank,
+            glyph: row.glyph,
+            label: row.label,
+            meta: row.meta,
+            selected: row.selected,
+            drag: shelf_drag_payload(&row.arm),
+            arm: row.arm,
+            pin: Some(row.entry),
+            refusal: None,
+        }
+    }
+}
+
+/// The answer Enter places: the best-ranked one that can be placed.
+pub(super) fn top_hit(hits: &[ShelfHit]) -> Option<&ShelfHit> {
+    hits.iter().find(|hit| hit.refusal.is_none())
+}
+
+/// Every placeable identity the query answers, best first.
+///
+/// Rows of one rank keep catalog order: primitives, code models, generated
+/// Verilog-A, stimulus definitions, library parts, project cells.
+pub(super) fn shelf_hits(
+    state: &AppState,
+    query: &ShelfQuery,
+    library_parts: &[LibraryPartRow],
+    cells: &[CellCandidate],
+) -> Vec<ShelfHit> {
+    let mut hits = Vec::new();
+    let offer = |hits: &mut Vec<ShelfHit>, rank: Option<MatchRank>, entry: ShelfEntry| {
+        if let Some(rank) = rank
+            && let Some(row) = resolve_shelf_entry(state, library_parts, cells, &entry)
+        {
+            hits.push(ShelfHit::of(rank, row));
+        }
+    };
+    for (_, _, _, sections) in PRIMITIVE_GROUPS {
+        for entry in primitive_entries(sections) {
+            let mut keywords = entry.keywords.to_vec();
+            keywords.push(entry.kind.display_name());
+            let rank = query.rank(&ShelfTerms {
+                label: entry.label,
+                keywords: &keywords,
+                part_numbers: &[],
+            });
+            offer(&mut hits, rank, ShelfEntry::Primitive(entry.kind));
+        }
+    }
+    for descriptor in engine_only_xspice_devices() {
+        let mut part_numbers = vec![descriptor.model_type];
+        part_numbers.extend_from_slice(descriptor.aliases);
+        let rank = query.rank(&ShelfTerms {
+            label: descriptor.display_name,
+            keywords: descriptor.keywords,
+            part_numbers: &part_numbers,
+        });
+        offer(
+            &mut hits,
+            rank,
+            ShelfEntry::BuiltinXspice(descriptor.stable_id.to_owned()),
+        );
+    }
+    for descriptor in generated_veriloga_devices() {
+        let rank = query.rank(&ShelfTerms {
+            label: descriptor.model_name,
+            keywords: &[],
+            part_numbers: &[descriptor.module_name, descriptor.source_digest],
+        });
+        offer(
+            &mut hits,
+            rank,
+            ShelfEntry::GeneratedVerilogA(descriptor.model_name.to_owned()),
+        );
+    }
+    let pending_stimulus = state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_stimulus
+        .as_ref()
+        .map(|held| held.definition().to_owned());
+    for row in stimulus_library_rows(state) {
+        let keywords = row.keywords.iter().map(String::as_str).collect::<Vec<_>>();
+        let Some(rank) = query.rank(&ShelfTerms {
+            label: &row.name,
+            keywords: &keywords,
+            part_numbers: &[],
+        }) else {
+            continue;
+        };
+        hits.push(ShelfHit {
+            rank,
+            glyph: ShelfGlyph::Source,
+            selected: pending_stimulus
+                .as_deref()
+                .is_some_and(|held| held.eq_ignore_ascii_case(&row.name)),
+            drag: Some(SchematicShelfDragPayload::stimulus(row.placement)),
+            arm: ShelfArm::Stimulus(row.name.clone()),
+            label: row.name,
+            meta: Some(row.meta),
+            pin: None,
+            refusal: None,
+        });
+    }
+    for row in library_parts {
+        let rank = library_part_rank(query, &row.part_id, &row.device, &row.source);
+        match &row.action {
+            // Still listed, so a search for it says why it cannot be placed
+            // instead of claiming it does not exist.
+            LibraryPartAction::Refused(reason) => {
+                if let Some(rank) = rank {
+                    hits.push(ShelfHit {
+                        rank,
+                        glyph: ShelfGlyph::Icon(WorkbenchIcon::Models),
+                        label: row.part_id.clone(),
+                        meta: Some(row.meta.clone()),
+                        selected: false,
+                        arm: ShelfArm::Part(Box::new(row.clone())),
+                        pin: None,
+                        drag: None,
+                        refusal: Some(reason.clone()),
+                    });
+                }
+            }
+            _ => offer(
+                &mut hits,
+                rank,
+                ShelfEntry::LibraryPart(row.part_id.clone()),
+            ),
+        }
+    }
+    for candidate in cells {
+        let rank = query.rank(&ShelfTerms {
+            label: &candidate.cell,
+            keywords: &[],
+            part_numbers: &[&candidate.library, &candidate.view],
+        });
+        if candidate.ready {
+            let entry = ShelfEntry::Cell {
+                library: candidate.library.clone(),
+                cell: candidate.cell.clone(),
+                view: candidate.view.clone(),
+            };
+            offer(&mut hits, rank, entry);
+        } else if let Some(rank) = rank {
+            hits.push(ShelfHit {
+                rank,
+                glyph: ShelfGlyph::Icon(WorkbenchIcon::Models),
+                label: candidate.cell.clone(),
+                meta: Some(candidate.unavailable_reason.clone()),
+                selected: false,
+                arm: ShelfArm::Cell(Box::new(candidate.binding.clone())),
+                pin: None,
+                drag: None,
+                refusal: Some(candidate.unavailable_reason.clone()),
+            });
+        }
+    }
+    hits.sort_by_key(|hit| hit.rank);
+    hits.truncate(SHELF_HITS);
+    hits
+}
+
+/// The answers to a standing query, best first, on the shelf's row contract.
+///
+/// The row Enter would place carries the hover fill, so the field's answer to
+/// Enter is on screen before the key is pressed.
+fn shelf_results(ui: &mut Ui, state: &mut AppState, hits: &[ShelfHit]) -> Option<ShelfArm> {
+    if hits.is_empty() {
+        empty_navigator_row(ui, "No component or cell matches this filter");
+        return None;
+    }
+    shelf_section_header(ui, "Matches", Some(&hits.len().to_string()));
+    let top = hits.iter().position(|hit| hit.refusal.is_none());
+    let hover = Tokens::get(ui.ctx()).color.bg_hover;
+    let mut armed = None;
+    for (index, hit) in hits.iter().enumerate() {
+        let placeable = hit.refusal.is_none();
+        let response = ui
+            .add_enabled_ui(placeable, |ui| {
+                let fill = ui.painter().add(egui::Shape::Noop);
+                let response = shelf_part_row(
+                    ui,
+                    hit.glyph,
+                    &hit.label,
+                    hit.selected,
+                    hit.meta.as_deref(),
+                    0,
+                );
+                if top == Some(index) && !hit.selected {
+                    ui.painter()
+                        .set(fill, egui::Shape::rect_filled(response.rect, 0.0, hover));
+                }
+                response
+            })
+            .inner;
+        if let Some(reason) = &hit.refusal {
+            response.on_disabled_hover_text(reason.as_str());
+            continue;
+        }
+        if let Some(payload) = hit.drag.clone() {
+            response.dnd_set_drag_payload(payload);
+        }
+        if response.clicked() {
+            armed = Some(hit.arm.clone());
+        }
+        if let Some(entry) = &hit.pin {
+            shelf_pin_context_menu(&response, state, entry);
+        }
+    }
+    armed
 }

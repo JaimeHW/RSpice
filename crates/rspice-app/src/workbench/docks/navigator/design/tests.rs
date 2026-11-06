@@ -23,6 +23,7 @@ use crate::workbench::state::{NavigatorTreeNode, NavigatorTreeState, Workspace};
 mod object_rows;
 mod rails;
 mod shelf;
+mod shelf_search;
 
 /// Give the project one more schematic master: the library cell view, and the
 /// content the projection will materialize for it.
