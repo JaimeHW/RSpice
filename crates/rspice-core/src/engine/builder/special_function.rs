@@ -9,7 +9,8 @@
 
 use super::*;
 use crate::device::special_function::{
-    Gate, GateFunction, Ota, OutputStage, Schmitt, SpecialFunctionError,
+    Gate, GateFunction, Ota, OutputStage, Schmitt, Sequential, SequentialFunction,
+    SpecialFunctionError,
 };
 use crate::netlist::SpecialFunction;
 use crate::xspice::{
@@ -136,7 +137,10 @@ pub(super) fn build(
         | SpecialFunction::And
         | SpecialFunction::Or
         | SpecialFunction::Xor
-        | SpecialFunction::Schmitt => {
+        | SpecialFunction::Schmitt
+        | SpecialFunction::DFlop
+        | SpecialFunction::SrFlop
+        | SpecialFunction::Counter => {
             let (model, ports) = logic_device(element, &terminals, function, params)?;
             let cout = model.stage.cout;
             Hosted {
@@ -309,7 +313,7 @@ impl CodeModel for OtaModel {
 }
 
 //=============================================================================
-// Gates and Schmitt triggers
+// Gates, Schmitt triggers, flip-flops and the counter
 //=============================================================================
 
 /// What a logic device decides from its inputs.
@@ -318,25 +322,39 @@ enum Decision {
     Gate { gate: Gate, used: [bool; 5] },
     /// A Schmitt trigger on `V1 − V2`.
     Schmitt(Schmitt),
+    /// A flip-flop or counter over the used inputs among terminals 1 to 5.
+    Sequential { device: Sequential, used: [bool; 5] },
 }
 
-/// Accepted-state slots of a logic device.
+/// Accepted-state slots of a logic device. An output word holds the level
+/// of `Q` in bit 0 and that of `_Q` in bit 1.
 mod slot {
-    /// The logic function's latest value (0 or 1).
+    /// The output word the device's inputs call for.
     pub(super) const DESIRED: usize = 0;
-    /// When that value took hold.
+    /// When that word took hold.
     pub(super) const SINCE: usize = 1;
-    /// The level the outputs are driven toward (0 or 1).
+    /// The output word the outputs are driven toward.
     pub(super) const LEVEL: usize = 2;
     /// The `Q` and `_Q` source positions above the common.
     pub(super) const Q: usize = 3;
     pub(super) const QB: usize = 4;
-    /// Each input's value, for locating threshold crossings.
-    pub(super) const INPUTS: usize = 5;
+    /// A flip-flop's Q or a counter's count.
+    pub(super) const STATE: usize = 5;
+    /// Each input's value, for edges and threshold crossings.
+    pub(super) const INPUTS: usize = 6;
     pub(super) const COUNT: usize = INPUTS + 5;
 }
 
 const INPUT_PORTS: [&str; 5] = ["in1", "in2", "in3", "in4", "in5"];
+
+fn word(q: bool, qb: bool) -> Value {
+    Value::from(u8::from(q) | (u8::from(qb) << 1))
+}
+
+/// The levels of `Q` and `_Q` in an output word.
+fn bits(word: Value) -> (bool, bool) {
+    (word % 2.0 >= 1.0, word >= 2.0)
+}
 
 struct LogicModel {
     name: &'static str,
@@ -347,9 +365,16 @@ struct LogicModel {
 }
 
 impl LogicModel {
-    /// The input values, and the value of the logic function given its
-    /// accepted value `desired`.
-    fn decide(&self, ctx: &CmContext, desired: bool) -> ([Value; 5], bool) {
+    /// The input values, the output word and the sequential state, given the
+    /// accepted word and state. A flip-flop or counter keeps its initial
+    /// state through the operating point.
+    fn decide(
+        &self,
+        ctx: &CmContext,
+        desired: Value,
+        state: Value,
+        operating_point: bool,
+    ) -> ([Value; 5], Value, Value) {
         let mut inputs = [0.0; 5];
         match &self.decision {
             Decision::Gate { gate, used } => {
@@ -360,26 +385,59 @@ impl LogicModel {
                         levels.push(inputs[index] >= gate.reference);
                     }
                 }
-                (inputs, gate.function.evaluate(levels))
+                let high = gate.function.evaluate(levels);
+                (inputs, word(high, !high), 0.0)
             }
             Decision::Schmitt(schmitt) => {
                 inputs[0] = ctx.input("in1");
-                (inputs, schmitt.next(desired, inputs[0]))
+                let high = schmitt.next(bits(desired).0, inputs[0]);
+                (inputs, word(high, !high), 0.0)
+            }
+            Decision::Sequential { device, used } => {
+                let (mut before, mut now) = ([None; 5], [None; 5]);
+                for (index, port) in INPUT_PORTS.iter().enumerate() {
+                    if used[index] {
+                        inputs[index] = ctx.input(port);
+                        let previous = ctx.state_prev(slot::INPUTS + index);
+                        before[index] = Some(previous >= device.reference);
+                        now[index] = Some(inputs[index] >= device.reference);
+                    }
+                }
+                let state = if operating_point {
+                    0
+                } else {
+                    device.next(state as u32, before, now)
+                };
+                let (q, qb) = device.outputs(state);
+                (inputs, word(q, qb), Value::from(state))
             }
         }
     }
 
-    /// The level each input crosses to change the function from `desired`.
-    fn thresholds(&self, desired: bool) -> [Value; 5] {
+    /// The input values the first time step reads as the operating point's.
+    /// A counter's clock reads low there, so a clock already high counts.
+    fn operating_point_inputs(&self, mut inputs: [Value; 5]) -> [Value; 5] {
+        if let Decision::Sequential { device, used } = &self.decision
+            && matches!(device.function, SequentialFunction::Counter { .. })
+            && used[0]
+        {
+            inputs[0] = Value::MIN;
+        }
+        inputs
+    }
+
+    /// The level each input crosses to change the output word from `desired`.
+    fn thresholds(&self, desired: Value) -> [Value; 5] {
         match &self.decision {
             Decision::Gate { gate, .. } => [gate.reference; 5],
-            Decision::Schmitt(schmitt) => [schmitt.trip(desired); 5],
+            Decision::Schmitt(schmitt) => [schmitt.trip(bits(desired).0); 5],
+            Decision::Sequential { device, .. } => [device.reference; 5],
         }
     }
 
-    /// When the function left `desired` within the step ending at
+    /// When the output word left `desired` within the step ending at
     /// `ctx.time`: the latest crossing among the inputs that changed side.
-    fn crossing(&self, ctx: &CmContext, inputs: &[Value; 5], desired: bool) -> Value {
+    fn crossing(&self, ctx: &CmContext, inputs: &[Value; 5], desired: Value) -> Value {
         let (start, end) = (ctx.time_prev, ctx.time);
         let mut latest = start;
         let thresholds = self.thresholds(desired);
@@ -402,10 +460,6 @@ impl LogicModel {
             .filter(|(_, used)| *used)
             .map(|(ports, _)| ports)
     }
-}
-
-fn flag(value: bool) -> Value {
-    Value::from(u8::from(value))
 }
 
 impl CodeModel for LogicModel {
@@ -453,23 +507,31 @@ impl CodeModel for LogicModel {
         // Every evaluation rewrites the candidate state from the accepted one,
         // so a probe may write it too: the output partials read it.
         let stage = &self.stage;
-        let (level, q, qb) = if ctx.is_dc() || !ctx.is_transient() {
-            let (inputs, desired) = self.decide(ctx, ctx.state_prev(slot::DESIRED) != 0.0);
-            let (q, qb) = (stage.level(desired), stage.level(!desired));
-            ctx.set_initial_state(slot::DESIRED, flag(desired));
-            ctx.set_initial_state(slot::LEVEL, flag(desired));
+        let (level, q, qb) = if ctx.is_dc_operating_point() || !ctx.is_transient() {
+            let (inputs, desired, state) = self.decide(
+                ctx,
+                ctx.state_prev(slot::DESIRED),
+                ctx.state_prev(slot::STATE),
+                true,
+            );
+            let (high, high_b) = bits(desired);
+            let (q, qb) = (stage.level(high), stage.level(high_b));
+            ctx.set_initial_state(slot::DESIRED, desired);
+            ctx.set_initial_state(slot::LEVEL, desired);
             ctx.set_initial_state(slot::Q, q);
             ctx.set_initial_state(slot::QB, qb);
+            ctx.set_initial_state(slot::STATE, state);
             ctx.set_initial_state(slot::SINCE, Value::MIN);
-            for (index, input) in inputs.into_iter().enumerate() {
+            for (index, input) in self.operating_point_inputs(inputs).into_iter().enumerate() {
                 ctx.set_initial_state(slot::INPUTS + index, input);
             }
             (desired, q, qb)
         } else {
             let (start, now) = (ctx.time_prev, ctx.time);
-            let was_desired = ctx.state_prev(slot::DESIRED) != 0.0;
-            let was_level = ctx.state_prev(slot::LEVEL) != 0.0;
-            let (inputs, desired) = self.decide(ctx, was_desired);
+            let was_desired = ctx.state_prev(slot::DESIRED);
+            let was_level = ctx.state_prev(slot::LEVEL);
+            let (inputs, desired, state) =
+                self.decide(ctx, was_desired, ctx.state_prev(slot::STATE), false);
             let since = if desired == was_desired {
                 ctx.state_prev(slot::SINCE)
             } else {
@@ -478,21 +540,22 @@ impl CodeModel for LogicModel {
             let edge = since + stage.delay;
             let switches = desired != was_level && edge <= now;
             let level = if switches { desired } else { was_level };
-            let advance = |x: Value, high: bool| {
+            let advance = |x: Value, from: bool, to: bool| {
                 if switches {
-                    let at_edge = stage.slew(x, !high, edge - start);
-                    stage.slew(at_edge, high, now - edge)
+                    stage.slew(stage.slew(x, from, edge - start), to, now - edge)
                 } else {
-                    stage.slew(x, high, now - start)
+                    stage.slew(x, from, now - start)
                 }
             };
-            let q = advance(ctx.state_prev(slot::Q), level);
-            let qb = advance(ctx.state_prev(slot::QB), !level);
-            ctx.set_state(slot::DESIRED, flag(desired));
+            let ((from, from_b), (to, to_b)) = (bits(was_level), bits(level));
+            let q = advance(ctx.state_prev(slot::Q), from, to);
+            let qb = advance(ctx.state_prev(slot::QB), from_b, to_b);
+            ctx.set_state(slot::DESIRED, desired);
             ctx.set_state(slot::SINCE, since);
-            ctx.set_state(slot::LEVEL, flag(level));
+            ctx.set_state(slot::LEVEL, level);
             ctx.set_state(slot::Q, q);
             ctx.set_state(slot::QB, qb);
+            ctx.set_state(slot::STATE, state);
             for (index, input) in inputs.into_iter().enumerate() {
                 ctx.set_state(slot::INPUTS + index, input);
             }
@@ -503,7 +566,7 @@ impl CodeModel for LogicModel {
                 if switches && let Some(tripdt) = stage.tripdt {
                     ctx.request_breakpoint(edge + tripdt);
                 }
-                for (x, high) in [(q, level), (qb, !level)] {
+                for (x, high) in [(q, to), (qb, to_b)] {
                     if let Some(ramp) = stage.ramp_duration(x, high).filter(|ramp| *ramp > 0.0) {
                         ctx.request_breakpoint(now + ramp);
                     }
@@ -511,9 +574,9 @@ impl CodeModel for LogicModel {
             }
             (level, q, qb)
         };
+        let (high, high_b) = bits(level);
         for (sense, drive, true_output) in self.output_ports() {
-            let high = level == true_output;
-            let source = if true_output { q } else { qb };
+            let (high, source) = if true_output { (high, q) } else { (high_b, qb) };
             let current = (ctx.input(sense) - source) / stage.resistance(high);
             ctx.set_output(drive, current);
         }
@@ -521,14 +584,23 @@ impl CodeModel for LogicModel {
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {
-        let level = ctx.state(slot::LEVEL) != 0.0;
+        let (high, high_b) = bits(ctx.state(slot::LEVEL));
         self.output_ports()
             .find(|(_, drive, _)| output_port.eq_ignore_ascii_case(drive))
             .map(|(sense, _, true_output)| {
-                let high = level == true_output;
+                let high = if true_output { high } else { high_b };
                 vec![(sense.to_string(), 1.0 / self.stage.resistance(high))]
             })
             .unwrap_or_default()
+    }
+}
+
+/// The terminals among 1 to 5 a sequential device reads; it ignores the
+/// others.
+fn sequential_inputs(function: SpecialFunction) -> &'static [usize] {
+    match function {
+        SpecialFunction::DFlop => &[1, 3, 4, 5],
+        _ => &[1, 2],
     }
 }
 
@@ -538,16 +610,16 @@ fn logic_device(
     function: SpecialFunction,
     params: &[(String, Value)],
 ) -> Result<(LogicModel, Vec<XspicePort>), SimulationError> {
+    let name = function.ltspice_name();
+    let error = |error| device_error(element, error);
     let gate_function = match function {
-        SpecialFunction::Buf => Some(("BUF", GateFunction::Or)),
-        SpecialFunction::Or => Some(("OR", GateFunction::Or)),
-        SpecialFunction::And => Some(("AND", GateFunction::And)),
-        SpecialFunction::Xor => Some(("XOR", GateFunction::Xor)),
+        SpecialFunction::Buf | SpecialFunction::Or => Some(GateFunction::Or),
+        SpecialFunction::And => Some(GateFunction::And),
+        SpecialFunction::Xor => Some(GateFunction::Xor),
         _ => None,
     };
-    let (name, decision, stage) = if let Some((name, gate_function)) = gate_function {
-        let gate = Gate::from_params(name, gate_function, params)
-            .map_err(|error| device_error(element, error))?;
+    let (decision, stage) = if let Some(gate_function) = gate_function {
+        let gate = Gate::from_params(name, gate_function, params).map_err(error)?;
         let used = [1, 2, 3, 4, 5].map(|pin| terminals.used(pin));
         if !used.contains(&true) {
             return Err(SimulationError::Circuit(format!(
@@ -556,9 +628,9 @@ fn logic_device(
             )));
         }
         let stage = gate.stage;
-        (name, Decision::Gate { gate, used }, stage)
-    } else {
-        let schmitt = Schmitt::from_params(params).map_err(|error| device_error(element, error))?;
+        (Decision::Gate { gate, used }, stage)
+    } else if function == SpecialFunction::Schmitt {
+        let schmitt = Schmitt::from_params(params).map_err(error)?;
         for pin in [3, 4, 5] {
             if terminals.used(pin) {
                 return Err(SimulationError::Circuit(format!(
@@ -568,12 +640,18 @@ fn logic_device(
             }
         }
         let stage = schmitt.stage;
-        ("SCHMITT", Decision::Schmitt(schmitt), stage)
+        (Decision::Schmitt(schmitt), stage)
+    } else {
+        let device = Sequential::from_params(name, params).map_err(error)?;
+        let read = sequential_inputs(function);
+        let used = [1, 2, 3, 4, 5].map(|pin| read.contains(&pin) && terminals.used(pin));
+        let stage = device.stage;
+        (Decision::Sequential { device, used }, stage)
     };
     let outputs = [terminals.used(6), terminals.used(7)];
     let mut ports = Vec::with_capacity(9);
     match &decision {
-        Decision::Gate { used, .. } => {
+        Decision::Gate { used, .. } | Decision::Sequential { used, .. } => {
             for (index, used) in used.iter().enumerate() {
                 ports.push(if *used {
                     terminals.sensed(index + 1)

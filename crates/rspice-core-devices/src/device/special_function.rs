@@ -10,11 +10,14 @@
 
 mod logic;
 mod ota;
+mod sequential;
 
 #[doc(hidden)]
 pub use logic::{Gate, GateFunction, OutputStage, Schmitt};
 #[doc(hidden)]
 pub use ota::{Ota, OtaDrive, OtaNoise};
+#[doc(hidden)]
+pub use sequential::{Sequential, SequentialFunction};
 
 use crate::Value;
 use std::fmt;

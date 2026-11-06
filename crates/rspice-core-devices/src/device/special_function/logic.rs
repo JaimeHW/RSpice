@@ -66,7 +66,7 @@ pub struct OutputStage {
 }
 
 impl OutputStage {
-    fn read(p: &mut InstanceParams<'_>) -> Result<Self, SpecialFunctionError> {
+    pub(super) fn read(p: &mut InstanceParams<'_>) -> Result<Self, SpecialFunctionError> {
         let device = p.device;
         let vhigh = p.or("VHIGH", 1.0)?;
         let vlow = p.or("VLOW", 0.0)?;

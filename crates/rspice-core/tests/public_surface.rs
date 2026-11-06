@@ -565,7 +565,10 @@ const MAX_PUBLIC_ITEMS: usize = 5247;
 // `OutputStage` level, resistance, slew and ramp-duration methods, the three
 // `from_params` constructors, `Schmitt::next` and `trip`, and `Ota::drive` and
 // `clamp`. The census is 1,633, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1633;
+// The flip-flops and counter add six: the `Sequential` re-export, the
+// `Sequential` and `SequentialFunction` types, and `Sequential::from_params`,
+// `next` and `outputs`. The census is 1,639, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1639;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

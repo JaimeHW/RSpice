@@ -333,3 +333,159 @@ A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=1p ink=10
         assert_close("in", actual, expected, 1e-6 * expected);
     }
 }
+
+#[test]
+fn flip_flops_and_counters_hold_their_initial_state_in_the_operating_point() {
+    let deck = "* sequential operating points
+Vh hi 0 1
+Vh5 hi5 0 5
+A1 hi 0 0 0 0 qb1 q1 0 SRFLOP
+A2 0 0 0 hi 0 qb2 q2 0 DFLOP
+A3 hi 0 hi 0 0 qb3 q3 0 DFLOP Vhigh=3 Vlow=-1 Rout=10
+R3 q3 0 1k
+A4 hi5 0 0 0 0 p2 p1 0 COUNTER cycles=4 Vhigh=5 Rhigh=100
+R4 p1 0 100
+A5 hi 0 0 0 0 p2b p1b 0 COUNTER cycles=0
+.op
+.end
+";
+    let op = Engine::default()
+        .run_dc_op(&parse(deck))
+        .expect("OP solves");
+    let v = |node: &str| op.try_voltage_named(node).unwrap();
+    // LTspice 26.1.1 batch: S and PRE wait for the first time step.
+    for (node, expected) in [
+        ("q1", 0.0),
+        ("qb1", 1.0),
+        ("q2", 0.0),
+        ("qb2", 1.0),
+        ("q3", -1000.0 / 1010.0),
+        ("qb3", 3.0),
+        ("p1", 2.5),
+        ("p2", 0.0),
+        ("p1b", 0.0),
+        ("p2b", 0.0),
+    ] {
+        assert_close(node, v(node), expected, 1e-9);
+    }
+}
+
+#[test]
+fn flip_flops_and_counters_switch_where_ltspice_does() {
+    let deck = "* flip-flops and counters
+Vc clk 0 PULSE(0 1 5n 1p 1p 5n 10n)
+Vs s 0 PWL(0 0 20n 0 20.01n 1 22n 1 22.01n 0 40n 0 40.01n 1 50n 1 50.01n 0 100n 0 100.01n 1 130n 1 130.01n 0 175n 0 175.01n 1 177n 1 177.01n 0)
+Vr r 0 PWL(0 0 40n 0 40.01n 1 45n 1 45.01n 0 60n 0 60.01n 1 62n 1 62.01n 0 110n 0 110.01n 1 112n 1 112.01n 0 160n 0 160.01n 1 190n 1 190.01n 0)
+A1 s r 0 0 0 qb1 q1 0 SRFLOP
+Vd d 0 PWL(0 0 30n 0 30.01n 1 70n 1 70.01n 0)
+Vp pre 0 PWL(0 0 82n 0 82.01n 1 98n 1 98.01n 0 120n 0 120.01n 1 128n 1 128.01n 0)
+Vcl clr 0 PWL(0 0 32n 0 32.01n 1 48n 1 48.01n 0 120n 0 120.01n 1 124n 1 124.01n 0)
+A2 d 0 clk pre clr qb2 q2 0 DFLOP
+Vd3 d3 0 PWL(0 0 56n 0 56.01n 1 76n 1 76.01n 0)
+A3 d3 0 clk 0 0 qb3 q3 0 DFLOP Td=3n
+Vs4 s4 0 PWL(0 0 140n 0 140.01n 1 140.5n 1 140.51n 0)
+Vr4 r4 0 PWL(0 0 141n 0 141.01n 1 141.5n 1 141.51n 0)
+A4 s4 r4 0 0 0 qb4 q4 0 SRFLOP Td=3n
+Vx x 0 PWL(0 0 62n 0 62.01n 1 68n 1 68.01n 0)
+A5 clk x 0 0 0 p2 p1 0 COUNTER cycles=4
+A6 clk 0 0 0 0 p2b p1b 0 COUNTER cycles=3 Trise=2n Td=5n
+.end
+";
+    let probes = [
+        // SRFLOP: R holds Q low over S, and S sets it again once R falls.
+        ("q1", 21e-9, 1.0),
+        ("q1", 41e-9, 0.0),
+        ("q1", 46e-9, 1.0),
+        ("q1", 61e-9, 0.0),
+        ("q1", 101e-9, 1.0),
+        ("q1", 111e-9, 0.0),
+        ("q1", 113e-9, 1.0),
+        ("q1", 161e-9, 0.0),
+        ("q1", 176e-9, 0.0),
+        // DFLOP: CLR masks the edges at 35 and 45 ns, PRE those at 85 and
+        // 95 ns, and CLR wins over PRE from 120 to 124 ns.
+        ("q2", 36e-9, 0.0),
+        ("q2", 56e-9, 1.0),
+        ("qb2", 56e-9, 0.0),
+        ("q2", 76e-9, 0.0),
+        ("q2", 83e-9, 1.0),
+        ("q2", 96e-9, 1.0),
+        ("q2", 106e-9, 0.0),
+        ("q2", 122e-9, 0.0),
+        ("q2", 125e-9, 1.0),
+        ("q2", 136e-9, 0.0),
+        // Td = 3 ns after the edges at 65 and 85 ns; D rising 1 ns after
+        // the edge at 55 ns waits for the next one.
+        ("q3", 67.9e-9, 0.0),
+        ("q3", 68.1e-9, 1.0),
+        ("q3", 87.9e-9, 1.0),
+        ("q3", 88.1e-9, 0.0),
+        // A 1 ns set-then-reset is shorter than Td and never shows.
+        ("q4", 143.5e-9, 0.0),
+        ("q4", 144.5e-9, 0.0),
+        // COUNTER cycles=4: Phi1 for counts 0 and 1, Phi2 for 2 and 3; RST
+        // from 62 to 68 ns zeroes the count and swallows the edge at 65 ns.
+        ("p1", 4e-9, 1.0),
+        ("p2", 16e-9, 1.0),
+        ("p1", 26e-9, 0.0),
+        ("p1", 36e-9, 1.0),
+        ("p2", 61e-9, 1.0),
+        ("p1", 64e-9, 1.0),
+        ("p1", 66e-9, 1.0),
+        ("p1", 76e-9, 1.0),
+        ("p2", 86e-9, 1.0),
+        ("p2", 96e-9, 1.0),
+        ("p1", 106e-9, 1.0),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 200e-9, 0.1e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-3);
+    }
+
+    // COUNTER cycles=3 slews over Trise = 2 ns from the clock edge whatever
+    // Td says. LTspice 26.1.1 batch: 0.48763 and 0.51237 at 6 ns, 0.487903
+    // at 16 ns; its counter runs about 13 mV ahead of its own slew at the
+    // start of each ramp, inside this tolerance.
+    let ramps = [
+        ("p1b", 6e-9, 0.48763),
+        ("p2b", 6e-9, 0.51237),
+        ("p2b", 16e-9, 0.487903),
+    ];
+    let points: Vec<(&str, f64)> = ramps.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 20e-9, 0.02e-9, &points);
+    for ((node, time, expected), actual) in ramps.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 0.02);
+    }
+}
+
+#[test]
+fn a_counter_clock_high_in_the_operating_point_counts_at_the_first_step() {
+    let deck = "* clock high from the start
+Vh hi 0 1
+A1 hi 0 0 0 0 p2 p1 0 COUNTER cycles=2
+A2 hi 0 hi 0 0 qb2 q2 0 DFLOP
+A3 hi 0 0 0 0 qb3 q3 0 SRFLOP
+.end
+";
+    // LTspice 26.1.1 batch: the counter steps to count 1 at once, the
+    // DFLOP sees no edge, and the SRFLOP sets on the first step.
+    let values = tran_at(
+        deck,
+        10e-9,
+        0.1e-9,
+        &[("p1", 5e-9), ("p2", 5e-9), ("q2", 5e-9), ("q3", 5e-9)],
+    );
+    for ((node, expected), actual) in [("p1", 0.0), ("p2", 1.0), ("q2", 0.0), ("q3", 1.0)]
+        .into_iter()
+        .zip(values)
+    {
+        assert_close(node, actual, expected, 1e-9);
+    }
+}
+
+#[test]
+fn a_counter_needs_cycles() {
+    let error = build_error("* bad\nA1 clk 0 0 0 0 p2 p1 0 COUNTER\nVc clk 0 1\n.end\n");
+    assert!(error.contains("cycles"), "{error}");
+}
