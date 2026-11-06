@@ -542,8 +542,17 @@ R2 out 0 1k
         for variable in &result.variables {
             assert_eq!(variable.samples.len(), result.runs_completed);
             assert!(variable.samples.iter().all(|sample| sample.is_finite()));
-            let exact_mean = variable.samples.iter().sum::<f64>() / variable.samples.len() as f64;
-            assert_eq!(variable.mean, exact_mean);
+            // The engine sums with compensation, so a plain sum of the same
+            // samples may round differently: allow its rounding bound, (n - 1)
+            // units in the last place for same-signed samples.
+            let count = variable.samples.len() as f64;
+            let plain_mean = variable.samples.iter().sum::<f64>() / count;
+            assert!(
+                (variable.mean - plain_mean).abs() <= count * f64::EPSILON * plain_mean.abs(),
+                "{}: mean {} is not its samples' mean {plain_mean}",
+                variable.name,
+                variable.mean
+            );
         }
     }
 
