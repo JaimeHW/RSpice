@@ -31,7 +31,8 @@ const DESKTOP_VERTICAL_INSET: f32 = 34.0;
 const PHONE_INSET: f32 = 8.0;
 const PHONE_MAX_WIDTH: f32 = 560.0;
 const NARROW_MAX_WIDTH: f32 = 820.0;
-const HEADER_HEIGHT: f32 = 44.0;
+/// The title band, as tall as the footer band and every kit dialog's header.
+const HEADER_HEIGHT: f32 = 48.0;
 const FOOTER_HEIGHT: f32 = 48.0;
 const CATEGORY_RAIL_WIDTH: f32 = 196.0;
 const CATEGORY_ROW_HEIGHT: f32 = 30.0;
@@ -795,9 +796,10 @@ fn render_category_rail(
     active_category_id
 }
 
-/// A rail group name: the one piece of text in the dialog that is not a
-/// setting, a value or a control, so it is the faintest thing on the rail and
-/// carries no rule, no eyebrow and no tracking.
+/// A rail group name: it heads the categories under it, so it is set as a
+/// section band's title is, semibold in the dimmed ink, with no rule, no
+/// eyebrow and no tracking. Faint and medium at the categories' own edge it
+/// read as one more category that did nothing when pressed.
 fn category_group_label(ui: &mut Ui, label: &str) {
     let t = Tokens::get(ui.ctx());
     let (rect, response) = ui.allocate_exact_size(
@@ -814,8 +816,8 @@ fn category_group_label(ui: &mut Ui, label: &str) {
         egui::pos2(rect.left() + CONTENT_INSET, rect.center().y + 3.0),
         egui::Align2::LEFT_CENTER,
         label,
-        theme::sans(tokens::FS_0, FontWeight::Medium),
-        t.color.text_faint,
+        theme::sans(tokens::FS_0, FontWeight::SemiBold),
+        t.color.text_dim,
     );
 }
 
@@ -1398,20 +1400,33 @@ pub(super) fn control_width(ui: &Ui) -> f32 {
 /// The `.segmented` control moved to `ui::widgets` when the results data
 /// browser needed the same object; preference pages keep reaching it by the
 /// name they already use.
+///
+/// It is as wide as the column's selects, in equal segments, so the value
+/// column has one control width. Hugging their words, Color mode and Density
+/// stood 162 and 137 points wide over a 299 point select.
 pub(super) fn segmented(
     ui: &mut Ui,
     id_salt: &'static str,
     options: &[&str],
     selected: &mut usize,
 ) -> bool {
-    crate::ui::widgets::segmented(
-        ui,
-        id_salt,
-        options,
-        selected,
-        // The preferences grid item stretches at the phone breakpoint.
-        crate::ui::widgets::SegmentedWidth::PhoneStretch,
+    let width = control_width(ui);
+    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+    ui.allocate_ui_with_layout(
+        vec2(width, height),
+        egui::Layout::left_to_right(egui::Align::Center),
+        |ui| {
+            ui.set_width(width);
+            crate::ui::widgets::segmented(
+                ui,
+                id_salt,
+                options,
+                selected,
+                crate::ui::widgets::SegmentedWidth::Equal,
+            )
+        },
     )
+    .inner
 }
 
 /// A boolean setting's control: the design system's switch, on a hit target a
