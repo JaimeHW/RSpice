@@ -13,7 +13,8 @@ use crate::device::special_function::{
 };
 use crate::netlist::SpecialFunction;
 use crate::xspice::{
-    CmContext, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortSpec, PortType,
+    CmContext, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortNoiseCurrent, PortSpec,
+    PortType,
     XspiceCheckpointSupport, XspiceInstance, XspiceSmallSignalDescriptor,
 };
 use std::sync::Arc;
@@ -84,6 +85,12 @@ pub(super) fn build(
         match function {
             SpecialFunction::Ota => {
                 let ota = Ota::from_params(params).map_err(|error| device_error(element, error))?;
+                if ota.noise.incm > 0.0 {
+                    return Err(SimulationError::Circuit(format!(
+                        "{}: OTA common-mode input current noise (incm) is not supported",
+                        element.name
+                    )));
+                }
                 for pin in [5, 6] {
                     if terminals.used(pin) {
                         return Err(SimulationError::Circuit(format!(
@@ -249,6 +256,28 @@ impl CodeModel for OtaModel {
         let (current, _) = self.output(ctx);
         ctx.set_output("out", current);
         Ok(())
+    }
+
+    fn port_noise_currents(&self, ctx: &CmContext) -> Vec<PortNoiseCurrent> {
+        let noise = &self.ota.noise;
+        let drive = self.ota.drive(ctx.input("in"), self.multiplier(ctx));
+        // The input voltage noise reaches the output through the
+        // transconductance at the bias; the normal-mode current noise flows
+        // between the inputs.
+        vec![
+            PortNoiseCurrent {
+                mechanism: "en",
+                port: "out",
+                white: (drive.d_input * noise.en).powi(2),
+                corner: noise.enk,
+            },
+            PortNoiseCurrent {
+                mechanism: "in",
+                port: "in",
+                white: noise.in_.powi(2),
+                corner: noise.ink,
+            },
+        ]
     }
 
     fn output_input_partials(&self, ctx: &CmContext, output_port: &str) -> Vec<(String, Value)> {

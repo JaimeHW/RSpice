@@ -665,6 +665,19 @@ pub struct InputDataFileParameter {
     pub empty_uses_default: bool,
 }
 
+/// A device-noise current a code model drives between the terminals of one
+/// of its ports, white with a flicker corner: `white · (1 + corner / f)`.
+#[derive(Debug, Clone, PartialEq)]
+pub struct PortNoiseCurrent {
+    /// The mechanism's name in noise contributions.
+    pub mechanism: &'static str,
+    pub port: &'static str,
+    /// White current density (A²/Hz).
+    pub white: Value,
+    /// Flicker corner (Hz).
+    pub corner: Value,
+}
+
 /// The main trait for XSPICE code models
 ///
 /// All code models (built-in and external) implement this trait.
@@ -804,6 +817,12 @@ pub trait CodeModel: Send + Sync {
     /// listed element. An element in high impedance drives nothing and is not
     /// listed. The default is a model with no such output.
     fn converter_noise_conductances(&self, _ctx: &super::CmContext) -> Vec<(usize, Value)> {
+        Vec::new()
+    }
+
+    /// The model's device noise at its present state: currents between the
+    /// terminals of its ports. The default is a model without device noise.
+    fn port_noise_currents(&self, _ctx: &super::CmContext) -> Vec<PortNoiseCurrent> {
         Vec::new()
     }
 

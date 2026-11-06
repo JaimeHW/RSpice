@@ -161,6 +161,6 @@ pub use threshold::{AnalogInputThreshold, AnalogThresholdBehavior};
 
 pub use traits::{
     CmError, CmResult, CodeModel, InputDataFileParameter, ParamSpec, ParamType, PortDirection,
-    PortSpec, PortType, XspiceCheckpointSupport, XspiceRationalTransfer,
+    PortNoiseCurrent, PortSpec, PortType, XspiceCheckpointSupport, XspiceRationalTransfer,
     XspiceSmallSignalDescriptor,
 };

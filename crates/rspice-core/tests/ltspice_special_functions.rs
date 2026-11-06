@@ -3,6 +3,7 @@
 //! Reference values are LTspice 26.1.1 batch runs of the same decks.
 
 use rspice_core::Complex64;
+use rspice_core::analysis::NoiseContributionProbe;
 use rspice_core::analysis::ac::AcResult;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::{ElementKind, Netlist, SpecialFunction};
@@ -263,5 +264,43 @@ A3 b in 0 0 0 0 q3 0 SCHMITT Vt=0.6 Vh=0.3
     let values = tran_at(deck, 200e-9, 0.05e-9, &points);
     for ((node, time, expected), actual) in probes.iter().zip(values) {
         assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-3);
+    }
+}
+
+fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f64> {
+    Engine::default()
+        .run_noise_named_with_input_source(&parse(deck), "out", None, "V1", frequencies, 300.15)
+        .expect("noise solves")
+        .iter()
+        .map(|point| {
+            let probe = NoiseContributionProbe::parse(&format!("DNO(A1,{mechanism})")).unwrap();
+            point.contribution(&probe).expect("OTA mechanism reported").sqrt()
+        })
+        .collect()
+}
+
+#[test]
+fn ota_input_noise_matches_ltspice() {
+    let voltage = "* ota en
+V1 in 0 0 AC 1
+A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=10n enk=100
+.end
+";
+    // LTspice 26.1.1 batch, V(A1.en): en*sqrt(1 + enk/f) through G*Rout = 10.
+    let densities = ota_noise_density(voltage, "en", &[1.0, 10.0, 1e4]);
+    for (actual, expected) in densities.into_iter().zip([1.004_988e-6, 3.316_625e-7, 1.004_988e-7]) {
+        assert_close("en", actual, expected, 1e-6 * expected);
+    }
+    let current = "* ota in
+V1 s 0 0 AC 1
+Ra a 0 1k
+Rb b s 3k
+A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=1p ink=10
+.end
+";
+    // LTspice 26.1.1 batch, V(A1.in): in*sqrt(1 + ink/f) across Ra + Rb, times 10.
+    let densities = ota_noise_density(current, "in", &[1.0, 1e4]);
+    for (actual, expected) in densities.into_iter().zip([1.326_650e-7, 4.001_999e-8]) {
+        assert_close("in", actual, expected, 1e-6 * expected);
     }
 }

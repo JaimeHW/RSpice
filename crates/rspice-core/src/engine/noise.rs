@@ -1866,6 +1866,49 @@ impl Engine {
         Ok(sources)
     }
 
+    /// The device noise code models drive between their port terminals: a
+    /// white source, and a 1/f source for a flicker corner.
+    fn code_model_port_noise_sources(circuit: &CircuitData) -> Vec<NoiseSource> {
+        use crate::xspice::PortConnection;
+        let mut sources = Vec::new();
+        for instance in &circuit.xspice_instances {
+            for noise in instance.port_noise_currents() {
+                if noise.white <= 0.0 {
+                    continue;
+                }
+                let (pos, neg) = match instance.connection(noise.port) {
+                    Some(PortConnection::Analog(node)) => (*node, 0),
+                    Some(
+                        PortConnection::Differential(pos, neg)
+                        | PortConnection::CurrentOutput { pos, neg },
+                    ) => (*pos, *neg),
+                    _ => continue,
+                };
+                let identity = crate::analysis::NoiseSourceIdentity::mechanism(
+                    instance.name.clone(),
+                    noise.mechanism,
+                );
+                sources.push(
+                    NoiseSource::white(instance.name.clone(), pos, neg, noise.white)
+                        .with_identity(identity.clone()),
+                );
+                if noise.corner > 0.0 {
+                    sources.push(
+                        NoiseSource::flicker_psd(
+                            instance.name.clone(),
+                            pos,
+                            neg,
+                            noise.white * noise.corner,
+                            1.0,
+                        )
+                        .with_identity(identity),
+                    );
+                }
+            }
+        }
+        sources
+    }
+
     /// The thermal noise of every switch's present conductance: `4kT·G`
     /// across its terminals at the circuit temperature, for voltage-,
     /// current- and expression-controlled switches alike.
@@ -2286,6 +2329,7 @@ impl Engine {
         }
 
         noise_sources.extend(Self::converter_thermal_noise_sources(circuit)?);
+        noise_sources.extend(Self::code_model_port_noise_sources(circuit));
 
         for bsim3 in &circuit.bsim3v3.devices {
             noise_sources.extend(Self::collect_bsim3v3_noise_sources(bsim3)?);

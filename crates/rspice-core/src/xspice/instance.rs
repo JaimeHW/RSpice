@@ -1432,6 +1432,11 @@ impl XspiceInstance {
         self.model.converter_noise_conductances(&self.context)
     }
 
+    /// See [`super::CodeModel::port_noise_currents`].
+    pub(crate) fn port_noise_currents(&self) -> Vec<super::PortNoiseCurrent> {
+        self.model.port_noise_currents(&self.context)
+    }
+
     /// See [`super::CodeModel::receives_real_output`].
     #[cfg(feature = "veriloga")]
     pub(crate) fn receives_real_output(&self, port: &str) -> bool {

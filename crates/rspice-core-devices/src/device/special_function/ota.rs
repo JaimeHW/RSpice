@@ -26,13 +26,6 @@ pub struct OtaNoise {
     pub incmk: Value,
 }
 
-impl OtaNoise {
-    /// `white² · (1 + corner / f)`.
-    pub fn power(white: Value, corner: Value, frequency: Value) -> Value {
-        white * white * (1.0 + corner / frequency)
-    }
-}
-
 #[derive(Debug, Clone, PartialEq)]
 pub struct Ota {
     pub g: Value,
