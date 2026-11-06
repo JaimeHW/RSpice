@@ -1667,6 +1667,33 @@ impl Engine {
         .map_err(SimulationError::into_exhausted_circuit_error)
     }
 
+    /// Xyce holds each `.IC` node at its value through every DC-mode solve:
+    /// given `.IC`, its nonlinear solver augments the system with
+    /// AugmentLinSys_IC (N_NLS_NOX_Interface.C:483-489 and 1602-1621), which
+    /// zeroes the node's residual and replaces its Jacobian row with a unit
+    /// diagonal (N_NLS_NOX_AugmentLinSys_IC.C:98-164), so the node keeps the
+    /// value written into the starting vector. That is RSpice's forced `.IC`
+    /// operating point. A `.IC` that names no node of the circuit holds
+    /// nothing, as in Xyce, which augments only once it found one
+    /// (`found > 0`).
+    pub(in crate::engine) fn dialect_dc_op_startup<'a>(
+        &self,
+        netlist: &Netlist,
+        circuit: &crate::CircuitData,
+        startup: DcOpStartup<'a>,
+    ) -> DcOpStartup<'a> {
+        if self.config.spice_dialect == super::SpiceDialect::Xyce
+            && matches!(startup, DcOpStartup::Automatic { use_hints: true })
+            && !self
+                .collect_initial_condition_hints(netlist, circuit)
+                .is_empty()
+        {
+            DcOpStartup::ForceInitialConditions
+        } else {
+            startup
+        }
+    }
+
     pub(in crate::engine) fn solve_dc_operating_point_with_startup_and_abort(
         &self,
         netlist: &Netlist,

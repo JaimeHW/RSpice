@@ -1161,7 +1161,6 @@ impl Engine {
         linearize: Option<DcOperatingPointLinearization<'_>>,
         abort: &dyn AbortSignal,
     ) -> Result<DcOperatingPointState, SimulationError> {
-        let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
         let run_scope = crate::abort_signal::ModelRunSignal::if_needed(abort);
         let abort: &dyn AbortSignal = run_scope.as_ref().map_or(abort, |scope| scope);
         Self::ensure_model_run_active(abort)?;
@@ -1182,6 +1181,12 @@ impl Engine {
         // alternative is answering with the placeholder row's zero. A sweep
         // point runs through its own entry below.
         Self::refuse_authored_event_only_dc_voltages(netlist, &circuit, OutputAnalysisKind::Op)?;
+        let startup = if lifecycle.is_none() {
+            engine.dialect_dc_op_startup(netlist, &circuit, startup)
+        } else {
+            startup
+        };
+        let force_initial_conditions = matches!(startup, DcOpStartup::ForceInitialConditions);
 
         let veriloga_analysis = if force_initial_conditions { 4 } else { 0 };
         if lifecycle
@@ -2202,6 +2207,39 @@ mod tests {
             (actual - expected).abs() <= 1.0e-10,
             "expected V({node})={expected:.17e}, got {actual:.17e}"
         );
+    }
+
+    /// Xyce holds each `.IC` node at its value through its DC operating point
+    /// (AugmentLinSys_IC). Xyce 7.10 prints V(m) = 0.3 for the divider, and
+    /// V(g) = 0.25 both where the diode alone would settle at 0.476 V and
+    /// where only a capacitor and a current source meet the node. ngspice
+    /// reads `.IC` only for a transient, so its `.op` solves the divider.
+    #[test]
+    fn a_xyce_dialect_operating_point_holds_its_ic_nodes() {
+        let divider = "ic divider\nV1 a 0 2\nR1 a m 1k\nR2 m 0 1k\n.ic v(m)=0.3\n.op\n.end\n";
+        for (deck, node, held) in [
+            (divider, "m", 0.3),
+            (
+                "ic diode\nI1 0 g 1u\nC1 g 0 1p\nD1 g 0 dm\n.model dm d is=1e-14\n\
+                 .ic v(g)=0.25\n.op\n.end\n",
+                "g",
+                0.25,
+            ),
+            (
+                "ic floating\nI1 0 g 1u\nC1 g 0 1p\n.ic v(g)=0.25\n.op\n.end\n",
+                "g",
+                0.25,
+            ),
+        ] {
+            let netlist = Netlist::parse(deck).unwrap();
+            let result = xyce_engine()
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|error| panic!("{deck}: {error}"));
+            assert_voltage(&result, node, held);
+        }
+        let netlist = Netlist::parse(divider).unwrap();
+        let result = Engine::default().run_dc_op(&netlist).unwrap();
+        assert_voltage(&result, "m", 1.0);
     }
 
     #[test]
