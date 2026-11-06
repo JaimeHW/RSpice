@@ -8,8 +8,10 @@
 //! This module holds the device equations and their LTspice parameter sets;
 //! the engine hosts each instance as an analog behavioral model.
 
+mod logic;
 mod ota;
 
+pub use logic::{Gate, GateFunction, OutputStage, Schmitt};
 pub use ota::{Ota, OtaDrive, OtaNoise};
 
 use crate::Value;

@@ -127,3 +127,141 @@ fn ota_refuses_what_ltspice_does_not_define() {
     let window = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA Vhigh=0 Vlow=1\n.end\n");
     assert!(window.contains("Vhigh above Vlow"), "{window}");
 }
+
+fn tran_at(deck: &str, stop: f64, step: f64, probes: &[(&str, f64)]) -> Vec<f64> {
+    let tran = Engine::default()
+        .run_tran(&parse(deck), stop, step)
+        .expect("transient solves");
+    probes
+        .iter()
+        .map(|(node, time)| {
+            let wave = tran
+                .try_voltage_waveform_named(node)
+                .unwrap_or_else(|| panic!("no waveform for {node}"));
+            let index = tran.time.partition_point(|t| t < time).max(1);
+            let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+            let fraction = if t1 > t0 { (time - t0) / (t1 - t0) } else { 0.0 };
+            wave[index - 1] + fraction * (wave[index] - wave[index - 1])
+        })
+        .collect()
+}
+
+#[test]
+fn gate_operating_points_match_ltspice() {
+    let deck = "* gate operating points
+Va a 0 1
+Vb b 0 0
+Vc c 0 1
+Vx x 0 2.5
+Vcm cm 0 1
+A1 a b 0 0 0 qb1 q1 0 AND
+A2 a b 0 0 0 qb2 q2 0 OR
+A3 a b c 0 0 qb3 q3 0 XOR
+A4 a b 0 0 0 qb4 q4 0 XOR
+A5 b 0 0 0 0 qb5 q5 0 BUF
+A6 x cm cm cm cm qb6 q6 cm BUF Vhigh=3 Vlow=-1 Rout=10
+R6 q6 0 1k
+R6b qb6 0 1k
+A7 x 0 0 0 0 0 q7 0 SCHMITT Vt=2 Vh=0.2 Rhigh=50
+R7 q7 0 50
+.op
+.end
+";
+    let op = Engine::default().run_dc_op(&parse(deck)).expect("OP solves");
+    let v = |node: &str| op.try_voltage_named(node).unwrap();
+    for (node, expected) in [
+        ("q1", 0.0),
+        ("qb1", 1.0),
+        ("q2", 1.0),
+        ("q3", 0.0),
+        ("q4", 1.0),
+        ("q5", 0.0),
+        ("qb5", 1.0),
+        // Levels and threshold sit above the common at 1 V; 10 ohms into 1k.
+        ("q6", 3.960_396_039_6),
+        ("qb6", 0.0),
+        // Rhigh = 50 into 50 ohms.
+        ("q7", 0.5),
+    ] {
+        assert_close(node, v(node), expected, 1e-9);
+    }
+}
+
+#[test]
+fn gate_delay_slew_and_output_rc_match_ltspice() {
+    let deck = "* gate transients
+V1 in 0 PWL(0 0 10n 0 10.001n 1 50n 1 50.001n 0 70n 0 70.001n 1 72n 1 72.001n 0)
+A1 in 0 0 0 0 0 q1 0 BUF Td=5n
+A2 in 0 0 0 0 0 q2 0 BUF Trise=20n
+A3 in 0 0 0 0 qb3 q3 0 BUF Trise=10n Tfall=4n
+A4 in 0 0 0 0 0 q4 0 BUF Tau=10n Rout=1k
+R4 q4 0 1k
+A5 in 0 0 0 0 0 q5 0 BUF Rhigh=100 Rlow=10 Vlow=-1 Ref=0.5
+R5 q5 0 100
+.end
+";
+    let probes = [
+        // Td = 5 ns, and a 2 ns pulse is shorter than the hold time.
+        ("q1", 14.9e-9, 0.0),
+        ("q1", 15.1e-9, 1.0),
+        ("q1", 73e-9, 0.0),
+        ("q1", 78e-9, 0.0),
+        // Trise = 20 ns: a linear ramp to 95 %, then tau = 1 ns.
+        ("q2", 20e-9, 0.499_96),
+        ("q2", 29e-9, 0.949_96),
+        ("q2", 31e-9, 0.993_229),
+        ("q2", 60e-9, 0.500_042),
+        // Trise = 10 ns, Tfall = 4 ns, one settling constant.
+        ("q3", 20e-9, 0.989_495),
+        ("q3", 52e-9, 0.500_213),
+        ("qb3", 52e-9, 0.199_915),
+        // Tau = 10 ns behind 1k into 1k: 5 ns.
+        ("q4", 15e-9, 0.316_043),
+        ("q4", 20e-9, 0.432_326),
+        ("q4", 60e-9, 0.067_651_7),
+        // Rhigh and Rlow follow the output level.
+        ("q5", 40e-9, 0.5),
+        ("q5", 90e-9, -100.0 / 110.0),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 100e-9, 0.02e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 2e-3);
+    }
+}
+
+#[test]
+fn schmitt_triggers_trip_where_ltspice_does() {
+    let deck = "* schmitt trips
+V1 in 0 PWL(0 0 100n 3 200n 0)
+Vb b 0 2
+A1 in 0 0 0 0 0 q1 0 SCHMITT Vhigh=3
+A2 in 0 0 0 0 qb2 0 0 SCHMITT Vhigh=3 Vt=1
+A3 b in 0 0 0 0 q3 0 SCHMITT Vt=0.6 Vh=0.3
+.end
+";
+    let probes = [
+        // Defaults Vt = 1.5, Vh = Vt/20: trips at 1.575 V (52.5 ns) and
+        // 1.425 V (152.5 ns).
+        ("q1", 52.3e-9, 0.0),
+        ("q1", 52.8e-9, 3.0),
+        ("q1", 152.3e-9, 3.0),
+        ("q1", 152.8e-9, 0.0),
+        // Vt = 1, Vh = 0.05 on the inverted output: 35 ns and 168.33 ns.
+        ("qb2", 34.8e-9, 3.0),
+        ("qb2", 35.3e-9, 0.0),
+        ("qb2", 168.1e-9, 0.0),
+        ("qb2", 168.6e-9, 3.0),
+        // Differential: V(b) - V(in) falls through 0.3 V at 56.67 ns and
+        // rises through 0.9 V at 163.33 ns.
+        ("q3", 56.4e-9, 1.0),
+        ("q3", 56.9e-9, 0.0),
+        ("q3", 163.1e-9, 0.0),
+        ("q3", 163.6e-9, 1.0),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 200e-9, 0.05e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-3);
+    }
+}
