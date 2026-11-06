@@ -151,6 +151,20 @@ veriloga-model-asmhemt = [
     "rspice-core-netlist/veriloga-model-asmhemt",
     "rspice-core-devices/veriloga-model-asmhemt",
 ]
+veriloga-model-bjt504tva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bjt504tva",
+    "rspice-core-base/veriloga-model-bjt504tva",
+    "rspice-core-netlist/veriloga-model-bjt504tva",
+    "rspice-core-devices/veriloga-model-bjt504tva",
+]
+veriloga-model-bjt504va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bjt504va",
+    "rspice-core-base/veriloga-model-bjt504va",
+    "rspice-core-netlist/veriloga-model-bjt504va",
+    "rspice-core-devices/veriloga-model-bjt504va",
+]
 veriloga-model-bjt505-va = [
     "veriloga-builtins-base",
     "rspice-veriloga-models/veriloga-model-bjt505-va",
@@ -164,6 +178,20 @@ veriloga-model-bjt505t-va = [
     "rspice-core-base/veriloga-model-bjt505t-va",
     "rspice-core-netlist/veriloga-model-bjt505t-va",
     "rspice-core-devices/veriloga-model-bjt505t-va",
+]
+veriloga-model-bjtd504tva = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bjtd504tva",
+    "rspice-core-base/veriloga-model-bjtd504tva",
+    "rspice-core-netlist/veriloga-model-bjtd504tva",
+    "rspice-core-devices/veriloga-model-bjtd504tva",
+]
+veriloga-model-bjtd504va = [
+    "veriloga-builtins-base",
+    "rspice-veriloga-models/veriloga-model-bjtd504va",
+    "rspice-core-base/veriloga-model-bjtd504va",
+    "rspice-core-netlist/veriloga-model-bjtd504va",
+    "rspice-core-devices/veriloga-model-bjtd504va",
 ]
 veriloga-model-bjtd505-va = [
     "veriloga-builtins-base",
@@ -388,8 +416,12 @@ veriloga-builtins-models = [
     "veriloga-model-asmesd",
     "veriloga-model-asmesd-dio",
     "veriloga-model-asmhemt",
+    "veriloga-model-bjt504tva",
+    "veriloga-model-bjt504va",
     "veriloga-model-bjt505-va",
     "veriloga-model-bjt505t-va",
+    "veriloga-model-bjtd504tva",
+    "veriloga-model-bjtd504va",
     "veriloga-model-bjtd505-va",
     "veriloga-model-bjtd505t-va",
     "veriloga-model-bsimbulk",

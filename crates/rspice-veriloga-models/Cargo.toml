@@ -20,8 +20,12 @@ veriloga-model-angelov-gan = ["dep:rspice-veriloga-model-angelov-gan"]
 veriloga-model-asmesd = ["dep:rspice-veriloga-model-asmesd"]
 veriloga-model-asmesd-dio = ["dep:rspice-veriloga-model-asmesd-dio"]
 veriloga-model-asmhemt = ["dep:rspice-veriloga-model-asmhemt"]
+veriloga-model-bjt504tva = ["dep:rspice-veriloga-model-bjt504tva"]
+veriloga-model-bjt504va = ["dep:rspice-veriloga-model-bjt504va"]
 veriloga-model-bjt505-va = ["dep:rspice-veriloga-model-bjt505-va"]
 veriloga-model-bjt505t-va = ["dep:rspice-veriloga-model-bjt505t-va"]
+veriloga-model-bjtd504tva = ["dep:rspice-veriloga-model-bjtd504tva"]
+veriloga-model-bjtd504va = ["dep:rspice-veriloga-model-bjtd504va"]
 veriloga-model-bjtd505-va = ["dep:rspice-veriloga-model-bjtd505-va"]
 veriloga-model-bjtd505t-va = ["dep:rspice-veriloga-model-bjtd505t-va"]
 veriloga-model-bsimbulk = ["dep:rspice-veriloga-model-bsimbulk"]
@@ -64,8 +68,12 @@ veriloga-builtins-noise = [
     "rspice-veriloga-model-asmesd?/veriloga-builtins-noise",
     "rspice-veriloga-model-asmesd-dio?/veriloga-builtins-noise",
     "rspice-veriloga-model-asmhemt?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bjt504tva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bjt504va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bjt505-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bjt505t-va?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bjtd504tva?/veriloga-builtins-noise",
+    "rspice-veriloga-model-bjtd504va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bjtd505-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bjtd505t-va?/veriloga-builtins-noise",
     "rspice-veriloga-model-bsimbulk?/veriloga-builtins-noise",
@@ -111,8 +119,12 @@ rspice-veriloga-model-angelov-gan = { path = "models/angelov-gan", version = "0.
 rspice-veriloga-model-asmesd = { path = "models/asmesd", version = "0.1.0", optional = true }
 rspice-veriloga-model-asmesd-dio = { path = "models/asmesd-dio", version = "0.1.0", optional = true }
 rspice-veriloga-model-asmhemt = { path = "models/asmhemt", version = "0.1.0", optional = true }
+rspice-veriloga-model-bjt504tva = { path = "models/bjt504tva", version = "0.1.0", optional = true }
+rspice-veriloga-model-bjt504va = { path = "models/bjt504va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bjt505-va = { path = "models/bjt505-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bjt505t-va = { path = "models/bjt505t-va", version = "0.1.0", optional = true }
+rspice-veriloga-model-bjtd504tva = { path = "models/bjtd504tva", version = "0.1.0", optional = true }
+rspice-veriloga-model-bjtd504va = { path = "models/bjtd504va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bjtd505-va = { path = "models/bjtd505-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bjtd505t-va = { path = "models/bjtd505t-va", version = "0.1.0", optional = true }
 rspice-veriloga-model-bsimbulk = { path = "models/bsimbulk", version = "0.1.0", optional = true }

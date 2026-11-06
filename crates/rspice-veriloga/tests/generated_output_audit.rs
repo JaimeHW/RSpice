@@ -102,7 +102,7 @@ fn generated_veriloga_devices_are_portable_direct_rust_artifacts() {
         }
     }
 
-    assert_eq!(model_crates, 43, "audit every generated model crate");
+    assert_eq!(model_crates, 47, "audit every generated model crate");
     assert!(
         failures.is_empty(),
         "generated models must be portable direct Rust and independent of interpreter/JIT/compiler implementation:\n{}",
@@ -514,7 +514,9 @@ fn generated_veriloga_sources_stay_compact() {
     /// now carries the `units` and `desc` attributes its source gives (17,789
     /// strings, 1.02 MB), and a `$limit` junction starts from its critical
     /// voltage (0.24 MB of branches). Also attributed, not endorsed.
-    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 36_000_000;
+    /// The total raised 2026-11-09, from 36.0 MB: the four Mextram 504.12.1
+    /// packages are 1.08 MB of their own code. No other model grew.
+    const MAX_TOTAL_MODEL_RUST_BYTES: usize = 37_100_000;
     const MAX_SINGLE_MODEL_RUST_BYTES: usize = 3_700_000;
     const MAX_EMPTY_ELSE_ARMS: usize = 32;
 
@@ -656,7 +658,7 @@ fn generated_veriloga_bodies_are_protected_from_rustfmt_rewrites() {
             display_path(&lib_path)
         );
     }
-    assert_eq!(model_crates, 43, "audit every generated model crate");
+    assert_eq!(model_crates, 47, "audit every generated model crate");
 
     let mut unmarked = Vec::new();
     scan_generated_rust(&generated_root, &mut |path, source| {
@@ -697,7 +699,7 @@ fn generated_state_files_use_compact_tab_indentation() {
         }
     });
 
-    assert_eq!(state_files, 43, "audit every generated state file");
+    assert_eq!(state_files, 47, "audit every generated state file");
     assert!(
         tab_indented_lines > 0,
         "generated state files must be indented"
@@ -744,7 +746,7 @@ fn generated_static_parameter_bounds_are_interned() {
         }
     });
 
-    assert_eq!(state_files, 43, "audit every generated state file");
+    assert_eq!(state_files, 47, "audit every generated state file");
     assert_eq!(pooled_state_files, state_files);
     assert!(
         failures.is_empty(),
@@ -813,7 +815,7 @@ fn generated_parameter_names_use_sorted_compact_lookup_tables() {
         total_entries += names_count;
     });
 
-    assert_eq!(state_files, 43, "audit every generated state file");
+    assert_eq!(state_files, 47, "audit every generated state file");
     assert!(total_entries > 0, "lookup corpus must not be empty");
     assert!(
         failures.is_empty(),
@@ -857,7 +859,7 @@ fn generated_model_features_match_the_core_feature_catalog() {
 
     assert_eq!(
         model_features.len(),
-        43,
+        47,
         "every generated model must have one stable compile feature"
     );
     for feature in &model_features {

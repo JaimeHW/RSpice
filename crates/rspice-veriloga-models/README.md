@@ -34,8 +34,12 @@ compared without regard to case.
 | `asmesd` | `asmesd` | `veriloga-model-asmesd` |
 | `asmesd_dio` | `asmesd_dio` | `veriloga-model-asmesd-dio` |
 | `asmhemt` | `asmhemt` | `veriloga-model-asmhemt` |
+| `bjt504tva` | `bjt504tva` | `veriloga-model-bjt504tva` |
+| `bjt504va` | `bjt504va` | `veriloga-model-bjt504va` |
 | `bjt505_va` | `bjt505_va` | `veriloga-model-bjt505-va` |
 | `bjt505t_va` | `bjt505t_va` | `veriloga-model-bjt505t-va` |
+| `bjtd504tva` | `bjtd504tva` | `veriloga-model-bjtd504tva` |
+| `bjtd504va` | `bjtd504va` | `veriloga-model-bjtd504va` |
 | `bjtd505_va` | `bjtd505_va` | `veriloga-model-bjtd505-va` |
 | `bjtd505t_va` | `bjtd505t_va` | `veriloga-model-bjtd505t-va` |
 | `bsimbulk` | `bsimbulk` | `veriloga-model-bsimbulk` |

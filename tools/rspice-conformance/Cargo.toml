@@ -49,8 +49,8 @@ veriloga-native = ["verilog-digital", "rspice-core/veriloga-native"]
 verilog-digital = ["rspice-core/veriloga"]
 # Keep the authoritative default census honest by linking every generated
 # capability required by an admitted deck. Select the canonical VBIC
-# three-terminal, external-thermal, and four-terminal artifacts plus their
-# shared noise runtime. The remaining compact-model catalog stays outside the
+# three-terminal, external-thermal, and four-terminal artifacts, Mextram
+# 504.12.1 (bjt504va), and their shared noise runtime. The remaining compact-model catalog stays outside the
 # default build so compile cost remains bounded.
 circuit-suites = [
     "veriloga-model-diode-cmc",
@@ -60,6 +60,7 @@ circuit-suites = [
     "veriloga-model-vbic13",
     "veriloga-model-vbic13-3t-et",
     "veriloga-model-vbic13-4t",
+    "veriloga-model-bjt504va",
 ]
 
 # Forwarded, not local. The ngspice suite marks decks that instantiate a
@@ -107,6 +108,12 @@ veriloga-model-vbic13-4t = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-model-vbic13-4t",
 ]
+# Forward Mextram 504.12.1 so the Xyce suite runs VANOISE/commonEmitterBjt_mextram
+# (Q LEVEL=504) instead of reporting the model as missing from this build.
+veriloga-model-bjt504va = [
+    "veriloga-builtins-base",
+    "rspice-core/veriloga-model-bjt504va",
+]
 veriloga-builtins-models = [
     "veriloga-builtins-base",
     "rspice-core/veriloga-builtins-models",
@@ -116,6 +123,7 @@ veriloga-builtins-models = [
     "veriloga-model-vbic13",
     "veriloga-model-vbic13-3t-et",
     "veriloga-model-vbic13-4t",
+    "veriloga-model-bjt504va",
 ]
 # Preserve the compatibility umbrella while exposing the individual VBIC and
 # noise capabilities above for feature-shard builds. Production admission asks

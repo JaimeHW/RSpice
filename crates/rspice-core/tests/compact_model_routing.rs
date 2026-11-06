@@ -88,6 +88,18 @@ fn a_verilog_a_delivered_bjt_family_names_its_module_and_feature() {
             "bjt505t_va",
             "veriloga-model-bjt505t-va",
         ),
+        (
+            ".model qmod MEXTRAM504 ()",
+            "MEXTRAM 504",
+            "bjt504va",
+            "veriloga-model-bjt504va",
+        ),
+        (
+            ".model qmod BJT504TVA ()",
+            "MEXTRAM 504 self-heating",
+            "bjt504tva",
+            "veriloga-model-bjt504tva",
+        ),
     ];
 
     let mut refusals = 0usize;
@@ -217,6 +229,62 @@ RT dt 0 1G
     };
     assert_eq!(unit("V(dt)"), "K");
     assert_eq!(unit("V(cx)"), "V");
+}
+
+/// Xyce registers Mextram 504.12.1 as Q LEVEL=504. Under the Xyce dialect a
+/// LEVEL=504 card runs that release's own module, a PNP card as a PNP, and is
+/// never handed to Mextram 505.
+#[cfg(feature = "veriloga-model-bjt504va")]
+#[test]
+fn an_xyce_level_504_card_runs_mextram_504_with_the_card_polarity() {
+    use rspice_core::engine::SpiceDialect;
+    let engine = Engine::new(SimulationConfig::default().with_spice_dialect(SpiceDialect::Xyce));
+    let mut collector_currents = Vec::new();
+    for (polarity, vcc, vb) in [("NPN", 1.0, 0.75), ("PNP", -1.0, -0.75)] {
+        let deck = format!(
+            "* Xyce Mextram 504 by level
+             VCC c 0 DC {vcc}
+             VB b 0 DC {vb}
+             Q1 c b 0 0 qmod
+             .model qmod {polarity} LEVEL=504
+             .end
+"
+        );
+        let netlist = Netlist::parse(&deck).expect("Mextram 504 deck parses");
+        let circuit = engine
+            .build_circuit(&netlist)
+            .expect("an Xyce LEVEL=504 card builds through the generated backend");
+        let report = circuit.device_op_report();
+        let entry = report
+            .entries
+            .iter()
+            .find(|entry| entry.name.eq_ignore_ascii_case("Q1"))
+            .expect("Q1 is reported");
+        assert_eq!(entry.device_kind.to_ascii_uppercase(), "BJT504VA");
+        let op = engine
+            .run_dc_op(&netlist)
+            .expect("the Mextram 504 operating point solves");
+        let current = op
+            .branch_currents
+            .iter()
+            .zip(&op.branch_names)
+            .find(|(_, name)| name.eq_ignore_ascii_case("VCC"))
+            .map(|(current, _)| *current)
+            .expect("VCC branch current");
+        collector_currents.push(current);
+    }
+    // A forward-biased NPN draws collector current out of VCC's positive
+    // terminal and the mirrored PNP returns it: the two currents are equal and
+    // opposite only if the PNP card ran with TYPE=-1.
+    assert!(
+        collector_currents[0].abs() > 1.0e-9,
+        "{collector_currents:?}"
+    );
+    assert!(
+        (collector_currents[0] + collector_currents[1]).abs()
+            <= 1.0e-9 * collector_currents[0].abs(),
+        "NPN and PNP Mextram 504 must mirror: {collector_currents:?}"
+    );
 }
 
 #[cfg(feature = "veriloga-model-bjt505-va")]

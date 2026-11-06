@@ -26,5 +26,19 @@ License: stated per release, in that release's own license file.
   California grant is carried in the header of `code/bsimsoi.va`, with
   `NOTICE.txt` naming the CMC standard.
 
+- `vacode_504.12.1`: Mextram 504.12.1 (July 2016), taken from the Mextram
+  site at Auburn University,
+  https://www.eng.auburn.edu/~niuguof/mextram/codes/index.html, as
+  `vacode_504.12.1.tar.gz` (SHA-256
+  `17056001d10896dbc8c6f4816d501f8d10210186b3ae245837403253382d298c`) and
+  vendored unmodified. The Mextram intellectual-property notice, disclaimer,
+  and license are in `IP_NOTICE_DISCLAIMER_LICENSE`, copyright NXP
+  Semiconductors, Delft University of Technology, and Auburn University. Xyce
+  7.10 registers this release as Q LEVEL=504 (`bjt504va`) and LEVEL=505
+  (`bjt504tva`) from a copy its `README_Xyce` records as modified (added
+  junction limiting, a `tempx` temporary, `M` as an alias of `MULT`); that
+  copy is not used here. The archive holds the four modules, their include
+  files, and the license; it ships no test circuits or reference results.
+
 None of these releases carries a non-commercial or no-derivatives restriction;
 `tools/models/license_audit.py` enforces that across the whole `models/` tree.

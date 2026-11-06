@@ -1631,6 +1631,56 @@ fn juncap200_transient_agrees_across_routes() {
 }
 
 // ---------------------------------------------------------------------------
+// Mextram 504.12.1 — Xyce's Q LEVEL=504
+//
+// The rows carry their own `cfg`, so a build that selects the model picks
+// them up.
+// ---------------------------------------------------------------------------
+
+#[cfg(feature = "veriloga-model-bjt504va")]
+const MEXTRAM504_SOURCE: &str = "models/veriloga/cmc/vacode_504.12.1/bjt504.va";
+
+#[cfg(feature = "veriloga-model-bjt504va")]
+fn mextram504_row(body: &str) -> Row<'_> {
+    Row {
+        label: "bjt504va",
+        module: "bjt504va",
+        source: MEXTRAM504_SOURCE,
+        body,
+        nodes: &["c", "b", "bx"],
+        branches: &["VC", "VB"],
+        tstop: 20.0e-9,
+        tstep: 1.0e-9,
+    }
+}
+
+/// Forward active at the release defaults, through a base resistor so the
+/// base node is solved rather than forced.
+#[cfg(feature = "veriloga-model-bjt504va")]
+#[test]
+fn mextram504_operating_point_agrees_across_routes() {
+    mextram504_row(
+        "VC c 0 1
+VB b 0 0.8
+RB b bx 1k
+X1 c bx 0 0 bjt504va",
+    )
+    .compare_operating_point();
+}
+
+#[cfg(feature = "veriloga-model-bjt504va")]
+#[test]
+fn mextram504_ac_agrees_across_routes() {
+    mextram504_row(
+        "VC c 0 1
+VB b 0 DC 0.8 AC 1
+RB b bx 1k
+X1 c bx 0 0 bjt504va",
+    )
+    .compare_ac(&[1.0e3, 1.0e6, 1.0e9]);
+}
+
+// ---------------------------------------------------------------------------
 // r3_cmc — the shipped model the audit names for read-before-assign
 //
 // The generated crate is 185 KB of Rust — the smallest of the three families

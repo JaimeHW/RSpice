@@ -589,6 +589,21 @@ fn generated_bjt_target(
                 .then_some(GeneratedTarget::new("bjtd505t_va"))
         })
         .or_else(|| {
+            match_normalized(type_name, &["BJT504VA", "MEXTRAM504"])
+                .then_some(GeneratedTarget::new("bjt504va"))
+        })
+        .or_else(|| {
+            match_normalized(type_name, &["BJT504TVA", "MEXTRAM504T"])
+                .then_some(GeneratedTarget::new("bjt504tva"))
+        })
+        .or_else(|| {
+            match_normalized(type_name, &["BJTD504VA"]).then_some(GeneratedTarget::new("bjtd504va"))
+        })
+        .or_else(|| {
+            match_normalized(type_name, &["BJTD504TVA"])
+                .then_some(GeneratedTarget::new("bjtd504tva"))
+        })
+        .or_else(|| {
             match_normalized(type_name, &["VBIC", "VBIC13", "VBIC13_4T", "VBIC1P3"])
                 .then_some(GeneratedTarget::new("vbic13_4t"))
         })
@@ -620,6 +635,10 @@ fn generated_bjt_target(
             GeneratedTarget::new("vbic13_4t")
                 .with_optional_internal_nodes(&["dt", "cx", "ci", "bx", "bi", "ei"]),
         ),
+        // Xyce registers Mextram 504.12.1 as Q LEVEL=504 (bjt504va) and its
+        // self-heating variant as LEVEL=505 (bjt504tva); neither is Mextram 505.
+        Some(504) => Some(GeneratedTarget::new("bjt504va")),
+        Some(505) => Some(GeneratedTarget::new("bjt504tva")),
         _ => None,
     })
 }
@@ -1557,7 +1576,14 @@ fn append_generated_bjt_polarity_param(
 fn needs_inferred_generated_bjt_type(model_name: &str) -> bool {
     match_normalized(
         model_name,
-        &["VBIC13", "VBIC13_3T_ET", "VBIC13_4T", "VBIC_4T_ET_CF"],
+        &[
+            "VBIC13",
+            "VBIC13_3T_ET",
+            "VBIC13_4T",
+            "VBIC_4T_ET_CF",
+            "BJT504VA",
+            "BJT504TVA",
+        ],
     )
 }
 
@@ -1689,6 +1715,8 @@ fn is_generated_bjt_target(model_name: &str) -> bool {
                 "BJT505T_VA",
                 "BJTD505_VA",
                 "BJTD505T_VA",
+                "BJTD504VA",
+                "BJTD504TVA",
             ],
         )
 }
@@ -2430,5 +2458,58 @@ mod release_routing_tests {
         )];
         append_generated_mos_polarity_param(target, Some(model), &mut params);
         assert_eq!(params.len(), 1, "an authored TYPE is never overridden");
+    }
+
+    fn bjt_level_target(
+        card: &str,
+        dialect: crate::config::SpiceDialect,
+    ) -> Option<GeneratedTarget> {
+        let netlist = Netlist::parse(&format!(
+            "BJT level routing\nQ1 c b e s model\n{card}\n.END\n"
+        ))
+        .expect("BJT level fixture parses");
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        generated_bjt_target("model", Some(model), 4, dialect)
+            .expect("level classification succeeds")
+    }
+
+    #[test]
+    fn xyce_mextram_levels_select_release_504_and_never_505() {
+        for (card, expected) in [
+            (".MODEL model NPN LEVEL=504", "bjt504va"),
+            (".MODEL model PNP LEVEL=504", "bjt504va"),
+            (".MODEL model NPN LEVEL=505", "bjt504tva"),
+        ] {
+            let target = bjt_level_target(card, crate::config::SpiceDialect::Xyce)
+                .expect("Xyce Mextram level selects a generated model");
+            assert_eq!(target.model_name, expected, "{card}");
+        }
+        for dialect in [
+            crate::config::SpiceDialect::BestAvailable,
+            crate::config::SpiceDialect::Ngspice,
+        ] {
+            assert!(
+                bjt_level_target(".MODEL model NPN LEVEL=504", dialect).is_none(),
+                "LEVEL=504 is Xyce's registration, not {dialect:?}'s"
+            );
+        }
+    }
+
+    #[test]
+    fn a_level_selected_mextram_504_card_runs_its_module_with_the_card_polarity() {
+        let netlist = Netlist::parse(
+            "Mextram 504 polarity\nQ1 c b e s model\n.MODEL model PNP LEVEL=504 IS=1e-17\n.END\n",
+        )
+        .expect("Mextram polarity fixture parses");
+        let model = find_model_def(&netlist, "model").expect("fixture model exists");
+        let mut params = Vec::new();
+        append_generated_bjt_polarity_param(
+            GeneratedTarget::new("bjt504va"),
+            Some(model),
+            &mut params,
+        );
+        assert_eq!(params.len(), 1);
+        assert!(params[0].name.eq_ignore_ascii_case("type"));
+        assert!(matches!(params[0].value, ParametricValue::Resolved(value) if value == -1.0));
     }
 }

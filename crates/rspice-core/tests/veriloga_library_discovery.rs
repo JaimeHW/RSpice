@@ -25,6 +25,16 @@ fn shipped_cmc_tree_discovers_veriloga_models_without_omi() {
         packages.contains("cmc/hicumL2_v320_files"),
         "HICUM/L2 package should be discoverable"
     );
+    let mextram504 = entries
+        .iter()
+        .filter(|entry| entry.package == "cmc/vacode_504.12.1")
+        .flat_map(|entry| entry.modules.iter().map(String::as_str))
+        .collect::<HashSet<_>>();
+    assert_eq!(
+        mextram504,
+        HashSet::from(["bjt504va", "bjt504tva", "bjtd504va", "bjtd504tva"]),
+        "the Mextram 504.12.1 package should discover its four modules"
+    );
     assert!(
         packages
             .iter()

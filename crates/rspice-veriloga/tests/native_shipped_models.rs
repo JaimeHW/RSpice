@@ -114,6 +114,11 @@ fn shipped_models_compile_and_execute_through_the_public_native_jit() {
             Some("hicumL2va"),
         ),
         (
+            "mextram504",
+            shipped_model_path(&["cmc", "vacode_504.12.1", "bjt504.va"]),
+            Some("bjt504va"),
+        ),
+        (
             "bsimsoi47",
             shipped_model_path(&["cmc", "BSIM-SOI_4.7.0_05192025", "code", "bsimsoi.va"]),
             Some("bsimsoi"),
@@ -452,6 +457,7 @@ fn terminal_bias(name: &str, terminal: usize) -> f64 {
         "psp104" | "psp104_nqs" | "hisimsoi" => &[0.05, 0.7, 0.0, 0.0],
         "bsimimg" => &[0.15, 0.7, 0.05, -0.05, 0.01],
         "hicuml0" | "hicuml2" => &[0.2, 0.8, 0.0, 0.0, 0.0],
+        "mextram504" => &[0.2, 0.8, 0.0, 0.0],
         "bsimsoi47" => &[0.05, 0.7, 0.0, 0.0, 0.0, 0.0, 0.0],
         "bsimsoi100" => &[0.05, 0.7, 0.0, 0.0, 0.0, 0.0],
         "asmhemt" => &[0.1, 0.3, 0.0, 0.0, 0.0],

@@ -6244,6 +6244,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rspice-veriloga-model-bjt504tva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjt504va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
 name = "rspice-veriloga-model-bjt505-va"
 version = "0.1.0"
 dependencies = [
@@ -6252,6 +6266,20 @@ dependencies = [
 
 [[package]]
 name = "rspice-veriloga-model-bjt505t-va"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjtd504tva"
+version = "0.1.0"
+dependencies = [
+ "rspice-veriloga-runtime",
+]
+
+[[package]]
+name = "rspice-veriloga-model-bjtd504va"
 version = "0.1.0"
 dependencies = [
  "rspice-veriloga-runtime",
@@ -6518,8 +6546,12 @@ dependencies = [
  "rspice-veriloga-model-asmesd",
  "rspice-veriloga-model-asmesd-dio",
  "rspice-veriloga-model-asmhemt",
+ "rspice-veriloga-model-bjt504tva",
+ "rspice-veriloga-model-bjt504va",
  "rspice-veriloga-model-bjt505-va",
  "rspice-veriloga-model-bjt505t-va",
+ "rspice-veriloga-model-bjtd504tva",
+ "rspice-veriloga-model-bjtd504va",
  "rspice-veriloga-model-bjtd505-va",
  "rspice-veriloga-model-bjtd505t-va",
  "rspice-veriloga-model-bsimbulk",

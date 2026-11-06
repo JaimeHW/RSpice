@@ -563,6 +563,38 @@ pub(super) fn verilog_a_delivered_bjt_model(model_type: &str) -> Option<VerilogA
                 feature: "veriloga-model-bjtd505t-va",
             },
         ),
+        (
+            &["BJT504VA", "MEXTRAM504"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 504",
+                generated_model: "bjt504va",
+                feature: "veriloga-model-bjt504va",
+            },
+        ),
+        (
+            &["BJT504TVA", "MEXTRAM504T"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 504 self-heating",
+                generated_model: "bjt504tva",
+                feature: "veriloga-model-bjt504tva",
+            },
+        ),
+        (
+            &["BJTD504VA"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 504 without a substrate terminal",
+                generated_model: "bjtd504va",
+                feature: "veriloga-model-bjtd504va",
+            },
+        ),
+        (
+            &["BJTD504TVA"],
+            VerilogADeliveredBjtModel {
+                family: "MEXTRAM 504 without a substrate terminal, with self-heating",
+                generated_model: "bjtd504tva",
+                feature: "veriloga-model-bjtd504tva",
+            },
+        ),
     ];
 
     let normalized = normalize_model_type_key(model_type);
