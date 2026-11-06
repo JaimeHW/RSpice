@@ -5309,6 +5309,30 @@ mod cancellation_tests {
     }
 
     #[test]
+    fn only_xyce_ignores_an_enddata_no_data_opened() {
+        // Xyce 7.10 runs this deck; ngspice-46 refuses `.enddata` as an
+        // unimplemented dot command.
+        let source = "stray enddata\nV1 1 0 1\nR1 1 0 1k\n.enddata\n.op\n.end\n";
+        let netlist = parse_netlist_with_options(
+            source,
+            NetlistParseOptions {
+                expression_dialect: ExpressionDialect::Xyce,
+                ..NetlistParseOptions::default()
+            },
+        )
+        .expect("Xyce ignores a stray .ENDDATA");
+        assert_eq!(netlist.elements.len(), 2);
+        let error = parse_netlist_with_options(source, NetlistParseOptions::default())
+            .expect_err("the other dialects refuse a stray .ENDDATA");
+        assert!(
+            error
+                .to_string()
+                .contains(".ENDDATA without matching .DATA"),
+            "{error}"
+        );
+    }
+
+    #[test]
     fn inline_data_tables_obey_point_and_value_limits_while_parsing() {
         let source = "bounded data\n.data sweep a b\n1 2\n3 4\n.enddata\n.op\n.end\n";
 

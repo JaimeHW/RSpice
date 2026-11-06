@@ -985,11 +985,8 @@ fn extract_data_tables(
             }
             continue;
         }
-        if token.eq_ignore_ascii_case(".enddata") {
-            return Err(MultiRunError::new(format!(
-                ".enddata without matching .data at line {line_number}"
-            )));
-        }
+        // A `.enddata` no `.data` opened stays in the deck for the parser,
+        // which knows the dialect that decides it.
         if token.eq_ignore_ascii_case(".data") {
             let mut fields = line.split_whitespace().skip(1);
             let Some(name) = fields.next() else {
@@ -1493,6 +1490,14 @@ mod tests {
     // may not name the engine.
 
     #[test]
+    fn a_dangling_enddata_is_left_for_the_parser() {
+        let decks = try_expand_multi_run("t\nV1 a 0 1\n.enddata\n.op\n.end\n")
+            .expect("expansion leaves a stray .enddata to the parser");
+        assert_eq!(decks.len(), 1);
+        assert!(decks[0].source.contains(".enddata"), "{}", decks[0].source);
+    }
+
+    #[test]
     fn checked_data_sweep_rejects_malformed_tables() {
         let cases = [
             (
@@ -1534,11 +1539,6 @@ mod tests {
                 "unknown_reference",
                 "t\nV1 a 0 1\n.dc data=missing\n.end\n",
                 "unknown .data table `missing`",
-            ),
-            (
-                "dangling_enddata",
-                "t\nV1 a 0 1\n.enddata\n.op\n.end\n",
-                ".enddata without matching .data",
             ),
         ];
 

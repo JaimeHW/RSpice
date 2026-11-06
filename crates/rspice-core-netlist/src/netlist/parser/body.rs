@@ -206,7 +206,14 @@ pub(super) fn parse(
             )?);
             continue;
         }
+        // Xyce ignores a `.ENDDATA` that no `.DATA` opened, since it never
+        // needs one to close a table (N_IO_CircuitBlock.C:1554); ngspice
+        // refuses the card ("unimplemented dot command"), and so do the
+        // other dialects.
         if head.eq_ignore_ascii_case(".enddata") && !state.conditionals_suppress() {
+            if xyce_syntax {
+                continue;
+            }
             return Err(ParseError::Syntax {
                 line: line_num,
                 message: ".ENDDATA without matching .DATA".to_string(),
