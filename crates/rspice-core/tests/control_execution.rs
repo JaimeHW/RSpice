@@ -1104,6 +1104,41 @@ fn integ_integrates_a_vector_over_its_scale() {
     }
 }
 
+/// `mtimeavg` averages a vector over the `mtimeavgwindow` centred on each
+/// time point (maths/cmaths/cmath4.c:1005), ten tran steps when unset, the
+/// window cut at the plot's ends. For the 0-1-0 V triangle over 2 ms on a
+/// 0.1 ms grid the exact means are 0.25 V at 0 and 0.75 V at 1 ms over 1 ms,
+/// and 0.1, 0.5 and 0.9 V at 0, 0.5 and 1 ms over 0.4 ms.
+#[test]
+fn mtimeavg_averages_a_vector_over_a_time_window() {
+    let (presented, error) = run_until_error(
+        "mtimeavg\nv1 1 0 pwl(0 0 1m 1 2m 0)\nr1 1 0 1k\n.control\ntran 0.1m 2m\nlinearize\n\
+         let m = mtimeavg(v(1))\nset mtimeavgwindow=0.4m\nlet w = mtimeavg(v(1))\nprint m w\n\
+         .endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    let [traces] = prints.as_slice() else {
+        panic!("one print: {prints:?}");
+    };
+    let expected: [&[(usize, f64)]; 2] =
+        [&[(0, 0.25), (10, 0.75)], &[(0, 0.1), (5, 0.5), (10, 0.9)]];
+    for (trace, points) in traces.iter().zip(expected) {
+        for &(index, mean) in points {
+            let value = trace.y.samples[index].re;
+            assert!(
+                (value - mean).abs() < 1e-9,
+                "{} at {index}: {value}",
+                trace.y.expression
+            );
+        }
+    }
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first

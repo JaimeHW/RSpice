@@ -3,6 +3,7 @@
 //! return are in radians, ngspice's default `units`.
 
 use super::*;
+use crate::engine::control::shell::{ShellValue, number_prefix};
 
 /// Whether `name` is a function this module evaluates on a whole vector.
 pub(super) fn is_vector_function(name: &str) -> bool {
@@ -43,6 +44,7 @@ pub(super) fn is_vector_function(name: &str) -> bool {
             | "POS"
             | "DERIV"
             | "INTEG"
+            | "MTIMEAVG"
     )
 }
 
@@ -356,6 +358,44 @@ pub(super) fn apply(
                 unit,
             }
         }
+        // cmath4.c:1005 cx_mtimeavg: each point's mean over `mtimeavgwindow`
+        // centred on its time, ten of the circuit's tran steps when unset.
+        "MTIMEAVG" => {
+            let times = circuit
+                .scale_values(scale.as_deref(), length)
+                .filter(|(_, unit)| *unit == SignalUnit::Second)
+                .map(|(times, _)| times)
+                .ok_or_else(|| command_error(line, "mtimeavg needs real time scale"))?;
+            if complex {
+                return Err(command_error(line, "mtimeavg needs a real valued vector."));
+            }
+            let window = match circuit.shell.get("mtimeavgwindow") {
+                Some(ShellValue::Word(text)) => number_prefix(text),
+                _ => None,
+            }
+            .unwrap_or_else(|| {
+                circuit
+                    .datasets
+                    .iter()
+                    .rev()
+                    .find_map(|dataset| match dataset.command {
+                        AnalysisCommand::Tran { step, .. } => Some(10.0 * step),
+                        _ => None,
+                    })
+                    .unwrap_or(1e-6)
+            });
+            let data: Vec<Value> = samples.iter().map(|sample| sample.re).collect();
+            let values = moving_time_average(&times, &data, window)
+                .into_iter()
+                .map(ComplexValue::from)
+                .collect();
+            VectorValue {
+                samples: values,
+                complex,
+                scale,
+                unit,
+            }
+        }
         _ => {
             return Err(command_error(
                 line,
@@ -364,6 +404,39 @@ pub(super) fn apply(
         }
     };
     Ok(value)
+}
+
+/// The mean of the piecewise-linear `data` over the `window` centred on
+/// each of its `times`, the window cut to the times' span at its ends, as
+/// ngspice documents mtimeavg. cx_mtimeavg itself (cmath4.c:1089) sums
+/// rectangles and widens, rather than trims, the window at its edges, so a
+/// 0-1-0 V triangle averages to 1.625 V there.
+fn moving_time_average(times: &[Value], data: &[Value], window: Value) -> Vec<Value> {
+    let (Some(&first), Some(&last)) = (times.first(), times.last()) else {
+        return Vec::new();
+    };
+    let half = window / 2.0;
+    times
+        .iter()
+        .zip(data)
+        .map(|(&time, &value)| {
+            let (low, high) = ((time - half).max(first), (time + half).min(last));
+            if high <= low {
+                return value;
+            }
+            let mut integral = 0.0;
+            for (point, next) in times.iter().zip(data).zip(times.iter().zip(data).skip(1)) {
+                let ((&start, &from), (&stop, &to)) = (point, next);
+                let (left, right) = (start.max(low), stop.min(high));
+                if right <= left {
+                    continue;
+                }
+                let at = |x: Value| from + (to - from) * (x - start) / (stop - start);
+                integral += (at(left) + at(right)) * (right - left) / 2.0;
+            }
+            integral / (high - low)
+        })
+        .collect()
 }
 
 /// ngspice `cx_sqrt` for a complex element (cmath1.c:487), whose branch
