@@ -100,46 +100,26 @@ pub fn missing_capabilities(required: &[String]) -> Vec<String> {
         .collect()
 }
 
-/// Orders two semantic versions by precedence.
-///
-/// Enough of Semantic Versioning 2.0.0 to answer the one question the shelf
-/// asks: is the catalog offering something newer than what is installed. Both
-/// values have already been proved well formed — one by the signed manifest,
-/// the other by the signed snapshot — so this compares rather than validates.
+/// Orders two semantic versions by Semantic Versioning 2.0.0 precedence.
 ///
 /// This is the crate's only version ordering. Every place that decides which
 /// release is newest — the part index here, and the packs table in the Models
 /// workspace — calls it, because a second ordering is a second answer: byte
-/// comparison ranks `9.0.0` above `10.0.0` and a pre-release above its own
-/// release, and a shelf that disagrees with the index about which release is
-/// current offers an update that does not exist or hides one that does.
+/// comparison ranks `9.0.0` above `10.0.0`, `beta.2` above `beta.11` and a
+/// pre-release above its own release, and a shelf that disagrees with the
+/// index about which release is current offers an update that does not exist
+/// or hides one that does. Both values have already been proved well formed,
+/// one by the signed manifest, the other by the signed snapshot; should one
+/// not be, it ranks below every version that is, so it is never offered as an
+/// update.
 pub fn precedence(left: &str, right: &str) -> std::cmp::Ordering {
-    fn split(value: &str) -> (Vec<u64>, Option<String>) {
-        let core = value
-            .split(['-', '+'])
-            .next()
-            .unwrap_or_default()
-            .split('.')
-            .map(|number| number.parse::<u64>().unwrap_or_default())
-            .collect();
-        let prerelease = value
-            .split_once('-')
-            .map(|(_, rest)| rest.split('+').next().unwrap_or_default().to_owned())
-            .filter(|rest| !rest.is_empty());
-        (core, prerelease)
+    use std::cmp::Ordering;
+    match (semver::Version::parse(left), semver::Version::parse(right)) {
+        (Ok(left), Ok(right)) => left.cmp_precedence(&right),
+        (Ok(_), Err(_)) => Ordering::Greater,
+        (Err(_), Ok(_)) => Ordering::Less,
+        (Err(_), Err(_)) => left.cmp(right),
     }
-
-    let (left_core, left_pre) = split(left);
-    let (right_core, right_pre) = split(right);
-    left_core.cmp(&right_core).then_with(|| {
-        // A release outranks any pre-release of the same core version.
-        match (&left_pre, &right_pre) {
-            (None, None) => std::cmp::Ordering::Equal,
-            (None, Some(_)) => std::cmp::Ordering::Greater,
-            (Some(_), None) => std::cmp::Ordering::Less,
-            (Some(left), Some(right)) => left.cmp(right),
-        }
-    })
 }
 
 /// What class of device one of a project library's parts is.
@@ -353,6 +333,15 @@ mod tests {
             std::cmp::Ordering::Less
         );
         assert_eq!(precedence("2.0.0", "10.0.0"), std::cmp::Ordering::Less);
+        assert_eq!(
+            precedence("1.2.0-beta.11", "1.2.0-beta.2"),
+            std::cmp::Ordering::Greater
+        );
+        assert_eq!(
+            precedence("1.2.0+build.7", "1.2.0"),
+            std::cmp::Ordering::Equal
+        );
+        assert_eq!(precedence("1.2.0", "garbage"), std::cmp::Ordering::Greater);
     }
 
     #[test]

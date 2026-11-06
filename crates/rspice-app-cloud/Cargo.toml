@@ -25,6 +25,7 @@ rspice-simulation-contract.workspace = true
 egui = { version = "0.35.0", default-features = false }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
+semver.workspace = true
 sha2 = "0.10"
 base64 = "0.23"
 log = "0.4"

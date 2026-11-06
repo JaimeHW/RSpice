@@ -40,6 +40,7 @@ rspice-simulation.workspace = true
 rspice-veriloga = { path = "../rspice-veriloga", version = "0.1.0" }
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json.workspace = true
+semver.workspace = true
 thiserror.workspace = true
 sha2 = "0.10"
 log = "0.4"

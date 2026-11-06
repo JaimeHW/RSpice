@@ -103,7 +103,7 @@ pub fn read_manifest(body: &[u8]) -> Result<Release, CheckFailure> {
         return Err(CheckFailure::Unreadable);
     }
     let manifest: Manifest = serde_json::from_slice(body).map_err(|_| CheckFailure::Unreadable)?;
-    if SemVer::parse(&manifest.version).is_none() {
+    if semver::Version::parse(&manifest.version).is_err() {
         return Err(CheckFailure::Version);
     }
     if !is_calendar_day(&manifest.date) {
@@ -125,8 +125,11 @@ pub fn read_manifest(body: &[u8]) -> Result<Release, CheckFailure> {
 /// a pre-release of the installed version are not; a version that does not
 /// parse never is.
 pub fn is_newer(release: &str, installed: &str) -> bool {
-    match (SemVer::parse(release), SemVer::parse(installed)) {
-        (Some(release), Some(installed)) => release.cmp(&installed) == Ordering::Greater,
+    match (
+        semver::Version::parse(release),
+        semver::Version::parse(installed),
+    ) {
+        (Ok(release), Ok(installed)) => release.cmp_precedence(&installed) == Ordering::Greater,
         _ => false,
     }
 }
@@ -169,120 +172,6 @@ fn is_calendar_day(date: &str) -> bool {
         return false;
     };
     time::Date::from_calendar_date(i32::from(year), month, day).is_ok()
-}
-
-/// A SemVer 2.0.0 version, for precedence: the core and the pre-release
-/// identifiers. Build metadata is checked and then set aside, as SemVer
-/// gives it no part in precedence.
-#[derive(Debug, PartialEq, Eq)]
-struct SemVer {
-    core: [u64; 3],
-    pre: Vec<Identifier>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
-enum Identifier {
-    Numeric(u64),
-    Alphanumeric(String),
-}
-
-impl SemVer {
-    fn parse(text: &str) -> Option<Self> {
-        let (rest, build) = match text.split_once('+') {
-            Some((rest, build)) => (rest, Some(build)),
-            None => (text, None),
-        };
-        if let Some(build) = build
-            && !build.split('.').all(|part| {
-                !part.is_empty()
-                    && part
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-            })
-        {
-            return None;
-        }
-        let (core, pre) = match rest.split_once('-') {
-            Some((core, pre)) => (core, Some(pre)),
-            None => (rest, None),
-        };
-        let mut numbers = core.split('.');
-        let mut core = [0u64; 3];
-        for slot in &mut core {
-            *slot = numeric(numbers.next()?)?;
-        }
-        if numbers.next().is_some() {
-            return None;
-        }
-        let pre = match pre {
-            None => Vec::new(),
-            Some(pre) => pre
-                .split('.')
-                .map(|part| {
-                    if part.is_empty()
-                        || !part
-                            .bytes()
-                            .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-')
-                    {
-                        None
-                    } else if part.bytes().all(|byte| byte.is_ascii_digit()) {
-                        numeric(part).map(Identifier::Numeric)
-                    } else {
-                        Some(Identifier::Alphanumeric(part.to_owned()))
-                    }
-                })
-                .collect::<Option<Vec<_>>>()?,
-        };
-        Some(Self { core, pre })
-    }
-}
-
-/// A numeric identifier: digits, without a leading zero unless it is zero.
-fn numeric(text: &str) -> Option<u64> {
-    if text.is_empty()
-        || !text.bytes().all(|byte| byte.is_ascii_digit())
-        || (text.len() > 1 && text.starts_with('0'))
-    {
-        return None;
-    }
-    text.parse().ok()
-}
-
-impl Ord for SemVer {
-    fn cmp(&self, other: &Self) -> Ordering {
-        self.core.cmp(&other.core).then_with(|| {
-            match (self.pre.is_empty(), other.pre.is_empty()) {
-                (true, true) => Ordering::Equal,
-                // A pre-release comes before the release it leads to.
-                (true, false) => Ordering::Greater,
-                (false, true) => Ordering::Less,
-                (false, false) => self.pre.cmp(&other.pre),
-            }
-        })
-    }
-}
-
-impl PartialOrd for SemVer {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Identifier {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (Self::Numeric(left), Self::Numeric(right)) => left.cmp(right),
-            (Self::Numeric(_), Self::Alphanumeric(_)) => Ordering::Less,
-            (Self::Alphanumeric(_), Self::Numeric(_)) => Ordering::Greater,
-            (Self::Alphanumeric(left), Self::Alphanumeric(right)) => left.cmp(right),
-        }
-    }
-}
-
-impl PartialOrd for Identifier {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
 }
 
 /// Fetch the manifest's bytes: one GET of [`MANIFEST_URL`], on a runtime of
