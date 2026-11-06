@@ -29,7 +29,7 @@ pub struct DeviceDescriptor {
     /// Product-wide, serialization-safe identity.  Never reuse or rename an id
     /// after release; aliases belong in the document migration layer.
     pub stable_id: &'static str,
-    /// Default embedded SVG filename, relative to `assets/component_symbols`.
+    /// Default embedded SVG filename, relative to the repository `assets/component_symbols`.
     pub default_symbol_asset: Option<&'static str>,
     /// Simulation implementation selected for the device.
     pub implementation: DeviceImplementation,

@@ -10,7 +10,11 @@ fn main() {
     let manifest_dir =
         PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR must be set"));
 
-    let assets_dir = manifest_dir.join("assets").join("component_symbols");
+    let assets_dir = manifest_dir
+        .join("..")
+        .join("..")
+        .join("assets")
+        .join("component_symbols");
 
     println!("cargo:rerun-if-changed={}", assets_dir.display());
 

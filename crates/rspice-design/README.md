@@ -24,7 +24,7 @@ crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 | `drc` | The electrical rule checker: `DrcChecker`, `DrcConfig` (which rules run and at what severity) and `run_check_with_hierarchy`, which checks the subject cell view and every cell view its instances reach |
 | `library` | `LibraryCatalog`, `Library`, `Cell`, `View` and `ViewType`; revisioned library mutations and the collaboration-lock authority |
 | `symbol`, `symbol_generation`, `symbol_resolver`, `resolved_symbol` | `SymbolDocument`, the persisted symbol view (body artwork, label anchors, pins) with its edit and publication rules; block symbols generated from a cell's interface ports; `SymbolResolver`, which finds the authored or generated symbol for a binding; `ResolvedCellSymbol` and its pin diagnostics |
-| `symbol_artwork` | `SymbolLibrary`: the built-in component artwork parsed from the SVGs in `assets/component_symbols/`, with component bindings and terminal geometry. Built only with `symbol-artwork` |
+| `symbol_artwork` | `SymbolLibrary`: the built-in component artwork parsed from the SVGs in the repository `assets/component_symbols/`, with component bindings and terminal geometry. Built only with `symbol-artwork` |
 | `model_bound_symbol` | Symbols bound to `rspice-model-library` definitions: materialization, import review and guarded library construction |
 | `properties` | `PropertyCatalog`, the typed property sheet for each component kind, and source-parameter contract findings |
 | `parameters` | The lexer for authored SPICE parameter text that lookups and structural edits share |
@@ -71,7 +71,7 @@ crates, and refuses egui, eframe, winit, wgpu and rfd in its closure.
 
 | Flag | Effect |
 | :--- | :--- |
-| `symbol-artwork` | Builds `symbol_artwork`: `build.rs` embeds every SVG in `assets/component_symbols/` and `usvg` parses them. Enabled by `rspice-app`, `rspice-hardcopy` and `rspice-schematic-editor` |
+| `symbol-artwork` | Builds `symbol_artwork`: `build.rs` embeds every SVG in the repository `assets/component_symbols/` and `usvg` parses them. Enabled by `rspice-app`, `rspice-hardcopy` and `rspice-schematic-editor` |
 | `generated-veriloga-catalog` | Enables `rspice-core/veriloga-builtins`, so the build-time generated Verilog-A models are in the device catalog and can be placed and bound; without it that catalog is empty |
 | `symbol-test-observation` | Counts symbol-view deserializations for cache regression tests. Enabled by `rspice-app`'s dev-dependency |
 | `work-observation` | Counts the work an edit does (document snapshots, connectivity passes and their steps, wire cleanups) in `rspice-design-model`'s `work_tally`, for tests that hold a gesture to its per-frame work. Enabled by `rspice-app`'s dev-dependency |
