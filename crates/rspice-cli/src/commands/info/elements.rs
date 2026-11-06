@@ -324,6 +324,15 @@ impl<'a> ElementDetails<'a> {
                 let parameters = instance_parameters(params);
                 record!("subcircuit", subckt_name, parameters)
             }
+            ElementKind::SpecialFunction {
+                function,
+                instance_params,
+                deferred_params,
+            } => {
+                let function = function.ltspice_name();
+                let parameters = scalar_parameters(instance_params, deferred_params, &[]);
+                record!("special_function", function, parameters)
+            }
             Xspice {
                 model,
                 pspice_u_timing,
