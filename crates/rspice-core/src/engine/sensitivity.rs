@@ -790,6 +790,29 @@ impl Engine {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
             }
+            if device_name.contains(':') {
+                // A device inside a subcircuit instance (`X1:MP`) is set in a
+                // specialized copy of its definition, as a hierarchical
+                // `.STEP` sets it.
+                let element = Self::resolve_hierarchical_step_element(netlist, device_name)?;
+                let canonical_parameter =
+                    Self::canonical_device_parameter(&element.kind, Some(param_name));
+                Self::apply_hierarchical_device_step_value(
+                    netlist,
+                    device_name,
+                    Some(&canonical_parameter),
+                    *value,
+                )?;
+                netlist.retain_device_parameter(
+                    (
+                        device_name.to_ascii_uppercase(),
+                        canonical_parameter.to_ascii_uppercase(),
+                    ),
+                    *value,
+                );
+                applied += 1;
+                continue;
+            }
             let element = netlist
                 .elements
                 .iter_mut()
@@ -829,6 +852,15 @@ impl Engine {
         {
             if index.is_multiple_of(64) && abort.is_aborted() {
                 return Err(SimulationError::Aborted);
+            }
+            if device_name.contains(':') {
+                Self::apply_hierarchical_device_step_value(
+                    netlist,
+                    device_name,
+                    Some(parameter_name),
+                    *value,
+                )?;
+                continue;
             }
             let element = netlist
                 .elements

@@ -726,10 +726,20 @@ impl Engine {
         }
         let (device_name, param_name) = match column.split_once(':') {
             Some((device_name, param_name)) => {
-                if device_name.is_empty() || param_name.is_empty() || param_name.contains(':') {
+                if column.split(':').any(str::is_empty) {
                     return Err(SimulationError::Circuit(format!(
-                        ".STEP DATA column '{name}' has an unsupported hierarchical device override; expected device:param"
+                        ".STEP DATA column '{name}' has an empty device or parameter name"
                     )));
+                }
+                if let Some((path, param_name)) = column.rsplit_once(':')
+                    && path.contains(':')
+                {
+                    // `x1:mp:l` is the `l` of `mp` inside instance `x1`, the
+                    // device a hierarchical `.STEP x1:mp:l` steps.
+                    let element = Self::resolve_hierarchical_step_element(netlist, path)?;
+                    let param = Self::canonical_device_parameter(&element.kind, Some(param_name));
+                    let path = path.to_ascii_uppercase();
+                    return Ok((format!("DEVICE:{path}:{param}"), format!("{path}:{param}")));
                 }
                 (device_name, Some(param_name))
             }
@@ -817,7 +827,7 @@ impl Engine {
         canonical.unwrap_or(&raw).to_string()
     }
 
-    fn resolve_hierarchical_step_element<'a>(
+    pub(in crate::engine) fn resolve_hierarchical_step_element<'a>(
         netlist: &'a Netlist,
         target_name: &str,
     ) -> Result<&'a crate::netlist::Element, SimulationError> {
@@ -1521,7 +1531,7 @@ impl Engine {
         )))
     }
 
-    fn apply_hierarchical_device_step_value(
+    pub(in crate::engine) fn apply_hierarchical_device_step_value(
         stepped: &mut Netlist,
         target_name: &str,
         param_name: Option<&str>,
@@ -2782,7 +2792,7 @@ mod tests {
     }
 
     #[test]
-    fn step_plan_rejects_data_device_collision_and_hierarchical_column() {
+    fn step_plan_rejects_data_device_collision_and_unknown_hierarchical_instance() {
         let collision = Netlist::parse(
             "data device collision\n\
              R1 out 0 10\n\
@@ -2814,11 +2824,11 @@ mod tests {
         .expect("hierarchical-column deck parses");
         let error = engine
             .plan_step_commands(&hierarchical, &step_commands(&hierarchical), plan_limits(1))
-            .expect_err("hierarchical DATA device columns must fail during planning");
+            .expect_err("a DATA column naming no instance must fail during planning");
+        let message = error.to_string();
         assert!(
-            error
-                .to_string()
-                .contains("unsupported hierarchical device override")
+            message.contains("root instance 'X1' not found"),
+            "{message}"
         );
     }
 

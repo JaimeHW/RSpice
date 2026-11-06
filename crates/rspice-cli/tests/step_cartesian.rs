@@ -894,6 +894,60 @@ fn step_data_table_reaches_the_typed_planner_and_binds_each_row() {
 }
 
 #[test]
+fn step_data_column_sets_a_device_inside_a_subcircuit_instance() {
+    // Xyce resolves a DATA column `X1:R1:R` as `.STEP X1:R1:R` does: the
+    // resistance of R1 inside instance X1. Xyce 7.10 prints V(out) = 0.5 and
+    // 0.75 for these two rows.
+    let dir = test_dir("data_hierarchical");
+    let deck = dir.join("data_hierarchical.sp");
+    let output_path = dir.join("operating_point.csv");
+    std::fs::write(
+        &deck,
+        "* STEP DATA column inside a subcircuit instance\n\
+         V1 in 0 1\n\
+         R2 in out 1k\n\
+         X1 out 0 sub\n\
+         .subckt sub a b\n\
+         R1 a b 1k\n\
+         .ends\n\
+         .data rows X1:R1:R\n\
+         1k\n\
+         3k\n\
+         .enddata\n\
+         .step data=rows\n\
+         .op\n\
+         .end\n",
+    )
+    .expect("write hierarchical STEP DATA deck");
+
+    let run = run_rspice(&[
+        "--quiet",
+        "run",
+        deck.to_str().unwrap(),
+        "-o",
+        output_path.to_str().unwrap(),
+        "-f",
+        "csv",
+    ]);
+    assert!(
+        run.status.success(),
+        "stdout: {}; stderr: {}",
+        String::from_utf8_lossy(&run.stdout),
+        String::from_utf8_lossy(&run.stderr)
+    );
+
+    for (index, expected) in [0.5, 0.75].into_iter().enumerate() {
+        let path = step_output(&output_path, index + 1);
+        let csv = std::fs::read_to_string(&path)
+            .unwrap_or_else(|error| panic!("read {}: {error}", path.display()));
+        let vout = scalar_csv_value(&csv, "V(OUT)");
+        assert!((vout - expected).abs() < 1.0e-9, "{csv}");
+    }
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn conditional_child_analysis_change_fails_before_any_step_output() {
     let dir = test_dir("conditional_analysis");
     let deck = dir.join("conditional.sp");
