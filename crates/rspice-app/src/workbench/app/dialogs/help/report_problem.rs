@@ -129,7 +129,9 @@ impl RSpiceApp {
                     rows.mono("Session log", log_file);
                     rows.row("", |ui| open_folder = ui.button("Open folder").clicked());
                 }
-                rows.mono("Contact", SUPPORT_ADDRESS);
+                // Mono is for the version and the path; an address reads in
+                // the body face, as About states its prose facts.
+                rows.text("Contact", SUPPORT_ADDRESS);
                 rows.row("Bundle", |ui| {
                     ui.checkbox(
                         &mut include_session_log,
