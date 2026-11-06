@@ -183,32 +183,22 @@ fn generate_amplifier(
     pins: &AmplifierPins,
 ) -> GeneratedSymbol {
     let half = AMPLIFIER_SIZE / 2;
-    let placement = |index: usize| {
-        if index == pins.inverting {
-            (SymbolPinSide::Left, Point::new(-half, -AMPLIFIER_INPUT_Y))
-        } else if index == pins.non_inverting {
-            (SymbolPinSide::Left, Point::new(-half, AMPLIFIER_INPUT_Y))
-        } else if index == pins.output {
-            (SymbolPinSide::Right, Point::new(half, 0))
-        } else if index == pins.positive {
-            (SymbolPinSide::Top, Point::new(0, -half))
-        } else {
-            (SymbolPinSide::Bottom, Point::new(0, half))
-        }
-    };
+    let mut placement = vec![(SymbolPinSide::Bottom, Point::new(0, half)); ports.len()];
+    placement[pins.inverting] = (SymbolPinSide::Left, Point::new(-half, -AMPLIFIER_INPUT_Y));
+    placement[pins.non_inverting] = (SymbolPinSide::Left, Point::new(-half, AMPLIFIER_INPUT_Y));
+    placement[pins.output] = (SymbolPinSide::Right, Point::new(half, 0));
+    placement[pins.positive] = (SymbolPinSide::Top, Point::new(0, -half));
+    placement[pins.negative] = (SymbolPinSide::Bottom, Point::new(0, half));
     GeneratedSymbol {
         pins: ports
             .iter()
             .zip(roles)
-            .enumerate()
-            .map(|(index, (port, role))| {
-                let (side, offset) = placement(index);
-                GeneratedPin {
-                    name: port.name.clone(),
-                    direction: role.direction(),
-                    side,
-                    offset,
-                }
+            .zip(placement)
+            .map(|((port, role), (side, offset))| GeneratedPin {
+                name: port.name.clone(),
+                direction: role.direction(),
+                side,
+                offset,
             })
             .collect(),
         width: AMPLIFIER_SIZE,
