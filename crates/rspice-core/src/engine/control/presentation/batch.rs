@@ -256,6 +256,55 @@ impl ControlCircuit {
         format!("{}{newline}", words.join(" "))
     }
 
+    /// ngspice `setscale [vector]` (frontend/com_setscale.c:34): the vector
+    /// the current plot's others run against, or without one the `display`
+    /// line of its scale. An analysis plot keeps the scale its analysis
+    /// swept, so only a user plot's or the constants plot's changes; nor
+    /// does a vector take a scale of its own (the two-word form).
+    pub(in crate::engine) fn set_scale(
+        &mut self,
+        command: &ControlCommand,
+    ) -> Result<String, ControlError> {
+        let line = command.line;
+        let words = crate::engine::control::shell::words(&command.arguments);
+        match words.as_slice() {
+            [] => {
+                if self.vectors.current_plot().is_none() && self.current_dataset().is_none() {
+                    return Ok(self
+                        .constants_scale()
+                        .map_or_else(String::new, |(name, value)| {
+                            vector_line(&name.to_ascii_lowercase(), value, true)
+                        }));
+                }
+                let Some(scale) = self.current_scale_name() else {
+                    return Ok(String::new());
+                };
+                self.display(&ControlCommand {
+                    line,
+                    name: "display".into(),
+                    arguments: scale,
+                })
+            }
+            [word] => {
+                if self.vectors.current_plot().is_none() && self.current_dataset().is_some() {
+                    return Err(command_error(
+                        line,
+                        "setscale: an analysis plot keeps the scale its analysis swept",
+                    ));
+                }
+                if self.set_current_scale(&word.text) {
+                    Ok(String::new())
+                } else {
+                    Ok(format!("Error: no such vector as {}.\n", word.text))
+                }
+            }
+            _ => Err(command_error(
+                line,
+                "setscale: a vector takes its plot's scale, not one of its own",
+            )),
+        }
+    }
+
     /// `display [vectors...]` on the current plot: a dataset's vectors with
     /// the `let` vectors bound in it, or a plot `setplot new` made.
     pub(in crate::engine) fn display(

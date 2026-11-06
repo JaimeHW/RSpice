@@ -136,6 +136,8 @@ enum CommandKind {
     Fft,
     /// `meas` and `measure`.
     Measure,
+    /// `setscale [vector]`: the current plot's scale.
+    SetScale,
     /// A command ngspice -b accepts with no batch effect.
     Ignored(Ignored),
 }
@@ -196,6 +198,7 @@ impl CommandKind {
             "linearize" => Self::Linearize,
             "fft" => Self::Fft,
             "meas" | "measure" => Self::Measure,
+            "setscale" => Self::SetScale,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
             }
@@ -629,6 +632,19 @@ impl ControlCircuit {
                 command,
                 ControlPresentationKind::Text(Self::echo(command)),
             )),
+            CommandKind::SetScale => {
+                let report = self.set_scale(command)?;
+                if report.is_empty() {
+                    Ok(PreparedCommand::Complete(
+                        ControlCommandEffect::CircuitChanged,
+                    ))
+                } else {
+                    Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Text(report),
+                    ))
+                }
+            }
             CommandKind::Display => Ok(Self::batch_output(
                 command,
                 ControlPresentationKind::Text(self.display(command)?),

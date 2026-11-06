@@ -49,6 +49,8 @@ pub(in crate::engine::control) struct VectorStore {
     plots: Vec<UserPlot>,
     /// The user plot that is current, if `setplot` chose one last.
     current: Option<usize>,
+    /// The scale `setscale` gave the constants plot.
+    constants_scale: Option<String>,
 }
 
 impl VectorStore {
@@ -651,18 +653,65 @@ impl ControlCircuit {
         });
     }
 
-    /// The scale of the current user plot, when it has `length` elements.
+    /// The scale of the current user plot, or of the constants plot before
+    /// any analysis ran, when it has `length` elements.
     fn user_plot_scale(&self, length: usize) -> Option<&UserVector> {
-        let plot = &self.vectors.plots[self.vectors.current?];
-        let scale = plot.scale.as_deref()?;
+        let (plot, scale) = match self.vectors.current {
+            Some(index) => {
+                let plot = &self.vectors.plots[index];
+                (Some(plot.name.as_str()), plot.scale.as_deref()?)
+            }
+            None if self.current_dataset().is_none() => {
+                (None, self.vectors.constants_scale.as_deref()?)
+            }
+            None => return None,
+        };
         self.vectors
             .vectors
             .iter()
             .find(|vector| {
-                vector.plot.as_deref() == Some(plot.name.as_str())
-                    && vector.name.eq_ignore_ascii_case(scale)
+                vector.plot.as_deref() == plot && vector.name.eq_ignore_ascii_case(scale)
             })
             .filter(|vector| vector.value.samples.len() == length)
+    }
+
+    /// The name of the current user plot's scale, else the analysis plot's.
+    pub(super) fn current_scale_name(&self) -> Option<String> {
+        match self.vectors.current {
+            Some(index) => self.vectors.plots[index].scale.clone(),
+            None => Some(self.current_dataset()?.scale_name().to_owned()),
+        }
+    }
+
+    /// The vector `setscale` made the constants plot's scale.
+    pub(super) fn constants_scale(&self) -> Option<(&str, &VectorValue)> {
+        let scale = self.vectors.constants_scale.as_deref()?;
+        self.vectors
+            .vectors
+            .iter()
+            .find(|vector| vector.plot.is_none() && vector.name.eq_ignore_ascii_case(scale))
+            .map(|vector| (vector.name.as_str(), &vector.value))
+    }
+
+    /// ngspice `setscale vector` (frontend/com_setscale.c:70): the vector
+    /// of the current user plot or constants plot that its others run
+    /// against. False when the plot has no vector of that name.
+    pub(super) fn set_current_scale(&mut self, name: &str) -> bool {
+        let plot = self.vectors.current_plot().map(str::to_owned);
+        let Some(vector) = self
+            .vectors
+            .vectors
+            .iter()
+            .find(|vector| vector.plot == plot && vector.name.eq_ignore_ascii_case(name))
+        else {
+            return false;
+        };
+        let name = Some(vector.name.clone());
+        match self.vectors.current {
+            Some(index) => self.vectors.plots[index].scale = name,
+            None => self.vectors.constants_scale = name,
+        }
+        true
     }
 
     /// `$&name`: the vector a `let` or dataset vector expression evaluates

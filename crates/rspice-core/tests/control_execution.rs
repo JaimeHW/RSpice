@@ -1008,6 +1008,51 @@ fn meas_measures_the_spectrum_plot_fft_made() {
     );
 }
 
+/// `setscale vector` makes a vector of the constants plot, or of a plot
+/// `setplot new` made, the scale its other vectors run against, and a bare
+/// `setscale` prints its display line (frontend/com_setscale.c:34);
+/// ngspice-46 prints `invec : notype, real, 4 long [default scale]` and
+/// `Error: no such vector as nosuch.`
+#[test]
+fn setscale_names_the_scale_of_the_current_plot() {
+    let (presented, error) = run_until_error(
+        "setscale\nr1 1 0 1k\n.control\nlet invec = vector(4)\nlet outvec = invec*2\n\
+         setscale invec\nsetscale\nprint outvec\nsetscale nosuch\nsetplot new\n\
+         let a = vector(3)\nlet b = a + 10\nlet c = a * 3\nsetscale b\nprint c\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let texts = texts(&presented);
+    assert_eq!(
+        texts[..2],
+        [
+            "    invec               : notype, real, 4 long [default scale]",
+            "Error: no such vector as nosuch.",
+        ]
+    );
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    let scales: Vec<(&str, Vec<f64>)> = prints
+        .iter()
+        .map(|traces| {
+            let x = &traces[0].x;
+            (
+                x.expression.as_str(),
+                x.samples.iter().map(|sample| sample.re).collect(),
+            )
+        })
+        .collect();
+    assert_eq!(
+        scales,
+        [
+            ("invec", vec![0.0, 1.0, 2.0, 3.0]),
+            ("b", vec![10.0, 11.0, 12.0])
+        ]
+    );
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
