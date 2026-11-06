@@ -205,6 +205,59 @@ fn every_soi_family_defaults_its_square_counts_to_one_square() {
     }
 }
 
+/// A BSIMSOI instance that names no channel length or width opens at 5 um
+/// in both references. ngspice assigns `l = w = 5e-6` in every SOI family
+/// (b3soipdset.c:1086-1095, b3soiddset.c:910-919, b3soifdset.c:911-920),
+/// and Xyce falls back to the model's L and W (N_DEV_MOSFET_B3SOI.C:3503-3507),
+/// which default to 5 um themselves (3279-3284). The native ports opened at
+/// zero, and their sizing pass then divided by a zero channel.
+#[test]
+fn every_soi_family_defaults_its_channel_geometry_to_five_microns() {
+    for model_selector in [
+        "level=55",
+        "level=56",
+        "level=57",
+        "level=10 soimod=2",
+        "level=10 soimod=1",
+        "level=10 soimod=0",
+    ] {
+        let drain_current = |instance_geometry: &str, model_geometry: &str| {
+            let deck = format!(
+                "\
+                * BSIMSOI channel geometry defaults\n\
+                m1 d g 0 0 nmos {instance_geometry}\n\
+                vd d 0 1\n\
+                vg g 0 0.8\n\
+                .model nmos nmos {model_selector} capmod=2 {model_geometry}\n\
+                .op\n\
+                .end\n"
+            );
+            let netlist = Netlist::parse(&deck).expect("geometry deck parses");
+            engine()
+                .run_dc_op(&netlist)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "{model_selector} [{instance_geometry}|{model_geometry}] should run: {err}"
+                    )
+                })
+                .branch_current_named("vd")
+                .unwrap_or_else(|| panic!("missing VD branch for {model_selector}"))
+        };
+        assert_eq!(
+            drain_current("", "").to_bits(),
+            drain_current("w=5u l=5u", "").to_bits(),
+            "{model_selector}: an instance without W or L must open at 5 um"
+        );
+        if model_selector.starts_with("level=10") {
+            assert_eq!(
+                drain_current("", "w=4u l=1u").to_bits(),
+                drain_current("w=4u l=1u", "").to_bits(),
+                "{model_selector}: Xyce takes the model's W and L for an instance without them"
+            );
+        }
+    }
+}
+
 #[test]
 fn xyce_level10_bsimsoi_rejects_unresolved_native_model_params() {
     let deck = xyce_level10_default_gain_stage().replace("level=10", "level=10 u0={missing_u0}");

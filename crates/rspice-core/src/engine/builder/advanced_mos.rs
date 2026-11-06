@@ -86,8 +86,8 @@ impl Engine {
         };
 
         // Instance geometry (W/L plus optional area/perimeter/squares).
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
+        let l = bsimsoi_instance_length(params_map, instance_params);
+        let w = bsimsoi_instance_width(params_map, instance_params);
         let geom = B3SoiDdGeometry {
             l,
             w,
@@ -265,8 +265,8 @@ impl Engine {
             (0, BodyMode::Floating)
         };
 
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
+        let l = bsimsoi_instance_length(params_map, instance_params);
+        let w = bsimsoi_instance_width(params_map, instance_params);
         let geom = B3SoiFdGeometry {
             l,
             w,
@@ -435,8 +435,8 @@ impl Engine {
             (body, 0, BodyMode::Floating)
         };
 
-        let l = instance_param(instance_params, &["L"]).unwrap_or(0.0);
-        let w = instance_param(instance_params, &["W"]).unwrap_or(0.0);
+        let l = bsimsoi_instance_length(params_map, instance_params);
+        let w = bsimsoi_instance_width(params_map, instance_params);
         let geom = B3SoiPdGeometry {
             l,
             w,

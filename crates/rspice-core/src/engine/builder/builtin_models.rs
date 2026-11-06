@@ -49,6 +49,7 @@ pub(in crate::engine::builder) fn is_bsimsoi_level(level: i32) -> bool {
 }
 
 const B3SOI_DEFAULT_L: f64 = 5.0e-6;
+const B3SOI_DEFAULT_W: f64 = 5.0e-6;
 const B3SOI_DEFAULT_NPEAK: f64 = 1.7e17;
 const B3SOI_DEFAULT_NLX: f64 = 1.74e-7;
 const B3SOI_DEFAULT_TSI: f64 = 1.0e-7;
@@ -56,6 +57,32 @@ const B3SOI_DEFAULT_VBS0PD: f64 = 0.0;
 const B3SOI_DEFAULT_VBS0FD: f64 = 0.5;
 const B3SOI_DEFAULT_VBSA: f64 = 0.0;
 const B3SOI_EPS_SI: f64 = 1.03594e-10;
+
+/// A BSIMSOI instance's channel length: its own `L`, else the model's, else
+/// 5 um. ngspice opens every SOI family at `l = w = 5e-6`
+/// (b3soipdset.c:1086-1095, b3soiddset.c:910-919, b3soifdset.c:911-920).
+/// Xyce takes the model's L and W for an instance without them
+/// (N_DEV_MOSFET_B3SOI.C:3503-3507), and those default to 5 um
+/// (N_DEV_MOSFET_B3SOI.C:3279-3284).
+pub(in crate::engine::builder) fn bsimsoi_instance_length(
+    params: &HashMap<String, f64>,
+    instance_params: &[(String, f64)],
+) -> f64 {
+    instance_param(instance_params, &["L"])
+        .or_else(|| params.get("L").copied())
+        .unwrap_or(B3SOI_DEFAULT_L)
+}
+
+/// A BSIMSOI instance's channel width, defaulted as
+/// [`bsimsoi_instance_length`] defaults its length.
+pub(in crate::engine::builder) fn bsimsoi_instance_width(
+    params: &HashMap<String, f64>,
+    instance_params: &[(String, f64)],
+) -> f64 {
+    instance_param(instance_params, &["W"])
+        .or_else(|| params.get("W").copied())
+        .unwrap_or(B3SOI_DEFAULT_W)
+}
 
 pub(in crate::engine::builder) fn native_bsimsoi_level_for(
     level: i32,
@@ -97,9 +124,7 @@ fn bsimsoi_auto_selected_level(
     params: &HashMap<String, f64>,
     instance_params: &[(String, f64)],
 ) -> Result<i32, String> {
-    let l = instance_param(instance_params, &["L"])
-        .or_else(|| params.get("L").copied())
-        .unwrap_or(B3SOI_DEFAULT_L);
+    let l = bsimsoi_instance_length(params, instance_params);
     let npeak = bsimsoi_model_param(params, "NCH", B3SOI_DEFAULT_NPEAK);
     let nlx = bsimsoi_model_param(params, "NLX", B3SOI_DEFAULT_NLX);
     let tsi = bsimsoi_model_param(params, "TSI", B3SOI_DEFAULT_TSI);
