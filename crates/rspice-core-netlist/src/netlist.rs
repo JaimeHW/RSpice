@@ -3922,9 +3922,14 @@ fn decode_source_bytes_with_abort(
         return Ok(source);
     }
 
-    if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
-        let little_endian = bytes.starts_with(&[0xFF, 0xFE]);
-        let body = &bytes[2..];
+    let utf16 = if bytes.starts_with(&[0xFF, 0xFE]) || bytes.starts_with(&[0xFE, 0xFF]) {
+        Some((bytes.starts_with(&[0xFF, 0xFE]), &bytes[2..]))
+    } else if is_bomless_utf16_le(&bytes) {
+        Some((true, &bytes[..]))
+    } else {
+        None
+    };
+    if let Some((little_endian, body)) = utf16 {
         if !body.len().is_multiple_of(2) {
             return Err(ParseError::Io(std::io::Error::new(
                 std::io::ErrorKind::InvalidData,
@@ -3983,6 +3988,8 @@ pub fn decode_source_bytes(bytes: &[u8]) -> Result<String, std::io::Error> {
     } else if bytes.starts_with(&[0xFE, 0xFF]) {
         // UTF-16 BE BOM
         decode_utf16_be(&bytes[2..])
+    } else if is_bomless_utf16_le(bytes) {
+        decode_utf16_le(bytes)
     } else {
         // Try UTF-8 first, fall back to Latin-1
         match String::from_utf8(bytes.to_vec()) {
@@ -3993,6 +4000,18 @@ pub fn decode_source_bytes(bytes: &[u8]) -> Result<String, std::io::Error> {
             }
         }
     }
+}
+
+/// UTF-16LE without a byte-order mark, as LTspice writes its component
+/// libraries: every odd byte of the opening text is zero and no even one is.
+/// No 8-bit or UTF-8 source has that shape, since a SPICE source holds no NUL.
+fn is_bomless_utf16_le(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(512)];
+    head.len() >= 4
+        && bytes.len().is_multiple_of(2)
+        && head
+            .chunks_exact(2)
+            .all(|pair| pair[0] != 0 && pair[1] == 0)
 }
 
 /// Decode UTF-16 LE bytes to String
@@ -4032,6 +4051,20 @@ fn decode_utf16_be(bytes: &[u8]) -> Result<String, std::io::Error> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn utf16le_without_a_byte_order_mark_decodes_as_text() {
+        let text = "* \u{a9} vendor\n.model QN NPN(BF=100)\n";
+        let bytes = text
+            .encode_utf16()
+            .flat_map(u16::to_le_bytes)
+            .collect::<Vec<_>>();
+        assert_eq!(decode_source_bytes(&bytes).unwrap(), text);
+        let parsed = decode_source_bytes_with_abort(bytes, &crate::abort_signal::NoAbort);
+        assert_eq!(parsed.ok().as_deref(), Some(text));
+        // 8-bit text never has the shape: it decodes byte for byte.
+        assert_eq!(decode_source_bytes(b"R1 a b 1k\n").unwrap(), "R1 a b 1k\n");
+    }
 
     fn cancellation_fixture_path(name: &str) -> PathBuf {
         let nonce = std::time::SystemTime::now()
