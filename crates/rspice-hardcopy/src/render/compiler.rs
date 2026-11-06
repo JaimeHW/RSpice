@@ -973,22 +973,17 @@ impl<'a> SemanticSceneCompiler<'a> {
             )
         };
         let block = component.instance_block();
-        let (min, max) = block.body;
-        let corners = [
-            world(min),
-            world(rspice_design_model::Point::new(max.x, min.y)),
-            world(max),
-            world(rspice_design_model::Point::new(min.x, max.y)),
-        ];
-        self.primitives.push(ScenePrimitive::Polyline {
-            points: corners
-                .into_iter()
-                .map(|point| self.schematic_point(point))
-                .collect::<Result<_, _>>()?,
-            closed: true,
-            stroke,
-            fill: None,
-        });
+        for (points, closed) in &block.outline {
+            self.primitives.push(ScenePrimitive::Polyline {
+                points: points
+                    .iter()
+                    .map(|point| self.schematic_point(world(*point)))
+                    .collect::<Result<_, _>>()?,
+                closed: *closed,
+                stroke,
+                fill: None,
+            });
+        }
 
         for pin in block.pins {
             let inner = rspice_design::symbol_generation::lead_inner(
