@@ -50,6 +50,7 @@ impl Engine {
                     }
                 }
             }
+            Self::stamp_settled_node_gmin(circuit, matrix);
             return;
         }
         for index in 0..circuit.num_nodes() {
@@ -58,6 +59,39 @@ impl Engine {
             }
         }
         circuit.stamp_resistive_island_floor(matrix, gmin);
+    }
+
+    /// Install GMIN on each settled compact-model node alone
+    /// ([`Self::settle_compact_model_private_nodes`]) in an assembly that
+    /// stamps no nodal floor.
+    ///
+    /// A settled node takes the floor like any other node, and no equation
+    /// reaches it, so without the floor its row was empty: every operating
+    /// point solved without the floor first was singular there and went back
+    /// to the floor whole, moving every node only leakage holds. Spectre
+    /// installs GMIN on the node that has no DC path alone ("Gmin installed
+    /// to provide path"), which keeps the node at the 0 V its balanced flows
+    /// give it and leaves the rest of the circuit without a floor.
+    fn stamp_settled_node_gmin(circuit: &CircuitData, matrix: &mut StaticMatrix) {
+        let Some(settled) = &circuit.settled_compact_model_private_nodes else {
+            return;
+        };
+        if circuit.settled_node_gmin == 0.0 {
+            return;
+        }
+        for &node in settled {
+            matrix.add(node - 1, node - 1, circuit.settled_node_gmin);
+        }
+    }
+
+    /// The diagonal a settled node carries in an assembly at nodal floor
+    /// `floor`: the floor, or the GMIN installed on it where there is none.
+    fn settled_node_diagonal(circuit: &CircuitData, floor: Value) -> Value {
+        if floor == 0.0 {
+            circuit.settled_node_gmin
+        } else {
+            floor
+        }
     }
 
     /// Add a homotopy GMIN stage `gmin` whose final floor is `floor`: the
@@ -278,8 +312,9 @@ impl Engine {
             if unread && rhs.get(index).is_some_and(|&value| value == 0.0) {
                 circuit.compact_model_private_nodes.remove(&node);
                 settled.push(node);
-                if floor != 0.0 {
-                    matrix.add(index, index, floor);
+                let diagonal = Self::settled_node_diagonal(circuit, floor);
+                if diagonal != 0.0 {
+                    matrix.add(index, index, diagonal);
                 }
                 continue;
             }
@@ -322,6 +357,7 @@ impl Engine {
         rhs: &[Value],
         floor: Value,
     ) -> Result<(), SimulationError> {
+        let diagonal = Self::settled_node_diagonal(circuit, floor);
         let Some(settled) = circuit.settled_compact_model_private_nodes.as_mut() else {
             return Ok(());
         };
@@ -338,11 +374,11 @@ impl Engine {
             // row may hold what it held then, a branch incidence with no
             // flow, as BSIM-SOI's unconnected thermal node does.
             let index = node - 1;
-            let column_quiet = matrix.column_is_deficient_beyond_diagonal(index, floor);
+            let column_quiet = matrix.column_is_deficient_beyond_diagonal(index, diagonal);
             if column_quiet && rhs.get(index).is_none_or(|&value| value == 0.0) {
                 return true;
             }
-            if column_quiet || matrix.row_is_deficient_beyond_diagonal(index, floor) {
+            if column_quiet || matrix.row_is_deficient_beyond_diagonal(index, diagonal) {
                 refused = Some(node);
                 return true;
             }
@@ -351,8 +387,8 @@ impl Engine {
         });
         for &node in &released {
             circuit.compact_model_private_nodes.insert(node);
-            if floor != 0.0 {
-                matrix.add(node - 1, node - 1, -floor);
+            if diagonal != 0.0 {
+                matrix.add(node - 1, node - 1, -diagonal);
             }
         }
         match refused {

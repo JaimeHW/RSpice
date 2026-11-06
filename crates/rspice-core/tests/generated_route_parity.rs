@@ -1128,6 +1128,37 @@ fn a_compact_models_own_node_with_no_dc_path_settles_or_is_refused_by_name() {
     );
 }
 
+/// A settled node no longer sends the operating point back to the nodal
+/// floor. No equation reaches `u` or `r`, so without the floor their rows
+/// were empty and the system singular ("singular matrix: check node
+/// X1.u"), and the whole circuit was solved at the 1e-15 S floor, which
+/// pulled the 1e9/1e9 Ohm divider at `n` to 0.49999975 V. GMIN installed
+/// on the settled nodes alone, as Spectre installs it on a node with no DC
+/// path, leaves the rest of the circuit without a floor: v(n) = 0.5, as
+/// ngspice-46 solves the divider (4.999999999999999e-01).
+#[test]
+fn a_settled_node_does_not_send_the_operating_point_back_to_the_nodal_floor() {
+    let path = std::env::temp_dir().join(format!("rspice_settled_floor_{}.va", std::process::id()));
+    std::fs::write(
+        &path,
+        "`include \"disciplines.vams\"\nmodule open2(a, b, u, r);\ninout a, b, u, r;\n\
+         electrical a, b, u, r;\nanalog begin\n  I(a, b) <+ V(a, b) / 1k;\nend\nendmodule\n",
+    )
+    .expect("write the module");
+    let source = path.display().to_string().replace('\\', "/");
+    let deck = format!(
+        "* settled nodes beside a leakage-held divider\n.va \"{source}\" open2\nV1 in 0 1\n\
+         X1 in 0 open2\nR1 in n 1e9\nR2 n 0 1e9\n.end\n"
+    );
+    let trace = operating_point_trace(&deck, &["n", "x1.u", "x1.r"], &["V1"]);
+    let _ = std::fs::remove_file(&path);
+    assert_eq!(trace[0].text.as_deref(), Some("ok"), "{trace:?}");
+    let n = traced(&trace, "op.v(n)");
+    assert!((n - 0.5).abs() <= 1.0e-12, "v(n) = {n:e}: {trace:?}");
+    assert_eq!(traced(&trace, "op.v(x1.u)").to_bits(), 0.0f64.to_bits());
+    assert_eq!(traced(&trace, "op.v(x1.r)").to_bits(), 0.0f64.to_bits());
+}
+
 /// A private node whose row a conditional stamp leaves empty at the starting
 /// bias is not a node without a DC path. At `V(c) = 0` nothing writes `x`'s
 /// row while `I(a)` reads `V(x)`, but the stamp exists, and the operating

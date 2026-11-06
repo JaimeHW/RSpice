@@ -6329,6 +6329,7 @@ impl Engine {
         let gshunt = netlist.options.gshunt.unwrap_or(0.0);
         circuit.global_shunt_conductance = self.nodal_shunt_conductance() + gshunt;
         circuit.large_signal_shunt_conductance = gshunt;
+        circuit.settled_node_gmin = self.config.convergence_config.gmin_target.max(0.0);
         circuit.b3soi_gmin_scale = if self.config.b3soi_gmin_scaling {
             1.0e-6
         } else {

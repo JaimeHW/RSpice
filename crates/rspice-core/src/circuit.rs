@@ -662,6 +662,10 @@ pub struct CircuitData {
     /// stamps reach leaves it and rejoins the private set
     /// (`Engine::settle_compact_model_private_nodes`).
     pub(crate) settled_compact_model_private_nodes: Option<Vec<NodeId>>,
+    /// The GMIN an assembly that stamps no nodal floor installs on each of
+    /// [`Self::settled_compact_model_private_nodes`]: the engine's floor
+    /// value, `gmin_target` (`Engine::stamp_nodal_gmin`).
+    pub(crate) settled_node_gmin: Value,
     /// Of [`Self::compact_model_private_nodes`], those whose row some
     /// equation of the owning model can write a Jacobian entry into at DC,
     /// whatever its bias: the model's stamp pattern, not one evaluation.

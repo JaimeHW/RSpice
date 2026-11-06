@@ -1027,16 +1027,13 @@ mod generated {
     fn a_generated_instance_reports_its_metered_terminal_currents() {
         let runtime = format!(".va \"{}\"", model_source());
         let saves = "i(x1) @x1[ia] @x1[ik] i(rs)";
-        let gmin = rspice_core::SimulationConfig::default()
-            .convergence_config
-            .gmin_target;
         let mut op_currents = Vec::new();
         for include in ["", runtime.as_str()] {
             let op = operating_point(&deck(include, "dc 1", saves, ".op"));
             // KCL at the anode: the series resistor's current is the
-            // diode's and the node's GMIN floor's.
-            let anode = op.try_voltage_named("a").expect("V(a)");
-            let native = observable(&op, "I(rs)") - gmin * anode;
+            // diode's, the operating point being solved without the nodal
+            // floor.
+            let native = observable(&op, "I(rs)");
             assert!(native > 1e-7, "the diode conducts: {native}");
             assert_static("op I(x1)", observable(&op, "I(x1)"), native);
             assert_static("op @x1[ia]", observable(&op, "x1:ia"), native);
@@ -1094,16 +1091,11 @@ mod generated_multi_letter {
         // A `.PRINT` card's `N(x1:in1)` is the saved `@x1[in1]`, exported
         // under the card's spelling.
         let spellings = ["@x1[in2]", "x1:in2"];
-        let gmin = rspice_core::SimulationConfig::default()
-            .convergence_config
-            .gmin_target;
 
         // KCL at `a`: what the instance drives out of `n2` leaves through the
-        // meter `vm` and the node's GMIN floor.
-        let kcl = |point: &SimulationResult| {
-            point.branch_current_named("vm").expect("I(vm)")
-                + gmin * point.try_voltage_named("a").expect("V(a)")
-        };
+        // meter `vm`, an operating point and a DC sweep point being solved
+        // without the nodal floor.
+        let kcl = |point: &SimulationResult| point.branch_current_named("vm").expect("I(vm)");
         let source = deck("dc 1.5", ".op");
         let op = operating_point(&source);
         let native = kcl(&op);
@@ -1181,9 +1173,10 @@ mod generated_multi_letter {
 /// system, as they are on the native devices.
 ///
 /// Each device sits behind a zero-volt source `vm`, so KCL at the node between
-/// them is the reference: `vm`'s current and the node's GMIN floor at an
-/// operating point, a DC sweep point and every transient sample, and `vm`'s
-/// current alone in AC, which has no nodal GMIN. All agree to 1e-12.
+/// them is the reference: `vm`'s current and the node's GMIN floor at every
+/// transient sample, and `vm`'s current alone at an operating point and a DC
+/// sweep point, which are solved without the nodal floor, and in AC, which
+/// has no nodal GMIN. All agree to 1e-12.
 #[cfg(all(
     feature = "veriloga-model-diode-cmc",
     feature = "veriloga-model-r2-cmc"
@@ -1240,11 +1233,8 @@ mod card_routed {
     #[test]
     fn a_card_routed_resistor_reports_the_current_of_the_solved_system() {
         let saves = "v(a) i(r1) @r1[in1] @r1[in2] i(vm)";
-        // What leaves `n2` into `a` leaves `a` through `vm` and GMIN.
-        let kcl = |point: &SimulationResult| {
-            point.branch_current_named("vm").expect("I(vm)")
-                + gmin() * point.try_voltage_named("a").expect("V(a)")
-        };
+        // What leaves `n2` into `a` leaves `a` through `vm`.
+        let kcl = |point: &SimulationResult| point.branch_current_named("vm").expect("I(vm)");
 
         let op = operating_point(&resistor("dc 1.5", saves, ".op"));
         let native = kcl(&op);
@@ -1323,11 +1313,8 @@ mod card_routed {
     #[test]
     fn a_card_routed_diode_reports_the_current_of_the_solved_system() {
         let saves = "v(b) i(d1) @d1[ia] @d1[ik] @d1[id] i(vm)";
-        // What `vm` brings into `b` leaves through the anode and GMIN.
-        let kcl = |point: &SimulationResult| {
-            point.branch_current_named("vm").expect("I(vm)")
-                - gmin() * point.try_voltage_named("b").expect("V(b)")
-        };
+        // What `vm` brings into `b` leaves through the anode.
+        let kcl = |point: &SimulationResult| point.branch_current_named("vm").expect("I(vm)");
 
         let op = operating_point(&diode("dc 1", saves, ".op"));
         let native = kcl(&op);
