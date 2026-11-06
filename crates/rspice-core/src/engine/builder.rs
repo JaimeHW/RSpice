@@ -8518,16 +8518,6 @@ impl Engine {
                         }
                     }
 
-                    // `DEVICE VOLTLIM=0` reaches no native route below.
-                    if !self.config.device_voltage_limiting {
-                        let family = if is_vdmos_compatible {
-                            "VDMOS".to_string()
-                        } else {
-                            format!("MOSFET {}", mos_level_descriptor(level))
-                        };
-                        return Err(voltage_limiting_cannot_be_disabled(&element.name, &family));
-                    }
-
                     // BSIM3v3.3: LEVEL=8/49 (ngspice) and BSIM3-shaped
                     // LEVEL=9 (Xyce) cards route to the native port. ngspice
                     // also uses LEVEL=9 for MOS9, so BestAvailable dispatch
@@ -8591,6 +8581,11 @@ impl Engine {
                     if (matches!(level, 8 | 49) || level9_is_bsim3)
                         && let Some(params_map) = params_map.as_ref()
                     {
+                        require_voltage_limiting(
+                            self.config.device_voltage_limiting,
+                            &element.name,
+                            "BSIM3 MOSFET",
+                        )?;
                         let bsim3_params = native_bsim3_model_params_upper_map(
                             &element.name,
                             model,
@@ -8643,6 +8638,11 @@ impl Engine {
                     if matches!(level, 14 | 54)
                         && let Some(params_map) = params_map.as_ref()
                     {
+                        require_voltage_limiting(
+                            self.config.device_voltage_limiting,
+                            &element.name,
+                            "BSIM4 MOSFET",
+                        )?;
                         let bsim4_params = native_bsim4_model_params_upper_map(
                             &element.name,
                             model,
@@ -8682,6 +8682,11 @@ impl Engine {
                     if native_ekv26_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
+                        require_voltage_limiting(
+                            self.config.device_voltage_limiting,
+                            &element.name,
+                            "EKV26 MOSFET",
+                        )?;
                         let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
@@ -8710,6 +8715,11 @@ impl Engine {
                     if native_ekv3_level(level)
                         && let Some(params_map) = params_map.as_ref()
                     {
+                        require_voltage_limiting(
+                            self.config.device_voltage_limiting,
+                            &element.name,
+                            "EKV3 MOSFET",
+                        )?;
                         let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
@@ -8735,6 +8745,11 @@ impl Engine {
                     // Xyce MOS LEVEL=18 (`.model ... NMOS/PMOS level=18`)
                     // and ngspice VDMOS (`.model ... VDMOS nchan/pchan`).
                     if is_vdmos_compatible && let Some(params_map) = params_map.as_ref() {
+                        require_voltage_limiting(
+                            self.config.device_voltage_limiting,
+                            &element.name,
+                            "VDMOS",
+                        )?;
                         let model_key = native_model_key.clone();
                         reject_deferred_native_mos_model_params(
                             &element.name,
@@ -8836,6 +8851,7 @@ impl Engine {
                     });
                     mosfet.set_ngspice_dialect(self.config.spice_dialect != SpiceDialect::Xyce);
                     mosfet.set_xyce_initial_fix(self.config.spice_dialect == SpiceDialect::Xyce);
+                    mosfet.set_voltage_limiting_enabled(self.config.device_voltage_limiting);
 
                     // Device temperature: instance TEMP is absolute (C),
                     // DTEMP offsets the circuit temperature; model TNOM

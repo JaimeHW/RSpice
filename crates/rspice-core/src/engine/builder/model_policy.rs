@@ -673,6 +673,19 @@ pub(super) fn voltage_limiting_cannot_be_disabled(device: &str, family: &str) ->
     ))
 }
 
+/// Refuse `DEVICE VOLTLIM=0` on a route whose device always limits.
+pub(super) fn require_voltage_limiting(
+    enabled: bool,
+    device: &str,
+    family: &str,
+) -> Result<(), SimulationError> {
+    if enabled {
+        Ok(())
+    } else {
+        Err(voltage_limiting_cannot_be_disabled(device, family))
+    }
+}
+
 pub(super) fn bjt_level_descriptor(level: f64) -> String {
     if level.is_finite() && (level - level.round()).abs() <= 1e-9 {
         format!("LEVEL={:.0}", level.round())

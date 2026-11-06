@@ -195,6 +195,7 @@ impl Mosfet {
             native_xyce_transient_convergence: false,
             ngspice_dialect: true,
             xyce_initial_fix: false,
+            voltage_limiting: true,
             indices: MosfetIndices::default(),
         }
     }
@@ -428,7 +429,8 @@ impl Mosfet {
         if let Some((vgs, vds, vbs)) = self.pending_startup_bias() {
             return (vgs, vds, vbs, false);
         }
-        if !self.has_branch_history
+        if !self.voltage_limiting
+            || !self.has_branch_history
             || !self.eval_vgs_prev.is_finite()
             || !self.eval_vds_prev.is_finite()
             || !self.eval_vbs_prev.is_finite()
@@ -1898,6 +1900,33 @@ mod tests {
         mos.enter_operating_point(false);
         mos.update(&[5.0, 5.0, 0.0, 0.0]);
         assert_eq!((mos.eval_vgs, mos.eval_vds), (5.0, 5.0));
+    }
+
+    #[test]
+    fn voltlim_off_evaluates_every_iterate_unseeded_and_unlimited() {
+        use crate::device::NonlinearDevice;
+
+        // Xyce gates the initJct seed and fetlim/limvds/pnjlim on
+        // `voltageLimiterFlag` (N_DEV_MOSFET1.C:2787, 2866); an `OFF`
+        // instance still opens at zero bias (:2823).
+        let mut mos = Mosfet::new_nmos("m1".to_string(), 1, 2, 3, 4);
+        mos.set_voltage_limiting_enabled(false);
+        mos.enter_operating_point(false);
+        mos.update(&[0.5, 0.3, 0.0, 0.0]);
+        assert_eq!((mos.eval_vgs, mos.eval_vds, mos.eval_vbs), (0.3, 0.5, 0.0));
+        mos.update(&[20.0, 15.0, 0.0, 2.0]);
+        assert_eq!(
+            (mos.eval_vgs, mos.eval_vds, mos.eval_vbs),
+            (15.0, 20.0, 2.0)
+        );
+        assert!(!mos.junction_limited);
+
+        let mut off = Mosfet::new_nmos("m2".to_string(), 1, 2, 3, 4);
+        off.set_voltage_limiting_enabled(false);
+        off.set_initially_off(true);
+        off.enter_operating_point(false);
+        off.update(&[5.0, 5.0, 0.0, 0.0]);
+        assert_eq!((off.eval_vgs, off.eval_vds, off.eval_vbs), (0.0, 0.0, 0.0));
     }
 
     #[test]

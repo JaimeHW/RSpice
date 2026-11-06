@@ -530,6 +530,10 @@ pub struct Mosfet {
     /// Hold an `OFF` instance through Xyce's initFixFlag (the Xyce dialect)
     /// instead of ngspice's MODEINITFIX.
     xyce_initial_fix: bool,
+    /// Xyce's global `DEVICE VOLTLIM`: the first operating-point load takes
+    /// the MODEINITJCT seed and every iterate runs fetlim, limvds and
+    /// pnjlim. Cleared, each load reads the solution as it stands.
+    voltage_limiting: bool,
 
     /// Pre-computed matrix indices for O(1) stamping
     pub(crate) indices: MosfetIndices,
@@ -780,6 +784,15 @@ impl Mosfet {
         self.xyce_initial_fix = enabled;
     }
 
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy. Xyce's `voltageLimiterFlag`
+    /// gates both the initJct seed and the fetlim/limvds/pnjlim sequence
+    /// (N_DEV_MOSFET1.C:2787, 2866, and the level 2/3/6 twins); an `OFF`
+    /// instance opens at zero bias either way (:2823).
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
+    }
+
     /// Begin one operating-point load of a classic MOS population. Under
     /// Xyce's initFixFlag an `OFF` instance holds its zero bias at the first
     /// load (initJct) and at every later one that follows a load in which any
@@ -892,8 +905,10 @@ impl Mosfet {
             return (!released).then_some((0.0, 0.0, 0.0));
         }
         // An instance `IC=` vector would be ngspice's seed instead; those
-        // instances keep starting from the Newton iterate.
-        let seeded = self.operating_point_startup().is_some()
+        // instances keep starting from the Newton iterate, as every instance
+        // does without `DEVICE VOLTLIM`.
+        let seeded = self.voltage_limiting
+            && self.operating_point_startup().is_some()
             && matches!(self.level, 1 | 2 | 3 | 6 | 9)
             && !self.uses_legacy_bsim()
             && self

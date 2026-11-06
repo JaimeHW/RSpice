@@ -2228,3 +2228,42 @@ fn every_native_mos_family_names_an_unknown_instance_parameter_and_builds() {
         assert_eq!(about_device(&known_name), 0, "{family}: {warnings:?}");
     }
 }
+
+/// Xyce's `DEVICE VOLTLIM=0` drops the classic MOS initJct seed and the
+/// fetlim/limvds/pnjlim sequence (N_DEV_MOSFET1.C:2787, 2866). That changes
+/// the Newton path and nothing else: each Berkeley level still solves a CMOS
+/// inverter, at the operating point the limited solve reaches.
+#[test]
+fn classic_mos_levels_solve_with_voltage_limiting_disabled() {
+    for level in [1, 2, 3] {
+        let deck = format!(
+            "classic MOS inverter with and without voltage limiting\n\
+             mn out in 0 0 nch w=10u l=1u\n\
+             mp out in vdd vdd pch w=20u l=1u\n\
+             vdd vdd 0 5\n\
+             vin in 0 1\n\
+             .model nch nmos level={level} vto=0.7 kp=110u lambda=0.04 gamma=0.4 phi=0.7\n\
+             .model pch pmos level={level} vto=-0.7 kp=50u lambda=0.05 gamma=0.4 phi=0.7\n\
+             .op\n\
+             .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("inverter deck parses");
+        let output = |device_voltage_limiting: bool| {
+            Engine::new(SimulationConfig {
+                device_voltage_limiting,
+                ..SimulationConfig::default()
+            })
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| {
+                panic!("LEVEL={level} with VOLTLIM={device_voltage_limiting} should run: {err}")
+            })
+            .try_voltage_named("out")
+            .unwrap_or_else(|| panic!("missing V(out) for LEVEL={level}"))
+        };
+        let (limited, unlimited) = (output(true), output(false));
+        assert!(
+            (limited - unlimited).abs() <= 1.0e-6,
+            "LEVEL={level}: V(out) {limited} limited, {unlimited} unlimited"
+        );
+    }
+}
