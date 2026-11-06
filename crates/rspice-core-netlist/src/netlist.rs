@@ -12618,6 +12618,41 @@ mod tests {
         );
     }
 
+    /// Without a typical delay a UGATE takes the mean of its minimum and
+    /// maximum, else the one it has, and reads a delay written `-1` as not
+    /// given (ngspice-46 frontend/udevices.c:2911 estimate_typ): a BUF with
+    /// TPLHMN=1n TPLHMX=3n rises 2 ns after its input, and one with
+    /// TPHLTY=-1 TPHLMN=4n falls 4 ns after it, as in ngspice-46.
+    #[test]
+    fn pspice_u_gate_ugate_timing_estimates_a_missing_typical_delay() {
+        let netlist = Netlist::parse(
+            "pspice u gate estimated timing\n\
+             U1 BUF $G_DPWR $G_DGND a y DLY IO_LEVEL=0\n\
+             .model DLY UGATE (TPLHMN=1n TPLHMX=3n TPHLTY=-1 TPHLMN=4n)\n\
+             .end\n",
+        )
+        .expect("PSpice UGATE timing without typical delays should parse");
+
+        let alias_name = match &netlist.elements[0].kind {
+            ElementKind::Xspice { model, .. } => model.as_str(),
+            other => panic!("expected XSPICE lowering, got {other:?}"),
+        };
+        let alias = netlist
+            .models
+            .iter()
+            .find(|model| model.name == alias_name)
+            .expect("generated timing alias exists");
+        let delay = |target: &str| {
+            alias
+                .params
+                .iter()
+                .find(|(name, _)| name == target)
+                .map_or(Value::NAN, |(_, value)| *value)
+        };
+        assert!((delay("rise_delay") - 2.0e-9).abs() < 1.0e-21);
+        assert!((delay("fall_delay") - 4.0e-9).abs() < 1.0e-21);
+    }
+
     #[test]
     fn pspice_u_gate_ugate_timing_honors_mntymxdly_max_mode() {
         let netlist = Netlist::parse(

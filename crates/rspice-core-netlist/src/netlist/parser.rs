@@ -4252,44 +4252,58 @@ enum PspiceTimingDelay {
     Expr(String),
 }
 
+/// The delay a timing model gives by its typical, minimum and maximum
+/// parameters (`source_names`, in that order), as ngspice-46 estimates it
+/// (frontend/udevices.c:2972 estimate_delay): MNTYMXDLY 1 takes the minimum
+/// and 3 the maximum when the model gives it; otherwise, and for 2, the
+/// typical value, else the mean of the minimum and the maximum, else the
+/// maximum, else the minimum (:2911 estimate_typ). A value written with a
+/// leading `-` counts as not given.
 fn pspice_timing_delay_estimate(
     timing_model: &ModelDef,
     source_names: &[&str],
     delay_mode: PspiceUTimingMode,
 ) -> Option<PspiceTimingDelay> {
-    for source_name in pspice_timing_delay_source_order(source_names, delay_mode) {
+    let given = |index: usize| {
+        let source_name = source_names.get(index)?;
         if let Some((_, value)) = timing_model
             .params
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
         {
-            return Some(PspiceTimingDelay::Numeric(*value));
+            return (!value.is_sign_negative()).then_some(PspiceTimingDelay::Numeric(*value));
         }
-
-        if let Some((_, expr)) = timing_model
+        timing_model
             .expr_params
             .iter()
             .find(|(name, _)| name.eq_ignore_ascii_case(source_name))
-        {
-            return Some(PspiceTimingDelay::Expr(expr.clone()));
-        }
-    }
-
-    None
-}
-
-fn pspice_timing_delay_source_order<'a>(
-    source_names: &'a [&'a str],
-    delay_mode: PspiceUTimingMode,
-) -> impl Iterator<Item = &'a str> {
-    let order = match delay_mode {
-        PspiceUTimingMode::Min => [1usize, 0, 2],
-        PspiceUTimingMode::Typ => [0usize, 1, 2],
-        PspiceUTimingMode::Max => [2usize, 0, 1],
+            .filter(|(_, expr)| !expr.trim_start().starts_with('-'))
+            .map(|(_, expr)| PspiceTimingDelay::Expr(expr.clone()))
     };
-    order
-        .into_iter()
-        .filter_map(|index| source_names.get(index).copied())
+    let (typical, minimum, maximum) = (given(0), given(1), given(2));
+    match delay_mode {
+        PspiceUTimingMode::Min if minimum.is_some() => return minimum,
+        PspiceUTimingMode::Max if maximum.is_some() => return maximum,
+        _ => {}
+    }
+    if typical.is_some() {
+        return typical;
+    }
+    let text = |delay: PspiceTimingDelay| match delay {
+        PspiceTimingDelay::Numeric(value) => format!("{value:e}"),
+        PspiceTimingDelay::Expr(expr) => expr,
+    };
+    match (minimum, maximum) {
+        (Some(PspiceTimingDelay::Numeric(low)), Some(PspiceTimingDelay::Numeric(high))) => {
+            Some(PspiceTimingDelay::Numeric((low + high) / 2.0))
+        }
+        (Some(low), Some(high)) => Some(PspiceTimingDelay::Expr(format!(
+            "(({})+({}))/2",
+            text(low),
+            text(high)
+        ))),
+        (minimum, maximum) => maximum.or(minimum),
+    }
 }
 
 /// The one delay a code model takes for a rising and a falling one: the
