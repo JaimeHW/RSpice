@@ -1068,6 +1068,42 @@ fn remzerovec_keeps_the_vectors_that_have_elements() {
     assert!(texts[0].contains("v1#branch"), "{}", texts[0]);
 }
 
+/// `integ` integrates a vector by the trapezoidal rule over its plot's scale
+/// (maths/cmaths/cmath4.c:439 cx_integ), here the 0.1 ms grid linearize made
+/// from a 0-1-0 V triangle over 2 ms. ngspice-46 prints, for `integ(v(1))`
+/// and `integ(v1#branch)`, 5e-06 and -5e-09 at index 1, 5e-04 and -5e-07 at
+/// index 10, and 1e-03 and -1e-06 at index 20.
+#[test]
+fn integ_integrates_a_vector_over_its_scale() {
+    let (presented, error) = run_until_error(
+        "integ\nv1 1 0 pwl(0 0 1m 1 2m 0)\nr1 1 0 1k\n.control\ntran 0.1m 2m\nlinearize\n\
+         let b = integ(v(1))\nlet c = integ(V1#branch)\nprint b c\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    let [traces] = prints.as_slice() else {
+        panic!("one print: {prints:?}");
+    };
+    for (trace, bins) in traces.iter().zip([
+        [(1, 5e-6), (10, 5e-4), (20, 1e-3)],
+        [(1, -5e-9), (10, -5e-7), (20, -1e-6)],
+    ]) {
+        assert_eq!(trace.y.samples.len(), 21);
+        for (index, expected) in bins {
+            let value = trace.y.samples[index].re;
+            assert!(
+                (value - expected).abs() < 1e-9 * expected.abs(),
+                "{} at {index}: {value}",
+                trace.y.expression
+            );
+        }
+    }
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first

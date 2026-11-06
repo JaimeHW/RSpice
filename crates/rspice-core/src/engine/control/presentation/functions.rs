@@ -42,6 +42,7 @@ pub(super) fn is_vector_function(name: &str) -> bool {
             | "NINT"
             | "POS"
             | "DERIV"
+            | "INTEG"
     )
 }
 
@@ -293,18 +294,12 @@ pub(super) fn apply(
             SignalUnit::Dimensionless,
         ),
         "DERIV" => {
-            let scale_values = scale
-                .as_deref()
-                .and_then(|name| circuit.dataset(name))
-                .filter(|dataset| dataset.length() == length)
-                .and_then(|dataset| {
-                    (0..length)
-                        .map(|row| dataset.scale_value(row))
-                        .collect::<Option<Vec<_>>>()
-                })
-                .ok_or_else(|| {
-                    command_error(line, "deriv requires a vector on its plot's scale")
-                })?;
+            let (scale_values, _) =
+                circuit
+                    .scale_values(scale.as_deref(), length)
+                    .ok_or_else(|| {
+                        command_error(line, "deriv requires a vector on its plot's scale")
+                    })?;
             if abort.is_aborted() {
                 return Err(ControlError::new(
                     line,
@@ -328,6 +323,37 @@ pub(super) fn apply(
                 complex,
                 scale,
                 unit: SignalUnit::Unspecified,
+            }
+        }
+        // cmath4.c:439 cx_integ: the trapezoidal rule over the plot's
+        // scale, from zero at its first point.
+        "INTEG" => {
+            if complex {
+                return Err(command_error(
+                    line,
+                    "Function integ is not supported for complex data",
+                ));
+            }
+            let (scale_values, _) =
+                circuit
+                    .scale_values(scale.as_deref(), length)
+                    .ok_or_else(|| {
+                        command_error(line, "integ requires a vector on its plot's scale")
+                    })?;
+            let mut total = 0.0;
+            let mut values = Vec::with_capacity(length);
+            for (index, sample) in samples.iter().enumerate() {
+                if let Some(previous) = index.checked_sub(1) {
+                    let step = scale_values[index] - scale_values[previous];
+                    total += (sample.re + samples[previous].re) * step / 2.0;
+                }
+                values.push(ComplexValue::from(total));
+            }
+            VectorValue {
+                samples: values,
+                complex,
+                scale,
+                unit,
             }
         }
         _ => {

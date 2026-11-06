@@ -653,6 +653,26 @@ impl ControlCircuit {
         });
     }
 
+    /// The scale a vector of `length` elements follows, as `vector_scale`
+    /// finds it (its dataset's, else the current user plot's): its real
+    /// values and its unit.
+    pub(super) fn scale_values(
+        &self,
+        scale: Option<&str>,
+        length: usize,
+    ) -> Option<(Vec<Value>, SignalUnit)> {
+        if let Some(dataset) = scale.and_then(|name| self.dataset(name)) {
+            if dataset.length() != length {
+                return None;
+            }
+            let values = (0..length).map(|row| dataset.scale_value(row));
+            return Some((values.collect::<Option<_>>()?, dataset.scale_unit()));
+        }
+        let scale = self.user_plot_scale(length)?;
+        let values = scale.value.samples.iter().map(|sample| sample.re).collect();
+        Some((values, scale.value.unit.clone()))
+    }
+
     /// The scale of the current user plot, or of the constants plot before
     /// any analysis ran, when it has `length` elements.
     fn user_plot_scale(&self, length: usize) -> Option<&UserVector> {
