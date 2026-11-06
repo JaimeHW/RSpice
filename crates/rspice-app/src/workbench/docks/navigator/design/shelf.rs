@@ -3,8 +3,8 @@
 //! A separate surface from the navigator beside it, and separated here for the
 //! reason the two tabs exist at all: the navigator answers about the design in
 //! front of the reader, and this answers about everything that could be added
-//! to it. They share only how a query is folded ([`super::normalized`]) and
-//! what it matches ([`super::matches_query`]).
+//! to it. They share no matcher either: the navigator filters its tree by
+//! substring, and the shelf ranks every placeable row by word ([`search`]).
 //!
 //! Almost nothing here takes the whole application. A shelf row arms a tool,
 //! writes a pin, or credits a placement, and all three live in
@@ -1062,7 +1062,7 @@ fn resolve_shelf_entry(
                 entry: entry.clone(),
                 glyph: ShelfGlyph::Event,
                 label: descriptor.display_name.to_owned(),
-                meta: Some(descriptor.model_type.to_owned()),
+                meta: xspice_meta(descriptor).map(str::to_owned),
                 selected: placing_cell
                     && pending
                         .and_then(|binding| binding.builtin_xspice.as_ref())
@@ -1464,6 +1464,30 @@ fn variant_entry(
         })
 }
 
+/// Whether a palette variant row places this library part's card on its
+/// device.
+fn placed_by_variant_row(row: &LibraryPartRow) -> bool {
+    let LibraryPartAction::Arm(placement) = &row.action else {
+        return false;
+    };
+    let PartPlacement::NativeDevice {
+        component_type,
+        model,
+        ..
+    } = placement.as_ref()
+    else {
+        return false;
+    };
+    component_palette()
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .any(|entry| {
+            entry.kind == *component_type
+                && entry.variant.is_some()
+                && entry.default_model == Some(model.as_str())
+        })
+}
+
 /// Whether the place tool holds this primitive bare, with no card or skin.
 fn primitive_armed(state: &AppState, kind: ComponentType) -> bool {
     let editor = &state.model.schematic.session.editor;
@@ -1505,9 +1529,9 @@ pub(super) fn arm_variant(
 /// The Stimulus library section: every definition this project authored, as a
 /// placeable part.
 ///
-/// It sits directly under Primitives because that is what a definition is — a
-/// source of one of the twelve families above it, with its fields already
-/// filled in — and above the pack and cell catalogs, which publish devices
+/// It sits directly under the built-in groups because that is what a
+/// definition is — a source of one of the families above it, with its fields
+/// already filled in — and above the pack and cell catalogs, which publish devices
 /// rather than excitations. A project that has authored none paints nothing at
 /// all rather than an empty header: the shelf's other sections do the same, and
 /// a heading over nothing is a door that leads nowhere.
@@ -1608,6 +1632,19 @@ fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context
     }
 }
 
+/// A code model's meta column: its netlist model name, unless that name only
+/// repeats the label (`potentiometer`, `oneshot`).
+fn xspice_meta(descriptor: &CatalogXspiceDeviceDescriptor) -> Option<&'static str> {
+    let folded = |text: &str| {
+        text.chars()
+            .filter(char::is_ascii_alphanumeric)
+            .map(|c| c.to_ascii_lowercase())
+            .collect::<String>()
+    };
+    (folded(descriptor.model_type) != folded(descriptor.display_name))
+        .then_some(descriptor.model_type)
+}
+
 fn xspice_row(
     ui: &mut Ui,
     state: &mut AppState,
@@ -1630,7 +1667,7 @@ fn xspice_row(
         ShelfGlyph::Event,
         descriptor.display_name,
         selected,
-        Some(descriptor.model_type),
+        xspice_meta(descriptor),
         level,
     );
     let stable_id = descriptor.stable_id;
@@ -2130,6 +2167,11 @@ pub(super) fn shelf_hits(
         });
     }
     for row in library_parts {
+        // A card a variant row places is answered by that row, which ranks on
+        // the card's name as well, so the search lists the part once.
+        if placed_by_variant_row(row) {
+            continue;
+        }
         let rank = library_part_rank(query, &row.part_id, &row.device, &row.source);
         match &row.action {
             // Still listed, so a search for it says why it cannot be placed

@@ -59,6 +59,8 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("chassis", &["Chassis Ground"]),
     ("electrolytic", &["Polarized Capacitor"]),
     ("polarized capacitor", &["Polarized Capacitor"]),
+    ("rspice_zener", &["Zener Diode"]),
+    ("rspice_led_green", &["LED (green)"]),
 ];
 
 #[test]
@@ -135,4 +137,18 @@ fn a_query_nothing_answers_lists_nothing() {
     let app = RSpiceApp::test_instance();
     assert!(!hits(&app, "resistor").is_empty());
     assert!(hits(&app, "no-such-component-or-cell").is_empty());
+}
+
+/// A library card a variant row places is answered by that row alone.
+#[test]
+fn a_card_a_variant_row_places_is_listed_once() {
+    let app = RSpiceApp::test_instance();
+    let labels = hits(&app, "led")
+        .into_iter()
+        .map(|hit| hit.label)
+        .collect::<Vec<_>>();
+    assert_eq!(
+        labels,
+        ["LED (red)", "LED (green)", "LED (blue)", "LED (white)"]
+    );
 }
