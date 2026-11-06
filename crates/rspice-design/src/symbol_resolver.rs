@@ -116,7 +116,19 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
             AuthoredDocument::Missing => {}
         }
 
-        ports.map(|ports| ResolvedCellSymbol::from_generated_interface(&ports, roles))
+        // An instance placed from a model source states the roles of its
+        // pins. With no symbol view of its own, the symbol drawn from them is
+        // its symbol, not a stand-in for a missing one.
+        ports.map(|ports| {
+            if roles.is_empty() {
+                ResolvedCellSymbol::from_generated_interface(&ports, roles)
+            } else {
+                ResolvedCellSymbol::from_authored_document(
+                    SymbolDocument::generated_from_interface(&ports, roles),
+                    &ports,
+                )
+            }
+        })
     }
 
     fn resolve_ports(

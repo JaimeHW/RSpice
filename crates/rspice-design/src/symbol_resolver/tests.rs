@@ -356,3 +356,34 @@ fn a_generated_symbols_bus_pin_resolves_under_its_whole_name() {
         [("D[7:0]", PortDirection::InOut), ("en", PortDirection::In)]
     );
 }
+
+/// A subcircuit placed from a vendor model states its pins' roles, and the
+/// amplifier it describes is drawn as its symbol, not as an unresolved cell.
+#[test]
+fn an_instance_that_states_pin_roles_draws_the_symbol_they_describe() {
+    use rspice_design_model::port::PinRole;
+    let (libraries, buffers) = library_with_amp(None);
+    let resolver = SymbolResolver::new(&libraries, &buffers);
+    let roles = [
+        PinRole::NonInvertingInput,
+        PinRole::InvertingInput,
+        PinRole::PositiveSupply,
+        PinRole::NegativeSupply,
+        PinRole::Output,
+    ];
+    let ports = ["1", "2", "99", "50", "45"]
+        .into_iter()
+        .zip(roles)
+        .map(|(name, role)| port(name, role.direction()))
+        .collect::<Vec<_>>();
+    let mut binding = LibraryCellInstance::new("vendor", "OPAMP", "spice");
+    binding.bind_interface_with_roles(&ports, &roles);
+
+    let resolved = resolver
+        .resolve_binding(&binding)
+        .expect("the stated interface resolves");
+
+    assert_eq!(resolved.source(), ResolvedSymbolSource::Authored);
+    assert_eq!(resolved.connectable_pins().count(), 5);
+    assert!(resolved.issues().is_empty());
+}
