@@ -447,8 +447,8 @@ pub const VIEW_HISTORY_DEPTH: usize = 16;
 pub const VIEW_GESTURE_GAP_SECONDS: f64 = 0.5;
 
 /// The views a canvas showed before the one it shows, newest last, so Zoom
-/// previous can step back through them. `V` is the canvas's own camera, its
-/// zoom and pan.
+/// previous can step back through them. `V` is the canvas's own camera: a
+/// drawing's zoom and pan, or the windows a waveform sheet's panes show.
 ///
 /// The canvas reports the view each frame ends on. The first change after a
 /// pause keeps the view it left; the changes that follow it closely are the
@@ -470,23 +470,22 @@ impl<V> Default for ViewHistory<V> {
     }
 }
 
-impl<V: Copy + PartialEq> ViewHistory<V> {
+impl<V: Clone + PartialEq> ViewHistory<V> {
     /// Note that a frame at `time` seconds ended on `view`.
     pub fn observe(&mut self, view: V, time: f64) {
-        match self.shown {
-            Some(shown) if shown == view => return,
-            Some(shown) => {
-                let new_gesture = !(time - self.last_change < VIEW_GESTURE_GAP_SECONDS
-                    && time >= self.last_change);
-                if new_gesture && self.earlier.last() != Some(&shown) {
-                    if self.earlier.len() == VIEW_HISTORY_DEPTH {
-                        self.earlier.remove(0);
-                    }
-                    self.earlier.push(shown);
+        if self.shown.as_ref() == Some(&view) {
+            return;
+        }
+        if let Some(shown) = self.shown.take() {
+            let new_gesture =
+                !(time - self.last_change < VIEW_GESTURE_GAP_SECONDS && time >= self.last_change);
+            if new_gesture && self.earlier.last() != Some(&shown) {
+                if self.earlier.len() == VIEW_HISTORY_DEPTH {
+                    self.earlier.remove(0);
                 }
-                self.last_change = time;
+                self.earlier.push(shown);
             }
-            None => {}
+            self.last_change = time;
         }
         self.shown = Some(view);
     }
@@ -500,7 +499,7 @@ impl<V: Copy + PartialEq> ViewHistory<V> {
     /// shows it next, and the next change starts a gesture of its own.
     pub fn step_back(&mut self) -> Option<V> {
         let view = self.earlier.pop()?;
-        self.shown = Some(view);
+        self.shown = Some(view.clone());
         self.last_change = f64::NEG_INFINITY;
         Some(view)
     }
