@@ -434,8 +434,9 @@ impl ModelsFeature {
             let picked = rfd::FileDialog::new()
                 .add_filter(
                     "SPICE model source",
-                    &["lib", "model", "mod", "spice", "cir", "inc", "scs"],
+                    crate::state::pdk_config::MODEL_FILE_EXTENSIONS,
                 )
+                .add_filter("All files", &["*"])
                 .pick_file();
             if let Some(path) = picked {
                 Self::start_native_model_source_parse(cx, _ctx, path);
@@ -1616,10 +1617,8 @@ fn browser_model_root_candidates(files: &[(String, Vec<u8>)]) -> Vec<String> {
                 .extension()
                 .and_then(|extension| extension.to_str())
                 .filter(|extension| {
-                    matches!(
-                        extension.to_ascii_lowercase().as_str(),
-                        "lib" | "model" | "mod" | "spice" | "cir" | "inc" | "scs"
-                    )
+                    crate::state::pdk_config::MODEL_FILE_EXTENSIONS
+                        .contains(&extension.to_ascii_lowercase().as_str())
                 })
                 .map(|_| name.clone())
         })

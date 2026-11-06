@@ -958,6 +958,12 @@ impl ModelLibraryManager {
             if !seen.insert(portable_path_key(&canonical)) {
                 continue;
             }
+            // `.txt` names no format: a text file in a model folder is a model
+            // source only when it declares a SPICE definition, so a folder's
+            // notes and licences are passed over rather than refused.
+            if file.extension == "txt" && !declares_spice_definition(&canonical) {
+                continue;
+            }
             match candidate.load_library_file(&canonical, None) {
                 Ok(_) => {
                     admitted.push(canonical);
@@ -995,6 +1001,23 @@ impl ModelLibraryManager {
     pub fn load_builtin_models(&mut self) {
         self.catalog.load_builtin_models()
     }
+}
+
+/// Whether the file at `path` declares a SPICE definition: a `.model`,
+/// `.subckt`, `.lib`, `.include` or `.param` card at the start of a line.
+fn declares_spice_definition(path: &Path) -> bool {
+    std::fs::read(path)
+        .ok()
+        .and_then(|bytes| rspice_core::netlist::decode_source_bytes(&bytes).ok())
+        .is_some_and(|text| {
+            text.lines().any(|line| {
+                line.split_whitespace().next().is_some_and(|card| {
+                    [".model", ".subckt", ".lib", ".include", ".inc", ".param"]
+                        .iter()
+                        .any(|directive| card.eq_ignore_ascii_case(directive))
+                })
+            })
+        })
 }
 
 #[cfg(test)]

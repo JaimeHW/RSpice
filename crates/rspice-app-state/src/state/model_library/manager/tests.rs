@@ -1949,6 +1949,36 @@ fn disabling_configured_sources_unloads_only_retained_pdk_ownership() {
     fs::remove_dir_all(manual_root).expect("remove manual root");
 }
 
+/// A model folder holds vendor models under every SPICE extension, `.txt`
+/// among them, beside the notes that come with them.
+#[test]
+fn a_folder_scan_reads_every_model_extension_and_passes_over_notes() {
+    let root = std::env::temp_dir().join(format!("rspice-pdk-vendor-{}", uuid::Uuid::new_v4()));
+    fs::create_dir_all(&root).expect("create vendor root");
+    fs::write(root.join("diode.sub"), ".model DSUB D (IS=1e-14)\n").expect("write .sub");
+    fs::write(
+        root.join("amp.txt"),
+        "* vendor amplifier\n.subckt AMPTXT IN OUT\nR1 IN OUT 1k\n.ends AMPTXT\n",
+    )
+    .expect("write .txt model");
+    fs::write(root.join("readme.txt"), "Unzip into your model folder.\n").expect("write notes");
+
+    let mut config = crate::state::pdk_config::PdkConfig::default();
+    config.add_library_path(root.to_string_lossy());
+    let mut manager = ModelLibraryManager::new();
+    assert_eq!(
+        manager
+            .replace_from_pdk_config(None, &mut config)
+            .expect("the folder applies without its notes"),
+        2
+    );
+    assert!(manager.get_library("diode").is_some());
+    assert!(manager.get_library("amp").is_some());
+    assert!(manager.get_library("readme").is_none());
+
+    fs::remove_dir_all(root).expect("remove vendor root");
+}
+
 //=========================================================================
 // Shipped model pack discovery
 //=========================================================================
