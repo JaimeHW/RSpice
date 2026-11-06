@@ -86,9 +86,10 @@ pub use hierarchy_path::{HierarchyPath, HierarchyPathConfig};
 pub use include::source_path_literal_to_host_path;
 pub use include::{
     IncludeProcessor, IncludeResolution, IncludeSearchCandidate, IncludeSearchStage,
-    ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge, normalize_source_path_literal,
-    parse_include_directive, parse_lib_directive,
+    MODEL_SOURCE_EXTENSIONS, ResolvedIncludeDependency, SealedSourceBundle, SealedSourceEdge,
+    normalize_source_path_literal, parse_include_directive, parse_lib_directive,
 };
+pub(crate) use parser::strip_semicolon_comment;
 pub use initcond::{
     DeviceInitialConditionSourceProvider, DeviceInitialConditionSourceText,
     MAX_DEVICE_INITIAL_CONDITION_SOURCE_BYTES,

@@ -1517,6 +1517,7 @@ impl IncludeProcessor {
 
             if split_directive(trimmed)
                 .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
+                && library_file_include(trimmed).is_none()
             {
                 let Some((filename, section)) = parse_lib_directive(trimmed) else {
                     return Err(ParseError::Syntax {
@@ -1594,7 +1595,8 @@ impl IncludeProcessor {
 
             if split_directive(trimmed).is_some_and(|(directive, _)| {
                 matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"])
-            }) {
+            }) || library_file_include(trimmed).is_some()
+            {
                 let Some(filename) = parse_include_directive(trimmed) else {
                     return Err(ParseError::Syntax {
                         line: line_number,
@@ -1886,6 +1888,9 @@ pub fn parse_include_directive(line: &str) -> Option<String> {
     // unquoted `;`.
     let trimmed = super::parser::strip_semicolon_comment(line).trim();
     let (directive, rest) = split_directive(trimmed)?;
+    if directive.eq_ignore_ascii_case(".lib") {
+        return library_file_include(trimmed);
+    }
     if !matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"]) {
         return None;
     }
@@ -1969,7 +1974,7 @@ fn spice_relative_path(path: &str) -> PathBuf {
 pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = super::parser::strip_semicolon_comment(line).trim();
     let (directive, rest) = split_directive(trimmed)?;
-    if !directive.eq_ignore_ascii_case(".lib") {
+    if !directive.eq_ignore_ascii_case(".lib") || library_file_include(trimmed).is_some() {
         return None;
     }
     let rest = rest.trim();
@@ -2002,6 +2007,42 @@ pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
         .map(|section| unquote_section_name(section).to_owned());
 
     Some((filename, section))
+}
+
+/// The extensions a SPICE or Spectre model source is written under,
+/// lowercase. Vendors ship SPICE models as `.lib`, `.sub`, `.mod`, `.model`,
+/// `.cir`, `.sp`, `.spi`, `.spice`, `.inc`, `.ckt` and `.txt`.
+pub const MODEL_SOURCE_EXTENSIONS: &[&str] = &[
+    "lib", "sub", "mod", "model", "cir", "sp", "spi", "spice", "inc", "txt", "ckt", "scs",
+];
+
+/// The file a one-argument `.lib` card includes whole, LTspice's
+/// `.lib UniversalOpAmp2.lib`. The argument names a file when it carries a
+/// path or a model-source extension, which no section name does; any other
+/// one-argument card opens a section.
+fn library_file_include(card: &str) -> Option<String> {
+    let rest = split_directive(card)?.1.trim();
+    let (argument, remainder) = match rest.chars().next() {
+        Some(quote @ ('"' | '\'')) => {
+            let quoted = &rest[1..];
+            let end = quoted.find(quote)?;
+            (&quoted[..end], &quoted[end + 1..])
+        }
+        _ => {
+            let end = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            (&rest[..end], &rest[end..])
+        }
+    };
+    let names_file = argument.contains(['/', '\\'])
+        || Path::new(argument)
+            .extension()
+            .and_then(|extension| extension.to_str())
+            .is_some_and(|extension| {
+                MODEL_SOURCE_EXTENSIONS
+                    .iter()
+                    .any(|known| extension.eq_ignore_ascii_case(known))
+            });
+    (names_file && remainder.trim().is_empty()).then(|| argument.to_owned())
 }
 
 /// A `.lib`/`.endl` section name without the quotes around it. ngspice skips
@@ -2079,6 +2120,35 @@ mod tests {
         assert_eq!(parse_include_directive(".incbin bad"), None);
     }
 
+    /// A one-argument `.lib` names a file when it carries a path or a model
+    /// source extension (LTspice's `.lib UniversalOpAmp2.lib`); any other
+    /// one-argument card opens a section.
+    #[test]
+    fn a_one_argument_lib_card_names_a_file_or_a_section() {
+        for card in [
+            ".lib UniversalOpAmp2.lib",
+            ".LIB \"vendor models/opamps.sub\"",
+            ".lib ../models/opamps",
+        ] {
+            assert!(parse_include_directive(card).is_some(), "{card}");
+            assert_eq!(parse_lib_directive(card), None, "{card}");
+        }
+        assert_eq!(
+            parse_include_directive(".lib 'opamps.lib'").as_deref(),
+            Some("opamps.lib")
+        );
+        assert_eq!(parse_include_directive(".lib TT"), None);
+        assert_eq!(
+            parse_lib_directive(".lib TT"),
+            Some(("TT".to_owned(), None))
+        );
+        assert_eq!(
+            parse_lib_directive(".lib models.lib TT"),
+            Some(("models.lib".to_owned(), Some("TT".to_owned())))
+        );
+        assert_eq!(parse_include_directive(".lib models.lib TT"), None);
+    }
+
     /// ngspice 46 includes `r9.inc` for `.include r9.inc;c` (a `;` ends the
     /// card outside quotes, as it does in Xyce); RSpice looked for a file
     /// named `r9.inc;c`. A quoted `;` is still part of the name.
@@ -2098,8 +2168,12 @@ mod tests {
         );
         assert_eq!(parse_include_directive(".include;r9.inc"), None);
         assert_eq!(
-            parse_lib_directive(".lib models.lib;c"),
-            Some(("models.lib".to_owned(), None))
+            parse_lib_directive(".lib tt;c"),
+            Some(("tt".to_owned(), None))
+        );
+        assert_eq!(
+            parse_include_directive(".lib models.lib;c").as_deref(),
+            Some("models.lib")
         );
         assert_eq!(
             parse_lib_directive(".lib models.lib tt;c"),

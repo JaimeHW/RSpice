@@ -70,13 +70,9 @@ pub use technology_diff::{
     diff_area_label, diff_impact_label,
 };
 
-/// The extensions a model source is written under, lowercase: the import
-/// picker offers these and a library folder scan reads these. Vendors ship
-/// SPICE models as `.lib`, `.sub`, `.mod`, `.model`, `.cir`, `.sp`, `.spi`,
-/// `.spice`, `.inc`, `.ckt` and `.txt`, and Spectre models as `.scs`.
-pub const MODEL_FILE_EXTENSIONS: &[&str] = &[
-    "lib", "sub", "mod", "model", "cir", "sp", "spi", "spice", "inc", "txt", "ckt", "scs",
-];
+/// The extensions a model source is written under: the import picker offers
+/// these and a library folder scan reads these.
+pub const MODEL_FILE_EXTENSIONS: &[&str] = rspice_core::netlist::MODEL_SOURCE_EXTENSIONS;
 /// Default configuration file name.
 pub const CONFIG_FILE_NAME: &str = "pdk_config.json";
 /// Maximum directory recursion depth for scanning.

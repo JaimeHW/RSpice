@@ -891,7 +891,14 @@ impl LibParser {
             if line_index.is_multiple_of(64) {
                 ensure_library_parse_not_aborted(abort)?;
             }
-            let trimmed = line.trim();
+            // A card ends at an unquoted `;`, as it does for every simulator
+            // that reads these files; QSPICE and LTspice model files annotate
+            // their parameters that way.
+            let trimmed = if line.trim_start().starts_with('*') {
+                line.trim()
+            } else {
+                crate::netlist::strip_semicolon_comment(line).trim()
+            };
 
             // Line continuation with +
             if trimmed.starts_with('+') {
@@ -2054,6 +2061,48 @@ mod tests {
             "errors should name the unterminated section: {:?}",
             result.errors
         );
+    }
+
+    /// LTspice's one-argument `.lib file.lib` includes the file whole, and
+    /// QSPICE and LTspice model files annotate parameters after a `;`.
+    #[test]
+    fn a_one_argument_lib_file_is_included_and_a_semicolon_ends_a_card() {
+        let dir = unique_lib_parser_temp_dir("lib-file-include");
+        std::fs::create_dir_all(&dir).expect("fixture directory");
+        std::fs::write(
+            dir.join("inner.lib"),
+            ".subckt BUF in out\nE1 out 0 in 0 1\n.ends BUF\n",
+        )
+        .expect("inner library");
+        let outer = dir.join("outer.lib");
+        std::fs::write(
+            &outer,
+            "* vendor library\n\
+             .lib inner.lib\n\
+             .model QA NPN(BF=100 ; forward beta\n\
+             + VAF=50) ; Early voltage\n",
+        )
+        .expect("outer library");
+
+        let mut parser = LibParser::new(&dir);
+        let result = parser.parse_file(&outer).expect("outer library reads");
+        std::fs::remove_dir_all(&dir).ok();
+
+        assert!(result.is_ok(), "{:?}", result.errors);
+        assert!(result.sections.is_empty(), "no section is opened");
+        assert!(
+            result
+                .top_level_subcircuits
+                .iter()
+                .any(|subcircuit| subcircuit.name.eq_ignore_ascii_case("BUF"))
+        );
+        let model = result
+            .top_level_models
+            .iter()
+            .find(|model| model.name.eq_ignore_ascii_case("QA"))
+            .expect("the commented model card imports");
+        assert_eq!(model.parameters.get("bf").copied(), Some(100.0));
+        assert_eq!(model.parameters.get("vaf").copied(), Some(50.0));
     }
 
     /// A card is described by the whole comment paragraph above it, not by the

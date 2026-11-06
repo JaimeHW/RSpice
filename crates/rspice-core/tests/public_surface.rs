@@ -407,7 +407,9 @@ use rspice_core::analysis::harmonic_balance::{
 // `IncludeProcessor::reading_sources_through` bring it to 5,254: a run reads a
 // model library's sources as their import did, so a definition the import
 // skipped can neither fail the run nor stand in for the one it kept.
-const MAX_PUBLIC_ITEMS: usize = 5254;
+// `library::MODEL_SOURCE_EXTENSIONS`, the model file extensions the model
+// picker and folder scan admit, brings it to 5,255.
+const MAX_PUBLIC_ITEMS: usize = 5255;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
