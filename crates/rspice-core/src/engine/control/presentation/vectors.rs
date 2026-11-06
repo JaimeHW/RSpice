@@ -354,19 +354,22 @@ impl ControlCircuit {
         }
     }
 
-    /// ngspice reads `v(name)` as the vector `name` (frontend/parse.c), so
-    /// it names a `let` vector, a scalar one too, before a node of the same
-    /// name.
+    /// ngspice reads `v(name)` as the vector `name` and `i(name)` as
+    /// `name#branch` (frontend/vectors.c:522 vec_fromplot), so either names
+    /// a `let` vector, a scalar one too, or one of a plot linearize made,
+    /// before a node or a source of the same name.
     fn voltage_alias(&self, name: &str, args: &[Expr]) -> Option<usize> {
         let [Expr::Param(vector)] = args else {
             return None;
         };
         let (prefix, probe) = name.rsplit_once('.').unwrap_or(("", name));
-        if probe != "V" {
-            return None;
-        }
+        let vector = match probe {
+            "V" => vector.clone(),
+            "I" => format!("{vector}#branch"),
+            _ => return None,
+        };
         if prefix.is_empty() {
-            self.find_vector(vector, true)
+            self.find_vector(&vector, true)
         } else {
             self.find_vector(&format!("{prefix}.{vector}"), true)
         }

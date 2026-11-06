@@ -881,6 +881,32 @@ fn display_marks_an_operating_points_first_node_as_its_scale() {
     );
 }
 
+/// `i(source)` reads the vector `source#branch` of the current plot
+/// (frontend/vectors.c:522 vec_fromplot), so on the plot linearize made it
+/// is that plot's current: ngspice-46 prints 11 rows, -1e-04 A at index 1
+/// and -1e-03 A at index 10, for a 0-1 V ramp over 1 ms into 1 kOhm.
+#[test]
+fn i_of_a_source_reads_the_branch_vector_of_a_linearized_plot() {
+    let (presented, error) = run_until_error(
+        "i alias\nv1 1 0 pwl(0 0 1m 1)\nr1 1 0 1k\n.control\ntran 0.1m 1m\nlinearize\n\
+         print i(v1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    let [[trace]] = prints.as_slice() else {
+        panic!("one trace: {prints:?}");
+    };
+    assert_eq!(trace.y.samples.len(), 11);
+    for (index, current) in [(1, -1e-4), (10, -1e-3)] {
+        let value = trace.y.samples[index].re;
+        assert!((value - current).abs() < 1e-12, "{index}: {value}");
+    }
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
