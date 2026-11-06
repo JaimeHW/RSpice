@@ -12,7 +12,9 @@ pub enum IntegrationMethod {
     /// Second-order Gear (BDF-2), the only Gear order the engine integrates
     /// at.
     Gear2,
-    /// Automatic trap/gear switching (Spectre default).
+    /// The trapezoidal rule with a switch to Gear-2: a ringing detector
+    /// (three consecutive sign changes in any unknown's step-to-step
+    /// difference) moves it to Gear-2, and two smooth steps move it back.
     TrapGear,
 }
 
