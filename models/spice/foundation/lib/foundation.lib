@@ -12,6 +12,20 @@
 * Generic 5.6 V-class avalanche diode.
 .model RSPICE_ZENER D (IS=1e-14 N=1.2 RS=0.5 CJO=20p VJ=0.7 M=0.33 BV=5.6 IBV=1m)
 
+* Generic 1 A-class Schottky barrier rectifier: about 0.26 V at 1 mA and
+* 0.46 V at 1 A. A majority-carrier junction stores no charge, so TT is left
+* at zero; EG and XTI are the barrier's, not silicon's.
+.model RSPICE_SCHOTTKY D (IS=5e-8 N=1 RS=0.02 CJO=50p VJ=0.4 M=0.5 EG=0.69 XTI=2 BV=40 IBV=100u)
+
+* Generic indicator LEDs, each about 20 mA at its forward voltage: red
+* (AlGaInP) 1.95 V, green (InGaN) 3.0 V, blue (InGaN) 3.1 V, white
+* (phosphor-converted InGaN) 3.15 V. EG is the emitter's band gap; the high
+* emission coefficient of the nitride junctions is what their slope shows.
+.model RSPICE_LED_RED D (IS=7.2e-20 N=1.8 RS=4 CJO=20p VJ=1.8 M=0.4 EG=1.9 BV=5 IBV=10u)
+.model RSPICE_LED_GREEN D (IS=1.7e-21 N=2.5 RS=8 CJO=40p VJ=2.6 M=0.4 EG=2.4 BV=5 IBV=10u)
+.model RSPICE_LED_BLUE D (IS=3.6e-22 N=2.5 RS=8 CJO=40p VJ=2.7 M=0.4 EG=2.6 BV=5 IBV=10u)
+.model RSPICE_LED_WHITE D (IS=1.7e-22 N=2.5 RS=8 CJO=40p VJ=2.7 M=0.4 EG=2.6 BV=5 IBV=10u)
+
 * Generic complementary bipolar transistors.
 .model RSPICE_NPN NPN (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)
 .model RSPICE_PNP PNP (IS=1e-15 BF=100 BR=1 VAF=100 VAR=20 CJE=10p CJC=5p TF=0.5n TR=10n)

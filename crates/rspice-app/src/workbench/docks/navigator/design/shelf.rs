@@ -686,6 +686,9 @@ const SHELF_ENTRY_FIELD: char = '\u{1f}';
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum ShelfEntry {
     Primitive(ComponentType),
+    /// A palette row that places a primitive with a symbol skin and model,
+    /// by its label.
+    Variant(String),
     /// A model-library part, by the id the unified index publishes.
     LibraryPart(String),
     /// A built-in XSPICE code model, by its registry stable id.
@@ -734,6 +737,7 @@ impl ShelfEntry {
                 };
                 format!("primitive{SHELF_ENTRY_FIELD}{name}")
             }
+            Self::Variant(label) => format!("variant{SHELF_ENTRY_FIELD}{label}"),
             Self::LibraryPart(part) => format!("part{SHELF_ENTRY_FIELD}{part}"),
             Self::BuiltinXspice(id) => format!("xspice{SHELF_ENTRY_FIELD}{id}"),
             Self::GeneratedVerilogA(model) => format!("veriloga{SHELF_ENTRY_FIELD}{model}"),
@@ -756,6 +760,7 @@ impl ShelfEntry {
                 serde_json::from_value(serde_json::Value::String(fields.next()?.to_owned()))
                     .ok()?,
             ),
+            "variant" => Self::Variant(fields.next()?.to_owned()),
             "part" => Self::LibraryPart(fields.next()?.to_owned()),
             "xspice" => Self::BuiltinXspice(fields.next()?.to_owned()),
             "veriloga" => Self::GeneratedVerilogA(fields.next()?.to_owned()),
@@ -869,6 +874,9 @@ fn armed_shelf_entry(state: &AppState) -> Option<ShelfEntry> {
         .as_ref()
         && armed.tool == Tool::Place(kind)
     {
+        if let Some(entry) = variant_entry(kind, armed.variant.as_deref(), &armed.model) {
+            return Some(ShelfEntry::Variant(entry.label.to_owned()));
+        }
         return Some(ShelfEntry::LibraryPart(armed.model.clone()));
     }
     // A stimulus definition is armed on the same tool as its family's
@@ -973,6 +981,7 @@ struct ShelfEntryRow {
 #[derive(Clone)]
 pub(super) enum ShelfArm {
     Primitive(ComponentType),
+    Variant(&'static ComponentPaletteEntry),
     /// Held by stable id rather than by binding: a vector-port code model
     /// opens the placement dialog instead of arming, and that fork belongs
     /// with the catalog row's, not duplicated here.
@@ -1011,9 +1020,23 @@ fn resolve_shelf_entry(
             glyph: primitive_shelf_glyph(*kind),
             label: primitive_label(*kind).to_owned(),
             meta: primitive_shelf_meta(*kind),
-            selected: state.model.schematic.session.editor.tool == Tool::Place(*kind),
+            selected: primitive_armed(state, *kind),
             arm: ShelfArm::Primitive(*kind),
         }),
+        ShelfEntry::Variant(label) => {
+            let row = component_palette()
+                .iter()
+                .flat_map(|section| section.entries.iter())
+                .find(|row| row.variant.is_some() && row.label == label)?;
+            Some(ShelfEntryRow {
+                entry: entry.clone(),
+                glyph: primitive_shelf_glyph(row.kind),
+                label: row.label.to_owned(),
+                meta: variant_meta(row),
+                selected: variant_armed(state, row),
+                arm: ShelfArm::Variant(row),
+            })
+        }
         ShelfEntry::LibraryPart(part) => {
             let row = library_parts.iter().find(|row| row.part_id == *part)?;
             // A refused part has no placement to offer, so it is absent here
@@ -1193,7 +1216,9 @@ fn shelf_drag_payload(arm: &ShelfArm) -> Option<SchematicShelfDragPayload> {
             .find(|descriptor| descriptor.stable_id == *id)
             .and_then(|descriptor| builtin_xspice_library_binding(descriptor).ok())
             .map(SchematicShelfDragPayload::library_cell),
-        ShelfArm::Part(_) | ShelfArm::Stimulus(_) => None,
+        // A variant arms its card and skin on the place tool, which a drop
+        // does not carry.
+        ShelfArm::Variant(_) | ShelfArm::Part(_) | ShelfArm::Stimulus(_) => None,
     }
 }
 
@@ -1222,6 +1247,7 @@ fn shelf_pin_context_menu(response: &Response, state: &mut AppState, entry: &She
 fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
     match arm {
         ShelfArm::Primitive(kind) => arm_primitive(app, kind, ctx),
+        ShelfArm::Variant(entry) => arm_variant(&mut app.state, entry, ctx),
         ShelfArm::BuiltinXspice(id) => {
             if let Some(binding) = place_builtin_xspice(&mut app.state, &id) {
                 arm_cell(&mut app.state, binding, ctx);
@@ -1371,24 +1397,109 @@ pub(super) fn shelf_part_row(
 fn primitive_row(
     ui: &mut Ui,
     state: &mut AppState,
-    entry: &ComponentPaletteEntry,
+    entry: &'static ComponentPaletteEntry,
     level: usize,
 ) -> Option<ShelfArm> {
+    let (selected, meta, pin, arm) = if entry.variant.is_some() {
+        (
+            variant_armed(state, entry),
+            variant_meta(entry),
+            ShelfEntry::Variant(entry.label.to_owned()),
+            ShelfArm::Variant(entry),
+        )
+    } else {
+        (
+            primitive_armed(state, entry.kind),
+            primitive_shelf_meta(entry.kind),
+            ShelfEntry::Primitive(entry.kind),
+            ShelfArm::Primitive(entry.kind),
+        )
+    };
     let response = shelf_part_row(
         ui,
         primitive_shelf_glyph(entry.kind),
         entry.label,
-        state.model.schematic.session.editor.tool == Tool::Place(entry.kind),
-        primitive_shelf_meta(entry.kind).as_deref(),
+        selected,
+        meta.as_deref(),
         level,
     );
-    if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
+    if entry.variant.is_none()
+        && let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind)
+    {
         response.dnd_set_drag_payload(payload);
     }
-    shelf_pin_context_menu(&response, state, &ShelfEntry::Primitive(entry.kind));
-    response
-        .clicked()
-        .then_some(ShelfArm::Primitive(entry.kind))
+    shelf_pin_context_menu(&response, state, &pin);
+    response.clicked().then_some(arm)
+}
+
+/// The value a variant row places: its own card, or the type's default.
+fn variant_model(entry: &ComponentPaletteEntry) -> &'static str {
+    entry.default_model.unwrap_or(entry.kind.default_value())
+}
+
+/// A variant row's meta column: the placed default, unless the row names its
+/// own card, which its label already says.
+fn variant_meta(entry: &ComponentPaletteEntry) -> Option<String> {
+    entry
+        .default_model
+        .is_none()
+        .then(|| primitive_shelf_meta(entry.kind))
+        .flatten()
+}
+
+/// The palette variant row an armed card and skin came from, if any.
+fn variant_entry(
+    kind: ComponentType,
+    variant: Option<&str>,
+    model: &str,
+) -> Option<&'static ComponentPaletteEntry> {
+    component_palette()
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .find(|entry| {
+            entry.kind == kind
+                && entry.variant.is_some()
+                && entry.variant == variant
+                && variant_model(entry) == model
+        })
+}
+
+/// Whether the place tool holds this primitive bare, with no card or skin.
+fn primitive_armed(state: &AppState, kind: ComponentType) -> bool {
+    let editor = &state.model.schematic.session.editor;
+    editor.tool == Tool::Place(kind)
+        && editor
+            .pending_part_model
+            .as_ref()
+            .is_none_or(|armed| armed.tool != Tool::Place(kind))
+}
+
+/// Whether the place tool holds exactly this variant row's card and skin.
+fn variant_armed(state: &AppState, entry: &ComponentPaletteEntry) -> bool {
+    let editor = &state.model.schematic.session.editor;
+    editor.tool == Tool::Place(entry.kind)
+        && editor.pending_part_model.as_ref().is_some_and(|armed| {
+            armed.tool == Tool::Place(entry.kind)
+                && armed.variant.as_deref() == entry.variant
+                && armed.model == variant_model(entry)
+        })
+}
+
+/// Arm the place tool with a variant row's card and skin.
+pub(super) fn arm_variant(
+    state: &mut AppState,
+    entry: &ComponentPaletteEntry,
+    ctx: &egui::Context,
+) {
+    let _ = crate::workbench::app::arm_pack_part(
+        &mut state.model,
+        PartPlacement::NativeDevice {
+            component_type: entry.kind,
+            variant: entry.variant.map(str::to_owned),
+            model: variant_model(entry).to_owned(),
+        },
+    );
+    finish_shelf_placement(state, ctx);
 }
 
 /// The Stimulus library section: every definition this project authored, as a
@@ -1869,7 +1980,7 @@ pub(super) fn primitive_label(kind: ComponentType) -> &'static str {
     component_palette()
         .iter()
         .flat_map(|section| section.entries)
-        .find(|entry| entry.kind == kind)
+        .find(|entry| entry.kind == kind && entry.variant.is_none())
         .map_or(kind.display_name(), |entry| entry.label)
 }
 
@@ -1941,6 +2052,14 @@ pub(super) fn shelf_hits(
     };
     for row in ComponentCategory::ALL.into_iter().flat_map(palette_rows) {
         match row {
+            PaletteRow::Primitive(entry) if entry.variant.is_some() => {
+                let rank = query.rank(&ShelfTerms {
+                    label: entry.label,
+                    keywords: entry.keywords,
+                    part_numbers: entry.default_model.as_slice(),
+                });
+                offer(&mut hits, rank, ShelfEntry::Variant(entry.label.to_owned()));
+            }
             PaletteRow::Primitive(entry) => {
                 let mut keywords = entry.keywords.to_vec();
                 keywords.push(entry.kind.display_name());

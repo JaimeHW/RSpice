@@ -359,6 +359,88 @@ fn an_unadopted_release_reviews_and_an_incompatible_one_refuses() {
     assert_eq!(rows[1].meta, "opamp · needs harmonic-balance-2");
 }
 
+/// Every symbol skin the artwork library registers is one a reader can reach
+/// without placing something else first: a shelf row places it, or the type's
+/// Symbol property offers it. And every row's skin is one the property offers,
+/// so a placed variant can be switched back.
+#[test]
+fn every_registered_symbol_variant_is_reachable_from_a_row_or_a_property() {
+    use rspice_design::properties::PropertyValue;
+
+    let app = RSpiceApp::test_instance();
+    let library =
+        rspice_design::symbol_artwork::SymbolLibrary::load_embedded().expect("artwork loads");
+    let offered = |kind: ComponentType, variant: &str| {
+        app.state
+            .design
+            .property_registry
+            .get(kind)
+            .into_iter()
+            .flat_map(|sheet| sheet.iter())
+            .filter(|definition| definition.name == "symbol")
+            .any(|definition| {
+                matches!(&definition.default_value, PropertyValue::Enum { options, .. }
+                    if options.iter().any(|option| option == variant))
+            })
+    };
+    let rows = component_palette()
+        .iter()
+        .flat_map(|section| section.entries)
+        .filter_map(|entry| Some((entry.kind, entry.variant?)))
+        .collect::<HashSet<_>>();
+    for (kind, variant) in library.variants() {
+        assert!(
+            rows.contains(&(kind, variant)) || offered(kind, variant),
+            "{kind:?} registers the {variant:?} skin, but no row or property reaches it"
+        );
+    }
+    for (kind, variant) in rows {
+        assert!(
+            library
+                .variants()
+                .any(|registered| registered == (kind, variant)),
+            "a row places the {variant:?} skin {kind:?} does not register"
+        );
+        assert!(
+            offered(kind, variant),
+            "{kind:?}'s Symbol property does not offer the {variant:?} skin a row places"
+        );
+    }
+}
+
+/// A variant row arms its base type with its own card and skin, and the
+/// instance it places carries both.
+#[test]
+fn a_variant_row_places_its_type_with_its_card_and_skin() {
+    let mut app = RSpiceApp::test_instance();
+    let zener = component_palette()
+        .iter()
+        .flat_map(|section| section.entries.iter())
+        .find(|entry| entry.label == "Zener Diode")
+        .expect("the Zener row");
+    arm_variant(&mut app.state, zener, &egui::Context::default());
+    assert_eq!(
+        app.state.model.schematic.session.editor.tool,
+        Tool::Place(ComponentType::Diode)
+    );
+    let id = app
+        .state
+        .model
+        .schematic
+        .add_component(ComponentType::Diode, crate::state::Point::origin());
+    let placed = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == id)
+        .expect("placed");
+    assert_eq!(placed.value, "RSPICE_ZENER");
+    assert_eq!(placed.symbol_variant.as_deref(), Some("zener"));
+}
+
 // ------------------------------------------------------------ shelf identity
 
 /// Every glyph the Component shelf can paint, deduplicated: each placeable
@@ -915,6 +997,7 @@ fn every_shelf_entry_kind_round_trips_through_its_stored_key() {
     for entry in [
         ShelfEntry::Primitive(ComponentType::Resistor),
         ShelfEntry::Primitive(ComponentType::Ground),
+        ShelfEntry::Variant("Zener Diode".to_owned()),
         ShelfEntry::LibraryPart("1N4148".to_owned()),
         ShelfEntry::BuiltinXspice("gain".to_owned()),
         ShelfEntry::GeneratedVerilogA("bsimcmg".to_owned()),

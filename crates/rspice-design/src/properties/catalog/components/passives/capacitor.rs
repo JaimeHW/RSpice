@@ -206,6 +206,19 @@ impl PropertyCatalog {
                 .with_category("Initial conditions"),
         );
 
+        sheet.add(
+            PropertyDefinition::new("symbol")
+                .with_display_name("Symbol")
+                .with_description("Schematic symbol skin for the capacitor")
+                .with_type(PropertyType::Enum)
+                .with_default(PropertyValue::enumeration(
+                    "default",
+                    vec!["default".to_owned(), "polarized".to_owned()],
+                ))
+                .with_order(900)
+                .with_category("Appearance"),
+        );
+
         self.sheets.insert(ComponentType::Capacitor, sheet);
     }
 }

@@ -258,6 +258,8 @@ fn primitive_entries(state: &AppState) -> Vec<InstanceCatalogEntry> {
     crate::schematic::component_palette()
         .iter()
         .flat_map(|section| section.entries)
+        // A variant row is its type with a skin and card, not another type.
+        .filter(|entry| entry.variant.is_none())
         .filter(|entry| !matches!(entry.kind, ComponentType::Ground | ComponentType::Port))
         .map(|entry| {
             let terminal_names = entry

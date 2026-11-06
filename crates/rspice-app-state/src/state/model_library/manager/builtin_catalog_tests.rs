@@ -16,8 +16,8 @@ fn builtin_catalog_is_one_complete_foundation_library() {
     let foundation = manager
         .get_library("RSpice Foundation")
         .expect("foundation library");
-    assert_eq!(foundation.models.len(), 16);
-    assert_eq!(foundation.top_level_models.len(), 16);
+    assert_eq!(foundation.models.len(), 21);
+    assert_eq!(foundation.top_level_models.len(), 21);
     assert_eq!(foundation.pack_id.as_deref(), Some("rspice-foundation"));
     let opamp = foundation
         .subcircuits
@@ -54,6 +54,11 @@ fn every_foundation_card_carries_its_declared_family() {
     for (name, spice_type, level) in [
         ("RSPICE_DIODE", "D", ModelLevel::Unknown),
         ("RSPICE_ZENER", "D", ModelLevel::Unknown),
+        ("RSPICE_SCHOTTKY", "D", ModelLevel::Unknown),
+        ("RSPICE_LED_RED", "D", ModelLevel::Unknown),
+        ("RSPICE_LED_GREEN", "D", ModelLevel::Unknown),
+        ("RSPICE_LED_BLUE", "D", ModelLevel::Unknown),
+        ("RSPICE_LED_WHITE", "D", ModelLevel::Unknown),
         ("RSPICE_NPN", "NPN", ModelLevel::Unknown),
         ("RSPICE_PNP", "PNP", ModelLevel::Unknown),
         ("RSPICE_NPN_THERMAL", "NPN", ModelLevel::Vbic),

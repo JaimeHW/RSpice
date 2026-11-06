@@ -19,6 +19,11 @@ pub struct ComponentPaletteEntry {
     /// family it belongs to, and the SPICE card letter. Matched from word
     /// starts, never as substrings.
     pub keywords: &'static [&'static str],
+    /// The symbol skin the row places, as the type's Symbol property names
+    /// it; `None` for the type's own artwork.
+    pub variant: Option<&'static str>,
+    /// The model card the row places in place of the type's own default.
+    pub default_model: Option<&'static str>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -52,6 +57,26 @@ const fn entry(
         kind,
         label,
         keywords,
+        variant: None,
+        default_model: None,
+    }
+}
+
+/// A row that places `kind` with a symbol skin, and a model card when the
+/// skin names a different device.
+const fn variant(
+    kind: ComponentType,
+    label: &'static str,
+    variant: &'static str,
+    default_model: Option<&'static str>,
+    keywords: &'static [&'static str],
+) -> ComponentPaletteEntry {
+    ComponentPaletteEntry {
+        kind,
+        label,
+        keywords,
+        variant: Some(variant),
+        default_model,
     }
 }
 
@@ -68,6 +93,20 @@ const HIERARCHY: &[ComponentPaletteEntry] = &[
         "Ground",
         &["gnd", "0", "node 0", "common", "reference"],
     ),
+    variant(
+        T::Ground,
+        "Earth Ground",
+        "earth",
+        None,
+        &["earth", "protective earth", "pe"],
+    ),
+    variant(
+        T::Ground,
+        "Chassis Ground",
+        "chassis",
+        None,
+        &["chassis", "frame", "enclosure"],
+    ),
 ];
 
 const PASSIVES: &[ComponentPaletteEntry] = &[
@@ -76,6 +115,13 @@ const PASSIVES: &[ComponentPaletteEntry] = &[
         T::Capacitor,
         "Capacitor",
         &["c", "cap", "capacitance", "condenser"],
+    ),
+    variant(
+        T::Capacitor,
+        "Polarized Capacitor",
+        "polarized",
+        None,
+        &["electrolytic", "polarised", "tantalum", "cap"],
     ),
     entry(
         T::Inductor,
@@ -98,6 +144,13 @@ const SOURCES: &[ComponentPaletteEntry] = &[
             "vcc",
             "vdd",
         ],
+    ),
+    variant(
+        T::VoltageSource,
+        "Battery",
+        "battery",
+        None,
+        &["cell", "dc source"],
     ),
     entry(
         T::VoltageSourceAc,
@@ -217,6 +270,48 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
         T::Diode,
         "Diode",
         &["d", "rectifier", "pn junction", "junction diode"],
+    ),
+    variant(
+        T::Diode,
+        "Zener Diode",
+        "zener",
+        Some("RSPICE_ZENER"),
+        &["zener", "avalanche", "voltage reference", "regulator"],
+    ),
+    variant(
+        T::Diode,
+        "Schottky Diode",
+        "schottky",
+        Some("RSPICE_SCHOTTKY"),
+        &["schottky", "barrier diode", "rectifier"],
+    ),
+    variant(
+        T::Diode,
+        "LED (red)",
+        "led",
+        Some("RSPICE_LED_RED"),
+        &["led", "light emitting diode", "indicator", "red"],
+    ),
+    variant(
+        T::Diode,
+        "LED (green)",
+        "led",
+        Some("RSPICE_LED_GREEN"),
+        &["led", "light emitting diode", "indicator", "green"],
+    ),
+    variant(
+        T::Diode,
+        "LED (blue)",
+        "led",
+        Some("RSPICE_LED_BLUE"),
+        &["led", "light emitting diode", "indicator", "blue"],
+    ),
+    variant(
+        T::Diode,
+        "LED (white)",
+        "led",
+        Some("RSPICE_LED_WHITE"),
+        &["led", "light emitting diode", "indicator", "white"],
     ),
     entry(
         T::Nmos,

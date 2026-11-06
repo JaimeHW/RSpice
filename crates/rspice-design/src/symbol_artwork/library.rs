@@ -398,6 +398,13 @@ impl SymbolLibrary {
     }
 
     /// Number of loaded symbols
+    /// Every registered non-default skin, by component type and variant id.
+    pub fn variants(&self) -> impl Iterator<Item = (ComponentType, &str)> + '_ {
+        self.variant_symbols
+            .iter()
+            .flat_map(|(kind, skins)| skins.keys().map(move |variant| (*kind, variant.as_str())))
+    }
+
     pub fn component_count(&self) -> usize {
         self.symbols.len()
     }

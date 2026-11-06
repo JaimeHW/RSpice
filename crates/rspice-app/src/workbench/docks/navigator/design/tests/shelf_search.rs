@@ -50,6 +50,15 @@ const TOP_HITS: &[(&str, &[&str])] = &[
     ("sine", &["Sinusoidal Voltage Source"]),
     ("transmission line", &["Transmission Line"]),
     ("pin", &["Port"]),
+    ("led", &["LED (red)"]),
+    ("light emitting diode", &["LED (red)"]),
+    ("zener", &["Zener Diode"]),
+    ("schottky", &["Schottky Diode"]),
+    ("battery", &["Battery"]),
+    ("earth", &["Earth Ground"]),
+    ("chassis", &["Chassis Ground"]),
+    ("electrolytic", &["Polarized Capacitor"]),
+    ("polarized capacitor", &["Polarized Capacitor"]),
 ];
 
 #[test]
