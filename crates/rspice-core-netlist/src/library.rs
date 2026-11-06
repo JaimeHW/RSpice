@@ -5,6 +5,7 @@
 //!
 //! Also supports loading external .lib files from foundry PDKs with corner selection.
 
+mod encrypted;
 mod foundation_defaults;
 pub mod lib_parser;
 mod manager;
@@ -12,6 +13,7 @@ mod parser;
 mod spice_packs;
 mod veriloga_discovery;
 
+pub use encrypted::{EncryptedDefinition, EncryptionScheme};
 pub use foundation_defaults::{
     FoundationDeviceFamily, foundation_card_source, foundation_library_source,
 };

@@ -399,7 +399,11 @@ use rspice_core::analysis::harmonic_balance::{
 // the device an `ElementKind::SpecialFunction` names, and its `ltspice_name`,
 // which the CLI's element inspection prints; and `xspice::PortNoiseCurrent`,
 // what a code model's `port_noise_currents` returns. The census is 5,247.
-const MAX_PUBLIC_ITEMS: usize = 5247;
+// `library::EncryptedDefinition`, its `EncryptionScheme`, its `message` and
+// their re-export bring it to 5,251: the model catalog import (`rspice-model-
+// library` projection) refuses an encrypted vendor definition by name with
+// that sentence.
+const MAX_PUBLIC_ITEMS: usize = 5251;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine

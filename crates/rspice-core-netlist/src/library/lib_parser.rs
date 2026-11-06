@@ -23,6 +23,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use super::encrypted::{EncryptedDefinition, excise_encrypted};
 use super::manager::ModelType;
 use crate::abort_signal::{AbortReader, AbortSignal, NoAbort};
 use crate::netlist::lexer::parse_spice_value_complete;
@@ -277,6 +278,8 @@ pub struct LibParser {
     top_level_subcircuits: Vec<ParsedSubcircuit>,
     /// Parse errors encountered
     errors: Vec<ParseError>,
+    /// Encrypted definitions and blocks refused while parsing
+    encrypted: Vec<EncryptedDefinition>,
     /// Optional authenticated source resolver. When populated, include
     /// traversal is satisfied exclusively from these retained bytes and exact
     /// owner/literal edges; the host filesystem is never consulted.
@@ -293,6 +296,10 @@ pub struct ParseError {
     pub file: Option<PathBuf>,
     /// Line number (1-indexed)
     pub line: Option<usize>,
+    /// The `.model` or `.subckt` this error belongs to. `None` when it
+    /// concerns the file or its dependencies, which no single definition
+    /// can be skipped to recover from.
+    pub definition: Option<String>,
 }
 
 impl std::fmt::Display for ParseError {
@@ -330,6 +337,7 @@ impl LibParser {
             top_level_models: Vec::new(),
             top_level_subcircuits: Vec::new(),
             errors: Vec::new(),
+            encrypted: Vec::new(),
             authenticated_sources: None,
             authenticated_dependencies: None,
         }
@@ -518,6 +526,7 @@ impl LibParser {
         self.top_level_models.clear();
         self.top_level_subcircuits.clear();
         self.errors.clear();
+        self.encrypted.clear();
         self.authenticated_sources = None;
         self.authenticated_dependencies = None;
     }
@@ -605,12 +614,15 @@ impl LibParser {
             .current_file
             .as_deref()
             .unwrap_or_else(|| Path::new(""));
-        match super::adapt_spectre_model_library(source_path, content) {
+        let (content, encrypted) = excise_encrypted(content, self.current_file.as_deref());
+        self.encrypted.extend(encrypted);
+        match super::adapt_spectre_model_library(source_path, &content) {
             Ok(adapted) => self.parse_content(&adapted, abort)?,
             Err(error) => self.errors.push(ParseError {
                 message: error.message,
                 file: self.current_file.clone(),
                 line: Some(error.line),
+                definition: None,
             }),
         }
         Ok(())
@@ -622,6 +634,9 @@ impl LibParser {
         let mut current_section: Option<LibSection> = None;
         let mut current_section_start_line: Option<usize> = None;
         let mut subckt_content: Option<(ParsedSubcircuit, Vec<String>, usize)> = None;
+        // A `.subckt` whose header failed: its body is skipped through
+        // `.ends`, so none of its cards leak into the enclosing scope.
+        let mut skipping_subckt = false;
         let mut last_comment = String::new();
         // The line the comment paragraph last grew on. A card's description is
         // the whole paragraph above it, so a comment on the very next line
@@ -679,6 +694,7 @@ impl LibParser {
                         ),
                         file: self.current_file.clone(),
                         line: current_section_start_line,
+                        definition: None,
                     });
                     self.sections.push(section);
                 }
@@ -727,11 +743,15 @@ impl LibParser {
                         subckt.source_file = self.current_file.clone();
                         subckt_content = Some((subckt, vec![line.to_string()], line_number));
                     }
-                    Err(message) => self.errors.push(ParseError {
-                        message,
-                        file: self.current_file.clone(),
-                        line: Some(line_number),
-                    }),
+                    Err(message) => {
+                        self.errors.push(ParseError {
+                            message,
+                            file: self.current_file.clone(),
+                            line: Some(line_number),
+                            definition: Some(Self::definition_name(line)),
+                        });
+                        skipping_subckt = true;
+                    }
                 }
                 last_comment.clear();
                 continue;
@@ -739,6 +759,7 @@ impl LibParser {
 
             // Handle .ends
             if upper.starts_with(".ENDS") {
+                skipping_subckt = false;
                 if let Some((mut subckt, mut content_lines, _)) = subckt_content.take() {
                     content_lines.push(line.to_string());
                     subckt.content = content_lines.join("\n");
@@ -749,6 +770,10 @@ impl LibParser {
                         self.top_level_subcircuits.push(subckt);
                     }
                 }
+                continue;
+            }
+
+            if skipping_subckt {
                 continue;
             }
 
@@ -791,6 +816,7 @@ impl LibParser {
                                 ),
                                 file: self.current_file.clone(),
                                 line: Some(line_number),
+                                definition: Some(model.name.clone()),
                             });
                         } else if let Some(ref mut section) = current_section {
                             section.models.push(model);
@@ -802,6 +828,7 @@ impl LibParser {
                         message,
                         file: self.current_file.clone(),
                         line: Some(line_number),
+                        definition: Some(Self::definition_name(line)),
                     }),
                 }
                 last_comment.clear();
@@ -816,6 +843,7 @@ impl LibParser {
                 ),
                 file: self.current_file.clone(),
                 line: Some(start_line),
+                definition: Some(subckt.name.clone()),
             });
         }
 
@@ -829,6 +857,7 @@ impl LibParser {
                 ),
                 file: self.current_file.clone(),
                 line: start_line,
+                definition: None,
             });
         }
         Ok(())
@@ -916,6 +945,7 @@ impl LibParser {
                 ),
                 file: self.current_file.clone(),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -959,6 +989,7 @@ impl LibParser {
                     ),
                     file: self.current_file.clone(),
                     line: Some(directive_line),
+                    definition: None,
                 });
                 return Ok(());
             }
@@ -971,6 +1002,7 @@ impl LibParser {
                 message,
                 file: self.current_file.clone(),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -986,6 +1018,7 @@ impl LibParser {
                 message: format!("Cyclic include dependency: {}", cycle.join(" -> ")),
                 file: self.current_file.clone(),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -1000,6 +1033,7 @@ impl LibParser {
                 ),
                 file: self.current_file.clone(),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -1019,6 +1053,7 @@ impl LibParser {
                             message,
                             file: self.current_file.clone(),
                             line: Some(directive_line),
+                            definition: None,
                         });
                         return Ok(());
                     }
@@ -1029,6 +1064,7 @@ impl LibParser {
                             message,
                             file: self.current_file.clone(),
                             line: Some(directive_line),
+                            definition: None,
                         });
                         return Ok(());
                     }
@@ -1062,6 +1098,7 @@ impl LibParser {
                         ),
                         file: self.current_file.clone(),
                         line: Some(directive_line),
+                        definition: None,
                     });
                 }
             },
@@ -1073,6 +1110,7 @@ impl LibParser {
                     ),
                     file: self.current_file.clone(),
                     line: Some(directive_line),
+                    definition: None,
                 });
             }
         }
@@ -1095,6 +1133,7 @@ impl LibParser {
                 ),
                 file: self.current_file.clone(),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -1103,6 +1142,7 @@ impl LibParser {
                 message: "Authenticated dependency has no owning source identity".to_owned(),
                 file: None,
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         };
@@ -1113,6 +1153,7 @@ impl LibParser {
                     message: format!("Invalid authenticated dependency path: {error}"),
                     file: Some(owner),
                     line: Some(directive_line),
+                    definition: None,
                 });
                 return Ok(());
             }
@@ -1133,6 +1174,7 @@ impl LibParser {
                 ),
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         };
@@ -1148,6 +1190,7 @@ impl LibParser {
                 ),
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         };
@@ -1158,6 +1201,7 @@ impl LibParser {
                 message,
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -1172,6 +1216,7 @@ impl LibParser {
                 message: format!("Cyclic include dependency: {}", cycle.join(" -> ")),
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             return Ok(());
         }
@@ -1185,6 +1230,7 @@ impl LibParser {
                     ),
                     file: Some(owner),
                     line: Some(directive_line),
+                    definition: None,
                 });
                 return Ok(());
             }
@@ -1201,6 +1247,7 @@ impl LibParser {
                 message,
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             self.include_stack.pop();
             self.include_depth -= 1;
@@ -1213,6 +1260,7 @@ impl LibParser {
                 message,
                 file: Some(owner),
                 line: Some(directive_line),
+                definition: None,
             });
             self.include_stack.pop();
             self.include_depth -= 1;
@@ -1420,6 +1468,18 @@ impl LibParser {
 
     /// Return the text following one complete, case-insensitive directive
     /// token. Prefix lookalikes are intentionally not accepted.
+    /// The name a `.model` or `.subckt` card declares, read without parsing
+    /// the rest of the card, so a card that fails to parse is still reported
+    /// by name.
+    fn definition_name(line: &str) -> String {
+        line.split_whitespace()
+            .nth(1)
+            .map(|name| name.split('(').next().unwrap_or(name))
+            .filter(|name| !name.is_empty())
+            .unwrap_or_else(|| line.split_whitespace().next().unwrap_or_default())
+            .to_owned()
+    }
+
     fn directive_rest<'a>(line: &'a str, directive: &str) -> Option<&'a str> {
         let line = line.trim();
         let token_end = line.find(char::is_whitespace).unwrap_or(line.len());
@@ -1765,6 +1825,7 @@ impl LibParser {
             top_level_models: self.top_level_models.clone(),
             top_level_subcircuits: self.top_level_subcircuits.clone(),
             errors: self.errors.clone(),
+            encrypted: self.encrypted.clone(),
             resolved_sources: self.resolved_sources.clone(),
             resolved_dependencies: self.resolved_dependencies.clone(),
         }
@@ -1786,6 +1847,8 @@ pub struct LibParseResult {
     pub top_level_subcircuits: Vec<ParsedSubcircuit>,
     /// Errors encountered during parsing
     pub errors: Vec<ParseError>,
+    /// Encrypted definitions and blocks, refused by name and never read.
+    pub encrypted: Vec<EncryptedDefinition>,
     /// Canonical paths and exact contents read for the root file and every
     /// transitive include. Entries are unique by canonical path.
     pub resolved_sources: Vec<ResolvedLibSource>,
@@ -2906,5 +2969,50 @@ mod tests {
         );
 
         let _ = std::fs::remove_dir_all(directory);
+    }
+
+    #[test]
+    fn a_broken_definition_is_reported_by_name_and_its_neighbours_still_parse() {
+        let source = ".model GOOD1 D (IS=1e-14)\n\
+                      .model BROKEN D (IS=1e-14 N=1\n\
+                      .subckt\n\
+                      .model LEAKED D (IS=1e-15)\n\
+                      .ends\n\
+                      .subckt AMP IN OUT\n\
+                      R1 IN OUT 1k\n\
+                      .ends AMP\n\
+                      .model GOOD2 NPN (BF=100)\n";
+        let result = LibParser::new(".").parse_string(source);
+        let models = result
+            .top_level_models
+            .iter()
+            .map(|model| model.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(models, ["GOOD1", "GOOD2"], "{:?}", result.errors);
+        assert_eq!(result.top_level_subcircuits.len(), 1);
+        assert_eq!(result.top_level_subcircuits[0].name, "AMP");
+        let refused = result
+            .errors
+            .iter()
+            .map(|error| (error.definition.as_deref(), error.line))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refused,
+            [(Some("BROKEN"), Some(2)), (Some(".subckt"), Some(3))]
+        );
+    }
+
+    #[test]
+    fn an_encrypted_subcircuit_is_refused_and_never_parsed() {
+        let source = ".subckt SEALED IN+ IN- V+ V- OUT\n.prot\n\
+                      Zk3Qw8Ur1Ty6Op4As9Df2Gh7Jk5Lz0Xc\n.unprot\n.ends SEALED\n\
+                      .model D1 D (IS=1e-14)\n";
+        let result = LibParser::new(".").parse_string(source);
+        assert!(result.is_ok(), "{:?}", result.errors);
+        assert!(result.top_level_subcircuits.is_empty());
+        assert_eq!(result.top_level_models.len(), 1);
+        assert_eq!(result.encrypted.len(), 1);
+        assert_eq!(result.encrypted[0].name.as_deref(), Some("SEALED"));
+        assert_eq!(result.encrypted[0].line, 1);
     }
 }
