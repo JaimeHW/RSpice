@@ -9782,6 +9782,53 @@ mod tests {
     }
 
     #[test]
+    fn a_parenthesized_controlling_pair_reads_as_the_bare_pair() {
+        // Vendor macromodels write linear sources and switches in the PSpice
+        // pair form: `GSY 99 50 (99,50) 48E-6`, `S1 90 91 (50,99) VSY_SWITCH`.
+        let netlist = Netlist::parse(
+            "parenthesized controlling pairs\n\
+             E1 out 0 (inp, inn) 10\n\
+             G1 out 0 (inp,inn) 1m\n\
+             S1 out 0 (inp,inn) SW\n\
+             .model SW VSWITCH (RON=1 ROFF=1MEG VON=1 VOFF=0)\n\
+             .end\n",
+        )
+        .expect("parenthesized controlling pairs parse");
+        let kind = |name: &str| {
+            &netlist
+                .elements
+                .iter()
+                .find(|element| element.name.eq_ignore_ascii_case(name))
+                .unwrap_or_else(|| panic!("{name} is parsed"))
+                .kind
+        };
+        let is_input_pair =
+            |pos: &str, neg: &str| pos.eq_ignore_ascii_case("inp") && neg.eq_ignore_ascii_case("inn");
+        assert!(matches!(
+            kind("E1"),
+            ElementKind::Vcvs { gain, control_nodes: (pos, neg), .. }
+                if *gain == 10.0 && is_input_pair(pos, neg)
+        ));
+        assert!(matches!(
+            kind("G1"),
+            ElementKind::Vccs { transconductance, control_nodes: (pos, neg), .. }
+                if *transconductance == 1e-3 && is_input_pair(pos, neg)
+        ));
+        assert!(matches!(
+            kind("S1"),
+            ElementKind::VSwitch { control_pos, control_neg, model, .. }
+                if is_input_pair(control_pos, control_neg) && model.eq_ignore_ascii_case("SW")
+        ));
+
+        let unclosed = Netlist::parse("unclosed pair\nE1 out 0 (inp,inn 10\n.end\n")
+            .expect_err("an unclosed pair is refused");
+        assert!(
+            unclosed.to_string().contains("closing controlling pair"),
+            "{unclosed}"
+        );
+    }
+
+    #[test]
     fn linear_controlled_sources_reject_unconsumed_trailing_tokens() {
         for line in [
             "E1 out 0 in 0 2 garbage",

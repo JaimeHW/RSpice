@@ -7518,13 +7518,15 @@ fn try_controlled_source_behavioral_assignment(
     Ok(Some(expression))
 }
 
-/// Consume one controlling node pair of a `POLY(n)` voltage-controlled source.
+/// Consume one controlling node pair of a voltage-controlled source or switch.
 ///
-/// SPICE2 writes the pairs bare (`POLY(2) 3 0 4 0`). PSpice also permits them
-/// parenthesised and comma-separated (`POLY(2) (3,0) (4,0)`), which is the form
-/// the PARTS-generated op-amp macromodels use — TL072, TL082 and OP07 all open
-/// with `EGND 99 0 POLY(2) (3,0) (4,0) 0 .5 .5`. ngspice accepts both.
-fn expect_poly_controlling_pair(
+/// SPICE2 writes a pair bare (`3 0`). PSpice also permits it parenthesised and
+/// comma-separated (`(3,0)`), which is the form the PARTS-generated op-amp
+/// macromodels use: TL072, TL082 and OP07 all open with
+/// `EGND 99 0 POLY(2) (3,0) (4,0) 0 .5 .5`, and vendor macromodels write
+/// linear sources and switches the same way (`GSY 99 50 (99,50) 48E-6`,
+/// `S1 90 91 (50,99) VSY_SWITCH`). ngspice accepts both.
+pub(super) fn expect_controlling_pair(
     stream: &mut TokenStream,
     line_num: usize,
 ) -> Result<(String, String), ParseError> {
@@ -7541,7 +7543,7 @@ fn expect_poly_controlling_pair(
     if !stream.consume(&TokenKind::RParen) {
         return Err(ParseError::Syntax {
             line: line_num,
-            message: format!("Expected ')' closing POLY controlling pair ({positive},{negative})"),
+            message: format!("Expected ')' closing controlling pair ({positive},{negative})"),
         });
     }
     Ok((positive, negative))
@@ -8101,7 +8103,7 @@ fn parse_voltage_controlled_source(
         Some(ControlledSourceForm::Poly(dims)) => {
             let mut vars = Vec::with_capacity(dims);
             for _ in 0..dims {
-                let (cp, cn) = expect_poly_controlling_pair(stream, line_num)?;
+                let (cp, cn) = expect_controlling_pair(stream, line_num)?;
                 vars.push(format!("V({},{})", cp, cn));
             }
             let coeffs = collect_numeric_tail(
@@ -8308,8 +8310,7 @@ fn parse_voltage_controlled_source(
                 return Ok(VoltageControlledSourceParseKind::Ordinary);
             }
 
-            let ctrl_pos = expect_node(stream, line_num)?;
-            let ctrl_neg = expect_node(stream, line_num)?;
+            let (ctrl_pos, ctrl_neg) = expect_controlling_pair(stream, line_num)?;
             if let Some(rational_text) = take_ltspice_laplace(stream, line_num)? {
                 elements.extend(synthesize_laplace(
                     &name,
