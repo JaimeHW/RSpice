@@ -41,7 +41,7 @@ use std::path::Path;
 use rspice_pack::{Part, PartKind, Symbol};
 
 use crate::state::model_library::{ModelLibrary, placement_component_for_model};
-use crate::state::schematic::{ComponentType, LibraryCellInstance, PortDirection, PortSpec};
+use crate::state::schematic::{ComponentType, LibraryCellInstance, PortSpec};
 
 /// The `symbol.ref` value that asks for a generic cell instance.
 const CELL_INSTANCE_REFERENCE: &str = "rspice.library.cell_instance";
@@ -176,6 +176,7 @@ pub fn plan_library_placement(library: &ModelLibrary, part: &str) -> Result<Part
         return Ok(PartPlacement::CellInstance(Box::new(cell_instance_over(
             part,
             &interface.ports,
+            interface.description.as_deref(),
             &library.name,
             library.root_path.as_deref(),
         )?)));
@@ -307,17 +308,21 @@ fn cell_instance(
     library: &str,
     source: Option<&Path>,
 ) -> Result<LibraryCellInstance, String> {
-    cell_instance_over(&part.id, &part.terminals, library, source)
+    cell_instance_over(&part.id, &part.terminals, None, library, source)
 }
 
 /// The generic instance binding over one ordered terminal contract.
 ///
 /// Taken as an id and a terminal list rather than as a manifest part so the
 /// retained route builds exactly the same object from a parsed subcircuit's
-/// ports. Terminal order is netlist order on both paths.
+/// ports. Terminal order is netlist order on both paths. Pin roles come from
+/// the terminal names and, for a parsed definition, the vendor's pin-order
+/// comment; a pin neither states stays bidirectional rather than drawn with
+/// a role the source never claimed.
 fn cell_instance_over(
     id: &str,
     terminals: &[String],
+    description: Option<&str>,
     library: &str,
     source: Option<&Path>,
 ) -> Result<LibraryCellInstance, String> {
@@ -330,16 +335,17 @@ fn cell_instance_over(
     // uses, so a placed pack part and a placed imported subcircuit are the
     // same kind of object to everything downstream.
     let mut binding = LibraryCellInstance::new(library, id, "spice");
-    binding.bind_interface(
+    let roles = rspice_design::pin_roles::infer_pin_roles(terminals, description);
+    binding.bind_interface_with_roles(
         &terminals
             .iter()
-            .map(|terminal| PortSpec {
+            .zip(&roles)
+            .map(|(terminal, role)| PortSpec {
                 name: terminal.clone(),
-                // A subcircuit port carries no declared direction, and
-                // inventing one would draw an arrow the source never claimed.
-                direction: PortDirection::InOut,
+                direction: role.direction(),
             })
             .collect::<Vec<_>>(),
+        &roles,
     );
     binding.source_path = source.map(Path::to_path_buf);
     binding.module_name = Some(id.to_owned());
@@ -350,6 +356,7 @@ fn cell_instance_over(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rspice_design_model::port::PinRole;
 
     fn part(id: &str, kind: PartKind, terminals: &[&str], reference: Option<&str>) -> Part {
         Part {
@@ -435,6 +442,64 @@ mod tests {
         );
         assert!(binding.interface_bound);
         assert!(binding.source_path.is_some());
+        assert_eq!(binding.interface_roles(), OPAMP_ROLES);
+    }
+
+    const OPAMP_ROLES: [PinRole; 5] = [
+        PinRole::NonInvertingInput,
+        PinRole::InvertingInput,
+        PinRole::PositiveSupply,
+        PinRole::NegativeSupply,
+        PinRole::Output,
+    ];
+
+    #[test]
+    fn a_numbered_vendor_subcircuit_takes_its_roles_from_the_pin_order_comment() {
+        let mut library = ModelLibrary::new("vendor");
+        library.subcircuits.insert(
+            "AMP".to_owned(),
+            rspice_model_library::ModelSubcircuitInterface {
+                name: "AMP".to_owned(),
+                ports: ["1", "2", "99", "50", "45"].map(str::to_owned).to_vec(),
+                parameter_defaults: Default::default(),
+                description: Some(
+                    "Node Assignments noninverting input | inverting input | | positive                      supply | | | negative supply | | | | output | | | | |"
+                        .to_owned(),
+                ),
+                file_path: None,
+                source_line: Some(12),
+                section: None,
+            },
+        );
+        let PartPlacement::CellInstance(binding) =
+            plan_library_placement(&library, "AMP").expect("the subcircuit places")
+        else {
+            panic!("a subcircuit places as a cell instance");
+        };
+        assert_eq!(binding.terminal_order, ["1", "2", "99", "50", "45"]);
+        assert_eq!(binding.interface_roles(), OPAMP_ROLES);
+        let component = crate::state::schematic::Component::new(
+            1,
+            ComponentType::CellInstance,
+            rspice_design_model::Point::origin(),
+        )
+        .with_library_cell(*binding);
+        let block = component.instance_block();
+        let side = |name: &str| {
+            block
+                .pins
+                .iter()
+                .find(|pin| pin.name == name)
+                .map(|pin| pin.side)
+        };
+        use rspice_design_model::symbol_pin::SymbolPinSide;
+        assert_eq!(side("1"), Some(SymbolPinSide::Left));
+        assert_eq!(side("2"), Some(SymbolPinSide::Left));
+        assert_eq!(side("99"), Some(SymbolPinSide::Top));
+        assert_eq!(side("50"), Some(SymbolPinSide::Bottom));
+        assert_eq!(side("45"), Some(SymbolPinSide::Right));
+        // The triangle: three corners, apex on the output.
+        assert_eq!(block.outline[0].0.len(), 3);
     }
 
     #[test]
