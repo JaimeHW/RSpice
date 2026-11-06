@@ -48,6 +48,23 @@ pub fn mono_input(ui: &mut Ui, label: &str, value: &mut String, width: f32) -> R
     response
 }
 
+/// A single-line text field `width` wide at the theme's control height, with
+/// its text centred in it.
+///
+/// egui sizes a bare [`TextEdit`] from its font's row and a two-point margin,
+/// so a search or filter field stood 21 points tall beside 28-point selects
+/// and buttons, and beside 44-point ones under a finger. The control height is
+/// the one the theme raises to the touch target on a touch screen, so a field
+/// laid out here is as tall as the controls beside it on either. The caller
+/// keeps its own font, hint and margin.
+pub fn text_field(ui: &mut Ui, edit: TextEdit<'_>, width: f32) -> Response {
+    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
+    ui.add_sized(
+        vec2(width, height),
+        edit.vertical_align(egui::Align::Center),
+    )
+}
+
 /// Inset between a well's trailing edge and the unit inside it.
 const UNIT_INSET: f32 = 8.0;
 /// Least air between a value's text and its unit.
@@ -236,6 +253,28 @@ pub fn field_label<R>(ui: &mut Ui, label: &str, content: impl FnOnce(&mut Ui) ->
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A text field is as tall as the controls beside it: the pointer control
+    /// height, and the touch control height under a finger.
+    #[test]
+    fn a_text_field_takes_the_control_height_under_a_pointer_and_a_finger() {
+        for (target, height) in [(None, 28.0), (Some(44.0), 44.0)] {
+            let ctx = egui::Context::default();
+            crate::Theme::default().apply_responsive_metrics_with_target(&ctx, target);
+            let mut query = String::new();
+            let mut field = egui::Rect::NOTHING;
+            let _ = ctx.run_ui(egui::RawInput::default(), |ctx| {
+                egui::CentralPanel::default().show(ctx, |ui| {
+                    field = text_field(ui, TextEdit::singleline(&mut query), 170.0).rect;
+                });
+            });
+            assert_eq!(Tokens::get(&ctx).metrics.ctl_h, height);
+            assert!(
+                (field.height() - height).abs() < 0.5 && (field.width() - 170.0).abs() < 0.5,
+                "touch target {target:?}: the field is {field:?}"
+            );
+        }
+    }
 
     /// A fact stated beside a field reads at the size the field holds its
     /// value: the row's value and the typed value are one size.

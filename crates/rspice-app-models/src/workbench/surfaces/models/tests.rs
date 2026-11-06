@@ -32,7 +32,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00-models-project",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "39b54d6768146c1cfd10ceb89d6c1d842d863f686ee148305d31a36f9a041ee5",
+        fingerprint: "ab6a84bd1339b669f85a079b4920215983a1e3519d63a94a3ec5413c53eb9693",
     },
     ModelsBaseline {
         name: "models-01-symbols-cdf",
@@ -56,7 +56,7 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-04-include-graph",
         page: ModelsPage::Include,
         scope: ModelsCatalogScope::Project,
-        fingerprint: "0e4f4a9947e51221e64df28f0a1320123889bce8f405889a7f6d102b9920f63f",
+        fingerprint: "6dbc94ed5e3c5d88a9a64e13f83638717a487ee85de2021030fde68b67a7bda3",
     },
     ModelsBaseline {
         name: "models-05-qualification",
@@ -68,13 +68,13 @@ const MODELS_BASELINES: [ModelsBaseline; 8] = [
         name: "models-00b-rspice-library",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::RSpiceLibrary,
-        fingerprint: "ae9c601c21b924036aae46b92230a25593039e7da6cb9a23463978b3c61c5785",
+        fingerprint: "dee91ecf99812ee2ecd2613a3ba8aec9b3d5070c0e4c2e6407c571dd75d9f6b4",
     },
     ModelsBaseline {
         name: "models-00c-installed-packs",
         page: ModelsPage::Models,
         scope: ModelsCatalogScope::InstalledPacks,
-        fingerprint: "18ed506c419dcdcdac86e89cf04d5f4085d96815499443c06934a8dc0b590810",
+        fingerprint: "fd543ce49cadf85470e74915b7aab4a464ace294c8ed3a61bf6c86e6e81b392f",
     },
 ];
 
@@ -156,14 +156,21 @@ fn models_visual_baselines_cover_every_page_and_catalog_scope_once_and_are_uniqu
 
 #[test]
 fn every_models_workspace_page_matches_its_reviewed_visual_baseline() {
-    for baseline in MODELS_BASELINES {
-        let canvas = models_canvas(baseline.page, baseline.scope);
-        canvas.assert_regression(
-            baseline.name,
-            models_regression_height(&canvas),
-            baseline.fingerprint,
-        );
-    }
+    // Every changed page at once, so one run names each fingerprint a
+    // reviewed change replaces.
+    let changed = MODELS_BASELINES
+        .iter()
+        .filter_map(|baseline| {
+            let canvas = models_canvas(baseline.page, baseline.scope);
+            let actual = canvas.regression_fingerprint(models_regression_height(&canvas));
+            (actual != baseline.fingerprint).then(|| format!("{}: {actual}", baseline.name))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        changed.is_empty(),
+        "visual regression; review the renders before accepting the new fingerprints:\n{}",
+        changed.join("\n")
+    );
 }
 
 /// Every page's actions stay inside its own title band.

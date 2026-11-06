@@ -9,7 +9,7 @@ use crate::state::command_catalog::{CommandKey, CommandPlatform};
 use crate::state::shortcuts::ShortcutPreferences;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, name_control, text_field};
 use crate::workbench::app::{HelpCenterPage, RSpiceApp};
 use crate::workbench::app_state::session::shortcuts::ShortcutCategory;
 use crate::workbench::commands::vocabulary::{Command, CommandRegistry, command_registry};
@@ -269,11 +269,13 @@ impl RSpiceApp {
                 let t = Tokens::get(ui.ctx());
                 let c = t.color;
 
-                ui.add(
-                    egui::TextEdit::singleline(filter_text)
-                        .hint_text("Filter by name or shortcut")
-                        .desired_width(f32::INFINITY),
+                let width = ui.available_width();
+                let field = text_field(
+                    ui,
+                    egui::TextEdit::singleline(filter_text).hint_text("Filter by name or shortcut"),
+                    width,
                 );
+                name_control(ui, &field, "Filter shortcuts");
                 let filter = filter_text.trim().to_lowercase();
 
                 ui.spacing_mut().item_spacing.y = 0.0;

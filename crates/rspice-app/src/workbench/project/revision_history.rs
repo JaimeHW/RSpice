@@ -16,6 +16,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone, select,
+    text_field,
 };
 use crate::workbench::design_system::section_header;
 
@@ -412,13 +413,13 @@ fn revision_history_body(
         // the table's right edge.
         let compare = Button::new("Compare selected").enabled(dialog.selected.len() == 2);
         let compare_width = compare.measured_width(ui);
-        ui.add(
+        let width =
+            (ui.available_width() - compare_width - 2.0 * ui.spacing().item_spacing.x).max(180.0);
+        text_field(
+            ui,
             TextEdit::singleline(&mut dialog.query)
-                .desired_width(
-                    (ui.available_width() - compare_width - 2.0 * ui.spacing().item_spacing.x)
-                        .max(180.0),
-                )
                 .hint_text("Revision, actor, artifact, or message\u{2026}"),
+            width,
         );
         if compare.show(ui).clicked() {
             action = HistoryAction::Compare;
@@ -978,9 +979,9 @@ fn shown_columns(rows: &[&ProjectAuditRow]) -> Vec<usize> {
 
 /// The width of each `shown` column across `width`: each column as wide as
 /// its widest text, then all of them widened in proportion to fill the table,
-/// so nothing is elided while the table fits. A table that cannot fit shrinks
-/// in the same proportion and elides, rather than running its last columns
-/// off the dialog's edge behind a scroll bar.
+/// so nothing is elided while the table fits. A table that cannot fit takes
+/// the room from its widest columns only (see [`fit_widths`]), rather than
+/// running its last columns off the dialog's edge behind a scroll bar.
 fn column_widths(ui: &Ui, rows: &[&ProjectAuditRow], shown: &[usize], width: f32) -> Vec<f32> {
     let measure = |text: RichText| {
         egui::WidgetText::from(text)
@@ -1003,11 +1004,39 @@ fn column_widths(ui: &Ui, rows: &[&ProjectAuditRow], shown: &[usize], width: f32
         })
         .collect::<Vec<_>>();
     let room = (width - COLUMN_GAP * shown.len().saturating_sub(1) as f32).max(1.0);
-    let scale = room / natural.iter().sum::<f32>().max(1.0);
-    natural
-        .iter()
-        .map(|width| (width * scale).floor())
-        .collect()
+    fit_widths(&natural, room)
+}
+
+/// Natural column widths fitted to `room`. Room to spare widens every column
+/// in proportion. Too little is taken from the widest columns alone: they
+/// are cut to one common width, as wide as still fits, and every column
+/// narrower than that keeps its whole text. Shrinking every column in
+/// proportion elided an eight-letter revision ("built-i...") beside a column
+/// of prose that could have given the room up.
+fn fit_widths(natural: &[f32], room: f32) -> Vec<f32> {
+    let total = natural.iter().sum::<f32>().max(1.0);
+    if total <= room {
+        let scale = room / total;
+        return natural
+            .iter()
+            .map(|width| (width * scale).floor())
+            .collect();
+    }
+    let mut sorted = natural.to_vec();
+    sorted.sort_by(f32::total_cmp);
+    let mut below = 0.0;
+    let mut cap = 0.0;
+    for (index, width) in sorted.iter().enumerate() {
+        let wider = (sorted.len() - index) as f32;
+        // Every column from this one up cut to the same width.
+        let candidate = (room - below) / wider;
+        if candidate <= *width {
+            cap = candidate;
+            break;
+        }
+        below += width;
+    }
+    natural.iter().map(|width| width.min(cap).floor()).collect()
 }
 
 /// A column's heading: sentence case, in the label face, as written.
@@ -1248,6 +1277,17 @@ mod tests {
         let visible = visible_rows(&rows, &dialog);
         assert_eq!(visible.len(), 1);
         assert_eq!(visible[0].kind, ProjectAuditArtifactKind::SimulationPlan);
+    }
+
+    /// A table too wide for its room cuts its widest columns to one width and
+    /// leaves every narrower column whole; one with room to spare widens
+    /// every column in proportion.
+    #[test]
+    fn a_table_that_cannot_fit_cuts_only_its_widest_columns() {
+        let fitted = fit_widths(&[60.0, 120.0, 190.0, 260.0, 60.0], 600.0);
+        assert_eq!(fitted, vec![60.0, 120.0, 180.0, 180.0, 60.0]);
+        let roomy = fit_widths(&[50.0, 150.0], 400.0);
+        assert_eq!(roomy, vec![100.0, 300.0]);
     }
 
     /// The table fits the width it is given, every column of it, with its

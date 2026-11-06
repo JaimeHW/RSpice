@@ -17,7 +17,7 @@ use crate::services::cloud_account::{
 };
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem, text_field};
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app::dialogs::unpublish_web::{
     UnpublishWebDialogState, open_unpublish_web_dialog,
@@ -697,17 +697,19 @@ fn render_page_column(
     section_head(ui, "Page");
 
     field_label(ui, "Title");
-    ui.add(
-        egui::TextEdit::singleline(&mut dialog.title)
-            .font(theme::field_sans())
-            .desired_width(f32::INFINITY),
+    let width = ui.available_width();
+    text_field(
+        ui,
+        egui::TextEdit::singleline(&mut dialog.title).font(theme::field_sans()),
+        width,
     );
     field_label(ui, "Author credit");
-    ui.add(
+    text_field(
+        ui,
         egui::TextEdit::singleline(&mut dialog.author_credit)
             .font(theme::field_sans())
-            .desired_width(f32::INFINITY)
             .hint_text("shown on the page · leave empty for Anonymous"),
+        width,
     );
     field_label(ui, "Description");
     ui.add(

@@ -16,7 +16,7 @@ use crate::services::cloud_account::{
 use crate::services::live_protocol::PeerIdentity;
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem};
+use crate::ui::widgets::{Dialog, DialogChoice, DialogSize, Problem, text_field};
 use crate::workbench::app::dialogs::review_primitives::problem_note;
 use crate::workbench::app_state::run_preflight::PreflightDialogState;
 use crate::workbench::app_state::{Model, PlatformState};
@@ -378,11 +378,12 @@ fn render_start(
     ui.add_space(tokens::SP_4);
     section_head(ui, "Join a session instead");
     ui.horizontal(|ui| {
-        ui.add(
+        text_field(
+            ui,
             egui::TextEdit::singleline(&mut dialog.join_code_input)
                 .font(theme::field_mono())
-                .desired_width(180.0)
                 .hint_text("join code from the host"),
+            180.0,
         );
         let code = dialog.join_code_input.trim().to_owned();
         if ui

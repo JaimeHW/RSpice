@@ -8,7 +8,7 @@ use egui_extras::{Column, TableBuilder};
 use crate::state::{AuthoredDrawingSheetSize, DrawingSheetPreset, DrawingSheetPresetScope};
 use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::{self, Tokens};
-use crate::ui::widgets::Button;
+use crate::ui::widgets::{Button, text_field};
 
 use super::model::{
     ImportCandidate, ImportResolution, PresetEditorDraft, PresetEditorMode, PresetEditorUnit,
@@ -746,13 +746,14 @@ fn preset_editor_form(
         },
         |form| {
             field_label(form, "Name");
-            changed |= form
-                .add(
-                    TextEdit::singleline(&mut draft.name)
-                        .char_limit(crate::state::MAX_DRAWING_SHEET_PRESET_NAME_CHARS)
-                        .desired_width(f32::INFINITY),
-                )
-                .changed();
+            let width = form.available_width();
+            changed |= text_field(
+                form,
+                TextEdit::singleline(&mut draft.name)
+                    .char_limit(crate::state::MAX_DRAWING_SHEET_PRESET_NAME_CHARS),
+                width,
+            )
+            .changed();
 
             form.add_space(4.0);
             field_label(form, "Scope");
@@ -795,13 +796,21 @@ fn preset_editor_form(
         editor_section(ui, "Physical size", |form| {
             form.columns(2, |columns| {
                 field_label(&mut columns[0], "Portrait width");
-                changed |= columns[0]
-                    .add(TextEdit::singleline(&mut draft.width).desired_width(f32::INFINITY))
-                    .changed();
+                let width = columns[0].available_width();
+                changed |= text_field(
+                    &mut columns[0],
+                    TextEdit::singleline(&mut draft.width),
+                    width,
+                )
+                .changed();
                 field_label(&mut columns[1], "Portrait height");
-                changed |= columns[1]
-                    .add(TextEdit::singleline(&mut draft.height).desired_width(f32::INFINITY))
-                    .changed();
+                let width = columns[1].available_width();
+                changed |= text_field(
+                    &mut columns[1],
+                    TextEdit::singleline(&mut draft.height),
+                    width,
+                )
+                .changed();
             });
             form.add_space(4.0);
             field_label(form, "Units");

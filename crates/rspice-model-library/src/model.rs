@@ -1,6 +1,7 @@
 //! A device model.
 
 use serde::{Deserialize, Serialize};
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -87,6 +88,26 @@ impl DeviceModel {
             model_type,
             ..Default::default()
         }
+    }
+
+    /// The level a surface states for this card, or `None` where the card's
+    /// family has no level to state.
+    ///
+    /// A card that names its family or a level this catalog classifies reads
+    /// as that; one that declares a level it does not classify reads as the
+    /// number. A card that omits its level runs at its family's engine default
+    /// ([`ModelType::default_level`]), and says so: "Unknown" claimed the
+    /// level could not be told, beside sibling cards that named theirs.
+    pub fn level_label(&self) -> Option<Cow<'static, str>> {
+        if self.level != ModelLevel::Unknown {
+            return Some(Cow::Borrowed(self.level.display_name()));
+        }
+        if let Some(level) = self.spice_level {
+            return Some(Cow::Owned(format!("Level {level}")));
+        }
+        self.model_type
+            .default_level()
+            .map(|level| Cow::Borrowed(level.display_name()))
     }
 
     /// Set level

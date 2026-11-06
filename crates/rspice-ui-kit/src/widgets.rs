@@ -57,11 +57,12 @@ pub use docbar::docbar_at_height;
 pub use form::name_control;
 pub use form::{
     choice_row, field_label, input_row, kv_row, mono_input, mono_input_with_unit, switch_row,
+    text_field,
 };
 pub use ordered_chips::{OrderedChipsEdit, ordered_chips};
 pub use pane::{
-    PANE_FOOTER_H, PANE_HEADER_H, PANE_RAIL_W, PaneSide, pane_footer, pane_header,
-    pane_header_height, two_pane,
+    PANE_FOOTER_H, PANE_HEADER_H, PANE_INSET, PANE_RAIL_W, PaneSide, pane_footer,
+    pane_footer_inset, pane_header, pane_header_height, pane_header_inset, two_pane,
 };
 pub use segmented::{SegmentedWidth, segmented};
 pub use select::{SelectOutput, select};

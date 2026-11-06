@@ -81,6 +81,37 @@ impl ModelType {
         Self::Other,
     ];
 
+    /// The level the engine runs a card of this family at when the card names
+    /// none, or `None` for a family the engine does not select by `LEVEL`.
+    ///
+    /// Read from the engine's builder, not from SPICE folklore: a level-less
+    /// MOS card is built as `LEVEL=1`, a BJT card as Gummel-Poon `LEVEL=1`, a
+    /// diode as the legacy junction diode (no `LEVEL` or `LEVEL=0/1`), a JFET
+    /// as "legacy LEVEL=1/no LEVEL" and a MESFET as "no LEVEL/LEVEL=0/1"
+    /// (legacy MESFET). A vertical power MOSFET is its own family whatever its
+    /// level.
+    pub fn default_level(self) -> Option<ModelLevel> {
+        match self {
+            Self::Nmos
+            | Self::Pmos
+            | Self::Npn
+            | Self::Pnp
+            | Self::Njfet
+            | Self::Pjfet
+            | Self::Nmesfet
+            | Self::Pmesfet
+            | Self::Diode => Some(ModelLevel::SpiceLevel1),
+            Self::NVdmos | Self::PVdmos => Some(ModelLevel::Vdmos),
+            Self::Resistor
+            | Self::Capacitor
+            | Self::Inductor
+            | Self::Varactor
+            | Self::Rf
+            | Self::Esd
+            | Self::Other => None,
+        }
+    }
+
     /// Display name
     ///
     /// Presentation only. Nothing may classify, key, or round-trip a card by
@@ -368,5 +399,44 @@ mod tests {
                 "token '{token}'"
             );
         }
+    }
+
+    /// A card that omits its level states its family's engine default, and a
+    /// family with no level states none. The foundation diode, bipolar, JFET
+    /// and MESFET cards name no level and read "Unknown" beside the MOS card
+    /// that wrote `LEVEL=1`.
+    #[test]
+    fn a_card_without_a_level_states_its_familys_engine_default() {
+        let card = |model_type: ModelType, token: &str, level: Option<u32>| {
+            let mut model = crate::DeviceModel::new("card", model_type);
+            model.level = ModelLevel::from_spice_card(level, token);
+            model.spice_level = level;
+            model.level_label()
+        };
+        for (model_type, token) in [
+            (ModelType::Diode, "D"),
+            (ModelType::Npn, "NPN"),
+            (ModelType::Njfet, "NJF"),
+            (ModelType::Pmesfet, "PMF"),
+            (ModelType::Nmos, "NMOS"),
+        ] {
+            assert_eq!(card(model_type, token, None).as_deref(), Some("SPICE L1"));
+        }
+        assert_eq!(
+            card(ModelType::NVdmos, "NVDMOS", None).as_deref(),
+            Some("VDMOS")
+        );
+        assert_eq!(
+            card(ModelType::Npn, "NPN", Some(4)).as_deref(),
+            Some("VBIC")
+        );
+        // A declared level the catalog does not classify reads as its number.
+        assert_eq!(
+            card(ModelType::Diode, "D", Some(2)).as_deref(),
+            Some("Level 2")
+        );
+        // A family the engine does not select by level has no level to state.
+        assert_eq!(card(ModelType::Capacitor, "C", None), None);
+        assert_eq!(card(ModelType::Other, "X", None), None);
     }
 }

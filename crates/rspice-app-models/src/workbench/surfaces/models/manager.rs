@@ -51,7 +51,7 @@ use crate::state::ModelsPage;
 use crate::state::command_catalog::CommandKey;
 use crate::ui::widgets::{
     self, Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, Problem, SegmentedWidth,
-    paint_problem_mark, problem_line,
+    paint_problem_mark, problem_line, text_field,
 };
 use crate::workbench::app_state::Model;
 use crate::workbench::app_state::design_history::{
@@ -778,10 +778,12 @@ fn catalog_bar(
                             format!("Search {} parts by name, class or pack…", parts)
                         }
                     };
-                    let query = ui.add_sized(
-                        [ui.available_width().clamp(170.0, 340.0), 24.0],
+                    let width = ui.available_width().clamp(170.0, 340.0);
+                    let query = text_field(
+                        ui,
                         egui::TextEdit::singleline(&mut app.state.models_view.catalog_query)
                             .hint_text(hint),
+                        width,
                     );
                     if query.changed() {
                         app.state.models_view.part_catalog_offset = 0;
@@ -967,20 +969,44 @@ fn project_catalog(ui: &mut Ui, app: &mut ManagerRenderContext<'_>, pass: &Proje
         .fill(Tokens::get(ui.ctx()).color.bg_panel)
         .show(ui, |ui| {
         let sort = app.state.models_view.catalog_sort;
-        if let Some(key) = sortable_table_header(
-            ui,
-            "models-project-catalog-sort",
-            &[
-                sort_column("Model", 0.20, ModelsCatalogSortKey::Model),
-                sort_column("Family", 0.17, ModelsCatalogSortKey::Family),
-                sort_column("Source", 0.22, ModelsCatalogSortKey::Source),
-                sort_column("Used by", 0.16, ModelsCatalogSortKey::UsedBy),
-                sort_column("Vectors", 0.10, ModelsCatalogSortKey::Vectors),
-                sort_column("Status", 0.15, ModelsCatalogSortKey::Status),
-            ],
-            sort.key,
-            sort.descending,
-        ) {
+        // The rows are laid out inside the scroll area, which takes its bar's
+        // gutter out of their width whenever they overflow it. The header spans
+        // the same track, so each heading stands over its own values; across
+        // the whole width it drifted right column by column, and a model's
+        // vector count sat under the gap before "Vectors".
+        let gutter = if rows.len() as f32 * ROW_H > table_h {
+            ui.spacing().scroll.allocated_width()
+        } else {
+            0.0
+        };
+        let track = (ui.available_width() - gutter).max(1.0);
+        let header = ui.allocate_ui(egui::vec2(track, HEADER_H), |ui| {
+            sortable_table_header(
+                ui,
+                "models-project-catalog-sort",
+                &[
+                    sort_column("Model", 0.20, ModelsCatalogSortKey::Model),
+                    sort_column("Family", 0.17, ModelsCatalogSortKey::Family),
+                    sort_column("Source", 0.22, ModelsCatalogSortKey::Source),
+                    sort_column("Used by", 0.16, ModelsCatalogSortKey::UsedBy),
+                    sort_column("Vectors", 0.10, ModelsCatalogSortKey::Vectors),
+                    sort_column("Status", 0.15, ModelsCatalogSortKey::Status),
+                ],
+                sort.key,
+                sort.descending,
+            )
+        });
+        // The band itself still runs to the pane's edge, over the gutter.
+        let band = header.response.rect;
+        ui.painter().rect_filled(
+            egui::Rect::from_min_max(
+                egui::pos2(band.right(), band.top()),
+                egui::pos2(band.right() + gutter, band.bottom()),
+            ),
+            0.0,
+            Tokens::get(ui.ctx()).color.bg_inset,
+        );
+        if let Some(key) = header.inner {
             // Next frame's scan reads the new order; this frame's rows were
             // derived under the old one and are painted as they were derived.
             app.state.models_view.catalog_sort.toggle(key);

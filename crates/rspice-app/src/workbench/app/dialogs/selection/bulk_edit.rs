@@ -24,7 +24,7 @@ use crate::ui::theme::{self, FontWeight};
 use crate::ui::tokens::Tokens;
 use crate::ui::widgets::{
     Button, Dialog, DialogChoice, DialogInitialFocus, DialogSize, DialogTransactionTone,
-    name_control, select,
+    name_control, select, text_field,
 };
 use crate::ui::widgets::{DIALOG_BODY_INSET, band_header};
 use crate::workbench::design_system::WorkbenchIcon;
@@ -662,8 +662,8 @@ fn selection_bulk_body(
                         dialog.save_filter_open = !dialog.save_filter_open;
                     }
                     let width = ui.available_width();
-                    let response = ui.add_sized(
-                        [width, tokens.metrics.ctl_h],
+                    let response = text_field(
+                        ui,
                         TextEdit::singleline(&mut dialog.filter.query)
                             .hint_text(
                                 "Find instance, property, model, net, expression or path\u{2026}",
@@ -674,6 +674,7 @@ fn selection_bulk_body(
                                 top: 5,
                                 bottom: 5,
                             }),
+                        width,
                     );
                     WorkbenchIcon::Search.paint(
                         ui.painter(),
@@ -689,7 +690,7 @@ fn selection_bulk_body(
                 },
             );
             if dialog.save_filter_open {
-                saved_filter_controls(ui, dialog, saved_filters, &tokens, &mut action);
+                saved_filter_controls(ui, dialog, saved_filters, &mut action);
             }
         });
     ui.separator();
@@ -795,15 +796,15 @@ fn saved_filter_controls(
     ui: &mut Ui,
     dialog: &mut SelectionBulkEditDialogState,
     saved_filters: &[String],
-    tokens: &Tokens,
     action: &mut SelectionBulkBodyAction,
 ) {
     ui.add_space(6.0);
     ui.horizontal(|ui| {
         ui.label("Filter name");
-        let response = ui.add_sized(
-            [220.0, tokens.metrics.ctl_h],
+        let response = text_field(
+            ui,
             TextEdit::singleline(&mut dialog.save_filter_name),
+            220.0,
         );
         name_control(ui, &response, "Filter name");
         if Button::new("Save").accent().show(ui).clicked() {
@@ -1155,14 +1156,14 @@ const IMPACT_ROW_H: f32 = 22.0;
 /// A text field across `ui`'s width at the selects' height, named by the
 /// label its column states above it.
 fn field(ui: &mut Ui, label: &str, value: &mut String, hint: &str) -> egui::Response {
-    let height = Tokens::get(ui.ctx()).metrics.ctl_h;
-    let response = ui.add_sized(
-        [ui.available_width(), height],
+    let width = ui.available_width();
+    let response = text_field(
+        ui,
         TextEdit::singleline(value)
             .font(theme::field_mono())
             .hint_text(hint)
-            .vertical_align(egui::Align::Center)
             .margin(egui::Margin::symmetric(8, 4)),
+        width,
     );
     name_control(ui, &response, label);
     response

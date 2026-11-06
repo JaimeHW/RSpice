@@ -36,7 +36,9 @@ struct SelectedModelDetail<'a> {
     /// none when the card is no bin of one.
     bins: Vec<BinWindow>,
     family: &'static str,
-    level: &'static str,
+    /// The card's level, or its family's engine default; none for a family
+    /// with no level.
+    level: Option<std::borrow::Cow<'static, str>>,
     /// Whether the library names an external root a pin can be taken from, and
     /// whether it already holds one.
     has_root: bool,
@@ -221,7 +223,7 @@ fn project_selection<'a>(
         binding,
         bins,
         family: model.model_type.display_name(),
-        level: model.level.display_name(),
+        level: model.level_label(),
         has_root: library.has_external_root(),
         pinned: library.has_retained_closure(),
         project_owned: library.source_authority.is_project_owned(),
@@ -312,10 +314,15 @@ pub(super) fn selected_model_detail(
                     1 => " · 1 bin".to_owned(),
                     count => format!(" · {count} bins"),
                 };
+                let level = detail
+                    .level
+                    .as_deref()
+                    .map(|level| format!(" · {level}"))
+                    .unwrap_or_default();
                 ui.label(
                     RichText::new(format!(
-                        "{} · {} · {}{bins}",
-                        detail.family, detail.level, detail.library
+                        "{}{level} · {}{bins}",
+                        detail.family, detail.library
                     ))
                     .font(theme::sans(tokens::FS_1, FontWeight::Regular))
                     .color(t.color.text_dim),

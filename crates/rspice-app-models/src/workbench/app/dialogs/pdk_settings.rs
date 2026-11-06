@@ -18,8 +18,9 @@ use crate::ui::icons::Icon;
 use crate::ui::theme::{self, FontWeight, mix};
 use crate::ui::tokens::{self, Tokens};
 use crate::ui::widgets::{
-    Button, Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H, PANE_RAIL_W, PaneSide,
-    chip, pane_footer, pane_header, pane_header_height, two_pane,
+    Button, DIALOG_BODY_INSET, Dialog, DialogChoice, DialogSize, IconButton, PANE_FOOTER_H,
+    PANE_RAIL_W, PaneSide, chip, pane_footer_inset, pane_header_height, pane_header_inset,
+    text_field, two_pane,
 };
 use crate::workbench::app_state::session::pdk_settings::{
     PdkSettingsDialogResult, PdkSettingsDialogState,
@@ -37,6 +38,11 @@ const FILE_ROW_H: f32 = 24.0;
 const SECTIONS_W: f32 = 132.0;
 /// X offset of the FILE column.
 const FILE_COL_X: f32 = 64.0;
+/// Where every pane's captions and rows start: the panes lie edge to edge,
+/// on the dialog's border, so this is the dialog's own left edge, the one its
+/// title and its footer actions stand on. The panes' 10 pt left their
+/// captions and rows three points left of the title.
+const INSET: f32 = DIALOG_BODY_INSET + 1.0;
 
 /// What a sources-rail interaction asked for this frame.
 enum SourceAction {
@@ -164,7 +170,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     #[cfg(not(target_arch = "wasm32"))]
     let import_browser_file = false;
 
-    pane_header(ui, |ui| {
+    pane_header_inset(ui, INSET, |ui| {
         header_caption(ui, "Sources");
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
@@ -206,7 +212,7 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     let trailing_h = if state.adding_env {
         ENV_ROW_H + 4.0
     } else {
-        ENV_ROW_H
+        0.0
     };
     let env_list_h = (env.len() as f32 * ENV_ROW_H + trailing_h).min(96.0);
     // Two pane headers (sources, environment) and the rule between the lists.
@@ -248,32 +254,48 @@ fn sources_rail(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> bool {
     ui.painter()
         .hline(ui.max_rect().x_range(), sep_y, Stroke::new(1.0, c.border));
     ui.add_space(1.0);
-    pane_header(ui, |ui| header_caption(ui, "Environment"));
-
-    let mut env_action: Option<EnvAction> = None;
-    egui::ScrollArea::vertical()
-        .id_salt("rspice.pdk.env")
-        .max_height(env_list_h)
-        .auto_shrink([false, false])
-        .show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for (index, (name, value)) in env.iter().enumerate() {
-                let resolved = crate::state::pdk_config::expand_path(&state.config, value);
-                if let Some(act) = env_row(ui, index, name, value, &resolved) {
-                    env_action = Some(act);
-                }
-            }
-            if state.adding_env {
-                if let Some(act) =
-                    env_add_row(ui, &mut state.new_env_name, &mut state.new_env_value)
-                {
-                    env_action = Some(act);
-                }
-            } else if env_add_prompt_row(ui) {
+    // Its add action is a header button, as the sources' is: it was a faint
+    // row wedged under the last variable at the pane's bottom edge.
+    pane_header_inset(ui, INSET, |ui| {
+        header_caption(ui, "Environment");
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if Button::new("Add")
+                .icon(Icon::Add)
+                .compact()
+                .accessible_label("Add environment variable")
+                .show(ui)
+                .clicked()
+            {
                 state.adding_env = true;
                 ui.ctx().memory_mut(|m| m.request_focus(env_name_id()));
             }
         });
+    });
+
+    let mut env_action: Option<EnvAction> = None;
+    // An empty list takes no height: a scroll area keeps a floor of its own,
+    // which would hold a blank strip under the header.
+    if env_list_h > 0.0 {
+        egui::ScrollArea::vertical()
+            .id_salt("rspice.pdk.env")
+            .max_height(env_list_h)
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (index, (name, value)) in env.iter().enumerate() {
+                    let resolved = crate::state::pdk_config::expand_path(&state.config, value);
+                    if let Some(act) = env_row(ui, index, name, value, &resolved) {
+                        env_action = Some(act);
+                    }
+                }
+                if state.adding_env
+                    && let Some(act) =
+                        env_add_row(ui, &mut state.new_env_name, &mut state.new_env_value)
+                {
+                    env_action = Some(act);
+                }
+            });
+    }
 
     if let Some(act) = action {
         match act {
@@ -391,7 +413,7 @@ fn source_row(
             // Disabled sources render dimmed, like the design's 55 % row.
             let alpha = if entry.enabled { 1.0 } else { 0.55 };
 
-            ui.add_space(8.0);
+            ui.add_space(INSET);
             let (box_rect, box_response) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::click());
             box_response.widget_info(|| {
                 egui::WidgetInfo::selected(
@@ -536,7 +558,7 @@ fn source_edit_row(ui: &mut Ui, idx: usize, buffer: &mut String) -> Option<Sourc
         vec2(width, ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.add_space(8.0);
+            ui.add_space(INSET);
             let response = ui.add(
                 egui::TextEdit::singleline(buffer)
                     .id(path_edit_id(idx))
@@ -561,7 +583,7 @@ fn source_add_row(ui: &mut Ui, buffer: &mut String) -> Option<SourceAction> {
         vec2(width, ROW_H),
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
-            ui.add_space(8.0);
+            ui.add_space(INSET);
             let response = ui.add(
                 egui::TextEdit::singleline(buffer)
                     .id(add_path_id())
@@ -617,7 +639,7 @@ fn env_row(
                 );
             }
 
-            ui.add_space(10.0);
+            ui.add_space(INSET);
             let name_w = (rect.width() * 0.45).max(40.0);
             let name_galley = ui.fonts_mut(|f| {
                 let mut job = egui::text::LayoutJob::simple_singleline(
@@ -681,46 +703,6 @@ fn env_row(
     action
 }
 
-/// The faint "+ variable…" row; returns `true` when clicked.
-fn env_add_prompt_row(ui: &mut Ui) -> bool {
-    let t = Tokens::get(ui.ctx());
-    let c = t.color;
-    let (rect, response) =
-        ui.allocate_exact_size(vec2(ui.available_width(), ENV_ROW_H), Sense::click());
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(
-            egui::WidgetType::Button,
-            ui.is_enabled(),
-            "Add environment variable",
-        )
-    });
-    if !ui.is_rect_visible(rect) {
-        return false;
-    }
-    let hover =
-        ui.ctx()
-            .animate_bool_with_time(response.id, response.hovered(), ui.style().animation_time);
-    let painter = ui.painter();
-    if hover > 0.0 {
-        painter.rect_filled(
-            rect,
-            0.0,
-            mix(egui::Color32::TRANSPARENT, c.bg_hover, hover),
-        );
-    }
-    painter.text(
-        egui::pos2(rect.left() + 10.0, rect.center().y),
-        egui::Align2::LEFT_CENTER,
-        "Add variable\u{2026}",
-        theme::sans(tokens::FS_0, FontWeight::Regular),
-        mix(c.text_faint, c.text_dim, hover),
-    );
-    theme::paint_focus_ring(ui, &response, rect);
-    response
-        .on_hover_cursor(egui::CursorIcon::PointingHand)
-        .clicked()
-}
-
 /// The inline name/value inputs opened by "+ variable…". Enter commits
 /// when the name is non-empty; ✕ dismisses.
 fn env_add_row(ui: &mut Ui, name: &mut String, value: &mut String) -> Option<EnvAction> {
@@ -731,7 +713,7 @@ fn env_add_row(ui: &mut Ui, name: &mut String, value: &mut String) -> Option<Env
         egui::Layout::left_to_right(egui::Align::Center),
         |ui| {
             ui.spacing_mut().item_spacing.x = 4.0;
-            ui.add_space(8.0);
+            ui.add_space(INSET);
             let name_response = ui.add(
                 egui::TextEdit::singleline(name)
                     .id(env_name_id())
@@ -799,7 +781,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
         .count();
 
     let mut toggle_recursive = false;
-    pane_header(ui, |ui| {
+    pane_header_inset(ui, INSET, |ui| {
         let chip_reserve = if selected_entry.is_some() { 84.0 } else { 0.0 };
         let path_w = (ui.available_width() - chip_reserve - 196.0).max(40.0);
         // A path is set in mono; the words for every source are prose.
@@ -841,14 +823,15 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
             toggle_recursive = true;
         }
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            ui.add(
+            text_field(
+                ui,
                 egui::TextEdit::singleline(&mut state.file_filter)
                     .font(theme::field_sans())
                     .hint_text(format!(
                         "Filter {scope_total} file{}…",
                         if scope_total == 1 { "" } else { "s" }
-                    ))
-                    .desired_width(170.0),
+                    )),
+                170.0,
             );
         });
     });
@@ -905,7 +888,7 @@ fn detail_pane(ui: &mut Ui, state: &mut PdkSettingsDialogState) -> Option<PathBu
             }
         });
 
-    pane_footer(ui, &scan_summary(state));
+    pane_footer_inset(ui, INSET, &scan_summary(state));
     load
 }
 
@@ -915,7 +898,7 @@ fn table_header(ui: &mut Ui) {
     let c = t.color;
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), FILE_ROW_H), Sense::hover());
     for (label, x) in [
-        ("Type", rect.left() + 10.0),
+        ("Type", rect.left() + INSET),
         ("File", rect.left() + FILE_COL_X),
         ("Sections", rect.right() - SECTIONS_W),
     ] {
@@ -984,7 +967,7 @@ fn file_row(ui: &mut Ui, file: &DiscoveredFile) -> egui::Response {
     };
     paint_badge(
         ui,
-        rect.left() + 10.0,
+        rect.left() + INSET,
         rect.center().y,
         badge_text,
         badge_color,

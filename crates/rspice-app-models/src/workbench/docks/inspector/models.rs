@@ -53,7 +53,9 @@ pub(in crate::workbench) fn show(ui: &mut Ui, selected_model: Option<&str>, mode
     // heading reading "Selected model" states the catalog's selection twice.
     section_header(ui, &model.name, None);
     property_row(ui, "Type", model.model_type.display_name());
-    property_row(ui, "Level", model.level.display_name());
+    if let Some(level) = model.level_label() {
+        property_row(ui, "Level", &level);
+    }
     if let Some(vdd) = model.vdd {
         property_row(
             ui,

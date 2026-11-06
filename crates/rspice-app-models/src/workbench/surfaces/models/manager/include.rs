@@ -61,10 +61,11 @@ pub(super) fn include_page(
             &mut app.state.models_view.include_direct_only,
             "Direct dependencies only",
         );
-        ui.add(
+        text_field(
+            ui,
             egui::TextEdit::singleline(&mut app.state.models_view.include_definition_query)
-                .hint_text("Filter definitions or providers…")
-                .desired_width(260.0),
+                .hint_text("Filter definitions or providers…"),
+            260.0,
         );
     });
     // Both panes below read the libraries while the page also writes selection

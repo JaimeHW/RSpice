@@ -107,17 +107,26 @@ pub fn pane_header_height(ctx: &egui::Context) -> f32 {
     }
 }
 
+/// The side padding of a pane's header and footer strips.
+pub const PANE_INSET: f32 = 10.0;
+
 /// The `.hd` strip at the top of a pane: [`pane_header_height`] tall,
-/// contents centered vertically inside 10 pt side padding (right-aligned
-/// sub-layouts land on the padded edge, not the pane border), hairline rule
-/// underneath.
+/// contents centered vertically inside [`PANE_INSET`] side padding
+/// (right-aligned sub-layouts land on the padded edge, not the pane border),
+/// hairline rule underneath.
 pub fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
+    pane_header_inset(ui, PANE_INSET, add_contents);
+}
+
+/// [`pane_header`] with `inset` side padding, for panes laid edge to edge in
+/// a dialog, whose contents stand on the dialog's own left edge.
+pub fn pane_header_inset(ui: &mut Ui, inset: f32, add_contents: impl FnOnce(&mut Ui)) {
     let t = Tokens::get(ui.ctx());
     let height = pane_header_height(ui.ctx());
     let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), height), Sense::hover());
     let mut header_ui = ui.new_child(
         UiBuilder::new()
-            .max_rect(rect.shrink2(vec2(10.0, 0.0)))
+            .max_rect(rect.shrink2(vec2(inset, 0.0)))
             .layout(Layout::left_to_right(Align::Center)),
     );
     header_ui.spacing_mut().item_spacing.x = 8.0;
@@ -132,6 +141,11 @@ pub fn pane_header(ui: &mut Ui, add_contents: impl FnOnce(&mut Ui)) {
 /// The footer strip pinned to the pane bottom: faint sans meta text over
 /// a hairline rule (the spec's bottom `.hd` variant).
 pub fn pane_footer(ui: &mut Ui, text: &str) {
+    pane_footer_inset(ui, PANE_INSET, text);
+}
+
+/// [`pane_footer`] with its text `inset` from the pane's left edge.
+pub fn pane_footer_inset(ui: &mut Ui, inset: f32, text: &str) {
     let t = Tokens::get(ui.ctx());
     let c = t.color;
     ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
@@ -140,7 +154,7 @@ pub fn pane_footer(ui: &mut Ui, text: &str) {
         let painter = ui.painter();
         painter.hline(rect.x_range(), rect.top() + 0.5, Stroke::new(1.0, c.border));
         painter.text(
-            pos2(rect.left() + 10.0, rect.center().y),
+            pos2(rect.left() + inset, rect.center().y),
             egui::Align2::LEFT_CENTER,
             text,
             theme::sans(tokens::FS_0, FontWeight::Regular),

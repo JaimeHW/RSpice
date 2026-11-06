@@ -319,10 +319,8 @@ pub(super) fn render_dialog(
                 });
                 ui.horizontal(|ui| {
                     ui.label("Target cell");
-                    let cell = ui.add(
-                        egui::TextEdit::singleline(&mut target_cell)
-                            .desired_width(f32::INFINITY),
-                    );
+                    let width = ui.available_width();
+                    let cell = text_field(ui, egui::TextEdit::singleline(&mut target_cell), width);
                     Some(cell.id)
                 })
                 .inner

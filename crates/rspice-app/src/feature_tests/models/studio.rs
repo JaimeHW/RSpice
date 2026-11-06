@@ -328,3 +328,54 @@ fn showing_the_project_models_always_opens_the_project_catalog_scope() {
         ModelsCatalogScope::Project
     );
 }
+
+/// Every heading of the project catalog stands over its own column while the
+/// rows scroll.
+///
+/// The rows are laid out inside a scroll area, which takes its bar's gutter
+/// out of their width once they overflow it, while the header spanned the
+/// whole pane: each heading drifted right of its column by a share of the
+/// gutter, and a model's vector count sat under the gap before "Vectors".
+#[test]
+fn the_catalog_headings_stand_over_their_columns_while_the_rows_scroll() {
+    let mut app = RSpiceApp::test_instance();
+    app.state.model.model_library_manager.clear();
+    let mut library = ModelLibrary::new("alpha");
+    for index in 0..60 {
+        let mut model = DeviceModel::new(&format!("n{index:02}"), ModelType::Nmos);
+        model.file_path = Some(PathBuf::from("alpha.lib"));
+        library.add_model(model);
+    }
+    app.state.model.model_library_manager.add_library(library);
+    crate::workbench::models::workspace_state::select_library_or_prompt(
+        &mut app.state.model,
+        &mut app.state.workbench,
+        "alpha",
+    );
+    app.state.models.models_page = ModelsPage::Models;
+    let studio = ModelsStudio::open(app);
+    let rect = |wanted: &str| {
+        studio
+            .controls
+            .iter()
+            .find(|(label, _)| label.starts_with(wanted))
+            .map(|(_, rect)| *rect)
+            .unwrap_or_else(|| {
+                panic!(
+                    "nothing announces {wanted:?}; the page announces {:#?}",
+                    studio.announcements()
+                )
+            })
+    };
+    let first = rect("sort by Model");
+    let last = rect("sort by Status");
+    let row = rect("n00 in alpha");
+    assert!(
+        (first.left() - row.left()).abs() < 0.5 && (last.right() - row.right()).abs() < 0.5,
+        "the headings span {:.0}..{:.0} over rows spanning {:.0}..{:.0}",
+        first.left(),
+        last.right(),
+        row.left(),
+        row.right()
+    );
+}
