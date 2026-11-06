@@ -826,7 +826,7 @@ fn session_restore_reopens_the_veriloga_tab_in_design() {
     let (reference, bundle_id) = add_veriloga_cell(&mut app.state, "gain", "model.va", "gain");
     open_in_design(&mut app.state, &reference);
     let mut storage = MemoryStorage::default();
-    eframe::set_value(&mut storage, eframe::APP_KEY, &app.state);
+    app.state.store_session(&mut storage);
 
     let mut restored = AppState::restore_eframe_session(&storage).expect("the session restores");
     restored.restore_active_schematic_from_workspace();

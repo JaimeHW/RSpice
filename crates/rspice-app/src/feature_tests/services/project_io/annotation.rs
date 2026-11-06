@@ -463,11 +463,28 @@ fn annotation_session(project: &ProjectSnapshot) -> AppState {
     state
 }
 
-fn restore_annotation_session(state: &AppState, ron: bool) -> AppState {
-    if ron {
-        ron::from_str(&ron::to_string(state).unwrap()).unwrap()
+/// The session as the next launch reads it: through the session store, or
+/// decoded directly.
+fn restore_annotation_session(state: &AppState, stored: bool) -> AppState {
+    struct Stored(String);
+
+    impl eframe::Storage for Stored {
+        fn get_string(&self, key: &str) -> Option<String> {
+            (key == eframe::APP_KEY).then(|| self.0.clone())
+        }
+
+        fn set_string(&mut self, _: &str, _: String) {}
+
+        fn remove_string(&mut self, _: &str) {}
+
+        fn flush(&mut self) {}
+    }
+
+    let session = serde_json::to_string(state).unwrap();
+    if stored {
+        AppState::restore_eframe_session(&Stored(session)).unwrap()
     } else {
-        serde_json::from_str(&serde_json::to_string(state).unwrap()).unwrap()
+        serde_json::from_str(&session).unwrap()
     }
 }
 
@@ -528,7 +545,7 @@ fn assert_restored_annotation(state: &AppState, fixture: &PendingAnnotation) {
 
 #[test]
 fn session_restores_pending_annotation_and_every_reference_once() {
-    for ron in [false, true] {
+    for stored in [false, true] {
         for schematic_active in [false, true] {
             let mut fixture = pending_annotation();
             if !schematic_active {
@@ -554,7 +571,7 @@ fn session_restores_pending_annotation_and_every_reference_once() {
             }
             let state = annotation_session(&fixture.project);
             let original = serde_json::to_value(&state.model.workspace).unwrap();
-            let restored = restore_annotation_session(&state, ron);
+            let restored = restore_annotation_session(&state, stored);
             assert_restored_annotation(&restored, &fixture);
             assert_eq!(
                 serde_json::to_value(&state.model.workspace).unwrap(),
@@ -565,7 +582,7 @@ fn session_restores_pending_annotation_and_every_reference_once() {
                     .message
                     .contains("Applied approved reference annotation")
             }));
-            let repeated = restore_annotation_session(&restored, ron);
+            let repeated = restore_annotation_session(&restored, stored);
             assert_restored_annotation(&repeated, &fixture);
             assert!(!repeated.model.log_buffer.entries().any(|entry| {
                 entry
@@ -578,11 +595,11 @@ fn session_restores_pending_annotation_and_every_reference_once() {
 
 #[test]
 fn session_retains_unsaved_schematic_flags_across_document_switches() {
-    for ron in [false, true] {
+    for stored in [false, true] {
         let mut fixture = pending_annotation();
         fixture.project.restore_pending_annotation().unwrap();
         let state = annotation_session(&fixture.project);
-        let mut restored = restore_annotation_session(&state, ron);
+        let mut restored = restore_annotation_session(&state, stored);
         for reference in [&fixture.root, &fixture.child] {
             assert!(
                 restored
@@ -614,7 +631,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
             .unwrap()
             .clone_editor();
         restored.sync_active_schematic_to_workspace();
-        let repeated = restore_annotation_session(&restored, ron);
+        let repeated = restore_annotation_session(&restored, stored);
         assert!(repeated.model.schematic.session.is_dirty);
         assert!(
             repeated
@@ -630,7 +647,7 @@ fn session_retains_unsaved_schematic_flags_across_document_switches() {
 
 #[test]
 fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_after_repair() {
-    for ron in [false, true] {
+    for stored in [false, true] {
         for configured in [false, true] {
             for failure in [
                 "unrecorded name",
@@ -645,7 +662,7 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                 let mut broken = fixture.clone();
                 damage_pending_annotation(&mut broken, failure);
                 let source = annotation_session(&broken.project);
-                let mut restored = restore_annotation_session(&source, ron);
+                let mut restored = restore_annotation_session(&source, stored);
                 for reference in [&fixture.root, &fixture.child] {
                     assert_eq!(
                         restored.model.workspace.content.schematic_buffers[&reference.key()]
@@ -678,7 +695,7 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                         .get("annotation_restoration_error")
                         .is_none()
                 );
-                for blocked in [&restored, &restore_annotation_session(&restored, ron)] {
+                for blocked in [&restored, &restore_annotation_session(&restored, stored)] {
                     let error = blocked
                         .model
                         .workspace
@@ -785,7 +802,10 @@ fn failed_session_annotation_preserves_documents_blocks_execution_and_retries_af
                     "{failure}"
                 );
                 assert_restored_annotation(&restored, &fixture);
-                assert_restored_annotation(&restore_annotation_session(&restored, ron), &fixture);
+                assert_restored_annotation(
+                    &restore_annotation_session(&restored, stored),
+                    &fixture,
+                );
             }
         }
     }

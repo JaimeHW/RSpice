@@ -267,10 +267,11 @@ fn a_session_saved_after_close_project_restarts_with_no_project() {
 
     let mut state = AppState::default();
     assert!(state.close_project_discard(ProjectCloseDestination::EmptyWorkbench));
-    let session = ron::to_string(&state).expect("the session serializes");
+    let session = serde_json::to_string(&state).expect("the session serializes");
 
     for choice in [0, 1] {
-        let mut restored = ron::from_str::<Box<AppState>>(&session).expect("the session restores");
+        let mut restored =
+            serde_json::from_str::<Box<AppState>>(&session).expect("the session restores");
         restored
             .model
             .preferences
@@ -327,10 +328,11 @@ fn a_saved_project_comes_back_through_its_session() {
                 .workspace
                 .save_active_schematic(&state.model.schematic);
         }
-        ron::to_string(state.as_ref()).expect("the session serializes")
+        serde_json::to_string(state.as_ref()).expect("the session serializes")
     };
     let restart = |session: &str, choice: usize| {
-        let mut state = ron::from_str::<Box<AppState>>(session).expect("the session restores");
+        let mut state =
+            serde_json::from_str::<Box<AppState>>(session).expect("the session restores");
         state
             .model
             .preferences
@@ -2152,7 +2154,7 @@ fn save_as_moves_the_open_project_and_its_saved_session_to_the_new_file() {
     ));
 
     let mut storage = MemoryStorage::default();
-    eframe::set_value(&mut storage, eframe::APP_KEY, &state);
+    state.store_session(&mut storage);
     let restored = AppState::restore_eframe_session(&storage).expect("the session restores");
     assert!(names_renamed(
         restored.model.workspace.content.project.path.as_deref()

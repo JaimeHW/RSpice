@@ -288,7 +288,7 @@ impl AppState {
     ) {
         let history = self.model.simulation.retained.runs.revision();
         if self.platform.session_kept != SessionKept::WithoutRuns(history.clone()) {
-            match offer(storage, ron::ser::to_string(&*self), read_back) {
+            match offer(storage, serde_json::to_string(&*self), read_back) {
                 Offer::Kept => {
                     settle(&mut self.model, &mut self.platform, SessionKept::Whole);
                     return;
@@ -297,7 +297,11 @@ impl AppState {
                 Offer::NotEncoded => return,
             }
         }
-        let kept = match offer(storage, ron::ser::to_string(&WithoutRuns(self)), read_back) {
+        let kept = match offer(
+            storage,
+            serde_json::to_string(&WithoutRuns(self)),
+            read_back,
+        ) {
             Offer::Kept => SessionKept::WithoutRuns(history),
             Offer::Refused => SessionKept::Nothing,
             Offer::NotEncoded => return,

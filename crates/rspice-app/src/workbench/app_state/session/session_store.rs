@@ -50,7 +50,7 @@ pub(crate) fn settle(model: &mut Model, platform: &mut PlatformState, kept: Sess
 
 pub(crate) fn offer(
     storage: &mut dyn eframe::Storage,
-    encoded: ron::Result<String>,
+    encoded: serde_json::Result<String>,
     read_back: bool,
 ) -> Offer {
     let text = match encoded {
@@ -140,8 +140,8 @@ mod tests {
 
     /// A store that holds the session without its runs, and not with them.
     fn storage_between(state: &AppState) -> LimitedStorage {
-        let whole = ron::ser::to_string(state).expect("session encodes").len();
-        let lean = ron::ser::to_string(&WithoutRuns(state))
+        let whole = serde_json::to_string(state).expect("session encodes").len();
+        let lean = serde_json::to_string(&WithoutRuns(state))
             .expect("session encodes")
             .len();
         assert!(lean * 2 < whole, "the run must dominate the session");

@@ -5413,7 +5413,6 @@ dependencies = [
  "js-sys",
  "log",
  "rfd",
- "ron",
  "rspice-app-state",
  "rspice-automation-protocol",
  "rspice-automation-runtime",
@@ -5986,7 +5985,6 @@ dependencies = [
 name = "rspice-project"
 version = "0.1.0"
 dependencies = [
- "ron",
  "rspice-core",
  "rspice-design",
  "rspice-design-model",

@@ -2084,7 +2084,7 @@ mod tests {
     }
 
     #[test]
-    fn application_state_round_trips_through_eframe_ron_storage() {
+    fn application_state_round_trips_through_eframe_storage() {
         #[derive(Default)]
         struct MemoryStorage(std::collections::HashMap<String, String>);
 
@@ -2104,9 +2104,9 @@ mod tests {
             fn flush(&mut self) {}
         }
 
-        let expected = AppState::default();
+        let mut expected = AppState::default();
         let mut storage = MemoryStorage::default();
-        eframe::set_value(&mut storage, eframe::APP_KEY, &expected);
+        expected.store_session(&mut storage);
         let restored = AppState::restore_eframe_session(&storage)
             .expect("RSpice must be able to restore a session it just saved");
 

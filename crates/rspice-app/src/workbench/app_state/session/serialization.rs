@@ -15,17 +15,17 @@ const LEGACY_SESSION_PROJECT_ID_NAMESPACE: uuid::Uuid =
     uuid::Uuid::from_u128(0x655d_ae12_6cdd_5971_b7d8_aafe_02b6_b367);
 
 impl AppState {
-    /// Restore eframe's RON session, including receipts emitted before their
-    /// writer and independently recoverable decoder shared a wire format.
+    /// Restore the session the last run stored.
     ///
     /// `None` only when nothing was stored. A stored session that will not
-    /// decode is replaced by a new one whose Console says so: otherwise the
-    /// reader's project and layout vanish without a word. The decoder's own
-    /// account, a position in the RON text, goes to the log.
+    /// decode, one an older build wrote in another shape among them, is
+    /// replaced by a new one whose Console says so: otherwise the reader's
+    /// project and layout vanish without a word. The decoder's own account,
+    /// a position in the stored text, goes to the log.
     pub(crate) fn restore_eframe_session(storage: &dyn eframe::Storage) -> Option<Self> {
         let text = storage.get_string(eframe::APP_KEY)?;
-        Some(Self::from_session_ron(&text).unwrap_or_else(|error| {
-            log::warn!("the stored eframe session did not decode: {error}");
+        Some(serde_json::from_str(&text).unwrap_or_else(|error| {
+            log::warn!("the stored session did not decode: {error}");
             let mut state = Self::default();
             state.record(
                 LogSeverity::Warning,
@@ -36,53 +36,6 @@ impl AppState {
             state
         }))
     }
-
-    /// An `Option` written as a plain value reads as present. Every session
-    /// this build writes spells one `Some(…)`, but a field an older build
-    /// wrote plainly and this one reads as optional would otherwise cost the
-    /// reader their whole session, as a run's result fields and a title
-    /// block's retired placement each once did.
-    fn from_session_ron(text: &str) -> Result<Self, ron::error::SpannedError> {
-        let migrated = migrate_legacy_browser_receipt(text);
-        ron::Options::default()
-            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME)
-            .from_str(migrated.as_deref().unwrap_or(text))
-    }
-}
-
-fn migrate_legacy_browser_receipt(text: &str) -> Option<String> {
-    use crate::workbench::lifecycle::project_lifecycle::BrowserBindingReceipt;
-
-    // Borrow only this field. Other domains are skipped without building an
-    // untyped tree of the entire, potentially deeply nested working session.
-    #[derive(serde::Deserialize)]
-    struct Envelope<'a> {
-        #[serde(default, borrow)]
-        browser_project_binding_receipt: Option<&'a ron::value::RawValue>,
-    }
-    let envelope: Envelope<'_> = ron::from_str(text).ok()?;
-    let raw = envelope.browser_project_binding_receipt?;
-    if ron::from_str::<serde_json::Value>(raw.get_ron())
-        .ok()
-        .and_then(|value| serde_json::from_value::<BrowserBindingReceipt>(value).ok())
-        .is_some()
-    {
-        return None;
-    }
-    // A missing, malformed or future backend never acquires authority by
-    // inference. Successful decoding still requires the normal canonical
-    // identity, generation, digest and permission checks after startup.
-    let receipt = raw.into_rust::<BrowserBindingReceipt>().ok()?;
-    let replacement = ron::to_string(&serde_json::to_value(receipt).ok()?).ok()?;
-    let raw = raw.get_ron();
-    let start = (raw.as_ptr() as usize).checked_sub(text.as_ptr() as usize)?;
-    let end = start.checked_add(raw.len())?;
-    if text.get(start..end)? != raw {
-        return None;
-    }
-    let mut migrated = text.to_owned();
-    migrated.replace_range(start..end, &replacement);
-    Some(migrated)
 }
 
 impl serde::Serialize for AppState {
@@ -158,23 +111,6 @@ impl AppState {
         {
             simulation_results = ProjectSimulationResults::default();
         }
-        let execution_context_json =
-            serde_json::to_string(&execution_context).map_err(|error| {
-                <S::Error as serde::ser::Error>::custom(format!(
-                    "session execution context could not be encoded: {error}"
-                ))
-            })?;
-        // The independently recoverable receipt decoder reads a JSON value.
-        // Preserve that same wire representation in RON: a typed unit enum
-        // otherwise becomes `()` when the decoder visits it as an untyped
-        // value, losing which browser backend owns the canonical project.
-        let browser_receipt = self
-            .platform
-            .browser_project_binding_receipt
-            .as_ref()
-            .map(serde_json::to_value)
-            .transpose()
-            .map_err(<S::Error as serde::ser::Error>::custom)?;
         let field_count = if simulation_results.is_empty() {
             10
         } else {
@@ -204,12 +140,15 @@ impl AppState {
         state.serialize_field("workbench", &WorkbenchWireRef::capture(self))?;
         state.serialize_field("recent_files", &self.platform.recent_files)?;
         state.serialize_field("license_key", &self.cloud.license_key)?;
-        state.serialize_field("execution_context_json", &execution_context_json)?;
+        state.serialize_field("execution_context", &execution_context)?;
         state.serialize_field(
             "native_project_binding_receipt",
             &self.platform.native_project_binding_receipt,
         )?;
-        state.serialize_field("browser_project_binding_receipt", &browser_receipt)?;
+        state.serialize_field(
+            "browser_project_binding_receipt",
+            &self.platform.browser_project_binding_receipt,
+        )?;
         // After Close Project the workspace still holds a placeholder project.
         // Without this field a restart would open that placeholder as an
         // untitled project.
@@ -255,17 +194,10 @@ impl<'de> serde::Deserialize<'de> for AppState {
             license_key: Option<String>,
             #[serde(default)]
             simulation_results: Box<ProjectSimulationResults>,
-            // Legacy sessions wrote the typed context directly. Decode that
-            // form through its bounded wire type without first constructing a
-            // recursively nested untyped value.
-            #[serde(default, deserialize_with = "deserialize_session_execution_context")]
-            execution_context: Option<Box<ron::value::RawValue>>,
-            // Current sessions isolate the context in a JSON string so a
-            // corrupt or future context can be rejected independently without
-            // discarding document recovery, recent files, or the rest of the
-            // RON session.
-            #[serde(default, deserialize_with = "deserialize_session_json_string")]
-            execution_context_json: Option<String>,
+            // A context that reads but no longer restores is set aside below
+            // on its own; the rest of the session is kept.
+            #[serde(default)]
+            execution_context: Option<Box<ProjectExecutionContext>>,
             #[serde(default)]
             native_project_binding_receipt: Option<serde_json::Value>,
             #[serde(default)]
@@ -276,7 +208,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
         }
 
         // Decode every persisted domain directly into its bounded wire type.
-        // Materializing the complete, deeply nested RON session as an untyped
+        // Materializing the complete, deeply nested session as an untyped
         // JSON tree first can exhaust the browser WASM stack before any domain
         // validation or recovery policy gets a chance to run.
         let de = AppStateDe::deserialize(deserializer)?;
@@ -286,10 +218,6 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 .project
                 .has_descriptor_local_legacy_identity()
         });
-        let legacy_execution_context_identity = de
-            .execution_context
-            .as_deref()
-            .map(ron::value::RawValue::get_ron);
         let migrated_session_identity = if needs_session_identity {
             let identity_value = serde_json::to_value((
                 de.project_workspace.as_deref(),
@@ -299,8 +227,7 @@ impl<'de> serde::Deserialize<'de> for AppState {
                 &de.recent_files,
                 &de.license_key,
                 &de.simulation_results,
-                &legacy_execution_context_identity,
-                &de.execution_context_json,
+                &de.execution_context,
                 &de.native_project_binding_receipt,
                 &de.browser_project_binding_receipt,
             ))
@@ -430,41 +357,18 @@ impl<'de> serde::Deserialize<'de> for AppState {
             .routing_mode = state.design.schematic_routing_mode;
         state.workbench.reconcile_restored_navigation();
         let navigation_warning = state.workbench.take_route_diagnostic();
-        let execution_warnings = match (de.execution_context_json, de.execution_context) {
-            (Some(_), Some(_)) => vec![
-                "Simulation plan and model libraries were not restored because the session contains conflicting execution-context encodings; documented defaults were loaded instead"
-                    .to_owned(),
-            ],
-            (Some(value), None) => {
-                let restored = serde_json::from_str::<ProjectExecutionContext>(&value)
-                    .map_err(|error| error.to_string())
-                    .and_then(|context| crate::io::restore_execution_context(context, project_id));
-                match restored {
-                    Ok((simulation_plan, model_library_manager, warnings)) => {
-                        state.model.sim_setup = simulation_plan;
-                        state.model.model_library_manager = model_library_manager;
-                        warnings
-                    }
-                    Err(error) => vec![format!(
-                        "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
-                    )],
-                }
-            }
-            (None, Some(context)) => match ProjectExecutionContext::from_legacy_session_ron(
-                context.get_ron(),
-            )
-            .and_then(|context| crate::io::restore_execution_context(context, project_id))
-            {
+        let execution_warnings = match de.execution_context {
+            Some(context) => match crate::io::restore_execution_context(*context, project_id) {
                 Ok((simulation_plan, model_library_manager, warnings)) => {
                     state.model.sim_setup = simulation_plan;
                     state.model.model_library_manager = model_library_manager;
                     warnings
                 }
                 Err(error) => vec![format!(
-                    "Simulation plan and model libraries were not restored because their persisted legacy session data is invalid: {error}; documented defaults were loaded instead"
+                    "Simulation plan and model libraries were not restored because their persisted session data is invalid: {error}; documented defaults were loaded instead"
                 )],
             },
-            (None, None) => vec![
+            None => vec![
                 "This legacy session predates durable simulation plans; RSpice initialized the documented default Transient plan and built-in model catalog"
                     .to_owned(),
             ],
@@ -530,22 +434,6 @@ fn default_boxed_library_manager() -> Box<crate::state::LibraryManager> {
     Box::new(crate::state::LibraryManager::with_primitives())
 }
 
-fn deserialize_session_execution_context<'de, D>(
-    deserializer: D,
-) -> Result<Option<Box<ron::value::RawValue>>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <Box<ron::value::RawValue> as serde::Deserialize>::deserialize(deserializer).map(Some)
-}
-
-fn deserialize_session_json_string<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    <String as serde::Deserialize>::deserialize(deserializer).map(Some)
-}
-
 fn deserialize_session_project_workspace<'de, D>(
     deserializer: D,
 ) -> Result<Option<Box<crate::state::ProjectWorkspace>>, D::Error>
@@ -589,8 +477,7 @@ mod tests {
         state.model.simulation.retained.next_run_id = 41;
         assert_eq!(state.model.simulation.start_run().id, 42);
         state.model.simulation.clear_runs();
-        let json = serde_json::to_string(&state).expect("session serializes");
-        let mut restored: AppState = serde_json::from_str(&json).expect("session restores");
+        let mut restored = relaunch(saved_session(&mut state));
         assert!(restored.model.simulation.retained.runs.is_empty());
         assert_eq!(restored.model.simulation.retained.next_run_id, 42);
         assert_eq!(restored.model.simulation.start_run().id, 43);
@@ -666,33 +553,22 @@ mod tests {
         state.model.simulation.execution.is_running = true;
         state.model.simulation.execution.trigger_abort = true;
 
-        let json = serde_json::to_string(&state).expect("session serializes");
-        assert!(json.contains("simulation_results"));
-        // RON is what eframe stores. A result field it could not read back
-        // once replaced every session that held a run with a new one.
-        let ron = ron::to_string(&state).expect("eframe RON session serializes");
-        for (format, restored) in [
-            ("JSON", serde_json::from_str::<AppState>(&json).unwrap()),
-            ("RON", AppState::from_session_ron(&ron).unwrap()),
-        ] {
-            assert_eq!(
-                restored.model.simulation.retained.run_count(),
-                1,
-                "{format}"
-            );
-            assert_eq!(
-                restored
-                    .model
-                    .simulation
-                    .active_run()
-                    .expect("active restored run")
-                    .label,
-                "Run 3 (session fixture)"
-            );
-            assert_eq!(restored.model.simulation.view.waveforms[0].name, "V(out)");
-            assert!(!restored.model.simulation.execution.is_running);
-            assert!(!restored.model.simulation.execution.trigger_abort);
-        }
+        let saved = saved_session(&mut state);
+        assert!(saved.contains("simulation_results"));
+        let restored = relaunch(saved);
+        assert_eq!(restored.model.simulation.retained.run_count(), 1);
+        assert_eq!(
+            restored
+                .model
+                .simulation
+                .active_run()
+                .expect("active restored run")
+                .label,
+            "Run 3 (session fixture)"
+        );
+        assert_eq!(restored.model.simulation.view.waveforms[0].name, "V(out)");
+        assert!(!restored.model.simulation.execution.is_running);
+        assert!(!restored.model.simulation.execution.trigger_abort);
     }
 
     #[test]
@@ -713,22 +589,16 @@ mod tests {
                 backend,
             };
             state.platform.browser_project_binding_receipt = Some(receipt.clone());
-            let json = serde_json::to_string(&state).expect("JSON session serializes");
-            let ron = ron::to_string(&state).expect("eframe RON session serializes");
-            for (format, restored) in [
-                ("JSON", serde_json::from_str::<AppState>(&json).unwrap()),
-                ("RON", ron::from_str::<AppState>(&ron).unwrap()),
-            ] {
-                assert_eq!(
-                    restored.platform.browser_project_binding_receipt.as_ref(),
-                    Some(&receipt),
-                    "{backend:?} authority must survive {format} session recovery"
-                );
-                assert_eq!(
-                    restored.model.workspace.content.project.id(),
-                    state.model.workspace.content.project.id()
-                );
-            }
+            let restored = relaunch(saved_session(&mut state));
+            assert_eq!(
+                restored.platform.browser_project_binding_receipt.as_ref(),
+                Some(&receipt),
+                "{backend:?} authority must survive session recovery"
+            );
+            assert_eq!(
+                restored.model.workspace.content.project.id(),
+                state.model.workspace.content.project.id()
+            );
         }
     }
 
@@ -742,113 +612,11 @@ mod tests {
         };
         state.platform.native_project_binding_receipt = Some(receipt.clone());
 
-        let json = serde_json::to_string(&state).expect("session serializes");
-        let ron = ron::to_string(&state).expect("eframe RON session serializes");
-        for restored in [
-            serde_json::from_str::<AppState>(&json).unwrap(),
-            ron::from_str::<AppState>(&ron).unwrap(),
-        ] {
-            assert_eq!(
-                restored.platform.native_project_binding_receipt.as_ref(),
-                Some(&receipt)
-            );
-        }
-    }
-
-    #[test]
-    fn legacy_browser_receipt_migration_preserves_documents_and_exact_authority() {
-        use crate::workbench::lifecycle::project_lifecycle::{
-            BrowserBindingBackend, BrowserBindingReceipt,
-        };
-        #[derive(serde::Serialize)]
-        struct LegacySession<'a> {
-            project_workspace: &'a crate::state::ProjectWorkspace,
-            browser_project_binding_receipt: Option<&'a BrowserBindingReceipt>,
-        }
-        for backend in [
-            BrowserBindingBackend::Opfs,
-            BrowserBindingBackend::ExternalFile,
-        ] {
-            let mut state = AppState::default();
-            state
-                .model
-                .workspace
-                .content
-                .project
-                .rename("Legacy saved circuit")
-                .unwrap();
-            state.model.schematic.add_component(
-                crate::state::ComponentType::Resistor,
-                crate::state::Point::new(17, 29),
-            );
-            state
-                .model
-                .workspace
-                .save_active_schematic(&state.model.schematic);
-            let receipt = BrowserBindingReceipt {
-                binding_id: uuid::Uuid::from_u128(0xc23c_8916_2865_430a_a612_ecbb_111b_3ce1),
-                project_id: state.model.workspace.content.project.id().to_string(),
-                accepted_generation: 23,
-                accepted_digest: "ab".repeat(32).parse().unwrap(),
-                backend,
-            };
-            let legacy = ron::to_string(&LegacySession {
-                project_workspace: &state.model.workspace,
-                browser_project_binding_receipt: Some(&receipt),
-            })
-            .unwrap();
-            let migrated = migrate_legacy_browser_receipt(&legacy).unwrap();
-            assert!(migrate_legacy_browser_receipt(&migrated).is_none());
-            let restored = AppState::from_session_ron(&legacy).unwrap();
-            assert_eq!(
-                restored.platform.browser_project_binding_receipt.as_ref(),
-                Some(&receipt)
-            );
-            assert_eq!(
-                restored.model.workspace.content.project.id(),
-                state.model.workspace.content.project.id()
-            );
-            assert_eq!(
-                restored.model.workspace.content.project.name(),
-                "Legacy saved circuit"
-            );
-            assert_eq!(
-                restored.model.schematic.document().components,
-                state.model.schematic.document().components
-            );
-            assert!(
-                !restored
-                    .model
-                    .log_buffer
-                    .entries()
-                    .any(|entry| entry.message.contains("browser project binding receipt"))
-            );
-
-            if backend == BrowserBindingBackend::Opfs {
-                for invalid in ["future_backend", "42"] {
-                    let corrupted = legacy.replace("backend:opfs", &format!("backend:{invalid}"));
-                    assert_ne!(corrupted, legacy);
-                    assert!(migrate_legacy_browser_receipt(&corrupted).is_none());
-                    let recovered = AppState::from_session_ron(&corrupted).unwrap();
-                    assert!(recovered.platform.browser_project_binding_receipt.is_none());
-                    assert_eq!(
-                        recovered.model.workspace.content.project.id(),
-                        state.model.workspace.content.project.id()
-                    );
-                    assert_eq!(
-                        recovered.model.schematic.document().components,
-                        state.model.schematic.document().components
-                    );
-                    assert!(
-                        recovered
-                            .model
-                            .log_buffer
-                            .entries()
-                            .any(|entry| entry.message.contains("browser project binding receipt"))
-                    );
-                }
-            }
-        }
+        let restored = relaunch(saved_session(&mut state));
+        assert_eq!(
+            restored.platform.native_project_binding_receipt.as_ref(),
+            Some(&receipt)
+        );
     }
 
     #[test]
@@ -892,8 +660,8 @@ mod tests {
             }),
         );
 
-        let restored: AppState = serde_json::from_value(session)
-            .expect("receipt corruption is independently recoverable");
+        // Receipt corruption is independently recoverable.
+        let restored = relaunch(serde_json::to_string(&session).expect("the fixture encodes"));
         assert_eq!(
             restored.model.workspace.content.project.name(),
             "Recovered receipt-corruption fixture"
@@ -935,8 +703,7 @@ mod tests {
     fn the_session_records_whether_a_project_is_open() {
         let mut closed = AppState::default();
         closed.close_project_session();
-        let ron = ron::to_string(&closed).expect("eframe RON session serializes");
-        let restored = ron::from_str::<Box<AppState>>(&ron).expect("the session restores");
+        let restored = relaunch(saved_session(&mut closed));
         assert!(!restored.platform.project_lifecycle.is_open());
         restored.assert_project_open_fact();
 
@@ -955,51 +722,8 @@ mod tests {
         older.assert_project_open_fact();
     }
 
-    /// An eframe session written before every sheet took its standard's
-    /// frame held each sheet format with margins of its own, a plain border,
-    /// custom zones lettered down the top and left, and corner and fold
-    /// marks. It restores, every format on its standard's frame.
-    #[test]
-    fn a_ron_session_saved_with_retired_drawing_sheet_frames_restores() {
-        let format = ron::to_string(&crate::state::SchematicSheetFormat::default()).unwrap();
-        let start = format.find("border:").expect("a format writes its border");
-        let end = format
-            .find(",title_block:")
-            .expect("a format writes its title block");
-        let frame = &format[start..end];
-        let written = ron::to_string(&AppState::default()).expect("eframe RON session serializes");
-        assert!(written.contains(frame), "the session holds a sheet format");
-        let legacy = written.replace(
-            frame,
-            "margins:(top_um:5000,right_um:5000,bottom_um:5000,left_um:5000),bleed_um:0,\
-             border:plain,zones:(mode:custom,custom_columns:Some(7),custom_rows:Some(5),\
-             labels:r#numeric-alpha,edges:r#top-and-left),\
-             marks:(registration:true,folding:true)",
-        );
-
-        let restored = ron::from_str::<Box<AppState>>(&legacy).expect("the session restores");
-
-        let default = &restored
-            .model
-            .workspace
-            .content
-            .design_management
-            .drawing_sheet_settings()
-            .default_format;
-        assert_eq!(
-            default.border,
-            crate::state::DrawingSheetBorderTemplate::Standard
-        );
-        assert_eq!(default.zones.mode, crate::state::DrawingSheetZoneMode::None);
-        assert!(default.marks.centring);
-        assert_eq!(
-            default.margins(),
-            crate::state::DrawingSheetFrameConvention::Iso5457.margins(false)
-        );
-    }
-
-    /// eframe's storage, held in memory, so a session is saved by
-    /// `eframe::set_value` exactly as the app saves it on exit.
+    /// eframe's storage, held in memory, so a session is saved and read
+    /// back exactly as the app does it.
     #[derive(Default)]
     pub(super) struct MemoryStorage(std::collections::HashMap<String, String>);
 
@@ -1019,13 +743,14 @@ mod tests {
         fn flush(&mut self) {}
     }
 
-    fn saved_session(state: &AppState) -> String {
+    /// Save the session the way the application does on exit.
+    pub(super) fn saved_session(state: &mut AppState) -> String {
         let mut storage = MemoryStorage::default();
-        eframe::set_value(&mut storage, eframe::APP_KEY, state);
+        state.store_session(&mut storage);
         storage
             .0
             .remove(eframe::APP_KEY)
-            .expect("eframe stores the session")
+            .expect("the session is stored")
     }
 
     pub(super) fn relaunch(session: String) -> AppState {
@@ -1130,7 +855,7 @@ mod tests {
                 tags: vec!["afe".to_owned()],
             });
 
-        let restored = relaunch(saved_session(&state));
+        let restored = relaunch(saved_session(&mut state));
 
         assert_eq!(
             restored.model.workspace.content.project.name(),
@@ -1163,61 +888,6 @@ mod tests {
         assert_eq!(
             restored.workbench.theme.density,
             crate::ui::Density::Relaxed
-        );
-    }
-
-    /// The builds of 10-18 wrote a title block's anchor, rotation, offsets
-    /// and scale as plain values. The title block went on to read them as
-    /// options, so every session those builds saved was replaced at the next
-    /// launch with "1:1215: Expected option". Such a session restores.
-    #[test]
-    fn a_session_saved_with_a_placed_and_scaled_title_block_restores() {
-        let mut state = AppState::default();
-        state
-            .model
-            .workspace
-            .content
-            .project
-            .rename("Saved before the title block was fixed in place")
-            .expect("valid project name");
-        let written = saved_session(&state);
-        let head = "title_block:(template:standard,";
-        assert!(written.contains(head), "the session holds a title block");
-        let legacy = written.replace(
-            head,
-            "title_block:(template:standard,anchor:r#bottom-right,rotation:upright,\
-             offset_x_um:0,offset_y_um:0,\
-             scale:(kind:\"ratio\",drawing_units:1,reality_units:1),",
-        );
-
-        ron::from_str::<Box<AppState>>(&legacy).expect("strict RON reads the title block");
-        let restored = relaunch(legacy);
-
-        assert_eq!(
-            restored.model.workspace.content.project.name(),
-            "Saved before the title block was fixed in place"
-        );
-    }
-
-    /// A field one build wrote plainly and a later one reads as optional
-    /// costs the reader nothing at the next launch.
-    #[test]
-    fn a_session_holding_an_option_written_plainly_restores() {
-        let mut state = AppState::default();
-        state.simulate.selected_specification = Some("gain".to_owned());
-        let written = saved_session(&state);
-        let plain = written.replace(
-            "selected_specification:Some(\"gain\")",
-            "selected_specification:\"gain\"",
-        );
-        assert_ne!(plain, written, "the session holds the selection");
-        assert!(ron::from_str::<Box<AppState>>(&plain).is_err());
-
-        let restored = relaunch(plain);
-
-        assert_eq!(
-            restored.simulate.selected_specification.as_deref(),
-            Some("gain")
         );
     }
 
@@ -1256,7 +926,7 @@ mod tests {
         session
             .as_object_mut()
             .expect("session object")
-            .remove("execution_context_json");
+            .remove("execution_context");
         let legacy_json = serde_json::to_string(&session).expect("legacy session serializes");
 
         let first: AppState = serde_json::from_str(&legacy_json).expect("legacy session restores");
@@ -1297,7 +967,7 @@ mod tests {
             value
                 .as_object_mut()
                 .expect("session object")
-                .remove("execution_context_json");
+                .remove("execution_context");
             value
         }
 
@@ -1417,13 +1087,7 @@ mod tests {
         };
         assert_eq!(transient_draft.stop, "unfinished(");
         let value: serde_json::Value = serde_json::from_str(&json).expect("session JSON parses");
-        let persisted_context: serde_json::Value = serde_json::from_str(
-            value["execution_context_json"]
-                .as_str()
-                .expect("session stores an isolated execution-context envelope"),
-        )
-        .expect("execution-context envelope is valid JSON");
-        let persisted = &persisted_context["simulation_plan"];
+        let persisted = &value["execution_context"]["simulation_plan"];
         for retired in ["enabled", "analysis_order", "listed", "tran", "ac", "op"] {
             assert!(
                 persisted.get(retired).is_none(),
@@ -1451,10 +1115,9 @@ mod tests {
         assert!(restored.settings.browser_spoken_feedback);
     }
 
-    /// The Han form a person prefers comes back from the session eframe
-    /// stores, which is RON.
+    /// The Han form a person prefers comes back from the stored session.
     #[test]
-    fn the_han_form_round_trips_through_the_ron_session() {
+    fn the_han_form_round_trips_through_the_stored_session() {
         use rspice_ui_kit::fonts::{HanPreference, HanVariant};
 
         let mut state = AppState::default();
@@ -1463,8 +1126,7 @@ mod tests {
             .preferences
             .set_choice(crate::workbench::ChoicePreference::HanForm, 4)
             .expect("Japanese is one of the Han forms");
-        let ron = ron::to_string(&state).expect("eframe RON session serializes");
-        let restored = AppState::from_session_ron(&ron).expect("the RON session restores");
+        let restored = relaunch(saved_session(&mut state));
         assert_eq!(
             restored.model.preferences.han_preference(),
             HanPreference::Prefer(HanVariant::Japanese)

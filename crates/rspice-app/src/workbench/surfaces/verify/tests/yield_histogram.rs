@@ -328,11 +328,12 @@ fn a_restored_session_and_a_reopened_project_state_the_same_yield() {
     assert_eq!((results[0].pass_count, results[0].total_runs), (37, 40));
     let judged = serde_json::to_value(&results).expect("the yield serializes");
 
-    let session = ron::to_string(&app.state).expect("the session serializes as RON");
+    let session = serde_json::to_string(&app.state).expect("the session serializes");
     let restored =
         AppState::restore_eframe_session(&Stored(session.clone())).expect("a stored session");
-    let strict = ron::from_str::<Box<AppState>>(&session).expect("the session reads strictly");
-    for (route, mut state) in [("eframe", Box::new(restored)), ("strict RON", strict)] {
+    let strict =
+        serde_json::from_str::<Box<AppState>>(&session).expect("the session reads strictly");
+    for (route, mut state) in [("eframe", Box::new(restored)), ("strict", strict)] {
         let model = &mut state.model;
         assert!(
             model

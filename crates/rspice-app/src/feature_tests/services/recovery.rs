@@ -10,17 +10,8 @@ use crate::workbench::lifecycle::recovery::unique_temp_dir;
 fn replacement_guard_compares_initial_plan_draft_to_the_documented_default() {
     let state = AppState::default();
     let mut session = serde_json::to_value(&state).expect("session serializes");
-    let execution_context_json = session["execution_context_json"]
-        .as_str()
-        .expect("current session stores an isolated execution-context envelope");
-    let mut execution_context: serde_json::Value = serde_json::from_str(execution_context_json)
-        .expect("execution-context envelope is valid JSON");
-    execution_context["simulation_plan"]["analysis_plan"]["instances"][0]["draft"]["draft"]["stop"] =
-        serde_json::json!("41u");
-    session["execution_context_json"] = serde_json::Value::String(
-        serde_json::to_string(&execution_context)
-            .expect("updated execution-context envelope serializes"),
-    );
+    session["execution_context"]["simulation_plan"]["analysis_plan"]["instances"][0]["draft"]["draft"]
+        ["stop"] = serde_json::json!("41u");
     let restored: AppState = serde_json::from_value(session).expect("current session restores");
     let plan = restored
         .model

@@ -1249,11 +1249,10 @@ fn switching_designs_credits_nothing_to_the_reader() {
 /// The pin set and the placement history are per-user, cross-project state,
 /// and they survive an application restart.
 ///
-/// The boundary proved here is the real one: the same `eframe::Storage` RON
-/// round trip `RSpiceApp::save` performs — `eframe::set_value(storage,
-/// eframe::APP_KEY, &self.state)` — and `RSpiceApp::new` reads back. Nothing
-/// about that store is per-project: it is the user's own application-data
-/// file, and the browser's local storage on the web build.
+/// The boundary proved here is the real one: the session store
+/// `RSpiceApp::save` writes and `RSpiceApp::new` reads back. Nothing about
+/// that store is per-project: it is the user's own application-data file,
+/// and the browser's local storage on the web build.
 #[test]
 fn the_shelf_set_survives_the_restart_boundary_the_workbench_actually_crosses() {
     #[derive(Default)]
@@ -1296,10 +1295,9 @@ fn the_shelf_set_survives_the_restart_boundary_the_workbench_actually_crosses() 
     let saved = app.state.model.preferences.component_shelf();
 
     let mut storage = MemoryStorage::default();
-    eframe::set_value(&mut storage, eframe::APP_KEY, &app.state);
-    let restored: crate::workbench::app_state::AppState =
-        eframe::get_value(&storage, eframe::APP_KEY)
-            .expect("RSpice must be able to restore a session it just saved");
+    app.state.store_session(&mut storage);
+    let restored = crate::workbench::app_state::AppState::restore_eframe_session(&storage)
+        .expect("RSpice must be able to restore a session it just saved");
 
     assert_eq!(
         restored.model.preferences.component_shelf(),

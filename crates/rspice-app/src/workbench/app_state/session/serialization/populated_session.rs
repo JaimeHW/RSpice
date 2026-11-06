@@ -3,11 +3,11 @@
 //!
 //! The session's wire is three structs: the application's own fields, the
 //! `ui_session` subset of the document engines' state, and the workbench's
-//! persisted layout and selections. A wire mismatch in any of them does not
-//! fail a JSON test; it costs the reader the whole session at the next launch,
-//! which has happened twice. So the session here is saved and read back the
-//! way eframe does it, read strictly, read as the safe-mode JSON snapshot, and
-//! kept without its runs, and each must come back as it was written.
+//! persisted layout and selections. A wire mismatch in any of them costs the
+//! reader the whole session at the next launch, which has happened twice. So
+//! the session here is stored and read back the way the application does it,
+//! read as the safe-mode snapshot, and kept without its runs, and each must
+//! come back as it was written.
 
 use super::tests::{MemoryStorage, relaunch};
 use super::*;
@@ -345,22 +345,14 @@ fn stored(state: &mut AppState) -> String {
     eframe::Storage::get_string(&storage, eframe::APP_KEY).expect("the session is stored")
 }
 
-/// The session as a value: what `encode` wrote, with the execution context,
-/// which the session holds as JSON text, read as a value as well.
+/// The session as a value.
 ///
 /// Text cannot be compared. A hash map writes its entries in an order that
 /// differs from one instance to the next, and the library catalog, the
 /// documents and the built-in model catalog are all hash maps. A value's
 /// maps compare by key.
 fn session_value(encode: impl serde::Serialize) -> serde_json::Value {
-    let mut session = serde_json::to_value(encode).expect("the session encodes as JSON");
-    let context = session
-        .get_mut("execution_context_json")
-        .expect("the session writes its execution context");
-    let parsed = serde_json::from_str(context.as_str().expect("the context is held as text"))
-        .expect("the execution context is JSON");
-    *context = parsed;
-    session
+    serde_json::to_value(encode).expect("the session encodes as JSON")
 }
 
 /// Fail on the first place two sessions part company, naming where, rather
@@ -448,19 +440,46 @@ fn a_populated_session_restores_and_saves_again_unchanged() {
     assert_same_session(
         &session_value(as_restored(state)),
         &session_value(&restored),
-        "eframe RON",
+        "stored",
     );
 }
 
-/// The production reader accepts a plain value where an option is expected,
-/// which is what lets an older session through. A strict reader does not,
-/// so it is the one that sees a field this build writes in a shape it does
-/// not read.
+/// The reader refuses a session nested deeper than 128 arrays and objects,
+/// and a refused session costs the reader all of it. The session this build
+/// writes stays well inside that.
 #[test]
-fn a_populated_session_reads_back_strictly() {
+fn a_populated_session_nests_well_inside_the_reader_limit() {
+    const READER_LIMIT: usize = 128;
     let saved = stored(&mut populated_session());
 
-    ron::from_str::<Box<AppState>>(&saved).expect("strict RON reads the session this build wrote");
+    let (mut depth, mut deepest) = (0_usize, 0_usize);
+    let (mut in_text, mut escaped) = (false, false);
+    for byte in saved.bytes() {
+        if in_text {
+            match (escaped, byte) {
+                (true, _) => escaped = false,
+                (false, b'\\') => escaped = true,
+                (false, b'"') => in_text = false,
+                _ => {}
+            }
+            continue;
+        }
+        match byte {
+            b'"' => in_text = true,
+            b'[' | b'{' => {
+                depth += 1;
+                deepest = deepest.max(depth);
+            }
+            b']' | b'}' => depth -= 1,
+            _ => {}
+        }
+    }
+
+    assert_eq!(depth, 0, "the stored session closes every array and object");
+    assert!(
+        deepest * 2 <= READER_LIMIT,
+        "the stored session nests {deepest} deep, more than half the reader's limit"
+    );
 }
 
 /// The safe-mode snapshot is the session as JSON, and it is read back
@@ -484,7 +503,7 @@ fn a_populated_session_survives_the_json_snapshot_unchanged() {
 #[test]
 fn a_populated_session_kept_without_its_runs_restores_everything_else() {
     let lean = |state: &AppState| {
-        ron::ser::to_string(&WithoutRuns(state)).expect("the lean session encodes")
+        serde_json::to_string(&WithoutRuns(state)).expect("the lean session encodes")
     };
     let state = populated_session();
 
@@ -499,7 +518,7 @@ fn a_populated_session_kept_without_its_runs_restores_everything_else() {
     assert_same_session(
         &session_value(WithoutRuns(&state)),
         &session_value(WithoutRuns(&restored)),
-        "lean RON",
+        "lean",
     );
     // Only the runs are left out.
     let without_runs = |state: &AppState| {
@@ -513,7 +532,7 @@ fn a_populated_session_kept_without_its_runs_restores_everything_else() {
     assert_same_session(
         &without_runs(&state),
         &without_runs(&restored),
-        "lean RON beside the whole",
+        "lean beside the whole",
     );
 }
 

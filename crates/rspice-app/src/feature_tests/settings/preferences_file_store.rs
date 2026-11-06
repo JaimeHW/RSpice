@@ -337,7 +337,7 @@ fn a_session_only_profile_migrates_into_the_file_once_and_loses_nothing() {
     let mut old = AppState::default();
     customize(&mut old);
     let mut storage = MemoryStorage::default();
-    eframe::set_value(&mut storage, eframe::APP_KEY, &old);
+    old.store_session(&mut storage);
 
     let first = AppState::restore_with_store(Some(&storage), Some(store.clone()));
     assert_eq!(settings_of(&first), settings_of(&old));
@@ -346,7 +346,7 @@ fn a_session_only_profile_migrates_into_the_file_once_and_loses_nothing() {
 
     // The next launch restores a session that knows nothing of the file. The
     // file wins, and nothing is written again.
-    eframe::set_value(&mut storage, eframe::APP_KEY, &AppState::default());
+    AppState::default().store_session(&mut storage);
     let second = AppState::restore_with_store(Some(&storage), Some(store));
     assert_eq!(settings_of(&second), settings_of(&old));
     assert_eq!(second.settings.preferences_file.writes, 0);
