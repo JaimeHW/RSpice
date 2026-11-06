@@ -197,7 +197,7 @@ impl ComponentType {
             ComponentType::CurrentSourceNoise => "I Noise",
             ComponentType::CurrentSourceRandom => "I Random",
             ComponentType::Vcvs => "VCVS (E)",
-            ComponentType::OpAmp => "Op-Amp",
+            ComponentType::OpAmp => "Ideal Op-Amp",
             ComponentType::Vccs => "VCCS (G)",
             ComponentType::Ccvs => "CCVS (H)",
             ComponentType::Cccs => "CCCS (F)",

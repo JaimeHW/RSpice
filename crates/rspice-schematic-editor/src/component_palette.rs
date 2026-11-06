@@ -438,7 +438,7 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
 
 const AMPLIFIERS: &[ComponentPaletteEntry] = &[entry(
     T::OpAmp,
-    "Op-Amp",
+    "Ideal Op-Amp",
     &[
         "opamp",
         "operational amplifier",

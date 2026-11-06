@@ -608,7 +608,7 @@ fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() 
         "Voltage Source",
         "NMOS",
         "AND Gate (event-driven)",
-        "Op-Amp",
+        "Ideal Op-Amp",
     ] {
         assert!(
             !text.contains(folded),
