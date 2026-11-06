@@ -9785,11 +9785,12 @@ mod tests {
     #[test]
     fn a_parenthesized_controlling_pair_reads_as_the_bare_pair() {
         // Vendor macromodels write linear sources and switches in the PSpice
-        // pair form: `GSY 99 50 (99,50) 48E-6`, `S1 90 91 (50,99) VSY_SWITCH`.
+        // pair form: `GSY 99 50 (99,50) 48E-6`, `EZ (145 0) (45 0) 1`,
+        // `S1 90 91 (50,99) VSY_SWITCH`.
         let netlist = Netlist::parse(
             "parenthesized controlling pairs\n\
-             E1 out 0 (inp, inn) 10\n\
-             G1 out 0 (inp,inn) 1m\n\
+             E1 (out 0) (inp, inn) 10\n\
+             G1 out 0 (inp inn) 1m\n\
              S1 out 0 (inp,inn) SW\n\
              .model SW VSWITCH (RON=1 ROFF=1MEG VON=1 VOFF=0)\n\
              .end\n",
@@ -9810,6 +9811,12 @@ mod tests {
             ElementKind::Vcvs { gain, control_nodes: (pos, neg), .. }
                 if *gain == 10.0 && is_input_pair(pos, neg)
         ));
+        let e1 = netlist
+            .elements
+            .iter()
+            .find(|element| element.name.eq_ignore_ascii_case("E1"))
+            .expect("E1 is parsed");
+        assert!(e1.nodes[0].eq_ignore_ascii_case("out") && e1.nodes[1] == "0");
         assert!(matches!(
             kind("G1"),
             ElementKind::Vccs { transconductance, control_nodes: (pos, neg), .. }
@@ -9824,7 +9831,7 @@ mod tests {
         let unclosed = Netlist::parse("unclosed pair\nE1 out 0 (inp,inn 10\n.end\n")
             .expect_err("an unclosed pair is refused");
         assert!(
-            unclosed.to_string().contains("closing controlling pair"),
+            unclosed.to_string().contains("closing node pair"),
             "{unclosed}"
         );
     }
