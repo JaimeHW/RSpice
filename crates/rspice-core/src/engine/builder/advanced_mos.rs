@@ -989,6 +989,7 @@ impl Engine {
         instance_params: &[(String, f64)],
         temperature_kelvin: f64,
         tnom_default_k: f64,
+        voltage_limiting: bool,
         shared: &mut HashMap<String, Bsim4v8SharedModel>,
     ) -> Result<(), SimulationError> {
         use crate::device::Bsim4v8Device;
@@ -1205,7 +1206,7 @@ impl Engine {
             0
         };
 
-        circuit.bsim4v8.add(Bsim4v8Device::new(
+        let mut device = Bsim4v8Device::new(
             element.name.clone(),
             drain_external,
             drain,
@@ -1221,7 +1222,9 @@ impl Engine {
             charge_deficit,
             multiplier,
             core,
-        ));
+        );
+        device.set_voltage_limiting_enabled(voltage_limiting);
+        circuit.bsim4v8.add(device);
         Ok(())
     }
 

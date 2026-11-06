@@ -8633,11 +8633,6 @@ impl Engine {
                     if matches!(level, 14 | 54)
                         && let Some(params_map) = params_map.as_ref()
                     {
-                        require_voltage_limiting(
-                            self.config.device_voltage_limiting,
-                            &element.name,
-                            "BSIM4 MOSFET",
-                        )?;
                         let bsim4_params = native_bsim4_model_params_upper_map(
                             &element.name,
                             model,
@@ -8658,6 +8653,7 @@ impl Engine {
                             instance_params,
                             self.config.temperature,
                             tnom_default_k,
+                            self.config.device_voltage_limiting,
                             &mut bsim4v8_models,
                         )?;
                         model_safety::native_mos(

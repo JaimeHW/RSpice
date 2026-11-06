@@ -42,6 +42,7 @@ impl Clone for Bsim4v8Device {
             initial_off_seed_pending: self.initial_off_seed_pending,
             initial_off_seed_evaluations: self.initial_off_seed_evaluations,
             initial_off_seed_raw: self.initial_off_seed_raw,
+            voltage_limiting: self.voltage_limiting,
             eval_memo: self.eval_memo.clone(),
         }
     }
@@ -79,6 +80,7 @@ impl Clone for Bsim4v8Device {
             initial_off_seed_pending,
             initial_off_seed_evaluations,
             initial_off_seed_raw,
+            voltage_limiting,
             eval_memo,
         } = source;
         self.name.clone_from(name);
@@ -112,6 +114,7 @@ impl Clone for Bsim4v8Device {
         self.initial_off_seed_pending = *initial_off_seed_pending;
         self.initial_off_seed_evaluations = *initial_off_seed_evaluations;
         self.initial_off_seed_raw = *initial_off_seed_raw;
+        self.voltage_limiting = *voltage_limiting;
         self.eval_memo.clone_from(eval_memo);
     }
 }

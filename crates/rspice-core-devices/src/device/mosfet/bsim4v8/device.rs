@@ -170,6 +170,10 @@ pub struct Bsim4v8Device {
     /// Raw branch voltages the last update saw while the `OFF` startup state
     /// was still pending; `self.bias` holds the startup state instead.
     initial_off_seed_raw: Option<Bsim4v8Bias>,
+    /// Xyce's global `DEVICE VOLTLIM`: every iterate runs the
+    /// fetlim/limvds/pnjlim sequence. Cleared, each load reads the solution
+    /// as it stands.
+    voltage_limiting: bool,
     /// The most recent module evaluations, reused at identical inputs, and
     /// whether the current iterate's charge state was requested.
     eval_memo: Bsim4v8EvalMemo,
@@ -235,6 +239,7 @@ impl Bsim4v8Device {
             initial_off_seed_pending: true,
             initial_off_seed_evaluations: 0,
             initial_off_seed_raw: None,
+            voltage_limiting: true,
             eval_memo: Bsim4v8EvalMemo::default(),
         }
     }
@@ -243,6 +248,15 @@ impl Bsim4v8Device {
     /// linearization is b4ld.c's zero-bias MODEINITJCT state.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy: `voltageLimiterFlag` gates
+    /// the fetlim/limvds/pnjlim sequence on the branch and body-junction
+    /// voltages (N_DEV_MOSFET_B4p82.C:3157-3260). An `OFF` instance opens at
+    /// zero bias either way.
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     /// Set the engine's junction GMIN (ngspice `CKTgmin`). The module's
@@ -387,7 +401,7 @@ impl Bsim4v8Device {
         let raw = self.raw_branch_voltages(v);
         let raw_junction = self.raw_junction_bias(v);
         let anchor = self.limit_anchor(raw, raw_junction);
-        if !anchor.valid {
+        if !self.voltage_limiting || !anchor.valid {
             return (raw, raw_junction, false);
         }
         let (limited, mut check) = self.core.limit_voltages(raw, anchor.bias, anchor.von);
@@ -2365,6 +2379,20 @@ mod tests {
     impl MatrixStamper for NoStamp {
         fn stamp(&mut self, _row: NodeId, _col: NodeId, _value: Value) {}
         fn stamp_rhs(&mut self, _index: NodeId, _value: Value) {}
+    }
+
+    /// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`,
+    /// N_DEV_MOSFET_B4p82.C:3157) takes the 4 V gate step the limited device
+    /// holds near threshold.
+    #[test]
+    fn voltlim_off_takes_every_iterate_unlimited() {
+        let mut device = nmos();
+        device.set_voltage_limiting_enabled(false);
+        device.update(&[0.0, 0.0]);
+        let iterate = [0.05, 4.0];
+        device.update(&iterate);
+        assert_eq!(device.bias, device.raw_branch_voltages(&iterate));
+        assert!(!device.last_limited.get());
     }
 
     #[test]
