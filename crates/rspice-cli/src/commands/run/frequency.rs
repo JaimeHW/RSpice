@@ -23,6 +23,9 @@ mod state;
 mod table;
 pub(super) use state::{StatePublication, run_at_transient_state, shared_state_times};
 
+/// A noise sweep and the `device:param` values of its bias point.
+type NoiseWithBias = (Vec<rspice_core::analysis::NoiseResult>, Vec<(String, f64)>);
+
 fn map_frequency_error(
     ctx: &RunContext<'_>,
     analysis: &str,
@@ -750,7 +753,7 @@ pub(super) fn finish_ac_table(
     ctx: &RunContext<'_>,
     table: &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>,
 ) -> Result<(), CliError> {
-    finish_ac(ctx, &table.points, Some(table))
+    finish_ac(ctx, &table.points, Some(table), &[])
 }
 
 pub(super) fn run_ac(
@@ -772,24 +775,32 @@ pub(super) fn run_ac(
 }
 
 fn run_ac_frequencies(ctx: &RunContext<'_>, frequencies: Vec<f64>) -> Result<(), CliError> {
-    let results = ctx
+    let (results, operating_point) = ctx
         .engine
-        .run_ac_with_abort(ctx.netlist, &frequencies, &crate::abort::ProcessAbort)
+        .run_ac_reporting_operating_point_with_abort(
+            ctx.netlist,
+            &frequencies,
+            &crate::abort::ProcessAbort,
+        )
         .map_err(|source| map_frequency_error(ctx, "AC", source))?;
-    finish_ac_results(ctx, &results)
+    finish_ac(ctx, &results, None, &operating_point)
 }
 
 pub(super) fn finish_ac_results(
     ctx: &RunContext<'_>,
     results: &[rspice_core::analysis::AcResult],
 ) -> Result<(), CliError> {
-    finish_ac(ctx, results, None)
+    finish_ac(ctx, results, None, &[])
 }
 
+/// Finish an AC sweep; `operating_point` holds the `device:param` values of
+/// its bias point that a `.PRINT AC` card can print, empty when the run
+/// reported none.
 fn finish_ac(
     ctx: &RunContext<'_>,
     results: &[rspice_core::analysis::AcResult],
     coordinates: Option<&rspice_core::engine::FrequencyDataResult<rspice_core::analysis::AcResult>>,
+    operating_point: &[(String, f64)],
 ) -> Result<(), CliError> {
     if !ctx.args.allow_nonfinite {
         for result in results {
@@ -893,6 +904,7 @@ fn finish_ac(
         results,
         &frequencies,
         &inventory,
+        operating_point,
         &ctx.engine.config().resource_limits,
         &crate::abort::ProcessAbort,
     )
@@ -1216,15 +1228,17 @@ pub(super) fn run_noise(
     }
 
     let frequencies = generate_frequency_sweep(variation, points, start_freq, stop_freq)?;
-    let execution = ctx.engine.run_noise_named_with_input_source_and_abort(
-        ctx.netlist,
-        output_node,
-        reference_node,
-        input_source,
-        &frequencies,
-        ctx.engine.config().temperature,
-        &crate::abort::ProcessAbort,
-    );
+    let execution = ctx
+        .engine
+        .run_noise_named_reporting_operating_point_with_abort(
+            ctx.netlist,
+            output_node,
+            reference_node,
+            input_source,
+            &frequencies,
+            ctx.engine.config().temperature,
+            &crate::abort::ProcessAbort,
+        );
     finish_noise(
         ctx,
         output_node,
@@ -1286,6 +1300,7 @@ pub(super) fn finish_noise_table(
         &table.points,
         integrate,
         Some(table),
+        &[],
     )
 }
 
@@ -1294,17 +1309,20 @@ fn finish_noise(
     output_node: &str,
     reference_node: Option<&str>,
     input_source: &str,
-    execution: Result<Vec<rspice_core::analysis::NoiseResult>, rspice_core::SimulationError>,
+    execution: Result<NoiseWithBias, rspice_core::SimulationError>,
     integrate: bool,
 ) -> Result<(), CliError> {
-    let results = execution.map_err(|source| map_frequency_error(ctx, "Noise", source))?;
-    finish_noise_results(
+    let (results, operating_point) =
+        execution.map_err(|source| map_frequency_error(ctx, "Noise", source))?;
+    finish_noise_projected(
         ctx,
         output_node,
         reference_node,
         input_source,
         &results,
         integrate,
+        None,
+        &operating_point,
     )
 }
 
@@ -1324,9 +1342,13 @@ pub(super) fn finish_noise_results(
         results,
         integrate,
         None,
+        &[],
     )
 }
 
+/// Finish a noise sweep; `operating_point` holds the `device:param` values
+/// of its bias point that a `.PRINT NOISE` card can print, empty when the
+/// run reported none.
 fn finish_noise_projected(
     ctx: &RunContext<'_>,
     output_node: &str,
@@ -1337,6 +1359,7 @@ fn finish_noise_projected(
     coordinates: Option<
         &rspice_core::engine::FrequencyDataResult<rspice_core::analysis::NoiseResult>,
     >,
+    operating_point: &[(String, f64)],
 ) -> Result<(), CliError> {
     use rspice_core::analysis::noise::NoiseInputQuantity;
     if !ctx.args.allow_nonfinite {
@@ -1444,6 +1467,7 @@ fn finish_noise_projected(
     let printed = crate::commands::run_signals::noise_print_signals(
         ctx.netlist,
         results,
+        operating_point,
         &crate::abort::ProcessAbort,
     )
     .map_err(|source| CliError::CoreSimulationError {

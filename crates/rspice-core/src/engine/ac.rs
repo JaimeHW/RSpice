@@ -18,6 +18,9 @@ use crate::{CircuitData, Complex64, Netlist, NodeId, Value};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
+/// An AC sweep and the `device:param` values of its bias point.
+type AcSweepWithBias = (Vec<AcResult>, Vec<(String, Value)>);
+
 mod point;
 pub(super) use point::{AcExcitation, PreparedAc};
 
@@ -3172,6 +3175,31 @@ impl Engine {
         frequencies: &[Value],
         abort: &dyn AbortSignal,
     ) -> Result<Vec<AcResult>, SimulationError> {
+        self.run_ac_sweep(netlist, frequencies, None, abort)
+    }
+
+    /// Run an AC sweep as [`Self::run_ac_with_abort`] does, with the
+    /// `device:param` values a `.PRINT DC` card reads (`R1:R`, `C1:C`,
+    /// `M1:GM`) at the sweep's own bias point. A Xyce `.PRINT AC` card prints
+    /// them on every row; no second operating point is solved for them.
+    pub fn run_ac_reporting_operating_point_with_abort(
+        &self,
+        netlist: &Netlist,
+        frequencies: &[Value],
+        abort: &dyn AbortSignal,
+    ) -> Result<AcSweepWithBias, SimulationError> {
+        let mut operating_point = Vec::new();
+        let results = self.run_ac_sweep(netlist, frequencies, Some(&mut operating_point), abort)?;
+        Ok((results, operating_point))
+    }
+
+    fn run_ac_sweep(
+        &self,
+        netlist: &Netlist,
+        frequencies: &[Value],
+        operating_point: Option<&mut Vec<(String, Value)>>,
+        abort: &dyn AbortSignal,
+    ) -> Result<Vec<AcResult>, SimulationError> {
         if abort.is_aborted() {
             return Err(SimulationError::Aborted);
         }
@@ -3188,6 +3216,9 @@ impl Engine {
             excitation,
         } = engine.prepare_ac_analysis(netlist, super::CapabilityAnalysis::Ac, abort)?;
         let dc_solution = &linearization.bias;
+        if let Some(report) = operating_point {
+            *report = Self::operating_point_device_parameters(netlist, &mut circuit, dc_solution)?;
+        }
 
         let num_nodes = circuit.num_nodes();
         let size = circuit.matrix_size();

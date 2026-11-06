@@ -476,6 +476,50 @@ r2 out 0 1k
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.PRINT AC` or `.PRINT NOISE` card prints a `device:param` on every
+/// row, the value `.PRINT DC` prints at the analysis's own bias point: Xyce
+/// 7.10 prints R1:R 1e3, C1:C 1e-6, M1:W 1e-5 and M1:L 2e-6 on both rows of
+/// this deck's AC and NOISE sweeps. M1:GM, which RSpice also reports, is the
+/// LEVEL 1 transconductance KP*W/L*(VGS-VTO) = 1.5e-4 at VGS = 1.
+#[test]
+fn xyce_prints_device_parameters_on_ac_and_noise_cards_at_their_bias() {
+    let dir = test_dir("print_device_parameters");
+    let devices = "V1 1 0 DC 1 AC 1\nR1 1 2 1k\nC1 2 0 1u\nM1 4 2 0 0 NMOD W=10u L=2u\n\
+                   RD 5 4 1k\nVDD 5 0 DC 3\n.model NMOD NMOS LEVEL=1 VTO=0.7 KP=1e-4\n";
+    let parameters = "R1:R C1:C M1:W M1:L M1:GM";
+    for (tag, analysis) in [
+        (
+            "ac",
+            format!(".ac dec 1 100 1k\n.print ac vr(2) {parameters}\n"),
+        ),
+        (
+            "noise",
+            format!(".noise v(2) V1 dec 1 100 1k\n.print noise onoise {parameters}\n"),
+        ),
+    ] {
+        let deck = format!("* device parameters\n{devices}{analysis}.end\n");
+        let path = run_export_with_args(&dir, tag, &deck, "csv", &["--spice-dialect", "xyce"]);
+        let text = std::fs::read_to_string(&path).expect("read csv");
+        for (name, expected) in [
+            ("R1:R", 1e3),
+            ("C1:C", 1e-6),
+            ("M1:W", 1e-5),
+            ("M1:L", 2e-6),
+            ("M1:GM", 1.5e-4),
+        ] {
+            let column = common::csv_column(&text, name);
+            assert_eq!(column.len(), 2, "{tag} {name}: {text}");
+            for value in column {
+                assert!(
+                    (value - expected).abs() <= 1e-9 * expected,
+                    "{tag} {name}: {value}, expected {expected}"
+                );
+            }
+        }
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A two-point LIN sweep visits both ends in every dialect, as Xyce, LTspice,
 /// QSPICE and ngspice's noise analysis step it; ngspice's AC analysis alone
 /// visits only the start (acan.c:104-113). `.DISTO`, which only ngspice runs,

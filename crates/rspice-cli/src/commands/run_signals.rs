@@ -1018,12 +1018,14 @@ pub(crate) fn complex_export_signals(
 }
 
 /// Project an AC sweep onto the deck's output contract, with the running
-/// value of each measure a Xyce `.PRINT AC` card names.
+/// value of each measure a Xyce `.PRINT AC` card names and, on every row,
+/// the `device:param` values of the sweep's bias point (`operating_point`).
 pub(crate) fn ac_export_signals(
     netlist: &rspice_core::Netlist,
     results: &[rspice_core::analysis::AcResult],
     axis: &[Value],
     signals: &[ComplexSignal],
+    operating_point: &[(String, Value)],
     limits: &rspice_core::ResourceLimits,
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Vec<ComplexSignal>, rspice_core::SimulationError> {
@@ -1031,9 +1033,18 @@ pub(crate) fn ac_export_signals(
     let measures = rspice_core::analysis::evaluate_ac_printed_measures_with_limits_and_abort(
         netlist, results, limits, abort,
     )?;
-    let lookup = measures
+    let parameter_rows = operating_point
         .iter()
-        .map(|trace| (trace.name.clone(), trace.values.as_slice()))
+        .map(|(name, value)| (name.clone(), vec![*value; axis.len()]))
+        .collect::<Vec<_>>();
+    let lookup = parameter_rows
+        .iter()
+        .map(|(name, values)| (name.clone(), values.as_slice()))
+        .chain(
+            measures
+                .iter()
+                .map(|trace| (trace.name.clone(), trace.values.as_slice())),
+        )
         .collect();
     project_complex(
         netlist,
@@ -1047,15 +1058,17 @@ pub(crate) fn ac_export_signals(
     )
 }
 
-/// The columns a deck's `.PRINT NOISE` card prints over one noise sweep;
+/// The columns a deck's `.PRINT NOISE` card prints over one noise sweep,
+/// with the `device:param` values of its bias point (`operating_point`);
 /// `None` for a deck without one, which keeps the default spectrum table.
 pub(crate) fn noise_print_signals(
     netlist: &rspice_core::Netlist,
     results: &[rspice_core::analysis::NoiseResult],
+    operating_point: &[(String, Value)],
     abort: &dyn rspice_core::AbortSignal,
 ) -> Result<Option<Vec<ComplexSignal>>, rspice_core::SimulationError> {
     projection(netlist)?
-        .ordered_noise_columns(netlist, results, abort)?
+        .ordered_noise_columns(netlist, results, operating_point, abort)?
         .map(|columns| complex_columns("NOISE", columns))
         .transpose()
 }

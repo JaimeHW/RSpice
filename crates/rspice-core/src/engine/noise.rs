@@ -13,6 +13,8 @@ use super::{Engine, SimulationError};
 type ProbedNoiseSources = (Vec<NoiseSource>, Vec<Option<Value>>);
 #[cfg(feature = "veriloga")]
 use super::transient::device_noise::processes::veriloga_noise_mechanism;
+/// A noise sweep and the `device:param` values of its bias point.
+type NoiseSweepWithBias = (Vec<NoiseResult>, Vec<(String, Value)>);
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use super::transient::device_noise::processes::{
     CollectedNoiseProcess, NoiseProcessSpectrum, collect_noise_processes,
@@ -3152,6 +3154,7 @@ impl Engine {
             Some(input_source),
             frequencies,
             temperature,
+            None,
             abort,
         )
     }
@@ -3198,6 +3201,7 @@ impl Engine {
             None,
             frequencies,
             temperature,
+            None,
             abort,
         )
     }
@@ -3229,8 +3233,41 @@ impl Engine {
             Some(input_source),
             frequencies,
             temperature,
+            None,
             abort,
         )
+    }
+
+    /// Run named-node input-referred noise as
+    /// [`Self::run_noise_named_with_input_source_and_abort`] does, with the
+    /// `device:param` values a `.PRINT DC` card reads at the analysis's own
+    /// bias point. A Xyce `.PRINT NOISE` card prints them on every row; no
+    /// second operating point is solved for them.
+    #[allow(clippy::too_many_arguments)]
+    pub fn run_noise_named_reporting_operating_point_with_abort(
+        &self,
+        netlist: &Netlist,
+        output_pos: &str,
+        output_neg: Option<&str>,
+        input_source: &str,
+        frequencies: &[Value],
+        temperature: Value,
+        abort: &dyn AbortSignal,
+    ) -> Result<NoiseSweepWithBias, SimulationError> {
+        let mut operating_point = Vec::new();
+        let results = self.run_noise_internal(
+            netlist,
+            NoiseOutputPort::NodeNames {
+                positive: output_pos,
+                negative: output_neg,
+            },
+            Some(input_source),
+            frequencies,
+            temperature,
+            Some(&mut operating_point),
+            abort,
+        )?;
+        Ok((results, operating_point))
     }
 
     /// Non-cancellable convenience wrapper for named-node input-referred
@@ -3541,6 +3578,7 @@ impl Engine {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub(in crate::engine) fn run_noise_internal(
         &self,
         netlist: &Netlist,
@@ -3548,6 +3586,7 @@ impl Engine {
         input_source: Option<&str>,
         frequencies: &[Value],
         temperature: Value,
+        operating_point: Option<&mut Vec<(String, Value)>>,
         abort: &dyn AbortSignal,
     ) -> Result<Vec<NoiseResult>, SimulationError> {
         if abort.is_aborted() {
@@ -3611,6 +3650,9 @@ impl Engine {
             super::small_signal_bias::BiasSource::OperatingPoint,
             abort,
         )?;
+        if let Some(report) = operating_point {
+            *report = Self::operating_point_device_parameters(netlist, &mut circuit, &dc_solution)?;
+        }
         let CollectedNoiseSources {
             elementary: mut noise_sources,
             elementary_absolute_temperatures,

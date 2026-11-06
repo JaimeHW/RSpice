@@ -626,12 +626,16 @@ impl SignalProjection {
     /// `DNI()` are spectral densities in V²/Hz or A²/Hz
     /// (N_ANP_NOISE.C:1390-1393, N_IO_Op.C:123-141), and an expression reads
     /// them. ngspice's `onoise_spectrum` and `inoise_spectrum` keep the
-    /// amplitude densities of the default noise table. `None` means the deck
+    /// amplitude densities of the default noise table. `operating_point`
+    /// holds the `device:param` values of the analysis's bias point
+    /// (`Engine::run_noise_named_reporting_operating_point_with_abort`),
+    /// which an operand naming one prints on every row. `None` means the deck
     /// has no such card, so the frontend keeps that default table.
     pub fn ordered_noise_columns(
         &self,
         netlist: &Netlist,
         sweep: &[crate::analysis::NoiseResult],
+        operating_point: &[(String, Value)],
         abort: &dyn AbortSignal,
     ) -> Result<Option<Vec<ProjectedSignal>>, SimulationError> {
         if self.keeps_everything || !self.has_ordered_card(AnalysisResultKind::Noise) {
@@ -648,6 +652,10 @@ impl SignalProjection {
         let input_amplitude = sweep
             .iter()
             .map(crate::analysis::NoiseResult::input_referred_rms)
+            .collect::<Vec<_>>();
+        let parameter_rows = operating_point
+            .iter()
+            .map(|(name, value)| (name.as_str(), vec![*value; sweep.len()]))
             .collect::<Vec<_>>();
         let printed_measures = crate::analysis::measure_signals::printed_noise_measure_traces(
             netlist,
@@ -671,6 +679,11 @@ impl SignalProjection {
             &mut lookup,
             &printed_measures,
         );
+        for (name, values) in &parameter_rows {
+            lookup
+                .entry((*name).to_string())
+                .or_insert(values.as_slice());
+        }
         let source = ProjectionSource::new(AnalysisResultKind::Noise, "NOISE")
             .with_axis(series.axis())
             .with_signals(noise_inventory(sweep)?)

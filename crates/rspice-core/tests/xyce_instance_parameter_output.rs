@@ -98,3 +98,54 @@ fn a_dc_sweep_prints_each_static_instance_parameter_at_its_point() {
         ],
     );
 }
+
+#[test]
+fn ac_and_noise_report_the_instance_parameters_of_their_own_bias_point() {
+    // Xyce 7.10 prints R1:R 2, C1:C 1u, M1:L 2u and M1:W 10u on every row of
+    // a .PRINT AC or .PRINT NOISE card, the values .PRINT DC prints.
+    let netlist = xyce_deck(".AC DEC 1 1 10\n.PRINT AC VR(2) R1:R C1:C M1:L M1:W\n");
+    let engine = xyce_engine();
+    let (results, ac) = engine
+        .run_ac_reporting_operating_point_with_abort(&netlist, &[1.0, 10.0], &NoAbort)
+        .expect("AC runs");
+    assert_eq!(results.len(), 2);
+    let (results, noise) = engine
+        .run_noise_named_reporting_operating_point_with_abort(
+            &netlist,
+            "2",
+            None,
+            "V1",
+            &[1.0, 10.0],
+            300.15,
+            &NoAbort,
+        )
+        .expect("noise runs");
+    assert_eq!(results.len(), 2);
+    for report in [&ac, &noise] {
+        let value = |name: &str| {
+            report
+                .iter()
+                .find(|(reported, _)| reported.eq_ignore_ascii_case(name))
+                .map(|(_, value)| *value)
+                .unwrap_or_else(|| panic!("no {name} in {report:?}"))
+        };
+        for (name, expected) in [
+            ("R1:R", 2.0),
+            ("C1:C", 1e-6),
+            ("M1:L", 2e-6),
+            ("M1:W", 1e-5),
+        ] {
+            assert!(
+                (value(name) - expected).abs() <= 1e-12 * expected,
+                "{name}: {}",
+                value(name)
+            );
+        }
+        assert!(
+            report
+                .iter()
+                .all(|(name, _)| name.contains(':') && !name.contains('(')),
+            "{report:?}"
+        );
+    }
+}

@@ -882,6 +882,24 @@ impl Engine {
         Ok(())
     }
 
+    /// The `device:param` values a `.PRINT DC` card reads at a converged bias
+    /// (`R1:R`, `C1:C`, `M1:W`, `M1:GM`), for a small-signal analysis that
+    /// prints them at its own operating point: the report a DC point
+    /// publishes, without its node, branch and lead-current spellings.
+    pub(in crate::engine) fn operating_point_device_parameters(
+        netlist: &Netlist,
+        circuit: &mut CircuitData,
+        solution: &[Value],
+    ) -> Result<Vec<(String, Value)>, SimulationError> {
+        let mut result = SimulationResult::new(0, 0);
+        Self::populate_dc_observables(netlist, circuit, solution, &mut result)?;
+        Ok(result
+            .dc_observables
+            .into_iter()
+            .filter(|(name, _)| name.contains(':') && !name.contains('('))
+            .collect())
+    }
+
     /// Refuse an authored `V()` operand naming an event-only net before a DC
     /// analysis solves anything.
     ///
