@@ -17,7 +17,6 @@ fn timeout_interrupts_control_assignments_conditions_and_command_arguments() {
         "alter @V1[sin] [ 0 work(26) 1 ]",
         "set num_threads=work(26)",
         "option abstol=1n reltol={work(26)}",
-        "pz in 0 out 0 vol pz\nprint pole(work(26))",
         "pz in 0 out 0 vol pz\nsettype frequency pole(work(26))",
         "pz in 0 out 0 vol pz\nplot pole(1) xlimit 0 work(26)",
     ]
@@ -30,6 +29,45 @@ fn timeout_interrupts_control_assignments_conditions_and_command_arguments() {
         )).unwrap();
         assert_times_out(&deck, script, true);
     }
+}
+
+#[test]
+fn a_print_whose_user_functions_overflow_the_expansion_limit_is_refused_by_it() {
+    // print evaluates whole vectors, so it expands each user function call in
+    // place, as ngspice's define does, and refuses an expansion past its node
+    // limit. work(26) would expand to 2^27 nodes, so the refusal comes after a
+    // bounded amount of work, close to a 50 ms deadline in a release build.
+    // It is checked here with no deadline. rspice-core's
+    // control_expression_cancellation covers the deadline poll inside that
+    // expansion with an exact abort count.
+    let dir = common::test_dir("control-expansion-limit");
+    let deck = dir.join("print.cir");
+    std::fs::write(
+        &deck,
+        format!(
+            "* control expansion limit\nV1 in 0 1\nR1 in out 1k\nC1 out 0 1u\n{}.control\n\
+             pz in 0 out 0 vol pz\nprint pole(work(26))\n.endc\n.end\n",
+            work_functions()
+        ),
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .args(["--quiet", "--error-format", "json", "run"])
+        .arg(&deck)
+        .output()
+        .unwrap();
+    assert_eq!(
+        output.status.code(),
+        Some(65),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
+    let message = error["error"]["message"].as_str().unwrap_or_default();
+    assert!(
+        message.contains("user function expansion exceeds its size limit"),
+        "{error}"
+    );
 }
 
 #[test]
@@ -140,7 +178,7 @@ fn timeout_interrupts_conditionals_and_eager_element_expressions() {
 fn timeout_interrupts_forward_and_scoped_expression_resolution() {
     let functions = work_functions();
     let dir = common::test_dir("deferred-element-expression-timeout");
-    for (index, (body, execution_started)) in [
+    for (index, (body, execution_can_start)) in [
         (
             "V2 a 0 SIN(0 1 1 {later+work(26)})\nR2 a 0 1k\n.PARAM later=1",
             false,
@@ -187,7 +225,7 @@ fn timeout_interrupts_forward_and_scoped_expression_resolution() {
     {
         let deck = dir.join(format!("deferred-{index}.cir"));
         std::fs::write(&deck, format!("* deferred expression deadline\n{functions}V1 out 0 1\nR1 out 0 1k\n{body}\n.OP\n.END\n")).unwrap();
-        assert_times_out(&deck, body, *execution_started);
+        assert_times_out(&deck, body, *execution_can_start);
     }
 }
 
@@ -323,7 +361,7 @@ fn timeout_interrupts_deferred_bare_vector_evaluation() {
     }
 }
 
-fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: bool) {
+fn assert_times_out(deck: &std::path::Path, source: &str, execution_can_start: bool) {
     let mut child = Command::new(env!("CARGO_BIN_EXE_rspice"))
         .args(["--quiet", "--error-format", "json", "run"])
         .arg(deck)
@@ -354,13 +392,19 @@ fn assert_times_out(deck: &std::path::Path, source: &str, execution_started: boo
     let error: serde_json::Value = serde_json::from_slice(&output.stderr).unwrap();
     assert_eq!(error["error"]["category"], "timeout", "{source}: {error}");
     assert_eq!(error["error"]["exit_code"], 124);
-    if execution_started {
+    // An empty stdout means no run existed to summarize: the deadline came
+    // during parsing, and the process-level JSON error is the
+    // machine-readable contract for a preflight failure. Where execution can
+    // start, a loaded runner can still reach 50 ms before it does, so the
+    // test reads which phase the deadline landed in from the output rather
+    // than predicting it.
+    if !output.stdout.is_empty() {
+        assert!(
+            execution_can_start,
+            "{source}: a deadline during parsing wrote a summary: {output:?}"
+        );
         let summary: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(summary["status"], "timed_out", "{source}: {summary}");
-    } else {
-        // Parsing has not produced a run to summarize; the process-level JSON
-        // error is the machine-readable contract for preflight failures.
-        assert!(output.stdout.is_empty(), "{source}: {output:?}");
     }
 }
 
