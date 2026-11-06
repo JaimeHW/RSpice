@@ -294,8 +294,23 @@ impl ControlCircuit {
     }
 
     /// The current plot's scale, if it is the plot kind `analysis` names:
-    /// get_measure2 measures only tran, ac, dc and sp plots.
+    /// get_measure2 measures only tran, ac, dc and sp plots. A plot made
+    /// beside the datasets, as fft's spectrum or linearize's transient, is
+    /// of the kind its name begins with (frontend/vectors.c:889 plot_alloc).
     fn measured_axis(&self, analysis: &str) -> Option<Vec<Value>> {
+        if let Some(plot) = self.vectors.current_plot() {
+            let kind = plot.trim_end_matches(|c: char| c.is_ascii_digit());
+            if !matches!(kind, "tran" | "ac" | "dc" | "sp") || !kind.eq_ignore_ascii_case(analysis)
+            {
+                return None;
+            }
+            let scale = self.vectors.plot_scale(plot)?;
+            let (_, value) = self
+                .vectors
+                .vectors_in(plot)
+                .find(|(name, _)| name.eq_ignore_ascii_case(scale))?;
+            return Some(value.samples.iter().map(|sample| sample.re).collect());
+        }
         let dataset = self.current_dataset()?;
         let matches = matches!(
             (&dataset.result, analysis.to_ascii_lowercase().as_str()),

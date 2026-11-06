@@ -976,6 +976,38 @@ fn fft_makes_a_spectrum_plot_of_the_transient_plot() {
     );
 }
 
+/// `meas sp` measures the spectrum plot fft made, on its frequency scale
+/// (com_measure2.c:1655 measures any tran, ac, dc or sp plot that is
+/// current). For the hanning spectrum of the 0-1-0-1-0 V triangle, ngspice-46
+/// prints `mx = 4.35337e-01 at= 1.56250e+02` between 100 Hz and 1 kHz and
+/// `mn = 3.14264e-02 at= 3.12500e+02` between 200 and 600 Hz, and fails
+/// `meas tran` there.
+#[test]
+fn meas_measures_the_spectrum_plot_fft_made() {
+    let (presented, error) = run_until_error(
+        "meas sp\nv1 1 0 pwl(0 0 1m 1 2m 0 3m 1 4m 0)\nr1 1 0 1k\n.control\n\
+         tran 0.1m 4m\nlinearize\nfft v(1)\nlet m = mag(v(1))\n\
+         meas sp mx max m from=100 to=1k\nmeas sp mn min m from=200 to=600\n\
+         meas tran tx max v(1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let texts = texts(&presented);
+    assert!(
+        texts.contains(&"mx                  =  4.35337e-01 at=  1.56250e+02".to_owned()),
+        "{texts:?}"
+    );
+    assert!(
+        texts.contains(&"mn                  =  3.14264e-02 at=  3.12500e+02".to_owned()),
+        "{texts:?}"
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.contains("meas tran tx max v(1) failed!")),
+        "{texts:?}"
+    );
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
