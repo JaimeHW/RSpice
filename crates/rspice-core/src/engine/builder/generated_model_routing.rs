@@ -302,7 +302,7 @@ fn generated_bjt_route<'a>(
     };
     if !voltage_limiting_enabled {
         return Err(SimulationError::Circuit(format!(
-            "DEVICE.VOLTLIM=0 is not implemented for generated BJT '{}' model '{}' family '{}'; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+            "DEVICE.VOLTLIM=0 is not implemented for generated BJT '{}' model '{}' family '{}'; its voltage limiting cannot yet be disabled",
             element.name, model_name, target.model_name
         )));
     }

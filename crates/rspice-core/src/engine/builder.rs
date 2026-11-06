@@ -6427,16 +6427,12 @@ impl Engine {
             for element in &flat_elements {
                 let family = match &element.kind {
                     ElementKind::Diode { .. } => Some("diode"),
-                    ElementKind::Mosfet { .. } => Some("MOSFET/VDMOS"),
                     ElementKind::Jfet { .. } => Some("JFET"),
                     ElementKind::Mesfet { .. } => Some("MESFET"),
                     _ => None,
                 };
                 if let Some(family) = family {
-                    return Err(SimulationError::Circuit(format!(
-                        "DEVICE.VOLTLIM=0 is not implemented for {family} device '{}'; only native legacy Gummel-Poon BJT limiting can currently be disabled",
-                        element.name
-                    )));
+                    return Err(voltage_limiting_cannot_be_disabled(&element.name, family));
                 }
             }
         }
@@ -7923,7 +7919,7 @@ impl Engine {
                             || !legacy_gummel_poon_bjt_level(level)
                         {
                             return Err(SimulationError::Circuit(format!(
-                                "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; only native legacy Gummel-Poon BJT limiting can currently be disabled",
+                                "DEVICE.VOLTLIM=0 is not implemented for BJT '{}' model '{}' family '{}' {}; its voltage limiting cannot yet be disabled",
                                 element.name,
                                 model,
                                 device_model.model_type,
@@ -8286,6 +8282,12 @@ impl Engine {
                             temperature: self.config.temperature,
                         },
                     )? {
+                        if !self.config.device_voltage_limiting {
+                            return Err(voltage_limiting_cannot_be_disabled(
+                                &element.name,
+                                "generated MOSFET",
+                            ));
+                        }
                         continue;
                     }
 
@@ -8471,6 +8473,7 @@ impl Engine {
                                         instance_params,
                                         deferred_params,
                                         temperature_kelvin: self.config.temperature,
+                                        voltage_limiting: self.config.device_voltage_limiting,
                                     },
                                 )?;
                                 warn_unread_instance_params(&element.name, instance_param_reads);
@@ -8487,6 +8490,7 @@ impl Engine {
                                         instance_params,
                                         deferred_params,
                                         temperature_kelvin: self.config.temperature,
+                                        voltage_limiting: self.config.device_voltage_limiting,
                                     },
                                 )?;
                                 warn_unread_instance_params(&element.name, instance_param_reads);
@@ -8503,6 +8507,7 @@ impl Engine {
                                         instance_params,
                                         deferred_params,
                                         temperature_kelvin: self.config.temperature,
+                                        voltage_limiting: self.config.device_voltage_limiting,
                                     },
                                     level == 10,
                                 )?;
@@ -8511,6 +8516,16 @@ impl Engine {
                             }
                             _ => {}
                         }
+                    }
+
+                    // `DEVICE VOLTLIM=0` reaches no native route below.
+                    if !self.config.device_voltage_limiting {
+                        let family = if is_vdmos_compatible {
+                            "VDMOS".to_string()
+                        } else {
+                            format!("MOSFET {}", mos_level_descriptor(level))
+                        };
+                        return Err(voltage_limiting_cannot_be_disabled(&element.name, &family));
                     }
 
                     // BSIM3v3.3: LEVEL=8/49 (ngspice) and BSIM3-shaped
@@ -8604,6 +8619,7 @@ impl Engine {
                                 instance_params,
                                 deferred_params,
                                 temperature_kelvin: self.config.temperature,
+                                voltage_limiting: self.config.device_voltage_limiting,
                             },
                             tnom_default_k,
                             bsim3_equation_set,
@@ -12231,6 +12247,16 @@ mod tests {
             .expect_err("VOLTLIM=0 must fail closed for VBIC limiting");
         assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
         assert!(error.to_string().contains("LEVEL=11"));
+
+        let ekv = Netlist::parse(
+            "unsupported EKV limiting\nV1 d 0 1\nM1 d d 0 0 NMOD\n.model NMOD NMOS LEVEL=260\n.end\n",
+        )
+        .expect("EKV fixture parses");
+        let error = Engine::new(config.clone())
+            .build_circuit(&ekv)
+            .expect_err("VOLTLIM=0 must fail closed for EKV limiting");
+        assert!(error.to_string().contains("DEVICE.VOLTLIM=0"));
+        assert!(error.to_string().contains("'M1'"), "{error}");
 
         config.device_voltage_limiting = true;
         Engine::new(config)

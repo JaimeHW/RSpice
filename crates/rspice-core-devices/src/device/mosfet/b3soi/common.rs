@@ -562,6 +562,10 @@ pub struct SoiInstanceCore {
     /// The deck marked this instance `OFF`, so its MODEINITJCT startup bias is
     /// the load's zero-junction arm.
     pub(crate) initial_off: bool,
+    /// Xyce's global `DEVICE VOLTLIM`: the first operating-point load takes
+    /// the gate seed and every Newton iterate is limited. Cleared, each load
+    /// reads the solution as it stands.
+    pub(crate) voltage_limiting: bool,
     /// Transient device-bypass tolerances `(reltol, current abstol, vntol)`,
     /// the ngspice `CKTreltol`/`CKTabstol`/`CKTvoltTol` triple. `None`
     /// disables bypass (DC operating point never bypasses).
@@ -602,6 +606,7 @@ impl SoiInstanceCore {
             dc_mode: std::cell::Cell::new(dc_mode),
             self_heating_startup_disabled: std::cell::Cell::new(false),
             initial_off: false,
+            voltage_limiting: true,
             bypass_tolerances: std::cell::Cell::new(None),
             bypass_active: std::cell::Cell::new(false),
             bypass_hits: std::cell::Cell::new(0),
@@ -649,6 +654,15 @@ impl SoiInstanceCore {
     /// True when the deck marked this instance `OFF`.
     pub fn is_initially_off(&self) -> bool {
         self.initial_off
+    }
+
+    /// Apply Xyce's global `DEVICE VOLTLIM` policy. Xyce's `voltageLimiterFlag`
+    /// gates both the initJct gate seed and the per-iterate node, body and
+    /// temperature-rise limiters (N_DEV_MOSFET_B3SOI.C:8866, 8981, 9022); an
+    /// `OFF` instance opens at zero junction bias either way (:8896).
+    #[doc(hidden)]
+    pub fn set_voltage_limiting_enabled(&mut self, enabled: bool) {
+        self.voltage_limiting = enabled;
     }
 
     pub fn set_instance_ic(&mut self, instance_ic: B3SoiInstanceIc) {

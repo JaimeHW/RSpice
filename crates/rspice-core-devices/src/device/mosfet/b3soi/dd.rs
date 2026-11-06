@@ -812,7 +812,7 @@ impl B3SoiDd {
 
     fn limited_terminal_voltages(&self, v: &[Value]) -> (B3SoiDdTerminals, bool) {
         let mut terminals = self.raw_terminal_voltages(v);
-        if !self.limit_anchor_valid.get() {
+        if !self.voltage_limiting || !self.limit_anchor_valid.get() {
             return (terminals, false);
         }
 
@@ -971,7 +971,7 @@ impl B3SoiDd {
     /// ngspice `Check` flag; the SmartVbs DC floor intentionally does not set
     /// it, matching `B3SOIDDSmartVbs`'s `NG_IGNORE(check)`).
     fn apply_branch_limiting(&self, bias: &mut B3SoiDdBias) -> bool {
-        if !self.limit_anchor_valid.get() {
+        if !self.voltage_limiting || !self.limit_anchor_valid.get() {
             return false;
         }
 
@@ -984,6 +984,9 @@ impl B3SoiDd {
     }
 
     fn apply_body_limiting(&self, bias: &mut B3SoiDdBias) -> bool {
+        if !self.voltage_limiting {
+            return false;
+        }
         if !self.limit_anchor_valid.get() {
             // First iterate of a phase: accept the raw bias, but still apply the
             // DC SmartVbs floor so a floating body never starts negative.
@@ -1006,8 +1009,10 @@ impl B3SoiDd {
         check
     }
 
+    /// ngspice floors the body inside its limiter block (b3soiddld.c:672-680)
+    /// and Xyce's BSIMSOI3 has no floor, so `DEVICE VOLTLIM=0` drops it too.
     fn apply_dc_smart_vbs(&self, bias: &mut B3SoiDdBias) {
-        if !self.dc_mode.get() || self.body_mode != BodyMode::Floating {
+        if !self.voltage_limiting || !self.dc_mode.get() || self.body_mode != BodyMode::Floating {
             return;
         }
         if bias.vds >= 0.0 {
@@ -1039,6 +1044,12 @@ impl B3SoiDd {
                 vps: 0.0,
                 del_temp: 0.0,
             };
+        }
+        // Xyce takes the gate seed only under `DEVICE VOLTLIM`
+        // (N_DEV_MOSFET_B3SOI.C:8866); without it the first load reads the
+        // solution as it stands.
+        if !self.voltage_limiting {
+            return raw;
         }
         match self.model.dialect {
             common::B3SoiDialect::Ngspice => B3SoiDdBias {
@@ -2114,6 +2125,69 @@ mod tests {
             dev.bias.vbs > limited_bias.vbs,
             "a later identical Newton iterate must advance the limiter"
         );
+    }
+
+    /// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`, N_DEV_MOSFET_B3SOI.C:8866,
+    /// 8981, 9022): the first operating-point load takes the solution without
+    /// the gate seed, no later iterate is limited, and a floating body keeps
+    /// the negative `vbs` the SmartVbs floor would have raised.
+    #[test]
+    fn voltlim_off_loads_the_raw_solution_at_every_iterate() {
+        let start = [0.3, 0.2, 0.0, 0.0, 0.1, 0.0, 0.1];
+        let mut seeded = tied_ideal_device();
+        seeded.dc_mode.set(true);
+        seeded.update(&start);
+        assert_eq!(seeded.bias.vgs, 0.1 + seeded.sized.vth0);
+        let mut unseeded = tied_ideal_device();
+        unseeded.set_voltage_limiting_enabled(false);
+        unseeded.dc_mode.set(true);
+        unseeded.update(&start);
+        assert_eq!(
+            (unseeded.bias.vds, unseeded.bias.vgs, unseeded.bias.vbs),
+            (0.3, 0.2, 0.1)
+        );
+
+        let mut dev = tied_ideal_device();
+        dev.set_voltage_limiting_enabled(false);
+        dev.update(&[0.0; 7]);
+        dev.dc_mode.set(true);
+        dev.update(&[10.0, 8.0, 0.0, 7.0, 1.0, 0.0, 9.0]);
+        let bias = dev.bias;
+        assert_eq!(
+            (bias.vds, bias.vgs, bias.ves, bias.vbs, bias.vps),
+            (10.0, 8.0, 7.0, 1.0, 9.0)
+        );
+        assert!(!dev.last_limited.get() && !dev.bias_was_limited.get());
+
+        let floating_vbs = |limiting: bool| {
+            let model = Arc::new(B3SoiDdModel::from_params(&n1_params(), false, 300.15));
+            let nodes = B3SoiDdNodes {
+                node_drain: 1,
+                node_gate_external: 2,
+                node_gate: 2,
+                node_source: 3,
+                node_e: 4,
+                node_body: 5,
+                node_p: 0,
+                node_temp: 0,
+            };
+            let mut dev = B3SoiDd::new(
+                "m1".to_string(),
+                nodes,
+                BodyMode::Floating,
+                model,
+                geom(),
+                300.15,
+            )
+            .expect("floating DD device builds");
+            dev.set_voltage_limiting_enabled(limiting);
+            dev.update(&[0.0; 5]);
+            dev.dc_mode.set(true);
+            dev.update(&[1.0, 1.0, 0.0, 0.0, -0.5]);
+            dev.bias.vbs
+        };
+        assert_eq!(floating_vbs(true), 0.0);
+        assert_eq!(floating_vbs(false), -0.5);
     }
 
     /// Transient Newton revisits an iterate before stamping it as the

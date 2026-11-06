@@ -5,8 +5,9 @@ use crate::device::MosTerminals;
 
 /// Everything a device builder needs about the model card behind an element:
 /// which model to look up, its resolved numeric parameters, the instance
-/// overrides, the parameters whose expressions are still deferred, and the
-/// temperature the card is evaluated at.
+/// overrides, the parameters whose expressions are still deferred, the
+/// temperature the card is evaluated at, and whether `DEVICE VOLTLIM` leaves
+/// the device's voltage limiting on.
 #[derive(Clone, Copy)]
 pub(super) struct DeviceModelContext<'a> {
     pub model_key: &'a str,
@@ -14,6 +15,7 @@ pub(super) struct DeviceModelContext<'a> {
     pub instance_params: &'a [(String, f64)],
     pub deferred_params: &'a [(String, String)],
     pub temperature_kelvin: f64,
+    pub voltage_limiting: bool,
 }
 
 impl Engine {
@@ -41,6 +43,7 @@ impl Engine {
             instance_params,
             deferred_params,
             temperature_kelvin,
+            voltage_limiting,
         } = model;
         use crate::device::mosfet::b3soi::dd::temp::{B3SoiDdGeometry, B3SoiDdSized};
         use crate::device::{B3SoiDd, B3SoiDdModel, B3SoiDdNodes, BodyMode};
@@ -197,6 +200,7 @@ impl Engine {
         device.set_initially_off(
             instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
         );
+        device.set_voltage_limiting_enabled(voltage_limiting);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -231,6 +235,7 @@ impl Engine {
             instance_params,
             deferred_params,
             temperature_kelvin,
+            voltage_limiting,
         } = model;
         use crate::device::B3SoiFd;
         use crate::device::B3SoiFdModel;
@@ -351,6 +356,7 @@ impl Engine {
         device.set_initially_off(
             instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
         );
+        device.set_voltage_limiting_enabled(voltage_limiting);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -388,6 +394,7 @@ impl Engine {
             instance_params,
             deferred_params,
             temperature_kelvin,
+            voltage_limiting,
         } = model;
         use crate::device::B3SoiPdModel;
         use crate::device::mosfet::b3soi::pd::BodyMode;
@@ -529,6 +536,7 @@ impl Engine {
         device.set_initially_off(
             instance_param(instance_params, &["OFF"]).is_some_and(|off| off != 0.0),
         );
+        device.set_voltage_limiting_enabled(voltage_limiting);
 
         // DEBUG=-1 runs the device without dynamic charges (ngspice debugMod).
         if let Some(debug) =
@@ -668,6 +676,7 @@ impl Engine {
             instance_params,
             deferred_params,
             temperature_kelvin,
+            voltage_limiting: _,
         } = model;
         use crate::device::Bsim3v3Device;
         use crate::device::mosfet::bsim3v3::{

@@ -713,7 +713,7 @@ impl B3SoiFd {
     }
 
     fn apply_temp_limiting(&self, bias: &mut B3SoiFdBias) -> bool {
-        if !self.self_heating_active() || !self.limit_anchor_valid.get() {
+        if !self.voltage_limiting || !self.self_heating_active() || !self.limit_anchor_valid.get() {
             return false;
         }
 
@@ -888,7 +888,7 @@ impl B3SoiFd {
     fn limited_branch_voltages(&self, v: &[Value]) -> (B3SoiFdBias, [Value; 4], bool) {
         let mut terminals = self.raw_terminals(v);
         let mut check = false;
-        if self.limit_anchor_valid.get() {
+        if self.voltage_limiting && self.limit_anchor_valid.get() {
             for (t, old) in terminals.iter_mut().zip(self.terminal_limit_anchor) {
                 *t = common::soi_limit(*t, old, 3.0, &mut check);
             }

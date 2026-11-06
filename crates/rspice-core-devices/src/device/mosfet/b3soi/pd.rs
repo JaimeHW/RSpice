@@ -792,7 +792,7 @@ impl B3SoiPd {
     /// drain/source nodes, so this is the equivalent limiter whether those nodes
     /// are external terminals or builder-owned series-resistance primes.
     fn apply_branch_limiting(&self, bias: &mut B3SoiPdBias) -> bool {
-        if !self.limit_anchor_valid.get() {
+        if !self.voltage_limiting || !self.limit_anchor_valid.get() {
             return false;
         }
         let mut check = false;
@@ -805,7 +805,13 @@ impl B3SoiPd {
 
     /// MODEINITJCT startup bias used by ngspice for an uninitialized B3SOIPD
     /// operating-point solve with no explicit input operating point.
-    fn junction_init_bias(&self) -> B3SoiPdBias {
+    fn junction_init_bias(&self, raw: B3SoiPdBias) -> B3SoiPdBias {
+        // Xyce takes the gate seed only under `DEVICE VOLTLIM`
+        // (N_DEV_MOSFET_B3SOI.C:8866); without it the first load reads the
+        // solution as it stands, and an `OFF` instance still opens at zero.
+        if !self.voltage_limiting && !self.initial_off {
+            return raw;
+        }
         B3SoiPdBias {
             vbs: 0.0,
             // b3soipdld.c:376 replaces the gate seed with
@@ -834,7 +840,7 @@ impl B3SoiPd {
     /// Returns whether the per-iteration change cap actually engaged (the
     /// ngspice `Check` flag).
     fn apply_body_limiting(&self, bias: &mut B3SoiPdBias) -> bool {
-        if !self.limit_anchor_valid.get() {
+        if !self.voltage_limiting || !self.limit_anchor_valid.get() {
             // First iterate of a phase: accept the raw bias.
             return false;
         }
@@ -866,9 +872,9 @@ impl NonlinearDevice for B3SoiPd {
         }
         if !self.has_history && self.dc_mode.get() {
             self.converged_ref = self.bias;
-            self.last_update_bias
-                .set(Some(self.raw_branch_voltages(voltages)));
-            let bias = self.junction_init_bias();
+            let raw = self.raw_branch_voltages(voltages);
+            self.last_update_bias.set(Some(raw));
+            let bias = self.junction_init_bias(raw);
             self.bias = bias;
             self.op = self.eval_op_for_bias(bias);
             self.has_history = true;

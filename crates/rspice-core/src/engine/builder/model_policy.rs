@@ -664,6 +664,15 @@ pub(super) fn legacy_gummel_poon_bjt_level(level: f64) -> bool {
     bjt_level_matches(level, 0.0) || bjt_level_matches(level, 1.0) || bjt_level_matches(level, 2.0)
 }
 
+/// The refusal for a device whose voltage limiting Xyce's `DEVICE VOLTLIM=0`
+/// cannot yet switch off. Running it limited instead would silently change
+/// the Newton path the deck asked for.
+pub(super) fn voltage_limiting_cannot_be_disabled(device: &str, family: &str) -> SimulationError {
+    SimulationError::Circuit(format!(
+        "DEVICE.VOLTLIM=0 is not implemented for {family} device '{device}'; its voltage limiting cannot yet be disabled"
+    ))
+}
+
 pub(super) fn bjt_level_descriptor(level: f64) -> String {
     if level.is_finite() && (level - level.round()).abs() <= 1e-9 {
         format!("LEVEL={:.0}", level.round())

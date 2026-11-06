@@ -258,6 +258,53 @@ fn every_soi_family_defaults_its_channel_geometry_to_five_microns() {
     }
 }
 
+/// Xyce's `DEVICE VOLTLIM=0` drops the BSIMSOI gate seed and every per-iterate
+/// limiter (N_DEV_MOSFET_B3SOI.C:8866, 8981, 9022). That changes the Newton
+/// path and nothing else: each SOI family still solves a CMOS inverter, at the
+/// operating point the limited solve reaches.
+#[test]
+fn every_soi_family_solves_with_voltage_limiting_disabled() {
+    for model_selector in [
+        "level=55",
+        "level=56",
+        "level=57",
+        "level=10 soimod=2",
+        "level=10 soimod=1",
+        "level=10 soimod=0",
+    ] {
+        let deck = format!(
+            "\
+            * BSIMSOI inverter with and without voltage limiting\n\
+            mn out in 0 0 nsoi w=4u l=0.15u\n\
+            mp out in vdd vdd psoi w=10u l=0.15u\n\
+            vdd vdd 0 2\n\
+            vin in 0 0.6\n\
+            .model nsoi nmos {model_selector}\n\
+            .model psoi pmos {model_selector}\n\
+            .op\n\
+            .end\n"
+        );
+        let netlist = Netlist::parse(&deck).expect("inverter deck parses");
+        let output = |device_voltage_limiting: bool| {
+            Engine::new(SimulationConfig {
+                device_voltage_limiting,
+                ..SimulationConfig::default()
+            })
+            .run_dc_op(&netlist)
+            .unwrap_or_else(|err| {
+                panic!("{model_selector} with VOLTLIM={device_voltage_limiting} should run: {err}")
+            })
+            .try_voltage_named("out")
+            .unwrap_or_else(|| panic!("missing V(out) for {model_selector}"))
+        };
+        let (limited, unlimited) = (output(true), output(false));
+        assert!(
+            (limited - unlimited).abs() <= 1.0e-6,
+            "{model_selector}: V(out) {limited} limited, {unlimited} unlimited"
+        );
+    }
+}
+
 #[test]
 fn xyce_level10_bsimsoi_rejects_unresolved_native_model_params() {
     let deck = xyce_level10_default_gain_stage().replace("level=10", "level=10 u0={missing_u0}");

@@ -231,6 +231,39 @@ fn update_applies_body_limit_after_branch_limit() {
     );
 }
 
+/// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`, N_DEV_MOSFET_B3SOI.C:8866,
+/// 8981, 9022): the first operating-point load takes the solution without the
+/// gate seed, and no later iterate is limited.
+#[test]
+fn voltlim_off_loads_the_raw_solution_at_every_iterate() {
+    let start = [0.3, 0.2, 0.0, 0.0, 0.1, 0.1];
+    let mut seeded = tied_ideal_device();
+    seeded.dc_mode.set(true);
+    seeded.update(&start);
+    assert_eq!(seeded.bias.vgs, 0.1 + seeded.sized.vth0);
+    let mut unseeded = tied_ideal_device();
+    unseeded.set_voltage_limiting_enabled(false);
+    unseeded.dc_mode.set(true);
+    unseeded.update(&start);
+    assert_eq!(
+        (unseeded.bias.vds, unseeded.bias.vgs, unseeded.bias.vbs),
+        (0.3, 0.2, 0.1)
+    );
+
+    let mut dev = tied_ideal_device();
+    dev.set_voltage_limiting_enabled(false);
+    dev.dc_mode.set(false);
+    dev.update(&[0.0; 6]);
+    dev.dc_mode.set(true);
+    dev.update(&[10.0, 8.0, 0.0, 7.0, 1.0, 9.0]);
+    let bias = dev.bias;
+    assert_eq!(
+        (bias.vds, bias.vgs, bias.ves, bias.vbs, bias.vps),
+        (10.0, 8.0, 7.0, 1.0, 9.0)
+    );
+    assert!(!dev.last_limited.get());
+}
+
 /// Transient Newton revisits an iterate before stamping it as the operating
 /// point does: both passes see one `B3SOIPDlimit` step, and a new timestep
 /// attempt makes the same voltages the next iteration.

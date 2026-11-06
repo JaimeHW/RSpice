@@ -337,6 +337,20 @@ fn self_heating_update_limits_del_temp_step_like_ngspice() {
     );
 }
 
+/// `DEVICE VOLTLIM=0` (Xyce `voltageLimiterFlag`, N_DEV_MOSFET_B3SOI.C:8981,
+/// 9022) leaves every terminal and the temperature rise where Newton put it.
+#[test]
+fn voltlim_off_leaves_terminals_and_temperature_rise_unlimited() {
+    let mut dev = self_heating_device_for_stamp_test();
+    dev.set_voltage_limiting_enabled(false);
+    dev.update(&[0.0; 5]);
+    dev.update(&[5.0, 4.0, -4.5, 0.5, 100.0]);
+    let bias = dev.bias;
+    assert_eq!((bias.vds, bias.vgs, bias.ves), (9.5, 8.5, 5.0));
+    assert_eq!(bias.del_temp, 100.0);
+    assert!(!dev.last_limited.get());
+}
+
 #[test]
 fn self_heating_limited_iterate_is_not_converged() {
     let mut dev = self_heating_device_for_stamp_test();
