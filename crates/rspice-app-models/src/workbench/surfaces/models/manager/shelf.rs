@@ -516,6 +516,17 @@ fn shelf_row(
     if response.clicked() {
         app.state.models_view.selected_part = Some(key);
     }
+    // A subcircuit the project holds can be given a symbol of its own.
+    if let PartOrigin::ProjectRetained { library } = &row.origin
+        && hit.kind == "subckt"
+    {
+        response.context_menu(|ui| {
+            if ui.button("Create symbol\u{2026}").clicked() {
+                app.queue_subcircuit_symbol(library, &hit.name);
+                ui.close();
+            }
+        });
+    }
 }
 
 fn parts_catalog_footer(

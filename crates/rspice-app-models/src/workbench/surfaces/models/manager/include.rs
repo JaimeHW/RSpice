@@ -393,6 +393,9 @@ fn dependency_edge(ui: &Ui, owner: egui::Rect, target: egui::Rect, stroke: Strok
     ));
 }
 
+/// Width fraction of the definition table's action column.
+const DEFINITION_ACTION_W: f32 = 0.15;
+
 fn include_definition_table(
     ui: &mut Ui,
     app: &mut ManagerRenderContext<'_>,
@@ -430,12 +433,13 @@ fn include_definition_table(
         table_header(
             ui,
             &[
-                ("Definition", 0.22),
-                ("Kind", 0.11),
-                ("Provider", 0.20),
-                ("Section", 0.11),
-                ("Other candidates", 0.20),
-                ("Resolution", 0.16),
+                ("Definition", 0.20),
+                ("Kind", 0.09),
+                ("Provider", 0.18),
+                ("Section", 0.09),
+                ("Other candidates", 0.16),
+                ("Resolution", 0.13),
+                ("", DEFINITION_ACTION_W),
             ],
         );
         if matching.is_empty() {
@@ -463,14 +467,48 @@ fn include_definition_table(
                         ui,
                         false,
                         &[
-                            (&row.definition, 0.22, true),
-                            (row.scope.label(), 0.11, false),
-                            (provider, 0.20, false),
-                            (&section, 0.11, true),
-                            (&others, 0.20, false),
-                            (&row.resolution, 0.16, true),
+                            (&row.definition, 0.20, true),
+                            (row.scope.label(), 0.09, false),
+                            (provider, 0.18, false),
+                            (&section, 0.09, true),
+                            (&others, 0.16, false),
+                            (&row.resolution, 0.13, true),
                         ],
                     );
+                    // A subcircuit one provider settles can be given a symbol
+                    // from its row. The button sits in its own column, over
+                    // the row, without moving the next row down.
+                    let symbol_provider = (row.scope == ModelConsumerScope::Subcircuit
+                        && row.providers.len() == 1
+                        && row.resolved_provider.is_none())
+                    .then(|| {
+                        app.model
+                            .model_library_manager
+                            .effective_definition_provider(row.scope, &row.definition)
+                    })
+                    .and_then(|provider| provider.ok().flatten());
+                    if let Some(provider) = symbol_provider {
+                        let action = egui::Rect::from_min_max(
+                            egui::pos2(
+                                response.rect.right() - response.rect.width() * DEFINITION_ACTION_W,
+                                response.rect.top(),
+                            ),
+                            response.rect.max,
+                        );
+                        let mut cell = ui.new_child(
+                            egui::UiBuilder::new()
+                                .max_rect(action.shrink2(egui::vec2(4.0, 2.0)))
+                                .layout(Layout::right_to_left(Align::Center)),
+                        );
+                        if Button::new("Create symbol\u{2026}")
+                            .compact()
+                            .show(&mut cell)
+                            .clicked()
+                        {
+                            create_subcircuit_symbol =
+                                Some((provider.library, row.definition.clone()));
+                        }
+                    }
                     let announcement = format!(
                         "{} · {} · provider {provider} · section {section} · other candidates \
                          {others} · {}",
@@ -481,21 +519,12 @@ fn include_definition_table(
                     ui.ctx().accesskit_node_builder(response.id, |node| {
                         node.set_label(announcement.clone());
                     });
-                    if response.clicked() {
-                        // A settled decision is still editable and clearable.
-                        // Keep the resolution state separate from its route.
-                        if row.providers.len() > 1 || row.resolved_provider.is_some() {
-                            conflict =
-                                Some((row.definition.clone(), row.scope, row.providers.clone()));
-                        } else if row.scope == ModelConsumerScope::Subcircuit
-                            && let Ok(Some(provider)) = app
-                                .model
-                                .model_library_manager
-                                .effective_definition_provider(row.scope, &row.definition)
-                        {
-                            create_subcircuit_symbol =
-                                Some((provider.library, row.definition.clone()));
-                        }
+                    // A settled decision is still editable and clearable.
+                    // Keep the resolution state separate from its route.
+                    if response.clicked()
+                        && (row.providers.len() > 1 || row.resolved_provider.is_some())
+                    {
+                        conflict = Some((row.definition.clone(), row.scope, row.providers.clone()));
                     }
                 }
             });
