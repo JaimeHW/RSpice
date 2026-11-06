@@ -138,6 +138,8 @@ enum CommandKind {
     Measure,
     /// `setscale [vector]`: the current plot's scale.
     SetScale,
+    /// `remzerovec`: drop the current plot's vectors of no elements.
+    RemoveZeroVectors,
     /// A command ngspice -b accepts with no batch effect.
     Ignored(Ignored),
 }
@@ -199,6 +201,7 @@ impl CommandKind {
             "fft" => Self::Fft,
             "meas" | "measure" => Self::Measure,
             "setscale" => Self::SetScale,
+            "remzerovec" => Self::RemoveZeroVectors,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
             }
@@ -449,6 +452,13 @@ impl ControlCircuit {
             // vectors a later analysis keeps. Every analysis here keeps all
             // of its vectors, so each one the list names stays readable.
             CommandKind::Save => Ok(PreparedCommand::Complete(
+                ControlCommandEffect::CircuitChanged,
+            )),
+            // ngspice `remzerovec` (frontend/postcoms.c:78 com_remzerovec)
+            // drops the current plot's vectors of no elements, which
+            // `.option savecurrents` leaves for the devices it cannot read.
+            // Every vector here has elements, so none is dropped.
+            CommandKind::RemoveZeroVectors => Ok(PreparedCommand::Complete(
                 ControlCommandEffect::CircuitChanged,
             )),
             CommandKind::Destroy => {

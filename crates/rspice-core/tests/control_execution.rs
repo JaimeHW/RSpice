@@ -1053,6 +1053,21 @@ fn setscale_names_the_scale_of_the_current_plot() {
     );
 }
 
+/// `remzerovec` drops only the current plot's vectors of no elements
+/// (frontend/postcoms.c:78), so a transient plot keeps every vector.
+#[test]
+fn remzerovec_keeps_the_vectors_that_have_elements() {
+    let (presented, error) = run_until_error(
+        "remzerovec\nv1 1 0 pwl(0 0 1m 1)\nr1 1 0 1k\n.control\ntran 0.1m 1m\n\
+         display\nremzerovec\ndisplay\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let texts = texts(&presented);
+    assert_eq!(texts.len(), 2);
+    assert_eq!(texts[0], texts[1]);
+    assert!(texts[0].contains("v1#branch"), "{}", texts[0]);
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
