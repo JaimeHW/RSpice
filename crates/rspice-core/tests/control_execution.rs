@@ -907,6 +907,75 @@ fn i_of_a_source_reads_the_branch_vector_of_a_linearized_plot() {
     }
 }
 
+/// `fft` transforms the current transient plot's vectors into a spectrum
+/// plot (frontend/com_fft.c:27): hanning-weighted unless `specwindow` says
+/// otherwise, padded to a power of two N, N/2 + 1 bins of the transform over
+/// N/2 (the first and last over N). For a 0-1-0-1-0 V triangle over 4 ms,
+/// linearized to 41 points, ngspice-46 reports a 4.1 ms span and 23 zeros of
+/// padding, lists `frequency` and the complex `v(1)` of 33 points in sp2,
+/// and prints bins 0, 1 and 4 at 0, 156.25 and 625 Hz as 3.222933e-01,
+/// -1.37508e-01 - 4.13049e-01i and -1.10227e-02 + 2.333482e-01i; with
+/// `specwindow` none, bins 0, 1 and 2 are 3.125000e-01, -1.22642e-01 -
+/// 2.96085e-01i and 1.217008e-01 - 1.21701e-01i.
+#[test]
+fn fft_makes_a_spectrum_plot_of_the_transient_plot() {
+    let (presented, error) = run_until_error(
+        "fft of a triangle\nv1 1 0 pwl(0 0 1m 1 2m 0 3m 1 4m 0)\nr1 1 0 1k\n.control\n\
+         tran 0.1m 4m\nlinearize\nfft v(1)\ndisplay\nprint frequency v(1)\nsetplot tran2\n\
+         set specwindow=none\nfft v(1)\nprint v(1)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let texts = texts(&presented);
+    assert_eq!(
+        texts[0],
+        "FFT: Time span: 0.0041 s, input length: 41, zero padding: 23\n\
+         FFT: Frequency resolution: 243.902 Hz, output length: 33"
+    );
+    assert!(texts[1].contains("Name: sp2 (Spectrum)"), "{}", texts[1]);
+    assert!(
+        texts[1].contains(
+            "    frequency           : frequency, real, 33 long [default scale]\n\
+             \x20   v(1)                : notype, complex, 33 long"
+        ),
+        "{}",
+        texts[1]
+    );
+    let prints: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(printed)
+        .collect();
+    assert_eq!(prints.len(), 2);
+    let check = |trace: &rspice_core::engine::ControlTrace, bins: &[(usize, f64, f64)]| {
+        assert_eq!(trace.y.samples.len(), 33);
+        for &(bin, re, im) in bins {
+            let value = trace.y.samples[bin];
+            assert!(
+                (value.re - re).abs() < 1e-6 && (value.im - im).abs() < 1e-6,
+                "bin {bin}: {value:?}"
+            );
+        }
+    };
+    let hanning = prints[0].last().expect("v(1) printed");
+    assert!((hanning.x.samples[1].re - 156.25).abs() < 1e-9);
+    check(
+        hanning,
+        &[
+            (0, 3.222933e-1, 0.0),
+            (1, -1.37508e-1, -4.13049e-1),
+            (4, -1.10227e-2, 2.333482e-1),
+        ],
+    );
+    check(
+        &prints[1][0],
+        &[
+            (0, 3.125e-1, 0.0),
+            (1, -1.22642e-1, -2.96085e-1),
+            (2, 1.217008e-1, -1.21701e-1),
+        ],
+    );
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first

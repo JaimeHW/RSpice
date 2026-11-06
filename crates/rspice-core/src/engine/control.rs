@@ -132,6 +132,8 @@ enum CommandKind {
     Cutout,
     /// `linearize`: a transient plot of the current one on an even grid.
     Linearize,
+    /// `fft`: a spectrum plot of the current transient plot's vectors.
+    Fft,
     /// `meas` and `measure`.
     Measure,
     /// A command ngspice -b accepts with no batch effect.
@@ -192,6 +194,7 @@ impl CommandKind {
             "wrdata" => Self::WriteData,
             "cutout" => Self::Cutout,
             "linearize" => Self::Linearize,
+            "fft" => Self::Fft,
             "meas" | "measure" => Self::Measure,
             "gnuplot" | "hardcopy" | "asciiplot" | "iplot" | "xgraph" | "bltplot" => {
                 Self::Ignored(Ignored::Device)
@@ -456,6 +459,19 @@ impl ControlCircuit {
                 Ok(PreparedCommand::Complete(
                     ControlCommandEffect::CircuitChanged,
                 ))
+            }
+            CommandKind::Fft => {
+                let report = self.fft(command, variables, abort)?;
+                if report.is_empty() {
+                    Ok(PreparedCommand::Complete(
+                        ControlCommandEffect::CircuitChanged,
+                    ))
+                } else {
+                    Ok(Self::batch_output(
+                        command,
+                        ControlPresentationKind::Text(report),
+                    ))
+                }
             }
             CommandKind::Linearize => {
                 let report = self.linearize(command, variables, abort)?;

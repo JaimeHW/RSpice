@@ -13,6 +13,7 @@ mod noise;
 mod pole_zero;
 mod sensitivity;
 mod sparam;
+mod spectrum;
 mod stability;
 mod transfer;
 mod vectors;
