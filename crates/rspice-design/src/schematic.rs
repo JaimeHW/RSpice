@@ -8,6 +8,7 @@ pub mod bus_route;
 pub mod clipboard;
 pub mod clipboard_edit;
 pub mod component;
+pub mod component_category;
 pub mod component_display;
 pub mod component_edit;
 pub mod component_references;

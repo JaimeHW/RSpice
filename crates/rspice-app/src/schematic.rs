@@ -15,7 +15,8 @@
 
 pub(crate) use rspice_schematic_editor::symbols;
 pub use rspice_schematic_editor::{
-    ComponentPaletteEntry, component_palette, device_class_keywords,
+    ComponentCategory, ComponentPaletteEntry, PaletteRow, component_palette, device_class_keywords,
+    palette_rows,
 };
 pub(crate) mod symbol_editor;
 pub(crate) mod view;

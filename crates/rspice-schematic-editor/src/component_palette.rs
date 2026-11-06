@@ -1,9 +1,15 @@
-//! The component palette.
+//! The component palette: the one taxonomy of built-in placeable parts.
 //!
-//! The placeable devices, grouped into the sections the palette shows, with
-//! the words a reader searches each one by.
+//! Every native primitive is filed here under its functional group, with the
+//! words a reader searches it by. Code models carry their own group on their
+//! catalog descriptor; [`palette_rows`] merges the two, so the shelf, the
+//! instance catalog and the symbol audit all read one list.
 
+pub use rspice_design::schematic::component_category::ComponentCategory;
 use rspice_design::schematic::component_type::ComponentType;
+use rspice_design::schematic::device_catalog::{
+    CatalogXspiceDeviceDescriptor, engine_only_xspice_devices,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteEntry {
@@ -17,8 +23,24 @@ pub struct ComponentPaletteEntry {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ComponentPaletteSection {
-    pub title: &'static str,
+    pub category: ComponentCategory,
     pub entries: &'static [ComponentPaletteEntry],
+}
+
+/// One row of a functional group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PaletteRow {
+    Primitive(&'static ComponentPaletteEntry),
+    Xspice(&'static CatalogXspiceDeviceDescriptor),
+}
+
+impl PaletteRow {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Primitive(entry) => entry.label,
+            Self::Xspice(descriptor) => descriptor.display_name,
+        }
+    }
 }
 
 const fn entry(
@@ -35,6 +57,19 @@ const fn entry(
 
 use ComponentType as T;
 
+const HIERARCHY: &[ComponentPaletteEntry] = &[
+    entry(
+        T::Port,
+        "Port",
+        &["pin", "io", "interface", "terminal", "hierarchical port"],
+    ),
+    entry(
+        T::Ground,
+        "Ground",
+        &["gnd", "0", "node 0", "common", "reference"],
+    ),
+];
+
 const PASSIVES: &[ComponentPaletteEntry] = &[
     entry(T::Resistor, "Resistor", &["r", "res", "resistance", "ohm"]),
     entry(
@@ -47,42 +82,7 @@ const PASSIVES: &[ComponentPaletteEntry] = &[
         "Inductor",
         &["l", "ind", "inductance", "coil", "choke"],
     ),
-    entry(
-        T::Transformer,
-        "Transformer",
-        &["xfmr", "coupled inductors", "magnetics"],
-    ),
-    entry(
-        T::SaturableInductor,
-        "Saturable Inductor",
-        &["jiles atherton", "saturation", "nonlinear inductor", "core"],
-    ),
-    entry(
-        T::CoupledInductor,
-        "K Coupling",
-        &[
-            "k",
-            "mutual inductance",
-            "coupling coefficient",
-            "coupled inductors",
-        ],
-    ),
     entry(T::Memristor, "Memristor", &["memristive"]),
-    entry(
-        T::TransmissionLine,
-        "Transmission Line",
-        &["t", "tline", "lossless line", "delay line", "coax"],
-    ),
-    entry(
-        T::LossyTransmissionLine,
-        "Lossy Transmission Line",
-        &["o", "ltra", "lossy line", "rlgc"],
-    ),
-    entry(
-        T::CoupledTransmissionLine,
-        "Coupled Transmission Line",
-        &["p", "cpl", "multiconductor line", "coupled line"],
-    ),
 ];
 
 const SOURCES: &[ComponentPaletteEntry] = &[
@@ -209,40 +209,6 @@ const SOURCES: &[ComponentPaletteEntry] = &[
         T::CurrentSourceRandom,
         "Random Current Source",
         &["irandom", "trrandom"],
-    ),
-    entry(
-        T::BehavioralSource,
-        "Behavioral Source",
-        &[
-            "b",
-            "bsource",
-            "expression",
-            "arbitrary source",
-            "behavioral voltage",
-            "behavioral current",
-        ],
-    ),
-    entry(
-        T::RfPort,
-        "RF Port",
-        &["port", "s parameters", "termination", "50 ohm"],
-    ),
-    entry(
-        T::LoopProbe,
-        "Loop Probe",
-        &[
-            "stability",
-            "loop gain",
-            "phase margin",
-            "middlebrook",
-            "tian",
-            "probe",
-        ],
-    ),
-    entry(
-        T::Ground,
-        "Ground",
-        &["gnd", "0", "node 0", "common", "reference"],
     ),
 ];
 
@@ -375,18 +341,19 @@ const SEMICONDUCTORS: &[ComponentPaletteEntry] = &[
     ),
 ];
 
+const AMPLIFIERS: &[ComponentPaletteEntry] = &[entry(
+    T::OpAmp,
+    "Op-Amp",
+    &[
+        "opamp",
+        "operational amplifier",
+        "amplifier",
+        "amp",
+        "ideal op amp",
+    ],
+)];
+
 const CONTROLLED: &[ComponentPaletteEntry] = &[
-    entry(
-        T::OpAmp,
-        "Op-Amp",
-        &[
-            "opamp",
-            "operational amplifier",
-            "amplifier",
-            "amp",
-            "ideal op amp",
-        ],
-    ),
     entry(
         T::Vcvs,
         "VCVS (E)",
@@ -457,7 +424,83 @@ const CONTROLLED: &[ComponentPaletteEntry] = &[
     ),
 ];
 
+const DIGITAL: &[ComponentPaletteEntry] = &[
+    entry(
+        T::XspiceBuffer,
+        "Buffer (event-driven)",
+        &["logic", "digital buffer"],
+    ),
+    entry(
+        T::XspiceInverter,
+        "Inverter (event-driven)",
+        &["not", "not gate", "logic"],
+    ),
+    entry(
+        T::XspiceTristate,
+        "Tri-State Buffer (event-driven)",
+        &["tristate", "three state", "logic"],
+    ),
+    entry(
+        T::XspiceAndGate,
+        "AND Gate (event-driven)",
+        &["and", "logic"],
+    ),
+    entry(T::XspiceOrGate, "OR Gate (event-driven)", &["or", "logic"]),
+    entry(
+        T::XspiceNandGate,
+        "NAND Gate (event-driven)",
+        &["nand", "logic"],
+    ),
+    entry(
+        T::XspiceNorGate,
+        "NOR Gate (event-driven)",
+        &["nor", "logic"],
+    ),
+    entry(
+        T::XspiceXorGate,
+        "XOR Gate (event-driven)",
+        &["xor", "exclusive or", "logic"],
+    ),
+    entry(
+        T::XspiceDFlipFlop,
+        "D Flip-Flop (event-driven)",
+        &["dff", "flip flop", "flop", "register"],
+    ),
+    entry(
+        T::XspiceJkFlipFlop,
+        "JK Flip-Flop (event-driven)",
+        &["jkff", "flip flop", "flop"],
+    ),
+    entry(
+        T::XspiceSrLatch,
+        "SR Latch (event-driven)",
+        &["latch", "set reset"],
+    ),
+    entry(
+        T::XspiceAdcBridge,
+        "ADC Bridge",
+        &["adc", "analog to digital", "bridge"],
+    ),
+    entry(
+        T::XspiceDacBridge,
+        "DAC Bridge",
+        &["dac", "digital to analog", "bridge"],
+    ),
+];
+
 const BEHAVIORAL: &[ComponentPaletteEntry] = &[
+    entry(
+        T::BehavioralSource,
+        "Behavioral Source",
+        &[
+            "b",
+            "bsource",
+            "expression",
+            "arbitrary source",
+            "behavioral voltage",
+            "behavioral current",
+        ],
+    ),
     entry(T::XspiceGain, "Gain", &["scale", "gain block"]),
     entry(
         T::XspiceSummer,
@@ -489,80 +532,134 @@ const BEHAVIORAL: &[ComponentPaletteEntry] = &[
         "Differentiator",
         &["derivative", "differentiate"],
     ),
-    entry(T::XspiceBuffer, "Buffer", &["logic", "digital buffer"]),
-    entry(T::XspiceInverter, "Inverter", &["not", "not gate", "logic"]),
+];
+
+const MAGNETICS: &[ComponentPaletteEntry] = &[
     entry(
-        T::XspiceTristate,
-        "Tri-State Buffer",
-        &["tristate", "three state", "logic"],
-    ),
-    entry(T::XspiceAndGate, "AND Gate", &["and", "logic"]),
-    entry(T::XspiceOrGate, "OR Gate", &["or", "logic"]),
-    entry(T::XspiceNandGate, "NAND Gate", &["nand", "logic"]),
-    entry(T::XspiceNorGate, "NOR Gate", &["nor", "logic"]),
-    entry(
-        T::XspiceXorGate,
-        "XOR Gate",
-        &["xor", "exclusive or", "logic"],
+        T::Transformer,
+        "Transformer",
+        &["xfmr", "coupled inductors", "magnetics"],
     ),
     entry(
-        T::XspiceDFlipFlop,
-        "D Flip-Flop",
-        &["dff", "flip flop", "flop", "register"],
+        T::CoupledInductor,
+        "K Coupling",
+        &[
+            "k",
+            "mutual inductance",
+            "coupling coefficient",
+            "coupled inductors",
+        ],
     ),
     entry(
-        T::XspiceJkFlipFlop,
-        "JK Flip-Flop",
-        &["jkff", "flip flop", "flop"],
-    ),
-    entry(T::XspiceSrLatch, "SR Latch", &["latch", "set reset"]),
-    entry(
-        T::XspiceAdcBridge,
-        "ADC Bridge",
-        &["adc", "analog to digital", "bridge"],
-    ),
-    entry(
-        T::XspiceDacBridge,
-        "DAC Bridge",
-        &["dac", "digital to analog", "bridge"],
+        T::SaturableInductor,
+        "Saturable Inductor",
+        &["jiles atherton", "saturation", "nonlinear inductor", "core"],
     ),
 ];
 
-const HIERARCHY: &[ComponentPaletteEntry] = &[entry(
-    T::Port,
-    "Port",
-    &["pin", "io", "interface", "terminal", "hierarchical port"],
+const LINES: &[ComponentPaletteEntry] = &[
+    entry(
+        T::TransmissionLine,
+        "Transmission Line",
+        &["t", "tline", "lossless line", "delay line", "coax"],
+    ),
+    entry(
+        T::LossyTransmissionLine,
+        "Lossy Transmission Line",
+        &["o", "ltra", "lossy line", "rlgc"],
+    ),
+    entry(
+        T::CoupledTransmissionLine,
+        "Coupled Transmission Line",
+        &["p", "cpl", "multiconductor line", "coupled line"],
+    ),
+    entry(
+        T::RfPort,
+        "RF Port",
+        &["port", "s parameters", "termination", "50 ohm"],
+    ),
+];
+
+const PROBES: &[ComponentPaletteEntry] = &[entry(
+    T::LoopProbe,
+    "Loop Probe",
+    &[
+        "stability",
+        "loop gain",
+        "phase margin",
+        "middlebrook",
+        "tian",
+        "probe",
+    ],
 )];
 
 const PALETTE: &[ComponentPaletteSection] = &[
     ComponentPaletteSection {
-        title: "Hierarchy",
+        category: ComponentCategory::HierarchyConnectivity,
         entries: HIERARCHY,
     },
     ComponentPaletteSection {
-        title: "Passives",
+        category: ComponentCategory::Passives,
         entries: PASSIVES,
     },
     ComponentPaletteSection {
-        title: "Sources",
+        category: ComponentCategory::Sources,
         entries: SOURCES,
     },
     ComponentPaletteSection {
-        title: "Semiconductors",
+        category: ComponentCategory::Semiconductors,
         entries: SEMICONDUCTORS,
     },
     ComponentPaletteSection {
-        title: "Controlled sources",
+        category: ComponentCategory::AmplifiersComparators,
+        entries: AMPLIFIERS,
+    },
+    ComponentPaletteSection {
+        category: ComponentCategory::ControlledSourcesSwitches,
         entries: CONTROLLED,
     },
     ComponentPaletteSection {
-        title: "Behavioral (XSPICE)",
+        category: ComponentCategory::DigitalEventDriven,
+        entries: DIGITAL,
+    },
+    ComponentPaletteSection {
+        category: ComponentCategory::BehavioralMath,
         entries: BEHAVIORAL,
+    },
+    ComponentPaletteSection {
+        category: ComponentCategory::Magnetics,
+        entries: MAGNETICS,
+    },
+    ComponentPaletteSection {
+        category: ComponentCategory::LinesRf,
+        entries: LINES,
+    },
+    ComponentPaletteSection {
+        category: ComponentCategory::ProbesMeters,
+        entries: PROBES,
     },
 ];
 
 pub fn component_palette() -> &'static [ComponentPaletteSection] {
     PALETTE
+}
+
+/// Every row filed under `category`: its native primitives in palette order,
+/// then its code models by name. A code model that duplicates a native part
+/// carries no group and is never listed; it stays valid in netlists.
+pub fn palette_rows(category: ComponentCategory) -> Vec<PaletteRow> {
+    let mut rows = PALETTE
+        .iter()
+        .filter(|section| section.category == category)
+        .flat_map(|section| section.entries.iter().map(PaletteRow::Primitive))
+        .collect::<Vec<_>>();
+    let mut models = engine_only_xspice_devices()
+        .iter()
+        .filter(|descriptor| descriptor.category == Some(category))
+        .collect::<Vec<_>>();
+    models.sort_by_key(|descriptor| descriptor.display_name);
+    rows.extend(models.into_iter().map(PaletteRow::Xspice));
+    rows
 }
 
 /// The search words for a model-library part's device class, in the class

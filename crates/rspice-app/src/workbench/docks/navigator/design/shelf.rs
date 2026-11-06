@@ -20,9 +20,13 @@ pub(super) mod search;
 use std::collections::{BTreeMap, HashSet};
 
 use egui::{Response, ScrollArea, Ui};
+use rspice_design::schematic::device_catalog::CatalogXspiceDeviceDescriptor;
 
 use crate::schematic::view::SchematicShelfDragPayload;
-use crate::schematic::{ComponentPaletteEntry, component_palette, device_class_keywords};
+use crate::schematic::{
+    ComponentCategory, ComponentPaletteEntry, PaletteRow, component_palette, device_class_keywords,
+    palette_rows,
+};
 use crate::state::model_hub::{
     ModelHubPartRow, PartPlacement, PartProvenance, PartState, plan_library_placement,
     refusal_sentence,
@@ -51,39 +55,35 @@ use super::super::{
 };
 use search::{MatchRank, ShelfQuery, ShelfTerms};
 
-/// The shelf's primitive groups: the band's name, the family glyph its group
-/// row carries, whether a fresh install shows the band open, and the palette
-/// sections it gathers. The family glyphs follow the mockup's `PART_CATALOG`
-/// group column — Passives —, Sources ◯, Analog ▷, Mixed signal ⊞ — with the
-/// non-Latin marks painted as vector geometry because the bundled faces do
-/// not hold them (see [`ShelfGlyph`]).
+/// The family glyph a functional group's row carries.
 ///
-/// Passives is the one band open on first run — the mockup's
-/// `shelfOpenGroups: { Passives: true }` — so a new install's shelf leads
-/// with placeable rows instead of four folded bands over an empty-looking
-/// panel. Every position is still the reader's own once moved: only the
-/// default behind the persisted flag differs per group.
-pub(super) const PRIMITIVE_GROUPS: [(&str, ShelfGlyph, bool, &[&str]); 4] = [
-    (
-        "Passives",
-        ShelfGlyph::Text("\u{2014}"),
-        true,
-        &["Passives"],
-    ),
-    ("Sources", ShelfGlyph::Source, false, &["Sources"]),
-    (
-        "Analog",
-        ShelfGlyph::Amp,
-        false,
-        &["Hierarchy", "Semiconductors", "Controlled sources"],
-    ),
-    (
-        "Mixed signal / XSPICE",
-        ShelfGlyph::Event,
-        false,
-        &["Behavioral (XSPICE)"],
-    ),
-];
+/// The non-Latin marks are painted as vector geometry because the bundled
+/// faces do not hold them (see [`ShelfGlyph`]).
+pub(super) fn category_glyph(category: ComponentCategory) -> ShelfGlyph {
+    match category {
+        ComponentCategory::HierarchyConnectivity => ShelfGlyph::Icon(WorkbenchIcon::Pin),
+        ComponentCategory::Passives => ShelfGlyph::Text("\u{2014}"),
+        ComponentCategory::Sources => ShelfGlyph::Source,
+        ComponentCategory::Semiconductors => ShelfGlyph::Text("Q"),
+        ComponentCategory::AmplifiersComparators => ShelfGlyph::Amp,
+        ComponentCategory::ControlledSourcesSwitches => ShelfGlyph::Text("E"),
+        ComponentCategory::LogicTiming => ShelfGlyph::Text("&"),
+        ComponentCategory::DigitalEventDriven => ShelfGlyph::Event,
+        ComponentCategory::BehavioralMath => ShelfGlyph::Text("B"),
+        ComponentCategory::Magnetics => ShelfGlyph::Text("K"),
+        ComponentCategory::LinesRf => ShelfGlyph::Text("T"),
+        ComponentCategory::ProtectionElectromechanical => ShelfGlyph::Text("F"),
+        ComponentCategory::ProbesMeters => ShelfGlyph::Icon(WorkbenchIcon::Probe),
+    }
+}
+
+/// Passives is the one group open on first run, so a new install's shelf
+/// leads with placeable rows instead of a column of folded groups. Every
+/// position is the reader's own once moved: only the default behind the
+/// persisted flag differs per group.
+fn category_open_by_default(category: ComponentCategory) -> bool {
+    category == ComponentCategory::Passives
+}
 
 /// The identity mark a Component-shelf row paints in its glyph column.
 ///
@@ -272,9 +272,8 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         return;
     }
     let mut band = None;
-    let mut primitive = None;
+    let mut catalog = None;
     let mut stimulus = None;
-    let mut builtin = None;
     let mut generated = None;
     let mut cell = None;
     let mut requested_part = None;
@@ -288,9 +287,8 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
         .show(ui, |ui| {
             let pinned = pinned_band(ui, state, &library_parts, &cells);
             band = recent_band(ui, state, &library_parts, &cells).or(pinned);
-            primitive = primitive_catalog(ui, state);
+            catalog = component_catalog(ui, state);
             stimulus = stimulus_library_section(ui, state);
-            builtin = builtin_xspice_catalog(ui, state);
             generated = generated_veriloga_catalog(ui, state);
             requested_part = library_parts_section(ui, state, &library_parts);
             cell = project_library(ui, state, &cells);
@@ -305,14 +303,10 @@ pub(super) fn component_shelf(ui: &mut Ui, app: &mut RSpiceApp) {
                 "the shelf keeps every fold position under its own row"
             );
         });
-    if let Some(arm) = band {
+    if let Some(arm) = band.or(catalog) {
         apply_shelf_arm(app, arm, ui.ctx());
-    } else if let Some(kind) = primitive {
-        arm_primitive(app, kind, ui.ctx());
     } else if let Some(name) = stimulus {
         arm_stimulus_definition(&mut app.state, &name, ui.ctx());
-    } else if let Some(binding) = builtin {
-        arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(binding) = generated {
         arm_cell(&mut app.state, binding, ui.ctx());
     } else if let Some(binding) = cell {
@@ -977,7 +971,7 @@ struct ShelfEntryRow {
 
 /// What clicking a resolved pinned or recent row does.
 #[derive(Clone)]
-enum ShelfArm {
+pub(super) enum ShelfArm {
     Primitive(ComponentType),
     /// Held by stable id rather than by binding: a vector-port code model
     /// opens the placement dialog instead of arming, and that fork belongs
@@ -1239,23 +1233,31 @@ fn apply_shelf_arm(app: &mut RSpiceApp, arm: ShelfArm, ctx: &egui::Context) {
     }
 }
 
-pub(super) fn primitive_catalog(ui: &mut Ui, state: &mut AppState) -> Option<ComponentType> {
+/// The built-in catalog: every functional group that has rows, each holding
+/// native primitives and code models side by side.
+pub(super) fn component_catalog(ui: &mut Ui, state: &mut AppState) -> Option<ShelfArm> {
     let mut armed = None;
-    shelf_section_header(ui, "Primitives", Some(&primitive_entry_count().to_string()));
-    for (group, glyph, open_default, section_names) in PRIMITIVE_GROUPS {
-        let entries = primitive_entries(section_names);
-        if entries.is_empty() {
+    shelf_section_header(ui, "Built-in", Some(&catalog_row_count().to_string()));
+    for category in ComponentCategory::ALL {
+        let rows = palette_rows(category);
+        if rows.is_empty() {
             continue;
         }
         if catalog_group_row(
             ui,
-            ("component-shelf", group),
-            glyph,
-            group,
-            entries.len(),
-            open_default,
+            ("component-shelf", category.title()),
+            category_glyph(category),
+            category.title(),
+            rows.len(),
+            category_open_by_default(category),
         ) {
-            armed = primitive_rows(ui, state, &entries, 2).or(armed);
+            for row in rows {
+                let clicked = match row {
+                    PaletteRow::Primitive(entry) => primitive_row(ui, state, entry, 2),
+                    PaletteRow::Xspice(descriptor) => xspice_row(ui, state, descriptor, 2),
+                };
+                armed = clicked.or(armed);
+            }
         }
     }
     armed
@@ -1366,31 +1368,27 @@ pub(super) fn shelf_part_row(
     response
 }
 
-fn primitive_rows(
+fn primitive_row(
     ui: &mut Ui,
     state: &mut AppState,
-    entries: &[ComponentPaletteEntry],
+    entry: &ComponentPaletteEntry,
     level: usize,
-) -> Option<ComponentType> {
-    let mut armed = None;
-    for entry in entries {
-        let response = shelf_part_row(
-            ui,
-            primitive_shelf_glyph(entry.kind),
-            entry.label,
-            state.model.schematic.session.editor.tool == Tool::Place(entry.kind),
-            primitive_shelf_meta(entry.kind).as_deref(),
-            level,
-        );
-        if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
-            response.dnd_set_drag_payload(payload);
-        }
-        if response.clicked() {
-            armed = Some(entry.kind);
-        }
-        shelf_pin_context_menu(&response, state, &ShelfEntry::Primitive(entry.kind));
+) -> Option<ShelfArm> {
+    let response = shelf_part_row(
+        ui,
+        primitive_shelf_glyph(entry.kind),
+        entry.label,
+        state.model.schematic.session.editor.tool == Tool::Place(entry.kind),
+        primitive_shelf_meta(entry.kind).as_deref(),
+        level,
+    );
+    if let Some(payload) = SchematicShelfDragPayload::primitive(entry.kind) {
+        response.dnd_set_drag_payload(payload);
     }
-    armed
+    shelf_pin_context_menu(&response, state, &ShelfEntry::Primitive(entry.kind));
+    response
+        .clicked()
+        .then_some(ShelfArm::Primitive(entry.kind))
 }
 
 /// The Stimulus library section: every definition this project authored, as a
@@ -1499,65 +1497,49 @@ fn arm_stimulus_definition(state: &mut AppState, name: &str, ctx: &egui::Context
     }
 }
 
-fn builtin_xspice_catalog(ui: &mut Ui, state: &mut AppState) -> Option<LibraryCellInstance> {
-    let descriptors = engine_only_xspice_devices();
-    if descriptors.is_empty() {
-        return None;
-    }
-    if !catalog_group_row(
+fn xspice_row(
+    ui: &mut Ui,
+    state: &mut AppState,
+    descriptor: &CatalogXspiceDeviceDescriptor,
+    level: usize,
+) -> Option<ShelfArm> {
+    let selected = state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_library_cell
+        .as_ref()
+        .map(|pending| &pending.binding)
+        .and_then(|binding| binding.builtin_xspice.as_ref())
+        .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
+        && state.model.schematic.session.editor.tool == Tool::Place(ComponentType::CellInstance);
+    let response = shelf_part_row(
         ui,
-        "component-shelf-builtin-xspice",
         ShelfGlyph::Event,
-        "Built-in XSPICE",
-        descriptors.len(),
-        false,
-    ) {
-        return None;
-    }
-
-    let mut armed = None;
-    for descriptor in descriptors {
-        let selected = state
-            .model
-            .schematic
-            .session
-            .editor
-            .pending_library_cell
-            .as_ref()
-            .map(|pending| &pending.binding)
-            .and_then(|binding| binding.builtin_xspice.as_ref())
-            .is_some_and(|binding| binding.stable_id == descriptor.stable_id)
-            && state.model.schematic.session.editor.tool
-                == Tool::Place(ComponentType::CellInstance);
-        let response = shelf_part_row(
-            ui,
-            ShelfGlyph::Event,
-            descriptor.display_name,
-            selected,
-            Some(descriptor.model_type),
-            2,
-        );
-        let stable_id = descriptor.stable_id;
-        match builtin_xspice_library_binding(descriptor) {
-            Ok(binding) => {
-                response
-                    .dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding.clone()));
-                let clicked = response.clicked();
-                shelf_pin_context_menu(
-                    &response,
-                    state,
-                    &ShelfEntry::BuiltinXspice(stable_id.to_owned()),
-                );
-                if clicked {
-                    armed = place_builtin_xspice(state, stable_id).or(armed);
-                }
-            }
-            Err(error) => {
-                log::error!("Cannot expose {stable_id} in the XSPICE catalog: {error}");
-            }
+        descriptor.display_name,
+        selected,
+        Some(descriptor.model_type),
+        level,
+    );
+    let stable_id = descriptor.stable_id;
+    match builtin_xspice_library_binding(descriptor) {
+        Ok(binding) => {
+            response.dnd_set_drag_payload(SchematicShelfDragPayload::library_cell(binding));
+            shelf_pin_context_menu(
+                &response,
+                state,
+                &ShelfEntry::BuiltinXspice(stable_id.to_owned()),
+            );
+            response
+                .clicked()
+                .then(|| ShelfArm::BuiltinXspice(stable_id.to_owned()))
+        }
+        Err(error) => {
+            log::error!("Cannot expose {stable_id} in the XSPICE catalog: {error}");
+            None
         }
     }
-    armed
 }
 
 /// Decide what one built-in XSPICE click does.
@@ -1882,14 +1864,6 @@ fn finish_shelf_placement(state: &mut AppState, ctx: &egui::Context) {
     rspice_schematic_editor::view::canvas::request_focus(ctx);
 }
 
-pub(super) fn primitive_entries(section_names: &[&str]) -> Vec<ComponentPaletteEntry> {
-    component_palette()
-        .iter()
-        .filter(|section| section_names.contains(&section.title))
-        .flat_map(|section| section.entries.iter().copied())
-        .collect()
-}
-
 /// The label a primitive's own shelf row carries.
 pub(super) fn primitive_label(kind: ComponentType) -> &'static str {
     component_palette()
@@ -1899,10 +1873,11 @@ pub(super) fn primitive_label(kind: ComponentType) -> &'static str {
         .map_or(kind.display_name(), |entry| entry.label)
 }
 
-pub(super) fn primitive_entry_count() -> usize {
-    component_palette()
-        .iter()
-        .map(|section| section.entries.len())
+/// Rows the built-in catalog holds across every group.
+pub(super) fn catalog_row_count() -> usize {
+    ComponentCategory::ALL
+        .into_iter()
+        .map(|category| palette_rows(category).len())
         .sum()
 }
 
@@ -1964,31 +1939,33 @@ pub(super) fn shelf_hits(
             hits.push(ShelfHit::of(rank, row));
         }
     };
-    for (_, _, _, sections) in PRIMITIVE_GROUPS {
-        for entry in primitive_entries(sections) {
-            let mut keywords = entry.keywords.to_vec();
-            keywords.push(entry.kind.display_name());
-            let rank = query.rank(&ShelfTerms {
-                label: entry.label,
-                keywords: &keywords,
-                part_numbers: &[],
-            });
-            offer(&mut hits, rank, ShelfEntry::Primitive(entry.kind));
+    for row in ComponentCategory::ALL.into_iter().flat_map(palette_rows) {
+        match row {
+            PaletteRow::Primitive(entry) => {
+                let mut keywords = entry.keywords.to_vec();
+                keywords.push(entry.kind.display_name());
+                let rank = query.rank(&ShelfTerms {
+                    label: entry.label,
+                    keywords: &keywords,
+                    part_numbers: &[],
+                });
+                offer(&mut hits, rank, ShelfEntry::Primitive(entry.kind));
+            }
+            PaletteRow::Xspice(descriptor) => {
+                let mut part_numbers = vec![descriptor.model_type];
+                part_numbers.extend_from_slice(descriptor.aliases);
+                let rank = query.rank(&ShelfTerms {
+                    label: descriptor.display_name,
+                    keywords: descriptor.keywords,
+                    part_numbers: &part_numbers,
+                });
+                offer(
+                    &mut hits,
+                    rank,
+                    ShelfEntry::BuiltinXspice(descriptor.stable_id.to_owned()),
+                );
+            }
         }
-    }
-    for descriptor in engine_only_xspice_devices() {
-        let mut part_numbers = vec![descriptor.model_type];
-        part_numbers.extend_from_slice(descriptor.aliases);
-        let rank = query.rank(&ShelfTerms {
-            label: descriptor.display_name,
-            keywords: descriptor.keywords,
-            part_numbers: &part_numbers,
-        });
-        offer(
-            &mut hits,
-            rank,
-            ShelfEntry::BuiltinXspice(descriptor.stable_id.to_owned()),
-        );
     }
     for descriptor in generated_veriloga_devices() {
         let rank = query.rank(&ShelfTerms {

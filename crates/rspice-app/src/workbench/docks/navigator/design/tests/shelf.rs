@@ -10,8 +10,8 @@
 
 use super::super::shelf::*;
 use super::*;
-use crate::schematic::component_palette;
 use crate::schematic::view::SchematicShelfDragPayload;
+use crate::schematic::{ComponentCategory, PaletteRow, component_palette, palette_rows};
 use crate::state::model_hub::{ModelHubPartRow, PartPlacement, PartProvenance, PartState};
 use crate::state::model_library::{ModelLibrary, ModelSourceAuthority};
 use crate::state::{
@@ -20,19 +20,63 @@ use crate::state::{
 };
 use crate::workbench::framework::requests::FocusPlacementSearch;
 
+/// Every built-in part is filed under exactly one functional group, and a
+/// label names one row: two rows a reader cannot tell apart are one too many.
 #[test]
-fn mockup_primitive_groups_cover_every_placeable_palette_entry_once() {
-    let entries = PRIMITIVE_GROUPS
-        .iter()
-        .flat_map(|(_, _, _, sections)| primitive_entries(sections))
+fn every_built_in_part_is_filed_once_and_no_two_rows_share_a_label() {
+    let rows = ComponentCategory::ALL
+        .into_iter()
+        .flat_map(palette_rows)
         .collect::<Vec<_>>();
-    let unique = entries
+    assert_eq!(rows.len(), catalog_row_count());
+    let mut labels = HashSet::new();
+    for row in &rows {
+        assert!(
+            labels.insert(row.label()),
+            "two shelf rows are labelled {:?}",
+            row.label()
+        );
+    }
+    let entries = component_palette()
         .iter()
-        .map(|entry| entry.kind)
-        .collect::<HashSet<_>>();
+        .map(|section| section.entries.len())
+        .sum::<usize>();
+    let filed_primitives = rows
+        .iter()
+        .filter(|row| matches!(row, PaletteRow::Primitive(_)))
+        .count();
+    assert_eq!(filed_primitives, entries);
 
-    assert_eq!(entries.len(), primitive_entry_count());
-    assert_eq!(unique.len(), entries.len());
+    // A code model is filed unless it duplicates a native part, which the
+    // shelf offers instead.
+    let filed_models = rows
+        .iter()
+        .filter(|row| matches!(row, PaletteRow::Xspice(_)))
+        .count();
+    let grouped = engine_only_xspice_devices()
+        .iter()
+        .filter(|descriptor| descriptor.category.is_some())
+        .count();
+    assert_eq!(filed_models, grouped);
+    for duplicate in [
+        "capacitor",
+        "capacitoric",
+        "inductor",
+        "inductoric",
+        "memristor",
+        "zener",
+        "tline",
+        "cpline",
+    ] {
+        let descriptor = engine_only_xspice_devices()
+            .iter()
+            .find(|descriptor| descriptor.model_type == duplicate)
+            .expect("the duplicate is still a valid code model");
+        assert_eq!(
+            descriptor.category, None,
+            "{duplicate} duplicates a native part and stays off the shelf"
+        );
+    }
 }
 
 #[test]
@@ -330,7 +374,7 @@ fn every_shelf_glyph() -> Vec<ShelfGlyph> {
         // Library parts and project-library bands.
         ShelfGlyph::Icon(WorkbenchIcon::Models),
     ];
-    glyphs.extend(PRIMITIVE_GROUPS.iter().map(|(_, glyph, _, _)| *glyph));
+    glyphs.extend(ComponentCategory::ALL.map(category_glyph));
     for section in component_palette() {
         for entry in section.entries {
             glyphs.push(primitive_shelf_glyph(entry.kind));
@@ -419,7 +463,7 @@ fn shelf_frame(
                 .frame(egui::Frame::NONE)
                 .show(ctx, |ui| {
                     ui.set_width(260.0);
-                    primitive_catalog(ui, state);
+                    component_catalog(ui, state);
                 });
         },
     );
@@ -472,13 +516,18 @@ fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() 
     let _ = shelf_frame(&ctx, &mut app.state, Vec::new());
     let (text, controls) = shelf_frame(&ctx, &mut app.state, Vec::new());
 
-    for passive in ["Resistor", "Capacitor", "Transmission Line"] {
+    for passive in ["Resistor", "Capacitor", "Potentiometer"] {
         assert!(
             text.contains(passive),
             "a fresh shelf shows the Passives rows, missing {passive}: {text}"
         );
     }
-    for folded in ["Voltage Source", "NMOS", "AND Gate", "Op-Amp"] {
+    for folded in [
+        "Voltage Source",
+        "NMOS",
+        "AND Gate (event-driven)",
+        "Op-Amp",
+    ] {
         assert!(
             !text.contains(folded),
             "{folded} belongs to a band a fresh install keeps folded: {text}"
@@ -493,7 +542,12 @@ fn a_fresh_shelf_opens_passives_and_folds_the_rest_until_the_reader_moves_one() 
         (hits[0].1, hits[0].2)
     };
     assert_eq!(expanded(&controls, "Passives").1, Some(true));
-    for band in ["Sources", "Analog", "Mixed signal / XSPICE"] {
+    for band in [
+        "Hierarchy & connectivity",
+        "Sources",
+        "Semiconductors",
+        "Digital (event-driven)",
+    ] {
         assert_eq!(
             expanded(&controls, band).1,
             Some(false),
@@ -1024,9 +1078,8 @@ fn the_pinned_band_paints_the_set_and_is_absent_once_it_empties() {
 fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
     let mut shelf = ShelfHarness::opened().settled();
     let (_, runs) = shelf.frame(Vec::new());
-    let row = run_rect(&runs, "Transmission Line")
-        .expect("the Passives band paints a Transmission Line row");
-    let entry = ShelfEntry::Primitive(ComponentType::TransmissionLine);
+    let row = run_rect(&runs, "Memristor").expect("the Passives band paints a Memristor row");
+    let entry = ShelfEntry::Primitive(ComponentType::Memristor);
     assert!(
         !is_pinned(&shelf.app.state, &entry),
         "the row starts unpinned"
@@ -1049,8 +1102,7 @@ fn a_row_is_pinned_and_unpinned_from_its_context_menu() {
     // The pinned row now leads the shelf, and its menu offers the other
     // position — the same control, stating where the row stands.
     let (_, runs) = shelf.frame(Vec::new());
-    let pinned_row =
-        run_rect(&runs, "Transmission Line").expect("the pinned row is painted at the top");
+    let pinned_row = run_rect(&runs, "Memristor").expect("the pinned row is painted at the top");
     let _ = shelf.frame(secondary_click_events(pinned_row.center()));
     let (text, runs) = shelf.frame(Vec::new());
     assert!(
@@ -1639,7 +1691,7 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
     let mut landed = false;
     for _ in 0..80 {
         let output = shelf.output(vec![key(egui::Key::Tab, egui::Modifiers::NONE)]);
-        if focused_label(&output).as_deref() == Some("Transmission Line") {
+        if focused_label(&output).as_deref() == Some("Memristor") {
             landed = true;
             break;
         }
@@ -1658,7 +1710,7 @@ fn the_pin_menu_opens_from_the_keyboard_on_the_focused_row() {
     assert!(
         is_pinned(
             &shelf.app.state,
-            &ShelfEntry::Primitive(ComponentType::TransmissionLine)
+            &ShelfEntry::Primitive(ComponentType::Memristor)
         ),
         "and the menu acts on the row the keyboard was on"
     );

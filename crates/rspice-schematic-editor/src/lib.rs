@@ -23,7 +23,8 @@ pub mod view;
 pub mod xspice_placement;
 
 pub use component_palette::{
-    ComponentPaletteEntry, ComponentPaletteSection, component_palette, device_class_keywords,
+    ComponentCategory, ComponentPaletteEntry, ComponentPaletteSection, PaletteRow,
+    component_palette, device_class_keywords, palette_rows,
 };
 pub use symbols::SymbolLibrary;
 
