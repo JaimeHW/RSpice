@@ -2069,9 +2069,48 @@ impl Engine {
             Some("VHI" | "VLO" | "TR" | "TF" | "TSAMPLE") => {
                 Self::set_pat_source_parameter(spec, param_name.unwrap(), value)
             }
+            // ngspice's `ac` and `acmag` set the AC magnitude and `acphase`
+            // its phase in degrees (spicelib/devices/vsrc/vsrcpar.c:59
+            // VSRC_AC), the other one kept; the phase is held in radians.
+            Some("AC" | "ACMAG" | "ACPHASE") => {
+                let (magnitude, phase) = Self::source_ac(spec).unwrap_or((0.0, 0.0));
+                let (magnitude, phase) = if param_name == Some("ACPHASE") {
+                    (magnitude, value.to_radians())
+                } else {
+                    (value, phase)
+                };
+                *spec = std::mem::replace(spec, SourceSpec::Dc(0.0)).with_ac(magnitude, phase);
+                Ok(())
+            }
             Some(other) => Err(SimulationError::Circuit(format!(
-                "Unsupported source step parameter '{other}'; use DC, VALUE, SIN parameters V0, VO, VA, FREQ, TD, THETA, PHASE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
+                "Unsupported source step parameter '{other}'; use DC, VALUE, AC, ACMAG, ACPHASE, SIN parameters V0, VO, VA, FREQ, TD, THETA, PHASE, or PAT parameters VHI, VLO, TD, TR, TF, TSAMPLE"
             ))),
+        }
+    }
+
+    /// The AC magnitude and phase a source specification carries.
+    fn source_ac(spec: &SourceSpec) -> Option<(Value, Value)> {
+        match spec {
+            SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+                Self::source_ac(inner)
+            }
+            SourceSpec::Ac { magnitude, phase } => Some((*magnitude, *phase)),
+            SourceSpec::DcAc {
+                ac_magnitude,
+                ac_phase,
+                ..
+            }
+            | SourceSpec::AcTransient {
+                ac_magnitude,
+                ac_phase,
+                ..
+            }
+            | SourceSpec::DcAcTransient {
+                ac_magnitude,
+                ac_phase,
+                ..
+            } => Some((*ac_magnitude, *ac_phase)),
+            _ => None,
         }
     }
 

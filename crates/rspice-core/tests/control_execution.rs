@@ -1164,6 +1164,31 @@ fn alter_reads_the_parameter_word_before_the_equals_sign() {
     assert!((values[0][1].re - 3.0).abs() < 1e-9, "{values:?}");
 }
 
+/// `alter` sets a source's AC magnitude by `ac` or `acmag` and its phase by
+/// `acphase` (spicelib/devices/vsrc/vsrcpar.c:59). ngspice-46 prints v(2) =
+/// 0 after `alter v1 ac = 0`, and 0.5 at 90 degrees after `alter
+/// @v1[acmag] = 1` and `alter @v1[acphase] = 90`, for a 1k-1k divider.
+#[test]
+fn alter_sets_the_ac_magnitude_and_phase_of_a_source() {
+    let (presented, error) = run_until_error(
+        "alter ac\nv1 1 0 dc 1 ac 2\nr1 1 2 1k\nr2 2 0 1k\n.control\nalter v1 ac = 0\n\
+         ac lin 1 1k 1k\nprint v(2)\nalter @v1[acmag] = 1\nalter @v1[acphase] = 90\n\
+         ac lin 1 1k 1k\nprint v(2)\n.endc\n.end\n",
+    );
+    assert_eq!(error, None);
+    let values: Vec<_> = presented
+        .iter()
+        .filter(|request| matches!(request.kind, ControlPresentationKind::Print(_)))
+        .map(|request| printed(request)[0].y.samples[0])
+        .collect();
+    assert_eq!(values.len(), 2, "{values:?}");
+    assert!(values[0].norm() < 1e-12, "{values:?}");
+    assert!(
+        values[1].re.abs() < 1e-12 && (values[1].im - 0.5).abs() < 1e-12,
+        "{values:?}"
+    );
+}
+
 /// `linearize` interpolates the transient plot onto the analysis's own even
 /// grid, or the one `lin-tstart`, `lin-tstop` and `lin-tstep` set, in a new
 /// plot (frontend/linear.c:24), and `cutout` copies its rows from the first
