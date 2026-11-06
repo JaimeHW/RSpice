@@ -445,7 +445,9 @@ fn plan_manager_toolbar_controls(
     records: &[PlanCatalogRecord],
     action: &mut Option<PlanManagerAction>,
 ) {
-    let create = Button::new("New plan…").accent().icon(Icon::Add);
+    // Not accented: the footer's Open selected plan is the dialog's one
+    // primary, and two accented buttons on one surface left neither one.
+    let create = Button::new("New plan…").icon(Icon::Add);
     let campaign = Button::new("Queue campaign…")
         .enabled(records.iter().filter(|record| !record.archived).count() >= 2);
     let import = Button::new("Import…");
@@ -724,6 +726,8 @@ struct PlanDetailRow {
     label: &'static str,
     value: String,
     tone: PlanDetailTone,
+    /// A measured number or a code, set in mono; prose is in the body face.
+    mono: bool,
 }
 
 /// Everything the catalog knows about the selected plan, in one flat list.
@@ -754,11 +758,16 @@ fn plan_detail_rows(
         label,
         value,
         tone: PlanDetailTone::Stated,
+        mono: false,
+    };
+    let measured = |label, value: String| PlanDetailRow {
+        mono: true,
+        ..stated(label, value)
     };
     vec![
         stated("Name", selected.name.clone()),
-        stated("Revision", selected.revision.to_string()),
-        stated(
+        measured("Revision", selected.revision.to_string()),
+        measured(
             "Reference PVT corner",
             reference_pvt_label(selected.reference_pvt, policy),
         ),
@@ -775,16 +784,18 @@ fn plan_detail_rows(
                 label: "Declared run set",
                 value: RUN_SET_DOES_NOT_VALIDATE.to_owned(),
                 tone: PlanDetailTone::Failed,
+                mono: false,
             },
         },
         match (selected.estimated_duration(), selected.estimated_storage()) {
             (Some(duration), Some(storage)) => {
-                stated("Modelled cost", format!("{duration} · {storage}"))
+                measured("Modelled cost", format!("{duration} · {storage}"))
             }
             _ => PlanDetailRow {
                 label: "Modelled cost",
                 value: NO_MODELLED_COST.to_owned(),
                 tone: PlanDetailTone::Absent,
+                mono: false,
             },
         },
         stated(
@@ -853,7 +864,7 @@ fn plan_detail_row(ui: &mut Ui, row: &PlanDetailRow) {
         PlanDetailTone::Absent => (t.color.text_faint, None),
         PlanDetailTone::Failed => (t.color.err, Some(StatusMark::Failure)),
     };
-    kit::detail_row(ui, row.label, &row.value, tone, mark);
+    kit::detail_row(ui, row.label, &row.value, tone, mark, row.mono);
 }
 
 /// The plan's nominal point, corner first, the way the workbench chrome's own

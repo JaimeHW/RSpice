@@ -32,9 +32,9 @@ use crate::workbench::state::SimulationPlanManagerMode;
 
 /// Route-major, then viewport-major, matching `EVERY_ROUTE × GATED_VIEWPORTS`.
 const PLAN_MANAGER_FINGERPRINTS: [&str; 24] = [
-    "19dbbe4c65d0114e04382aba96512d96942417d6ffb1d41b8f307f0e57f90ade",
-    "3c5c57eb37fcf131d9e45c1f30afe3911a4c052342830875ab7b37e1ffbe69f3",
-    "01308ed40222dfd018c6adc75be93967f735a94658637af6d381ec2feed9171d",
+    "0c9b5df9c7ea43878f19b58222a2962dfb09c49981941d317dd361d5a69dbd5a",
+    "54f4db23d37d14f366b06dd9d17774457f3f6613cd1aea4eb4fd10e494bd2b20",
+    "2b238132dffaec754d4b79e7578f10ab146d1dda2c2f36722132775998737e2f",
     "cfa24fa39922b3032fa637a2b8be4a854482e3bb29e9da78d75e6587039f9c93",
     "2c527be37fbdbc1942ab9a938d96b53bc36b7bfce7d4131f10856dbf3499c186",
     "aad51a2e34cd9ce1c1d3366d22dead552b973f4425e8e3ae37de5722e6b90001",
@@ -139,12 +139,20 @@ fn plan_manager_visual_baselines_cover_the_route_viewport_product_and_are_unique
 
 #[test]
 fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
-    for (index, mode, viewport, screen) in baseline_cases() {
-        let canvas = raster(mode, screen);
-        canvas.assert_regression(
-            &file_stem(mode, viewport),
-            regression_height(&canvas),
-            PLAN_MANAGER_FINGERPRINTS[index],
-        );
-    }
+    // Every changed route at once, so one run names each fingerprint a
+    // reviewed change replaces.
+    let changed = baseline_cases()
+        .into_iter()
+        .filter_map(|(index, mode, viewport, screen)| {
+            let canvas = raster(mode, screen);
+            let actual = canvas.regression_fingerprint(regression_height(&canvas));
+            (actual != PLAN_MANAGER_FINGERPRINTS[index])
+                .then(|| format!("{index} {}: {actual}", file_stem(mode, viewport)))
+        })
+        .collect::<Vec<_>>();
+    assert!(
+        changed.is_empty(),
+        "visual regression; review the renders before accepting the new fingerprints:\n{}",
+        changed.join("\n")
+    );
 }

@@ -767,6 +767,7 @@ pub(super) fn detail_row(
     value: &str,
     tone: Color32,
     mark: Option<crate::workbench::design_system::StatusMark>,
+    mono: bool,
 ) {
     let t = Tokens::get(ui.ctx());
     let width = ui.available_width().max(1.0);
@@ -782,7 +783,13 @@ pub(super) fn detail_row(
         Stroke::new(1.0, t.color.border.gamma_multiply(0.75)),
     );
     let label_font = theme::sans(tokens::FS_0, FontWeight::Regular);
-    let value_font = theme::mono(tokens::FS_0, FontWeight::Medium);
+    // Mono for a measured number or a code; a name or a sentence reads in
+    // the body face, as "none pinned" and "root plan" are.
+    let value_font = if mono {
+        theme::mono(tokens::FS_0, FontWeight::Medium)
+    } else {
+        theme::sans(tokens::FS_1, FontWeight::Regular)
+    };
     let mark_width = if mark.is_some() {
         DETAIL_MARK_WIDTH
     } else {
