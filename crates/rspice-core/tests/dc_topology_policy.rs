@@ -302,6 +302,49 @@ fn a_negative_conductance_solves_without_the_nodal_floor() {
     assert!((n + 1.0e9).abs() <= 1.0e-6, "v(n) = {n:e}, ngspice-46 -1e9");
 }
 
+/// A converged operating point is polished by one more solve of its static
+/// system, which was assembled with the nodal floor even when the operating
+/// point had been solved without it. The polish accepts any answer within
+/// the voltage tolerance, so it moved a leakage-held node back to the
+/// floor's: beside a diode, the 1e9/1e9 Ohm divider read 0.49999975 V.
+/// ngspice-46 prints v(n) = 4.999999999999999e-01.
+#[test]
+fn the_polish_of_an_operating_point_solved_without_the_floor_keeps_its_system() {
+    let netlist = parse(
+        "Leakage-held divider beside a diode\nV1 in 0 1\nR1 in n 1e9\nR2 n 0 1e9\n\
+         RD in a 1k\nD1 a 0 dmod\n.model dmod d(is=1e-14)\n.op\n.end\n",
+    );
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("the diode deck has an operating point");
+    let n = voltage(&result, "n");
+    assert!((n - 0.5).abs() <= 1.0e-12, "v(n) = {n:e}, ngspice-46 0.5");
+}
+
+/// An XSPICE digital net between two code models is an event net. Its node
+/// owns an MNA placeholder row that no analog stamp reaches, and without
+/// the nodal floor that row made the system singular ("singular matrix:
+/// check node D1"), so the whole circuit went back to the 1e-15 S floor,
+/// which pulled the leakage-held divider at `n` to 0.49999975 V. ngspice
+/// keeps event nodes out of its analog matrix: ngspice-46 prints
+/// v(n) = 4.999999999999999e-01.
+#[test]
+fn an_event_net_does_not_send_the_operating_point_back_to_the_nodal_floor() {
+    let netlist = parse(
+        "Event nets beside a leakage-held divider\nV1 in 0 1\n\
+         A1 [in] [d1] adc1\n.model adc1 adc_bridge(in_low=0.5 in_high=0.5)\n\
+         A2 d1 d2 inv1\n.model inv1 d_inverter\n\
+         A3 [d2] [out] dac1\n.model dac1 dac_bridge\n\
+         RL out 0 1k\nR1 in n 1e9\nR2 n 0 1e9\n.op\n.end\n",
+    );
+    let result = engine()
+        .run_dc_op(&netlist)
+        .expect("the event nets' placeholders are pinned");
+    let n = voltage(&result, "n");
+    assert!((n - 0.5).abs() <= 1.0e-12, "v(n) = {n:e}, ngspice-46 0.5");
+    assert_eq!(voltage(&result, "out"), 0.0);
+}
+
 /// `p`'s own conductances cancel, so the circuit's system is singular and
 /// the solve goes back to the 1e-15 S GMIN floor, which `n`'s conductance
 /// cancels exactly; every GMIN stage above the floor solves. GMIN stepping

@@ -1050,7 +1050,10 @@ impl Engine {
     /// cktop.c), where RSpice keeps a GMIN floor from every node to ground.
     /// Outside the Xyce dialect the operating-point solve runs without the
     /// floor first.
-    fn tries_zero_dc_nodal_floor(&self, circuit: &CircuitData) -> bool {
+    pub(in crate::engine::convergence) fn tries_zero_dc_nodal_floor(
+        &self,
+        circuit: &CircuitData,
+    ) -> bool {
         self.config.spice_dialect != SpiceDialect::Xyce
             && self
                 .config

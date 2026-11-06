@@ -541,9 +541,20 @@ impl Engine {
         let snapshot = circuit.nonlinear_state_snapshot();
         let node_count = circuit.num_nodes().min(size);
         let mut polished_solution = None;
+        // The polish is one more solve of the system the operating point
+        // was solved as: without the nodal floor while that solve has not
+        // failed on this circuit. At the floor it was a different circuit's
+        // system, whose answer the voltage test below accepts whenever it
+        // lies within the tolerance, which moved every node only leakage
+        // holds back to the floor.
+        let gmin_floor = if self.tries_zero_dc_nodal_floor(circuit) {
+            0.0
+        } else {
+            self.dc_nodal_gmin_floor(circuit)
+        };
         let accepted = matrix.with_probe_values(|probe, rhs| {
             if self
-                .stamp_dc_static_probe_system(circuit, probe, rhs, solution)
+                .stamp_dc_static_probe_system(circuit, probe, rhs, solution, gmin_floor)
                 .is_err()
             {
                 return false;
@@ -592,7 +603,7 @@ impl Engine {
     }
 
     /// Assemble the operating-point Newton system at `solution` into a probe
-    /// matrix: the global nodal conditioning, the linear DC stamps, and every
+    /// matrix: the nodal floor `gmin_floor`, the linear DC stamps, and every
     /// device linearized exactly at `solution` (a static probe: no junction
     /// limiting, and a mixed host's discrete state held).
     fn stamp_dc_static_probe_system(
@@ -601,8 +612,8 @@ impl Engine {
         probe: &mut StaticMatrix,
         rhs: &mut [Value],
         solution: &[Value],
+        gmin_floor: Value,
     ) -> Result<(), SimulationError> {
-        let gmin_floor = self.dc_nodal_gmin_floor(circuit);
         Self::stamp_nodal_gmin(circuit, probe, gmin_floor);
         circuit.stamp_dc_direct(probe, rhs);
         let mut correction_rhs = Vec::new();
@@ -651,7 +662,8 @@ impl Engine {
         }
         let snapshot = circuit.nonlinear_state_snapshot();
         let tangents = matrix.with_probe_values(|probe, rhs| {
-            self.stamp_dc_static_probe_system(circuit, probe, rhs, solution)?;
+            let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+            self.stamp_dc_static_probe_system(circuit, probe, rhs, solution, gmin_floor)?;
             let denominator_floors = Self::dc_solve_denominator_floors(circuit, size);
             directions
                 .iter()
@@ -703,7 +715,8 @@ impl Engine {
         let snapshot = circuit.nonlinear_state_snapshot();
         let residual: Result<Vec<Value>, SimulationError> =
             matrix.with_probe_values(|probe, rhs| {
-                self.stamp_dc_static_probe_system(circuit, probe, rhs, at)?;
+                let gmin_floor = self.dc_nodal_gmin_floor(circuit);
+                self.stamp_dc_static_probe_system(circuit, probe, rhs, at, gmin_floor)?;
                 // Correction coordinates already hold `b - J x` in the RHS.
                 if Self::requires_vbic_correction_form(circuit) {
                     return Ok(rhs.to_vec());
