@@ -9,6 +9,7 @@ use crate::state::{
     SymbolParameterConstraints, SymbolParameterDefault, SymbolParameterField, SymbolParameterForm,
     SymbolParameterSection, SymbolParameterVisibility, SymbolPinDefinition, SymbolSourceContract,
 };
+use rspice_design_model::port::PinRole;
 
 use super::state::*;
 use crate::workbench::app_state::{
@@ -95,7 +96,7 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
     let schematic_reference = state.model.workspace.content.active_schematic_reference();
     let schematic_ports = state.model.schematic.interface_ports();
     let schematic_source = (!schematic_ports.is_empty()).then(|| CreateSymbolSchematicSource {
-        reference: schematic_reference,
+        reference: schematic_reference.clone(),
         pins: schematic_ports
             .into_iter()
             .map(pin_from_port)
@@ -120,14 +121,15 @@ pub(crate) fn open_create_model_bound_symbol_dialog(state: &mut AppState) {
             .unwrap_or_default(),
         CreateSymbolSourceMode::BlankExplicitContract => Vec::new(),
     };
+    // Without a model the symbol is drawn for the cell being edited.
     let cell = model_source.as_ref().map_or_else(
-        || "precision_opamp".to_owned(),
+        || default_cell_name(&schematic_reference.cell),
         |source| default_cell_name(&source.model),
     );
     let template = model_source
         .as_ref()
         .map_or(CreateSymbolTemplate::RectangularIc, |source| {
-            default_template(source.model_type, &source.model)
+            default_template(source.model_type)
         });
 
     state.design.create_model_bound_symbol = CreateModelBoundSymbolDialogState {
@@ -150,6 +152,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
     subcircuit: String,
     source_path: std::path::PathBuf,
     ordered_ports: Vec<String>,
+    description: Option<String>,
     section: Option<String>,
     parameter_defaults: std::collections::BTreeMap<String, String>,
 ) -> Result<(), String> {
@@ -181,19 +184,19 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
             "Subcircuit '{subcircuit}' has no explicit ordered terminal contract"
         ));
     }
+    let roles = rspice_design::pin_roles::infer_pin_roles(&ordered_ports, description.as_deref());
+    let template = if rspice_design::symbol_generation::is_amplifier_pin_set(&roles) {
+        CreateSymbolTemplate::OperationalAmplifier5Pin
+    } else {
+        CreateSymbolTemplate::RectangularIc
+    };
     let pins = ordered_ports
         .into_iter()
+        .zip(roles)
         .enumerate()
-        .map(|(index, port)| {
-            CreateSymbolPinDraft::new(
-                port,
-                CreateSymbolPinType::AnalogBidirectional,
-                if index.is_multiple_of(2) {
-                    CreateSymbolPinSide::Left
-                } else {
-                    CreateSymbolPinSide::Right
-                },
-            )
+        .map(|(index, (port, role))| {
+            let (electrical_type, side) = role_pin(role, index);
+            CreateSymbolPinDraft::new(port, electrical_type, side)
         })
         .collect::<Vec<_>>();
     let cell = default_cell_name(&subcircuit);
@@ -214,7 +217,7 @@ pub(crate) fn open_create_subcircuit_bound_symbol_dialog(
         source_mode: CreateSymbolSourceMode::Model,
         model_source: Some(model_source),
         pins,
-        template: CreateSymbolTemplate::RectangularIc,
+        template,
         pin_contract_reviewed: false,
         expected_library_revision: state.model.library_manager.revision(),
         ..CreateModelBoundSymbolDialogState::default()
@@ -399,13 +402,40 @@ fn model_family_label(model_type: ModelType) -> &'static str {
     }
 }
 
-fn default_template(model_type: ModelType, model: &str) -> CreateSymbolTemplate {
-    if model.to_ascii_lowercase().contains("opamp") || model.to_ascii_lowercase().contains("opa") {
-        CreateSymbolTemplate::OperationalAmplifier5Pin
-    } else if model_type == ModelType::Rf {
+/// A device model card is one primitive, never an amplifier: an amplifier is
+/// a subcircuit, and its template follows from the roles of its pins.
+fn default_template(model_type: ModelType) -> CreateSymbolTemplate {
+    if model_type == ModelType::Rf {
         CreateSymbolTemplate::RfNPort
     } else {
         CreateSymbolTemplate::RectangularIc
+    }
+}
+
+/// The electrical type and side a subcircuit pin of `role` is drawn with:
+/// inputs left, outputs right, the positive supply on top and the negative
+/// supply or ground below. A pin whose role is unknown alternates sides by
+/// its interface `index`, so a long port list stays balanced.
+fn role_pin(role: PinRole, index: usize) -> (CreateSymbolPinType, CreateSymbolPinSide) {
+    match role {
+        PinRole::NonInvertingInput | PinRole::InvertingInput | PinRole::Input => {
+            (CreateSymbolPinType::AnalogInput, CreateSymbolPinSide::Left)
+        }
+        PinRole::Output => (
+            CreateSymbolPinType::AnalogOutput,
+            CreateSymbolPinSide::Right,
+        ),
+        PinRole::PositiveSupply => (CreateSymbolPinType::Power, CreateSymbolPinSide::Top),
+        PinRole::NegativeSupply => (CreateSymbolPinType::Power, CreateSymbolPinSide::Bottom),
+        PinRole::Ground => (CreateSymbolPinType::Ground, CreateSymbolPinSide::Bottom),
+        PinRole::Bidirectional => (
+            CreateSymbolPinType::AnalogBidirectional,
+            if index.is_multiple_of(2) {
+                CreateSymbolPinSide::Left
+            } else {
+                CreateSymbolPinSide::Right
+            },
+        ),
     }
 }
 
@@ -426,9 +456,6 @@ fn pin_from_port(port: PortSpec) -> CreateSymbolPinDraft {
 }
 
 fn default_cell_name(model: &str) -> String {
-    if model.eq_ignore_ascii_case("OPA189_A") {
-        return "precision_opamp".to_owned();
-    }
     let mut name = model
         .chars()
         .map(|character| {

@@ -499,6 +499,9 @@ pub struct SubcircuitSymbolSource {
     pub subcircuit: String,
     pub source_path: std::path::PathBuf,
     pub ordered_ports: Vec<String>,
+    /// The comment paragraph above the definition, where a vendor lists
+    /// what each port is.
+    pub description: Option<String>,
     pub section: Option<String>,
     pub parameter_defaults: std::collections::BTreeMap<String, String>,
     pub opened_receipt: String,

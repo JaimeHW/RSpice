@@ -343,6 +343,7 @@ impl RSpiceApp {
                         subcircuit,
                         source_path,
                         ordered_ports,
+                        description,
                         section,
                         parameter_defaults,
                         opened_receipt,
@@ -353,6 +354,7 @@ impl RSpiceApp {
                         subcircuit,
                         source_path,
                         ordered_ports,
+                        description,
                         section,
                         parameter_defaults,
                     )

@@ -177,6 +177,12 @@ fn amplifier_pins(roles: &[PinRole]) -> Option<AmplifierPins> {
     })
 }
 
+/// Whether `roles` are an amplifier's pin set, the set a generated symbol
+/// draws as the amplifier triangle.
+pub fn is_amplifier_pin_set(roles: &[PinRole]) -> bool {
+    amplifier_pins(roles).is_some()
+}
+
 fn generate_amplifier(
     ports: &[PortSpec],
     roles: &[PinRole],

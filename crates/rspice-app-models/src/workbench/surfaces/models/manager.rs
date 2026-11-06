@@ -508,6 +508,7 @@ fn subcircuit_symbol_source(
         subcircuit: interface.name.clone(),
         source_path,
         ordered_ports: interface.ports.clone(),
+        description: interface.description.clone(),
         section: interface.section.clone(),
         parameter_defaults: interface.parameter_defaults.clone(),
         opened_receipt: format!(

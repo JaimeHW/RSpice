@@ -129,8 +129,10 @@ fn opening_uses_real_writable_library_and_selected_model() {
 
     let draft = &state.design.create_model_bound_symbol;
     assert!(draft.open);
-    assert_eq!(draft.target, "analog_blocks / precision_opamp");
+    assert_eq!(draft.target, "analog_blocks / opa189_a");
     assert_eq!(draft.source_mode, CreateSymbolSourceMode::Model);
+    // A model card is a primitive; its name never makes it an amplifier.
+    assert_eq!(draft.template, CreateSymbolTemplate::RectangularIc);
     assert!(
         draft.pins.is_empty(),
         "unknown macro-model terminals are never fabricated"
@@ -408,6 +410,7 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
             "VCC".to_owned(),
             "GND".to_owned(),
         ],
+        None,
         Some("TT".to_owned()),
         std::collections::BTreeMap::from([
             ("GAIN".to_owned(), "100".to_owned()),
@@ -464,6 +467,56 @@ fn shipped_subcircuit_opens_an_exact_x_device_pin_contract() {
         crate::state::SymbolParameterDefault::Expression { ref value }
             if value == "GAIN * 2"
     ));
+}
+
+/// A vendor op-amp names its pins by number and lists them in the comment
+/// above the definition; the draft reads the roles from that list.
+#[test]
+fn a_vendor_amplifier_subcircuit_opens_with_the_amplifier_template() {
+    let mut state = state_with_bound_mos_model();
+    open_create_subcircuit_bound_symbol_dialog(
+        &mut state,
+        "vendor_analog".to_owned(),
+        "OPA_SYNTH".to_owned(),
+        PathBuf::from("/models/opa_synth.lib"),
+        ["1", "2", "3", "4", "5"].map(str::to_owned).to_vec(),
+        Some("Synthetic precision amplifier. Pin order: IN+, IN-, V+, V-, OUT".to_owned()),
+        None,
+        std::collections::BTreeMap::new(),
+    )
+    .expect("subcircuit draft opens");
+
+    let draft = &state.design.create_model_bound_symbol;
+    assert_eq!(
+        draft.template,
+        CreateSymbolTemplate::OperationalAmplifier5Pin
+    );
+    assert_eq!(
+        draft
+            .pins
+            .iter()
+            .map(|pin| (pin.name.as_str(), pin.electrical_type, pin.side))
+            .collect::<Vec<_>>(),
+        [
+            (
+                "1",
+                CreateSymbolPinType::AnalogInput,
+                CreateSymbolPinSide::Left
+            ),
+            (
+                "2",
+                CreateSymbolPinType::AnalogInput,
+                CreateSymbolPinSide::Left
+            ),
+            ("3", CreateSymbolPinType::Power, CreateSymbolPinSide::Top),
+            ("4", CreateSymbolPinType::Power, CreateSymbolPinSide::Bottom),
+            (
+                "5",
+                CreateSymbolPinType::AnalogOutput,
+                CreateSymbolPinSide::Right
+            ),
+        ]
+    );
 }
 
 #[test]
