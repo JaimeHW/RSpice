@@ -591,6 +591,34 @@ impl Engine {
         canonical_device_parameter_sweep_source(netlist, source_name)
     }
 
+    /// The override a `.DC` source that is no independent source, parameter
+    /// or temperature sweeps: a device parameter (`R1`, `R1:R`) and, in the
+    /// Xyce dialect, a parameter of a top-level model card (`DMOD:IS`).
+    ///
+    /// Xyce sets a sweep's name through `setParam` (N_ANP_SweepParam.C:541),
+    /// which looks the name up as a device entity, instance or model alike
+    /// (N_DEV_DeviceMgr.C:6566), and reprocesses a model's parameters after
+    /// the change (N_DEV_DeviceMgr.C:6600). ngspice 46 refuses the sweep
+    /// ("Voltage source, current source, or resistor named "dmod:is" is not
+    /// in the circuit"), so the other dialects keep refusing it.
+    fn dc_sweep_parameter_override(&self, netlist: &Netlist, source_name: &str) -> Option<String> {
+        canonical_device_parameter_sweep_source(netlist, source_name).or_else(|| {
+            if self.config.spice_dialect != crate::config::SpiceDialect::Xyce {
+                return None;
+            }
+            let (model_name, parameter) = source_name.trim().rsplit_once(':')?;
+            let parameter = parameter.trim();
+            if parameter.is_empty() {
+                return None;
+            }
+            let model = netlist
+                .models
+                .iter()
+                .find(|model| model.name.eq_ignore_ascii_case(model_name.trim()))?;
+            Some(format!("{}:{}", model.name, parameter.to_ascii_uppercase()))
+        })
+    }
+
     fn populate_dc_observables(
         netlist: &Netlist,
         circuit: &mut CircuitData,
@@ -1546,8 +1574,7 @@ impl Engine {
         let outer_is_temp = sweep2.source.eq_ignore_ascii_case("TEMP")
             || sweep2.source.eq_ignore_ascii_case("TEMPER");
         let outer_is_parameter = Self::netlist_has_numeric_parameter(netlist, &sweep2.source);
-        let outer_device_parameter =
-            canonical_device_parameter_sweep_source(netlist, &sweep2.source);
+        let outer_device_parameter = self.dc_sweep_parameter_override(netlist, &sweep2.source);
 
         let mut results = Vec::new();
         let mut retained_values = 0usize;
@@ -1805,9 +1832,7 @@ impl Engine {
             );
         }
 
-        if let Some(device_parameter) =
-            canonical_device_parameter_sweep_source(netlist, source_name)
-        {
+        if let Some(device_parameter) = self.dc_sweep_parameter_override(netlist, source_name) {
             return self.run_dc_parameter_sweep_spec_with_report_and_abort(
                 netlist,
                 &device_parameter,
@@ -2116,7 +2141,7 @@ impl Engine {
         let parameter = if Self::netlist_has_numeric_parameter(netlist, source_name) {
             Some(source_name.to_owned())
         } else {
-            canonical_device_parameter_sweep_source(netlist, source_name)
+            self.dc_sweep_parameter_override(netlist, source_name)
         };
         let mut results =
             Vec::with_capacity(sweep_points.len().min(DC_SWEEP_RESULT_PREALLOC_LIMIT));
@@ -2672,6 +2697,47 @@ mod tests {
         assert_voltage(&points[3].result, "out", 20.0 / 3.0);
         assert_voltage(&points[4].result, "out", 5.0);
         assert_voltage(&points[5].result, "out", 4.0);
+    }
+
+    #[test]
+    fn xyce_dc_sweep_sets_a_model_card_parameter() {
+        let netlist = Netlist::parse(
+            "model parameter sweep\n\
+             V1 1 0 DC 1\n\
+             R1 1 2 1k\n\
+             D1 2 0 DMOD\n\
+             .model DMOD D IS=1e-14\n\
+             .op\n\
+             .end\n",
+        )
+        .expect("deck parses");
+        let sweep = crate::netlist::DcSweepSpec::linear(1e-14, 2e-14, 1e-14);
+        let points = xyce_engine()
+            .run_dc_sweep_spec_with_report_and_abort(&netlist, "dmod:is", &sweep, &NoAbort)
+            .expect("Xyce sweeps a model parameter");
+
+        // Xyce 7.10 prints V(2) for IS = 1e-14 and 2e-14. Its second point
+        // stops 1.8e-6 V short of the root (the IS it solves is 1.99985e-14),
+        // inside its Newton tolerance; RSpice solves the root.
+        assert_eq!(points.len(), 2);
+        for (point, expected) in points.iter().zip([6.29424162e-01, 6.12643787e-01]) {
+            let actual = point
+                .result
+                .try_voltage_named("2")
+                .expect("node 2 is published");
+            assert!(
+                (actual - expected).abs() <= 1e-5,
+                "V(2) = {actual:.9e}, Xyce {expected:.9e}"
+            );
+        }
+
+        let error = Engine::default()
+            .run_dc_sweep_spec_with_report_and_abort(&netlist, "DMOD:IS", &sweep, &NoAbort)
+            .expect_err("ngspice refuses a model parameter as a .DC source");
+        assert!(
+            error.to_string().contains("Source not found: DMOD:IS"),
+            "{error}"
+        );
     }
 
     #[test]

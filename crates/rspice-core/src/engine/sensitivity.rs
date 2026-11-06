@@ -813,16 +813,33 @@ impl Engine {
                 applied += 1;
                 continue;
             }
-            let element = netlist
+            let Some(index) = netlist
                 .elements
-                .iter_mut()
-                .find(|element| element.name.eq_ignore_ascii_case(device_name))
-                .ok_or_else(|| {
-                    SimulationError::Circuit(format!(
-                        ".STEP DATA target '{}:{}' not found in netlist",
-                        device_name, param_name
-                    ))
-                })?;
+                .iter()
+                .position(|element| element.name.eq_ignore_ascii_case(device_name))
+            else {
+                // A Xyce `.DC DMOD:IS` sweep sets a top-level model card's
+                // parameter; the overlay keeps it through source replay.
+                let model = netlist
+                    .models
+                    .iter_mut()
+                    .find(|model| model.name.eq_ignore_ascii_case(device_name))
+                    .ok_or_else(|| {
+                        SimulationError::Circuit(format!(
+                            ".STEP DATA target '{}:{}' not found in netlist",
+                            device_name, param_name
+                        ))
+                    })?;
+                Self::apply_model_step_value(model, param_name, *value);
+                let key = (
+                    model.name.to_ascii_uppercase(),
+                    param_name.to_ascii_uppercase(),
+                );
+                netlist.retain_model_parameter(key, *value);
+                applied += 1;
+                continue;
+            };
+            let element = &mut netlist.elements[index];
             let canonical_parameter =
                 Self::canonical_device_parameter(&element.kind, Some(param_name));
             Self::apply_device_step_value(&mut element.kind, Some(&canonical_parameter), *value)?;

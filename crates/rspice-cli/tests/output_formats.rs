@@ -582,6 +582,31 @@ fn xyce_prints_temperature_coefficients_and_model_parameters_in_every_analysis()
     let _ = std::fs::remove_dir_all(&dir);
 }
 
+/// A Xyce `.DC` sweep may name a model card's parameter; the swept value is
+/// what `.PRINT` reports for it. Xyce 7.10 prints these two points, the
+/// second 1.8e-6 V short of the root, inside its Newton tolerance.
+#[test]
+fn xyce_dc_sweeps_a_model_parameter_and_prints_its_value() {
+    let dir = test_dir("dc_model_parameter");
+    let deck = "* model parameter sweep\nV1 1 0 DC 1\nR1 1 2 1k\nD1 2 0 DMOD\n\
+                .model DMOD D IS=1e-14\n.dc DMOD:IS 1e-14 2e-14 1e-14\n\
+                .print dc v(2) DMOD:IS\n.end\n";
+    let path = run_export_with_args(&dir, "dc", deck, "csv", &["--spice-dialect", "xyce"]);
+    let text = std::fs::read_to_string(&path).expect("read csv");
+    let v2 = common::csv_column(&text, "V(2)");
+    let is = common::csv_column(&text, "DMOD:IS");
+    assert_eq!(v2.len(), 2, "{text}");
+    assert_eq!(is.len(), 2, "{text}");
+    for (index, (expected_v2, expected_is)) in [(6.29424162e-01, 1e-14), (6.12643787e-01, 2e-14)]
+        .into_iter()
+        .enumerate()
+    {
+        assert!((v2[index] - expected_v2).abs() <= 1e-5, "{text}");
+        assert!((is[index] - expected_is).abs() <= 1e-23, "{text}");
+    }
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
 /// A Xyce `.PRINT AC` expression is evaluated in complex arithmetic: one
 /// column when its type is real, `Re()` and `Im()` columns when a `V()`
 /// phasor reaches its root. Xyce 7.10 prints, at 100 Hz and 200 Hz of this
