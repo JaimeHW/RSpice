@@ -447,7 +447,11 @@ use rspice_core::analysis::harmonic_balance::{
 // `netlist::ExpTrain`, the repeating EXP a `SourceSpec` carries, its re-export
 // and `ExpTrain::edges_until`, the corners the application's stimulus preview
 // marks (`rspice-app-state` stimulus_realize/derived.rs), bring it to 5,277.
-const MAX_PUBLIC_ITEMS: usize = 5277;
+// `Engine::run_ac_reporting_operating_point_with_abort` and
+// `Engine::run_noise_named_reporting_operating_point_with_abort`, the
+// `device:param` values a Xyce `.PRINT AC` or `.PRINT NOISE` card prints at
+// the analysis's own bias point, bring it to 5,279.
+const MAX_PUBLIC_ITEMS: usize = 5279;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
