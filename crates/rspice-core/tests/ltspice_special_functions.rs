@@ -135,7 +135,11 @@ fn ota_refuses_what_ltspice_does_not_define() {
     let unknown = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA gain=2\nR1 out 0 1k\n.end\n");
     assert!(unknown.contains("GAIN"), "{unknown}");
     let rail = build_error("* bad\nA1 0 in 0 0 vn 0 out 0 OTA\nR1 out 0 1k\n.end\n");
-    assert!(rail.contains("terminal 5"), "{rail}");
+    assert!(
+        rail.contains("terminal 5 is connected to node VN")
+            && rail.contains("terminals 5 and 6 on the common node"),
+        "{rail}"
+    );
     let window = build_error("* bad\nA1 0 in 0 0 0 0 out 0 OTA Vhigh=0 Vlow=1\n.end\n");
     assert!(window.contains("Vhigh above Vlow"), "{window}");
 }
@@ -488,4 +492,169 @@ A3 hi 0 0 0 0 qb3 q3 0 SRFLOP
 fn a_counter_needs_cycles() {
     let error = build_error("* bad\nA1 clk 0 0 0 0 p2 p1 0 COUNTER\nVc clk 0 1\n.end\n");
     assert!(error.contains("cycles"), "{error}");
+}
+
+#[test]
+fn phase_detector_steps_where_ltspice_does() {
+    let deck = "* phase detectors
+Va a 0 PULSE(0 1 10n 1p 1p 50n 100n)
+Vb b 0 PULSE(0 1 30n 1p 1p 50n 100n)
+A1 a b 0 0 0 0 q1 0 PHASEDET Iout=15u
+R1 q1 0 1k
+A2 b a 0 0 0 0 q2 0 PHASEDET Vhigh=2.5 Vlow=-0.5
+R2 q2 0 1Meg
+Vf f 0 PULSE(0 1 10n 1p 1p 20n 40n)
+A3 f b 0 0 0 0 q3 0 PHASEDET
+R3 q3 0 1k
+Vm m 0 0.3
+A4 a m 0 0 0 0 q4 0 PHASEDET Ref=0.2
+R4 q4 0 1k
+.end
+";
+    // LTspice 26.1.1 batch.
+    let probes = [
+        // A leads B by 20 ns: Iout while A is ahead.
+        ("q1", 15e-9, 0.015),
+        ("q1", 35e-9, 0.0),
+        ("q1", 115e-9, 0.015),
+        // Swapped inputs sink 100 uA, held at Vlow through the 10 ohm clamp.
+        ("q2", 15e-9, -0.500_995),
+        ("q2", 35e-9, 0.0),
+        // A at 25 MHz against B at 10 MHz: the state stops at +1, so B's edge
+        // at 30 ns, and the coincident edges at 130 ns, bring it to zero.
+        ("q3", 15e-9, 0.1),
+        ("q3", 35e-9, 0.0),
+        ("q3", 95e-9, 0.1),
+        ("q3", 135e-9, 0.0),
+        // B is high from the operating point on, which counts as an edge.
+        ("q4", 5e-9, -0.1),
+        ("q4", 15e-9, 0.0),
+        ("q4", 115e-9, 0.1),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 150e-9, 0.1e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-5);
+    }
+}
+
+#[test]
+fn sample_and_hold_tracks_and_samples_as_ltspice_does() {
+    let deck = "* sample and hold
+Vi in 0 SINE(0.3 1 10Meg)
+Vck ck 0 PULSE(0 1 25n 1p 1p 10n 50n)
+Vsh sh 0 PWL(0 0 20n 0 20.01n 1 40n 1 40.01n 0)
+Vn inn 0 0.25
+A1 in 0 0 sh 0 0 o1 0 SAMPLEHOLD
+A2 in inn ck 0 0 0 o2 0 SAMPLEHOLD Rout=10
+R2 o2 0 1k
+A3 in 0 ck 0 0 0 o3 0 SAMPLEHOLD Vhigh=0.5 Vlow=-0.2
+.end
+";
+    // LTspice 26.1.1 batch, which tracks one time step late: within 1 mV.
+    let probes = [
+        // S/H: zero until S/H rises at 20 ns, then the input until it falls
+        // at 40 ns.
+        ("o1", 10e-9, 0.0),
+        ("o1", 30e-9, 1.251_06),
+        ("o1", 45e-9, 0.887_633),
+        ("o1", 80e-9, 0.887_633),
+        // CLK at 25 and 75 ns samples V(in) - 0.25 behind 10 ohms into 1k.
+        ("o2", 10e-9, 0.0),
+        ("o2", 30e-9, 1.0396),
+        ("o2", 80e-9, -0.940_594),
+        // The limits hold the output within 0.8 V/1001 of Vhigh = 0.5 and
+        // 0.5 V/1001 of Vlow = -0.2.
+        ("o3", 30e-9, 0.500_799),
+        ("o3", 80e-9, -0.200_5),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 100e-9, 0.01e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-3);
+    }
+    let both = build_error("* bad\nV1 in 0 1\nA1 in 0 in in 0 0 o 0 SAMPLEHOLD\n.end\n");
+    assert!(both.contains("not both"), "{both}");
+    let neither = build_error("* bad\nV1 in 0 1\nA1 in 0 0 0 0 0 o 0 SAMPLEHOLD\n.end\n");
+    assert!(neither.contains("CLK (terminal 3) or S/H"), "{neither}");
+}
+
+#[test]
+fn modulator_follows_ltspice_in_frequency_and_amplitude() {
+    let deck = "* modulators
+Vf fm 0 0.5
+Va am 0 0.5
+A1 fm 0 0 0 0 c1 s1 0 MODULATOR mark=2Meg space=1Meg
+A2 fm am 0 0 0 c2 s2 0 MODULATOR mark=2Meg space=1Meg
+R2 s2 0 1k
+Vf3 fm3 0 PWL(0 0 1u 0 1.001u 1)
+A3 fm3 0 0 0 0 c3 s3 0 MODULATOR mark=2Meg space=1Meg
+A4 0 0 0 0 0 c4 s4 0 MODULATOR mark=2Meg space=1Meg
+.end
+";
+    // LTspice 26.1.1 batch.
+    let probes = [
+        // 1.5 MHz from FM = 0.5 V.
+        ("s1", 100e-9, 0.809_009),
+        ("c1", 100e-9, 0.587_78),
+        ("s1", 166.667e-9, 0.999_99),
+        // Amplitude 0.5 behind the 1 ohm default into 1k.
+        ("s2", 100e-9, 0.404_101),
+        ("c2", 250e-9, -0.353_55),
+        // Space until FM steps to 1 V at 1 us, then mark.
+        ("s3", 100e-9, 0.587_783),
+        ("c3", 1.25e-6, -0.999_985),
+        // An unused FM reads 1 V: the mark frequency.
+        ("s4", 100e-9, 0.951_04),
+        ("c4", 100e-9, 0.309_012),
+    ];
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 1.5e-6, 1e-9, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 2e-3);
+    }
+    let op = Engine::default()
+        .run_dc_op(&parse(deck))
+        .expect("OP solves");
+    assert_close("c2", op.try_voltage_named("c2").unwrap(), 0.5, 1e-9);
+    assert_close("s2", op.try_voltage_named("s2").unwrap(), 0.0, 1e-9);
+    let missing = build_error("* bad\nA1 0 0 0 0 0 c s 0 MODULATOR mark=1k\n.end\n");
+    assert!(missing.contains("space"), "{missing}");
+}
+
+#[test]
+fn varistor_clamps_beyond_its_breakdown_as_ltspice_does() {
+    let deck = |v: f64| {
+        format!(
+            "* varistors
+V1 in 0 {v}
+Vc c 0 2
+Vn n 0 -2
+R1 in o1 1k
+A1 c 0 0 0 0 0 o1 0 VARISTOR rclamp=10
+R2 in o2 1k
+A2 c 0 0 0 0 0 o2 0 VARISTOR
+R3 in o3 1k
+A3 n 0 0 0 0 0 o3 0 VARISTOR rclamp=10
+.op
+.end
+"
+        )
+    };
+    // LTspice 26.1.1 batch (.dc V1 -5 5).
+    for (v, o1, o2) in [
+        (-5.0, -2.029_702_970_3, -2.002_997_003_0),
+        (1.5, 1.5, 1.5),
+        (3.0, 2.009_900_990_1, 2.000_999_001_0),
+        (5.0, 2.029_702_970_3, 2.002_997_003_0),
+    ] {
+        let op = Engine::default()
+            .run_dc_op(&parse(&deck(v)))
+            .expect("OP solves");
+        let node = |name: &str| op.try_voltage_named(name).unwrap();
+        assert_close(&format!("o1 at {v}"), node("o1"), o1, 1e-9);
+        assert_close(&format!("o2 at {v}"), node("o2"), o2, 1e-9);
+        // The breakdown is the magnitude of the control voltage.
+        assert_close(&format!("o3 at {v}"), node("o3"), o1, 1e-9);
+    }
 }

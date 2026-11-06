@@ -568,7 +568,12 @@ const MAX_PUBLIC_ITEMS: usize = 5247;
 // The flip-flops and counter add six: the `Sequential` re-export, the
 // `Sequential` and `SequentialFunction` types, and `Sequential::from_params`,
 // `next` and `outputs`. The census is 1,639, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1639;
+// The phase detector, sample-and-hold, modulator and varistor add 13: their
+// re-export, the `PhaseDetector`, `SampleHold`, `Modulator` and `Varistor`
+// types with a `from_params` each, `PhaseDetector::next`, and the `current`
+// of the phase detector, sample-and-hold and varistor. The census is 1,652,
+// with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1652;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently

@@ -19,6 +19,8 @@ use crate::xspice::{
 };
 use std::sync::Arc;
 
+mod mixed;
+
 /// The terminals of one instance, with every terminal tied to the common
 /// reported as unused.
 struct Terminals<'a> {
@@ -104,9 +106,15 @@ pub(super) fn build(
             }
             for pin in [5, 6] {
                 if terminals.used(pin) {
+                    // LTspice gives these terminals no documented use, and no
+                    // run settles what terminal 6 does beyond drawing a fixed
+                    // current.
                     return Err(SimulationError::Circuit(format!(
-                        "{}: OTA terminal {pin} must be tied to the common terminal",
-                        element.name
+                        "{}: OTA terminal {pin} is connected to node {}; RSpice requires \
+                         OTA terminals 5 and 6 on the common node (terminal 8, {})",
+                        element.name,
+                        terminals.node(pin),
+                        terminals.common()
                     )));
                 }
             }
@@ -149,13 +157,10 @@ pub(super) fn build(
                 capacitances: vec![(6, cout), (7, cout)],
             }
         }
-        other => {
-            return Err(SimulationError::Circuit(format!(
-                "{}: LTspice special function {} is not supported",
-                element.name,
-                other.ltspice_name()
-            )));
-        }
+        SpecialFunction::PhaseDet => mixed::phase_detector(element, &terminals, params)?,
+        SpecialFunction::SampleHold => mixed::sample_hold(element, &terminals, params)?,
+        SpecialFunction::Modulator => mixed::modulator(element, &terminals, params)?,
+        SpecialFunction::Varistor => mixed::varistor(element, &terminals, params)?,
     };
 
     let connections =

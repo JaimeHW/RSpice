@@ -9,11 +9,14 @@
 //! the engine hosts each instance as an analog behavioral model.
 
 mod logic;
+mod mixed;
 mod ota;
 mod sequential;
 
 #[doc(hidden)]
 pub use logic::{Gate, GateFunction, OutputStage, Schmitt};
+#[doc(hidden)]
+pub use mixed::{Modulator, PhaseDetector, SampleHold, Varistor};
 #[doc(hidden)]
 pub use ota::{Ota, OtaDrive, OtaNoise};
 #[doc(hidden)]
