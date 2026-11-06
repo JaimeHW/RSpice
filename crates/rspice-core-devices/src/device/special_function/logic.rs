@@ -20,6 +20,7 @@ use crate::Value;
 
 /// The logic function of a gate.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[doc(hidden)]
 pub enum GateFunction {
     /// BUF and OR: any used input true.
     Or,
@@ -29,6 +30,7 @@ pub enum GateFunction {
 }
 
 impl GateFunction {
+    #[doc(hidden)]
     pub fn evaluate(self, inputs: impl IntoIterator<Item = bool>) -> bool {
         let mut any = false;
         let mut all = true;
@@ -48,6 +50,7 @@ impl GateFunction {
 
 /// The source, impedance and timing of a logic output.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[doc(hidden)]
 pub struct OutputStage {
     pub vhigh: Value,
     pub vlow: Value,
@@ -80,7 +83,9 @@ impl OutputStage {
             format!("{device} needs Vhigh above Vlow (Vhigh={vhigh}, Vlow={vlow})")
         })?;
         for (name, value) in [("Rout", rout), ("Rhigh", rhigh), ("Rlow", rlow)] {
-            require(value > 0.0, || format!("{device} {name} must be positive ({value})"))?;
+            require(value > 0.0, || {
+                format!("{device} {name} must be positive ({value})")
+            })?;
         }
         for (name, value) in [("Td", delay), ("Trise", trise), ("Tfall", tfall)] {
             require(value >= 0.0, || {
@@ -88,7 +93,9 @@ impl OutputStage {
             })?;
         }
         if let Some(tripdt) = tripdt {
-            require(tripdt > 0.0, || format!("{device} tripdt must be positive ({tripdt})"))?;
+            require(tripdt > 0.0, || {
+                format!("{device} tripdt must be positive ({tripdt})")
+            })?;
         }
         let cout = match (tau, cout) {
             (Some(_), Some(_)) => {
@@ -97,7 +104,9 @@ impl OutputStage {
                 )));
             }
             (Some(tau), None) => {
-                require(tau >= 0.0, || format!("{device} Tau must not be negative ({tau})"))?;
+                require(tau >= 0.0, || {
+                    format!("{device} Tau must not be negative ({tau})")
+                })?;
                 require(trise == 0.0 && tfall == 0.0, || {
                     format!("{device} takes a slewing Trise/Tfall or a time constant Tau, not both")
                 })?;
@@ -105,7 +114,9 @@ impl OutputStage {
             }
             (None, cout) => cout.unwrap_or(0.0),
         };
-        require(cout >= 0.0, || format!("{device} Cout must not be negative ({cout})"))?;
+        require(cout >= 0.0, || {
+            format!("{device} Cout must not be negative ({cout})")
+        })?;
         Ok(Self {
             vhigh,
             vlow,
@@ -119,10 +130,12 @@ impl OutputStage {
         })
     }
 
+    #[doc(hidden)]
     pub fn level(&self, high: bool) -> Value {
         if high { self.vhigh } else { self.vlow }
     }
 
+    #[doc(hidden)]
     pub fn resistance(&self, high: bool) -> Value {
         if high { self.rhigh } else { self.rlow }
     }
@@ -145,6 +158,7 @@ impl OutputStage {
     }
 
     /// The source position `dt` after `x`, moving toward the `high` level.
+    #[doc(hidden)]
     pub fn slew(&self, x: Value, high: bool, dt: Value) -> Value {
         let target = self.level(high);
         let distance = (target - x).abs();
@@ -170,6 +184,7 @@ impl OutputStage {
 
     /// How long after `x` a move toward `high` stays on its linear ramp, when
     /// it has one; the stepper lands on its end.
+    #[doc(hidden)]
     pub fn ramp_duration(&self, x: Value, high: bool) -> Option<Value> {
         let target = self.level(high);
         let distance = (target - x).abs();
@@ -183,6 +198,7 @@ impl OutputStage {
 
 /// A gate: BUF, AND, OR or XOR.
 #[derive(Debug, Clone, PartialEq)]
+#[doc(hidden)]
 pub struct Gate {
     pub function: GateFunction,
     /// Input threshold above the common.
@@ -191,6 +207,7 @@ pub struct Gate {
 }
 
 impl Gate {
+    #[doc(hidden)]
     pub fn from_params(
         device: &'static str,
         function: GateFunction,
@@ -210,6 +227,7 @@ impl Gate {
 
 /// A Schmitt trigger, single-ended or differential.
 #[derive(Debug, Clone, PartialEq)]
+#[doc(hidden)]
 pub struct Schmitt {
     pub threshold: Value,
     pub hysteresis: Value,
@@ -217,6 +235,7 @@ pub struct Schmitt {
 }
 
 impl Schmitt {
+    #[doc(hidden)]
     pub fn from_params(params: &[(String, Value)]) -> Result<Self, SpecialFunctionError> {
         let mut p = InstanceParams::new("SCHMITT", params);
         let stage = OutputStage::read(&mut p)?;
@@ -234,6 +253,7 @@ impl Schmitt {
     }
 
     /// The trigger state after reading `input` from state `high`.
+    #[doc(hidden)]
     pub fn next(&self, high: bool, input: Value) -> bool {
         if high {
             input >= self.threshold - self.hysteresis
@@ -243,6 +263,7 @@ impl Schmitt {
     }
 
     /// The level the input crosses to leave state `high`.
+    #[doc(hidden)]
     pub fn trip(&self, high: bool) -> Value {
         if high {
             self.threshold - self.hysteresis

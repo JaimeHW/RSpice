@@ -14,8 +14,7 @@ use crate::device::special_function::{
 use crate::netlist::SpecialFunction;
 use crate::xspice::{
     CmContext, CmResult, CodeModel, EvaluationPhase, ParamSpec, PortNoiseCurrent, PortSpec,
-    PortType,
-    XspiceCheckpointSupport, XspiceInstance, XspiceSmallSignalDescriptor,
+    PortType, XspiceCheckpointSupport, XspiceInstance, XspiceSmallSignalDescriptor,
 };
 use std::sync::Arc;
 
@@ -72,6 +71,14 @@ fn device_error(element: &Element, error: SpecialFunctionError) -> SimulationErr
     SimulationError::Circuit(format!("{}: {error}", element.name))
 }
 
+/// A device's code model, the ports it connects, and the capacitance it puts
+/// from each output terminal to the common.
+struct Hosted {
+    model: Arc<dyn CodeModel>,
+    ports: Vec<XspicePort>,
+    capacitances: Vec<(usize, Value)>,
+}
+
 /// Build one special-function instance into `circuit`.
 pub(super) fn build(
     circuit: &mut CircuitData,
@@ -81,74 +88,78 @@ pub(super) fn build(
     temperature: Value,
 ) -> Result<(), SimulationError> {
     let terminals = Terminals::new(element)?;
-    let (model, ports, capacitances): (Arc<dyn CodeModel>, Vec<XspicePort>, Vec<(usize, Value)>) =
-        match function {
-            SpecialFunction::Ota => {
-                let ota = Ota::from_params(params).map_err(|error| device_error(element, error))?;
-                if ota.noise.incm > 0.0 {
+    let Hosted {
+        model,
+        ports,
+        capacitances,
+    } = match function {
+        SpecialFunction::Ota => {
+            let ota = Ota::from_params(params).map_err(|error| device_error(element, error))?;
+            if ota.noise.incm > 0.0 {
+                return Err(SimulationError::Circuit(format!(
+                    "{}: OTA common-mode input current noise (incm) is not supported",
+                    element.name
+                )));
+            }
+            for pin in [5, 6] {
+                if terminals.used(pin) {
                     return Err(SimulationError::Circuit(format!(
-                        "{}: OTA common-mode input current noise (incm) is not supported",
+                        "{}: OTA terminal {pin} must be tied to the common terminal",
                         element.name
                     )));
                 }
-                for pin in [5, 6] {
-                    if terminals.used(pin) {
-                        return Err(SimulationError::Circuit(format!(
-                            "{}: OTA terminal {pin} must be tied to the common terminal",
-                            element.name
-                        )));
-                    }
-                }
-                let multiplier = terminals.used(3) || terminals.used(4);
-                let ports = vec![
+            }
+            let multiplier = terminals.used(3) || terminals.used(4);
+            let ports = vec![
+                XspicePort::DifferentialVoltage {
+                    pos: terminals.node(2).to_string(),
+                    neg: terminals.node(1).to_string(),
+                },
+                if multiplier {
                     XspicePort::DifferentialVoltage {
-                        pos: terminals.node(2).to_string(),
-                        neg: terminals.node(1).to_string(),
-                    },
-                    if multiplier {
-                        XspicePort::DifferentialVoltage {
-                            pos: terminals.node(3).to_string(),
-                            neg: terminals.node(4).to_string(),
-                        }
-                    } else {
-                        XspicePort::Null
-                    },
-                    terminals.sensed(7),
-                    terminals.driven(7),
-                ];
-                let capacitances = vec![(7, ota.cout)];
-                (Arc::new(OtaModel { ota, multiplier }), ports, capacitances)
+                        pos: terminals.node(3).to_string(),
+                        neg: terminals.node(4).to_string(),
+                    }
+                } else {
+                    XspicePort::Null
+                },
+                terminals.sensed(7),
+                terminals.driven(7),
+            ];
+            Hosted {
+                capacitances: vec![(7, ota.cout)],
+                model: Arc::new(OtaModel { ota, multiplier }),
+                ports,
             }
-            SpecialFunction::Buf
-            | SpecialFunction::And
-            | SpecialFunction::Or
-            | SpecialFunction::Xor
-            | SpecialFunction::Schmitt => {
-                let (model, ports) = logic_device(element, &terminals, function, params)?;
-                let cout = model.stage.cout;
-                (Arc::new(model), ports, vec![(6, cout), (7, cout)])
+        }
+        SpecialFunction::Buf
+        | SpecialFunction::And
+        | SpecialFunction::Or
+        | SpecialFunction::Xor
+        | SpecialFunction::Schmitt => {
+            let (model, ports) = logic_device(element, &terminals, function, params)?;
+            let cout = model.stage.cout;
+            Hosted {
+                model: Arc::new(model),
+                ports,
+                capacitances: vec![(6, cout), (7, cout)],
             }
-            other => {
-                return Err(SimulationError::Circuit(format!(
-                    "{}: LTspice special function {} is not supported",
-                    element.name,
-                    other.ltspice_name()
-                )));
-            }
-        };
+        }
+        other => {
+            return Err(SimulationError::Circuit(format!(
+                "{}: LTspice special function {} is not supported",
+                element.name,
+                other.ltspice_name()
+            )));
+        }
+    };
 
-    let connections = coerce_xspice_connections(
-        circuit,
-        model.ports(),
-        &ports,
-        &element.name,
-        model.name(),
-    )?;
+    let connections =
+        coerce_xspice_connections(circuit, model.ports(), &ports, &element.name, model.name())?;
     let mut instance =
-        XspiceInstance::new(element.name.clone(), model, connections, &[], &[], &[], &[])
-            .map_err(|error| {
-                xspice_creation_error(format!("Failed to create {}", element.name), error)
-            })?;
+        XspiceInstance::new(element.name.clone(), model, connections, &[], &[], &[], &[]).map_err(
+            |error| xspice_creation_error(format!("Failed to create {}", element.name), error),
+        )?;
     instance.set_temperature(temperature);
     assign_xspice_output_branches(circuit, &mut instance, &element.name)?;
     instance.init().map_err(|error| {
@@ -206,7 +217,11 @@ impl OtaModel {
         let load = self.ota.rout.map_or(0.0, |rout| 1.0 / rout);
         (
             clamp + load * v - drive.current,
-            [-drive.d_input, -drive.d_multiplier, clamp_conductance + load],
+            [
+                -drive.d_input,
+                -drive.d_multiplier,
+                clamp_conductance + load,
+            ],
         )
     }
 }

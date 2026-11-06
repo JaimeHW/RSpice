@@ -13,6 +13,7 @@ use crate::Value;
 /// Input-referred noise densities, each white with a 1/f corner:
 /// `density² = white² · (1 + corner / f)`.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[doc(hidden)]
 pub struct OtaNoise {
     /// Input voltage noise (V/√Hz) and its corner (Hz).
     pub en: Value,
@@ -27,6 +28,7 @@ pub struct OtaNoise {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[doc(hidden)]
 pub struct Ota {
     pub g: Value,
     pub iout: Value,
@@ -48,6 +50,7 @@ pub struct Ota {
 /// The drive current out of the output terminal and its partial derivatives
 /// with respect to the differential and multiplying inputs.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[doc(hidden)]
 pub struct OtaDrive {
     pub current: Value,
     pub d_input: Value,
@@ -55,6 +58,7 @@ pub struct OtaDrive {
 }
 
 impl Ota {
+    #[doc(hidden)]
     pub fn from_params(params: &[(String, Value)]) -> Result<Self, SpecialFunctionError> {
         let mut p = InstanceParams::new("OTA", params);
         let g = p.or("G", 1.0)?;
@@ -94,14 +98,18 @@ impl Ota {
         require(vhigh > vlow, || {
             format!("OTA needs Vhigh above Vlow (Vhigh={vhigh}, Vlow={vlow})")
         })?;
-        require(rclamp > 0.0, || format!("OTA Rclamp must be positive ({rclamp})"))?;
+        require(rclamp > 0.0, || {
+            format!("OTA Rclamp must be positive ({rclamp})")
+        })?;
         require(epsilon >= 0.0, || {
             format!("OTA epsilon must not be negative ({epsilon})")
         })?;
         if let Some(rout) = rout {
             require(rout > 0.0, || format!("OTA Rout must be positive ({rout})"))?;
         }
-        require(cout >= 0.0, || format!("OTA Cout must not be negative ({cout})"))?;
+        require(cout >= 0.0, || {
+            format!("OTA Cout must not be negative ({cout})")
+        })?;
         for (name, value) in [
             ("en", noise.en),
             ("enk", noise.enk),
@@ -133,6 +141,7 @@ impl Ota {
 
     /// The current driven out of the output at differential input
     /// `V2 − V1` and multiplier `m`.
+    #[doc(hidden)]
     pub fn drive(&self, input: Value, multiplier: Value) -> OtaDrive {
         let effective = input + self.offset;
         let x = self.g * multiplier * effective;
@@ -156,12 +165,16 @@ impl Ota {
 
     /// The current the compliance clamp sinks from the output at output
     /// voltage `v` above the common, and its conductance.
+    #[doc(hidden)]
     pub fn clamp(&self, v: Value) -> (Value, Value) {
         let excess = |beyond: Value| -> (Value, Value) {
             if beyond <= 0.0 {
                 (0.0, 0.0)
             } else if beyond >= self.epsilon {
-                ((beyond - 0.5 * self.epsilon) / self.rclamp, 1.0 / self.rclamp)
+                (
+                    (beyond - 0.5 * self.epsilon) / self.rclamp,
+                    1.0 / self.rclamp,
+                )
             } else {
                 let scale = self.epsilon * self.rclamp;
                 (0.5 * beyond * beyond / scale, beyond / scale)
@@ -207,7 +220,12 @@ mod tests {
         // LTspice 26.1.1 batch: 4 uA at zero input, 9.5867 uA at 10 mV.
         assert!((shifted.drive(0.0, 1.0).current - 4e-6).abs() < 1e-15);
         assert!((shifted.drive(10e-3, 1.0).current - 9.586_657_6e-6).abs() < 1e-12);
-        let asym = ota(&[("G", 1e-3), ("IOUT", 10e-6), ("ISINK", -2e-6), ("ASYM", 1.0)]);
+        let asym = ota(&[
+            ("G", 1e-3),
+            ("IOUT", 10e-6),
+            ("ISINK", -2e-6),
+            ("ASYM", 1.0),
+        ]);
         assert_eq!(asym.drive(0.0, 1.0).current, 0.0);
         // LTspice 26.1.1 batch: -1.99982 uA at -10 mV.
         assert!((asym.drive(-10e-3, 1.0).current + 1.999_818_4e-6).abs() < 1e-12);
@@ -227,7 +245,12 @@ mod tests {
 
     #[test]
     fn clamp_switches_in_quadratically_over_epsilon() {
-        let device = ota(&[("VHIGH", 2.0), ("VLOW", -1.0), ("RCLAMP", 1e3), ("EPSILON", 0.5)]);
+        let device = ota(&[
+            ("VHIGH", 2.0),
+            ("VLOW", -1.0),
+            ("RCLAMP", 1e3),
+            ("EPSILON", 0.5),
+        ]);
         // LTspice 26.1.1 batch: 15.625 uA at 2.125 V, 375 uA at 2.625 V.
         assert!((device.clamp(2.125).0 - 15.625e-6).abs() < 1e-15);
         assert!((device.clamp(2.625).0 - 375e-6).abs() < 1e-15);

@@ -705,7 +705,7 @@ pub enum SpecialFunction {
 }
 
 impl SpecialFunction {
-    pub const ALL: [SpecialFunction; 13] = [
+    const ALL: [SpecialFunction; 13] = [
         Self::Buf,
         Self::And,
         Self::Or,
@@ -741,7 +741,7 @@ impl SpecialFunction {
     }
 
     /// The device a model token names, ignoring ASCII case.
-    pub fn from_model_token(token: &str) -> Option<Self> {
+    pub(crate) fn from_model_token(token: &str) -> Option<Self> {
         Self::ALL
             .into_iter()
             .find(|function| token.eq_ignore_ascii_case(function.ltspice_name()))

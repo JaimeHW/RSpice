@@ -11,7 +11,9 @@
 mod logic;
 mod ota;
 
+#[doc(hidden)]
 pub use logic::{Gate, GateFunction, OutputStage, Schmitt};
+#[doc(hidden)]
 pub use ota::{Ota, OtaDrive, OtaNoise};
 
 use crate::Value;
@@ -20,10 +22,11 @@ use std::fmt;
 /// A special-function instance whose parameters LTspice would not accept,
 /// or that names a terminal configuration it does not simulate.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[doc(hidden)]
 pub struct SpecialFunctionError(String);
 
 impl SpecialFunctionError {
-    pub fn new(message: impl Into<String>) -> Self {
+    fn new(message: impl Into<String>) -> Self {
         Self(message.into())
     }
 }

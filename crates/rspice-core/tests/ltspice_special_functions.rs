@@ -81,7 +81,9 @@ A7 0 in 0 0 0 0 o7 0 OTA G=1m Iout=10u Vhigh=5 Vlow=-5 Rout=100k
 .op
 .end
 ";
-    let op = Engine::default().run_dc_op(&parse(deck)).expect("OP solves");
+    let op = Engine::default()
+        .run_dc_op(&parse(deck))
+        .expect("OP solves");
     let v = |node: &str| op.try_voltage_named(node).unwrap();
     // Iout·tanh(G·vd/Iout) into 1k.
     assert_close("tanh drive", v("o1"), 7.615_941_551_9e-3, 1e-9);
@@ -112,10 +114,17 @@ A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k Cout=1n
     let ac = engine.run_ac(&netlist, &frequencies).expect("AC solves");
     // LTspice 26.1.1 batch: 9.99999998, 8.46733016, 0.159134790.
     for (point, expected) in ac.iter().zip([9.999_999_98, 8.467_330_16, 0.159_134_790]) {
-        assert_close("|H|", ac_voltage(point, "out").norm(), expected, 2e-6 * expected);
+        assert_close(
+            "|H|",
+            ac_voltage(point, "out").norm(),
+            expected,
+            2e-6 * expected,
+        );
     }
     let phase = ac_voltage(&ac[1], "out").arg().to_degrees();
-    let expected = -(2.0 * std::f64::consts::PI * 1e4 * 1e-5).atan().to_degrees();
+    let expected = -(2.0 * std::f64::consts::PI * 1e4 * 1e-5)
+        .atan()
+        .to_degrees();
     assert_close("phase at the pole", phase, expected, 1e-6);
 }
 
@@ -141,7 +150,11 @@ fn tran_at(deck: &str, stop: f64, step: f64, probes: &[(&str, f64)]) -> Vec<f64>
                 .unwrap_or_else(|| panic!("no waveform for {node}"));
             let index = tran.time.partition_point(|t| t < time).max(1);
             let (t0, t1) = (tran.time[index - 1], tran.time[index]);
-            let fraction = if t1 > t0 { (time - t0) / (t1 - t0) } else { 0.0 };
+            let fraction = if t1 > t0 {
+                (time - t0) / (t1 - t0)
+            } else {
+                0.0
+            };
             wave[index - 1] + fraction * (wave[index] - wave[index - 1])
         })
         .collect()
@@ -168,7 +181,9 @@ R7 q7 0 50
 .op
 .end
 ";
-    let op = Engine::default().run_dc_op(&parse(deck)).expect("OP solves");
+    let op = Engine::default()
+        .run_dc_op(&parse(deck))
+        .expect("OP solves");
     let v = |node: &str| op.try_voltage_named(node).unwrap();
     for (node, expected) in [
         ("q1", 0.0),
@@ -274,7 +289,10 @@ fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f6
         .iter()
         .map(|point| {
             let probe = NoiseContributionProbe::parse(&format!("DNO(A1,{mechanism})")).unwrap();
-            point.contribution(&probe).expect("OTA mechanism reported").sqrt()
+            point
+                .contribution(&probe)
+                .expect("OTA mechanism reported")
+                .sqrt()
         })
         .collect()
 }
@@ -288,7 +306,10 @@ A1 0 in 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k en=10n enk=10
 ";
     // LTspice 26.1.1 batch, V(A1.en): en*sqrt(1 + enk/f) through G*Rout = 10.
     let densities = ota_noise_density(voltage, "en", &[1.0, 10.0, 1e4]);
-    for (actual, expected) in densities.into_iter().zip([1.004_988e-6, 3.316_625e-7, 1.004_988e-7]) {
+    for (actual, expected) in densities
+        .into_iter()
+        .zip([1.004_988e-6, 3.316_625e-7, 1.004_988e-7])
+    {
         assert_close("en", actual, expected, 1e-6 * expected);
     }
     let current = "* ota in

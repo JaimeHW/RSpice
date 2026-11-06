@@ -395,7 +395,11 @@ use rspice_core::analysis::harmonic_balance::{
 // `analysis::evaluate_ac_printed_measures_with_limits_and_abort`, the running
 // value of each measure a Xyce `.PRINT AC` card names, which the CLI's AC
 // projection prints, brings it to 5,244.
-const MAX_PUBLIC_ITEMS: usize = 5244;
+// LTspice special-function `A` devices add three: `netlist::SpecialFunction`,
+// the device an `ElementKind::SpecialFunction` names, and its `ltspice_name`,
+// which the CLI's element inspection prints; and `xspice::PortNoiseCurrent`,
+// what a code model's `port_noise_currents` returns. The census is 5,247.
+const MAX_PUBLIC_ITEMS: usize = 5247;
 
 /// The `#[doc(hidden)] pub` items of the family, counted apart from
 /// `MAX_PUBLIC_ITEMS`. A hidden item is plumbing that one crate of the engine
@@ -553,7 +557,15 @@ const MAX_PUBLIC_ITEMS: usize = 5244;
 // engine/convergence/damping.rs) projects onto the no-gain box only while
 // every transistor's forward and reverse transport currents match. The
 // census is 1,611, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1611;
+// The LTspice special-function equations (`device::special_function`) add
+// 22, which the builder's special-function hosts (`rspice-core`
+// engine/builder/special_function.rs) read: two re-exports, the
+// `SpecialFunctionError`, `GateFunction`, `OutputStage`, `Gate`, `Schmitt`,
+// `Ota`, `OtaDrive` and `OtaNoise` types, `GateFunction::evaluate`, the
+// `OutputStage` level, resistance, slew and ramp-duration methods, the three
+// `from_params` constructors, `Schmitt::next` and `trip`, and `Ota::drive` and
+// `clamp`. The census is 1,633, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1633;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
