@@ -183,7 +183,13 @@ const MAX_EVENT_WORLD_DEEP_COPIES: u64 = 1_800;
 /// tree and re-running this deck reads 3,491 against the 38 here — a factor of
 /// 92 on a deck with no devices to copy, and on a deck with real ones a copy of
 /// every one of them 3,453 more times than the run needs.
-const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 4;
+///
+/// Lowered from 4 to 3 when a transient step began running plain Newton
+/// first and engaging the merit globalization only on the retry of a failed
+/// attempt: no step of this deck fails, so the globalization base's capture
+/// is no longer taken. The three left are the transient stepper's own and
+/// the two the DC residual probe takes.
+const MAX_DEVICE_STATE_SNAPSHOTS: u64 = 3;
 
 /// How far under its ceiling a count may sit before the ceiling is considered
 /// stale and must be lowered, as a percentage of the ceiling.
