@@ -1,0 +1,43 @@
+* RSpice functional parts.
+*
+* Each subcircuit here is a part placed from the Component shelf. They are
+* written on the native special-function devices (OTA, BUF, AND, OR, XOR,
+* SCHMITT, SRFLOP, COUNTER, PHASEDET, SAMPLEHOLD) and resolve by name with
+* no include. Pin order and parameter names are the placement contract the
+* schematic binds: change them only together with the part's descriptor.
+*
+* Internal stages that carry no supply current of their own are referenced to
+* the global ground, so a part's supply pins carry its quiescent current and
+* the current its output delivers, and nothing else.
+
+* Op-amp. Pins: IN+ IN- V+ V- OUT.
+* A single-pole voltage-feedback amplifier: a transconductance stage driving
+* a 100 pF compensation node sets GBW and AVOL, its current limit sets the
+* slew rate, the node is clamped inside the supply pins by HEADROOM, and a
+* current-limited output stage of resistance ROUT drives OUT. Output current
+* is drawn from V+ when sourced and returned to V- when sunk. The only noise
+* is the input noise EN and IN describe.
+.subckt RSPICE_FN_OPAMP INP INN VP VN OUT
++ AVOL=200k GBW=10Meg SLEW=10Meg VOS=0 IB=0 IOS=0 RIN=1T CIN=2p
++ EN=10n ENK=100 IN=1f INK=0 ROUT=50 ISRC=25m ISNK=25m HEADROOM=0 IQ=1m
+VOS NP INP {VOS}
+IBP INP VN {IB+IOS/2}
+IBN INN VN {IB-IOS/2}
+RIN NP INN {RIN}
+CIN NP INN {CIN}
+A1 INN NP 0 0 0 0 NC 0 OTA G={2*pi*GBW*100p} IOUT={SLEW*100p} VHIGH=1e9 VLOW=-1e9
++ EN={EN} ENK={ENK} IN={IN} INK={INK}
+RC NC 0 {AVOL/(2*pi*GBW*100p)} NOISY=0
+CC NC 0 100p
+EHI NXH 0 VP 0 1
+VHI NXH NHI {HEADROOM}
+ELO NXL 0 VN 0 1
+VLO NLO NXL {HEADROOM}
+A2 NHI NHI NHI NHI NHI NHI NC NHI OTA G=0 LINEAR VHIGH=0 VLOW=-1e9 RCLAMP=1m
+A3 NLO NLO NLO NLO NLO NLO NC NLO OTA G=0 LINEAR VHIGH=1e9 VLOW=0 RCLAMP=1m
+A4 OUT NC 0 0 0 0 NO 0 OTA G={1/ROUT} IOUT={ISRC} ISINK={-ISNK} ASYM VHIGH=1e9 VLOW=-1e9
+VSNS NO OUT 0
+BSRC VP 0 I=max(I(VSNS),0)
+BSNK 0 VN I=max(-I(VSNS),0)
+IQ VP VN {IQ}
+.ends RSPICE_FN_OPAMP

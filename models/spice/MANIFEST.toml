@@ -7,15 +7,15 @@
 # descriptive and cannot add themselves to a product artifact.
 
 [summary]
-packs = 1
-files = 1
-bytes = 4195
+packs = 2
+files = 2
+bytes = 6136
 models = 21
-subcircuits = 1
+subcircuits = 2
 models_top_level = 21
-subcircuits_top_level = 1
+subcircuits_top_level = 2
 shipped_packs = 1
-tiers = { own = 1 }
+tiers = { own = 2 }
 
 [[pack]]
 id = "rspice-foundation"
@@ -36,6 +36,29 @@ bytes = 4195
 models = 21
 subcircuits = 1
 models_top_level = 21
+subcircuits_top_level = 1
+lib_sections = 0
+digest = ""
+
+[[pack]]
+id = "rspice-functional"
+name = "RSpice functional parts"
+category = "builtin"
+originator = "RSpice project"
+path = "functional"
+url = ""
+pin = ""
+spdx = "LicenseRef-RSpice"
+tier = "own"
+redistributable = true
+devices = ["opamp", "comparator", "timer", "logic"]
+corners = []
+entry = "lib/functional.lib"
+files = 1
+bytes = 1941
+models = 0
+subcircuits = 1
+models_top_level = 0
 subcircuits_top_level = 1
 lib_sections = 0
 digest = ""

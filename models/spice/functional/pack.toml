@@ -1,0 +1,25 @@
+# Authored and maintained by the RSpice project.
+
+[pack]
+id = "rspice-functional"
+name = "RSpice functional parts"
+category = "builtin"
+originator = "RSpice project"
+description = "Functional parts placed from the Component shelf: op-amp, comparator, OTA, 555 timer, Schmitt triggers, analog-threshold logic gates, phase detector, counter and sample-and-hold, built on the native special-function devices. These are not manufacturer part models."
+
+[provenance]
+kind = "authored"
+url = ""
+
+[license]
+spdx = "LicenseRef-RSpice"
+tier = "own"
+redistributable = true
+notice_required = false
+file = "../../../LICENSE"
+
+[contents]
+root = "lib"
+devices = ["opamp", "comparator", "timer", "logic"]
+corners = []
+entry = "lib/functional.lib"

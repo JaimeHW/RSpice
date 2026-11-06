@@ -189,20 +189,29 @@ use thiserror::Error;
 use crate::Value;
 use crate::abort_signal::{AbortSignal, NoAbort};
 
-/// Subcircuits supplied by the embedded RSpice foundation library.
+/// Subcircuits supplied by the embedded RSpice foundation and functional
+/// libraries.
 ///
 /// `builtin_lib` owns the source text and nothing else: parsing it is this
 /// layer's work, so the leaf that carries the bytes never has to reach up
-/// into the parser to interpret them. Parsed once and cached, because both
-/// the flattener and the source-map linter ask for it per netlist.
-pub(crate) fn foundation_subcircuits() -> &'static [SubcircuitDef] {
+/// into the parser to interpret them. Parsed once and cached, because the
+/// flattener asks for it per netlist.
+pub(crate) fn builtin_subcircuits() -> &'static [SubcircuitDef] {
     static SUBCIRCUITS: std::sync::OnceLock<Vec<SubcircuitDef>> = std::sync::OnceLock::new();
-    SUBCIRCUITS.get_or_init(|| match parse_netlist(crate::builtin_lib::FOUNDATION_LIB) {
-        Ok(netlist) => netlist.subcircuits,
-        Err(error) => {
-            log::error!("embedded RSpice foundation library did not parse: {error}");
-            Vec::new()
-        }
+    SUBCIRCUITS.get_or_init(|| {
+        [
+            ("foundation", crate::builtin_lib::FOUNDATION_LIB),
+            ("functional", crate::builtin_lib::FUNCTIONAL_LIB),
+        ]
+        .into_iter()
+        .flat_map(|(library, source)| match parse_netlist(source) {
+            Ok(netlist) => netlist.subcircuits,
+            Err(error) => {
+                log::error!("embedded RSpice {library} library did not parse: {error}");
+                Vec::new()
+            }
+        })
+        .collect()
     })
 }
 

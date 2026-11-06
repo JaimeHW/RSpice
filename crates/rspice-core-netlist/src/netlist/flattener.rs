@@ -393,8 +393,7 @@ impl<'a> Flattener<'a> {
         models: &'a [ModelDef],
         config: FlattenerConfig,
     ) -> Self {
-        let foundation_subcircuits = super::foundation_subcircuits();
-        let subcircuit_map: HashMap<String, &SubcircuitDef> = foundation_subcircuits
+        let subcircuit_map: HashMap<String, &SubcircuitDef> = super::builtin_subcircuits()
             .iter()
             .chain(subcircuits)
             .map(|s| (s.name.to_ascii_uppercase(), s))
