@@ -142,7 +142,6 @@ fn every_plan_manager_route_matches_its_reviewed_gated_viewport_baselines() {
     // Every changed route at once, so one run names each fingerprint a
     // reviewed change replaces.
     let changed = baseline_cases()
-        .into_iter()
         .filter_map(|(index, mode, viewport, screen)| {
             let canvas = raster(mode, screen);
             let actual = canvas.regression_fingerprint(regression_height(&canvas));

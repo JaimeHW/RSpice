@@ -342,7 +342,7 @@ fn the_catalog_headings_stand_over_their_columns_while_the_rows_scroll() {
     app.state.model.model_library_manager.clear();
     let mut library = ModelLibrary::new("alpha");
     for index in 0..60 {
-        let mut model = DeviceModel::new(&format!("n{index:02}"), ModelType::Nmos);
+        let mut model = DeviceModel::new(format!("n{index:02}"), ModelType::Nmos);
         model.file_path = Some(PathBuf::from("alpha.lib"));
         library.add_model(model);
     }
