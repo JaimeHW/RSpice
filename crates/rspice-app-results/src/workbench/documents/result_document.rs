@@ -41,6 +41,7 @@ pub mod specs;
 mod table;
 mod transfer_function;
 pub mod view_context;
+mod view_history;
 mod view_plans;
 mod viewer_state;
 
@@ -59,6 +60,7 @@ pub(crate) use noise_contrib::export_csv as export_noise_contribution_csv;
 pub(crate) use op_inspector::export_csv as export_operating_point_csv;
 pub(crate) use optimization::export_csv as export_optimization_csv;
 pub(crate) use specs::export_csv as export_specs_csv;
+pub(crate) use view_history::{zoom_previous, zoom_previous_available};
 
 /// Route to the one surface that authors specification limits.
 ///
@@ -1473,6 +1475,8 @@ pub struct ResultsState {
     structural_gates: RetainedMemo<(AnalysisPresentationKey, StructuralGate), bool>,
     /// Memoized viewer projections; see [`view_plans::ViewPlans`].
     plans: view_plans::ViewPlans,
+    /// The views each waveform sheet showed, for Zoom previous. Transient.
+    view_histories: view_history::WaveViewHistories,
 }
 
 /// One evaluated expression series (owned arrays, cheap to clone).
@@ -1525,6 +1529,7 @@ pub fn show(
         ResultChrome::Full,
     );
     waves::marker_dialog::show(ui.ctx(), state);
+    view_history::observe(ui, state, view_history::WaveSheet::QuickView);
 }
 
 /// The workspace's own single-key gestures, as the mockup's results keymap
@@ -1705,6 +1710,7 @@ pub fn show_persistent_document(
         document_id,
     );
     waves::marker_dialog::show(ui.ctx(), state);
+    view_history::observe(ui, state, view_history::WaveSheet::Document(document_id));
 }
 
 /// Resolve and select the primary binding of a project-owned result document.

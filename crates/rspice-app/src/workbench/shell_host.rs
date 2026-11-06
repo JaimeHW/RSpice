@@ -1035,6 +1035,7 @@ mod tests {
             (ids::ZOOM_FIT, Command::ZoomFit),
             (ids::ZOOM_IN, Command::ZoomIn),
             (ids::ZOOM_OUT, Command::ZoomOut),
+            (ids::ZOOM_PREVIOUS, Command::ZoomPrevious),
         ] {
             assert_eq!(id, command.key(), "{command:?}");
             assert_eq!(legacy_command(id), Some(command), "{command:?}");

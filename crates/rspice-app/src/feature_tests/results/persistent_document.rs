@@ -1547,6 +1547,79 @@ fn zooming_one_pane_of_a_saved_x_link_zooms_the_other() {
     assert_eq!(saved_x_range(&app, document_id, second.id), zoomed);
 }
 
+/// One frame of the Results workspace over `document_id`, `time` seconds
+/// into the session.
+fn document_frame(app: &mut RSpiceApp, document_id: ResultDocumentId, time: f64) {
+    let ctx = egui::Context::default();
+    crate::ui::Theme::default().apply(&ctx);
+    let input = egui::RawInput {
+        time: Some(time),
+        ..Default::default()
+    };
+    let _ = ctx.run_ui(input, |ui| {
+        super::with_surface_parts(app, |state, run_controller, selected_specification| {
+            crate::workbench::documents::result_document::show_persistent_document(
+                ui,
+                state,
+                run_controller,
+                selected_specification,
+                document_id,
+            );
+        });
+    });
+}
+
+/// Zoom previous steps a result document back through the windows it
+/// showed, and the window the document keeps in its own axes comes back
+/// with it, not only the session's copy.
+#[test]
+fn zoom_previous_steps_a_result_document_back_through_its_kept_windows() {
+    use crate::workbench::commands::vocabulary::Command;
+    use crate::workbench::framework::host::Host;
+    let (mut app, document_id) = persistent_transient_fixture();
+    app.state
+        .workbench
+        .activate(crate::workbench::state::Workspace::Results);
+    let key = Command::ZoomPrevious.key();
+    document_frame(&mut app, document_id, 0.0);
+    let pane_id = projection(app.state.results_reads(), document_id)
+        .expect("document projection")
+        .pages[0]
+        .panes[0]
+        .id;
+    let run = &app.state.model.simulation.retained.runs[0];
+    let analysis = crate::workbench::documents::result_document::AnalysisPresentationKey::new(
+        run.dataset_id,
+        &run.analyses[0],
+    );
+    app.state.results.results.session.active_wave_pane = Some(
+        crate::workbench::documents::result_document::WavePanePresentationKey {
+            analysis,
+            unit: "V".to_owned(),
+        },
+    );
+    let opened = saved_x_range(&app, document_id, pane_id);
+    assert!(!app.is_enabled(key));
+
+    app.execute(Command::ZoomIn.key());
+    document_frame(&mut app, document_id, 1.0);
+    let nearer = saved_x_range(&app, document_id, pane_id);
+    app.execute(Command::ZoomIn.key());
+    document_frame(&mut app, document_id, 2.0);
+    assert_ne!(saved_x_range(&app, document_id, pane_id), nearer);
+    assert_ne!(nearer, opened);
+
+    assert!(app.is_enabled(key));
+    app.execute(key);
+    assert_eq!(saved_x_range(&app, document_id, pane_id), nearer);
+    document_frame(&mut app, document_id, 3.0);
+    assert_eq!(saved_x_range(&app, document_id, pane_id), nearer);
+    app.execute(key);
+    document_frame(&mut app, document_id, 4.0);
+    assert_eq!(saved_x_range(&app, document_id, pane_id), opened);
+    assert!(!app.is_enabled(key));
+}
+
 /// Linked cursors over a document are the document's: they survive a save,
 /// and moving the A cursor in one pane moves it in the other.
 #[test]

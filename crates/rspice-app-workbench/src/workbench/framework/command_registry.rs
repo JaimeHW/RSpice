@@ -374,6 +374,7 @@ pub mod ids {
         ZOOM_FIT = "canvas-fit-sheet";
         ZOOM_IN = "zoom-in";
         ZOOM_OUT = "zoom-out";
+        ZOOM_PREVIOUS = "zoom-previous";
     }
 }
 

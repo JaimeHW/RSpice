@@ -529,7 +529,7 @@ impl ResultViewerState {
     /// pane's zoom is session state and stays out of the document rather than
     /// being written into it under whichever ordinal a hash map happened to
     /// yield first.
-    const RETAINED_PANE_ORDINAL: usize = 0;
+    pub const RETAINED_PANE_ORDINAL: usize = 0;
     /// Clear cursors (Esc, Clear action).
     pub fn clear_cursors(&mut self) {
         self.cursors.clear();

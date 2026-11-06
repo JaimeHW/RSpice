@@ -273,7 +273,9 @@ impl Command {
             }
             Self::ZoomBox => active_schematic_editor(app),
             Self::ZoomPrevious => {
-                if let Some(session) = state.symbol_in_place() {
+                if let Some(enabled) = app.routed_command_key_enabled(ids::ZOOM_PREVIOUS) {
+                    enabled
+                } else if let Some(session) = state.symbol_in_place() {
                     session.view_history.can_step_back()
                 } else if active_symbol_editor(app) {
                     state.design.symbol.editor.view_history.can_step_back()

@@ -22,7 +22,7 @@ use crate::workbench::documents::result_document::{
     ResultsParts, ResultsReads, add_pane_available, compare_availability, copy_cursor_text,
     family_available, fit_gesture_available, linked_cursors, open_create_document,
     open_dataset_browser, open_specification_editor, request_view_gesture, viewer_is_available,
-    viewer_unavailability_reason, zoom_gesture_available,
+    viewer_unavailability_reason, zoom_gesture_available, zoom_previous, zoom_previous_available,
 };
 use crate::workbench::framework::command_registry::{CommandAvailability, CommandSpec, ids};
 use crate::workbench::framework::dialogs::DialogKey;
@@ -255,9 +255,9 @@ fn keep_axis_drafts(_: &mut Cx<'_, ResultsFeature>, _: &egui::Context) {}
 
 /// The workbench commands the results workspace answers for itself: Copy
 /// takes the cursor readout, the zooms and Fit move the active sheet's
-/// viewport, and Cancel lets go of the placed cursors. Each is the
-/// workspace's wherever Results is in front, Cancel only while a cursor is
-/// placed.
+/// viewport, Zoom previous steps the waveform sheet back through the views it
+/// showed, and Cancel lets go of the placed cursors. Each is the workspace's
+/// wherever Results is in front, Cancel only while a cursor is placed.
 const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
     RoutedCommand {
         key: ids::COPY,
@@ -284,6 +284,12 @@ const ROUTED: &[RoutedCommand<ResultsFeature>] = &[
         takes: in_results,
         enabled: |reads| fit_gesture_available(results_reads(reads)),
         execute: |cx| request_view_gesture(&mut cx.state.results, ViewGesture::Fit),
+    },
+    RoutedCommand {
+        key: ids::ZOOM_PREVIOUS,
+        takes: in_results,
+        enabled: |reads| zoom_previous_available(results_reads(reads)),
+        execute: |cx| zoom_previous(&mut results_parts(cx)),
     },
     RoutedCommand {
         key: ids::CANCEL,

@@ -901,7 +901,9 @@ impl Command {
             }
             Self::DeselectAll | Self::ZoomToSelection => "nothing is selected",
             Self::ZoomPrevious
-                if !super::active_schematic_editor(app) && !super::active_symbol_editor(app) =>
+                if !super::active_schematic_editor(app)
+                    && !super::active_symbol_editor(app)
+                    && app.routed_command_key_enabled(self.key()).is_none() =>
             {
                 "open a schematic or symbol"
             }

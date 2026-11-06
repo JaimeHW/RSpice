@@ -631,7 +631,8 @@ fn result_context_beats_global_only_when_enabled() {
     );
 }
 
-/// The magnification and copy chords reach the Results workspace.
+/// The magnification, Zoom previous and copy chords reach the Results
+/// workspace.
 ///
 /// Their handlers have carried a Results branch all along —
 /// `Command::ZoomFit` queues a view gesture and `Command::Copy` writes the
@@ -645,6 +646,7 @@ fn magnification_and_copy_chords_dispatch_on_a_result_sheet() {
         Command::ZoomIn,
         Command::ZoomOut,
         Command::ZoomFit,
+        Command::ZoomPrevious,
         Command::Copy,
     ] {
         let sequence = profile

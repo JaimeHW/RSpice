@@ -619,7 +619,9 @@ impl Command {
             // The canvas in front steps back to the view it showed before;
             // stepping back is not itself a view the history keeps.
             Self::ZoomPrevious => {
-                if let Some(session) = app.state.symbol_in_place_mut() {
+                if app.route_command_key(ids::ZOOM_PREVIOUS) {
+                    // The waveform sheet in front stepped back its own view.
+                } else if let Some(session) = app.state.symbol_in_place_mut() {
                     if let Some(view) = session.view_history.step_back() {
                         (session.zoom, session.pan) = view;
                     }
