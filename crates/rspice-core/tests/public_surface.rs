@@ -669,7 +669,14 @@ const MAX_PUBLIC_ITEMS: usize = 5279;
 // (engine/builder.rs) and `VoltageSwitch::terminal_conductance`
 // (engine/transient.rs) add three the engine reads from its devices crate. The
 // census is 1,679, with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1679;
+// `SoiInstanceCore::set_voltage_limiting_enabled`,
+// `Mosfet::set_voltage_limiting_enabled`,
+// `Bsim3v3Device::set_voltage_limiting_enabled` and
+// `Bsim4v8Device::set_voltage_limiting_enabled` add four: the builder
+// (`rspice-core` engine/builder.rs and builder/advanced_mos.rs) applies Xyce's
+// `DEVICE VOLTLIM` to each BSIMSOI, classic MOS, BSIM3 and BSIM4 instance it
+// builds. The census is 1,683, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1683;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
