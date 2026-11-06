@@ -5,6 +5,7 @@
 #[serde(from = "PersistedIntegrationMethod")]
 pub enum IntegrationMethod {
     /// Trapezoidal rule (A-stable, 2nd order).
+    #[default]
     Trap,
     /// Backward Euler (L-stable, 1st order).
     Euler,
@@ -12,7 +13,6 @@ pub enum IntegrationMethod {
     /// at.
     Gear2,
     /// Automatic trap/gear switching (Spectre default).
-    #[default]
     TrapGear,
 }
 

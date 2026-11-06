@@ -29,7 +29,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-analyses",
         page: SimulationPage::Analyses,
-        fingerprint: "25c3c6dbb59f55c963bb2aaf3761105e7fa48ece63f2a94bf7f835cb755547b5",
+        fingerprint: "11525a810208160953c7b0cc186fb9fd2a9346db366b5217547fdc6f0e8166c9",
     },
     StudioBaseline {
         name: "studio-excitations",
@@ -64,7 +64,7 @@ const STUDIO_BASELINES: [StudioBaseline; 9] = [
     StudioBaseline {
         name: "studio-solver",
         page: SimulationPage::Solver,
-        fingerprint: "502bb720d67a2261b536c99e2c0df9552f727c6f6e18dbfa1c8453e99a1702d9",
+        fingerprint: "ba9fb2d2b166e280f8eef76f7a3490d46eacfa6583213cffa6b99b78eb6b9a7c",
     },
     StudioBaseline {
         name: "studio-save",

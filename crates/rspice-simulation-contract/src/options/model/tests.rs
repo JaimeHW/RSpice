@@ -242,6 +242,26 @@ fn a_connect_rule_block_is_not_part_of_any_preset_and_is_an_identifier() {
 }
 
 #[test]
+fn a_new_project_integrates_trapezoidally_and_an_explicit_switch_is_written() {
+    // New projects run the trapezoidal rule, the ngspice, Xyce, HSPICE and
+    // Spectre default, and leave METHOD off the deck; the trap/Gear-2 switch
+    // is a choice the deck then states.
+    let options = SimulationOptions::default();
+    assert_eq!(options.method, IntegrationMethod::Trap);
+    assert_eq!(
+        options.simulation_config_overrides().integration_method,
+        Some(rspice_core::numerics::integration::IntegrationMethod::Trapezoidal)
+    );
+    assert!(!options.to_spice_options().contains("METHOD"));
+
+    let switched = SimulationOptions {
+        method: IntegrationMethod::TrapGear,
+        ..SimulationOptions::default()
+    };
+    assert!(switched.to_spice_options().contains("METHOD=TRAPGEAR"));
+}
+
+#[test]
 fn no_seed_emits_no_seed_line() {
     assert!(
         !SimulationOptions::default()

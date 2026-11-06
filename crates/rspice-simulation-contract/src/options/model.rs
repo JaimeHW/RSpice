@@ -230,7 +230,7 @@ impl Default for SimulationOptions {
             rshunt: None,
             connect_rules: None,
             damping: DampingStrategy::VoltageLimiting,
-            method: IntegrationMethod::TrapGear,
+            method: IntegrationMethod::Trap,
             solver: MatrixSolver::Lu,
             bypass_enabled: false,
             bypass_reltol: 1e-3,
