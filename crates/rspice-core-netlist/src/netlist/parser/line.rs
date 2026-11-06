@@ -903,19 +903,29 @@ pub(super) fn parse_line(
             params,
             defer_simple_param_refs,
         ),
-        // XSPICE code model instance
-        'A' => {
-            let name = expect_xspice_instance_name(&mut stream, line_num)?;
-            xspice_parser::parse_xspice(
+        // LTspice special function, otherwise an XSPICE code model instance
+        'A' => match special_function::special_function_of_line(line, models) {
+            Some(function) => special_function::parse_special_function(
                 &mut stream,
                 line_num,
-                name,
+                function,
                 elements,
                 params,
                 defer_simple_param_refs,
-                abort,
-            )
-        }
+            ),
+            None => {
+                let name = expect_xspice_instance_name(&mut stream, line_num)?;
+                xspice_parser::parse_xspice(
+                    &mut stream,
+                    line_num,
+                    name,
+                    elements,
+                    params,
+                    defer_simple_param_refs,
+                    abort,
+                )
+            }
+        },
         'U' => parse_pspice_u_device(line, line_num, elements, params, defer_simple_param_refs),
         _ => Err(ParseError::Syntax {
             line: line_num,

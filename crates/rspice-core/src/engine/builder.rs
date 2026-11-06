@@ -46,6 +46,7 @@ pub(in crate::engine) mod data_dependencies;
 mod ground_reference;
 mod model_resolution;
 mod model_safety;
+mod special_function;
 mod terminal_probes;
 pub(in crate::engine) use model_resolution::resolved_element_value_expression;
 use model_resolution::*;
@@ -6613,6 +6614,17 @@ impl Engine {
             // reported against this element and its card.
             let _binding = crate::notice::binding(&element.name, element_model_name(&element.kind));
             match &element.kind {
+                ElementKind::SpecialFunction {
+                    function,
+                    instance_params,
+                    ..
+                } => special_function::build(
+                    &mut circuit,
+                    element,
+                    *function,
+                    instance_params,
+                    self.config.temperature,
+                )?,
                 ElementKind::Resistor {
                     value,
                     value_expr,

@@ -190,6 +190,7 @@ mod qpss_card;
 mod qpxf_card;
 mod scoping;
 mod source_specs;
+mod special_function;
 mod state;
 mod tlines;
 mod values;

@@ -19,6 +19,7 @@ pub mod memristor_pem;
 pub mod memristor_team;
 pub mod pwl_file;
 mod stamp_error;
+pub mod special_function;
 mod switch;
 mod traits;
 mod transmission_line;

@@ -664,6 +664,88 @@ pub enum ElementKind {
         /// inside subcircuit bodies.
         real_vector_expr_params: Vec<(String, Vec<String>)>,
     },
+
+    //-------------------------------------------------------------------------
+    // LTspice special functions
+    //-------------------------------------------------------------------------
+    /// LTspice special-function device: `Annn n1 ... n8 FUNCTION [NAME=value | FLAG ...]`.
+    ///
+    /// `nodes` holds the eight terminals in LTspice order. Terminal 8 is the
+    /// device common; any other terminal tied to it is unused.
+    SpecialFunction {
+        function: SpecialFunction,
+        /// Instance parameters resolved while parsing, upper-cased. A bare
+        /// flag such as `LINEAR` is stored with the value 1.
+        instance_params: Vec<(String, Value)>,
+        /// Instance parameters captured inside subcircuit bodies and resolved
+        /// against the concrete instance scope during flattening.
+        deferred_params: Vec<(String, String)>,
+    },
+}
+
+/// The LTspice special-function devices, named by the model token of their
+/// `A` line. LTspice accepts exactly these names there; its symbol names
+/// (`INV`, `SCHMTINV`, `DIFFSCHMITT`, ...) select a device and its terminals
+/// but are not model tokens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum SpecialFunction {
+    Buf,
+    And,
+    Or,
+    Xor,
+    Schmitt,
+    DFlop,
+    SrFlop,
+    Counter,
+    PhaseDet,
+    SampleHold,
+    Modulator,
+    Varistor,
+    Ota,
+}
+
+impl SpecialFunction {
+    pub const ALL: [SpecialFunction; 13] = [
+        Self::Buf,
+        Self::And,
+        Self::Or,
+        Self::Xor,
+        Self::Schmitt,
+        Self::DFlop,
+        Self::SrFlop,
+        Self::Counter,
+        Self::PhaseDet,
+        Self::SampleHold,
+        Self::Modulator,
+        Self::Varistor,
+        Self::Ota,
+    ];
+
+    /// The model token LTspice reads for this device.
+    pub fn ltspice_name(self) -> &'static str {
+        match self {
+            Self::Buf => "BUF",
+            Self::And => "AND",
+            Self::Or => "OR",
+            Self::Xor => "XOR",
+            Self::Schmitt => "SCHMITT",
+            Self::DFlop => "DFLOP",
+            Self::SrFlop => "SRFLOP",
+            Self::Counter => "COUNTER",
+            Self::PhaseDet => "PHASEDET",
+            Self::SampleHold => "SAMPLEHOLD",
+            Self::Modulator => "MODULATOR",
+            Self::Varistor => "VARISTOR",
+            Self::Ota => "OTA",
+        }
+    }
+
+    /// The device a model token names, ignoring ASCII case.
+    pub fn from_model_token(token: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|function| token.eq_ignore_ascii_case(function.ltspice_name()))
+    }
 }
 
 /// Internal metadata attached to XSPICE elements lowered from PSpice U devices.

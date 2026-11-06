@@ -231,6 +231,9 @@ fn element_kind_and_model(kind: &ElementKind) -> (&'static str, Option<&str>) {
         ElementKind::Coupling { model, .. } => ("coupling", model.as_deref()),
         ElementKind::Subcircuit { subckt_name, .. } => ("subcircuit", Some(subckt_name)),
         ElementKind::Xspice { model, .. } => ("xspice", Some(model)),
+        ElementKind::SpecialFunction { function, .. } => {
+            ("special-function", Some(function.ltspice_name()))
+        }
     }
 }
 

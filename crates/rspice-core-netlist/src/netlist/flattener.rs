@@ -2353,6 +2353,20 @@ impl<'a> Flattener<'a> {
                 )?,
                 deferred_params: Vec::new(),
             },
+            ElementKind::SpecialFunction {
+                function,
+                instance_params,
+                deferred_params,
+            } => ElementKind::SpecialFunction {
+                function: *function,
+                instance_params: self.merge_deferred_params(
+                    instance_params,
+                    deferred_params,
+                    scope,
+                    abort,
+                )?,
+                deferred_params: Vec::new(),
+            },
 
             // The child resolver binds arguments sequentially in this caller
             // scope. Eager projection here loses complex values and makes later

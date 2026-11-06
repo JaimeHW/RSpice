@@ -236,16 +236,23 @@ impl ParseState {
             // transient checkpoint identity from an omitted directive.
             options.replace_ground = None;
         }
+        let mut elements = self.elements;
+        let mut subcircuits = self.subcircuits;
+        super::special_function::restore_xspice_readings(
+            &mut elements,
+            &mut subcircuits,
+            &self.models,
+        );
         let mut netlist = Netlist {
             title,
-            elements: self.elements,
+            elements,
             analyses,
             lin_analysis: self.lin_analysis,
             fft_analyses: self.fft_analyses,
             small_signal_states,
             data_tables: self.data_tables,
             models: self.models,
-            subcircuits: self.subcircuits,
+            subcircuits,
             params,
             spectre_statistics: self.spectre_statistics,
             spectre_statistical_coordinate: None,

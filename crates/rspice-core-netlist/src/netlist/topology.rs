@@ -779,6 +779,15 @@ fn dc_conduction_groups(
                 reason: "XSPICE lead groups are model-specific".to_string(),
             });
         }
+        // A special function's inputs only sense; its outputs drive against
+        // the common terminal.
+        ElementKind::SpecialFunction { .. } => {
+            let (inputs, outputs) = element.nodes.split_at(element.nodes.len().min(5));
+            let mut groups: Vec<Vec<&str>> =
+                inputs.iter().map(|node| vec![node.as_str()]).collect();
+            groups.push(outputs.iter().map(String::as_str).collect());
+            groups
+        }
         ElementKind::Mosfet { .. } if element.nodes.len() >= 4 => vec![
             vec![
                 element.nodes[0].as_str(),
@@ -879,6 +888,15 @@ fn xyce_dc_lead_groups(element: &Element) -> Result<Vec<Vec<&str>>, Connectivity
                 element: element.name.clone(),
                 reason: "XSPICE lead groups are model-specific".to_string(),
             });
+        }
+        // A special function's inputs only sense; its outputs drive against
+        // the common terminal.
+        ElementKind::SpecialFunction { .. } => {
+            let (inputs, outputs) = element.nodes.split_at(element.nodes.len().min(5));
+            let mut groups: Vec<Vec<&str>> =
+                inputs.iter().map(|node| vec![node.as_str()]).collect();
+            groups.push(outputs.iter().map(String::as_str).collect());
+            groups
         }
         ElementKind::Resistor { .. }
         | ElementKind::Inductor { .. }
