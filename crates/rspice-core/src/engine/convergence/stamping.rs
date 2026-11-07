@@ -258,6 +258,14 @@ impl Engine {
         circuit.set_xyce_memristor_operating_point_mode(true);
         circuit.set_semiconductor_junction_gmin(junction_gmin);
         self.update_operating_point_nonlinear(circuit, solution);
+        // A Verilog-A device has no convergence test of its own beyond its
+        // limiters, so the iterate is held to the terminal currents its
+        // Newton stamp predicts, as a SPICE device is held to its branch
+        // currents.
+        #[cfg(feature = "veriloga")]
+        circuit
+            .veriloga_devices_mut()
+            .settle_newton_currents(solution, self.device_convergence_criteria());
         if circuit.has_independent_xspice_evaluation() {
             circuit.evaluate_xspice_operating_point_load(time, solution, analysis);
         }

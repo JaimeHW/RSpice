@@ -102,14 +102,87 @@ fn stamp_failure(
 pub struct VerilogADevices {
     /// Device instances
     devices: Vec<VerilogADevice>,
+    /// The linear model each device's latest limited Newton stamp put on its
+    /// terminal rows, one per device; empty after any other kind of stamp.
+    newton_models: Vec<TerminalCurrentModel>,
+    /// Whether the operating-point iterate solved from those stamps moves some
+    /// terminal current by more than the tolerance allows.
+    newton_currents_unsettled: bool,
+}
+
+/// One device's limited Newton stamp as it bears on its terminal currents.
+///
+/// A terminal row's stamp is the device's own linearization: its conductances
+/// times the stamp point, less the equivalent source, is the current the
+/// device carried there, whatever the conductances are. The current the next
+/// iterate predicts differs from it by the conductances times the step. The
+/// iterate has settled the device when that predicted change is within
+/// tolerance of the current, the test SPICE devices apply to their branch
+/// currents. It is what keeps a solution off a Jacobian that disagrees with
+/// the currents: Newton then steps to wherever that Jacobian says KCL holds,
+/// which predicts a change as large as the current it fails to balance.
+#[derive(Debug, Clone, Default)]
+struct TerminalCurrentModel {
+    /// Each terminal row with the current the device carried on it.
+    rows: Vec<(usize, Value)>,
+    /// Each conductance on a terminal row: its row's slot in `rows`, its
+    /// column, its value and the column's value at the stamp point.
+    conductances: Vec<(usize, usize, Value, Value)>,
+    /// The stamp's raw matrix entries and sources, empty between stamps.
+    entries: Vec<(usize, usize, Value)>,
+    sources: Vec<(usize, Value)>,
+}
+
+impl TerminalCurrentModel {
+    /// Reduce the recorded stamp to the device's terminal rows at the point
+    /// it was stamped at. `terminal_rows` are matrix rows (ground excluded).
+    fn reduce(&mut self, terminal_rows: impl IntoIterator<Item = usize>, at: &[Value]) {
+        self.rows.clear();
+        self.conductances.clear();
+        for row in terminal_rows {
+            if !self.rows.iter().any(|&(known, _)| known == row) {
+                self.rows.push((row, 0.0));
+            }
+        }
+        for &(row, column, value) in &self.entries {
+            let Some(slot) = self.rows.iter().position(|&(known, _)| known == row) else {
+                continue;
+            };
+            let column_value = at.get(column).copied().unwrap_or(0.0);
+            self.rows[slot].1 += value * column_value;
+            self.conductances.push((slot, column, value, column_value));
+        }
+        for &(row, value) in &self.sources {
+            if let Some(slot) = self.rows.iter().position(|&(known, _)| known == row) {
+                self.rows[slot].1 -= value;
+            }
+        }
+        self.entries.clear();
+        self.sources.clear();
+    }
+
+    /// Whether moving to `solution` changes every terminal current by no more
+    /// than the device tolerance allows.
+    fn settled(&self, solution: &[Value], criteria: crate::device::NonlinearConvergenceCriteria) -> bool {
+        let mut change = vec![0.0; self.rows.len()];
+        for &(slot, column, value, column_value) in &self.conductances {
+            let Some(&next) = solution.get(column) else {
+                return false;
+            };
+            change[slot] += value * (next - column_value);
+        }
+        self.rows.iter().zip(&change).all(|(&(_, current), &change)| {
+            let tolerance = criteria.current_tolerance()
+                + criteria.relative_tolerance() * current.abs().max((current + change).abs());
+            change.abs() <= tolerance
+        })
+    }
 }
 
 impl VerilogADevices {
     /// Create an empty collection
     pub fn new() -> Self {
-        Self {
-            devices: Vec::new(),
-        }
+        Self::default()
     }
 
     /// Add a device to the collection
@@ -252,19 +325,65 @@ impl VerilogADevices {
         M: FnMut(usize, usize, Value),
         R: FnMut(usize, Value),
     {
-        for device in &mut self.devices {
+        self.newton_currents_unsettled = false;
+        if mode != VerilogAEvaluationMode::NewtonLimited {
+            self.newton_models.clear();
+            for device in &mut self.devices {
+                device
+                    .try_stamp_with_mode(circuit_voltages, &mut matrix_add, &mut rhs_add, mode)
+                    .map_err(|error| stamp_failure(device, circuit_voltages, &error))?;
+            }
+            return Ok(());
+        }
+        self.newton_models
+            .resize_with(self.devices.len(), TerminalCurrentModel::default);
+        for (device, model) in self.devices.iter_mut().zip(&mut self.newton_models) {
+            let TerminalCurrentModel {
+                entries, sources, ..
+            } = model;
             device
-                .try_stamp_with_mode(circuit_voltages, &mut matrix_add, &mut rhs_add, mode)
+                .try_stamp_with_mode(
+                    circuit_voltages,
+                    |row, column, value| {
+                        entries.push((row, column, value));
+                        matrix_add(row, column, value);
+                    },
+                    |row, value| {
+                        sources.push((row, value));
+                        rhs_add(row, value);
+                    },
+                    mode,
+                )
                 .map_err(|error| stamp_failure(device, circuit_voltages, &error))?;
+            let terminal_rows = (0..device.num_terminals())
+                .filter_map(|terminal| device.node_for_terminal(terminal).checked_sub(1));
+            model.reduce(terminal_rows, circuit_voltages);
         }
         Ok(())
     }
 
+    /// Judge the operating-point iterate `solution` solved from the latest
+    /// limited Newton stamps by the terminal currents those stamps predict
+    /// for it; [`Self::all_converged`] reports the verdict until the next
+    /// stamp.
+    pub(crate) fn settle_newton_currents(
+        &mut self,
+        solution: &[Value],
+        criteria: crate::device::NonlinearConvergenceCriteria,
+    ) {
+        self.newton_currents_unsettled = !self
+            .newton_models
+            .iter()
+            .all(|model| model.settled(solution, criteria));
+    }
+
     /// Whether every device's named limiters accepted their proposal during
-    /// the latest limited Newton stamp.
+    /// the latest limited Newton stamp, and the operating-point iterate
+    /// solved from it settled every terminal current.
     #[inline]
     pub fn all_converged(&self) -> bool {
-        self.devices.iter().all(VerilogADevice::limiter_converged)
+        !self.newton_currents_unsettled
+            && self.devices.iter().all(VerilogADevice::limiter_converged)
     }
 }
 
@@ -408,5 +527,72 @@ endmodule
         first
             .try_stamp(&[0.0, 0.0], |_, _, _| {}, |_, _| {})
             .expect("failed validation must leave the first device accepted at t=0");
+    }
+}
+
+#[cfg(all(test, feature = "veriloga", not(feature = "veriloga-native")))]
+mod newton_current_tests {
+    use super::{Compiler, VerilogADevice, VerilogADevices, VerilogAEvaluationMode};
+    use crate::device::NonlinearConvergenceCriteria;
+
+    const VT: f64 = 0.025;
+
+    fn junction() -> VerilogADevices {
+        let source = r#"
+module junction(a, c);
+    inout a, c;
+    electrical a, c;
+    analog I(a, c) <+ 1.0e-14 * (limexp(V(a, c) / 0.025) - 1.0);
+endmodule
+"#;
+        let model = Compiler::default()
+            .compile(source)
+            .expect("compile junction fixture");
+        let mut device = VerilogADevice::try_new("x1", model, &[1, 0]).unwrap();
+        device.try_set_analysis_type(0).unwrap();
+        let mut devices = VerilogADevices::new();
+        devices.add(device);
+        devices
+    }
+
+    /// One Newton step of a 1 mA source driving the junction from `at`, and
+    /// whether the collection then calls the operating point converged.
+    fn newton_step(devices: &mut VerilogADevices, at: f64) -> (f64, bool) {
+        let (mut conductance, mut rhs) = (0.0, 1.0e-3);
+        devices
+            .try_stamp_all_with_mode(
+                &[at],
+                |row, column, value| {
+                    assert_eq!((row, column), (0, 0));
+                    conductance += value;
+                },
+                |row, value| {
+                    assert_eq!(row, 0);
+                    rhs += value;
+                },
+                VerilogAEvaluationMode::NewtonLimited,
+            )
+            .expect("stamp the junction");
+        let next = rhs / conductance;
+        devices.settle_newton_currents(&[next], NonlinearConvergenceCriteria::default());
+        (next, devices.all_converged())
+    }
+
+    /// Far past its knee the junction carries some 1e28 A against the 1 mA
+    /// that drives it. No limiter acts there, so only the terminal current
+    /// the step predicts can say the iterate is not a solution.
+    #[test]
+    fn an_iterate_whose_terminal_current_does_not_settle_is_not_converged() {
+        let mut devices = junction();
+        let (_, converged) = newton_step(&mut devices, 1.0e6);
+        assert!(!converged, "a 1e28 A imbalance passed as converged");
+
+        let solution = VT * (1.0e-3_f64 / 1.0e-14 + 1.0).ln();
+        let (next, converged) = newton_step(&mut devices, solution);
+        assert!(
+            (next - solution).abs() <= 1.0e-12,
+            "Newton left the solution: {next} vs {solution}"
+        );
+        assert!(converged, "the solution itself did not settle");
     }
 }
