@@ -903,6 +903,9 @@ impl<'a> Flattener<'a> {
                 | super::ElementProvenance::GeneratedFrequencyResponseInput {
                     owner, node, ..
                 }
+                | super::ElementProvenance::GeneratedFrequencyResponseOutput {
+                    owner, node, ..
+                }
                 | super::ElementProvenance::GeneratedVariableDelay { owner, node, .. } => {
                     if !element
                         .nodes
@@ -937,6 +940,7 @@ impl<'a> Flattener<'a> {
                 super::ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
                 | super::ElementProvenance::GeneratedDynamicStateDerivative { owner, .. }
                 | super::ElementProvenance::GeneratedFrequencyResponseInput { owner, .. }
+                | super::ElementProvenance::GeneratedFrequencyResponseOutput { owner, .. }
                 | super::ElementProvenance::GeneratedVariableDelay { owner, .. } => {
                     Some(owner.as_str())
                 }
@@ -1918,6 +1922,17 @@ impl<'a> Flattener<'a> {
                     owner: self.remap_local_element_reference(owner, prefix),
                     node: self.qualify_hierarchy_name(prefix, node),
                     response: response.clone(),
+                },
+                super::ElementProvenance::GeneratedFrequencyResponseOutput {
+                    owner,
+                    node,
+                    input,
+                    fitted,
+                } => super::ElementProvenance::GeneratedFrequencyResponseOutput {
+                    owner: self.remap_local_element_reference(owner, prefix),
+                    node: self.qualify_hierarchy_name(prefix, node),
+                    input: self.qualify_hierarchy_name(prefix, input),
+                    fitted: self.qualify_hierarchy_name(prefix, fitted),
                 },
                 super::ElementProvenance::GeneratedVariableDelay {
                     owner,

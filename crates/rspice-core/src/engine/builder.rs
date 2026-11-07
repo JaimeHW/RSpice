@@ -43,6 +43,7 @@ use std::sync::RwLock;
 use std::time::{Duration, Instant};
 
 pub(in crate::engine) mod data_dependencies;
+mod frequency_output;
 mod ground_reference;
 mod model_resolution;
 mod model_safety;
@@ -6686,6 +6687,20 @@ impl Engine {
                     element,
                     owner,
                     (input, delay, maximum.as_deref()),
+                    self.config.temperature,
+                )?;
+                continue;
+            }
+            if let crate::netlist::ElementProvenance::GeneratedFrequencyResponseOutput {
+                input,
+                fitted,
+                ..
+            } = &element.provenance
+            {
+                frequency_output::build(
+                    &mut circuit,
+                    element,
+                    (input, fitted),
                     self.config.temperature,
                 )?;
                 continue;

@@ -217,13 +217,26 @@ pub enum ElementProvenance {
     /// known by a measured frequency response.
     ///
     /// The owner's other elements realize a rational fit of `response` for
-    /// the operating point and the transient. Small-signal analyses use the
-    /// response itself: there the owner's output is `response` times the
-    /// small-signal voltage of `node`.
+    /// the transient. Small-signal analyses use the response itself: there
+    /// the owner's output is `response` times the small-signal voltage of
+    /// `node`.
     GeneratedFrequencyResponseInput {
         owner: String,
         node: String,
         response: FrequencyResponse,
+    },
+    /// Behavioral voltage source driving the private node a source known by
+    /// a measured frequency response outputs.
+    ///
+    /// Its expression reads `fitted`, the rational fit the transient follows.
+    /// Operating points pass the source's input `input` through unscaled
+    /// instead, as QSPICE and LTspice do; the engine builds it as a selector
+    /// between the two. Every node named here is private to `owner`.
+    GeneratedFrequencyResponseOutput {
+        owner: String,
+        node: String,
+        input: String,
+        fitted: String,
     },
     /// Behavioral voltage source standing for a `delay(x,td[,tdmax])` whose
     /// delay varies during the simulation.

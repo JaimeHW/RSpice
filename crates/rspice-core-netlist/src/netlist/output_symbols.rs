@@ -1574,6 +1574,7 @@ fn collect_output_element_nodes(element: &Element, nodes: &mut HashSet<String>) 
     match &element.provenance {
         super::ElementProvenance::GeneratedDynamicInternalNode { node: private, .. }
         | super::ElementProvenance::GeneratedFrequencyResponseInput { node: private, .. }
+        | super::ElementProvenance::GeneratedFrequencyResponseOutput { node: private, .. }
         | super::ElementProvenance::GeneratedVariableDelay { node: private, .. } => {
             for node in &element.nodes {
                 if !node.eq_ignore_ascii_case(private) {

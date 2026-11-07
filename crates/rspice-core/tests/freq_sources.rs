@@ -1,6 +1,7 @@
 //! PSpice `FREQ` controlled sources. Small-signal analyses read the table
-//! exactly, between entries as QSPICE reads it; the operating point takes the
-//! lowest entry; the transient runs a stable rational fit of the entries.
+//! exactly, between entries as QSPICE reads it; operating points pass the
+//! input through unscaled, as QSPICE does; the transient runs a stable
+//! rational fit of the entries from the operating point.
 
 #[path = "common/op_point.rs"]
 mod op_point;
@@ -200,22 +201,70 @@ rl out 0 1k
 }
 
 #[test]
-fn the_lowest_entry_is_the_dc_gain() {
-    // A table whose lowest entry is 6 dB at 180 deg: the operating point is
-    // -1.99526 times the input, the gain AC reads below that entry.
-    let deck = "* inverting table
-vin in 0 dc 1 ac 1
-E1 out 0 FREQ {V(in)} = (10,6,180) (1k,6,180)
-G1 0 cur FREQ {V(in)} = (10,6,180) (1k,6,180)
-rl out 0 1k
-rc cur 0 1
+fn the_operating_point_passes_the_input_and_ac_reads_the_table() {
+    // QSPICE (build 2026-10-27) .op passes every input through unscaled,
+    // whatever the table's lowest entry: 1.5 V in, 1.5 V out, 3 V for
+    // {2*V(in)}, and 1.5 A from the G source. AC reads the table, its lowest
+    // entry below the first frequency.
+    let deck = "* op passes the input
+vin in 0 dc 1.5 ac 1
+E6 o6 0 FREQ {V(in)} = (10,6,180) (1k,6,180)
+E7 o7 0 FREQ {V(in)} = (0,6,0) (1k,0,-45)
+E9 o9 0 FREQ {2*V(in)} = (0,-6,0) (1k,-9,-45) (10k,-26,-90)
+G1 0 g1 FREQ {V(in)} = (0,6,0) (1k,0,-45)
+r1 g1 0 1
+X1 in xo inverting
+.subckt inverting a b
+E1 b 0 FREQ {V(a)} = (10,6,180) (1k,6,180)
+.ends
 .end
 ";
-    let gain = -(10f64.powf(6.0 / 20.0));
-    assert!((op_voltage(deck, "out") - gain).abs() < 1e-9);
-    assert!((op_voltage(deck, "cur") - gain).abs() < 1e-9);
-    assert!((ac(deck, "out", 1.0) - gain).norm() < 1e-9);
-    assert!((ac(deck, "cur", 1.0) - gain).norm() < 1e-9);
+    for (node, want) in [
+        ("o6", 1.5),
+        ("o7", 1.5),
+        ("o9", 3.0),
+        ("g1", 1.5),
+        ("xo", 1.5),
+    ] {
+        let got = op_voltage(deck, node);
+        assert!((got - want).abs() < 1e-9, "{node}: got {got}, want {want}");
+    }
+    let inverting = -(10f64.powf(6.0 / 20.0));
+    for node in ["o6", "xo"] {
+        assert!((ac(deck, node, 1.0) - inverting).norm() < 1e-9, "{node}");
+    }
+    let doubling = 10f64.powf(6.0 / 20.0);
+    for node in ["o7", "g1"] {
+        let got = ac(deck, node, 1e-3);
+        assert!((got - doubling).norm() < 1e-5, "{node}: {got}");
+    }
+}
+
+#[test]
+fn the_transient_leaves_the_operating_point_for_the_table() {
+    // LTspice 26.1.1 batch: 1 V in, the output is 1 V at the operating point
+    // and -1.99526 V from the first step on. QSPICE has no FREQ transient.
+    let deck = "* tran from a dc op
+vin in 0 dc 1
+E6 o6 0 FREQ {V(in)} = (10,6,180) (1k,6,180)
+X1 in xo inverting
+.subckt inverting a b
+E1 b 0 FREQ {V(a)} = (10,6,180) (1k,6,180)
+.ends
+.end
+";
+    let inverting = -(10f64.powf(6.0 / 20.0));
+    for node in ["o6", "xo"] {
+        let (time, value) = transient(deck, node);
+        assert_eq!(time[0], 0.0);
+        assert!((value[0] - 1.0).abs() < 1e-9, "{node} at t=0: {}", value[0]);
+        for (t, v) in time.iter().zip(&value).skip(1) {
+            assert!(
+                (v - inverting).abs() < 1e-3 * inverting.abs(),
+                "{node} at t={t}: {v}, want {inverting}"
+            );
+        }
+    }
 }
 
 #[test]
@@ -230,8 +279,8 @@ ra a 0 1k
 rb b 0 1k
 .end
 ";
-    assert!((op_voltage(deck, "a") - 2.0).abs() < 1e-9);
-    assert!((op_voltage(deck, "b") - 1.0).abs() < 1e-9);
+    assert!((ac(deck, "a", 1.0) - Complex64::new(1.999, -0.001)).norm() < 1e-9);
+    assert!((ac(deck, "b", 1.0) - Complex64::new(0.9995, -0.0005)).norm() < 1e-9);
     assert!((ac(deck, "a", 1e3) - Complex64::new(1.0, -1.0)).norm() < 1e-9);
     assert!((ac(deck, "b", 1e3) - Complex64::new(0.5, -0.5)).norm() < 1e-9);
 }

@@ -2,15 +2,17 @@
 //!
 //! `E1 out 0 FREQ {V(in)} [DB|MAG] [DEG|RAD] [R_I] = (f, a, b)... [DELAY=T]`
 //! answers small-signal analyses with the table itself, read between entries
-//! as [`FrequencyResponse`] reads it. The operating point takes the lowest
-//! entry as the DC gain. The transient runs a stable real rational fit of the
-//! table through the shared LAPLACE state-space synthesis; the fit matches
-//! the DC gain exactly and every entry within [`FIT_TOLERANCE`] of the peak
+//! as [`FrequencyResponse`] reads it. Operating points pass the input through
+//! unscaled, as QSPICE and LTspice do, whatever the table says. The transient
+//! runs a stable real rational fit of the table through the shared LAPLACE
+//! state-space synthesis, from the operating point's states: its output moves
+//! to the table's response at the first step. The fit takes the lowest
+//! entry's gain at DC and every entry within [`FIT_TOLERANCE`] of the peak
 //! gain, and a table no stable rational of order up to [`MAX_ORDER`] follows
-//! that closely is refused with the best error reached. `DELAY=T` says the table's phase includes a transport delay `T`:
-//! the transient fits the table with that delay taken out and adds it back as
-//! a pure delay, which leaves the table, and so every small-signal answer, as
-//! written.
+//! that closely is refused with the best error reached. `DELAY=T` says the
+//! table's phase includes a transport delay `T`: the transient fits the table
+//! with that delay taken out and adds it back as a pure delay, which leaves
+//! the table, and so every small-signal answer, as written.
 
 use super::{DelayTime, Element, ParseError, delay_line, synthesize_rational_transfer};
 use crate::netlist::{
@@ -294,15 +296,19 @@ pub(super) fn synthesize_freq(
     };
 
     let form = SynthesizedTransferForm::Frequency;
-    let input_node = format!("{name}.__FIN");
+    let node = |role: &str| format!("{name}.__{role}");
+    let input_node = node("FIN");
+    let fitted_node = node("FFIT");
+    let output_node = node("FOUT");
+    let behavioral_voltage = |expression: String| ElementKind::BehavioralVoltage {
+        expression,
+        tc1: 0.0,
+        tc2: 0.0,
+        multiplicity: SourceMultiplicity::default(),
+    };
     let mut elements = vec![Element {
-        name: format!("{name}.__BFIN"),
-        kind: ElementKind::BehavioralVoltage {
-            expression: input_expr.to_string(),
-            tc1: 0.0,
-            tc2: 0.0,
-            multiplicity: SourceMultiplicity::default(),
-        },
+        name: node("BFIN"),
+        kind: behavioral_voltage(input_expr.to_string()),
         nodes: vec![input_node.clone(), "0".to_string()],
         provenance: ElementProvenance::GeneratedFrequencyResponseInput {
             owner: name.to_string(),
@@ -321,16 +327,54 @@ pub(super) fn synthesize_freq(
             &mut elements,
         );
     }
-    elements.extend(synthesize_rational_transfer(
+    // The fit drives a private node; the owner's terminals carry whichever of
+    // the fit and the input the analysis follows.
+    let mut fitted = synthesize_rational_transfer(
         name,
-        node_pos,
-        node_neg,
+        &fitted_node,
+        "0",
         &fitted_input,
         unscale(numerator),
         unscale(denominator),
-        voltage_output,
+        true,
         form,
         line,
-    )?);
+    )?;
+    for element in fitted.iter_mut().filter(|element| element.name == name) {
+        element.name = node("BFFIT");
+        element.provenance = ElementProvenance::GeneratedDynamicInternalNode {
+            owner: name.to_string(),
+            form,
+            node: fitted_node.clone(),
+        };
+    }
+    elements.extend(fitted);
+    elements.push(Element {
+        name: node("BFOUT"),
+        kind: behavioral_voltage(format!("V({fitted_node})")),
+        nodes: vec![output_node.clone(), "0".to_string()],
+        provenance: ElementProvenance::GeneratedFrequencyResponseOutput {
+            owner: name.to_string(),
+            node: output_node.clone(),
+            input: input_node,
+            fitted: fitted_node,
+        },
+    });
+    let expression = format!("V({output_node})");
+    elements.push(Element {
+        name: name.to_string(),
+        kind: if voltage_output {
+            behavioral_voltage(expression)
+        } else {
+            ElementKind::BehavioralCurrent {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
+            }
+        },
+        nodes: vec![node_pos.to_string(), node_neg.to_string()],
+        provenance: ElementProvenance::Authored,
+    });
     Ok(elements)
 }

@@ -56,6 +56,7 @@ pub(crate) fn filter_elements_with_abort(
             | ElementProvenance::GeneratedDynamicInternalNode { owner, .. }
             | ElementProvenance::SynthesizedTransferState { owner, .. }
             | ElementProvenance::GeneratedFrequencyResponseInput { owner, .. }
+            | ElementProvenance::GeneratedFrequencyResponseOutput { owner, .. }
             | ElementProvenance::GeneratedVariableDelay { owner, .. } => {
                 rejected_owners.contains(&owner.to_ascii_uppercase())
             }
