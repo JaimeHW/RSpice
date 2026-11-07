@@ -350,13 +350,17 @@ A1 a b 0 0 0 0 out 0 OTA G=1m Iout=20u Vhigh=10 Vlow=-10 Rout=10k in=1p ink=10
     }
 }
 
+/// A deck, the device and noise mechanism it probes, the frequencies probed
+/// and LTspice's densities there.
+type NoiseDensityCase = (&'static str, &'static str, &'static str, [f64; 3], [f64; 3]);
+
 #[test]
 fn ota_noise_densities_written_as_expressions_of_frequency_match_ltspice() {
     // LTspice 26.1.1 batch, V(A1.en) and V(x1:A1.in), each density through
     // G*Rout = 10. LTspice reads a value across blanks inside parentheses or
     // beside an operator, evaluates it at every frequency point, keeps the
     // flicker corner on top, and reads node voltages at the operating point.
-    let cases: [(&str, &str, &str, [f64; 3], [f64; 3]); 4] = [
+    let cases: [NoiseDensityCase; 4] = [
         (
             "* en of freq, written with blanks
 V1 in 0 0 AC 1
