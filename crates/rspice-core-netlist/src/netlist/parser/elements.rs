@@ -627,7 +627,7 @@ fn extract_instance_param(params: &mut Vec<(String, Value)>, key: &str) -> Optio
 /// LTspice's `noiseless` instance flag: the element, and any resistor its
 /// parasitics bring, adds no noise (`noisy=0`).
 fn noiseless_flag() -> (String, Value) {
-    ("NOISY".to_owned(), 0.0.into())
+    ("NOISY".to_owned(), 0.0)
 }
 
 /// LTspice-style passive parasitics: peel explicit `Rser`/`Rpar`/`Cpar`
