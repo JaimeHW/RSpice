@@ -456,6 +456,16 @@ pub(super) fn parse_model_params(
                             try_signed_model_value(stream, params, line_num, &name)?
                         {
                             numeric_params.push((name, value));
+                        } else if param_is_part_annotation(&name) {
+                            let value = parse_model_bare_string_value(stream, line_num, &name)?;
+                            push_model_string_value(
+                                &mut string_params,
+                                &mut string_vector_params,
+                                &mut real_vector_params,
+                                line_num,
+                                &name,
+                                &value,
+                            )?;
                         } else {
                             // A bare identifier that does not resolve *here*
                             // is a forward parameter reference. It gets the
@@ -911,7 +921,7 @@ fn bare_model_ident_string_value(
     None
 }
 
-fn parse_model_bare_string_value(
+pub(super) fn parse_model_bare_string_value(
     stream: &mut TokenStream,
     line_num: usize,
     name: &str,
@@ -1013,6 +1023,16 @@ fn model_param_accepts_bare_string(name: &str, model_type: Option<&str>) -> bool
 /// into the model record.
 fn model_param_is_manufacturer_annotation(name: &str) -> bool {
     name.eq_ignore_ascii_case("mfg")
+}
+
+/// Part annotations name the part a card describes: its manufacturer, vendor,
+/// part number and kind (LTspice's diode catalog writes `type=silicon`,
+/// `type=schottky`, its capacitor catalog `type=X5R`). They carry no electrical
+/// meaning, so a bare word on one is read as text and never reaches a device.
+pub(super) fn param_is_part_annotation(name: &str) -> bool {
+    ["MFG", "VENDOR", "PN", "TYPE"]
+        .iter()
+        .any(|annotation| name.eq_ignore_ascii_case(annotation))
 }
 
 fn model_param_accepts_contextual_bare_string(name: &str, model_type: Option<&str>) -> bool {

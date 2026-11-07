@@ -1765,10 +1765,10 @@ pub(super) fn reject_deferred_native_mos_model_params(
     }
     for (name, value) in string_params {
         let param = name.to_ascii_uppercase();
-        if family.eq_ignore_ascii_case("VDMOS") && param == "MFG" {
-            // LTspice's shipped VDMOS catalog uses a bare identifier here as
-            // provenance metadata. It has no electrical meaning and ngspice
-            // ignores it, so accepting it must not alter the compact model.
+        if matches!(param.as_str(), "MFG" | "VENDOR" | "PN" | "TYPE") {
+            // Part annotations (LTspice's VDMOS catalog writes `mfg=`) name
+            // the part. They have no electrical meaning and ngspice ignores
+            // them, so accepting one must not alter the compact model.
             continue;
         }
         return Err(SimulationError::Circuit(format!(

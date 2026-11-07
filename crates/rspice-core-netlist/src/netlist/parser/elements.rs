@@ -175,6 +175,9 @@ pub(super) fn parse_resistor(
                         model = Some(model_name);
                         continue;
                     }
+                    if skip_part_annotation(stream, line_num, &name_upper)? {
+                        continue;
+                    }
 
                     if (name_upper == "R" || name_upper == "VALUE")
                         && let Some(expr) = take_value_expression_string(stream, params)
@@ -873,6 +876,9 @@ fn parse_passive_tail(
                         tail.model = Some(expect_model_name(stream, line_num)?);
                         continue;
                     }
+                    if skip_part_annotation(stream, line_num, &name_upper)? {
+                        continue;
+                    }
 
                     if name_upper == "IC" {
                         let parsed = take_ic_value(
@@ -1083,6 +1089,25 @@ fn parse_passive_tail(
     }
 
     Ok(tail)
+}
+
+/// Reads past a part annotation on a passive instance (LTspice's component
+/// catalog writes `mfg="KEMET" pn="C0805C106K7PAC" type="X5R"`). Annotations
+/// name the part and carry no electrical meaning, so the value is set aside.
+fn skip_part_annotation(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name_upper: &str,
+) -> Result<bool, ParseError> {
+    if !param_is_part_annotation(name_upper) {
+        return Ok(false);
+    }
+    if matches!(stream.peek().kind, TokenKind::StringLit(_)) {
+        stream.advance();
+    } else {
+        parse_model_bare_string_value(stream, line_num, name_upper)?;
+    }
+    Ok(true)
 }
 
 pub(super) fn parse_capacitor(

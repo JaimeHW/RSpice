@@ -121,3 +121,64 @@ fn an_element_reads_a_parameter_an_include_after_it_declares() {
     let values = tran_voltages(&netlist, 2e-3, 1e-3, &["b"]);
     assert_close("V(b)", values[0], 0.632120, 2e-4);
 }
+
+// LTspice: V(b)=V(b2)=0.643766; QSPICE: V(b)=V(b2)=0.643765. Both read
+// `type=` and `mfg=` as annotations that leave the diode unchanged.
+#[test]
+fn part_annotations_on_a_model_card_leave_the_device_unchanged() {
+    let netlist = parse(
+        "* model annotations
+V1 a 0 1
+R1 a b 100
+D1 b 0 dsi
+R2 a b2 100
+D2 b2 0 dref
+R3 a b3 100
+D3 b3 0 dsk
+.model dsi D(Is=2.52n Rs=.568 N=1.752 Cjo=4p M=.4 tt=20n Iave=200m Vpk=75 mfg=OnSemi type=silicon)
+.model dref D(Is=2.52n Rs=.568 N=1.752 Cjo=4p M=.4 tt=20n)
+.model dsk D(Is=2.52n Rs=.568 N=1.752 vendor=Acme type=schottky pn=1N914)
+.op
+.end
+",
+    );
+    let annotated = netlist
+        .models
+        .iter()
+        .find(|model| model.name.eq_ignore_ascii_case("dsi"))
+        .expect("model dsi");
+    assert!(
+        annotated
+            .string_params
+            .iter()
+            .any(|(name, value)| name.eq_ignore_ascii_case("TYPE")
+                && value.eq_ignore_ascii_case("silicon")),
+        "{:?}",
+        annotated.string_params
+    );
+    let reference = op_voltage(&netlist, "b2");
+    assert_close("V(b2)", reference, 0.643765, 2e-6);
+    assert_close("V(b)", op_voltage(&netlist, "b"), reference, 1e-12);
+    assert_close("V(b3)", op_voltage(&netlist, "b3"), reference, 1e-12);
+}
+
+// LTspice: V(b)=0.632120 at 1 ms, V(c)=9.99900e-5; QSPICE: 0.632120, 9.99900e-5.
+#[test]
+fn part_annotations_on_passive_instances_are_set_aside() {
+    let netlist = parse(
+        "* instance annotations
+V1 a 0 PULSE(0 1 0 1n 1n 1 2)
+R1 a b 1k
+C1 b 0 1u V=6.3 Irms=0 Rser=0.01 Lser=0 mfg=\"KEMET\" pn=\"C1206C105K4RAC\" type=\"X7R\"
+C2 b 0 1p mfg=Rubycon pn=10SWZ47M type=\"Al electrolytic\"
+R2 a c 1k
+L1 c 0 1m Ipk=1 Rser=0.1 Rpar=0 Cpar=0 mfg=\"Coilcraft\" pn=\"XAL4020-102\"
+R3 a 0 1k mfg=Vishay pn=CRCW08051K00
+.tran 0 2m 0 1u
+.end
+",
+    );
+    let values = tran_voltages(&netlist, 2e-3, 1e-3, &["b", "c"]);
+    assert_close("V(b)", values[0], 0.632120, 2e-4);
+    assert_close("V(c)", values[1], 9.999e-5, 1e-8);
+}
