@@ -395,8 +395,23 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
         };
         if let Some(waveform) = waveform.filter(|_| value.is_empty()) {
             kind = waveform;
-            value = token.clone();
             index += 1;
+            if token.contains('(') {
+                value = token.clone();
+                continue;
+            }
+            // QSPICE and LTspice also write a waveform's arguments as bare
+            // words after its name: `PWL 0 0 .5m 48`.
+            let arguments = tokens[index..]
+                .iter()
+                .take_while(|word| {
+                    let upper = word.to_ascii_uppercase();
+                    is_number_word(word) && upper != "AC" && upper != "DC"
+                })
+                .cloned()
+                .collect::<Vec<_>>();
+            index += arguments.len();
+            value = format!("{token}({})", arguments.join(" "));
             continue;
         }
         if let Some((key, parameter)) = token.split_once('=') {

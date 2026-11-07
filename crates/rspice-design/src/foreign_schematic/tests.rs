@@ -286,3 +286,28 @@ fn a_qsch_component_turned_by_an_eighth_is_refused() {
     assert!(parse_qsch(b"\xFF\xD8\xFF\xDB\xABcircuit\n\xBB\n").is_err());
     assert!(parse_qsch(b"\xFF\xD8\xFF\xDB\xABschematic\n").is_err());
 }
+
+#[test]
+fn a_waveform_written_without_parentheses_keeps_its_arguments() {
+    use super::mapping::source_value;
+    use crate::schematic::component_type::ComponentType;
+
+    let pwl = source_value(true, "PWL 0 0 .5m 48 AC 1 Rser=2");
+    assert_eq!(pwl.kind, ComponentType::VoltageSourcePwl);
+    assert_eq!(pwl.value, "PWL(0 0 .5m 48)");
+    assert_eq!(
+        pwl.params,
+        [
+            ("ac".to_owned(), "1".to_owned()),
+            ("rs".to_owned(), "2".to_owned())
+        ]
+    );
+    assert!(pwl.extra.is_empty(), "{:?}", pwl.extra);
+
+    let pulse = source_value(false, "PULSE .5 5 0 1u 1u 10u 20u");
+    assert_eq!(pulse.kind, ComponentType::CurrentSourcePulse);
+    assert_eq!(pulse.value, "PULSE(.5 5 0 1u 1u 10u 20u)");
+    // The parenthesised spelling reads the same.
+    let written = source_value(true, "PULSE(0 1 0 1n 1n 5m 10m)");
+    assert_eq!(written.value, "PULSE(0 1 0 1n 1n 5m 10m)");
+}
