@@ -540,6 +540,10 @@ impl Builder<'_> {
             return;
         };
         let attributes = merged_attributes(&definition, symbol);
+        // LTspice letters only the attributes a WINDOW shows; a symbol read
+        // from its file says which. A stand-in for a missing file says
+        // nothing, so its part keeps RSpice's own lettering.
+        let windowed = tool == ForeignTool::Ltspice && location.is_some();
         let pins = definition
             .ordered_pins()
             .into_iter()
@@ -585,7 +589,7 @@ impl Builder<'_> {
             }
         }
         if self.document.components.len() > placed {
-            self.letter_like_the_drawing(symbol, &definition);
+            self.letter_like_the_drawing(symbol, &definition, windowed);
         }
     }
 
@@ -658,7 +662,7 @@ impl Builder<'_> {
         let placed = self.document.components.len();
         self.place_cell(symbol, definition, &attributes, None, None, &pins);
         if self.document.components.len() > placed {
-            self.letter_like_the_drawing(symbol, definition);
+            self.letter_like_the_drawing(symbol, definition, false);
         }
         true
     }
@@ -666,11 +670,14 @@ impl Builder<'_> {
     /// Puts the last placed part's name and value where the drawing
     /// lettered them: at the instance's own `WINDOW`, else its symbol's,
     /// turned with the instance. The text stays upright and hangs off its
-    /// anchor on the side the drawing's run grows toward.
+    /// anchor on the side the drawing's run grows toward. When `windowed`,
+    /// a name or value with no window at all is not lettered, as LTspice
+    /// letters none.
     fn letter_like_the_drawing(
         &mut self,
         symbol: &ForeignSymbol,
         definition: &ForeignSymbolDefinition,
+        windowed: bool,
     ) {
         let window = |attribute: u32| {
             symbol
@@ -701,10 +708,9 @@ impl Builder<'_> {
                 )
             })
             .collect::<Vec<_>>();
-        let hidden = (
-            name.is_some_and(|window| window.hidden),
-            value.is_some_and(|window| window.hidden),
-        );
+        let unshown =
+            |window: Option<&ForeignWindow>| window.map_or(windowed, |window| window.hidden);
+        let hidden = (unshown(name), unshown(value));
         self.lettered.push(self.document.components.len() - 1);
         let Some(component) = self.document.components.last_mut() else {
             return;

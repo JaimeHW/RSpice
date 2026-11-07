@@ -2360,6 +2360,56 @@ fn a_qspice_pin_name_stands_where_the_drawing_sets_it() {
     assert_eq!(placed("VN"), (Point::new(30, -1), Some(Point::new(-1, 0))));
 }
 
+/// LTspice letters a symbol's attributes only where a WINDOW shows them. A
+/// layout symbol that shows its name and no value, or neither, letters as
+/// much here and no more: the value RSpice would otherwise place itself
+/// lands on the part's own artwork.
+#[test]
+fn an_ltspice_attribute_with_no_window_is_not_lettered() {
+    use crate::schematic::component_display::ComponentDisplayMode;
+
+    const NAMED_ASY: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -16 -24 16 24\n\
+        WINDOW 0 0 0 VCenter 2\nSYMATTR Prefix D\nSYMATTR Value D\n\
+        PIN 0 -32 NONE 0\nPINATTR PinName A\nPINATTR SpiceOrder 1\n\
+        PIN 0 32 NONE 0\nPINATTR PinName K\nPINATTR SpiceOrder 2\n";
+    const BARE_ASY: &str = "Version 4\nSymbolType CELL\nRECTANGLE Normal -16 -24 16 24\n\
+        SYMATTR Prefix C\nSYMATTR Value C\n\
+        PIN 0 -32 NONE 0\nPINATTR PinName 1\nPINATTR SpiceOrder 1\n\
+        PIN 0 32 NONE 0\nPINATTR PinName 2\nPINATTR SpiceOrder 2\n";
+    let mut library = library();
+    for (name, text) in [("padded", NAMED_ASY), ("bare", BARE_ASY)] {
+        library.symbols.insert(
+            name.to_owned(),
+            ForeignSymbolSource {
+                definition: parse_asy(text).expect("the test symbol reads"),
+                location: format!("{name}.asy"),
+                schematic: None,
+            },
+        );
+    }
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL padded 0 0 R0\nSYMATTR InstName D7\nSYMATTR Value 1N914\n\
+         SYMBOL bare 160 0 R0\nSYMATTR InstName C7\nSYMATTR Value 47n\n\
+         SYMBOL padded 320 0 R0\nWINDOW 3 24 0 Left 2\nSYMATTR InstName D8\nSYMATTR Value 1N914\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let shown = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} is placed"))
+            .display_mode
+    };
+    assert_eq!(shown("D7"), ComponentDisplayMode::NameOnly);
+    assert_eq!(shown("C7"), ComponentDisplayMode::Hidden);
+    // The drawing's own WINDOW shows the value of this one.
+    assert_eq!(shown("D8"), ComponentDisplayMode::Inherit);
+}
+
 /// A pin its source drawing letters no name for draws none here: LTspice's
 /// `NONE`, a place the symbol draws no pin for, and a QSPICE pin with no
 /// justification or one centred on its own point. A lettered pin keeps its
