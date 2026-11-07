@@ -347,10 +347,58 @@ type Resolved = (
 struct DeviceTie {
     source: Option<Point>,
     terminal: Point,
-    /// The middle of the part's terminals, which the ground faces away from.
-    center: Point,
+    /// The part's body, which the ground faces away from.
+    body: Body,
     /// The net the terminal joins, ground when there is none.
     net: Option<String>,
+}
+
+/// The middle of a placed part's body and half its width and height.
+#[derive(Debug, Clone, Copy)]
+struct Body {
+    center: Point,
+    half: Point,
+}
+
+impl Body {
+    fn of(symbol: &SymbolDocument, component: &Component, terminals: &[Point]) -> Self {
+        let (low, high) = symbol.body_bounds();
+        if low == high {
+            return Self {
+                center: centre(terminals),
+                half: Point::new(1, 1),
+            };
+        }
+        let [low, high] =
+            [low, high].map(|corner| component.pos + component.transform_point(corner));
+        Self {
+            center: Point::new((low.x + high.x) / 2, (low.y + high.y) / 2),
+            half: Point::new(
+                ((high.x - low.x) / 2).abs().max(1),
+                ((high.y - low.y) / 2).abs().max(1),
+            ),
+        }
+    }
+
+    /// The way a ground on `terminal` faces: out of the body edge the
+    /// terminal stands on.
+    fn outward(self, terminal: Point) -> Rotation {
+        let away = terminal - self.center;
+        // Measured in half-widths, so a pin on a long side reads as on it.
+        if i64::from(away.x.abs()) * i64::from(self.half.y)
+            > i64::from(away.y.abs()) * i64::from(self.half.x)
+        {
+            if away.x > 0 {
+                Rotation::R270
+            } else {
+                Rotation::R90
+            }
+        } else if away.y < 0 {
+            Rotation::R180
+        } else {
+            Rotation::R0
+        }
+    }
 }
 
 impl Builder<'_> {
@@ -1127,7 +1175,8 @@ impl Builder<'_> {
             self.tie_device(&cell, &component, pins, &points);
         }
         if self.drawing.tool == ForeignTool::Qspice {
-            self.tie_default_nets(symbol, definition, pins, &points);
+            let body = Body::of(&cell.symbol, &component, &points);
+            self.tie_default_nets(symbol, definition, body, pins, &points);
         }
         for (port, point) in cell
             .ports
@@ -1150,12 +1199,12 @@ impl Builder<'_> {
         sources: &[Point],
         terminals: &[Point],
     ) {
-        let center = centre(terminals);
+        let body = Body::of(&cell.symbol, component, terminals);
         for (source, terminal) in sources.iter().zip(terminals) {
             self.device_ties.push(DeviceTie {
                 source: Some(*source),
                 terminal: *terminal,
-                center,
+                body,
                 net: None,
             });
         }
@@ -1177,7 +1226,7 @@ impl Builder<'_> {
             self.device_ties.push(DeviceTie {
                 source: None,
                 terminal: component.pos + component.transform_point(position),
-                center,
+                body,
                 net: None,
             });
         }
@@ -1189,10 +1238,10 @@ impl Builder<'_> {
         &mut self,
         symbol: &ForeignSymbol,
         definition: &ForeignSymbolDefinition,
+        body: Body,
         sources: &[Point],
         terminals: &[Point],
     ) {
-        let center = centre(terminals);
         for pin in definition.ordered_pins() {
             let Some(net) = &pin.default_net else {
                 continue;
@@ -1209,7 +1258,7 @@ impl Builder<'_> {
             self.device_ties.push(DeviceTie {
                 source: Some(source),
                 terminal: *terminal,
-                center,
+                body,
                 net: (!ground).then(|| net.clone()),
             });
         }
@@ -1249,18 +1298,7 @@ impl Builder<'_> {
                 self.document.net_labels.push(label);
                 continue;
             }
-            let away = tie.terminal - tie.center;
-            let rotation = if away.x.abs() > away.y.abs() {
-                if away.x > 0 {
-                    Rotation::R270
-                } else {
-                    Rotation::R90
-                }
-            } else if away.y < 0 {
-                Rotation::R180
-            } else {
-                Rotation::R0
-            };
+            let rotation = tie.body.outward(tie.terminal);
             let id = self.id();
             let mut ground = Component::new(id, ComponentType::Ground, Point::default());
             ground.rotation = rotation;
