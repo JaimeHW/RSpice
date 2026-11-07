@@ -1095,7 +1095,10 @@ impl XyceTestRunner {
                         let multiplier = params
                             .iter()
                             .filter(|(name, _)| name.eq_ignore_ascii_case("M"))
-                            .map(|(_, value)| value.as_value())
+                            .map(|(_, value)| match value {
+                                ParametricValue::Resolved(value) => Some(*value),
+                                _ => None,
+                            })
                             .collect::<Vec<_>>();
                         if multiplier.len() != 1 || multiplier[0].is_none() {
                             return Err(

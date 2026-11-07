@@ -1238,7 +1238,7 @@ impl XyceTestRunner {
                 .eq(["2".to_string(), "0".to_string()])
             || instances[0].2.len() != 1
             || !instances[0].2[0].0.eq_ignore_ascii_case("resistance")
-            || instances[0].2[0].1.as_value().map(Value::to_bits) != Some(5.0f64.to_bits())
+            || !matches!(&instances[0].2[0].1, ParametricValue::Resolved(value) if value.to_bits() == 5.0f64.to_bits())
         {
             return Err(format!(
                 "subcircuit REPLACEGROUND instance is outside the exact X1 RESISTANCE=5 topology: {instances:?}"
