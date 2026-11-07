@@ -659,17 +659,16 @@ impl Builder<'_> {
             return None;
         }
         let mut words = Vec::new();
+        let fallback = attribute(attributes, "SpiceModel")
+            .unwrap_or_default()
+            .trim();
         let model = match attribute(attributes, "Value").filter(|value| !value.trim().is_empty()) {
             Some(value) => {
-                let mut tokens = spice_tokens(&spice_text(value)).into_iter();
-                let model = tokens.next().unwrap_or_default();
-                words.extend(tokens);
+                let (model, rest) = split_model(&spice_text(value), fallback);
+                words.extend(rest);
                 model
             }
-            None => attribute(attributes, "SpiceModel")
-                .unwrap_or_default()
-                .trim()
-                .to_owned(),
+            None => fallback.to_owned(),
         };
         for key in ["Value2", "SpiceLine", "SpiceLine2"] {
             if let Some(text) = attribute(attributes, key).filter(|text| !text.trim().is_empty()) {
@@ -799,7 +798,15 @@ impl Builder<'_> {
         {
             words.extend(spice_tokens(&spice_text(value2)));
         }
-        let (model, model_words) = written.as_deref().map(split_model).unwrap_or_default();
+        // A value of settings alone leaves the symbol's own model in place.
+        let fallback = attribute(attributes, "SpiceModel")
+            .map(str::trim)
+            .filter(|model| !model.is_empty() && !looks_like_file(model))
+            .unwrap_or(symbol.base_name());
+        let (model, model_words) = written
+            .as_deref()
+            .map(|text| split_model(text, fallback))
+            .unwrap_or_default();
         words.splice(0..0, model_words);
         // One cell per model: a cell's `spice` view runs one model.
         let cell_index = self.symbol_cell(
@@ -1607,19 +1614,27 @@ fn parallel_count(word: &str) -> Option<u32> {
         .filter(|count| *count > 0)
 }
 
+/// An attribute's text; LTspice writes an emptied attribute as `""`.
 fn attribute<'a>(attributes: &'a [ForeignAttribute], name: &str) -> Option<&'a str> {
     attributes
         .iter()
         .find(|attribute| attribute.name.eq_ignore_ascii_case(name))
-        .map(|attribute| attribute.value.as_str())
+        .map(|attribute| match attribute.value.trim() {
+            "\"\"" => "",
+            _ => attribute.value.as_str(),
+        })
 }
 
 /// A subcircuit name followed by words of its own instance line splits into
 /// the name and those words.
-fn split_model(model: &str) -> (String, Vec<String>) {
-    let mut tokens = spice_tokens(model).into_iter();
-    let name = tokens.next().unwrap_or_default();
-    (name, tokens.collect())
+/// The model a value names and the words after it; a value that opens
+/// with a setting names none, and `fallback` is the model.
+fn split_model(text: &str, fallback: &str) -> (String, Vec<String>) {
+    let tokens = spice_tokens(text);
+    match tokens.split_first() {
+        Some((name, rest)) if !name.contains('=') => (name.clone(), rest.to_vec()),
+        _ => (fallback.to_owned(), tokens),
+    }
 }
 
 /// Whether `text` is a SPICE number: digits, an optional fraction and

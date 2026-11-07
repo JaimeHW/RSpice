@@ -1201,7 +1201,9 @@ fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
          SYMBOL logic\\and 960 0 R0\nSYMATTR InstName A4\n\
          FLAG 1248 32 in1\nFLAG 1248 48 in2\nFLAG 1312 48 y6\n\
          WIRE 1264 96 1264 160\nFLAG 1264 160 0\n\
-         SYMBOL logic\\and 1280 0 R0\nSYMATTR InstName A5\nSYMATTR SpiceLine Tau=1n\n",
+         SYMBOL logic\\and 1280 0 R0\nSYMATTR InstName A5\nSYMATTR SpiceLine Tau=1n\n\
+         FLAG 1568 32 in1\nFLAG 1568 48 in2\nFLAG 1632 48 y7\n\
+         SYMBOL logic\\and 1600 0 R0\nSYMATTR InstName A6\nSYMATTR Value Trise=10n Vhigh=3.3\n",
     )
     .unwrap();
     let imported = import_foreign_schematic(&drawing, "work", &library);
@@ -1229,6 +1231,12 @@ fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
     assert_eq!(
         part("A1").library_cell.as_ref().unwrap().terminal_order,
         ["A", "B", "Y"]
+    );
+    // A value of settings alone keeps the symbol's model.
+    assert_eq!(functional("A6"), Some("rspice.functional.and"));
+    assert_eq!(
+        part("A6").params,
+        "INPUTS=2 VHIGH=3.3 VLOW=0 TD=0 TRISE=10n ROUT=1 TFALL=10n"
     );
     assert_eq!(functional("A2"), Some("rspice.functional.nand"));
     assert_eq!(
@@ -1275,4 +1283,23 @@ fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
     };
     assert_eq!(nets("A1"), ["in1", "in2", "y1"]);
     assert_eq!(nets("A2"), ["in1", "in2", "in3", "y2"]);
+}
+
+#[test]
+fn an_attribute_ltspice_emptied_is_no_value() {
+    // LTspice writes `""` for a value the user cleared.
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 400 400\nSYMBOL voltage 0 0 R0\nSYMATTR InstName V1\n\
+         SYMATTR Value2 AC 1\nSYMATTR Value \"\"\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let source = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "V1")
+        .expect("V1 was placed");
+    assert!(!source.value.contains('"'), "{:?}", source.value);
+    assert!(source.params.contains("ac=1"), "{}", source.params);
 }
