@@ -328,3 +328,27 @@ A1 NI 0 0 0 0 0 NS 0 SCHMITT VT={0.75*IBO} VH={0.25*IBO} VHIGH=1 VLOW=0 TRISE={T
 + TFALL={TON}
 RNS NS 0 1Meg NOISY=0
 .ends RSPICE_FN_DIAC
+
+* SCR. Pins: A G K.
+* The gate is a junction conducting IGT at VGT, falling e-fold every 26 mV
+* below it, with the gate charge IGT*TON stored on it at VGT. The thyristor
+* turns on, over TON, while its gate current exceeds IGT or its forward
+* voltage exceeds VDRM, and latches once its anode current reaches IL: it
+* then conducts with the gate removed until its current falls under IH.
+* Conducting, it drops VTM at ITM along a slope resistance RT from a
+* junction knee VTM-RT*ITM; off, it leaks IDRM at VDRM either way. The
+* defaults are a 2N5064-class sensitive-gate 200 V, 0.8 A thyristor.
+.subckt RSPICE_FN_SCR A G K VDRM=200 IDRM=10u VGT=0.8 IGT=200u IH=5m IL=6m
++ VTM=1.7 ITM=1.2 RT=0.6 TON=1u
+.func sp(x) {uramp(x)+ln(1+exp(-abs(x)))}
+VS A N1 0
+BA N1 K I=V(NS)*26m/RT*sp((V(N1,K)-VTM+RT*ITM)/26m)+V(N1,K)*IDRM/VDRM
+BG G K I=IGT/ln(2)*sp((V(G,K)-VGT)/26m)
+CG G K {IGT*TON/VGT}
+BI NI 0 V=I(VS)
+A1 G K 0 0 0 0 NTG 0 SCHMITT VT={VGT-0.5m} VH=0.5m VHIGH=1 VLOW=0
+A2 NI 0 0 0 0 0 NLT 0 SCHMITT VT={(IL+IH)/2} VH={(IL-IH)/2} VHIGH=1 VLOW=0
+A3 N1 K 0 0 0 0 NBO 0 SCHMITT VT={VDRM} VH=1m VHIGH=1 VLOW=0
+A4 NTG NLT NBO 0 0 0 NS 0 OR VHIGH=1 VLOW=0 TRISE={TON} TFALL={TON}
+RNS NS 0 1Meg NOISY=0
+.ends RSPICE_FN_SCR

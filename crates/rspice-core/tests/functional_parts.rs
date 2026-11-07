@@ -1237,3 +1237,83 @@ RL b 0 100
         assert!(current.abs() > 10e-3, "{current}");
     }
 }
+
+#[test]
+fn scr_latches_on_a_gate_pulse_above_igt_and_turns_off_below_ih() {
+    // 12 V through 100 Ohm. X1's 10 us gate pulse of 1.5 IGT turns it on,
+    // and it stays on with the gate removed until the supply falls to
+    // 1.3 V, where the anode current drops under IH; it then stays off when
+    // the supply returns. X2's pulse of 0.9 IGT never turns it on.
+    let deck = "* scr
+VA s 0 PWL(0 12 100u 12 110u 1.3 200u 1.3 210u 12)
+RL s a 100
+IG 0 g PULSE(0 300u 10u 100n 100n 10u 1)
+RG g 0 1Meg
+X1 a g 0 RSPICE_FN_SCR
+RL2 s a2 100
+IG2 0 g2 PULSE(0 180u 10u 100n 100n 10u 1)
+RG2 g2 0 1Meg
+X2 a2 g2 0 RSPICE_FN_SCR
+.end
+";
+    let tran = transient(deck, 300e-6, 0.1e-6);
+    let a = waveform(&tran, "a");
+    // On at 110 mA: VTM - RT (ITM - I).
+    let on = 1.7 - 0.6 * (1.2 - (12.0 - value_at(&tran.time, a, 50e-6)) / 100.0);
+    assert_close(
+        "latched with the gate removed",
+        value_at(&tran.time, a, 50e-6),
+        on,
+        5e-3,
+    );
+    assert_close("off below IH", value_at(&tran.time, a, 190e-6), 1.3, 1e-3);
+    assert_close("stays off", value_at(&tran.time, a, 290e-6), 12.0, 1e-3);
+    // X2 carries only its leakage, so its anode follows the supply.
+    let (s, a2) = (waveform(&tran, "s"), waveform(&tran, "a2"));
+    assert!(
+        s.iter().zip(a2).all(|(s, a2)| s - a2 < 1e-3),
+        "X2 turned on below IGT"
+    );
+    // VGT at IGT: the gate junction alone, at DC.
+    let gate = op_voltages(
+        "* scr gate\nIG 0 g 200u\nX1 a g 0 RSPICE_FN_SCR\nRA a 0 1k\n.end\n",
+        &["g"],
+    );
+    assert_close("VGT at IGT", gate[0], 0.8, 1e-6);
+}
+
+#[test]
+fn scr_holds_down_to_ih_and_needs_il_to_latch() {
+    // Triggered, then left to its anode current as the supply ramps down:
+    // the thyristor turns off where that current passes IH. Triggered into
+    // 5.3 mA, between IH and IL, it drops out once the gate goes; into
+    // 7.9 mA it stays on.
+    let deck = "* scr hold
+VA s 0 PWL(0 12 100u 12 5.1m 1.2)
+RL s a 100
+IG 0 g PULSE(0 1m 10u 100n 100n 20u 1)
+RG g 0 1Meg
+X1 a g 0 RSPICE_FN_SCR
+VB s3 0 12
+RL3 s3 a3 2.1k
+X3 a3 g 0 RSPICE_FN_SCR
+RL4 s3 a4 1.4k
+X4 a4 g 0 RSPICE_FN_SCR
+.end
+";
+    let tran = transient(deck, 5.1e-3, 1e-6);
+    let (s, a) = (waveform(&tran, "s"), waveform(&tran, "a"));
+    // Conducting, the anode sits under 1.1 V; off, it follows the supply,
+    // still above 1.4 V when the current passes IH.
+    let off = rising_crossing(&tran.time, a, 1.2);
+    let before = off - 2e-6;
+    let current = (value_at(&tran.time, s, before) - value_at(&tran.time, a, before)) / 100.0;
+    assert!(
+        (4.95e-3..5.15e-3).contains(&current),
+        "released at {current} A"
+    );
+    let a3 = value_at(&tran.time, waveform(&tran, "a3"), 200e-6);
+    assert!(a3 > 11.0, "latched below IL: {a3}");
+    let a4 = value_at(&tran.time, waveform(&tran, "a4"), 200e-6);
+    assert!(a4 < 2.0, "did not latch above IL: {a4}");
+}

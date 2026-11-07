@@ -428,3 +428,16 @@ fn a_placed_diac_blocks_below_its_breakover_voltage() {
     let expected = 30.0 / (1.0 + 1e3 * 50e-6 / 32.0);
     assert!((across - expected).abs() < 1e-6, "{across} vs {expected}");
 }
+
+#[test]
+fn a_placed_scr_conducts_with_its_gate_driven() {
+    // 1 mA into the gate from 5 V through 4.3 kOhm; 12 V through 100 Ohm.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "12", &["in", "0"]);
+    bench.primitive(ComponentType::VoltageSource, "VG", "5", &["gs", "0"]);
+    bench.primitive(ComponentType::Resistor, "RL", "100", &["in", "a"]);
+    bench.primitive(ComponentType::Resistor, "RG", "4.3k", &["gs", "g"]);
+    bench.part("rspice.functional.scr", "Q1", "", &["a", "g", "0"]);
+    let anode = bench.operating_point("a");
+    assert!(anode > 0.9 && anode < 1.1, "{anode}");
+}

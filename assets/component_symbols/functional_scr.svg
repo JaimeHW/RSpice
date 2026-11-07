@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- SCR: a rectifier with the gate leaving its cathode bar. Box 60x40,
+     pins A(0,20), G(40,40), K(60,20). -->
+<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,20 H 24.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 24.5,14.5 L 35,20 L 24.5,25.5 Z" fill="#000000" stroke="none"/>
+  <path d="M 35,14.5 V 25.5" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 35,20 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 35,25.5 L 40,30.5 V 40" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

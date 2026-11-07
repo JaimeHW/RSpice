@@ -5,7 +5,7 @@ id = "rspice-functional"
 name = "RSpice functional parts"
 category = "builtin"
 originator = "RSpice project"
-description = "Functional parts placed from the Component shelf: op-amp, comparator, OTA, 555 timer, Schmitt triggers, analog-threshold logic gates, phase detector, counter, sample-and-hold, crystal, varistor, fuse, relay, optocoupler and DIAC, built on the native special-function devices. These are not manufacturer part models."
+description = "Functional parts placed from the Component shelf: op-amp, comparator, OTA, 555 timer, Schmitt triggers, analog-threshold logic gates, phase detector, counter, sample-and-hold, crystal, varistor, fuse, relay, optocoupler, DIAC and SCR, built on the native special-function devices. These are not manufacturer part models."
 
 [provenance]
 kind = "authored"
@@ -20,6 +20,6 @@ file = "../../../LICENSE"
 
 [contents]
 root = "lib"
-devices = ["opamp", "comparator", "timer", "logic", "crystal", "varistor", "fuse", "relay", "optocoupler", "diac"]
+devices = ["opamp", "comparator", "timer", "logic", "crystal", "varistor", "fuse", "relay", "optocoupler", "diac", "scr"]
 corners = []
 entry = "lib/functional.lib"

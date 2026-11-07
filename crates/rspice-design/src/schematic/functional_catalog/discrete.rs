@@ -515,3 +515,103 @@ pub(super) const DIAC: FunctionalPartDescriptor = FunctionalPartDescriptor {
     preset: None,
     inputs: None,
 };
+
+const SCR_PINS: &[FunctionalPin] = &[pin("A", InOut), pin("G", In), pin("K", InOut)];
+
+/// Anode left, cathode right, the gate leaving the cathode side downward.
+const THYRISTOR_BLOCK: FunctionalBlock = FunctionalBlock {
+    height: 40,
+    pins: &[
+        (SymbolPinSide::Left, -30, 0),
+        (SymbolPinSide::Bottom, 10, 20),
+        (SymbolPinSide::Right, 30, 0),
+    ],
+};
+
+/// A 2N5064-class sensitive-gate 200 V, 0.8 A thyristor.
+const SCR_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VDRM",
+        "Off-state voltage",
+        "V",
+        "200",
+        "Forward voltage the thyristor blocks; beyond it, it breaks over and turns on without gate current.",
+    ),
+    number(
+        "IDRM",
+        "Off-state current",
+        "A",
+        "10u",
+        "Leakage at VDRM, either way, while blocking.",
+    ),
+    number(
+        "VGT",
+        "Gate trigger voltage",
+        "V",
+        "0.8",
+        "Gate-cathode voltage at the gate trigger current.",
+    ),
+    number(
+        "IGT",
+        "Gate trigger current",
+        "A",
+        "200u",
+        "Gate current above which the thyristor turns on.",
+    ),
+    number(
+        "IH",
+        "Holding current",
+        "A",
+        "5m",
+        "Anode current below which a latched thyristor turns off.",
+    ),
+    number(
+        "IL",
+        "Latching current",
+        "A",
+        "6m",
+        "Anode current the thyristor must reach while triggered to stay on once the gate is removed; at least IH.",
+    ),
+    number(
+        "VTM",
+        "On-state voltage",
+        "V",
+        "1.7",
+        "Anode-cathode voltage while conducting ITM.",
+    ),
+    number(
+        "ITM",
+        "On-state test current",
+        "A",
+        "1.2",
+        "Anode current at which the on-state voltage is VTM.",
+    ),
+    number(
+        "RT",
+        "On-state slope resistance",
+        "Ω",
+        "0.6",
+        "Slope of the on-state voltage with current about ITM.",
+    ),
+    number(
+        "TON",
+        "Turn-on time",
+        "s",
+        "1u",
+        "Time the thyristor takes to turn fully on, and off; the gate also stores IGT·TON of charge at VGT.",
+    ),
+];
+
+pub(super) const SCR: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.scr",
+    display_name: "SCR",
+    subcircuit: "RSPICE_FN_SCR",
+    pins: SCR_PINS,
+    symbol_asset: "functional_scr.svg",
+    block: Some(THYRISTOR_BLOCK),
+    keywords: &["scr", "thyristor", "silicon controlled rectifier", "2n5064"],
+    category: ComponentCategory::Semiconductors,
+    parameters: SCR_PARAMETERS,
+    preset: None,
+    inputs: None,
+};
