@@ -105,6 +105,8 @@ pub(super) fn build(
             element.name
         )));
     }
+    // The node an OTA's common-mode input current noise is injected into.
+    let mut common_mode_node = None;
     let Hosted {
         model,
         ports,
@@ -114,24 +116,23 @@ pub(super) fn build(
             let ota = Ota::from_params(params).map_err(|error| device_error(element, error))?;
             let mut en = None;
             let mut in_ = None;
+            let mut incm = None;
             for (name, expression) in densities {
                 let slot = match name.to_ascii_uppercase().as_str() {
                     "EN" => &mut en,
                     "IN" => &mut in_,
+                    "INCM" => &mut incm,
                     _ => {
                         return Err(SimulationError::Circuit(format!(
-                            "{}: OTA common-mode input current noise (incm) is not supported",
+                            "{}: parameter {name} must be a constant",
                             element.name
                         )));
                     }
                 };
                 *slot = Some(noise_density(element, name, expression)?);
             }
-            if ota.noise.incm > 0.0 {
-                return Err(SimulationError::Circuit(format!(
-                    "{}: OTA common-mode input current noise (incm) is not supported",
-                    element.name
-                )));
+            if incm.is_some() || ota.noise.incm > 0.0 {
+                common_mode_node = Some(format!("{}#ICM", element.name));
             }
             for pin in [5, 6] {
                 if terminals.used(pin) {
@@ -163,6 +164,13 @@ pub(super) fn build(
                 },
                 terminals.sensed(7),
                 terminals.driven(7),
+                match &common_mode_node {
+                    Some(node) => XspicePort::DifferentialCurrent {
+                        pos: node.clone(),
+                        neg: terminals.common().to_string(),
+                    },
+                    None => XspicePort::Null,
+                },
             ];
             Hosted {
                 capacitances: vec![(7, ota.cout)],
@@ -171,6 +179,8 @@ pub(super) fn build(
                     multiplier,
                     en,
                     in_,
+                    incm,
+                    common_mode: common_mode_node.is_some(),
                 }),
                 ports,
             }
@@ -211,6 +221,33 @@ pub(super) fn build(
     circuit.add_xspice_instance(instance);
 
     let common = node_id(circuit, terminals.common());
+    if let Some(node) = common_mode_node {
+        // LTspice's incm is one noise current driven into both inputs from
+        // the common. It is injected into a private node held by a quiet
+        // 1 ohm resistor, whose voltage drives a 1 S current into each input.
+        let node = node_id(circuit, &node);
+        circuit.resistors.add_device_series(
+            &element.name,
+            format!("{}#ICM", element.name),
+            node,
+            common,
+            1.0,
+        );
+        circuit.resistors.set_last_noisy(false);
+        for pin in [1, 2] {
+            let input = node_id(circuit, terminals.node(pin));
+            circuit.vccs.add(
+                format!("{}#ICM{pin}", element.name),
+                VoltageControlledNodes {
+                    node_pos: common,
+                    node_neg: input,
+                    ctrl_pos: node,
+                    ctrl_neg: common,
+                },
+                1.0,
+            );
+        }
+    }
     for (pin, capacitance) in capacitances {
         if capacitance > 0.0 && terminals.used(pin) {
             let node = node_id(circuit, terminals.node(pin));
@@ -278,10 +315,13 @@ fn node_id(circuit: &mut CircuitData, name: &str) -> crate::NodeId {
 struct OtaModel {
     ota: Ota,
     multiplier: bool,
-    /// Input voltage and normal-mode current noise written as expressions,
-    /// which replace the constant densities.
+    /// Input voltage, normal-mode and common-mode current noise written as
+    /// expressions, which replace the constant densities.
     en: Option<CompiledExpr>,
     in_: Option<CompiledExpr>,
+    incm: Option<CompiledExpr>,
+    /// Whether the `icm` port reaches the common-mode noise node.
+    common_mode: bool,
 }
 
 impl OtaModel {
@@ -328,6 +368,7 @@ impl CodeModel for OtaModel {
                 PortSpec::input("mult", PortType::DifferentialVoltage).nullable(),
                 PortSpec::input("vout", PortType::DifferentialVoltage),
                 PortSpec::output("out", PortType::DifferentialCurrent),
+                PortSpec::output("icm", PortType::DifferentialCurrent).nullable(),
             ]
         })
     }
@@ -355,6 +396,10 @@ impl CodeModel for OtaModel {
     fn evaluate(&self, ctx: &mut CmContext) -> CmResult<()> {
         let (current, _) = self.output(ctx);
         ctx.set_output("out", current);
+        if self.common_mode {
+            // The port only carries the common-mode noise current.
+            ctx.set_output("icm", 0.0);
+        }
         Ok(())
     }
 
@@ -384,6 +429,16 @@ impl CodeModel for OtaModel {
                 },
                 corner: noise.ink,
                 spectrum: self.in_.clone(),
+            },
+            PortNoiseCurrent {
+                mechanism: "icm",
+                port: "icm",
+                white: match self.incm {
+                    Some(_) => 1.0,
+                    None => noise.incm.powi(2),
+                },
+                corner: noise.incmk,
+                spectrum: self.incm.clone(),
             },
         ]
     }

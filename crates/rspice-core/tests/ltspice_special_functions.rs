@@ -779,3 +779,39 @@ R6 o6 0 1k
     assert_close("o5", v("o5"), -0.02, 1e-9);
     assert_close("o6", v("o6"), -9.242_343e-3, 1e-9);
 }
+
+#[test]
+fn ota_common_mode_current_noise_matches_ltspice() {
+    // LTspice 26.1.1 batch, V(A1.icm): incm*sqrt(1 + incmk/f) is one current
+    // driven into both inputs, so the difference across 1k and 2k loads
+    // carries |1k - 2k|*incm, not their quadrature sum.
+    let difference = "* ota incm read as a difference
+V1 s 0 0 AC 1
+Ra a 0 1k
+Rb b s 2k
+E1 out 0 a b 1
+A1 a b 0 0 0 0 0 0 OTA g=0 incm=1p incmk=10
+.end
+";
+    let densities = ota_noise_density(difference, "icm", &[1.0, 10.0, 1e3]);
+    for (actual, expected) in densities
+        .into_iter()
+        .zip([3.316_625e-9, 1.414_214e-9, 1.004_988e-9])
+    {
+        assert_close("icm difference", actual, expected, 1e-6 * expected);
+    }
+    let single = "* ota incm into one input load
+V1 s 0 0 AC 1
+Ra a 0 1k
+Rb out s 2k
+A1 a out 0 0 0 0 0 0 OTA g=0 incm=1p incmk=10
+.end
+";
+    let densities = ota_noise_density(single, "icm", &[1.0, 10.0, 1e3]);
+    for (actual, expected) in densities
+        .into_iter()
+        .zip([6.633_250e-9, 2.828_427e-9, 2.009_975e-9])
+    {
+        assert_close("icm", actual, expected, 1e-6 * expected);
+    }
+}
