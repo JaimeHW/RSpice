@@ -344,6 +344,19 @@ impl Builder<'_> {
             self.place_marker(symbol, &label);
             return;
         }
+        // LTspice names its frequency-response probes `@n`; only LTspice
+        // runs them.
+        if tool == ForeignTool::Ltspice
+            && symbol
+                .attribute("InstName")
+                .is_some_and(|name| name.trim().starts_with('@'))
+        {
+            self.refuse(format!(
+                "{label} is an LTspice frequency-response probe, which only LTspice runs; it was left out, so the loop it was inserted in is open."
+            ));
+            self.place_marker(symbol, &label);
+            return;
+        }
         let (definition, location, schematic) = match &symbol.embedded {
             Some(definition) => (Some(definition.clone()), None, None),
             None => match self.access.symbol(&symbol.symbol) {

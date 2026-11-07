@@ -1339,3 +1339,23 @@ fn a_part_with_no_value_writes_its_symbols_model() {
         .expect("a cell instance");
     assert_eq!(binding.module_name.as_deref(), Some("SAMPLEHOLD"));
 }
+
+#[test]
+fn an_ltspice_frequency_response_probe_is_refused_by_name() {
+    let drawing =
+        parse_asc("Version 4\nSHEET 1 400 400\nSYMBOL FRA 0 0 R0\nSYMATTR InstName @1\n").unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let refusals = imported
+        .notices
+        .iter()
+        .filter(|notice| notice.severity == ForeignNoticeSeverity::Refusal)
+        .collect::<Vec<_>>();
+    assert_eq!(refusals.len(), 1, "{refusals:?}");
+    assert!(
+        refusals[0].message.contains("@1")
+            && refusals[0].message.contains("frequency-response probe"),
+        "{}",
+        refusals[0].message
+    );
+    assert!(imported.document.components.is_empty());
+}
