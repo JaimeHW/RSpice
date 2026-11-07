@@ -487,12 +487,14 @@ mod tests {
             .iter()
             .filter(|diagnostic| diagnostic.code == "VA-CONVERGENCE-DIVISION")
             .collect::<Vec<_>>();
-        assert_eq!(divisions.len(), 2, "the placed finding and one repeated row");
+        assert_eq!(
+            divisions.len(),
+            2,
+            "the placed finding and one repeated row"
+        );
         assert!(
-            divisions
-                .iter()
-                .any(|diagnostic| diagnostic.line.is_none()
-                    && diagnostic.detail.ends_with("Reported 3 times.")),
+            divisions.iter().any(|diagnostic| diagnostic.line.is_none()
+                && diagnostic.detail.ends_with("Reported 3 times.")),
             "{divisions:#?}"
         );
         assert!(

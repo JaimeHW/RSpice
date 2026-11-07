@@ -375,10 +375,7 @@ fn analyze_regions(
         .map(|parameter| {
             (
                 parameter.name.to_string(),
-                parameter
-                    .range
-                    .as_ref()
-                    .map_or(Signs::ANY, Signs::of_range),
+                parameter.range.as_ref().map_or(Signs::ANY, Signs::of_range),
             )
         })
         .collect();
@@ -664,9 +661,7 @@ impl RegionContext<'_> {
                     BinaryOp::Mul | BinaryOp::IntMul => left.times(right),
                     BinaryOp::Div => left.divided_by(right),
                     BinaryOp::IntDiv => left.divided_by(right).truncated(),
-                    BinaryOp::Pow | BinaryOp::IntPow if left == Signs::POSITIVE => {
-                        Signs::POSITIVE
-                    }
+                    BinaryOp::Pow | BinaryOp::IntPow if left == Signs::POSITIVE => Signs::POSITIVE,
                     _ => Signs::ANY,
                 }
             }
@@ -677,9 +672,7 @@ impl RegionContext<'_> {
                 ("exp" | "limexp" | "cosh", [_]) => Signs::POSITIVE,
                 ("abs", [value]) => self.signs(value, facts).absolute(),
                 ("sqrt", [value]) => self.signs(value, facts).square_root(),
-                ("pow", [base, _]) if self.signs(base, facts) == Signs::POSITIVE => {
-                    Signs::POSITIVE
-                }
+                ("pow", [base, _]) if self.signs(base, facts) == Signs::POSITIVE => Signs::POSITIVE,
                 ("max", [left, right]) => self
                     .signs(left, facts)
                     .pairwise(self.signs(right, facts), Sign::larger),
@@ -1331,7 +1324,10 @@ endmodule
         };
         assert!(finding.summary.contains("'held'"), "{}", finding.summary);
         assert_eq!(finding.severity, SpecialistFindingSeverity::Information);
-        assert_eq!(finding.location.as_ref().map(|location| location.line), Some(7));
+        assert_eq!(
+            finding.location.as_ref().map(|location| location.line),
+            Some(7)
+        );
     }
 
     fn discontinuity_findings(source: &str, module: &str) -> Vec<String> {
