@@ -617,10 +617,78 @@ fn a_current_source_flagged_load_draws_nothing_without_a_supply() {
     assert_close("V(c)", op_voltage(&netlist, "c"), 1.0, 1e-9);
     assert_close("V(d)", op_voltage(&netlist, "d"), 0.3125, 1e-8);
 
-    let error =
-        Netlist::parse("waveform load\nI1 a 0 PULSE(0 1 0 1n 1n 1u 2u) load\nR1 a 0 1\n.end\n")
-            .expect_err("a waveform load is refused");
-    assert!(error.to_string().contains("constant current"), "{error}");
+    // LTspice 26.1.1 batch: a waveform load carries max(I(t), 0) through the
+    // same knee. V(a)=0.95 at 0.25 ms and 0.9 at 0.5 ms; V(c)=0.25 at the
+    // sine's crest and 1 while the sine is negative.
+    let netlist = parse(
+        "waveform loads\n\
+         V1 s 0 1\n\
+         R1 s a 100\n\
+         I1 a 0 PWL(0 0 1m 2m) load\n\
+         R2 s c 1k\n\
+         I2 c 0 SIN(0 1m 1k) load\n\
+         .tran 0 1m 0 1u\n\
+         .end\n",
+    );
+    let crest = tran_voltages(&netlist, 1e-3, 0.25e-3, &["a", "c"]);
+    assert_close("V(a) at 0.25 ms", crest[0], 0.95, 1e-6);
+    assert_close("V(c) at 0.25 ms", crest[1], 0.25, 1e-4);
+    let trough = tran_voltages(&netlist, 1e-3, 0.75e-3, &["a", "c"]);
+    assert_close("V(a) at 0.75 ms", trough[0], 0.85, 1e-6);
+    assert_close("V(c) at 0.75 ms", trough[1], 1.0, 1e-9);
+}
+
+// QSPICE 2026 batch, which alone reads `Vsat`: V(a)=V(d)=0.25, V(b)=-0.5,
+// V(c)=4*sqrt(2)-4 at the operating point; on the ramp V(f)=2(3-sqrt(7)) at
+// 0.25 ms and 2(2-sqrt(3)) at 0.5 ms. The law is I*g(V/Vsat) with the knee
+// of an LTspice load, for a current of either sign.
+#[test]
+fn a_current_source_saturates_below_its_vsat() {
+    let netlist = parse(
+        "saturating current sources\n\
+         V1 s 0 1\n\
+         R1 s a 1k\n\
+         I1 a 0 DC 1m Vsat=0.5\n\
+         V2 t 0 -1\n\
+         R2 t b 1k\n\
+         I2 b 0 DC 1m Vsat=2\n\
+         R3 s c 1k\n\
+         I3 c 0 DC -1m Vsat=4\n\
+         X1 s d sat vs=0.5\n\
+         .subckt sat p q vs=1\n\
+         R1 p q 1k\n\
+         I1 q 0 {1m} Vsat={vs}\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 0.25, 1e-8);
+    assert_close("V(b)", op_voltage(&netlist, "b"), -0.5, 1e-8);
+    assert_close(
+        "V(c)",
+        op_voltage(&netlist, "c"),
+        4.0 * 2f64.sqrt() - 4.0,
+        1e-8,
+    );
+    assert_close("V(d)", op_voltage(&netlist, "d"), 0.25, 1e-8);
+
+    let netlist = parse(
+        "saturating waveform\n\
+         V1 s 0 1\n\
+         R1 s f 1k\n\
+         I1 f 0 PWL(0 0 1m 2m) Vsat=2\n\
+         .tran 0 1m 0 1u\n\
+         .end\n",
+    );
+    let quarter = tran_voltages(&netlist, 1e-3, 0.25e-3, &["f"]);
+    assert_close(
+        "V(f) at 0.25 ms",
+        quarter[0],
+        2.0 * (3.0 - 7f64.sqrt()),
+        1e-5,
+    );
+    let half = tran_voltages(&netlist, 1e-3, 0.5e-3, &["f"]);
+    assert_close("V(f) at 0.5 ms", half[0], 2.0 * (2.0 - 3f64.sqrt()), 1e-5);
 }
 
 // QSPICE 2026 batch: V(a)=2.0, V(b)=6.0e-3 (LTspice 26.1.1 the same).

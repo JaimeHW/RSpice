@@ -105,6 +105,13 @@ impl TokenStream<'_> {
         }
     }
 
+    /// This stream's numeric bindings and abort signal over other tokens.
+    pub(super) fn with_tokens(&self, tokens: Vec<crate::netlist::lexer::Token>) -> Self {
+        let mut stream = self.clone();
+        stream.tokens = crate::netlist::lexer::TokenStream::new(tokens);
+        stream
+    }
+
     pub(super) fn with_abort(self, abort: &dyn AbortSignal) -> TokenStream<'_> {
         TokenStream {
             tokens: self.tokens,

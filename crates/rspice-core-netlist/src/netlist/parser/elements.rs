@@ -1557,13 +1557,37 @@ pub(super) fn parse_current_source(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
-    if let Some(expression) = current_load_expression(
-        &collect_deferred_source_spec(&mut stream.clone()),
-        &node_pos,
-        &node_neg,
-        line_num,
-    )? {
-        stream.collect_line();
+    if let Some((saturation, mut spec)) = take_current_saturation(stream, line_num)? {
+        let current = match constant_current(&spec) {
+            Some(current) => current,
+            None => {
+                // The waveform drives a private node, which the saturating
+                // source reads as its unsaturated current.
+                let holder = format!("{}#WAVE", name.to_ascii_uppercase());
+                let kind = match parse_current_source_kind(
+                    &mut spec,
+                    line_num,
+                    &name,
+                    params,
+                    defer_source_spec,
+                    None,
+                )? {
+                    ElementKind::CurrentSource(spec) => ElementKind::VoltageSource(spec),
+                    ElementKind::CurrentSourceDeferred(spec) => {
+                        ElementKind::VoltageSourceDeferred(spec)
+                    }
+                    kind => kind,
+                };
+                elements.push(Element {
+                    name: format!("V{holder}"),
+                    kind,
+                    nodes: vec![holder.clone(), "0".to_string()],
+                    provenance: crate::netlist::ElementProvenance::Authored,
+                });
+                format!("V({holder})")
+            }
+        };
+        let expression = saturation.expression(&current, &node_pos, &node_neg);
         elements.push(Element {
             name,
             kind: ElementKind::BehavioralCurrent {
@@ -1578,19 +1602,40 @@ pub(super) fn parse_current_source(
         return Ok(());
     }
 
+    let kind = parse_current_source_kind(
+        stream,
+        line_num,
+        &name,
+        params,
+        defer_source_spec,
+        parameter_direction,
+    )?;
+    elements.push(Element {
+        name,
+        kind,
+        nodes: vec![node_pos, node_neg],
+        provenance: crate::netlist::ElementProvenance::Authored,
+    });
+    Ok(())
+}
+
+/// A current source's specification: a parsed one, or its text when it
+/// names a parameter bound later.
+fn parse_current_source_kind(
+    stream: &mut TokenStream,
+    line_num: usize,
+    name: &str,
+    params: &ParamContext,
+    defer_source_spec: bool,
+    parameter_direction: Option<&mut ParameterDirectionCapture>,
+) -> Result<ElementKind, ParseError> {
     if defer_source_spec {
         let raw_spec = collect_deferred_source_spec(stream);
-        elements.push(Element {
-            name,
-            kind: if raw_spec.trim().is_empty() {
-                ElementKind::CurrentSource(SourceSpec::Dc(0.0))
-            } else {
-                ElementKind::CurrentSourceDeferred(raw_spec)
-            },
-            nodes: vec![node_pos, node_neg],
-            provenance: crate::netlist::ElementProvenance::Authored,
+        return Ok(if raw_spec.trim().is_empty() {
+            ElementKind::CurrentSource(SourceSpec::Dc(0.0))
+        } else {
+            ElementKind::CurrentSourceDeferred(raw_spec)
         });
-        return Ok(());
     }
 
     let raw_spec = collect_deferred_source_spec(&mut stream.clone());
@@ -1611,13 +1656,7 @@ pub(super) fn parse_current_source(
                 && !raw_spec.trim().is_empty() =>
         {
             stream.collect_line();
-            elements.push(Element {
-                name,
-                kind: ElementKind::CurrentSourceDeferred(raw_spec),
-                nodes: vec![node_pos, node_neg],
-                provenance: crate::netlist::ElementProvenance::Authored,
-            });
-            return Ok(());
+            return Ok(ElementKind::CurrentSourceDeferred(raw_spec));
         }
         Err(err) => return Err(err),
     };
@@ -1627,7 +1666,7 @@ pub(super) fn parse_current_source(
     {
         let [dc, magnitude, phase] = directions.into_inner();
         capture.elements.insert(
-            name.clone(),
+            name.to_string(),
             ElementParameterDirection::Source {
                 dc,
                 magnitude,
@@ -1635,15 +1674,7 @@ pub(super) fn parse_current_source(
             },
         );
     }
-
-    elements.push(Element {
-        name,
-        kind: ElementKind::CurrentSource(source_spec),
-        nodes: vec![node_pos, node_neg],
-        provenance: crate::netlist::ElementProvenance::Authored,
-    });
-
-    Ok(())
+    Ok(ElementKind::CurrentSource(source_spec))
 }
 
 fn collect_deferred_source_spec(stream: &mut TokenStream) -> String {
@@ -1655,45 +1686,143 @@ fn collect_deferred_source_spec(stream: &mut TokenStream) -> String {
         .join(" ")
 }
 
-/// LTspice's dissipative current load, `Ixxx n+ n- [DC] <current> load`.
-/// With u = V(n+,n-)/0.5 V the source carries max(I, 0)·g(u), where g is 1
-/// from u = 1 up, u(2 − u) between 0 and 1, and the resistor 2u below 0, so
-/// the load draws nothing when its supply collapses.
-fn current_load_expression(
-    raw_spec: &str,
-    node_pos: &str,
-    node_neg: &str,
+/// How a current source gives way as the voltage across it, V(n+,n-),
+/// collapses. With u = V(n+,n-)/knee it carries I·g(u), where g is 1 from
+/// u = 1 up, u(2 − u) between 0 and 1, and the resistor 2u below 0.
+enum CurrentSaturation {
+    /// LTspice's dissipative load, `Ixxx n+ n- <current> load`: the knee is
+    /// 0.5 V and the current max(I, 0), so the load never sources power.
+    Load,
+    /// QSPICE's `Vsat=<knee>`, for a current of either sign.
+    Knee(String),
+}
+
+impl CurrentSaturation {
+    fn expression(&self, current: &str, node_pos: &str, node_neg: &str) -> String {
+        let (current, knee) = match self {
+            Self::Load => (format!("max(({current}),0)"), "0.5"),
+            Self::Knee(knee) => (format!("({current})"), knee.as_str()),
+        };
+        let u = format!("(V({node_pos},{node_neg})/({knee}))");
+        format!("{current}*if({u}>=1,1,if({u}>=0,{u}*(2-{u}),2*{u}))")
+    }
+}
+
+/// Takes LTspice's trailing `load` flag or QSPICE's `Vsat=<value>` off a
+/// current source's tail, returning it and what is left of the tail.
+fn take_current_saturation<'a>(
+    stream: &mut TokenStream<'a>,
     line_num: usize,
-) -> Result<Option<String>, ParseError> {
-    let mut words = raw_spec.split_whitespace().collect::<Vec<_>>();
-    if !words
+) -> Result<Option<(CurrentSaturation, TokenStream<'a>)>, ParseError> {
+    let mut tokens = stream.clone().collect_line();
+    let mut saturation = None;
+    if tokens
         .last()
-        .is_some_and(|word| word.eq_ignore_ascii_case("LOAD"))
+        .is_some_and(|token| matches!(&token.kind, TokenKind::Ident(word) if word == "LOAD"))
     {
-        return Ok(None);
+        tokens.pop();
+        saturation = Some(CurrentSaturation::Load);
     }
-    words.pop();
-    if words
-        .first()
-        .is_some_and(|word| word.eq_ignore_ascii_case("DC"))
-    {
-        words.remove(0);
-    }
-    let value = words.join(" ");
-    let value = match value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) {
-        Some(expression) if !expression.contains(['{', '}']) => expression.to_string(),
-        _ if words.len() == 1 && !value.contains(['(', ')', '{', '}']) => value,
-        _ => {
+    let mut depth = 0usize;
+    let mut index = 0;
+    while index < tokens.len() {
+        let is_vsat = depth == 0
+            && matches!(&tokens[index].kind, TokenKind::Ident(word) if word == "VSAT")
+            && matches!(
+                tokens.get(index + 1).map(|token| &token.kind),
+                Some(TokenKind::Equals)
+            );
+        if !is_vsat {
+            match tokens[index].kind {
+                TokenKind::LParen => depth += 1,
+                TokenKind::RParen => depth = depth.saturating_sub(1),
+                _ => {}
+            }
+            index += 1;
+            continue;
+        }
+        let signed = matches!(
+            tokens.get(index + 2).map(|token| &token.kind),
+            Some(TokenKind::Minus | TokenKind::Plus)
+        );
+        let value_end = index + 3 + usize::from(signed);
+        let knee = tokens
+            .get(index + 2..value_end)
+            .filter(|value| {
+                matches!(
+                    value.last().map(|token| &token.kind),
+                    Some(TokenKind::Number(_) | TokenKind::Ident(_) | TokenKind::Expression(_))
+                )
+            })
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "Expected a voltage after 'Vsat='".to_string(),
+            })?
+            .iter()
+            .map(value_text)
+            .collect::<String>();
+        if crate::netlist::lexer::parse_spice_value(&knee).is_ok_and(|knee| knee <= 0.0) {
             return Err(ParseError::Syntax {
                 line: line_num,
-                message: format!("`load` applies to a constant current; `{raw_spec}` is not one"),
+                message: format!("'Vsat' must be positive, found {knee}"),
             });
         }
+        if saturation.is_some() {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: "A current source takes 'load' or 'Vsat=', not both".to_string(),
+            });
+        }
+        saturation = Some(CurrentSaturation::Knee(knee));
+        tokens.drain(index..value_end);
+    }
+    let Some(saturation) = saturation else {
+        return Ok(None);
     };
-    let v = format!("V({node_pos},{node_neg})");
-    Ok(Some(format!(
-        "max(({value}),0)*if({v}>=0.5,1,if({v}>=0,4*{v}*(1-{v}),4*{v}))"
-    )))
+    let rest = stream.with_tokens(tokens);
+    stream.collect_line();
+    Ok(Some((saturation, rest)))
+}
+
+/// The text of one value token inside an expression: a braced or quoted
+/// expression loses its delimiters.
+fn value_text(token: &Token) -> &str {
+    match &token.kind {
+        TokenKind::Expression(expression) => expression,
+        _ => &token.lexeme,
+    }
+}
+
+/// A tail that is one constant current, `[DC] [±]<value>`, as expression
+/// text.
+fn constant_current(spec: &TokenStream) -> Option<String> {
+    let mut tokens = spec.clone().collect_line();
+    if tokens
+        .first()
+        .is_some_and(|token| matches!(&token.kind, TokenKind::Ident(word) if word == "DC"))
+    {
+        tokens.remove(0);
+    }
+    let (sign, value) = match tokens.as_slice() {
+        [value] => ("", value),
+        [sign, value] if matches!(sign.kind, TokenKind::Minus) => ("-", value),
+        [sign, value] if matches!(sign.kind, TokenKind::Plus) => ("", value),
+        _ => return None,
+    };
+    match &value.kind {
+        TokenKind::Number(_) | TokenKind::Expression(_) => {}
+        TokenKind::Ident(word) if !is_source_keyword(word) => {}
+        _ => return None,
+    }
+    Some(format!("{sign}{}", value_text(value)))
+}
+
+/// Words that begin a source specification other than its DC value.
+fn is_source_keyword(word: &str) -> bool {
+    matches!(
+        word,
+        "AC" | "PULSE" | "SIN" | "SINE" | "EXP" | "PWL" | "SFFM" | "AM" | "TRNOISE" | "TRRANDOM"
+    )
 }
 
 pub(super) fn parse_pspice_u_device(
