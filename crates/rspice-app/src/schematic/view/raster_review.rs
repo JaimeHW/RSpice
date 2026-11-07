@@ -1082,7 +1082,8 @@ fn a_hovered_junction_ring_is_stroked_in_whole_device_pixels() {
     }
 }
 
-/// Where the functional sheet is measured from: its middle.
+/// Where the functional sheet's first four rows are measured from: their
+/// middle. The canvas holds four rows; each further four sit 560 lower.
 const FUNCTIONAL_CENTRE: Point = Point::new(340, 300);
 
 /// Every functional part on the shelf placed the way the shelf places it,
@@ -1105,13 +1106,18 @@ fn functional_sheet() -> AppState {
 #[test]
 fn a_placed_functional_part_letters_its_name_not_its_subcircuit() {
     let mut state = functional_sheet();
-    let render = render(
-        &mut state,
-        crate::ui::Theme::default(),
-        at_zoom(1.0, FUNCTIONAL_CENTRE),
-        1.0,
-    );
-    let painted = painted_text(&render.shapes);
+    let rows = crate::state::functional_parts().len().div_ceil(4);
+    let mut painted = Vec::new();
+    for band in 0..rows.div_ceil(4) {
+        let centre = Point::new(FUNCTIONAL_CENTRE.x, FUNCTIONAL_CENTRE.y + 560 * band as i32);
+        let render = render(
+            &mut state,
+            crate::ui::Theme::default(),
+            at_zoom(1.0, centre),
+            1.0,
+        );
+        painted.extend(painted_text(&render.shapes));
+    }
     for descriptor in crate::state::functional_parts() {
         assert!(
             painted
