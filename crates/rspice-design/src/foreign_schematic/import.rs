@@ -1948,7 +1948,7 @@ impl Builder<'_> {
                 };
                 if is_supply_rail(&flag.name) {
                     label.kind = NetLabelKind::Supply {
-                        glyph: SupplyGlyph::for_name(&flag.name),
+                        glyph: rail_glyph(&flag.name, run),
                     };
                 }
                 self.document.net_labels.push(label);
@@ -2703,6 +2703,20 @@ fn note_anchor(note: &DesignNote, point: Point, lettering: &ForeignLettering) ->
         point.x - (reach(across, width, width) + offset_x).round() as i32,
         point.y - (reach(down, height, middle) + offset_y).round() as i32,
     )
+}
+
+/// The glyph a rail flag draws: its name's by convention, unless that would
+/// stand on what reaches the flag. A rail reached from above hangs its bar
+/// below its point, and one reached from below stands its bar or arrow over
+/// it, as a drafter turns a rail symbol away from its wire; `run` is the way
+/// the flag's name reads, away from what reaches it.
+fn rail_glyph(name: &str, run: Option<ForeignPoint>) -> SupplyGlyph {
+    let glyph = SupplyGlyph::for_name(name);
+    match run.map(|run| (run.x.signum(), run.y.signum())) {
+        Some((0, 1)) => SupplyGlyph::Down,
+        Some((0, -1)) if glyph == SupplyGlyph::Down => SupplyGlyph::Bar,
+        _ => glyph,
+    }
 }
 
 /// VDD, VCC, VSS and VEE, alone or numbered, are supply rails.

@@ -2713,6 +2713,42 @@ fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     assert!(!note("LTspice readout").anchor_mark_hidden);
 }
 
+/// A rail flag draws the glyph its name calls for, turned away from the wire
+/// that reaches it: a VSS flag on top of a source's lead stands its bar over
+/// the point, and a VCC flag under an IC's pin hangs its bar below, where
+/// the conventional glyph would stand on the lead and letter the name over
+/// the part.
+#[test]
+fn an_imported_rail_turns_its_glyph_away_from_what_reaches_it() {
+    use crate::schematic::net_label::{NetLabelKind, SupplyGlyph};
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         WIRE 0 0 0 64\nFLAG 0 0 Vss\n\
+         WIRE 160 0 160 64\nFLAG 160 64 Vcc\n\
+         WIRE 320 0 320 64\nFLAG 320 0 VDD\n\
+         WIRE 480 0 480 64\nFLAG 480 64 VEE\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let glyph = |name: &str| {
+        let label = imported
+            .document
+            .net_labels
+            .iter()
+            .find(|label| label.name == name)
+            .unwrap_or_else(|| panic!("no label {name}"));
+        match label.kind {
+            NetLabelKind::Supply { glyph } => glyph,
+            kind => panic!("{name} is a {kind:?}, not a rail"),
+        }
+    };
+    assert_eq!(glyph("Vss"), SupplyGlyph::Bar, "reached from below");
+    assert_eq!(glyph("Vcc"), SupplyGlyph::Down, "reached from above");
+    assert_eq!(glyph("VDD"), SupplyGlyph::Bar);
+    assert_eq!(glyph("VEE"), SupplyGlyph::Down);
+}
+
 /// Where a net label of `imported` named `name` stands, in world units.
 fn label_point(imported: &ForeignImport, name: &str) -> (f32, f32) {
     let label = imported
