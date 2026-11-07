@@ -15,7 +15,8 @@ use crate::state::{
     ProjectSourceBundle, ProjectSourceFile, ProjectSourceId, ProjectSourceLanguage,
     ProjectSourceOwner, ProjectSourceRole, ViewType,
 };
-use crate::workbench::{AppState, MessageId, RSpiceApp};
+use crate::workbench::{MessageId, RSpiceApp};
+use rspice_app_workbench::workbench::state::WorkbenchSession;
 
 use rspice_app_state::workbench::app_state::model::{
     apply_compiled_interface, diagnostic_capacity_failure, receipt_from_report,
@@ -1073,7 +1074,10 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         LogSource::Studio,
                         "Verilog-A compilation produced more diagnostics than can be kept; the source was not validated.",
                     );
-                    announce_compile_failed(&mut app.state);
+                    announce_compile_failed(
+                        &mut app.state.workbench,
+                        &app.state.code.code_workspace.veriloga.last_failure,
+                    );
                     return;
                 }
             };
@@ -1168,7 +1172,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         ),
                     );
                     announce_compiled(
-                        &mut app.state,
+                        &mut app.state.workbench,
                         &report.abi,
                         summary.total().saturating_sub(summary.errors),
                     );
@@ -1226,7 +1230,10 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 LogSource::Studio,
                 "Verilog-A compilation failed. Review the source diagnostics.",
             );
-            announce_compile_failed(&mut app.state);
+            announce_compile_failed(
+                &mut app.state.workbench,
+                &app.state.code.code_workspace.veriloga.last_failure,
+            );
         }
         Err(()) => {
             app.state.code.code_workspace.veriloga.receipt = None;
@@ -1273,7 +1280,10 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                 LogSource::Studio,
                 "The Verilog-A compiler worker stopped before publishing a report.",
             );
-            announce_compile_failed(&mut app.state);
+            announce_compile_failed(
+                &mut app.state.workbench,
+                &app.state.code.code_workspace.veriloga.last_failure,
+            );
         }
     }
 }
@@ -1281,11 +1291,11 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
 /// Say on the status bar what a passing compile made, where a screen reader
 /// hears it too: "Compiled opamp_bhv: 5 ports, 5 parameters".
 fn announce_compiled(
-    state: &mut AppState,
+    workbench: &mut WorkbenchSession,
     abi: &rspice_veriloga::RuntimeAbiSummary,
     advisories: usize,
 ) {
-    let messages = state.workbench.messages();
+    let messages = workbench.messages();
     let counted = |count: usize, one: MessageId, many: MessageId| {
         messages.format(
             if count == 1 { one } else { many },
@@ -1325,21 +1335,14 @@ fn announce_compiled(
         .map(|(name, value)| (*name, value.as_str()))
         .collect::<Vec<_>>();
     let announcement = messages.format(template, &arguments);
-    state.prompt(announcement);
+    workbench.prompt(announcement);
 }
 
 /// Say on the status bar that the compile was refused, and how many errors
 /// refused it: "Compile failed: 2 errors".
-fn announce_compile_failed(state: &mut AppState) {
-    let messages = state.workbench.messages();
-    let errors = state
-        .code
-        .code_workspace
-        .veriloga
-        .last_failure
-        .summary()
-        .errors
-        .max(1);
+fn announce_compile_failed(workbench: &mut WorkbenchSession, failure: &CodeDiagnosticCollection) {
+    let messages = workbench.messages();
+    let errors = failure.summary().errors.max(1);
     let errors = messages.format(
         if errors == 1 {
             MessageId::VerilogAErrorSingular
@@ -1352,7 +1355,7 @@ fn announce_compile_failed(state: &mut AppState) {
         MessageId::VerilogACompileFailedAnnouncement,
         &[("errors", &errors)],
     );
-    state.prompt(announcement);
+    workbench.prompt(announcement);
 }
 
 fn record_veriloga_qualification(
