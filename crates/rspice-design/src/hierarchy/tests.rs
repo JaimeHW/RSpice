@@ -613,7 +613,7 @@ fn placed_functional_parts_reach_the_bill_of_materials_with_their_purchasing_fie
             Point::new(0, 0),
         )
         .with_library_cell(functional_library_binding(descriptor))
-        .with_name_value(&format!("U{}", index + 1), descriptor.display_name);
+        .with_name_value(format!("U{}", index + 1), descriptor.display_name);
         component.bom.manufacturer = format!("Maker {index}");
         top.components.push(component);
     }
