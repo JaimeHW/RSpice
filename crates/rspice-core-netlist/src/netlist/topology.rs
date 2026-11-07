@@ -1542,9 +1542,10 @@ fn remap_probe_node(raw: &str, remap_node: &impl Fn(&str) -> String) -> String {
     remap_node(raw)
 }
 
+/// A probed name, which may carry signs: LTspice nets such as `IN+` and `-V`.
 fn is_simple_probe_name(raw: &str) -> bool {
     raw.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '$'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '$' | '+' | '-'))
 }
 
 #[cfg(test)]

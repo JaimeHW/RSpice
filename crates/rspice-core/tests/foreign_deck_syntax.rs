@@ -1448,3 +1448,31 @@ B1 0 out I=1m*V(in) Rpar=1k Cpar={cp}
     let values = tran_voltages(&netlist, 2e-3, 1e-3, &["c"]);
     assert_close("V(c) at 1 ms", values[0], 0.632_120, 2e-5);
 }
+
+// LTspice and QSPICE: V(o1)=22, V(o2)=6 and V(o4)=6.
+#[test]
+fn a_probe_reads_a_net_whose_name_carries_a_sign_inside_or_at_the_end() {
+    let netlist = parse(
+        "* probes of nets whose names carry a sign inside or at the end
+V1 IN+ 0 3
+V2 IN- 0 1
+V3 TC-HEAT 0 2
+B1 o1 0 V=V(IN+,IN-)*10+V(TC-HEAT)
+X1 IN+ IN- o2 amp
+Vsense+ o2 o3 0
+R3 o3 0 1k
+B4 o4 0 V=I(Vsense+)*1k
+R4 o4 0 1k
+.subckt amp a b o
+R1 a mid+ 1k
+R2 mid+ b 1k
+B2 o 0 V=V(mid+)*2+V(a)-V(b)
+.ends amp
+.op
+.end
+",
+    );
+    assert_close("V(o1)", op_voltage(&netlist, "o1"), 22.0, 1e-9);
+    assert_close("V(o2)", op_voltage(&netlist, "o2"), 6.0, 1e-9);
+    assert_close("V(o4)", op_voltage(&netlist, "o4"), 6.0, 1e-9);
+}

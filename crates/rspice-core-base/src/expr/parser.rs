@@ -689,29 +689,53 @@ impl<'a> Parser<'a> {
         }
     }
 
-    /// The node or element a probe names, left as the current token. A sign
-    /// written against a name is part of it: LTspice's supply nodes are
-    /// commonly `+V` and `-V`, and `V(x,+V)` reads node `+V`.
+    /// The node or element a probe names, its last token left as the current
+    /// token. A sign written against a name, with no blank between, is part
+    /// of it: LTspice's supply nodes are commonly `+V` and `-V`, and its nets
+    /// `IN+`, `IN-A` or `TC-HEATSINK`, so `V(x,+V)` reads node `+V` and
+    /// `V(IN+)` node `IN+`.
     fn probe_reference(&mut self) -> Option<String> {
-        let sign = match &self.current {
-            Token::Ident(arg) => return Some(arg.clone()),
-            Token::Number { lexeme, .. } => return Some(lexeme.clone()),
-            Token::Plus => '+',
-            Token::Minus => '-',
+        let mut name = match &self.current {
+            Token::Ident(arg) => arg.clone(),
+            Token::Number { lexeme, .. } => lexeme.clone(),
+            Token::Plus | Token::Minus => String::new(),
             _ => return None,
         };
-        let written_against_a_name = self
-            .lexer
+        if name.is_empty() {
+            name.push(if self.current == Token::Plus { '+' } else { '-' });
+            if !self.name_continues() {
+                return None;
+            }
+            self.advance();
+            name.push_str(&self.name_piece()?);
+        }
+        while let Some(&sign) = self.lexer.chars.peek() {
+            if !matches!(sign, '+' | '-') {
+                break;
+            }
+            self.advance();
+            name.push(sign);
+            if !self.name_continues() {
+                break;
+            }
+            self.advance();
+            name.push_str(&self.name_piece()?);
+        }
+        Some(name)
+    }
+
+    /// Whether the next character, with no blank before it, continues a name.
+    fn name_continues(&mut self) -> bool {
+        self.lexer
             .chars
             .peek()
-            .is_some_and(|next| next.is_alphanumeric() || matches!(next, '_' | '$'));
-        if !written_against_a_name {
-            return None;
-        }
-        self.advance();
+            .is_some_and(|next| next.is_alphanumeric() || matches!(next, '_' | '$'))
+    }
+
+    fn name_piece(&self) -> Option<String> {
         match &self.current {
-            Token::Ident(name) => Some(format!("{sign}{name}")),
-            Token::Number { lexeme, .. } => Some(format!("{sign}{lexeme}")),
+            Token::Ident(name) => Some(name.clone()),
+            Token::Number { lexeme, .. } => Some(lexeme.clone()),
             _ => None,
         }
     }
@@ -1428,6 +1452,34 @@ mod tests {
         assert!(
             parse_expression_strict("1!=0").is_ok(),
             "allowing bang in node names must not consume the != operator"
+        );
+    }
+
+    #[test]
+    fn a_sign_written_against_a_probed_name_belongs_to_it() {
+        assert_eq!(
+            parse_expression_strict("V(IN+,-V)*2").expect("probe parses"),
+            Expr::mul(
+                Expr::sub(
+                    Expr::NodeVoltage("IN+".to_string()),
+                    Expr::NodeVoltage("-V".to_string())
+                ),
+                Expr::Const(2.0)
+            )
+        );
+        assert_eq!(
+            parse_expression_strict("V(IN-A)+I(V_sense+)").expect("probe parses"),
+            Expr::add(
+                Expr::NodeVoltage("IN-A".to_string()),
+                Expr::BranchCurrent("V_sense+".to_string())
+            )
+        );
+        assert_eq!(
+            parse_expression_strict("V(TC-WITH-SINK, N001+)").expect("probe parses"),
+            Expr::sub(
+                Expr::NodeVoltage("TC-WITH-SINK".to_string()),
+                Expr::NodeVoltage("N001+".to_string())
+            )
         );
     }
 

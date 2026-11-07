@@ -5896,9 +5896,10 @@ fn remap_probe_node(
     flattener.remap_node(trimmed, prefix, node_map)
 }
 
+/// A probed name, which may carry signs: LTspice nets such as `IN+` and `-V`.
 fn is_simple_probe_name(s: &str) -> bool {
     s.chars()
-        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '!'))
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '!' | '+' | '-'))
 }
 
 #[cfg(test)]
