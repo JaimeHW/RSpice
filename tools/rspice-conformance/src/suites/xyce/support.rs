@@ -2506,6 +2506,7 @@ impl XyceTestRunner {
             transient_lte_reference,
             transient_new_bp_stepping,
             ramptime,
+            transient_startup_ramp,
             digital_delay_type,
             xspice_event_trace_save,
             part_tolerances,
@@ -2618,6 +2619,7 @@ impl XyceTestRunner {
             && xmu.is_none()
             && trtol.is_none()
             && ramptime.is_none()
+            && transient_startup_ramp.is_none()
             && digital_delay_type.is_none()
             && xspice_event_trace_save.is_none()
             && itl1.is_none()
