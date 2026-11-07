@@ -7501,6 +7501,48 @@ fn collect_chebyshev_input_expression(
     Ok(expression)
 }
 
+/// LTspice's lookup-table controlled source, `Exxx|Gxxx n+ n- nc+ nc-
+/// table|tbl[=](v1,o1 v2,o2 ...)`: the output follows the control voltage
+/// through the pairs, linear between them, and holds the end values beyond.
+fn take_ltspice_control_table(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer: bool,
+    element_label: &str,
+) -> Result<Option<Vec<(NumericTerm, NumericTerm)>>, ParseError> {
+    let TokenKind::Ident(keyword) = &stream.peek().kind else {
+        return Ok(None);
+    };
+    if !(keyword.eq_ignore_ascii_case("TABLE") || keyword.eq_ignore_ascii_case("TBL"))
+        || !matches!(stream.peek_n(1).kind, TokenKind::Equals | TokenKind::LParen)
+    {
+        return Ok(None);
+    }
+    stream.advance();
+    stream.consume(&TokenKind::Equals);
+    if !matches!(stream.peek().kind, TokenKind::LParen) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!(
+                "{element_label} lookup table must list its (control, output) pairs in parentheses"
+            ),
+        });
+    }
+    let flat = collect_numeric_tail(stream, line_num, params, element_label, true, defer)?;
+    if flat.len() < 4 || !flat.len().is_multiple_of(2) {
+        return Err(ParseError::Syntax {
+            line: line_num,
+            message: format!("{element_label} lookup table requires at least two (x,y) pairs"),
+        });
+    }
+    Ok(Some(
+        flat.chunks_exact(2)
+            .map(|pair| (pair[0].clone(), pair[1].clone()))
+            .collect(),
+    ))
+}
+
 /// Reconstruct a controlled-source expression while leaving a trailing
 /// current-source `M=` assignment for the typed instance-parameter parser.
 /// LTspice's `E/G n+ n- nc+ nc- Laplace=<H(s)>`: the transfer of
@@ -8595,6 +8637,33 @@ fn parse_voltage_controlled_source(
                     is_voltage_output,
                     line_num,
                 )?);
+                return Ok(VoltageControlledSourceParseKind::Ordinary);
+            }
+            if let Some(pairs) = take_ltspice_control_table(
+                stream,
+                line_num,
+                params,
+                defer_simple_param_refs,
+                element_label,
+            )? {
+                let multiplicity = parse_source_multiplicity_tail_with_direction(
+                    stream,
+                    line_num,
+                    params,
+                    defer_simple_param_refs,
+                    element_label,
+                    !is_voltage_output,
+                    None,
+                )?;
+                elements.push(Element {
+                    name,
+                    kind: lower_behavioral(
+                        table_transfer_expression(&format!("V({ctrl_pos},{ctrl_neg})"), &pairs),
+                        multiplicity,
+                    ),
+                    nodes: vec![node_pos, node_neg],
+                    provenance: crate::netlist::ElementProvenance::Authored,
+                });
                 return Ok(VoltageControlledSourceParseKind::Ordinary);
             }
             let threshold = if is_voltage_output {

@@ -644,3 +644,30 @@ fn passive_parasitics_written_as_subcircuit_expressions_follow_the_instance() {
     assert_close("V(a)", op_voltage(&netlist, "a"), 2.0, 1e-9);
     assert_close("V(b)", op_voltage(&netlist, "b"), 6.0e-3, 1e-12);
 }
+
+// QSPICE 2026 and LTspice 26.1.1 batch: V(o1)=V(o4)=2.866667e-3,
+// V(o2)=1.7e-3, V(o3)=4 (held at the last pair beyond the table).
+#[test]
+fn a_controlled_source_follows_its_lookup_table() {
+    let netlist = parse(
+        "control tables\n\
+         V1 a 0 25\n\
+         R1 o1 0 1\n\
+         G1 0 o1 a 0 tbl=(10 0 20 2.8m 35 3m)\n\
+         V2 b 0 1.1\n\
+         R2 o2 0 1\n\
+         G2 0 o2 b 0 table(0.95,0m 0.969,0.5m 1,1m 1.06,1.5m 1.16,2m 1.34,2.5m 1.64,3m)\n\
+         E3 o3 0 a 0 table=(0,0 10,1 20,4)\n\
+         X1 a o4 sub\n\
+         .subckt sub p o\n\
+         R1 o 0 1\n\
+         G1 0 o p 0 table( 10 0 20 2.8m 35 3m)\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(o1)", op_voltage(&netlist, "o1"), 2.866_666_667e-3, 1e-12);
+    assert_close("V(o2)", op_voltage(&netlist, "o2"), 1.7e-3, 1e-12);
+    assert_close("V(o3)", op_voltage(&netlist, "o3"), 4.0, 1e-9);
+    assert_close("V(o4)", op_voltage(&netlist, "o4"), 2.866_666_667e-3, 1e-12);
+}
