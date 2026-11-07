@@ -292,6 +292,44 @@ A3 b in 0 0 0 0 q3 0 SCHMITT Vt=0.6 Vh=0.3
     }
 }
 
+#[test]
+fn schmitt_reference_and_default_hysteresis_trip_where_ltspice_does() {
+    // The input ramps from -3 V to 3 V over 4 ms and back over the next 4.
+    let deck = "* schmitt reference and default hysteresis
+V1 in 0 PWL(0 -3 4m 3 8m -3)
+A1 in 0 0 0 0 0 o1 0 SCHMITT Vt=-1
+A2 in 0 0 0 0 0 o2 0 SCHMITT Vt=2
+A3 in 0 0 0 0 0 o3 0 SCHMITT Ref=2
+A4 in 0 0 0 0 0 o4 0 SCHMITT Vt=1 Ref=2 Vh=0.1
+A5 in 0 0 0 0 0 o5 0 OR Ref=0.5 Vh=0.2
+.end
+";
+    // LTspice 26.1.1 trips: the default hysteresis is |Vt|/20, `Ref` is the
+    // threshold when `Vt` is absent, and a gate switches at `Ref` with no
+    // hysteresis though it accepts `Vh`.
+    let trips = [
+        ("o1", -0.95, -1.05),
+        ("o2", 2.1, 1.9),
+        ("o3", 2.1, 1.9),
+        ("o4", 1.1, 0.9),
+        ("o5", 0.5, 0.5),
+    ];
+    let rising = |v: f64| (v + 3.0) / 1.5e3;
+    let falling = |v: f64| 4e-3 + (3.0 - v) / 1.5e3;
+    let mut probes = Vec::new();
+    for (node, up, down) in trips {
+        probes.push((node, rising(up - 0.02), 0.0));
+        probes.push((node, rising(up + 0.02), 1.0));
+        probes.push((node, falling(down + 0.02), 1.0));
+        probes.push((node, falling(down - 0.02), 0.0));
+    }
+    let points: Vec<(&str, f64)> = probes.iter().map(|(n, t, _)| (*n, *t)).collect();
+    let values = tran_at(deck, 8e-3, 1e-6, &points);
+    for ((node, time, expected), actual) in probes.iter().zip(values) {
+        assert_close(&format!("{node} at {time:e}"), actual, *expected, 1e-3);
+    }
+}
+
 fn ota_noise_density(deck: &str, mechanism: &str, frequencies: &[f64]) -> Vec<f64> {
     device_noise_density(deck, "A1", mechanism, frequencies)
 }

@@ -216,6 +216,9 @@ impl Gate {
         let mut p = InstanceParams::new(device, params);
         let stage = OutputStage::read(&mut p)?;
         let reference = p.or("REF", 0.5 * (stage.vhigh + stage.vlow))?;
+        // LTspice accepts a Schmitt trigger's hysteresis on a gate and
+        // switches without it.
+        p.get("VH")?;
         p.finish()?;
         Ok(Self {
             function,
@@ -239,8 +242,13 @@ impl Schmitt {
     pub fn from_params(params: &[(String, Value)]) -> Result<Self, SpecialFunctionError> {
         let mut p = InstanceParams::new("SCHMITT", params);
         let stage = OutputStage::read(&mut p)?;
-        let threshold = p.or("VT", 0.5 * (stage.vhigh + stage.vlow))?;
-        let hysteresis = p.or("VH", 0.05 * threshold)?;
+        // `Ref` is the threshold too, as on a gate; `Vt` wins over it.
+        let reference = p.get("REF")?;
+        let threshold = p
+            .get("VT")?
+            .or(reference)
+            .unwrap_or(0.5 * (stage.vhigh + stage.vlow));
+        let hysteresis = p.or("VH", 0.05 * threshold.abs())?;
         p.finish()?;
         require(hysteresis >= 0.0, || {
             format!("SCHMITT Vh must not be negative ({hysteresis})")
