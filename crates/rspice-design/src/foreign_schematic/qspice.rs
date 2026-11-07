@@ -284,7 +284,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
 /// LTspice's `M` by `k`.
 fn orientation(code: u8) -> Option<ForeignOrientation> {
     let eighths = code & 7;
-    if eighths % 2 != 0 {
+    if !eighths.is_multiple_of(2) {
         return None;
     }
     let quarters = eighths / 2;

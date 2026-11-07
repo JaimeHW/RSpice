@@ -585,25 +585,26 @@ impl Builder<'_> {
             suffix += 1;
         }
         let ports = unique_pin_names(definition);
-        let mut document = SymbolDocument::default();
-        document.origin = Point::default();
-        document.pins = definition
-            .ordered_pins()
-            .iter()
-            .zip(&ports)
-            .map(|(pin, port)| {
-                SymbolPin::new(
-                    port.name.clone(),
-                    port.direction,
-                    Some(self.scale(pin.position)),
-                )
-            })
-            .collect();
-        document.body = definition
-            .shapes
-            .iter()
-            .filter_map(|shape| self.symbol_shape(shape))
-            .collect();
+        let mut document = SymbolDocument {
+            pins: definition
+                .ordered_pins()
+                .iter()
+                .zip(&ports)
+                .map(|(pin, port)| {
+                    SymbolPin::new(
+                        port.name.clone(),
+                        port.direction,
+                        Some(self.scale(pin.position)),
+                    )
+                })
+                .collect(),
+            body: definition
+                .shapes
+                .iter()
+                .filter_map(|shape| self.symbol_shape(shape))
+                .collect(),
+            ..SymbolDocument::default()
+        };
         let anchor = |attribute: u32| {
             definition
                 .windows
