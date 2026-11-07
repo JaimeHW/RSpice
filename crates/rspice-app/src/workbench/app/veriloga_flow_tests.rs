@@ -844,6 +844,34 @@ fn a_reviewed_op_amp_compiles_clean_and_each_of_its_errors_is_reached_where_it_w
         user.live
     );
 
+    // A division by a node voltage nothing keeps from zero is one piece of
+    // advice, placed on the denominator: an information row the inspector
+    // offers as a button, and no warning mark anywhere.
+    let advised = OPAMP.replace(
+        "I(out) <+ (V(out) - vtarget) / rout;",
+        "I(out) <+ (V(out) - vtarget) / V(vdd, vss);",
+    );
+    super::veriloga_interface_tests::edit_source(&mut user.app, &advised);
+    user.settle();
+    compile(&mut user);
+    assert_eq!(
+        user.prompt(),
+        "Compiled opamp_bhv: 5 ports, 5 parameters, 1 advisory"
+    );
+    user.expect("Information at line 30, column 36: Denominator can reach zero");
+    let selected = crate::workbench::documents::code_workspace::selected_veriloga_source(&user.app)
+        .expect("the module is open");
+    assert_eq!(
+        crate::workbench::documents::code_workspace::veriloga_compile_status(
+            &user.app.state.code.code_workspace.veriloga,
+            user.app.state.model.workspace.content.project.id(),
+            &selected,
+            user.app.state.workbench.messages(),
+        ),
+        Some(("1 advisory".to_owned(), None)),
+        "advice is not a warning"
+    );
+
     // `gbw` misspelt on line 21 and `vslew` on line 26.
     let broken = OPAMP
         .replace("vslew = slew(", "vslw = slew(")

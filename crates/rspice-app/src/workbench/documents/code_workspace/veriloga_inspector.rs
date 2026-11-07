@@ -113,7 +113,8 @@ pub(crate) fn veriloga_compile_status(
                             },
                             &[("count", &count)],
                         ),
-                        Some(Problem::Warning),
+                        // Information is advice, not a warning.
+                        (summary.warnings > 0).then_some(Problem::Warning),
                     ))
                 }
             }
@@ -594,7 +595,8 @@ fn diagnostics_section(
                 },
                 &[("count", &count)],
             ),
-            Some(Problem::Warning),
+            // Information is advice, not a warning.
+            (summary.warnings > 0).then_some(Problem::Warning),
         )
     };
     let mut activated = None;
@@ -700,7 +702,7 @@ fn diagnostic_row(
                                     .color(t.color.text_dim),
                             );
                         }
-                        ui.with_layout(Layout::right_to_left(Align::Min), |ui| {
+                        ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                             ui.label(
                                 egui::RichText::new(diagnostic.code())
                                     .font(theme::mono(tokens::FS_MICRO, FontWeight::Regular))
