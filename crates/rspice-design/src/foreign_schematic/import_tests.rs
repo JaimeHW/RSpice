@@ -1636,7 +1636,7 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
   »
   «component (2000,0) 0 0
     «symbol Gm
-      «type: Ã»
+      «type: \u{c3}»
       «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ã1\"»
       «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"MultGmAmp\"»
       «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Gm=<50µ> Isrc=10µ VoutMax=2.5 Ft=1Meg\"»
