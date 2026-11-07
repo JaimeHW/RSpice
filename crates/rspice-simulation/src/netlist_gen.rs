@@ -41,6 +41,8 @@ use rspice_vocabulary::product::AnalysisInstanceId;
 
 mod connectivity;
 mod formatting;
+#[cfg(test)]
+mod functional_tests;
 mod header;
 mod instances;
 mod magnetics;
