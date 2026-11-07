@@ -317,7 +317,7 @@ impl RSpiceApp {
     /// Press Run and let the pass authorize and queue the run, as the frames
     /// before the one that dispatches it would. Returns the digest it
     /// authorized.
-    fn queued_by_its_check(&mut self) -> crate::product::ContentDigest {
+    pub(super) fn queued_by_its_check(&mut self) -> crate::product::ContentDigest {
         start(&mut self.state, &mut self.simulation_controller, true);
         self.settle_preflight();
         assert!(
@@ -376,7 +376,7 @@ impl RSpiceApp {
     }
 
     /// Let the run a dispatch started finish, as the frames after it would.
-    fn finish_the_run(&mut self) {
+    pub(super) fn finish_the_run(&mut self) {
         let deadline = std::time::Instant::now() + std::time::Duration::from_secs(300);
         while self.simulation_controller.is_running()
             || self.state.model.simulation.execution.has_active_execution()
@@ -389,7 +389,9 @@ impl RSpiceApp {
     }
 
     /// The frame that dispatches a queued run, with the preparations it ran.
-    fn dispatch_frame(&mut self) -> Vec<crate::simulation::execution::SimulationRunIntent> {
+    pub(super) fn dispatch_frame(
+        &mut self,
+    ) -> Vec<crate::simulation::execution::SimulationRunIntent> {
         use crate::simulation::controller::prepared_run::thread_preparations;
 
         let earlier = thread_preparations::take();

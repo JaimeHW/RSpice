@@ -962,14 +962,12 @@ fn an_unforced_coupling_node_is_not_refused() {
     assert!(report.prepared.is_some(), "the run is authorized");
 }
 
-/// A source across a winding is singular in every DC solve. The operating
-/// point refuses it, and the finding is shown on the winding that closed the
-/// loop.
-#[test]
-fn a_source_across_a_winding_is_refused_on_the_winding() {
+/// A voltage source driven straight across a winding, with an operating
+/// point, in the open root.
+fn app_with_a_source_across_a_winding() -> (RSpiceApp, crate::state::CellViewRef) {
     use crate::state::{ComponentType, Point};
 
-    let (mut app, root) = app_with_an_open_root(
+    app_with_an_open_root(
         &[
             (ComponentType::Ground, Point::new(0, 40)),
             (ComponentType::VoltageSource, Point::new(0, 10)),
@@ -981,7 +979,107 @@ fn a_source_across_a_winding_is_refused_on_the_winding() {
             (Point::new(120, 30), Point::new(0, 30)),
         ],
         true,
+    )
+}
+
+/// The one warning the finished run raised about windings that close a loop
+/// of fixed DC voltages.
+fn winding_loop_warning(
+    app: &RSpiceApp,
+) -> &crate::workbench::app_state::diagnostic_store::DiagnosticRecord {
+    let warnings: Vec<_> = app
+        .state
+        .model
+        .diagnostics
+        .batches()
+        .flat_map(|batch| batch.records.iter())
+        .filter(|record| record.canonical.code.as_ref() == "RUN-DC-INDUCTOR-LOOP")
+        .collect();
+    let [warning] = warnings.as_slice() else {
+        panic!("the run raises one warning for the loop: {warnings:#?}");
+    };
+    assert_eq!(
+        warning.level,
+        crate::workbench::app_state::diagnostic_store::DiagnosticLevel::Warning,
+        "{warning:#?}"
     );
+    warning
+}
+
+/// Whether `route` leads to component `id` drawn in `cell_view`.
+fn routes_to_component(
+    route: Option<&crate::workbench::app_state::diagnostic_store::DiagnosticRoute>,
+    cell_view: &crate::state::CellViewRef,
+    id: u64,
+) -> bool {
+    matches!(
+        route,
+        Some(crate::workbench::app_state::diagnostic_store::DiagnosticRoute::Anchor(
+            crate::diagnostics::LogAnchor::Schematic {
+                cell_view: drawn,
+                component: Some(component),
+                ..
+            }
+        )) if drawn.key() == cell_view.key() && *component == id
+    )
+}
+
+/// A source across a winding has no DC solution as ngspice and Xyce read it.
+/// The best available reading solves it as QSPICE does, with the winding at a
+/// picoohm: the run is authorized and finishes, and its warning names the
+/// winding and is shown on it.
+#[test]
+fn a_source_across_a_winding_runs_and_is_warned_of_on_the_winding() {
+    let (mut app, root) = app_with_a_source_across_a_winding();
+    let winding = app
+        .state
+        .model
+        .schematic
+        .document()
+        .components
+        .iter()
+        .find(|component| component.kind == crate::state::ComponentType::Inductor)
+        .map(|component| (component.id, component.name.clone()))
+        .expect("the fixture draws the winding");
+
+    app.queued_by_its_check();
+    let blockers = preflight_blockers(&app);
+    assert!(blockers.is_empty(), "{blockers:?}");
+    assert!(app.dispatch_frame().is_empty());
+    app.finish_the_run();
+    let run = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    assert!(run.success, "{:?}", run.analyses);
+
+    let warning = winding_loop_warning(&app);
+    assert!(winding.1.starts_with('L'), "{winding:?}");
+    assert!(
+        warning.subject.object.eq_ignore_ascii_case(&winding.1)
+            && warning.message.contains(&warning.subject.object),
+        "the warning names {}: {warning:#?}",
+        winding.1
+    );
+    assert_eq!(warning.subject.cell_view.as_ref(), Some(&root));
+    assert!(
+        routes_to_component(warning.route.as_ref(), &root, winding.0),
+        "the warning is shown on the winding: {warning:#?}"
+    );
+}
+
+/// Read as ngspice reads it, a source across a winding is singular in every
+/// DC solve. The operating point refuses it, and the finding is shown on the
+/// winding that closed the loop.
+#[test]
+fn under_ngspice_a_source_across_a_winding_is_refused_on_the_winding() {
+    let (mut app, root) = app_with_a_source_across_a_winding();
+    app.state.model.sim_setup.options.compatibility =
+        crate::simulation::dialog::SimulationCompatibility::Ngspice;
 
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();

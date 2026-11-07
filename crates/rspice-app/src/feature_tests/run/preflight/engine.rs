@@ -647,14 +647,13 @@ fn a_forced_node_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
     );
 }
 
-/// A source across a winding inside a placed cell is refused on the winding
-/// `amp` draws, and following the finding opens `amp` with it selected.
-#[test]
-fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
+/// `amp` drives a source straight across a winding, and the root places it
+/// as `XAMP`. Returns the winding's id in `amp` with the application.
+fn app_with_a_winding_loop_in_amp() -> (RSpiceApp, crate::state::CellViewRef, u64) {
     use crate::state::{ComponentType, Point};
 
     let mut winding = 0;
-    let (mut app, amp) = app_with_an_amp_instance(|schematic| {
+    let (app, amp) = app_with_an_amp_instance(|schematic| {
         schematic.add_component(ComponentType::VoltageSource, Point::new(0, 10));
         winding = schematic.add_component(ComponentType::Inductor, Point::new(60, -10));
         for (from, to) in [
@@ -667,6 +666,98 @@ fn a_winding_loop_inside_an_instance_is_shown_in_the_cell_that_draws_it() {
                 .expect("the wire commits");
         }
     });
+    (app, amp, winding)
+}
+
+/// A source across a winding inside a placed cell runs under the best
+/// available reading, which gives the winding a picoohm at DC as QSPICE does.
+/// The run's warning names the winding under `XAMP` and is shown on the
+/// winding `amp` draws, and following it opens `amp` with the winding
+/// selected.
+#[test]
+fn a_winding_loop_inside_an_instance_is_warned_of_in_the_cell_that_draws_it() {
+    let (mut app, amp, winding) = app_with_a_winding_loop_in_amp();
+
+    app.queued_by_its_check();
+    let blockers = preflight_blockers(&app);
+    assert!(blockers.is_empty(), "{blockers:?}");
+    assert!(app.dispatch_frame().is_empty());
+    app.finish_the_run();
+    let run = app
+        .state
+        .model
+        .simulation
+        .retained
+        .runs
+        .first()
+        .expect("the run is retained");
+    assert!(run.success, "{:?}", run.analyses);
+
+    let warning = winding_loop_warning(&app);
+    let name = app
+        .state
+        .model
+        .workspace
+        .content
+        .schematic_buffers
+        .get(&amp.key())
+        .expect("amp is saved to the workspace")
+        .document()
+        .components
+        .iter()
+        .find(|component| component.id == winding)
+        .map(|component| component.name.clone())
+        .expect("amp draws the winding");
+    assert!(
+        warning
+            .subject
+            .object
+            .eq_ignore_ascii_case(&format!("XAMP.{name}"))
+            && warning.message.contains(&warning.subject.object),
+        "the warning names {name} under XAMP: {warning:#?}"
+    );
+    assert_eq!(
+        warning.subject.cell_view.as_ref(),
+        Some(&amp),
+        "shown in the cell that draws it"
+    );
+    assert!(
+        routes_to_component(warning.route.as_ref(), &amp, winding),
+        "the warning is shown on the winding: {warning:#?}"
+    );
+    let route = warning.route.clone().expect("the warning has a route");
+
+    app.state.workbench.activate(Workspace::Verify);
+    app.state.model.diagnostics.request_route(route);
+    crate::workbench::diagnostic_routes::apply_pending(&egui::Context::default(), &mut app);
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .active_schematic_reference(),
+        amp
+    );
+    assert!(
+        app.state
+            .model
+            .schematic
+            .session
+            .editor
+            .selection
+            .has_component(winding),
+        "following the warning selects the winding in amp"
+    );
+}
+
+/// Read as Xyce reads it, a source across a winding inside a placed cell is
+/// refused on the winding `amp` draws, and following the finding opens `amp`
+/// with it selected.
+#[test]
+fn under_xyce_a_winding_loop_inside_an_instance_is_refused_in_the_cell_that_draws_it() {
+    let (mut app, amp, winding) = app_with_a_winding_loop_in_amp();
+    app.state.model.sim_setup.options.compatibility =
+        crate::simulation::dialog::SimulationCompatibility::Xyce;
 
     start(&mut app.state, &mut app.simulation_controller, false);
     app.settle_preflight();
