@@ -475,8 +475,11 @@ fn a_mixed_drawing_imports_with_its_connectivity_and_parameters() {
     };
     let source = component("V1");
     assert_eq!(source.kind, ComponentType::VoltageSourcePulse);
-    assert_eq!(source.value, "PULSE(0 5u 0 1n 1n 5u 10u)");
-    assert_eq!(source.params, "ac=1 rs=0.1");
+    assert_eq!(source.value, "0");
+    assert_eq!(
+        source.params,
+        "v2=5u td=0 tr=1n tf=1n pw=5u per=10u ac=1 rs=0.1"
+    );
     let resistor = component("R1");
     // `Value2` and `SpiceLine` both set `tol`; the later one holds.
     assert_eq!(resistor.params, "tol=1 pwr=0.1");

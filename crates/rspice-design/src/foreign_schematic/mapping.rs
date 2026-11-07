@@ -341,6 +341,7 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
     let mut value = String::new();
     let mut params = Vec::new();
     let mut extra = Vec::new();
+    let mut arguments = Vec::new();
     let mut index = 0;
     while index < tokens.len() {
         let token = &tokens[index];
@@ -403,12 +404,19 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
                 &token[..keyword.len()]
             };
             if token.contains('(') {
-                value = format!("{name}{}", &token[keyword.len()..]);
+                let written = &token[keyword.len()..];
+                value = format!("{name}{written}");
+                arguments = written
+                    .trim()
+                    .strip_prefix('(')
+                    .and_then(|inner| inner.strip_suffix(')'))
+                    .map(spice_tokens)
+                    .unwrap_or_default();
                 continue;
             }
             // QSPICE and LTspice also write a waveform's arguments as bare
             // words after its name: `PWL 0 0 .5m 48`.
-            let arguments = tokens[index..]
+            arguments = tokens[index..]
                 .iter()
                 .take_while(|word| {
                     let upper = word.to_ascii_uppercase();
@@ -441,12 +449,61 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
         }
         index += 1;
     }
+    if extra.is_empty()
+        && let Some((first, named)) = named_waveform(kind, &arguments)
+    {
+        value = first;
+        params = named.into_iter().chain(params).collect();
+    }
     SourceValue {
         kind,
         value,
         params,
         extra,
     }
+}
+
+/// A positional `PULSE` or `SIN` as the named fields RSpice's own sources
+/// keep: the first argument as the value, the rest by name. Only a list
+/// that gives every argument the named form writes is read, so the card
+/// written from the fields is the source's own: `PULSE` with seven or eight
+/// arguments, `SIN` with three to six (the delay, damping and phase written
+/// for absent ones are 0, SPICE's own defaults). Any other list, and one
+/// written with commas, stays as written.
+fn named_waveform(
+    kind: ComponentType,
+    arguments: &[String],
+) -> Option<(String, Vec<(String, String)>)> {
+    use ComponentType as T;
+    let count = arguments.len();
+    let names: &[&str] = match kind {
+        T::VoltageSourcePulse if (7..=8).contains(&count) => {
+            &["v1", "v2", "td", "tr", "tf", "pw", "per", "np"]
+        }
+        T::CurrentSourcePulse if (7..=8).contains(&count) => {
+            &["i1", "i2", "td", "tr", "tf", "pw", "per", "np"]
+        }
+        T::VoltageSourceSin if (3..=6).contains(&count) => {
+            &["vo", "va", "freq", "td", "theta", "phase"]
+        }
+        T::CurrentSourceSin if (3..=6).contains(&count) => {
+            &["io", "ia", "freq", "td", "theta", "phase"]
+        }
+        _ => return None,
+    };
+    if arguments
+        .iter()
+        .any(|argument| argument.contains(',') || !is_number_word(argument))
+    {
+        return None;
+    }
+    let (first, rest) = arguments.split_first()?;
+    let named = names[1..]
+        .iter()
+        .zip(rest)
+        .map(|(name, argument)| ((*name).to_owned(), argument.clone()))
+        .collect();
+    Some((first.clone(), named))
 }
 
 /// A value word: a number, a braced expression, or a parameter name.

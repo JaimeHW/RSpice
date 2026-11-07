@@ -307,8 +307,66 @@ fn a_waveform_written_without_parentheses_keeps_its_arguments() {
 
     let pulse = source_value(false, "PULSE .5 5 0 1u 1u 10u 20u");
     assert_eq!(pulse.kind, ComponentType::CurrentSourcePulse);
-    assert_eq!(pulse.value, "PULSE(.5 5 0 1u 1u 10u 20u)");
+    assert_eq!(pulse.value, ".5");
+    assert_eq!(
+        pulse.params,
+        named(&[("i2", "5"), ("td", "0"), ("tr", "1u"), ("tf", "1u")])
+            .into_iter()
+            .chain(named(&[("pw", "10u"), ("per", "20u")]))
+            .collect::<Vec<_>>()
+    );
     // The parenthesised spelling reads the same.
     let written = source_value(true, "PULSE(0 1 0 1n 1n 5m 10m)");
-    assert_eq!(written.value, "PULSE(0 1 0 1n 1n 5m 10m)");
+    assert_eq!(written.value, "0");
+    assert_eq!(written.params[0], ("v2".to_owned(), "1".to_owned()));
+}
+
+fn named(pairs: &[(&str, &str)]) -> Vec<(String, String)> {
+    pairs
+        .iter()
+        .map(|(name, value)| ((*name).to_owned(), (*value).to_owned()))
+        .collect()
+}
+
+/// A positional waveform fills the named fields a source's label and sheet
+/// read, where its list gives every argument the named form writes; any
+/// other list stays as written, so the card the source simulator read is
+/// the card RSpice writes.
+#[test]
+fn a_positional_pulse_or_sine_fills_the_named_fields_of_its_source() {
+    use super::mapping::source_value;
+    use crate::schematic::component_type::ComponentType;
+
+    let pulse = source_value(true, "PULSE(0 {V} 0 1n 1n 5m 10m 3) AC 1 Rser=2");
+    assert_eq!(pulse.kind, ComponentType::VoltageSourcePulse);
+    assert_eq!(pulse.value, "0");
+    let mut expected = named(&[("v2", "{V}"), ("td", "0"), ("tr", "1n"), ("tf", "1n")]);
+    expected.extend(named(&[("pw", "5m"), ("per", "10m"), ("np", "3")]));
+    expected.extend(named(&[("ac", "1"), ("rs", "2")]));
+    assert_eq!(pulse.params, expected);
+
+    let sine = source_value(false, "SINE(1m 2m 1K)");
+    assert_eq!(sine.kind, ComponentType::CurrentSourceSin);
+    assert_eq!(sine.value, "1m");
+    assert_eq!(sine.params, named(&[("ia", "2m"), ("freq", "1K")]));
+    let damped = source_value(true, "SIN(0 1 1k 1m 10 90)");
+    assert_eq!(damped.value, "0");
+    assert_eq!(
+        damped.params.last(),
+        Some(&("phase".to_owned(), "90".to_owned()))
+    );
+
+    // An omitted period, the cycle count SIN has no field for, and words
+    // with no field keep the list as written.
+    for (text, kept) in [
+        ("PULSE(0 1 0 1n 1n 5m)", "PULSE(0 1 0 1n 1n 5m)"),
+        ("SINE(0 1 1k 0 0 0 5)", "SIN(0 1 1k 0 0 0 5)"),
+        ("SINE(0 1)", "SIN(0 1)"),
+    ] {
+        let source = source_value(true, text);
+        assert_eq!((source.value.as_str(), source.params.len()), (kept, 0));
+    }
+    let unknown = source_value(true, "PULSE(0 1 0 1n 1n 5m 10m) Foo=1");
+    assert_eq!(unknown.value, "PULSE(0 1 0 1n 1n 5m 10m)");
+    assert_eq!(unknown.extra, ["Foo=1"]);
 }
