@@ -7,6 +7,7 @@
 use std::cell::OnceCell;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::rc::Rc;
 
 use super::import::{ForeignLibrary, ForeignModelFile, ForeignSymbolSource};
 use super::{ForeignTool, decode_foreign_text, parse_asy};
@@ -14,6 +15,14 @@ use super::{ForeignTool, decode_foreign_text, parse_asy};
 /// A drawing's folder and the source program's installed library.
 pub struct InstalledForeignLibrary {
     beside: PathBuf,
+    /// Shared by every drawing of one import, so the installation is
+    /// indexed and its model cards read once.
+    install: Rc<Installation>,
+}
+
+/// The source program's installed symbols and models.
+#[derive(Default)]
+struct Installation {
     symbol_roots: Vec<PathBuf>,
     /// Every installed symbol by its lower-case file stem, for a drawing
     /// that names a symbol without its folder, as LTspice allows.
@@ -31,50 +40,50 @@ impl InstalledForeignLibrary {
             ForeignTool::Ltspice => ltspice_library_root(),
             ForeignTool::Qspice => qspice_install_root(),
         };
-        Self::new(
-            tool,
-            drawing.parent().unwrap_or(Path::new(".")),
-            install.as_deref(),
-        )
+        Self::new(tool, folder_of(drawing), install.as_deref())
     }
 
     /// The library of a drawing in `beside` with the source program's
     /// library at `install`: LTspice's `lib` folder, or QSPICE's install
     /// folder.
     pub fn new(tool: ForeignTool, beside: &Path, install: Option<&Path>) -> Self {
-        let mut library = Self {
-            beside: beside.to_path_buf(),
-            symbol_roots: Vec::new(),
-            symbol_index: OnceCell::new(),
-            model_roots: vec![beside.to_path_buf()],
-            card_files: Vec::new(),
-            cards: OnceCell::new(),
-        };
-        let Some(install) = install else {
-            return library;
-        };
-        match tool {
-            ForeignTool::Ltspice => {
-                library.symbol_roots.push(install.join("sym"));
-                library.model_roots.push(install.join("sub"));
-                library.model_roots.push(install.join("cmp"));
-                library.card_files = files_in(&install.join("cmp"), |name| {
+        let mut installation = Installation::default();
+        match (tool, install) {
+            (_, None) => {}
+            (ForeignTool::Ltspice, Some(install)) => {
+                installation.symbol_roots.push(install.join("sym"));
+                installation.model_roots.push(install.join("sub"));
+                installation.model_roots.push(install.join("cmp"));
+                installation.card_files = files_in(&install.join("cmp"), |name| {
                     name.to_ascii_lowercase().starts_with("standard.")
                 });
             }
-            ForeignTool::Qspice => {
-                library.model_roots.push(install.to_path_buf());
-                library.card_files =
+            (ForeignTool::Qspice, Some(install)) => {
+                installation.model_roots.push(install.to_path_buf());
+                installation.card_files =
                     files_in(install, |name| name.to_ascii_lowercase().ends_with(".txt"));
             }
         }
-        library
+        Self {
+            beside: beside.to_path_buf(),
+            install: Rc::new(installation),
+        }
+    }
+
+    /// The same installation read for the drawing at `drawing`: a block's
+    /// schematic, or the next drawing of a batch.
+    #[must_use]
+    pub fn for_another_drawing(&self, drawing: &Path) -> Self {
+        Self {
+            beside: folder_of(drawing).to_path_buf(),
+            install: Rc::clone(&self.install),
+        }
     }
 
     fn indexed_symbol(&self, name: &str) -> Option<&PathBuf> {
-        let index = self.symbol_index.get_or_init(|| {
+        let index = self.install.symbol_index.get_or_init(|| {
             let mut index = HashMap::new();
-            for root in &self.symbol_roots {
+            for root in &self.install.symbol_roots {
                 index_symbols(root, &mut index);
             }
             index
@@ -84,14 +93,31 @@ impl InstalledForeignLibrary {
     }
 
     fn card_texts(&self) -> &[String] {
-        self.cards.get_or_init(|| {
-            self.card_files
+        self.install.cards.get_or_init(|| {
+            self.install
+                .card_files
                 .iter()
                 .filter_map(|path| std::fs::read(path).ok())
                 .map(|bytes| decode_foreign_text(&bytes))
                 .collect()
         })
     }
+}
+
+fn folder_of(drawing: &Path) -> &Path {
+    drawing.parent().unwrap_or(Path::new("."))
+}
+
+/// The first bytes of a file, enough to tell an encrypted one.
+fn file_head(path: &Path) -> Option<Vec<u8>> {
+    use std::io::Read;
+    let mut head = Vec::with_capacity(256);
+    std::fs::File::open(path)
+        .ok()?
+        .take(256)
+        .read_to_end(&mut head)
+        .ok()?;
+    Some(head)
 }
 
 impl ForeignLibrary for InstalledForeignLibrary {
@@ -103,7 +129,7 @@ impl ForeignLibrary for InstalledForeignLibrary {
             .join("/");
         let relative = format!("{relative}.asy");
         let candidates = std::iter::once(&self.beside)
-            .chain(&self.symbol_roots)
+            .chain(&self.install.symbol_roots)
             .map(|root| root.join(&relative))
             .chain(self.indexed_symbol(name).cloned());
         for path in candidates {
@@ -132,14 +158,12 @@ impl ForeignLibrary for InstalledForeignLibrary {
         let path = if relative.is_absolute() {
             Some(relative).filter(|path| path.is_file())
         } else {
-            self.model_roots
-                .iter()
+            std::iter::once(&self.beside)
+                .chain(&self.install.model_roots)
                 .map(|root| root.join(&relative))
                 .find(|path| path.is_file())
         }?;
-        let encrypted = std::fs::read(&path)
-            .map(|bytes| is_encrypted(&bytes))
-            .unwrap_or(false);
+        let encrypted = file_head(&path).is_some_and(|head| is_encrypted(&head));
         Some(ForeignModelFile { path, encrypted })
     }
 
