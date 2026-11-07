@@ -19,7 +19,7 @@ RSPICE_FN_OPAMP	subckt	subckt	rspice-functional	lib/functional.lib	23	0	top
 RSPICE_FN_OR	subckt	subckt	rspice-functional	lib/functional.lib	129	0	top
 RSPICE_FN_OTA	subckt	subckt	rspice-functional	lib/functional.lib	80	0	top
 RSPICE_FN_PHASEDET	subckt	subckt	rspice-functional	lib/functional.lib	189	0	top
-RSPICE_FN_SAMPLEHOLD	subckt	subckt	rspice-functional	lib/functional.lib	205	0	top
+RSPICE_FN_SAMPLEHOLD	subckt	subckt	rspice-functional	lib/functional.lib	209	0	top
 RSPICE_FN_SCHMITT_BUF	subckt	subckt	rspice-functional	lib/functional.lib	146	0	top
 RSPICE_FN_SCHMITT_INV	subckt	subckt	rspice-functional	lib/functional.lib	141	0	top
 RSPICE_FN_XOR	subckt	subckt	rspice-functional	lib/functional.lib	135	0	top

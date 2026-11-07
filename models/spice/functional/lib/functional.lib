@@ -200,9 +200,21 @@ A1 CLK RST 0 0 0 0 OUT 0 COUNTER CYCLES={N} DUTY={DUTY} VHIGH={VHIGH} VLOW={VLOW
 .ends RSPICE_FN_COUNTER
 
 * Sample and hold. Pins: IN SAMPLE OUT.
-* While SAMPLE is above VTH the output tracks IN; when it falls the output
-* holds the last value, driven through ROUT into COUT.
-.subckt RSPICE_FN_SAMPLEHOLD IN SAMPLE OUT VTH=2.5 ROUT=1 COUT=10p
-A1 IN 0 0 SAMPLE 0 0 OUT 0 SAMPLEHOLD REF={VTH} ROUT={ROUT}
+* While SAMPLE is above VTH the output tracks IN plus VOS; when it falls the
+* output holds the last value and droops from it, falling DROOP volts per
+* second (rising, for a negative DROOP) until SAMPLE rises again. The value is
+* driven through ROUT into COUT.
+* The droop is integrated on CD while holding and cleared while sampling. It
+* runs from the start of a transient: an operating point has held for no time.
+.subckt RSPICE_FN_SAMPLEHOLD IN SAMPLE OUT VTH=2.5 VOS=0 DROOP=0 ROUT=1 COUT=10p
+VOS NI IN {VOS}
+A1 NI 0 0 SAMPLE 0 0 NH 0 SAMPLEHOLD REF={VTH} ROUT=1
+A2 SAMPLE 0 0 0 0 NHLD NSMP 0 BUF VHIGH=1 VLOW=0 REF={VTH}
+VRUN NRUN 0 PWL(0 0 1n 1)
+A3 0 NHLD NRUN 0 0 0 ND 0 OTA G={DROOP*1u} LINEAR
+A4 ND 0 NSMP 0 0 0 ND 0 OTA G=1k LINEAR
+CD ND 0 1u
+EO NO 0 NH ND 1
+RO NO OUT {ROUT} NOISY=0
 COUT OUT 0 {COUT}
 .ends RSPICE_FN_SAMPLEHOLD

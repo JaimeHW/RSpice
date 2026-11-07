@@ -879,3 +879,32 @@ X1 in s sh RSPICE_FN_SAMPLEHOLD
         assert_close("holding", value_at(&tran.time, sh, at), held, 1e-3);
     }
 }
+
+#[test]
+fn sample_and_hold_adds_its_offset_and_droops_at_its_rate_while_holding() {
+    // As above, sampling from 2.5 us to 3.5 us and again from 6.5 us, with a
+    // 10 mV offset and a 10 mV/us droop.
+    let deck = "* sample and hold offset and droop
+VS s 0 PULSE(0 5 2.5u 1n 1n 1u 4u)
+VI in 0 SIN(0 1 100k)
+X1 in s sh RSPICE_FN_SAMPLEHOLD VOS=10m DROOP=10k
+.end
+";
+    let tran = transient(deck, 7e-6, 1e-9);
+    let sh = waveform(&tran, "sh");
+    let input = waveform(&tran, "in");
+    let at = |wave: &[f64], time: f64| value_at(&tran.time, wave, time);
+    assert_close("tracking", at(sh, 3e-6), at(input, 3e-6) + 10e-3, 5e-4);
+    let held = at(input, 3.5e-6) + 10e-3;
+    for time in [4e-6, 5e-6, 6e-6] {
+        let drooped = held - 10e3 * (time - 3.5e-6);
+        assert_close("drooping", at(sh, time), drooped, 1e-3);
+    }
+    // Sampling again clears the droop.
+    assert_close(
+        "tracking again",
+        at(sh, 7e-6),
+        at(input, 7e-6) + 10e-3,
+        5e-4,
+    );
+}

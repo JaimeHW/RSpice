@@ -737,6 +737,20 @@ const SAMPLE_HOLD_PARAMETERS: &[FunctionalParameter] = &[
         "OUT tracks IN while SAMPLE is above this level and holds when it falls through it.",
     ),
     number(
+        "VOS",
+        "Input offset voltage",
+        "V",
+        "0",
+        "Added to IN before it is sampled.",
+    ),
+    number(
+        "DROOP",
+        "Droop rate",
+        "V/s",
+        "0",
+        "How fast the held output falls while holding; a negative rate rises.",
+    ),
+    number(
         "ROUT",
         "Output resistance",
         "Ω",

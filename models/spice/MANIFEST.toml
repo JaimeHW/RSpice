@@ -9,7 +9,7 @@
 [summary]
 packs = 2
 files = 2
-bytes = 14659
+bytes = 15199
 models = 21
 subcircuits = 17
 models_top_level = 21
@@ -55,7 +55,7 @@ devices = ["opamp", "comparator", "timer", "logic"]
 corners = []
 entry = "lib/functional.lib"
 files = 1
-bytes = 10464
+bytes = 11004
 models = 0
 subcircuits = 16
 models_top_level = 0
