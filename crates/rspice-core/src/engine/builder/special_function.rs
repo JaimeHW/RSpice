@@ -92,7 +92,8 @@ pub(super) fn build(
     circuit: &mut CircuitData,
     element: &Element,
     function: SpecialFunction,
-    (params, densities): (&[(String, Value)], &[(String, String)]),
+    params: &[(String, Value)],
+    densities: &[(String, String)],
     temperature: Value,
 ) -> Result<(), SimulationError> {
     let terminals = Terminals::new(element)?;

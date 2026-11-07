@@ -6735,7 +6735,8 @@ impl Engine {
                     &mut circuit,
                     element,
                     *function,
-                    (instance_params, deferred_params),
+                    instance_params,
+                    deferred_params,
                     self.config.temperature,
                 )?,
                 ElementKind::StateMachine(definition) => {
