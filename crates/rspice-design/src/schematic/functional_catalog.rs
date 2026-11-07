@@ -1016,7 +1016,7 @@ mod tests {
     use rspice_core_netlist::netlist::{lexer::parse_spice_value_complete, parse_netlist};
 
     #[test]
-    fn every_part_is_a_functional_library_subcircuit_with_its_pins_and_defaults() {
+    fn every_part_is_a_library_subcircuit_whose_parameters_are_its_sheet() {
         let library =
             parse_netlist(rspice_core_base::builtin_lib::FUNCTIONAL_LIB).expect("library parses");
         for descriptor in functional_parts() {
@@ -1031,10 +1031,29 @@ mod tests {
                 "{} pins",
                 descriptor.display_name
             );
+            // The sheet is the subcircuit: every parameter it declares is
+            // offered, and nothing is offered that it does not declare.
+            let declared = subcircuit
+                .params
+                .iter()
+                .map(|(name, _)| name)
+                .chain(subcircuit.expr_params.iter().map(|(name, _)| name))
+                .map(|name| name.to_ascii_uppercase())
+                .collect::<std::collections::BTreeSet<_>>();
+            let offered = descriptor
+                .parameters
+                .iter()
+                .map(|parameter| parameter.name.to_ascii_uppercase())
+                .collect::<std::collections::BTreeSet<_>>();
             assert_eq!(
-                subcircuit.params.len() + subcircuit.expr_params.len(),
+                offered.len(),
                 descriptor.parameters.len(),
-                "{} parameters",
+                "{} offers a parameter twice",
+                descriptor.display_name
+            );
+            assert_eq!(
+                offered, declared,
+                "{}: the sheet and the subcircuit name different parameters",
                 descriptor.display_name
             );
             for parameter in descriptor.parameters {
