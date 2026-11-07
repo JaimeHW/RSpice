@@ -163,7 +163,7 @@ pub fn defined_model_names(cards: &[ForeignCard]) -> Vec<String> {
 }
 
 /// Writes directive text RSpice keeps on the sheet as a note where its block
-/// was drawn.
+/// was drawn. Like a comment, it is lettering alone, with no anchor mark.
 pub fn keep_directive_text(
     document: &mut SchematicDocument,
     position: Point,
@@ -171,7 +171,8 @@ pub fn keep_directive_text(
 ) -> Result<(), String> {
     let id = SchematicIdentity::with_cursor(1).allocate(document);
     let note = DesignNote::new(id, position, DesignNoteKind::PlainText, text)
-        .map_err(|error| error.to_string())?;
+        .map_err(|error| error.to_string())?
+        .with_anchor_mark_hidden(true);
     document.design_notes.push(note);
     Ok(())
 }

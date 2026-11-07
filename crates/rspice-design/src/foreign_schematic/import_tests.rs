@@ -2207,13 +2207,15 @@ fn a_comment_keeps_its_size_and_stands_on_its_point_as_its_drawing_stood_it() {
 }
 
 /// A comment comes across as lettering alone: its drawing marks no anchor,
-/// so the note draws none either. A note RSpice writes itself, here for a
-/// readout the drawing pinned to a wire, keeps its mark.
+/// so the note draws none either, and nor does directive text kept on the
+/// sheet. A note RSpice writes itself, here for a readout the drawing pinned
+/// to a wire, keeps its mark.
 #[test]
 fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
     let drawing =
         parse_asc("Version 4\nTEXT 32 160 Left 2 ;Bias network\nDATAFLAG 96 80 \"$\"\n").unwrap();
-    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let mut imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    keep_directive_text(&mut imported.document, Point::new(0, 0), ".options gmin=1p").unwrap();
     let note = |start: &str| {
         imported
             .document
@@ -2223,5 +2225,6 @@ fn a_comment_draws_no_anchor_mark_where_its_drawing_drew_none() {
             .unwrap_or_else(|| panic!("no note {start:?}"))
     };
     assert!(note("Bias network").anchor_mark_hidden);
+    assert!(note(".options").anchor_mark_hidden);
     assert!(!note("LTspice readout").anchor_mark_hidden);
 }
