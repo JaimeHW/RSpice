@@ -85,6 +85,11 @@ impl ForwardParameters {
 
 /// Postpones a root element card that names a root parameter no card has
 /// bound yet. Returns whether the card was postponed.
+///
+/// Independent sources and XSPICE instances are never postponed: their cards
+/// already keep an unbound value as an expression that binds after the
+/// temperature is selected and the scopes are resolved, and reading them
+/// again here would evaluate it too early, at the provisional temperature.
 pub(super) fn postpone_forward_reference(
     state: &mut ParseState,
     line: &str,
@@ -93,11 +98,13 @@ pub(super) fn postpone_forward_reference(
     source_is_included: bool,
 ) -> bool {
     let plan = &state.forward_parameters;
+    let designator = line.trim_start().chars().next();
     if plan.replaying
         || plan.declared.is_empty()
         || !state.subckt_stack.is_empty()
         || state.open_machine.is_some()
-        || !line.trim_start().starts_with(|c: char| c.is_alphabetic())
+        || !designator.is_some_and(char::is_alphabetic)
+        || designator.is_some_and(|c| matches!(c.to_ascii_uppercase(), 'V' | 'I' | 'A'))
     {
         return false;
     }
