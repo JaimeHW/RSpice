@@ -247,9 +247,48 @@ pub fn import_foreign_schematic(
         pin_points: HashMap::new(),
         device_ties: Vec::new(),
     };
-    builder.collect_source_geometry();
-    for symbol in &drawing.symbols {
-        builder.place_symbol(symbol);
+    let resolved = drawing
+        .symbols
+        .iter()
+        .map(|symbol| builder.resolve(symbol))
+        .collect::<Vec<_>>();
+    // LTspice's jumper joins its two pins' nets as a wire does.
+    let jumpers = drawing
+        .symbols
+        .iter()
+        .zip(&resolved)
+        .filter(|(symbol, _)| {
+            drawing.tool == ForeignTool::Ltspice && symbol.base_name().eq_ignore_ascii_case("jumper")
+        })
+        .filter_map(|(symbol, (definition, ..))| {
+            let [a, b] = definition.as_ref()?.pins.as_slice() else {
+                return None;
+            };
+            let at = |pin: &ForeignPin| {
+                builder.scale(
+                    symbol
+                        .position
+                        .offset(symbol.orientation.apply(pin.position)),
+                )
+            };
+            Some((at(a), at(b)))
+        })
+        .collect::<Vec<_>>();
+    builder.collect_source_geometry(&jumpers);
+    // Every pin is known before any lead is routed, so no lead runs through
+    // a pin of a part placed after it.
+    for (symbol, (definition, ..)) in drawing.symbols.iter().zip(&resolved) {
+        for pin in definition.iter().flat_map(|definition| &definition.pins) {
+            let at = builder.scale(
+                symbol
+                    .position
+                    .offset(symbol.orientation.apply(pin.position)),
+            );
+            *builder.pin_points.entry(at).or_default() += 1;
+        }
+    }
+    for (symbol, resolved) in drawing.symbols.iter().zip(resolved) {
+        builder.place_symbol(symbol, resolved);
     }
     builder.tie_device_pins();
     builder.place_flags();
@@ -290,6 +329,8 @@ struct Builder<'a> {
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
 }
+
+type Resolved = (Option<ForeignSymbolDefinition>, Option<String>, Option<PathBuf>);
 
 /// A terminal of an LTspice A-device, tied to ground unless its source pin
 /// (`None`: it has none) meets a wire, a flag or another pin.
@@ -351,7 +392,23 @@ impl Builder<'_> {
         Point::new(fine(point.x), fine(point.y))
     }
 
-    fn place_symbol(&mut self, symbol: &ForeignSymbol) {
+    /// A placed symbol's definition, where it was read, and the schematic
+    /// of a hierarchical block.
+    fn resolve(&self, symbol: &ForeignSymbol) -> Resolved {
+        match &symbol.embedded {
+            Some(definition) => (Some(definition.clone()), None, None),
+            None => match self.access.symbol(&symbol.symbol) {
+                Some(source) => (
+                    Some(source.definition),
+                    Some(source.location),
+                    source.schematic,
+                ),
+                None => (ltspice_builtin_definition(symbol.base_name()), None, None),
+            },
+        }
+    }
+
+    fn place_symbol(&mut self, symbol: &ForeignSymbol, resolved: Resolved) {
         let tool = self.drawing.tool;
         let label = self.symbol_label(symbol);
         if tool == ForeignTool::Qspice
@@ -377,17 +434,7 @@ impl Builder<'_> {
             self.place_marker(symbol, &label);
             return;
         }
-        let (definition, location, schematic) = match &symbol.embedded {
-            Some(definition) => (Some(definition.clone()), None, None),
-            None => match self.access.symbol(&symbol.symbol) {
-                Some(source) => (
-                    Some(source.definition),
-                    Some(source.location),
-                    source.schematic,
-                ),
-                None => (ltspice_builtin_definition(symbol.base_name()), None, None),
-            },
-        };
+        let (definition, location, schematic) = resolved;
         let Some(definition) = definition else {
             self.refuse(format!(
                 "{label}: no symbol file `{}.asy` was found beside the schematic or in LTspice's symbol library, so its pins are unknown; it is drawn as a box with no pins.",
@@ -409,9 +456,6 @@ impl Builder<'_> {
             })
             .collect::<Vec<_>>();
         self.anchors.extend(pins.iter().copied());
-        for point in &pins {
-            *self.pin_points.entry(*point).or_default() += 1;
-        }
         // LTspice's jumper joins its two nets and is no device: a wire.
         if tool == ForeignTool::Ltspice
             && symbol.base_name().eq_ignore_ascii_case("jumper")
@@ -1303,7 +1347,7 @@ impl Builder<'_> {
         self.leads.extend_from_slice(leads);
     }
 
-    fn collect_source_geometry(&mut self) {
+    fn collect_source_geometry(&mut self, joins: &[(Point, Point)]) {
         let drawing = self.drawing;
         for (a, b) in drawing.wires.iter().chain(&drawing.bus_taps) {
             let (a, b) = (self.scale(*a), self.scale(*b));
@@ -1328,7 +1372,13 @@ impl Builder<'_> {
                 (self.scale(flag.position), name)
             })
             .collect::<Vec<_>>();
-        self.source_nets = SourceNets::new(&self.source_segments, &flags);
+        let segments = self
+            .source_segments
+            .iter()
+            .chain(joins)
+            .copied()
+            .collect::<Vec<_>>();
+        self.source_nets = SourceNets::new(&segments, &flags);
     }
 
     /// Places `component` where its terminals best meet the source `pins`
@@ -1344,16 +1394,20 @@ impl Builder<'_> {
         offsets: impl Fn(&Component) -> Vec<Point>,
     ) -> Vec<Point> {
         let candidates = placements(component, pins, &offsets);
-        let clear = candidates
-            .iter()
-            .find_map(|(position, rotation, mirrored, local)| {
-                let terminals = local
-                    .iter()
-                    .map(|offset| *position + *offset)
-                    .collect::<Vec<_>>();
-                self.clear_leads(&terminals, pins)
-                    .map(|leads| (*position, *rotation, *mirrored, terminals, leads))
-            });
+        // Leads bent at most once first; a lead that must cross another's
+        // path jogs around it only when no placement avoids that.
+        let clear = [false, true].into_iter().find_map(|detour| {
+            candidates
+                .iter()
+                .find_map(|(position, rotation, mirrored, local)| {
+                    let terminals = local
+                        .iter()
+                        .map(|offset| *position + *offset)
+                        .collect::<Vec<_>>();
+                    self.clear_leads(&terminals, pins, detour)
+                        .map(|leads| (*position, *rotation, *mirrored, terminals, leads))
+                })
+        });
         let (position, rotation, mirrored, terminals, leads) = clear.unwrap_or_else(|| {
             let (position, rotation, mirrored, local) =
                 candidates.into_iter().next().unwrap_or_else(|| {
@@ -1369,16 +1423,25 @@ impl Builder<'_> {
                 .iter()
                 .map(|offset| position + *offset)
                 .collect::<Vec<_>>();
-            let leads = terminals
-                .iter()
-                .zip(pins)
-                .flat_map(|(from, to)| {
-                    lead_routes(*from, *to)
-                        .into_iter()
-                        .next()
-                        .unwrap_or_default()
-                })
-                .collect();
+            // Each lead still takes a clear route where it has one.
+            let mut leads = Vec::new();
+            for (from, to) in terminals.iter().zip(pins) {
+                let others = terminals
+                    .iter()
+                    .chain(pins)
+                    .copied()
+                    .filter(|point| point != from && point != to)
+                    .collect::<Vec<_>>();
+                let mut routes = lead_routes(*from, *to);
+                routes.extend(detour_routes(*from, *to));
+                let route = routes
+                    .iter()
+                    .find(|route| self.route_is_clear(route, *from, *to, &others, &leads))
+                    .or(routes.first())
+                    .cloned()
+                    .unwrap_or_default();
+                leads.extend(route);
+            }
             (position, rotation, mirrored, terminals, leads)
         });
         component.pos = position;
@@ -1390,7 +1453,12 @@ impl Builder<'_> {
 
     /// Leads from each terminal to its pin that touch no other pin,
     /// terminal, joining point, wire or lead, or `None` when one cannot.
-    fn clear_leads(&self, terminals: &[Point], pins: &[Point]) -> Option<Vec<(Point, Point)>> {
+    fn clear_leads(
+        &self,
+        terminals: &[Point],
+        pins: &[Point],
+        detour: bool,
+    ) -> Option<Vec<(Point, Point)>> {
         let mut routed: Vec<(Point, Point)> = Vec::new();
         for (from, to) in terminals.iter().zip(pins) {
             let others = terminals
@@ -1405,7 +1473,11 @@ impl Builder<'_> {
                 }
                 continue;
             }
-            let route = lead_routes(*from, *to)
+            let mut routes = lead_routes(*from, *to);
+            if detour {
+                routes.extend(detour_routes(*from, *to));
+            }
+            let route = routes
                 .into_iter()
                 .find(|route| self.route_is_clear(route, *from, *to, &others, &routed))?;
             routed.extend(route);
@@ -1425,6 +1497,7 @@ impl Builder<'_> {
             .anchors
             .iter()
             .chain(&self.source_points)
+            .chain(self.pin_points.keys())
             .chain(self.terminals.iter().map(|(_, _, point)| point))
             .chain(others)
             .filter(|point| **point != from && **point != to)
@@ -2025,6 +2098,32 @@ fn lead_routes(from: Point, to: Point) -> Vec<Vec<(Point, Point)>> {
         .into_iter()
         .map(|corner| vec![(from, corner), (corner, to)])
         .collect()
+}
+
+/// Leads that bend twice: across to a jog line a few grid steps beside
+/// either end, along it, and across again; shortest first.
+fn detour_routes(from: Point, to: Point) -> Vec<Vec<(Point, Point)>> {
+    let steps = (1..=3).flat_map(|step| [-step * GRID, step * GRID]);
+    let mut routes = Vec::new();
+    for step in steps {
+        for x in [from.x + step, to.x + step] {
+            let (a, b) = (Point::new(x, from.y), Point::new(x, to.y));
+            routes.push(vec![(from, a), (a, b), (b, to)]);
+        }
+        for y in [from.y + step, to.y + step] {
+            let (a, b) = (Point::new(from.x, y), Point::new(to.x, y));
+            routes.push(vec![(from, a), (a, b), (b, to)]);
+        }
+    }
+    let length = |route: &Vec<(Point, Point)>| {
+        route
+            .iter()
+            .map(|(a, b)| (a.x - b.x).abs() + (a.y - b.y).abs())
+            .sum::<i32>()
+    };
+    routes.retain(|route| route.iter().all(|(a, b)| a != b));
+    routes.sort_by_key(length);
+    routes
 }
 
 /// Whether `point` lies on the segment from `a` to `b`, ends included.

@@ -1135,6 +1135,28 @@ fn a_lead_to_one_pin_never_runs_through_another() {
 }
 
 #[test]
+fn leads_that_must_cross_jog_around_each_other() {
+    // LTspice's transconductance source puts its output's plus pin below its
+    // minus and its control's plus above its minus; RSpice's draws each
+    // pair's plus on the same side, so one pair of leads must cross.
+    let source = "Version 4\nSHEET 1 880 680\n\
+        WIRE 32 32 32 -32\nWIRE 32 -32 -160 -32\nWIRE 32 128 32 80\n\
+        WIRE 80 16 80 -64\nWIRE 80 128 80 96\nWIRE -160 -32 -160 16\n\
+        FLAG 32 128 0\nFLAG 80 128 0\nFLAG 80 -64 out\nWIRE -160 112 -160 96\nFLAG -160 112 0\n\
+        SYMBOL g 80 0 R0\nSYMATTR InstName G1\nSYMATTR Value 1m\n\
+        SYMBOL voltage -160 0 R0\nSYMATTR InstName V1\nSYMATTR Value 1\n\
+        WIRE 336 32 336 -32\nWIRE 336 -32 224 -32\nWIRE 336 128 336 80\n\
+        WIRE 384 16 384 -64\nWIRE 384 128 384 96\n\
+        FLAG 336 128 0\nFLAG 384 128 0\nFLAG 384 -64 out2\nFLAG 224 -32 ctl\n\
+        SYMBOL e 384 0 R0\nSYMATTR InstName E1\nSYMATTR Value 10\n";
+    let drawing = parse_asc(source).unwrap();
+    let library = Library::default();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_same_connectivity(&drawing, &imported, &library);
+    assert_on_grid(&imported);
+}
+
+#[test]
 fn a_place_its_symbol_gives_no_pin_is_an_unconnected_terminal() {
     // LTspice writes a node of its own (`MP_nn`) for each instance-line
     // place no pin takes, so the model's later nodes keep their places.
@@ -1478,6 +1500,48 @@ fn an_ltspice_gate_with_a_ground_common_and_one_output_is_a_functional_gate() {
     };
     assert_eq!(nets("A1"), ["in1", "in2", "y1"]);
     assert_eq!(nets("A2"), ["in1", "in2", "in3", "y2"]);
+}
+
+#[test]
+fn a_gate_input_a_jumper_grounds_is_not_read() {
+    let mut library = Library::default();
+    for (name, source) in [
+        ("logic\\and", LTSPICE_AND_ASY),
+        (
+            "misc\\jumper",
+            "Version 4\nSymbolType CELL\nSYMATTR Prefix J\n\
+             PIN -32 64 NONE 0\nPINATTR SpiceOrder 1\nPIN 32 64 NONE 0\nPINATTR SpiceOrder 2\n",
+        ),
+    ] {
+        library.symbols.insert(
+            name.to_owned(),
+            ForeignSymbolSource {
+                definition: parse_asy(source).expect("the test symbol reads"),
+                location: format!("{name}.asy"),
+                schematic: None,
+            },
+        );
+    }
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 800 400\n\
+         FLAG -32 32 in1\nFLAG 32 48 y\nWIRE -32 48 -96 48\n\
+         WIRE -160 48 -160 96\nFLAG -160 96 0\n\
+         SYMBOL Misc\\jumper -128 -16 R0\nSYMATTR InstName J1\n\
+         SYMBOL logic\\and 0 0 R0\nSYMATTR InstName A1\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    let gate = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "A1")
+        .and_then(|component| component.library_cell.as_ref())
+        .and_then(|binding| binding.builtin_functional.as_ref())
+        .map(|contract| contract.stable_id.as_str());
+    // The jumper puts its second input on ground, which LTspice's gate
+    // does not read: one input left, a buffer.
+    assert_eq!(gate, Some("rspice.functional.buffer"));
 }
 
 #[test]
