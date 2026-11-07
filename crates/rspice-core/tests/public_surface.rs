@@ -594,9 +594,10 @@ const MAX_PUBLIC_ITEMS: usize = 5259;
 // of the phase detector, sample-and-hold and varistor. The census is 1,652,
 // with no slack.
 // `seeded_random` adds one: the netlist's parameter evaluator draws the same
-// `rand`/`random`/`white` samples as the behavioral VM. The census is 1,653,
-// with no slack.
-const MAX_HIDDEN_FAMILY_ITEMS: usize = 1653;
+// `rand`/`random`/`white` samples as the behavioral VM. The functional-part
+// library (`builtin_lib::FUNCTIONAL_LIB`) adds one, which `rspice-core-netlist`
+// resolves subcircuits from. The census is 1,654, with no slack.
+const MAX_HIDDEN_FAMILY_ITEMS: usize = 1654;
 
 /// How far under the ceiling the count may sit before the ceiling is
 /// considered stale and must be lowered. Without this, a ratchet silently
