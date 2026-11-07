@@ -410,3 +410,50 @@ R3 d 0 10k
     assert_close("pw", measurement(&results, "pw"), 5.1987e-3, 2e-7);
     assert_close("vd", measurement(&results, "vd"), 0.529717, 2e-5);
 }
+
+/// `uplim` and `dnlim` at operating points across the knee, by QSPICE's law.
+// QSPICE: uplim(V(in),0.5,1) and dnlim(V(in),0.5,1) at in = -2, -0.25, 0, 1,
+// 2.5 and -0.499. LTspice bends toward the limit exponentially instead
+// (uplim(-0.25,...) = -0.278801); QSPICE decides. Neither accepts the
+// functions in a .param.
+#[test]
+fn soft_limits_bend_toward_their_limit_past_the_knee() {
+    let levels = |input: f64| {
+        let netlist = parse(&format!(
+            "* soft limits
+V1 in 0 {input}
+B1 dn 0 V=dnlim(V(in),0.5,1)
+B2 up 0 V=uplim(V(in),0.5,1)
+R1 dn 0 1k
+R2 up 0 1k
+.end
+"
+        ));
+        (op_voltage(&netlist, "up"), op_voltage(&netlist, "dn"))
+    };
+    for (input, up, dn) in [
+        (-2.0, -2.0, 0.722_222_2),
+        (-0.25, -0.3, 0.863_636_4),
+        (0.0, -0.166_666_7, 0.9),
+        (1.0, 0.1, 1.166_666_7),
+        (2.5, 0.25, 2.5),
+        (-0.499, -0.499_001_0, 0.833_444_5),
+    ] {
+        let (actual_up, actual_dn) = levels(input);
+        assert_close(&format!("uplim at {input}"), actual_up, up, 1e-6);
+        assert_close(&format!("dnlim at {input}"), actual_dn, dn, 1e-6);
+    }
+    // Value and slope are continuous where each limit leaves the identity.
+    let step = 1e-6;
+    for (knee, read) in [(-0.5, 0usize), (1.5, 1usize)] {
+        let side = |input: f64| {
+            let (up, dn) = levels(input);
+            [up, dn][read]
+        };
+        let below = (side(knee) - side(knee - step)) / step;
+        let above = (side(knee + step) - side(knee)) / step;
+        assert_close(&format!("value at the knee {knee}"), side(knee), knee, 1e-9);
+        assert_close(&format!("slope across the knee {knee}"), above, below, 1e-4);
+    }
+}
+

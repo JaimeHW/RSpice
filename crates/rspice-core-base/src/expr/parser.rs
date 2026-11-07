@@ -804,6 +804,9 @@ impl<'a> Parser<'a> {
                 self.validate_function_arity(name, f, &args);
                 return Expr::Function { func: f, args };
             }
+            if upper == "UPLIM" || upper == "DNLIM" {
+                return self.soft_limit(name, upper == "UPLIM", args);
+            }
 
             self.errors
                 .push(format!("Unknown function '{}' in expression", name));
@@ -814,6 +817,46 @@ impl<'a> Parser<'a> {
         self.errors
             .push(format!("Unknown identifier '{}' in expression", name));
         Expr::Const(0.0)
+    }
+
+    /// `uplim(x, p, z)` is `x` up to the knee `p − z` and then bends toward
+    /// the limit `p` as `p − z²/(x − p + 2z)`, its value and slope continuous
+    /// at the knee; `dnlim(x, n, z)` mirrors it toward `n` from above. This
+    /// is QSPICE's law. Written out with `if`, every evaluator and derivative
+    /// reads it exactly.
+    fn soft_limit(&mut self, name: &str, upper: bool, args: Vec<Expr>) -> Expr {
+        let Ok([x, limit, zone]) = <[Expr; 3]>::try_from(args) else {
+            self.errors
+                .push(format!("{name} expects 3 arguments (value, limit, zone)"));
+            return Expr::Const(0.0);
+        };
+        // The distance past the knee, toward the limit.
+        let past = if upper {
+            Expr::sub(x.clone(), Expr::sub(limit.clone(), zone.clone()))
+        } else {
+            Expr::sub(Expr::add(limit.clone(), zone.clone()), x.clone())
+        };
+        let bend = Expr::div(
+            Expr::mul(zone.clone(), zone.clone()),
+            Expr::add(past.clone(), zone),
+        );
+        let limited = if upper {
+            Expr::sub(limit, bend)
+        } else {
+            Expr::add(limit, bend)
+        };
+        Expr::Function {
+            func: Function::If,
+            args: vec![
+                Expr::Binary {
+                    op: BinaryOp::Le,
+                    left: Box::new(past),
+                    right: Box::new(Expr::Const(0.0)),
+                },
+                x,
+                limited,
+            ],
+        }
     }
 
     fn validate_function_arity(&mut self, function_name: &str, func: Function, args: &[Expr]) {
