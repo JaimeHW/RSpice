@@ -66,6 +66,7 @@ impl CircuitData {
             jfets: Vec::new(),
             xyce_memristors: Vec::new(),
             non_electrical_state_nodes: HashSet::new(),
+            veriloga_instance_unknowns: Vec::new(),
             compact_model_private_nodes: HashSet::new(),
             settled_compact_model_private_nodes: None,
             compact_model_dc_driven_nodes: HashSet::new(),

@@ -628,6 +628,10 @@ pub struct CircuitData {
     /// Node IDs occupied by private non-electrical DAE state variables.
     /// Maintained alongside node remapping so hot solver classification is O(1).
     pub(crate) non_electrical_state_nodes: HashSet<NodeId>,
+    /// The nodes a Verilog-A instance creates for its own solver unknowns
+    /// rather than for nets, by the name each was created under: names, not
+    /// IDs, because a ground remap renumbers nodes after the builder is done.
+    pub(crate) veriloga_instance_unknowns: Vec<(String, crate::solver::InstanceUnknown)>,
     /// Node IDs a Verilog-A or generated compact model's instance owns: its
     /// internal nodes, and the nets of its own that the terminals a card left
     /// out sit on. None of them takes the final nodal GMIN floor

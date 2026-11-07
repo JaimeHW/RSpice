@@ -350,6 +350,21 @@ impl CircuitData {
         self.non_electrical_state_nodes.contains(&(index + 1))
     }
 
+    /// What each node identity holds when a Verilog-A instance owns it as a
+    /// solver unknown, indexed by node ID with ground at 0.
+    pub(crate) fn instance_unknown_kinds(&self) -> Vec<Option<crate::solver::InstanceUnknown>> {
+        let mut kinds = vec![None; self.num_nodes() + 1];
+        for (name, kind) in &self.veriloga_instance_unknowns {
+            if let Some(&node) = self.node_map.get(name)
+                && node > 0
+                && let Some(slot) = kinds.get_mut(node)
+            {
+                *slot = Some(*kind);
+            }
+        }
+        kinds
+    }
+
     pub(crate) fn non_electrical_state_mask(&self) -> Vec<bool> {
         let mut mask = vec![false; self.num_nodes()];
         for node in &self.non_electrical_state_nodes {

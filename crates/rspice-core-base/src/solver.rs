@@ -70,6 +70,25 @@ pub struct SimulationResult {
     /// never masking ground — belongs to this type rather than to each of its
     /// producers.
     event_only_nodes: Vec<Option<EventOnlyNetKind>>,
+    /// Which node identities are a Verilog-A instance's own solver unknowns
+    /// rather than nets, positionally aligned with `node_voltages`.
+    ///
+    /// Such an unknown takes a node slot because that is how the solver
+    /// numbers it, but its value is not a net's voltage: a branch current is
+    /// in amperes, and an unknown the module never named is no quantity a
+    /// reader asked for. Private for the same reason `event_only_nodes` is.
+    instance_unknowns: Vec<Option<InstanceUnknown>>,
+}
+
+/// What a node-indexed slot holds when a Verilog-A instance owns it as a
+/// solver unknown rather than as a net.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum InstanceUnknown {
+    /// The current through a branch the module names (`X1:b`), in amperes.
+    BranchCurrent,
+    /// An unknown the module never named (`X1:__br1`, `X1.__flow_state0`):
+    /// solved for, but not a quantity listed with the circuit's voltages.
+    Private,
 }
 
 impl SimulationResult {
@@ -86,6 +105,7 @@ impl SimulationResult {
             time_points: Vec::new(),
             voltage_waveforms: Vec::new(),
             event_only_nodes: vec![None; num_nodes + 1],
+            instance_unknowns: vec![None; num_nodes + 1],
         }
     }
 
@@ -163,6 +183,23 @@ impl SimulationResult {
         self.event_only_nodes = nodes;
         self.event_only_nodes.resize(self.node_voltages.len(), None);
         if let Some(ground) = self.event_only_nodes.first_mut() {
+            *ground = None;
+        }
+    }
+
+    /// What a Verilog-A instance's solver unknown in this node slot holds, or
+    /// `None` for a net (ground included).
+    pub fn instance_unknown(&self, node: usize) -> Option<InstanceUnknown> {
+        self.instance_unknowns.get(node).copied().flatten()
+    }
+
+    /// Record which node identities are Verilog-A instance unknowns, aligned
+    /// with `node_voltages`; normalized the way [`Self::set_event_only_nodes`]
+    /// normalizes its mask, so ground is never one.
+    pub fn set_instance_unknowns(&mut self, unknowns: Vec<Option<InstanceUnknown>>) {
+        self.instance_unknowns = unknowns;
+        self.instance_unknowns.resize(self.node_voltages.len(), None);
+        if let Some(ground) = self.instance_unknowns.first_mut() {
             *ground = None;
         }
     }

@@ -1101,6 +1101,7 @@ pub fn operating_point_projection_signals(
     result: &crate::solver::SimulationResult,
 ) -> Result<Vec<ProjectionSourceSignal<'_>>, SignalSchemaError> {
     let mut signals = Vec::new();
+    let mut instance_currents = Vec::new();
     for (node_id, value) in result.node_voltages.iter().enumerate().skip(1) {
         // A net only the event domain resolves publishes no voltage column:
         // its slot holds the placeholder row the assembly closed with `v = 0`,
@@ -1111,12 +1112,27 @@ pub fn operating_point_projection_signals(
             continue;
         }
         let registry = result_registry_name(result.node_names.get(node_id), node_id);
-        signals.push(ProjectionSourceSignal::new(
-            format!("V({registry})"),
-            &registry,
-            SignalKind::Voltage,
-            ProjectionValues::Real(Cow::Owned(vec![*value])),
-        )?);
+        let values = ProjectionValues::Real(Cow::Owned(vec![*value]));
+        // A Verilog-A instance's own unknowns are not nets: a named branch's
+        // current is listed with the currents, in amperes, and an unknown the
+        // module never named is not listed at all.
+        match result.instance_unknown(node_id) {
+            None => signals.push(ProjectionSourceSignal::new(
+                format!("V({registry})"),
+                &registry,
+                SignalKind::Voltage,
+                values,
+            )?),
+            Some(crate::solver::InstanceUnknown::BranchCurrent) => {
+                instance_currents.push(ProjectionSourceSignal::new(
+                    format!("I({registry})"),
+                    &registry,
+                    SignalKind::Current,
+                    values,
+                )?);
+            }
+            Some(crate::solver::InstanceUnknown::Private) => {}
+        }
     }
     for (index, current) in result.branch_currents.iter().enumerate() {
         let registry = result_registry_name(result.branch_names.get(index), index + 1);
@@ -1127,6 +1143,7 @@ pub fn operating_point_projection_signals(
             ProjectionValues::Real(Cow::Owned(vec![*current])),
         )?);
     }
+    signals.extend(instance_currents);
     Ok(signals)
 }
 

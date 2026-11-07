@@ -450,6 +450,13 @@ pub(super) struct VerilogAUnknownNames<'a> {
     pub(super) unconnected: &'a [String],
 }
 
+/// The `__` prefix the Verilog-A compiler reserves for the unknowns it
+/// introduces itself.
+#[cfg(feature = "veriloga")]
+fn is_compiler_owned_name(name: &str) -> bool {
+    name.starts_with("__")
+}
+
 /// A net name as the output layer compares it: case-insensitive, and with `:`
 /// and `.` the same separator.
 ///
@@ -500,6 +507,25 @@ impl VerilogAUnknownNames<'_> {
         match self.branches.get(index).and_then(Option::as_ref) {
             Some(name) => format!("{instance}:{name}"),
             None => format!("{instance}:__br{}", index + 1),
+        }
+    }
+
+    /// An internal node the module never named, or named as the compiler's
+    /// own (`__flow_state0`), is a solver unknown and no net the user drew.
+    fn internal_node_is_private(&self, index: usize) -> bool {
+        self.internal
+            .get(index)
+            .is_none_or(|name| is_compiler_owned_name(name))
+    }
+
+    /// A branch current is a reportable current only when the module names
+    /// its branch; the unnamed source of `V(out) <+ …` is the solver's.
+    fn branch_unknown_kind(&self, index: usize) -> crate::solver::InstanceUnknown {
+        match self.branches.get(index).and_then(Option::as_ref) {
+            Some(name) if !is_compiler_owned_name(name) => {
+                crate::solver::InstanceUnknown::BranchCurrent
+            }
+            _ => crate::solver::InstanceUnknown::Private,
         }
     }
 
@@ -578,7 +604,15 @@ fn bind_veriloga_solver_unknowns(
             .map_err(|error| error.to_string())?;
     }
     let internal_nodes: Vec<_> = (0..device.num_internal_nodes())
-        .map(|index| circuit.get_or_create_node(&names.internal_node(instance, index)))
+        .map(|index| {
+            let name = names.internal_node(instance, index);
+            if names.internal_node_is_private(index) {
+                circuit
+                    .veriloga_instance_unknowns
+                    .push((name.clone(), crate::solver::InstanceUnknown::Private));
+            }
+            circuit.get_or_create_node(&name)
+        })
         .collect();
     if !internal_nodes.is_empty() {
         device
@@ -597,7 +631,13 @@ fn bind_veriloga_solver_unknowns(
             .map_err(|error| error.to_string())?;
     }
     let branch_nodes: Vec<_> = (0..device.num_branch_unknowns())
-        .map(|index| circuit.get_or_create_node(&names.branch_unknown(instance, index)))
+        .map(|index| {
+            let name = names.branch_unknown(instance, index);
+            circuit
+                .veriloga_instance_unknowns
+                .push((name.clone(), names.branch_unknown_kind(index)));
+            circuit.get_or_create_node(&name)
+        })
         .collect();
     if !branch_nodes.is_empty() {
         device

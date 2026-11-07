@@ -76,7 +76,7 @@ use crate::execution::schema::{
 use crate::result_scalar::{
     boolean_scalar, count_scalar, derived_metric_scalar, real_or_unbounded_scalar, real_scalar,
 };
-use crate::solver::SimulationResult;
+use crate::solver::{InstanceUnknown, SimulationResult};
 
 pub(super) mod quasi_periodic;
 
@@ -495,6 +495,7 @@ impl AnalysisResultDocument {
         )?;
 
         let mut signals = Vec::new();
+        let mut instance_currents = Vec::new();
         // An event-only net gets no voltage descriptor at all, exactly as it
         // gets none in a transient document: a descriptor promises the signal
         // exists and this run chose what to keep of it, and the voltage of a
@@ -510,13 +511,27 @@ impl AnalysisResultDocument {
             if result.event_only_node_kind(index).is_some() {
                 continue;
             }
-            signals.push(ResultSignal::new(
-                voltage_descriptor(LOCATION, name, SignalValueType::Real, 1)?,
+            let samples = SeriesValues::Real {
+                samples: finite_samples(LOCATION, name, std::slice::from_ref(value))?,
+            };
+            // A Verilog-A instance's own unknowns are listed as the
+            // operating-point projection lists them.
+            let (descriptor, listed) = match result.instance_unknown(index) {
+                None => (
+                    voltage_descriptor(LOCATION, name, SignalValueType::Real, 1)?,
+                    &mut signals,
+                ),
+                Some(InstanceUnknown::BranchCurrent) => (
+                    current_descriptor(LOCATION, name, SignalValueType::Real, 1)?,
+                    &mut instance_currents,
+                ),
+                Some(InstanceUnknown::Private) => continue,
+            };
+            listed.push(ResultSignal::new(
+                descriptor,
                 None,
                 SeriesAvailability::Available,
-                SeriesValues::Real {
-                    samples: finite_samples(LOCATION, name, std::slice::from_ref(value))?,
-                },
+                samples,
             )?);
         }
         for (name, value) in result.branch_names.iter().zip(&result.branch_currents) {
@@ -529,6 +544,7 @@ impl AnalysisResultDocument {
                 },
             )?);
         }
+        signals.append(&mut instance_currents);
 
         let mut observables = Vec::with_capacity(result.dc_observables.len());
         for (name, value) in &result.dc_observables {
@@ -643,11 +659,16 @@ impl AnalysisResultDocument {
         )?;
 
         let mut signals = Vec::with_capacity(node_names.len() + branch_names.len());
+        let mut instance_currents = Vec::new();
         for (index, name) in node_names.iter().enumerate() {
             // Absent at every point, for the reason the operating-point
             // builder above gives: the sweep publishes no voltage for a net
             // only the event domain resolves.
             if first.result.event_only_node_kind(index).is_some() {
+                continue;
+            }
+            let instance_unknown = first.result.instance_unknown(index);
+            if instance_unknown == Some(InstanceUnknown::Private) {
                 continue;
             }
             let column = points
@@ -666,13 +687,25 @@ impl AnalysisResultDocument {
                         })
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            signals.push(ResultSignal::new(
-                voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+            let samples = SeriesValues::Real {
+                samples: finite_samples(LOCATION, name, &column)?,
+            };
+            let (descriptor, listed) = if instance_unknown.is_some() {
+                (
+                    current_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+                    &mut instance_currents,
+                )
+            } else {
+                (
+                    voltage_descriptor(LOCATION, name, SignalValueType::Real, point_count)?,
+                    &mut signals,
+                )
+            };
+            listed.push(ResultSignal::new(
+                descriptor,
                 None,
                 SeriesAvailability::Available,
-                SeriesValues::Real {
-                    samples: finite_samples(LOCATION, name, &column)?,
-                },
+                samples,
             )?);
         }
         for (index, name) in branch_names.iter().enumerate() {
@@ -701,6 +734,7 @@ impl AnalysisResultDocument {
                 },
             )?);
         }
+        signals.append(&mut instance_currents);
 
         let mut observable_names: Vec<String> = Vec::new();
         for point in points {

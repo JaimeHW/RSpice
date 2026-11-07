@@ -1483,3 +1483,62 @@ fn a_deck_naming_every_device_current_is_metered_in_linear_time() {
         );
     }
 }
+
+/// The unknowns a Verilog-A instance adds to the system are not nets. A
+/// branch the module names lists its current, in amperes, beside the
+/// circuit's other currents; an unknown the module never named (the current
+/// of an unnamed voltage contribution, the flow a port probe reads) is not
+/// listed at all. An internal node the module declares is a net and keeps its
+/// voltage.
+#[test]
+fn an_instances_own_unknowns_list_as_currents_or_not_at_all() {
+    let model = ModelFile::new(
+        "unknowns",
+        "`include \"disciplines.vams\"\n\
+module unknowns(p, n, s); inout p, n, s; electrical p, n, s; electrical mid;\n\
+branch (p, mid) b1; branch (mid, n) b2;\n\
+analog begin\n\
+  I(b1) <+ V(b1) / 1k;\n\
+  V(b2) <+ 2.0 * I(b2);\n\
+  V(s) <+ 1.0 * I(<p>);\n\
+end\n\
+endmodule\n",
+    );
+    let deck = format!(
+        "* instance unknowns\n.hdl \"{}\"\nV1 a 0 DC 1\nX1 a 0 s unknowns\n.op\n.end\n",
+        model.deck_path()
+    );
+    let op = operating_point(&deck);
+    let signals = operating_point_projection_signals(&op).expect("op inventory");
+    let listed = |name: &str| {
+        signals
+            .iter()
+            .find(|signal| signal.descriptor().display_name().eq_ignore_ascii_case(name))
+            .map(|signal| {
+                let ProjectionValues::Real(values) = signal.values() else {
+                    panic!("{name} is a real column");
+                };
+                (signal.descriptor().kind(), values[0])
+            })
+    };
+    let names = signals
+        .iter()
+        .map(|signal| signal.descriptor().display_name().to_owned())
+        .collect::<Vec<_>>();
+
+    // 1 V across 1 kOhm in series with the 2 Ohm the branch equation makes.
+    let current = 1.0 / 1002.0;
+    let (kind, value) = listed("I(X1:b2)").unwrap_or_else(|| panic!("I(X1:b2) in {names:?}"));
+    assert_eq!(kind, SignalKind::Current);
+    assert_static("I(X1:b2)", value, current);
+    let (kind, value) = listed("V(X1.mid)").unwrap_or_else(|| panic!("V(X1.mid) in {names:?}"));
+    assert_eq!(kind, SignalKind::Voltage);
+    assert_static("V(X1.mid)", value, 2.0 * current);
+    let (_, value) = listed("V(S)").unwrap_or_else(|| panic!("V(S) in {names:?}"));
+    assert_static("V(S)", value, current);
+    assert!(listed("V(X1:b2)").is_none(), "a branch current listed as a voltage: {names:?}");
+    assert!(
+        names.iter().all(|name| !name.contains("__")),
+        "an unknown the module never named is listed: {names:?}"
+    );
+}
