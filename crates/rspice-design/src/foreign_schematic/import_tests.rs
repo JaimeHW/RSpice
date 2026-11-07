@@ -2097,6 +2097,58 @@ fn an_ltspice_frequency_response_probe_is_refused_by_name() {
     assert!(imported.document.components.is_empty());
 }
 
+/// A QSPICE gate letters the settings its drawing shows, where and as large
+/// as the drawing set them, rather than the name RSpice gives the model it
+/// writes for the gate; edited, the gate letters RSpice's own value again.
+#[test]
+fn a_qspice_gate_letters_the_settings_its_drawing_shows() {
+    use crate::schematic::label_position::LabelPosition;
+    use crate::schematic::value_label::value_pieces;
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol AND2Q
+      «type: ¥»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
+      «text (0,-100) 0.6 15 0 0x1000000 -1 -1 \"Ref=2\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"b0\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"b1\"»
+    »
+  »
+  «net (0,400) 1 13 0 \"VDD\"»
+  «net (0,-400) 1 13 0 \"GND\"»
+  «net (400,0) 1 13 0 \"y\"»
+  «net (-400,200) 1 13 0 \"a\"»
+  «net (-400,-200) 1 13 0 \"b\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let mut gate = imported
+        .document
+        .components
+        .first()
+        .cloned()
+        .expect("the gate is placed");
+    assert_eq!(gate.value, "AND2Q_1");
+    let pieces = value_pieces(&gate).expect("the gate letters its drawing's text");
+    let [piece] = pieces else {
+        panic!("{pieces:?}");
+    };
+    assert_eq!((piece.text.as_str(), piece.size_percent), ("Ref=2", 60));
+    assert!(matches!(piece.position, LabelPosition::Placed { .. }));
+
+    gate.params.push_str(" Ref=3");
+    assert!(
+        value_pieces(&gate).is_none(),
+        "an edited gate letters RSpice's own value"
+    );
+}
+
 /// QSPICE's ¥-device gate and Ã-device Gm amplifier: each comes across as a
 /// behavioural subcircuit written for it, its pins in the symbol's order,
 /// with the settings it states, and a notice naming it.

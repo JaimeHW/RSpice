@@ -22,7 +22,7 @@ use rspice_design::{
         component_display::SchematicParameterLabelVisibility,
         label_layout::{self, LayoutPoint},
         label_position::LabelPosition,
-        value_label::cell_instance_value as instance_value,
+        value_label::{cell_instance_value as instance_value, value_pieces},
     },
     symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
     symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
@@ -326,6 +326,14 @@ fn draw_symbol_labels(
             palette.text,
         );
     }
+    // A value the drawing lettered in texts of its own stands as they were
+    // set.
+    if let Some(pieces) = value_pieces(component) {
+        if component.display_mode.show_value(visibility) {
+            super::drawing::draw_value_pieces(painter, origin, scale, pieces, palette);
+        }
+        return;
+    }
     let value = instance_value(component);
     if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp)
         && component.display_mode.show_value(visibility)
@@ -557,6 +565,36 @@ fn write_symbol_labels_svg(
             instance_label_align(component, symbol, name_anchor),
             config,
         );
+    }
+    let shown = component
+        .display_mode
+        .show_value(SchematicParameterLabelVisibility::NamesAndValues);
+    if let Some(pieces) = value_pieces(component) {
+        if shown {
+            let (x, y) = to_svg(component, Point::default(), config);
+            let origin = LayoutPoint::new(x as f32, y as f32);
+            for piece in pieces {
+                let Some(placed) = piece
+                    .position
+                    .placed_text(origin, config.units_per_world as f32)
+                else {
+                    continue;
+                };
+                if piece.text.trim().is_empty() {
+                    continue;
+                }
+                let at = super::drawing::layout_pos(placed.anchor);
+                write_sized_text_svg(
+                    svg,
+                    InstanceLabel::Value.class(),
+                    (f64::from(at.x), f64::from(at.y)),
+                    &piece.text,
+                    super::drawing::text_align(placed.horizontal, placed.vertical),
+                    InstanceLabel::Value.size(config) * f64::from(piece.size_percent) / 100.0,
+                );
+            }
+        }
+        return;
     }
     let value = instance_value(component);
     let value_anchor = symbol.document().value_anchor;

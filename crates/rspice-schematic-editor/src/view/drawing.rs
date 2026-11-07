@@ -1161,7 +1161,7 @@ fn draw_component_labels(
 
 /// A value a drawing lettered in several texts, each where and as large as
 /// the drawing set it.
-fn draw_value_pieces(
+pub(super) fn draw_value_pieces(
     painter: &Painter,
     pos: Pos2,
     scale: f32,

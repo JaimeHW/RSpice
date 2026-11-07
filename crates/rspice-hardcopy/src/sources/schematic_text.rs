@@ -105,10 +105,8 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             size_percent: 100,
         });
     }
-    let pieces = value_pieces(component).filter(|_| {
-        semantic.resolved_symbol.is_none()
-            && label_layout::instance_value_class(component) == ValueClass::Value
-    });
+    let pieces = value_pieces(component)
+        .filter(|_| label_layout::instance_value_class(component) == ValueClass::Value);
     if let Some(pieces) = pieces {
         if component.display_mode.show_value(visibility) {
             let origin = LayoutPoint::new(component.pos.x as f32, component.pos.y as f32);

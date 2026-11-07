@@ -326,7 +326,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
     }
     // QSPICE letters each attribute where the drawing put it, at its own
     // size; a value of several texts keeps them apart.
-    let value_pieces = if rest.len() > 1 {
+    let value_pieces = if !rest.is_empty() {
         rest.into_iter()
             .map(|(offset, text, reach, size_percent)| ForeignValuePiece {
                 text,

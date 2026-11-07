@@ -745,7 +745,18 @@ impl Builder<'_> {
                 })
                 .collect();
         }
-        let stands_for = source.then(|| value_and_parameters(component));
+        let spelled = pieces
+            .iter()
+            .flat_map(|(text, ..)| text.split_whitespace())
+            .eq(component.value.split_whitespace());
+        // A lone text that is the part's value letters as the value.
+        if spelled && pieces.len() == 1 && !source {
+            pieces.clear();
+        }
+        // Texts that say other than the part's value (a source's waveform,
+        // or the settings QSPICE letters on a gate whose model RSpice names
+        // itself) stand while the part keeps what it came with.
+        let stands_for = (source || !spelled).then(|| value_and_parameters(component));
         let unshown =
             |window: Option<&ForeignWindow>| window.map_or(windowed, |window| window.hidden);
         let hidden = (unshown(name), unshown(value));
