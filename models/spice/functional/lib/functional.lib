@@ -270,3 +270,27 @@ RTH NTH 0 {I2T/IRATED^2}
 BL NL 0 V=idt(max(stp(V(NTH)-I2T), stp(V(NL))*stp(1-V(NL)))/TARC)
 RNL NL 0 1Meg NOISY=0
 .ends RSPICE_FN_FUSE
+
+* Relay. Pins: A1 A2 COM NO NC.
+* The coil is RCOIL in series with LCOIL. The armature pulls in once the
+* coil current reaches VPULLIN/RCOIL either way and drops out once it falls
+* to VDROPOUT/RCOIL: a Schmitt trigger on the coil current, whose output
+* travels from rest to pulled in over 2*TOP and back over 2*TREL, so the
+* contacts change over TOP after pull-in and TREL after drop-out, as the
+* armature passes half travel. A closed contact is RON and an open one
+* ROFF, the resistance moving geometrically between them. FORM=1 is a
+* changeover (SPDT) contact, COM to NC at rest and COM to NO pulled in;
+* FORM=0 a make (SPST) contact, whose NC never closes. The defaults are a
+* 12 V, 400 Ohm general-purpose relay.
+.subckt RSPICE_FN_RELAY A1 A2 COM NO NC RCOIL=400 LCOIL=600m VPULLIN=9
++ VDROPOUT=1.2 TOP=5m TREL=2m RON=50m ROFF=1G FORM=1
+VS A1 N1 0
+RC N1 N2 {RCOIL}
+LC N2 A2 {LCOIL}
+BI NI 0 V=abs(I(VS))*RCOIL
+A1 NI 0 0 0 0 0 NM 0 SCHMITT VT={(VPULLIN+VDROPOUT)/2} VH={(VPULLIN-VDROPOUT)/2}
++ VHIGH=1 VLOW=0 TRISE={2*TOP} TFALL={2*TREL}
+RNM NM 0 1Meg NOISY=0
+BNO COM NO I=V(COM,NO)*exp(-(0.5+0.5*tanh(500*(V(NM)-0.5)))*ln(RON)-(0.5-0.5*tanh(500*(V(NM)-0.5)))*ln(ROFF))
+BNC COM NC I=V(COM,NC)*exp(-FORM*(0.5-0.5*tanh(500*(V(NM)-0.5)))*ln(RON)-(1-FORM*(0.5-0.5*tanh(500*(V(NM)-0.5))))*ln(ROFF))
+.ends RSPICE_FN_RELAY

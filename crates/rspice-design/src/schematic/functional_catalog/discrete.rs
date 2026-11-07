@@ -6,7 +6,7 @@ use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use super::{
     ComponentCategory, FunctionalBlock, FunctionalParameter, FunctionalPartDescriptor,
-    FunctionalPin, FunctionalPreset, FunctionalPresetChoice, InOut, number, pin,
+    FunctionalPin, FunctionalPreset, FunctionalPresetChoice, InOut, choice, number, pin, selector,
 };
 
 /// Two terminals on the block's centre line, one each side.
@@ -229,5 +229,150 @@ pub(super) const FUSE: FunctionalPartDescriptor = FunctionalPartDescriptor {
     category: ComponentCategory::ProtectionElectromechanical,
     parameters: FUSE_PARAMETERS,
     preset: None,
+    inputs: None,
+};
+
+const RELAY_PINS: &[FunctionalPin] = &[
+    pin("A1", InOut),
+    pin("A2", InOut),
+    pin("COM", InOut),
+    pin("NO", InOut),
+    pin("NC", InOut),
+];
+
+/// The coil drawn upright on the left, its terminals top and bottom; the
+/// contact's common below on the right, under its NC and NO terminals.
+const RELAY_BLOCK: FunctionalBlock = FunctionalBlock {
+    height: 40,
+    pins: &[
+        (SymbolPinSide::Top, -20, -20),
+        (SymbolPinSide::Bottom, -20, 20),
+        (SymbolPinSide::Bottom, 10, 20),
+        (SymbolPinSide::Top, 20, -20),
+        (SymbolPinSide::Top, 0, -20),
+    ],
+};
+
+/// A 12 V, 400 Ω general-purpose relay with a changeover contact.
+const RELAY_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "RCOIL",
+        "Coil resistance",
+        "Ω",
+        "400",
+        "Resistance of the coil.",
+    ),
+    number(
+        "LCOIL",
+        "Coil inductance",
+        "H",
+        "600m",
+        "Inductance of the coil, which slows its current after a voltage step.",
+    ),
+    number(
+        "VPULLIN",
+        "Pull-in voltage",
+        "V",
+        "9",
+        "Coil voltage, either polarity, at which the armature pulls in: the contacts operate once the coil current reaches VPULLIN/RCOIL.",
+    ),
+    number(
+        "VDROPOUT",
+        "Drop-out voltage",
+        "V",
+        "1.2",
+        "Coil voltage at which the armature drops out again; below the pull-in voltage, so the relay holds between them.",
+    ),
+    number(
+        "TOP",
+        "Operate time",
+        "s",
+        "5m",
+        "Time from the coil reaching pull-in to the contacts changing over.",
+    ),
+    number(
+        "TREL",
+        "Release time",
+        "s",
+        "2m",
+        "Time from the coil falling to drop-out to the contacts changing back.",
+    ),
+    number(
+        "RON",
+        "Contact resistance",
+        "Ω",
+        "50m",
+        "Resistance of a closed contact.",
+    ),
+    number(
+        "ROFF",
+        "Open resistance",
+        "Ω",
+        "1G",
+        "Resistance of an open contact.",
+    ),
+    selector(
+        "FORM",
+        "Contacts",
+        "SPDT",
+        "SPDT: COM connects to NC at rest and to NO once operated. SPST: a make contact from COM to NO, with NC never connected.",
+        &[choice("SPDT", "1"), choice("SPST", "0")],
+    ),
+];
+
+const RELAY_PRESET: FunctionalPreset = FunctionalPreset {
+    name: "COIL",
+    label: "Coil",
+    description: "Fills the coil's resistance, inductance, pull-in and drop-out with a typical relay's for that coil voltage; each stays editable.",
+    choices: &[
+        FunctionalPresetChoice {
+            label: "12 V",
+            values: &[
+                ("RCOIL", "400"),
+                ("LCOIL", "600m"),
+                ("VPULLIN", "9"),
+                ("VDROPOUT", "1.2"),
+            ],
+        },
+        FunctionalPresetChoice {
+            label: "5 V",
+            values: &[
+                ("RCOIL", "70"),
+                ("LCOIL", "100m"),
+                ("VPULLIN", "3.75"),
+                ("VDROPOUT", "0.5"),
+            ],
+        },
+        FunctionalPresetChoice {
+            label: "24 V",
+            values: &[
+                ("RCOIL", "1.6k"),
+                ("LCOIL", "2.4"),
+                ("VPULLIN", "18"),
+                ("VDROPOUT", "2.4"),
+            ],
+        },
+    ],
+};
+
+pub(super) const RELAY: FunctionalPartDescriptor = FunctionalPartDescriptor {
+    stable_id: "rspice.functional.relay",
+    display_name: "Relay",
+    subcircuit: "RSPICE_FN_RELAY",
+    pins: RELAY_PINS,
+    symbol_asset: "functional_relay.svg",
+    block: Some(RELAY_BLOCK),
+    keywords: &[
+        "relay",
+        "coil",
+        "contact",
+        "spdt",
+        "spst",
+        "electromechanical relay",
+        "changeover",
+    ],
+    category: ComponentCategory::ProtectionElectromechanical,
+    parameters: RELAY_PARAMETERS,
+    preset: Some(RELAY_PRESET),
     inputs: None,
 };

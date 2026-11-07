@@ -365,3 +365,32 @@ fn a_placed_fuse_drops_its_cold_resistance_times_its_current() {
     let across = bench.operating_point("a");
     assert!((across - 0.05).abs() < 1e-9, "{across}");
 }
+
+#[test]
+fn a_placed_relay_switches_its_common_from_nc_to_no_when_its_coil_is_driven() {
+    // A 12 V coil: NO closes and NC opens; at 1 V both return.
+    for (coil, no, nc) in [("12", 2.5e-4, 5.0), ("1", 5.0, 2.5e-4)] {
+        let mut bench = Bench::default();
+        bench.primitive(ComponentType::VoltageSource, "VC", coil, &["coil", "0"]);
+        bench.primitive(ComponentType::VoltageSource, "VP", "5", &["p", "0"]);
+        bench.part(
+            "rspice.functional.relay",
+            "K1",
+            "",
+            &["coil", "0", "0", "no", "nc"],
+        );
+        bench.primitive(ComponentType::Resistor, "RNO", "1k", &["p", "no"]);
+        bench.primitive(ComponentType::Resistor, "RNC", "1k", &["p", "nc"]);
+        let probes = bench.operating_points(&["no", "nc"]);
+        assert!(
+            (probes[0] - no).abs() < 1e-4,
+            "{coil} V: NO at {}",
+            probes[0]
+        );
+        assert!(
+            (probes[1] - nc).abs() < 1e-4,
+            "{coil} V: NC at {}",
+            probes[1]
+        );
+    }
+}

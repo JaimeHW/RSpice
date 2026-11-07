@@ -534,13 +534,7 @@ const CONTROLLED: &[ComponentPaletteEntry] = &[
     entry(
         T::VSwitch,
         "V-Switch (S)",
-        &[
-            "s",
-            "switch",
-            "vswitch",
-            "voltage controlled switch",
-            "relay",
-        ],
+        &["s", "switch", "vswitch", "voltage controlled switch"],
     ),
     entry(
         T::ISwitch,

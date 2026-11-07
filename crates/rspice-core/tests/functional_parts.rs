@@ -1084,3 +1084,78 @@ X2 b 0 RSPICE_FN_FUSE
     let b = waveform(&tran, "b");
     assert_close("closed at 5 s", value_at(&tran.time, b, 5.0), 0.095, 1e-6);
 }
+
+#[test]
+fn relay_pulls_in_and_drops_out_at_its_coil_voltages_after_its_operate_and_release_times() {
+    // The coil ramps 0 -> 12 V over 1 s and back over the next: with its
+    // 1.5 ms L/R lag (18 mV on the ramp) the contacts change over TOP after
+    // the coil passes 9 V and TREL after it falls past 1.2 V. A second coil
+    // steps to 12 V at 10 ms and off at 50 ms: its current crosses pull-in
+    // after -L/R ln(1/4) and drop-out after L/R ln(10).
+    let deck = "* relay
+VC c 0 PWL(0 0 1 12 2 0)
+X1 c 0 0 no nc RSPICE_FN_RELAY
+VP p 0 5
+RNO p no 1k
+RNC p nc 1k
+VS s 0 PWL(0 0 10m 0 10.001m 12 50m 12 50.001m 0)
+X2 s 0 0 no2 nc2 RSPICE_FN_RELAY
+RNO2 p no2 1k
+RNC2 p nc2 1k
+X3 s 0 0 no3 nc3 RSPICE_FN_RELAY FORM=0
+RNO3 p no3 1k
+RNC3 p nc3 1k
+.end
+";
+    let tran = transient(deck, 2.0, 1e-4);
+    let no = waveform(&tran, "no");
+    let closed = falling_crossing(&tran.time, no, 2.5);
+    assert_close("pull-in", 12.0 * (closed - 5e-3), 9.018, 0.01);
+    let reopened = tran
+        .time
+        .iter()
+        .zip(no)
+        .position(|(&time, &v)| time > 1.5 && v > 2.5)
+        .map(|index| tran.time[index])
+        .expect("drops out");
+    assert_close("drop-out", 12.0 * (2.0 - (reopened - 2e-3)), 1.182, 0.01);
+    let nc = waveform(&tran, "nc");
+    assert_close(
+        "NC open while operated",
+        value_at(&tran.time, nc, 1.0),
+        5.0,
+        1e-4,
+    );
+    assert_close(
+        "NC closed at rest",
+        value_at(&tran.time, nc, 0.5),
+        2.5e-4,
+        1e-6,
+    );
+    // Hysteresis: at 5 V the coil holds the contacts on the way down but
+    // not on the way up.
+    assert!(value_at(&tran.time, no, 5.0 / 12.0) > 4.9);
+    assert!(value_at(&tran.time, no, 2.0 - 5.0 / 12.0) < 1e-3);
+
+    let tau = 0.6 / 400.0;
+    let step = transient(
+        &deck.replace("VC c 0 PWL(0 0 1 12 2 0)", "VC c 0 0"),
+        80e-3,
+        2e-6,
+    );
+    let no2 = waveform(&step, "no2");
+    let operate = falling_crossing(&step.time, no2, 2.5) - 10e-3;
+    assert_close("operate", operate, -tau * 0.25f64.ln() + 5e-3, 20e-6);
+    let release = step
+        .time
+        .iter()
+        .zip(no2)
+        .position(|(&time, &v)| time > 50e-3 && v > 2.5)
+        .map(|index| step.time[index])
+        .expect("releases")
+        - 50e-3;
+    assert_close("release", release, tau * 10f64.ln() + 2e-3, 20e-6);
+    // A make contact never connects NC.
+    let nc3 = waveform(&step, "nc3");
+    assert!(nc3.iter().all(|&v| v > 5.0 - 1e-5));
+}
