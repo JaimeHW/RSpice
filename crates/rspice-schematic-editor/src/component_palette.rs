@@ -150,7 +150,9 @@ const SUPPLIES: &[SupplyPaletteEntry] = &[
     },
     SupplyPaletteEntry {
         name: "VSS",
-        keywords: &["vss", "supply", "rail", "power", "global", "negative", "return"],
+        keywords: &[
+            "vss", "supply", "rail", "power", "global", "negative", "return",
+        ],
     },
     SupplyPaletteEntry {
         name: "VEE",

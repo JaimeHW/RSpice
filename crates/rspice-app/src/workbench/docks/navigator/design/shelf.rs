@@ -177,12 +177,8 @@ impl ShelfGlyph {
                 );
             }
             Self::Supply(glyph) => {
-                let label = crate::state::NetLabel::supply(
-                    0,
-                    crate::state::Point::new(0, 0),
-                    "",
-                    glyph,
-                );
+                let label =
+                    crate::state::NetLabel::supply(0, crate::state::Point::new(0, 0), "", glyph);
                 let Some(bounds) =
                     rspice_design::schematic::label_layout::supply_glyph_rect(&label)
                 else {
@@ -1152,9 +1148,7 @@ fn resolve_shelf_entry(
             })
         }
         ShelfEntry::Supply(name) => {
-            let supply = supply_palette()
-                .iter()
-                .find(|supply| supply.name == name)?;
+            let supply = supply_palette().iter().find(|supply| supply.name == name)?;
             Some(ShelfEntryRow {
                 entry: entry.clone(),
                 glyph: supply_shelf_glyph(supply),
@@ -1567,7 +1561,12 @@ fn supply_shelf_glyph(entry: &SupplyPaletteEntry) -> ShelfGlyph {
 pub(super) fn arm_supply(state: &mut AppState, entry: &SupplyPaletteEntry, ctx: &egui::Context) {
     state.model.schematic.session.editor.pending_library_cell = None;
     state.model.schematic.arm_tool(Tool::Label);
-    state.model.schematic.session.editor.pending_net_label_sequence = Some(
+    state
+        .model
+        .schematic
+        .session
+        .editor
+        .pending_net_label_sequence = Some(
         rspice_schematic_editor::session::net_label_sequence::NetLabelSequence::repeating(
             entry.name,
             entry.kind(),

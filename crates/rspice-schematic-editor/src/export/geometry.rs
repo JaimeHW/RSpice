@@ -517,7 +517,12 @@ pub(super) fn write_net_label(svg: &mut String, label: &NetLabel, config: &SvgEx
             let (x2, y2) = at(drawing::layout_pos(end));
             write!(data, "M {x1} {y1} L {x2} {y2} ").unwrap();
         }
-        writeln!(svg, "<path class=\"net-supply\" d=\"{}\"/>", data.trim_end()).unwrap();
+        writeln!(
+            svg,
+            "<path class=\"net-supply\" d=\"{}\"/>",
+            data.trim_end()
+        )
+        .unwrap();
     }
     if let Some((tab, direction)) = layout.tab {
         let (left, top) = at(tab.min);

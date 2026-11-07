@@ -667,9 +667,15 @@ mod tests {
         for glyph in [SupplyGlyph::Bar, SupplyGlyph::Arrow, SupplyGlyph::Down] {
             let label = NetLabel::supply(9, Point::new(50, 40), "VDD", glyph);
             let layout = screen_layout(&ctx, &viewport, &label, color);
-            assert!(layout.supply_glyph.len() >= 2, "{glyph:?}: a stem and a bar or arrow");
+            assert!(
+                layout.supply_glyph.len() >= 2,
+                "{glyph:?}: a stem and a bar or arrow"
+            );
             for point in layout.supply_glyph.iter().flatten() {
-                assert!(layout.decoration_rect.contains(*point), "{glyph:?}: {point:?}");
+                assert!(
+                    layout.decoration_rect.contains(*point),
+                    "{glyph:?}: {point:?}"
+                );
             }
             assert!(
                 (layout.text_rect.center().x - layout.attachment.x).abs() < 0.5,
@@ -677,9 +683,15 @@ mod tests {
             );
             let stem_end = layout.supply_glyph[0][1];
             if glyph == SupplyGlyph::Down {
-                assert!(layout.text_rect.top() > stem_end.y, "a negative rail's name is below its bar");
+                assert!(
+                    layout.text_rect.top() > stem_end.y,
+                    "a negative rail's name is below its bar"
+                );
             } else {
-                assert!(layout.text_rect.bottom() < stem_end.y, "{glyph:?}: the name is above the symbol");
+                assert!(
+                    layout.text_rect.bottom() < stem_end.y,
+                    "{glyph:?}: the name is above the symbol"
+                );
             }
             let (min, max) = world_bounds(&label);
             let glyph_rect = label_layout::supply_glyph_rect(&label).expect("a supply has a glyph");
@@ -687,7 +699,11 @@ mod tests {
             assert!(min.y as f32 <= glyph_rect.min.y && max.y as f32 >= glyph_rect.max.y);
         }
         let plain = NetLabel::new(9, Point::new(50, 40), "VDD");
-        assert!(screen_layout(&ctx, &viewport, &plain, color).supply_glyph.is_empty());
+        assert!(
+            screen_layout(&ctx, &viewport, &plain, color)
+                .supply_glyph
+                .is_empty()
+        );
     }
 
     #[test]
