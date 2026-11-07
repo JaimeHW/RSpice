@@ -483,7 +483,7 @@ impl Builder<'_> {
             })
         {
             self.refuse(format!("{label} {reason}; it was left out."));
-            self.place_marker(symbol, &label);
+            self.place_marker(symbol, symbol.embedded.as_ref(), &label);
             return;
         }
         // LTspice names its frequency-response probes `@n`; only LTspice
@@ -496,7 +496,7 @@ impl Builder<'_> {
             self.refuse(format!(
                 "{label} is an LTspice frequency-response probe, which only LTspice runs; it was left out, so the loop it was inserted in is open."
             ));
-            self.place_marker(symbol, &label);
+            self.place_marker(symbol, resolved.0.as_ref(), &label);
             return;
         }
         let (definition, location, schematic) = resolved;
@@ -706,10 +706,15 @@ impl Builder<'_> {
         }
     }
 
+    /// The part as a notice names it: its name and symbol (a QSPICE block
+    /// may have a name and no symbol).
     fn symbol_label(&self, symbol: &ForeignSymbol) -> String {
+        let drawn = symbol.symbol.trim();
         match symbol.attribute("InstName") {
-            Some(name) => format!("{name} ({})", symbol.symbol),
-            None => format!("Symbol {} on line {}", symbol.symbol, symbol.line),
+            Some(name) if drawn.is_empty() => name.to_owned(),
+            Some(name) => format!("{name} ({drawn})"),
+            None if drawn.is_empty() => format!("The symbol on line {}", symbol.line),
+            None => format!("Symbol {drawn} on line {}", symbol.line),
         }
     }
 
@@ -1512,13 +1517,36 @@ impl Builder<'_> {
         self.place_cell(symbol, &definition, &attributes, None, None, &[]);
     }
 
-    /// A note where a refused component stood, so the gap reads as one.
-    fn place_marker(&mut self, symbol: &ForeignSymbol, label: &str) {
+    /// A note where a refused component stood, so the gap reads as one: it
+    /// hangs from the top left of the body, its label under the words, so it
+    /// stays on the body's own ground rather than across its neighbours.
+    fn place_marker(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: Option<&ForeignSymbolDefinition>,
+        label: &str,
+    ) {
         let id = self.id();
-        let text = format!("Not imported: {label}");
+        let corner = definition
+            .into_iter()
+            .flat_map(|definition| {
+                let shapes = definition.shapes.iter().flat_map(|shape| match shape {
+                    ForeignShape::Line(a, b)
+                    | ForeignShape::Rectangle(a, b)
+                    | ForeignShape::Ellipse(a, b) => vec![*a, *b],
+                    // An arc's box is its whole ellipse's, often wider than
+                    // the body.
+                    ForeignShape::Arc(_) => Vec::new(),
+                });
+                shapes.chain(definition.pins.iter().map(|pin| pin.position))
+            })
+            .map(|point| symbol.orientation.apply(point))
+            .reduce(|a, b| ForeignPoint::new(a.x.min(b.x), a.y.min(b.y)))
+            .unwrap_or_default();
+        let text = format!("Not imported:\n{label}");
         if let Ok(note) = DesignNote::new(
             id,
-            self.scale(symbol.position),
+            self.scale(symbol.position.offset(corner)),
             DesignNoteKind::PlainText,
             text,
         ) {

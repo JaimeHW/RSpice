@@ -701,7 +701,7 @@ const QSPICE: &str = "«schematic
     »
   »
   «component (600,-600) 0 0
-    «symbol Counter
+    «symbol
       «type: Ø(.DLL)»
       «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ø1\"»
       «pin (-200,0) (0,0) 1 0 0 0x1000000 -1 \"clk\"»
@@ -780,12 +780,13 @@ fn a_qspice_drawing_joins_what_its_wire_names_join_and_refuses_a_dll() {
             (Rotation::R270, Point::new(100, -40))
         ]
     );
+    // The block draws no symbol name: its note names it alone.
     assert!(
         imported
             .document
             .design_notes
             .iter()
-            .any(|note| note.text.contains("Ø1"))
+            .any(|note| note.text == "Not imported:\nØ1")
     );
     assert_on_grid(&imported);
 
@@ -1941,4 +1942,14 @@ fn a_qspice_pin_nothing_reaches_joins_its_own_net() {
         .collect::<Vec<_>>();
     assert_eq!(nets, ["vdd", "0", "out", "out", "in"]);
     assert_on_grid(&imported);
+    // The refused flip-flop's note hangs from its body's top left corner,
+    // its label under the words, not across the parts beside it.
+    let note = imported
+        .document
+        .design_notes
+        .iter()
+        .find(|note| note.text.starts_with("Not imported"))
+        .expect("the flip-flop leaves a note");
+    assert_eq!(note.text, "Not imported:\n¥2 (DFLOP)");
+    assert_eq!(note.pos, Point::new(260, -40));
 }
