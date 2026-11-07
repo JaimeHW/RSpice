@@ -2508,6 +2508,7 @@ impl XyceTestRunner {
             ramptime,
             digital_delay_type,
             xspice_event_trace_save,
+            part_tolerances,
             itl1,
             itl2,
             itl4,
@@ -2577,6 +2578,7 @@ impl XyceTestRunner {
             && output_interval_schedule.is_none()
             && output_time_points.is_empty()
             && timeint_breakpoints.is_empty()
+            && part_tolerances.is_empty()
             && timeint_reltol.map(Value::to_bits) == reltol_bits
             && timeint_abstol.map(Value::to_bits) == abstol_bits
             && timeint_delmax.is_none()
