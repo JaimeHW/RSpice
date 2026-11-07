@@ -3619,7 +3619,7 @@ impl<'a> Flattener<'a> {
         deferred_params: &[(String, String)],
         scope: &ParamContext,
         abort: &dyn AbortSignal,
-    ) -> Result<(Vec<(String, Value)>, Vec<(String, String)>), ParseWithAbortError> {
+    ) -> Result<SpecialFunctionParams, ParseWithAbortError> {
         let mut constant = Vec::new();
         let mut varying: Vec<(String, String)> = Vec::new();
         for (name, expression) in deferred_params {
@@ -5068,6 +5068,11 @@ fn resolve_deferred_param_expressions(
 
     Ok(())
 }
+
+/// A special function's instance parameters after resolution: the numbers,
+/// then the noise densities left as prepared expressions of frequency or
+/// the operating point.
+type SpecialFunctionParams = (Vec<(String, Value)>, Vec<(String, String)>);
 
 /// Parameters after resolution, split by what each one resolved to: numeric
 /// values, string literals, and the assignments that stayed symbolic.
