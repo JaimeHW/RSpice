@@ -62,7 +62,8 @@ impl Ota {
     pub fn from_params(params: &[(String, Value)]) -> Result<Self, SpecialFunctionError> {
         let mut p = InstanceParams::new("OTA", params);
         let g = p.or("G", 1.0)?;
-        let iout = p.or("IOUT", 10e-6)?;
+        // LTspice's libraries also spell the source limit Isrc and Isource.
+        let iout = p.get_any(&["IOUT", "ISRC", "ISOURCE"])?.unwrap_or(10e-6);
         let isink = p.or("ISINK", -iout)?;
         let asym = p.flag("ASYM")?;
         let linear = p.flag("LINEAR")?;

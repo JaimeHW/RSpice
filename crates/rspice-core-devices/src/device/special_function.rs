@@ -64,19 +64,24 @@ impl<'a> InstanceParams<'a> {
 
     /// The last assignment of `name`, ignoring ASCII case.
     fn get(&mut self, name: &str) -> Result<Option<Value>, SpecialFunctionError> {
+        self.get_any(&[name])
+    }
+
+    /// The last assignment of any of `names`, the spellings of one parameter.
+    fn get_any(&mut self, names: &[&str]) -> Result<Option<Value>, SpecialFunctionError> {
         let mut found = None;
         for (index, (candidate, value)) in self.params.iter().enumerate() {
-            if candidate.eq_ignore_ascii_case(name) {
+            if names.iter().any(|name| candidate.eq_ignore_ascii_case(name)) {
                 self.read[index] = true;
-                found = Some(*value);
+                found = Some((candidate, *value));
             }
         }
         match found {
-            Some(value) if !value.is_finite() => Err(SpecialFunctionError::new(format!(
+            Some((name, value)) if !value.is_finite() => Err(SpecialFunctionError::new(format!(
                 "{} parameter {name} is not finite ({value})",
                 self.device
             ))),
-            found => Ok(found),
+            found => Ok(found.map(|(_, value)| value)),
         }
     }
 
