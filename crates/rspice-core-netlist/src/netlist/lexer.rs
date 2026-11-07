@@ -627,9 +627,10 @@ fn is_ident_start(c: char) -> bool {
     c.is_alphabetic() || c == '_' || c == '%'
 }
 
-/// Check if character can be part of an identifier
+/// Check if character can be part of an identifier. LTspice's own libraries
+/// write `§` inside element and node names (`I§G20`).
 fn is_ident_char(c: char) -> bool {
-    c.is_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%')
+    c.is_alphanumeric() || matches!(c, '_' | '.' | '#' | ':' | '%' | '§')
 }
 
 /// Check if an otherwise-special character should remain available to parsers.
@@ -643,11 +644,13 @@ fn is_other_token_char(c: char) -> bool {
 /// grouping delimiters, and assignment markers for the surrounding grammar.
 /// The element-head parser and noise contribution probes share this exact
 /// whitelist so a device identity remains stable across parsing and analysis.
+/// LTspice's libraries add `§`.
 pub fn is_xyce_device_name_char(character: char) -> bool {
     character.is_alphanumeric()
         || matches!(
             character,
             '_' | ':'
+                | '§'
                 | '$'
                 | '-'
                 | '`'

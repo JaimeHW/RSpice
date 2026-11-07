@@ -692,3 +692,18 @@ fn a_resistor_tc_is_a_polynomial_of_any_length() {
     assert_close("V(b)", op_voltage(&netlist, "b"), 1.1234, 1e-12);
     assert_close("V(c)", op_voltage(&netlist, "c"), 0.9, 1e-12);
 }
+
+// QSPICE 2026 and LTspice 26.1.1 batch: V(a)=4, V(n§x)=3.
+#[test]
+fn a_section_sign_belongs_to_element_and_node_names() {
+    let netlist = parse(
+        "section sign\n\
+         I§G1 0 a 1m\n\
+         R§1 a n§x 1k\n\
+         R2 n§x 0 3k\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 4.0, 1e-9);
+    assert_close("V(n§x)", op_voltage(&netlist, "n§x"), 3.0, 1e-9);
+}
