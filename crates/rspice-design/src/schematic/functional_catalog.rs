@@ -368,8 +368,9 @@ pub fn functional_instance_parameters(
             .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
     }) {
         return Err(format!(
-            "{} has no parameter '{key}'",
-            descriptor.display_name
+            "{} has no parameter '{}'",
+            descriptor.display_name,
+            key.to_ascii_uppercase()
         ));
     }
     Ok(written
