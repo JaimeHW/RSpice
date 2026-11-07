@@ -967,3 +967,79 @@ fn a_laplace_expression_reads_parameters_braced_or_bare() {
         assert_close(&format!("Im V({node}) #{point}"), voltage.im, im, 1e-9);
     }
 }
+
+// QSPICE 2026 steps `V1 a 0 SIN(0 1 100k)` under `.tran 5u 5m` every
+// 0.24-0.8 us, whatever TSTEP is, and its waveform read between those points
+// stays within 7.85e-3 of the sine; LTspice 26.1.1 within 3.8e-2. Stepped at
+// TSTEP, two points a period, it strays by most of the amplitude.
+#[test]
+fn a_sine_source_is_resolved_whatever_tstep_says() {
+    let netlist = parse(
+        "sine alone\n\
+         V1 a 0 SIN(0 1 100k)\n\
+         R1 a 0 1k\n\
+         .tran 5u 5m\n\
+         .end\n",
+    );
+    let tran = Engine::default()
+        .run_tran(&netlist, 5e-3, 5e-6)
+        .expect("transient solves");
+    let wave = tran
+        .try_voltage_waveform_named("a")
+        .expect("V(a) is solved");
+    let mut worst = 0.0f64;
+    for k in 0..20_000 {
+        let time = 5e-3 * f64::from(k) / 20_000.0;
+        let index = tran
+            .time
+            .partition_point(|t| *t < time)
+            .clamp(1, tran.time.len() - 1);
+        let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+        let value = wave[index - 1] + (wave[index] - wave[index - 1]) * (time - t0) / (t1 - t0);
+        worst = worst.max((value - (std::f64::consts::TAU * 1e5 * time).sin()).abs());
+    }
+    assert!(
+        worst <= 7.85e-3,
+        "V(a) strays {worst:e} from the sine between points"
+    );
+}
+
+// QSPICE 2026 steps `V1 a 0 SFFM(0 1 100k 5 10k)` under `.tran 5u 5m` at the
+// carrier's pace, about as often as a 100 kHz sine, and its waveform read
+// between those points strays within 1.13e-2 of the exact one; LTspice
+// 26.1.1 within 1.97e-2. RSpice resolves the carrier swung up to 150 kHz.
+#[test]
+fn an_sffm_source_is_resolved_whatever_tstep_says() {
+    let netlist = parse(
+        "sffm alone\n\
+         V1 a 0 SFFM(0 1 100k 5 10k)\n\
+         R1 a 0 1k\n\
+         .tran 5u 5m\n\
+         .end\n",
+    );
+    let tran = Engine::default()
+        .run_tran(&netlist, 5e-3, 5e-6)
+        .expect("transient solves");
+    let wave = tran
+        .try_voltage_waveform_named("a")
+        .expect("V(a) is solved");
+    let exact = |time: f64| {
+        use std::f64::consts::TAU;
+        (TAU * 1e5 * time + 5.0 * (TAU * 1e4 * time).sin()).sin()
+    };
+    let mut worst = 0.0f64;
+    for k in 0..20_000 {
+        let time = 5e-3 * f64::from(k) / 20_000.0;
+        let index = tran
+            .time
+            .partition_point(|t| *t < time)
+            .clamp(1, tran.time.len() - 1);
+        let (t0, t1) = (tran.time[index - 1], tran.time[index]);
+        let value = wave[index - 1] + (wave[index] - wave[index - 1]) * (time - t0) / (t1 - t0);
+        worst = worst.max((value - exact(time)).abs());
+    }
+    assert!(
+        worst <= 1.13e-2,
+        "V(a) strays {worst:e} from the SFFM between points"
+    );
+}

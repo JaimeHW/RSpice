@@ -445,6 +445,11 @@ macro_rules! shared_source_methods {
     };
 }
 
+/// The chord error, relative to its amplitude, that a sine source's steps
+/// keep to: QSPICE's own at the waveform's peaks, where it steps a 100 kHz
+/// sine every 0.241 us whatever TSTEP is.
+const SINE_CHORD_TOLERANCE: Value = 3e-3;
+
 impl VoltageSources {
     pub fn new() -> Self {
         Self::default()
@@ -1252,6 +1257,74 @@ impl VoltageSources {
             }
             _ => None,
         }
+    }
+
+    /// The longest step from `time` that resolves every sine source's
+    /// waveform, read the native way ([`Self::sine_resolution_step`]).
+    pub(crate) fn waveform_max_timestep_at(&self, time: Value) -> Option<Value> {
+        self.source_specs
+            .iter()
+            .flatten()
+            .filter_map(|spec| Self::sine_resolution_step(spec, time, self.transient_context))
+            .reduce(Value::min)
+    }
+
+    /// The longest step whose chord strays from a sine's waveform by no more
+    /// than [`SINE_CHORD_TOLERANCE`] of its amplitude, `sqrt(8 tol) / w`,
+    /// once the sine has started: QSPICE resolves a source's waveform
+    /// whatever TSTEP says. An `SFFM` source's `w` is its highest, the carrier
+    /// swung up by `MDI * FM`. A source with no sine asks for nothing; nor
+    /// does `AM`, which neither QSPICE nor LTspice reads.
+    fn sine_resolution_step(
+        spec: &crate::netlist::SourceSpec,
+        time: Value,
+        context: Option<TransientSourceContext>,
+    ) -> Option<Value> {
+        use crate::netlist::SourceSpec;
+
+        match spec {
+            SourceSpec::Distortion { inner, .. } | SourceSpec::RfPort { inner, .. } => {
+                Self::sine_resolution_step(inner, time, context)
+            }
+            SourceSpec::DcTransient { transient, .. }
+            | SourceSpec::AcTransient { transient, .. }
+            | SourceSpec::DcAcTransient { transient, .. } => {
+                Self::sine_resolution_step(transient, time, context)
+            }
+            SourceSpec::Sin {
+                amplitude,
+                frequency,
+                delay,
+                ..
+            } => {
+                let frequency = Self::resolve_sin_frequency(*frequency, context);
+                Self::chord_step(*amplitude, frequency, time >= *delay)
+            }
+            SourceSpec::Sffm {
+                amplitude,
+                carrier_freq,
+                modulation_index,
+                signal_freq,
+                delay,
+                ..
+            } => {
+                let (carrier, signal, index) =
+                    Self::sffm_parameters(*carrier_freq, *modulation_index, *signal_freq, context);
+                Self::chord_step(
+                    *amplitude,
+                    carrier.abs() + (index * signal).abs(),
+                    time >= *delay,
+                )
+            }
+            _ => None,
+        }
+    }
+
+    /// [`Self::sine_resolution_step`] for a sine of `amplitude` whose
+    /// frequency reaches `frequency`, once it has `started`.
+    fn chord_step(amplitude: Value, frequency: Value, started: bool) -> Option<Value> {
+        (amplitude != 0.0 && frequency.is_finite() && frequency > 0.0 && started)
+            .then(|| (8.0 * SINE_CHORD_TOLERANCE).sqrt() / (std::f64::consts::TAU * frequency))
     }
 
     #[inline]
@@ -2140,6 +2213,18 @@ pub struct CurrentSources {
 }
 
 impl CurrentSources {
+    /// The longest step from `time` that resolves every sine source's
+    /// waveform, read the native way ([`VoltageSources::waveform_max_timestep_at`]).
+    pub(crate) fn waveform_max_timestep_at(&self, time: Value) -> Option<Value> {
+        self.source_specs
+            .iter()
+            .flatten()
+            .filter_map(|spec| {
+                VoltageSources::sine_resolution_step(spec, time, self.transient_context)
+            })
+            .reduce(Value::min)
+    }
+
     #[inline]
     fn finite_dc_value(&self, index: usize) -> Value {
         let value = self.dc_values[index];

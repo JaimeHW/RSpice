@@ -1917,9 +1917,10 @@ impl Engine {
             && !circuit.has_xyce_core_shared_level1_ill_conditioned()
     }
 
-    /// Apply Xyce's dynamic voltage-source timestep contract without changing
-    /// native or ngspice stepping. Xyce 7.10 enables `TIMEINT USEDEVICEMAX`
-    /// by default and asks each VSRC waveform for its current ceiling.
+    /// The step ceiling the sources ask for. Read the native way, every sine
+    /// source's waveform is resolved whatever TSTEP says, as QSPICE resolves
+    /// it. Xyce 7.10 enables `TIMEINT USEDEVICEMAX` by default and asks each
+    /// VSRC waveform for its current ceiling. ngspice asks for none.
     #[inline]
     fn transient_device_max_timestep(
         &self,
@@ -1927,6 +1928,15 @@ impl Engine {
         time: Value,
         global_max_step: Value,
     ) -> Value {
+        if self.config.spice_dialect == SpiceDialect::BestAvailable {
+            return [
+                circuit.voltage_sources.waveform_max_timestep_at(time),
+                circuit.current_sources.waveform_max_timestep_at(time),
+            ]
+            .into_iter()
+            .flatten()
+            .fold(global_max_step, Value::min);
+        }
         if self.config.spice_dialect != SpiceDialect::Xyce
             || !self
                 .config
