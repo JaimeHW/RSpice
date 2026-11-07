@@ -206,3 +206,78 @@ rl out 0 1k
         "G LAPLACE pure gain must equal the linear VCCS: {vl} vs {vr}"
     );
 }
+
+/// `exp(-s*1m)/(1+s*0.2m)` in LTspice's E form: QSPICE refuses the delay
+/// factor ("Can't numerically factor"), so LTspice 26.1.1 decides.
+const DELAYED_LOWPASS: &str = "E1 out 0 in 0 Laplace=exp(-s*1m)/(1+s*0.2m)";
+
+fn delayed_lowpass_value(deck: &str, node: &str, frequency: f64) -> num_complex::Complex64 {
+    let netlist = Netlist::parse(deck).expect("deck parses");
+    let results = Engine::new(SimulationConfig::default())
+        .run_ac(&netlist, &[frequency])
+        .expect("ac solves");
+    let result = &results[0];
+    let index = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case(node))
+        .expect("node present");
+    result.voltages[index]
+}
+
+#[test]
+fn delay_factor_rotates_the_phase_without_touching_the_magnitude() {
+    // LTspice 26.1.1 AC: |H| = 0.992197 at -43.162 deg at 100 Hz.
+    let deck =
+        format!("* delayed lowpass\nvin in 0 dc 1 ac 1\n{DELAYED_LOWPASS}\nrl out 0 1k\n.end\n");
+    assert!((op_voltage(&deck, "out") - 1.0).abs() < 1e-8);
+    for frequency in [100.0, 1e3, 1e4] {
+        let omega = 2.0 * std::f64::consts::PI * frequency;
+        let want = num_complex::Complex64::from_polar(1.0, -omega * 1e-3)
+            / num_complex::Complex64::new(1.0, omega * 0.2e-3);
+        let got = delayed_lowpass_value(&deck, "out", frequency);
+        assert!(
+            (got - want).norm() < 1e-6 * want.norm(),
+            "H at {frequency} Hz: got {got}, want {want}"
+        );
+    }
+}
+
+#[test]
+fn delay_factor_shifts_the_step_response() {
+    // LTspice 26.1.1 transient: 0.392 at 1.6 ms and 0.918 at 2 ms.
+    let deck = format!(
+        "* delayed lowpass step\nvin in 0 pulse(0 1 0.5m 1u 1u 10 20)\n{DELAYED_LOWPASS}\nrl out 0 1k\n.end\n"
+    );
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let result = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 3e-3, 1e-6)
+        .expect("transient runs");
+    let out = result
+        .node_names
+        .iter()
+        .position(|name| name.eq_ignore_ascii_case("out"))
+        .expect("out present");
+    let start = 0.5e-3 + 0.5e-6 + 1e-3;
+    for (k, &t) in result.time.iter().enumerate() {
+        let want = if t <= start {
+            0.0
+        } else {
+            1.0 - (-(t - start) / 0.2e-3).exp()
+        };
+        let got = result.voltages[out][k];
+        assert!((got - want).abs() < 5e-3, "t={t}: got {got}, want {want}");
+    }
+}
+
+#[test]
+fn irrational_laplace_forms_are_refused_by_name() {
+    for (transfer, needle) in [
+        ("sqrt(s)/(1+s)", "sqrt() is not realizable"),
+        ("exp(-s*s*1m)", "must be a delay"),
+    ] {
+        let deck = format!("* refusal\nvin in 0 1\nE1 out 0 in 0 Laplace={transfer}\n.end\n");
+        let error = Netlist::parse(&deck).expect_err("refused").to_string();
+        assert!(error.contains(needle), "{transfer}: {error}");
+    }
+}

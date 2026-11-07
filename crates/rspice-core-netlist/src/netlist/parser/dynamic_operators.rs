@@ -384,49 +384,79 @@ fn realize(
                     )));
                 }
             }
-            let launch = node("DLYI");
-            let far = node("DLYO");
-            elements.push(Element {
-                name: node("BDLY"),
-                kind: ElementKind::BehavioralVoltage {
-                    expression: input.clone(),
-                    tc1: 0.0,
-                    tc2: 0.0,
-                    multiplicity: SourceMultiplicity::default(),
-                },
-                nodes: vec![launch.clone(), "0".to_string()],
-                provenance: internal(&launch),
-            });
-            elements.push(Element {
-                name: node("TDLY"),
-                kind: ElementKind::TransmissionLine {
-                    z0: Some(DELAY_LINE_IMPEDANCE),
-                    td: fixed,
-                    freq: None,
-                    nl: None,
-                    model: None,
-                    deferred_params: if fixed.is_some() {
-                        Vec::new()
-                    } else {
-                        vec![("TD".to_string(), delay.clone())]
-                    },
-                },
-                nodes: vec![launch, "0".to_string(), far.clone(), "0".to_string()],
-                provenance: internal(&far),
-            });
-            elements.push(Element {
-                name: node("RDLY"),
-                kind: ElementKind::Resistor {
-                    value: DELAY_LINE_IMPEDANCE,
-                    value_expr: None,
-                    model: None,
-                    instance_params: Vec::new(),
-                    deferred_params: Vec::new(),
-                },
-                nodes: vec![far.clone(), "0".to_string()],
-                provenance: internal(&far),
-            });
-            Ok(format!("V({far})"))
+            let delay = match fixed {
+                Some(value) => DelayTime::Fixed(value),
+                None => DelayTime::Deferred(delay.clone()),
+            };
+            Ok(delay_line(owner, ordinal, form, input, delay, elements))
         }
     }
+}
+
+/// How long a generated delay line delays: a number, or an expression the
+/// flattener resolves in the instance's parameter scope.
+pub(super) enum DelayTime {
+    Fixed(f64),
+    Deferred(String),
+}
+
+/// Launch `input` into a matched lossless line of `delay` owned by `owner`,
+/// appending its elements; returns the expression of its delayed far end.
+pub(super) fn delay_line(
+    owner: &str,
+    ordinal: usize,
+    form: SynthesizedTransferForm,
+    input: &str,
+    delay: DelayTime,
+    elements: &mut Vec<Element>,
+) -> String {
+    let node = |role: &str| format!("{owner}.__{role}{ordinal}");
+    let internal = |node: &str| ElementProvenance::GeneratedDynamicInternalNode {
+        owner: owner.to_string(),
+        form,
+        node: node.to_string(),
+    };
+    let (td, deferred_params) = match delay {
+        DelayTime::Fixed(value) => (Some(value), Vec::new()),
+        DelayTime::Deferred(text) => (None, vec![("TD".to_string(), text)]),
+    };
+    let launch = node("DLYI");
+    let far = node("DLYO");
+    elements.push(Element {
+        name: node("BDLY"),
+        kind: ElementKind::BehavioralVoltage {
+            expression: input.to_string(),
+            tc1: 0.0,
+            tc2: 0.0,
+            multiplicity: SourceMultiplicity::default(),
+        },
+        nodes: vec![launch.clone(), "0".to_string()],
+        provenance: internal(&launch),
+    });
+    elements.push(Element {
+        name: node("TDLY"),
+        kind: ElementKind::TransmissionLine {
+            z0: Some(DELAY_LINE_IMPEDANCE),
+            td,
+            freq: None,
+            nl: None,
+            model: None,
+            deferred_params,
+        },
+        nodes: vec![launch, "0".to_string(), far.clone(), "0".to_string()],
+        provenance: internal(&far),
+    });
+    elements.push(Element {
+        name: node("RDLY"),
+        kind: ElementKind::Resistor {
+            value: DELAY_LINE_IMPEDANCE,
+            value_expr: None,
+            model: None,
+            instance_params: Vec::new(),
+            deferred_params: Vec::new(),
+        },
+        nodes: vec![far.clone(), "0".to_string()],
+        provenance: internal(&far),
+    });
+    format!("V({far})")
 }

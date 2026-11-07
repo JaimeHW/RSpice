@@ -14,13 +14,17 @@
 //!   variable-step accuracy a fixed bilinear discretization cannot match.
 //! - **PSS/HB/noise**: inherit the realization like any other circuit.
 //!
+//! A multiplicative `exp(-s*T)` factor is a pure transport delay: the input
+//! first crosses a matched lossless line of delay `T`, whose history and
+//! breakpoints the line keeps, and the rational part acts on its far end.
+//!
 //! The rational is parsed exactly — no sampling or fitting — by evaluating
 //! the brace expression over the field of rational functions in `s`. The
 //! denominator is then made monic and the realization is frequency-scaled
 //! by `ω₀ = a₀^(1/n)` (the geometric mean of the pole magnitudes) so state
 //! magnitudes and stamped conductances stay O(1) wherever the poles live.
 
-use super::{Element, ElementKind, ParseError, SourceMultiplicity};
+use super::{DelayTime, Element, ElementKind, ParseError, SourceMultiplicity, delay_line};
 use crate::Value;
 
 //=============================================================================
@@ -81,11 +85,12 @@ fn poly_clean(p: Poly) -> Poly {
     )
 }
 
-/// Rational function `num/den` in `s`.
+/// Rational function `num/den` in `s` times the delay `e^(-s·delay)`.
 #[derive(Debug, Clone)]
 struct Rational {
     num: Poly,
     den: Poly,
+    delay: Value,
 }
 
 impl Rational {
@@ -93,6 +98,7 @@ impl Rational {
         Self {
             num: vec![v],
             den: vec![1.0],
+            delay: 0.0,
         }
     }
 
@@ -100,23 +106,61 @@ impl Rational {
         Self {
             num: vec![0.0, 1.0],
             den: vec![1.0],
+            delay: 0.0,
         }
     }
 
-    fn add(&self, other: &Self) -> Self {
-        Self {
+    /// `exp(argument)`, which is realizable only for an argument `c - s·T`.
+    fn exp(argument: &Self) -> Result<Self, String> {
+        let num = poly_trim(argument.num.clone());
+        let den = poly_trim(argument.den.clone());
+        let affine = den.len() == 1 && num.len() <= 2 && argument.delay == 0.0;
+        let delay = -num.get(1).copied().unwrap_or(0.0) / den[0];
+        if !(affine && delay.is_finite() && delay >= 0.0) {
+            return Err(
+                "exp() in a LAPLACE expression must be a delay exp(-s*T) with T >= 0; \
+                 other irrational transfer functions cannot be realized"
+                    .to_string(),
+            );
+        }
+        Ok(Self {
+            num: vec![(num[0] / den[0]).exp()],
+            den: vec![1.0],
+            delay,
+        })
+    }
+
+    /// The common delay of two summed terms; a zero term takes the other's.
+    fn sum_delay(&self, other: &Self) -> Result<Value, String> {
+        if poly_is_zero(&self.num) {
+            Ok(other.delay)
+        } else if poly_is_zero(&other.num) || self.delay == other.delay {
+            Ok(self.delay)
+        } else {
+            Err(
+                "LAPLACE terms with different exp(-s*T) delays cannot be realized; \
+                 factor the delay out of the sum"
+                    .to_string(),
+            )
+        }
+    }
+
+    fn add(&self, other: &Self) -> Result<Self, String> {
+        Ok(Self {
             num: poly_add(
                 &poly_mul(&self.num, &other.den),
                 &poly_mul(&other.num, &self.den),
             ),
             den: poly_mul(&self.den, &other.den),
-        }
+            delay: self.sum_delay(other)?,
+        })
     }
 
-    fn sub(&self, other: &Self) -> Self {
+    fn sub(&self, other: &Self) -> Result<Self, String> {
         self.add(&Self {
             num: poly_neg(&other.num),
             den: other.den.clone(),
+            delay: other.delay,
         })
     }
 
@@ -124,6 +168,7 @@ impl Rational {
         Self {
             num: poly_mul(&self.num, &other.num),
             den: poly_mul(&self.den, &other.den),
+            delay: self.delay + other.delay,
         }
     }
 
@@ -134,6 +179,7 @@ impl Rational {
         Ok(Self {
             num: poly_mul(&self.num, &other.den),
             den: poly_mul(&self.den, &other.num),
+            delay: self.delay - other.delay,
         })
     }
 
@@ -161,6 +207,8 @@ enum RatTok {
     Caret,
     LParen,
     RParen,
+    /// A named function, applied to the parenthesized argument that follows.
+    Function(String),
 }
 
 fn suffix_multiplier(suffix: &str) -> Option<Value> {
@@ -219,6 +267,20 @@ fn tokenize_rational(text: &str) -> Result<Vec<RatTok>, String> {
             's' | 'S' if !chars.get(i + 1).is_some_and(|c| c.is_ascii_alphanumeric()) => {
                 tokens.push(RatTok::S);
                 i += 1;
+            }
+            c if c.is_ascii_alphabetic() => {
+                let start = i;
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    i += 1;
+                }
+                let name: String = chars[start..i].iter().collect();
+                if chars.get(i) != Some(&'(') {
+                    return Err(format!(
+                        "unknown symbol '{name}' in LAPLACE expression \
+                         (allowed: numbers, s, + - * / ^, parentheses and exp(-s*T))"
+                    ));
+                }
+                tokens.push(RatTok::Function(name));
             }
             c if c.is_ascii_digit() || c == '.' => {
                 // Number: digits, optional fraction, optional exponent,
@@ -294,11 +356,11 @@ impl RatParser {
             match op {
                 RatTok::Plus => {
                     self.next();
-                    value = value.add(&self.parse_term()?);
+                    value = value.add(&self.parse_term()?)?;
                 }
                 RatTok::Minus => {
                     self.next();
-                    value = value.sub(&self.parse_term()?);
+                    value = value.sub(&self.parse_term()?)?;
                 }
                 _ => break,
             }
@@ -345,7 +407,7 @@ impl RatParser {
         match self.peek() {
             Some(RatTok::Minus) => {
                 self.next();
-                Ok(Rational::constant(0.0).sub(&self.parse_unary()?))
+                Rational::constant(0.0).sub(&self.parse_unary()?)
             }
             Some(RatTok::Plus) => {
                 self.next();
@@ -359,6 +421,21 @@ impl RatParser {
         match self.next() {
             Some(RatTok::Num(v)) => Ok(Rational::constant(v)),
             Some(RatTok::S) => Ok(Rational::s()),
+            Some(RatTok::Function(name)) => {
+                if !name.eq_ignore_ascii_case("exp") {
+                    let name = name.to_ascii_lowercase();
+                    return Err(format!(
+                        "{name}() is not realizable in a LAPLACE expression; only \
+                         polynomials in s and exp(-s*T) delay factors are"
+                    ));
+                }
+                self.next();
+                let argument = self.parse_expr()?;
+                if self.next() != Some(RatTok::RParen) {
+                    return Err("unbalanced parentheses in LAPLACE expression".to_string());
+                }
+                Rational::exp(&argument)
+            }
             Some(RatTok::LParen) => {
                 let inner = self.parse_expr()?;
                 if self.next() != Some(RatTok::RParen) {
@@ -376,7 +453,8 @@ impl RatParser {
 
 /// Parse a rational transfer function in `s` into ascending-coefficient
 /// numerator and denominator polynomials.
-pub(super) fn parse_rational_in_s(text: &str) -> Result<(Vec<Value>, Vec<Value>), String> {
+/// Parse `N(s)/D(s)·e^(-s·T)`, returning the numerator, denominator and `T`.
+pub(super) fn parse_rational_in_s(text: &str) -> Result<(Vec<Value>, Vec<Value>, Value), String> {
     let tokens = tokenize_rational(text)?;
     if tokens.is_empty() {
         return Err("empty LAPLACE transfer function".to_string());
@@ -387,6 +465,9 @@ pub(super) fn parse_rational_in_s(text: &str) -> Result<(Vec<Value>, Vec<Value>)
         return Err("trailing input after LAPLACE transfer function".to_string());
     }
 
+    if !(rational.delay.is_finite() && rational.delay >= 0.0) {
+        return Err("LAPLACE expression divides by exp(-s*T), a time advance".to_string());
+    }
     let mut num = poly_clean(rational.num);
     let mut den = poly_clean(rational.den);
     if poly_is_zero(&den) {
@@ -408,7 +489,7 @@ pub(super) fn parse_rational_in_s(text: &str) -> Result<(Vec<Value>, Vec<Value>)
         den.drain(0..common);
     }
 
-    Ok((num, den))
+    Ok((num, den, rational.delay))
 }
 
 //=============================================================================
@@ -440,11 +521,28 @@ pub(super) fn synthesize_laplace(
     voltage_output: bool,
     line_num: usize,
 ) -> Result<Vec<Element>, ParseError> {
-    let (num, den) = parse_rational_in_s(rational_text).map_err(|message| ParseError::Syntax {
-        line: line_num,
-        message: format!("LAPLACE source '{name}': {message}"),
-    })?;
-    synthesize_rational_transfer(
+    let (num, den, delay) =
+        parse_rational_in_s(rational_text).map_err(|message| ParseError::Syntax {
+            line: line_num,
+            message: format!("LAPLACE source '{name}': {message}"),
+        })?;
+    let form = crate::netlist::SynthesizedTransferForm::Laplace;
+    let mut elements = Vec::new();
+    let delayed;
+    let input_expr = if delay > 0.0 {
+        delayed = delay_line(
+            name,
+            1,
+            form,
+            input_expr,
+            DelayTime::Fixed(delay),
+            &mut elements,
+        );
+        delayed.as_str()
+    } else {
+        input_expr
+    };
+    elements.extend(synthesize_rational_transfer(
         name,
         node_pos,
         node_neg,
@@ -452,9 +550,10 @@ pub(super) fn synthesize_laplace(
         num,
         den,
         voltage_output,
-        crate::netlist::SynthesizedTransferForm::Laplace,
+        form,
         line_num,
-    )
+    )?);
+    Ok(elements)
 }
 
 /// Realize a real rational transfer function as circuit elements.
@@ -739,20 +838,29 @@ mod tests {
 
     #[test]
     fn parses_first_order_lowpass() {
-        let (num, den) = parse_rational_in_s("1/(1+s/1000)").unwrap();
+        let (num, den, _) = parse_rational_in_s("1/(1+s/1000)").unwrap();
         assert_ratio_eq((&num, &den), (&[1.0], &[1.0, 1e-3]));
     }
 
     #[test]
     fn parses_polynomial_ratio_with_suffixes_and_powers() {
         // (1 + s/1k)^2 / (1 + s*1m) — suffixes k and m, integer power.
-        let (num, den) = parse_rational_in_s("(1+s/1k)^2/(1+s*1m)").unwrap();
+        let (num, den, _) = parse_rational_in_s("(1+s/1k)^2/(1+s*1m)").unwrap();
         assert_ratio_eq((&num, &den), (&[1.0, 2e-3, 1e-6], &[1.0, 1e-3]));
     }
 
     #[test]
+    fn delay_factors_multiply_out_of_the_rational_part() {
+        let (num, den, delay) = parse_rational_in_s("2*exp(-s*1m)*exp(1-s/1k)/(1+s*0.2m)").unwrap();
+        assert!((delay - 2e-3).abs() < 1e-18, "{delay}");
+        assert_ratio_eq((&num, &den), (&[2.0 * 1f64.exp()], &[1.0, 2e-4]));
+        let (_, _, delay) = parse_rational_in_s("exp(-s*1m)/(1+s)+exp(-s*1m)").unwrap();
+        assert_eq!(delay, 1e-3);
+    }
+
+    #[test]
     fn cancels_common_s_factors_exactly() {
-        let (num, den) = parse_rational_in_s("s/(s*(1+s))").unwrap();
+        let (num, den, _) = parse_rational_in_s("s/(s*(1+s))").unwrap();
         // After exact s-cancellation the DC value must be finite (1.0).
         assert!(
             num[0] != 0.0 || den[0] != 0.0,
@@ -767,6 +875,16 @@ mod tests {
         assert!(format!("{err}").contains("improper"), "{err}");
 
         assert!(parse_rational_in_s("1/(1+q)").is_err());
+        for (text, needle) in [
+            ("sqrt(s)/(1+s)", "sqrt() is not realizable"),
+            ("exp(-s*s)/(1+s)", "must be a delay"),
+            ("exp(s*1m)", "must be a delay"),
+            ("1/exp(-s*1m)", "time advance"),
+            ("exp(-s*1m)+exp(-s*2m)", "different exp(-s*T) delays"),
+        ] {
+            let error = parse_rational_in_s(text).unwrap_err();
+            assert!(error.contains(needle), "{text}: {error}");
+        }
         assert!(parse_rational_in_s("1/0").is_err());
         assert!(parse_rational_in_s("").is_err());
     }
