@@ -318,7 +318,8 @@ fn a_waveform_written_without_parentheses_keeps_its_arguments() {
 
     let pwl = source_value(true, "PWL 0 0 .5m 48 AC 1 Rser=2");
     assert_eq!(pwl.kind, ComponentType::VoltageSourcePwl);
-    assert_eq!(pwl.value, "PWL(0 0 .5m 48)");
+    // Its pairs are its value: the list its card writes inside `PWL()`.
+    assert_eq!(pwl.value, "0 0 .5m 48");
     assert_eq!(
         pwl.params,
         [
@@ -389,6 +390,12 @@ fn a_positional_pulse_or_sine_fills_the_named_fields_of_its_source() {
         let source = source_value(true, text);
         assert_eq!((source.value.as_str(), source.params.len()), (kept, 0));
     }
+    // A PWL's pairs are its value, whatever case its name is written in.
+    let pwl = source_value(true, "pwl(0 0 1u 3.3)");
+    assert_eq!(pwl.kind, ComponentType::VoltageSourcePwl);
+    assert_eq!((pwl.value.as_str(), pwl.params.len()), ("0 0 1u 3.3", 0));
+    let odd = source_value(true, "PWL(0 0 1u)");
+    assert_eq!(odd.value, "PWL(0 0 1u)");
     let unknown = source_value(true, "PULSE(0 1 0 1n 1n 5m 10m) Foo=1");
     assert_eq!(unknown.value, "PULSE(0 1 0 1n 1n 5m 10m)");
     assert_eq!(unknown.extra, ["Foo=1"]);

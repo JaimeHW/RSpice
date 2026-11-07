@@ -144,7 +144,8 @@ pub(super) fn qspice_native(device_type: &str, pin_count: usize) -> Option<Nativ
 /// states none) is left out, or `None` when RSpice imports its kind.
 pub(super) fn qspice_refusal(device_type: &str, kind: &str) -> Option<String> {
     let letter = device_type.chars().next()?;
-    let kind = kind.trim().to_uppercase();
+    // QSPICE's drawings write the Φ of a phase detector's type as Ø.
+    let kind = kind.trim().to_uppercase().replace("Ø-DET", "Φ-DET");
     let what = match letter {
         'Ø' => {
             return Some(
@@ -163,8 +164,7 @@ pub(super) fn qspice_refusal(device_type: &str, kind: &str) -> Option<String> {
             "CLOCKSYNC" => "clock synchronizer",
             "MONOSTABLE" => "monostable",
             "ULATOR" => "AM/FM modulator",
-            // QSPICE's drawings write the Φ of its type as Ø.
-            "Φ-DET" | "Ø-DET" => "phase/frequency detector",
+            "Φ-DET" => "phase/frequency detector",
             oscillator if oscillator.contains("OSC") || oscillator == "VCO" => "oscillator",
             _ => "digital device",
         },
@@ -496,14 +496,22 @@ pub(super) fn source_value(voltage: bool, text: &str) -> SourceValue {
 /// that gives every argument the named form writes is read, so the card
 /// written from the fields is the source's own: `PULSE` with seven or eight
 /// arguments, `SIN` with three to six (the delay, damping and phase written
-/// for absent ones are 0, SPICE's own defaults). Any other list, and one
-/// written with commas, stays as written.
+/// for absent ones are 0, SPICE's own defaults). A `PWL` keeps its time and
+/// value pairs as its value, the list its card writes between `PWL(` and
+/// `)`. Any other list, and one written with commas, stays as written.
 fn named_waveform(
     kind: ComponentType,
     arguments: &[String],
 ) -> Option<(String, Vec<(String, String)>)> {
     use ComponentType as T;
     let count = arguments.len();
+    let plain = arguments
+        .iter()
+        .all(|argument| !argument.contains(',') && is_number_word(argument));
+    if matches!(kind, T::VoltageSourcePwl | T::CurrentSourcePwl) {
+        return (plain && count >= 2 && count.is_multiple_of(2))
+            .then(|| (arguments.join(" "), Vec::new()));
+    }
     let names: &[&str] = match kind {
         T::VoltageSourcePulse if (7..=8).contains(&count) => {
             &["v1", "v2", "td", "tr", "tf", "pw", "per", "np"]
@@ -519,10 +527,7 @@ fn named_waveform(
         }
         _ => return None,
     };
-    if arguments
-        .iter()
-        .any(|argument| argument.contains(',') || !is_number_word(argument))
-    {
+    if !plain {
         return None;
     }
     let (first, rest) = arguments.split_first()?;
