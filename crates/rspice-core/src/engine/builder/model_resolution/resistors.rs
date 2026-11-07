@@ -951,11 +951,30 @@ fn resolve_resistor_parameters(
         }
         resolved *= scale;
     } else {
-        if tc1 != 0.0 || tc2 != 0.0 {
+        // LTspice's `tc` polynomial continues past TC2 with TC3·dT³, ...
+        let higher_orders = (3..)
+            .map_while(|order| {
+                let name = format!("TC{order}");
+                instance_param(instance_params, &[name.as_str()])
+            })
+            .collect::<Vec<_>>();
+        if let Some(value) = higher_orders.iter().find(|value| !value.is_finite()) {
+            return Err(SimulationError::Circuit(format!(
+                "Resistor '{element_name}' resolved a temperature coefficient to non-finite value {value}"
+            )));
+        }
+        if tc1 != 0.0 || tc2 != 0.0 || higher_orders.iter().any(|value| *value != 0.0) {
             let temp_ctx =
                 crate::analysis::TemperatureContext::from_celsius(current_temp_c, tnom_c);
+            let dt = temp_ctx.delta_t;
+            let higher = higher_orders
+                .iter()
+                .zip(3..)
+                .map(|(coefficient, order)| coefficient * dt.powi(order))
+                .sum::<f64>();
             resolved = crate::analysis::ResistorTempCoeffs::new(tc1, tc2)
-                .scale_resistance(resolved, &temp_ctx);
+                .scale_resistance(resolved, &temp_ctx)
+                + resolved * higher;
         }
     }
 

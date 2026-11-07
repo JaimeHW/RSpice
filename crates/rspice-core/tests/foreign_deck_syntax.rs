@@ -671,3 +671,24 @@ fn a_controlled_source_follows_its_lookup_table() {
     assert_close("V(o3)", op_voltage(&netlist, "o3"), 4.0, 1e-9);
     assert_close("V(o4)", op_voltage(&netlist, "o4"), 2.866_666_667e-3, 1e-12);
 }
+
+// QSPICE 2026 and LTspice 26.1.1 batch at 127 C: V(a)=1.123, V(b)=1.1234,
+// V(c)=0.9, the polynomial R0·(1 + tc1·dT + tc2·dT² + tc3·dT³ + ...).
+#[test]
+fn a_resistor_tc_is_a_polynomial_of_any_length() {
+    let netlist = parse(
+        "resistor tc\n\
+         I1 0 a 1m\n\
+         R1 a 0 1k tc=1m 2u 3n\n\
+         I2 0 b 1m\n\
+         R2 b 0 1k tc = 1m, 2u, 3n, 4p noiseless\n\
+         I3 0 c 1m\n\
+         R3 c 0 1k tc=-1m\n\
+         .temp 127\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 1.123, 1e-12);
+    assert_close("V(b)", op_voltage(&netlist, "b"), 1.1234, 1e-12);
+    assert_close("V(c)", op_voltage(&netlist, "c"), 0.9, 1e-12);
+}

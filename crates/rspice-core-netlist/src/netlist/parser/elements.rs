@@ -158,6 +158,8 @@ pub(super) fn parse_resistor(
                             params,
                             element_label: "resistor",
                             defer_simple_param_refs,
+                            polynomial_tc: params.expression_dialect()
+                                != crate::config::ExpressionDialect::Xyce,
                         },
                         first,
                         ElementParamSink {
@@ -448,6 +450,9 @@ struct PassiveAssignmentContext<'a> {
     params: &'a ParamContext,
     element_label: &'a str,
     defer_simple_param_refs: bool,
+    /// LTspice's resistor `tc`: a polynomial of any length whose
+    /// coefficients may be separated by blanks.
+    polynomial_tc: bool,
 }
 
 /// The three model names a PSpice `U` compound gate names: the terminal model,
@@ -555,7 +560,22 @@ fn parse_passive_tc_assignment(
         params,
         element_label,
         defer_simple_param_refs,
+        polynomial_tc,
     } = context;
+    if polynomial_tc {
+        return parse_polynomial_tc(
+            stream,
+            line_num,
+            params,
+            defer_simple_param_refs,
+            first,
+            ElementParamSink {
+                instance_params,
+                deferred_params,
+            },
+            vector_given,
+        );
+    }
     let second = if !stream.consume(&TokenKind::Comma) {
         if passive_tc_assignment_ended(stream) {
             None
@@ -611,6 +631,71 @@ fn parse_passive_tc_assignment(
             second,
         );
         vector_given[1] = true;
+    }
+    Ok(())
+}
+
+/// LTspice's resistor `tc=tc1[,] tc2[,] tc3 ...`: R = R0·(1 + tc1·dT +
+/// tc2·dT² + tc3·dT³ + ...). Coefficients run until the card ends or a name
+/// follows, and the k-th one is `TCk`.
+fn parse_polynomial_tc(
+    stream: &mut TokenStream,
+    line_num: usize,
+    params: &ParamContext,
+    defer_simple_param_refs: bool,
+    first: DeferrableValue,
+    sink: ElementParamSink<'_>,
+    vector_given: &mut [bool; 2],
+) -> Result<(), ParseError> {
+    let ElementParamSink {
+        instance_params,
+        deferred_params,
+    } = sink;
+    let mut coefficients = vec![first];
+    loop {
+        let separated = stream.consume(&TokenKind::Comma);
+        // A number with a scale suffix (`2u`) lexes as a name.
+        let is_number = |kind: &TokenKind| match kind {
+            TokenKind::Number(_) | TokenKind::Expression(_) => true,
+            TokenKind::Ident(name) => crate::netlist::lexer::parse_spice_value(name).is_ok(),
+            _ => false,
+        };
+        let starts_value = match &stream.peek().kind {
+            TokenKind::Minus | TokenKind::Plus => is_number(&stream.peek_n(1).kind),
+            TokenKind::Ident(_) if separated => !matches!(stream.peek_n(1).kind, TokenKind::Equals),
+            kind => is_number(kind),
+        };
+        if !starts_value {
+            if separated {
+                return Err(ParseError::Syntax {
+                    line: line_num,
+                    message:
+                        "Expected a temperature coefficient after ',' in resistor parameter 'TC'"
+                            .to_string(),
+                });
+            }
+            break;
+        }
+        let coefficient = take_passive_tc_component(stream, params, defer_simple_param_refs)
+            .ok_or_else(|| ParseError::Syntax {
+                line: line_num,
+                message: "Expected a temperature coefficient in resistor parameter 'TC'"
+                    .to_string(),
+            })?;
+        coefficients.push(coefficient);
+    }
+    for (index, coefficient) in coefficients.into_iter().enumerate() {
+        upsert_instance_param(
+            ElementParamSink {
+                instance_params,
+                deferred_params,
+            },
+            format!("TC{}", index + 1),
+            coefficient,
+        );
+        if let Some(given) = vector_given.get_mut(index) {
+            *given = true;
+        }
     }
     Ok(())
 }
@@ -867,6 +952,7 @@ fn parse_passive_tail(
                             params,
                             element_label,
                             defer_simple_param_refs,
+                            polynomial_tc: false,
                         },
                         first,
                         ElementParamSink {
