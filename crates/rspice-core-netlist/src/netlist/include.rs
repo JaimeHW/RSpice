@@ -1515,11 +1515,19 @@ impl IncludeProcessor {
             let line_number = line_index + 1;
             let trimmed = line.trim();
 
+            // QSPICE and LTspice include the file a one-argument `.lib`
+            // names whole. Xyce reads every one-argument `.lib` as the start
+            // of a library section, so its BUG 387 certification deck fails
+            // on the missing `.ENDL`; a deck read under Xyce's rules keeps
+            // that meaning.
+            let whole_file_lib = self.expression_dialect != ExpressionDialect::Xyce
+                && library_file_include(trimmed).is_some();
+
             if split_directive(trimmed)
                 .is_some_and(|(directive, _)| directive.eq_ignore_ascii_case(".lib"))
-                && library_file_include(trimmed).is_none()
+                && !whole_file_lib
             {
-                let Some((filename, section)) = parse_lib_directive(trimmed) else {
+                let Some((filename, section)) = lib_directive_parts(trimmed) else {
                     return Err(ParseError::Syntax {
                         line: line_number,
                         message: format!(
@@ -1595,7 +1603,7 @@ impl IncludeProcessor {
 
             if split_directive(trimmed).is_some_and(|(directive, _)| {
                 matches_ignore_ascii_case(directive, &[".include", ".inc", ".incl"])
-            }) || library_file_include(trimmed).is_some()
+            }) || whole_file_lib
             {
                 let Some(filename) = parse_include_directive(trimmed) else {
                     return Err(ParseError::Syntax {
@@ -1973,10 +1981,18 @@ fn spice_relative_path(path: &str) -> PathBuf {
 /// Returns (filename, optional_section)
 pub fn parse_lib_directive(line: &str) -> Option<(String, Option<String>)> {
     let trimmed = super::parser::strip_semicolon_comment(line).trim();
-    let (directive, rest) = split_directive(trimmed)?;
+    let (directive, _) = split_directive(trimmed)?;
     if !directive.eq_ignore_ascii_case(".lib") || library_file_include(trimmed).is_some() {
         return None;
     }
+    lib_directive_parts(trimmed)
+}
+
+/// The file and optional section of a `.lib` card, reading a one-argument
+/// card as a section start whatever its argument looks like.
+fn lib_directive_parts(line: &str) -> Option<(String, Option<String>)> {
+    let trimmed = super::parser::strip_semicolon_comment(line).trim();
+    let (_, rest) = split_directive(trimmed)?;
     let rest = rest.trim();
     if rest.is_empty() {
         return None;
