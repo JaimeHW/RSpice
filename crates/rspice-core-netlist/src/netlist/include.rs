@@ -2021,7 +2021,12 @@ pub const MODEL_SOURCE_EXTENSIONS: &[&str] = &[
 /// path or a model-source extension, which no section name does; any other
 /// one-argument card opens a section.
 fn library_file_include(card: &str) -> Option<String> {
-    let rest = split_directive(card)?.1.trim();
+    let card = super::parser::strip_semicolon_comment(card).trim();
+    let (directive, rest) = split_directive(card)?;
+    if !directive.eq_ignore_ascii_case(".lib") {
+        return None;
+    }
+    let rest = rest.trim();
     let (argument, remainder) = match rest.chars().next() {
         Some(quote @ ('"' | '\'')) => {
             let quoted = &rest[1..];
