@@ -43,10 +43,12 @@ impl ForwardParameters {
             } else if head.eq_ignore_ascii_case(".ends") || head.eq_ignore_ascii_case(".eom") {
                 *depth = depth.saturating_sub(1);
             } else if *depth == 0
-                && [".param", ".params", ".global_param"]
+                && [".param", ".params"]
                     .iter()
                     .any(|command| head.eq_ignore_ascii_case(command))
             {
+                // `.global_param` values are runtime values an element
+                // already keeps as an expression, so they need no deferral.
                 declared.extend(declared_parameter_names(&card[head.len()..]));
             }
             card.clear();
@@ -102,8 +104,8 @@ pub(super) fn postpone_forward_reference(
     let mut words = line.split_whitespace();
     words.next();
     let names_unbound = words.any(|word| {
-        word.split(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-            .filter(|name| name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_'))
+        word.split(|c: char| !(c.is_alphanumeric() || c == '_'))
+            .filter(|name| name.starts_with(|c: char| c.is_alphabetic() || c == '_'))
             .any(|name| {
                 plan.declared.contains(&name.to_ascii_uppercase())
                     && !state.params.has_any_parameter_binding(name)
@@ -188,10 +190,12 @@ fn name_before_assignment(text: &str) -> Option<&str> {
         text = text.trim_end();
     }
     let start = text
-        .rfind(|c: char| !(c.is_ascii_alphanumeric() || c == '_'))
-        .map_or(0, |index| index + 1);
+        .char_indices()
+        .rev()
+        .find(|(_, c)| !(c.is_alphanumeric() || *c == '_'))
+        .map_or(0, |(index, c)| index + c.len_utf8());
     let name = &text[start..];
-    name.starts_with(|c: char| c.is_ascii_alphabetic() || c == '_')
+    name.starts_with(|c: char| c.is_alphabetic() || c == '_')
         .then_some(name)
 }
 
