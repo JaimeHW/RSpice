@@ -270,6 +270,7 @@ pub fn import_foreign_schematic(
         pin_points: HashMap::new(),
         pin_leads: HashMap::new(),
         lettered: Vec::new(),
+        free_names: Vec::new(),
         device_ties: Vec::new(),
         behaviours: Vec::new(),
     };
@@ -332,6 +333,7 @@ pub fn import_foreign_schematic(
     }
     builder.tie_device_pins();
     builder.place_flags();
+    builder.clear_net_names();
     builder.clear_lettering();
     builder.place_texts();
     builder.place_shapes();
@@ -371,6 +373,9 @@ struct Builder<'a> {
     /// The placed parts whose name and value stand where the drawing
     /// lettered them, by index.
     lettered: Vec<usize>,
+    /// Net labels, by index, whose name may stand on another side where it
+    /// lands on a body, with those sides in the order to try them.
+    free_names: Vec<(usize, Vec<NetLabelSide>)>,
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
@@ -1992,7 +1997,73 @@ impl Builder<'_> {
                         glyph: rail_glyph(&flag.name, run),
                     };
                 }
+                // A side RSpice chose, or a name QSPICE centres over its
+                // point, gives way to another where it lands on a body.
+                let others = match (run, label.side) {
+                    _ if matches!(label.kind, NetLabelKind::Supply { .. }) => Vec::new(),
+                    (None, _) => vec![NetLabelSide::Left, NetLabelSide::Above, NetLabelSide::Below],
+                    (Some(_), NetLabelSide::Above) if flag.facing.is_some() => {
+                        vec![NetLabelSide::Right, NetLabelSide::Left]
+                    }
+                    _ => Vec::new(),
+                };
+                if !others.is_empty() {
+                    self.free_names
+                        .push((self.document.net_labels.len(), others));
+                }
                 self.document.net_labels.push(label);
+            }
+        }
+    }
+
+    /// Names each net whose label may stand on another side on the first
+    /// side where its name lands on no part's body. RSpice draws its own
+    /// bodies, and grounds, which can reach into a name the drawing centred
+    /// beside them; and a flag on the middle of a wire says nothing of the
+    /// side its name reads to.
+    fn clear_net_names(&mut self) {
+        let natives = self
+            .document
+            .components
+            .iter()
+            .filter(|component| component.kind != ComponentType::CellInstance)
+            .map(native_body);
+        let cells = self.document.components.iter().filter_map(|component| {
+            let binding = component.library_cell.as_ref()?;
+            let cell = self.cells.iter().find(|cell| cell.cell == binding.cell)?;
+            cell.symbol.drawn_body_bounds()?;
+            let body = Body::of(&cell.symbol, component, &[]);
+            Some(LayoutRect {
+                min: LayoutPoint::new(
+                    (body.center.x - body.half.x) as f32,
+                    (body.center.y - body.half.y) as f32,
+                ),
+                max: LayoutPoint::new(
+                    (body.center.x + body.half.x) as f32,
+                    (body.center.y + body.half.y) as f32,
+                ),
+            })
+        });
+        let bodies = natives.chain(cells).collect::<Vec<_>>();
+        let lands = |label: &NetLabel| {
+            net_label_boxes(label)
+                .first()
+                .is_some_and(|name| bodies.iter().any(|body| overlaps(*name, *body)))
+        };
+        for (index, sides) in std::mem::take(&mut self.free_names) {
+            let Some(label) = self.document.net_labels.get(index) else {
+                continue;
+            };
+            if !lands(label) {
+                continue;
+            }
+            let clear = sides.into_iter().find(|side| {
+                let mut moved = label.clone();
+                moved.side = *side;
+                !lands(&moved)
+            });
+            if let Some(side) = clear {
+                self.document.net_labels[index].side = side;
             }
         }
     }

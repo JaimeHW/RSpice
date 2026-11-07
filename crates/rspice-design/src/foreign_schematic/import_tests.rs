@@ -1441,6 +1441,29 @@ fn an_ltspice_flag_names_its_net_away_from_what_reaches_it() {
     );
 }
 
+/// A flag whose side RSpice chooses, on the middle of a wire, names its net
+/// on the first side where the name lands on no part's body: reading away
+/// from the amplifier whose input it labels, not across its body.
+#[test]
+fn a_flag_whose_side_rspice_chooses_names_its_net_clear_of_bodies() {
+    use crate::schematic::net_label::NetLabelSide;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL amp 128 0 R0\nSYMATTR InstName X1\n\
+         WIRE 16 -16 96 -16\nFLAG 80 -16 SIGNAL\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let label = imported
+        .document
+        .net_labels
+        .iter()
+        .find(|label| label.name == "SIGNAL")
+        .expect("the flag is placed");
+    assert_eq!(label.side, NetLabelSide::Left);
+}
+
 #[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(
