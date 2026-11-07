@@ -240,6 +240,14 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                         numbers_after_points(fields).get(1).map(String::as_str),
                     ),
                     name_offset: None,
+                    // The second point is where the name stands from the
+                    // pin; its text code justifies it there.
+                    name_at: pin_points.get(1).map(|offset| {
+                        (
+                            *offset,
+                            text_reach(numbers_after_points(fields).get(1).map(String::as_str)),
+                        )
+                    }),
                     position: pin_points
                         .first()
                         .copied()

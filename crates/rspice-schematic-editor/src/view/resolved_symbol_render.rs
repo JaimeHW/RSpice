@@ -16,7 +16,7 @@ use egui::{Align, Align2, Color32, Painter, Pos2, Shape, Stroke, vec2};
 use super::lod;
 use crate::export::{SvgExportConfig, escape_xml};
 use rspice_design::{
-    resolved_symbol::ResolvedCellSymbol,
+    resolved_symbol::{ResolvedCellSymbol, ResolvedSymbolPin},
     schematic::{
         component::Component,
         component_display::SchematicParameterLabelVisibility,
@@ -27,7 +27,7 @@ use rspice_design::{
     symbol::{SymbolShape, SymbolTextAlign, SymbolTextPlacement, symbol_text_bounds},
     symbol_generation::{GENERATED_PIN_LABEL_SIZE, fit_pin_name, inward_step},
 };
-use rspice_design_model::{Point, port::PortDirection, symbol_pin::SymbolPinSide};
+use rspice_design_model::{Point, port::PortDirection};
 use rspice_ui_kit::{palette::Palette, tokens::Tokens};
 
 pub fn draw_resolved_symbol(
@@ -241,7 +241,7 @@ fn draw_symbol_pins(
             let anchor = to_screen(origin, scale, component, symbol.pin_label_anchor(pin));
             painter.text(
                 anchor,
-                pin_label_align(component, pin.side),
+                pin_label_align(component, pin),
                 fit_pin_name(&pin.name),
                 rspice_ui_kit::theme::mono(font_size, rspice_ui_kit::theme::FontWeight::Regular),
                 color.gamma_multiply(0.75),
@@ -251,9 +251,20 @@ fn draw_symbol_pins(
 }
 
 /// Align a pin name so it reads from its own edge into the body, whatever
-/// orientation the instance is placed in.
-fn pin_label_align(component: &Component, side: SymbolPinSide) -> Align2 {
-    let inward = component.transform_point(inward_step(side));
+/// orientation the instance is placed in. A name the drawing placed itself
+/// reaches from its anchor the way the drawing set it, turned with the
+/// instance and kept upright.
+fn pin_label_align(component: &Component, pin: &ResolvedSymbolPin) -> Align2 {
+    if let Some(at) = pin.name_at {
+        let reach = component.transform_point(at.reach);
+        let edge = |step: i32| match step.signum() {
+            1 => Align::Min,
+            -1 => Align::Max,
+            _ => Align::Center,
+        };
+        return Align2([edge(reach.x), edge(reach.y)]);
+    }
+    let inward = component.transform_point(inward_step(pin.side));
     if inward.x.abs() >= inward.y.abs() {
         if inward.x >= 0 {
             Align2::LEFT_CENTER
@@ -473,7 +484,7 @@ fn write_symbol_pins_svg(
             "pin",
             to_svg(component, symbol.pin_label_anchor(pin), config),
             &fit_pin_name(&pin.name),
-            pin_label_align(component, pin.side),
+            pin_label_align(component, pin),
             f64::from(GENERATED_PIN_LABEL_SIZE) * config.units_per_world,
         );
     }

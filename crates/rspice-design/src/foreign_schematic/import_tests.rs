@@ -2311,6 +2311,55 @@ fn an_ltspice_pin_with_no_name_letters_none() {
     );
 }
 
+/// A QSPICE pin sets where its name stands: its second point is the name's
+/// anchor from the pin, and its text code says which way the name reaches
+/// from there. A supply pin at the end of a lead drawn through an
+/// amplifier's body letters its name beside the lead's end, outside the
+/// body, rather than down the lead across the body's edge.
+#[test]
+fn a_qspice_pin_name_stands_where_the_drawing_sets_it() {
+    let drawing = parse_qsch(&qsch_bytes(
+        "«schematic
+  «component (0,0) 0 0
+    «symbol AMP
+      «type: X»
+      «line (-700,400) (-700,-400) 0 0 0x1000000 -1 -1»
+      «triangle (-1400,600) (-1400,-600) (0,0) 0 0 0x1000000 0x1000000 -1 -1»
+      «text (-700,150) 1 15 0 0x1000000 -1 -1 \"X1\"»
+      «text (-700,-100) 1 15 0 0x1000000 -1 -1 \"amp\"»
+      «pin (-1400,300) (20,0) 1 7 0 0x0 -1 \"IN\"»
+      «pin (-700,400) (100,20) 1 7 0 0x0 -1 \"VP\"»
+      «pin (-700,-400) (300,10) 1 11 0 0x0 -1 \"VN\"»
+      «pin (0,0) (-20,0) 1 11 0 0x0 -1 \"OUT\"»
+    »
+  »
+»
+",
+    ))
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let cell = imported
+        .cells
+        .iter()
+        .find(|cell| cell.source_symbol == "AMP")
+        .expect("the amplifier's cell");
+    let resolved = ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports);
+    let placed = |name: &str| {
+        let pin = resolved
+            .connectable_pins()
+            .find(|pin| pin.name == name)
+            .unwrap_or_else(|| panic!("no pin {name}"));
+        let terminal = resolved.effective_pin_offset(pin);
+        let anchor = resolved.pin_label_anchor(pin);
+        (
+            Point::new(anchor.x - terminal.x, anchor.y - terminal.y),
+            pin.name_at.map(|at| at.reach),
+        )
+    };
+    assert_eq!(placed("VP"), (Point::new(10, -2), Some(Point::new(1, 0))));
+    assert_eq!(placed("VN"), (Point::new(30, -1), Some(Point::new(-1, 0))));
+}
+
 /// A pin its source drawing letters no name for draws none here: LTspice's
 /// `NONE`, a place the symbol draws no pin for, and a QSPICE pin with no
 /// justification or one centred on its own point. A lettered pin keeps its

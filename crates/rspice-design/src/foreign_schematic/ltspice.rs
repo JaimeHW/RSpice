@@ -198,6 +198,7 @@ pub fn parse_asy(source: &str) -> Result<ForeignSymbolDefinition, ForeignParseEr
                         .is_some_and(|justification| justification.eq_ignore_ascii_case("NONE")),
                     // How far in from the pin the name starts.
                     name_offset: words.get(4).and_then(|offset| offset.parse().ok()),
+                    name_at: None,
                 });
             }
             "PINATTR" => {

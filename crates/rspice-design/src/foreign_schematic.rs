@@ -195,6 +195,10 @@ pub struct ForeignPin {
     /// How far in from the pin the source tool starts its name, in the
     /// drawing's units.
     pub name_offset: Option<i32>,
+    /// Where the source tool letters the name when it sets the place
+    /// itself (QSPICE): the anchor's offset from the pin, and which way the
+    /// name's box reaches from it across and down, in the symbol's frame.
+    pub name_at: Option<(ForeignPoint, ForeignPoint)>,
 }
 
 /// Drawing primitives, in the units of the drawing that holds them.

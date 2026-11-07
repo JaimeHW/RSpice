@@ -130,6 +130,21 @@ pub struct SymbolPin {
     /// its name. The name never starts closer than the standard gutter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub name_offset: Option<i32>,
+    /// Where the drawing this pin came from letters its name, when it sets
+    /// the place itself rather than a distance in from the terminal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name_at: Option<PinNamePlacement>,
+}
+
+/// A pin name's place as the drawing the pin came from sets it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PinNamePlacement {
+    /// The name's anchor from the pin's terminal, in symbol coordinates.
+    pub offset: Point,
+    /// Which way the name's box reaches from its anchor, across and down:
+    /// each step 1 or -1, or 0 where the box is centred on that axis.
+    pub reach: Point,
 }
 
 impl SymbolPin {
@@ -143,6 +158,7 @@ impl SymbolPin {
             offset: pin_offset(default_pin_side(direction, position), position),
             name_hidden: false,
             name_offset: None,
+            name_at: None,
         }
     }
 
@@ -156,6 +172,13 @@ impl SymbolPin {
     /// or at the standard gutter.
     pub fn with_name_offset(mut self, offset: Option<i32>) -> Self {
         self.name_offset = offset;
+        self
+    }
+
+    /// The same pin with its name lettered where the drawing it came from
+    /// sets it, or where the symbol's own layout puts it.
+    pub fn with_name_at(mut self, at: Option<PinNamePlacement>) -> Self {
+        self.name_at = at;
         self
     }
 

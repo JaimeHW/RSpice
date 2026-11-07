@@ -6,7 +6,7 @@ use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
-use crate::symbol::{SymbolDocument, SymbolShape};
+use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolShape};
 use crate::symbol_generation::GeneratedSymbol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -42,6 +42,9 @@ pub struct ResolvedSymbolPin {
     pub name_hidden: bool,
     /// How far in from the terminal the symbol starts this pin's name.
     pub name_offset: Option<i32>,
+    /// Where the symbol letters this pin's name, when the drawing it came
+    /// from sets the place itself.
+    pub name_at: Option<PinNamePlacement>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -97,6 +100,13 @@ impl ResolvedCellSymbol {
     /// sets its own distance for the name starts it there when that is
     /// farther in.
     pub fn pin_label_anchor(&self, pin: &ResolvedSymbolPin) -> Point {
+        // A name the drawing placed itself stands where it was placed.
+        if let Some(at) = pin.name_at {
+            return self.effective_point(Point::new(
+                pin.offset.x + at.offset.x,
+                pin.offset.y + at.offset.y,
+            ));
+        }
         let anchor = crate::symbol_generation::pin_label_anchor(
             pin.offset,
             pin.side,
@@ -139,6 +149,7 @@ impl ResolvedCellSymbol {
                         offset,
                         name_hidden: pin.name_hidden,
                         name_offset: pin.name_offset,
+                        name_at: pin.name_at,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -161,6 +172,7 @@ impl ResolvedCellSymbol {
                         offset,
                         name_hidden: pin.name_hidden,
                         name_offset: pin.name_offset,
+                        name_at: pin.name_at,
                     }),
                     None => issues.push(ResolvedSymbolIssue {
                         kind: ResolvedSymbolIssueKind::UnplacedPin,
@@ -235,6 +247,7 @@ impl ResolvedCellSymbol {
                         offset,
                         name_hidden: pin.name_hidden,
                         name_offset: pin.name_offset,
+                        name_at: pin.name_at,
                     })
                 })
             })

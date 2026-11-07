@@ -50,7 +50,7 @@ use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
 use crate::schematic::value_label::{component_value_label, value_pieces};
 use crate::schematic::wire::Wire;
-use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
+use crate::symbol::{PinNamePlacement, SymbolDocument, SymbolPin, SymbolShape};
 
 /// RSpice's schematic grid step.
 const GRID: i32 = 10;
@@ -1530,7 +1530,13 @@ impl Builder<'_> {
                     .with_name_hidden(
                         slot.is_none_or(|pin| pin.name_hidden || pin.name.trim().is_empty()),
                     )
-                    .with_name_offset(name_offset),
+                    .with_name_offset(name_offset)
+                    .with_name_at(slot.and_then(|pin| pin.name_at).map(|(offset, reach)| {
+                        PinNamePlacement {
+                            offset: self.scale_fine(offset),
+                            reach: Point::new(reach.x, reach.y),
+                        }
+                    })),
             );
         }
         if !gaps.is_empty() && !device {
