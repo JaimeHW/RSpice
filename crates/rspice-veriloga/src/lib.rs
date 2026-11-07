@@ -1247,8 +1247,15 @@ impl VerilogACompiler {
         let source_digest = canonical_ir::StableDigest::from_text(source).as_hex();
         measurements.checkpoint(PipelinePhase::BytecodeGeneration)?;
         let phase_started = web_time::Instant::now();
-        let model = CodeGenerator::new()
-            .generate_analyzed_module_with_source_digest(&executable, source_digest)?;
+        // The branch the runtime entries take: with AMS enabled a module's
+        // digital half belongs to the mixed host, and only its analog half is
+        // generated here.
+        let generator = CodeGenerator::new();
+        let model = if self.options.enable_ams {
+            generator.generate_mixed_analog_half_with_source_digest(&executable, source_digest)?
+        } else {
+            generator.generate_analyzed_module_with_source_digest(&executable, source_digest)?
+        };
         measurements.record(PipelinePhase::BytecodeGeneration, phase_started.elapsed());
 
         Ok((

@@ -6,8 +6,8 @@ use crate::cli::{CliError, CompileVaArgs, Config, map_atomic_output_error};
 use crate::commands::publish;
 use rspice_veriloga::canonical_ir::CanonicalValueType;
 use rspice_veriloga::{
-    CompilerOptions, DeclaredParameter, RuntimeAbiParameterRange, RuntimeAbiParameterValue,
-    RuntimeAbiRangeBound, RuntimeAbiRangeValue, VerilogACompiler,
+    DeclaredParameter, RuntimeAbiParameterRange, RuntimeAbiParameterValue, RuntimeAbiRangeBound,
+    RuntimeAbiRangeValue, VerilogACompiler,
 };
 
 /// Execute the compile-va command
@@ -29,8 +29,9 @@ pub fn execute(
     let usage_source = (args.show_usage && !quiet)
         .then(|| usage_source_path(&args.input))
         .transpose()?;
-    // Configure compiler options
-    let mut options = CompilerOptions::default();
+    // The app's options: AMS enabled, so a module with digital declarations
+    // compiles here exactly as it does in a project.
+    let mut options = rspice_simulation::compilation::unified_runtime_compiler_options();
 
     // Add include paths (CLI flags first, then config paths.veriloga_includes)
     for include_dir in &args.includes {

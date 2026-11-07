@@ -655,3 +655,40 @@ fn the_interface_states_parameters_as_declared() {
         );
     }
 }
+
+/// A module with digital declarations compiles as it does in a project: the
+/// compiler runs with AMS enabled, and the digital half is the mixed host's.
+#[test]
+fn a_module_with_digital_declarations_compiles_as_in_a_project() {
+    let dir = common::test_dir("ams_digital_declarations");
+    let input = dir.join("ams_cmp.vams");
+    let summary = dir.join("ams_cmp.json");
+    std::fs::write(
+        &input,
+        "`include \"disciplines.vams\"\n\
+         module cmp(inp, inn, q, clk);\n\
+         input inp, inn, clk;\n\
+         output q;\n\
+         electrical inp, inn;\n\
+         logic clk;\n\
+         reg q;\n\
+         always @(posedge clk) q <= (V(inp) > V(inn));\n\
+         endmodule\n",
+    )
+    .unwrap();
+    let output = Command::new(env!("CARGO_BIN_EXE_rspice"))
+        .arg("compile-va")
+        .arg(&input)
+        .arg("-o")
+        .arg(&summary)
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+    let interface = common::read_json(&summary);
+    assert_eq!(interface["model"], "cmp", "{interface}");
+    assert_eq!(
+        interface["terminals"],
+        serde_json::json!(["inp", "inn", "q", "clk"]),
+        "{interface}"
+    );
+}
