@@ -69,6 +69,10 @@ pub enum FileErrorNorm {
 pub enum MeasureOperand {
     Constant(Value),
     Waveform(String),
+    /// The final result of an earlier measurement of the same analysis, as
+    /// LTspice and QSPICE read `FIND V(in) AT t1`: the cards evaluate in
+    /// order once the analysis is complete.
+    Result(String),
 }
 
 /// Xyce's default absolute equality tolerance for conditional measurements.

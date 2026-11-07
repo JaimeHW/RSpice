@@ -4126,6 +4126,9 @@ impl LiveCondition {
                 MeasureOperand::Waveform(name) => {
                     LiveConditionOperand::Waveform(LiveMeasureOperand::compile(name, params)?)
                 }
+                MeasureOperand::Result(name) => {
+                    return Err(super::measure::unresolved_result_operand(name));
+                }
             },
             edge: condition.occurrence.edge,
             number: condition.occurrence.number,
@@ -4269,6 +4272,9 @@ impl LiveDelayClause {
                         MeasureOperand::Waveform(name) => LiveConditionOperand::Waveform(
                             LiveMeasureOperand::compile(name, params)?,
                         ),
+                        MeasureOperand::Result(name) => {
+                            return Err(super::measure::unresolved_result_operand(name));
+                        }
                     },
                     tracker: if legacy {
                         DelayConditionTracker::new_legacy(

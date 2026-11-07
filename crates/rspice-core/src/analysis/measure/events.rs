@@ -843,6 +843,7 @@ impl Evaluation<'_, '_, '_> {
         let (right, constant) = match &condition.right {
             MeasureOperand::Constant(value) => (None, *value),
             MeasureOperand::Waveform(text) => (Some(self.steps(text)?), Value::NAN),
+            MeasureOperand::Result(name) => return Err(super::unresolved_result_operand(name)),
         };
         let mut instants = left.instants.clone();
         if let Some(right) = right {

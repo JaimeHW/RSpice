@@ -5,7 +5,9 @@
 //! construct, LTspice does.
 
 use rspice_core::analysis::measure::MeasureResult;
-use rspice_core::analysis::measure_signals::evaluate_ac_measurements;
+use rspice_core::analysis::measure_signals::{
+    evaluate_ac_measurements, evaluate_tran_measurements,
+};
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
 
@@ -289,7 +291,9 @@ fn measurement(results: &[MeasureResult], name: &str) -> f64 {
         .unwrap_or_else(|| panic!("{name} failed: {:?}", result.error))
 }
 
-// QSPICE (QPOST): tmp=0.99998, gain=0.998032, ft=2760.03 Hz.
+// QSPICE (QPOST) decides; LTspice has no Phase(): tmp=0.99998,
+// gain=0.998032, ft=2760.03 Hz, ph=-59.9545 deg, gdb=-1.44507,
+// gre=0.716957, gim=-0.450477, f3=1587.78 Hz.
 #[test]
 fn ac_measurements_take_parts_of_a_complex_probe_with_functions() {
     let netlist = parse(
@@ -301,6 +305,7 @@ C1 out 0 100n
 .MEAS AC tmp max mag(V(out))
 .MEAS AC GAIN FIND mag(V(out)) AT 100
 .MEAS AC FT when mag(V(out)) = 0.5
+.MEAS AC ph find Phase(V(out)) at FT
 .MEAS AC gdb FIND db(V(out)) AT 1k
 .MEAS AC gre FIND re(V(out)) AT 1k
 .MEAS AC gim FIND im(V(out)) AT 1k
@@ -318,4 +323,34 @@ C1 out 0 100n
     assert_close("tmp", measurement(&results, "tmp"), 0.99998, 1e-5);
     assert_close("gain", measurement(&results, "gain"), 0.998032, 1e-6);
     assert_close("ft", measurement(&results, "ft"), 2760.03, 5.0);
+    assert_close("ph", measurement(&results, "ph"), -59.9545, 0.2);
+    assert_close("gdb", measurement(&results, "gdb"), -1.44507, 1e-4);
+    assert_close("gre", measurement(&results, "gre"), 0.716957, 1e-5);
+    assert_close("gim", measurement(&results, "gim"), -0.450477, 1e-5);
+    assert_close("f3", measurement(&results, "f3"), 1587.78, 5.0);
+}
+
+// QSPICE (QPOST) decides: t1=489.531 us, vin=0.0657325, slope=-6269.56 V/s;
+// LTspice: 489.531 us, 0.0657331, -6270.30 V/s.
+#[test]
+fn a_measurement_finds_a_value_at_another_measurements_result() {
+    let netlist = parse(
+        "* meas at another measurement
+V1 in 0 SIN(0 1 1k) AC 1
+R1 in out 1k
+C1 out 0 100n
+.tran 0 2m 0 1u
+.MEAS TRAN t1 WHEN V(out)=0.5 FALL=1
+.MEAS TRAN vin FIND V(in) AT t1
+.MEAS TRAN slope DERIV V(in) AT=t1
+.end
+",
+    );
+    let tran = Engine::default()
+        .run_tran(&netlist, 2e-3, 1e-6)
+        .expect("transient solves");
+    let results = evaluate_tran_measurements(&netlist, &tran);
+    assert_close("t1", measurement(&results, "t1"), 489.531e-6, 2e-8);
+    assert_close("vin", measurement(&results, "vin"), 0.0657325, 1e-4);
+    assert_close("slope", measurement(&results, "slope"), -6269.56, 2.0);
 }

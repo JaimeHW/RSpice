@@ -1041,34 +1041,34 @@ impl MeasureEngine {
         // Expression measures (PARAM='...') read other results by name, so
         // they evaluate in a second pass over the directly computed set —
         // and in statement order, so a PARAM may reference an earlier PARAM.
-        let mut results: Vec<MeasureResult> = self
-            .measurements
-            .iter()
-            .enumerate()
-            .map(|(index, m)| {
-                continuous::poll(abort, 0)?;
-                Ok(match &m.measure_type {
-                    MeasureType::Param { .. } | MeasureType::Equation { .. } => {
-                        MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
-                    }
-                    _ => {
-                        let signals = if signal_maps.len() == 1 {
-                            signal_maps[0]
-                        } else {
-                            signal_maps[index]
-                        };
-                        self.evaluate_one(
-                            m,
+        let mut results: Vec<MeasureResult> = Vec::with_capacity(self.measurements.len());
+        for (index, m) in self.measurements.iter().enumerate() {
+            continuous::poll(abort, 0)?;
+            let result = match &m.measure_type {
+                MeasureType::Param { .. } | MeasureType::Equation { .. } => {
+                    MeasureResult::failed_for_statement(m, "PARAM expression not yet evaluated")
+                }
+                _ => {
+                    let signals = if signal_maps.len() == 1 {
+                        signal_maps[0]
+                    } else {
+                        signal_maps[index]
+                    };
+                    match with_earlier_results(m, &results) {
+                        Ok(statement) => self.evaluate_one(
+                            &statement,
                             MeasureData {
                                 axis: time,
                                 signals,
                                 segment_starts,
                             },
-                        )
+                        ),
+                        Err(error) => MeasureResult::failed_for_statement(m, &error),
                     }
-                })
-            })
-            .collect::<Result<_, crate::SimulationError>>()?;
+                }
+            };
+            results.push(result);
+        }
         for (idx, m) in self.measurements.iter().enumerate() {
             continuous::poll(abort, idx)?;
             if let MeasureType::Param { expression } = &m.measure_type {
@@ -2495,7 +2495,55 @@ fn resolve_measure_operand<'a>(
         MeasureOperand::Waveform(name) => lookup_signal(signals, name)
             .map(ResolvedMeasureOperand::Waveform)
             .ok_or_else(|| format!("When signal '{name}' not found")),
+        MeasureOperand::Result(name) => Err(unresolved_result_operand(name)),
     }
+}
+
+pub(crate) fn unresolved_result_operand(name: &str) -> String {
+    format!("measurement '{name}' is read only as an AT point of a FIND or DERIV")
+}
+
+/// A FIND or DERIV placed at an earlier measurement's result reads that
+/// result once the earlier cards have been evaluated, in card order.
+fn with_earlier_results<'a>(
+    statement: &'a MeasureStatement,
+    earlier: &[MeasureResult],
+) -> Result<std::borrow::Cow<'a, MeasureStatement>, String> {
+    let (MeasureType::Find {
+        when: Some(condition),
+        ..
+    }
+    | MeasureType::Derivative {
+        when: Some(condition),
+        ..
+    }) = &statement.measure_type
+    else {
+        return Ok(std::borrow::Cow::Borrowed(statement));
+    };
+    let MeasureOperand::Result(name) = &condition.right else {
+        return Ok(std::borrow::Cow::Borrowed(statement));
+    };
+    let result = earlier
+        .iter()
+        .rev()
+        .find(|result| result.name.eq_ignore_ascii_case(name))
+        .ok_or_else(|| format!("AT names '{name}', which is not an earlier measurement"))?;
+    let value = result
+        .value
+        .ok_or_else(|| format!("measurement '{name}', which AT names, has no result"))?;
+    let mut resolved = statement.clone();
+    if let MeasureType::Find {
+        when: Some(condition),
+        ..
+    }
+    | MeasureType::Derivative {
+        when: Some(condition),
+        ..
+    } = &mut resolved.measure_type
+    {
+        condition.right = MeasureOperand::Constant(value);
+    }
+    Ok(std::borrow::Cow::Owned(resolved))
 }
 
 fn delay_clause_event(

@@ -3706,7 +3706,13 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "FIND" => {
-                    let options = parse_point_measure_options(stream, line_num, params, "FIND")?;
+                    let options = parse_point_measure_options(
+                        stream,
+                        line_num,
+                        params,
+                        "FIND",
+                        measure_result_axis(&analysis),
+                    )?;
 
                     MeasureType::Find {
                         signal: signal.clone(),
@@ -3719,7 +3725,13 @@ pub(super) fn parse_meas_command(
                     }
                 }
                 "DERIV" | "DERIVATIVE" => {
-                    let options = parse_point_measure_options(stream, line_num, params, "DERIV")?;
+                    let options = parse_point_measure_options(
+                        stream,
+                        line_num,
+                        params,
+                        "DERIV",
+                        measure_result_axis(&analysis),
+                    )?;
 
                     MeasureType::Derivative {
                         signal: signal.clone(),
@@ -4001,13 +4013,38 @@ fn expect_finite_measure_td(
     Ok(value)
 }
 
+/// The independent axis an `AT` naming an earlier measurement places its
+/// point on, for the analyses whose measurements evaluate after the run.
+fn measure_result_axis(analysis: &str) -> Option<&'static str> {
+    match analysis {
+        "TRAN" => Some("TIME"),
+        "AC" | "NOISE" => Some("FREQUENCY"),
+        _ => None,
+    }
+}
+
+/// Whether the word after `AT` names an earlier measurement rather than a
+/// number or a parameter: a bare name standing alone as the operand.
+fn names_measurement_result(stream: &TokenStream, params: &ParamContext) -> bool {
+    let TokenKind::Ident(name) = &stream.peek().kind else {
+        return false;
+    };
+    params.get(name).is_none()
+        && crate::netlist::lexer::parse_spice_value_complete(name).is_err()
+        && matches!(
+            stream.peek_n(1).kind,
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Comma | TokenKind::Ident(_)
+        )
+}
+
 fn parse_point_measure_options(
     stream: &mut TokenStream,
     line_num: usize,
     params: &ParamContext,
     measure_type: &str,
+    result_axis: Option<&str>,
 ) -> Result<PointMeasureOptions, ParseError> {
-    use crate::netlist::measure::WhenCondition;
+    use crate::netlist::measure::{MeasureOperand, WhenCondition};
 
     let mut options = PointMeasureOptions {
         at: None,
@@ -4048,6 +4085,27 @@ fn parse_point_measure_options(
                         line: line_num,
                         message: format!("Expected '=' after {keyword} in .MEAS {measure_type}"),
                     });
+                }
+                // `AT t1` names an earlier measurement: the point is where the
+                // axis reaches that measurement's result.
+                if keyword == "AT"
+                    && let Some(axis) = result_axis
+                    && names_measurement_result(stream, params)
+                {
+                    if options.when.is_some() {
+                        return Err(ParseError::Syntax {
+                            line: line_num,
+                            message: format!(".MEAS {measure_type} takes AT or WHEN, not both"),
+                        });
+                    }
+                    let name = stream.peek().lexeme.clone();
+                    stream.advance();
+                    options.when = Some(WhenCondition {
+                        left: axis.to_string(),
+                        right: MeasureOperand::Result(name),
+                        occurrence: crate::netlist::measure::EventOccurrence::default(),
+                    });
+                    continue;
                 }
                 let value = if keyword == "TD" {
                     expect_finite_measure_td(stream, line_num, params)?
