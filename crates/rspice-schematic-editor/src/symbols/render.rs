@@ -5,9 +5,8 @@
 //! geometry every frame.
 
 use egui::{Painter, Pos2, Shape, Stroke, Vec2};
-use std::f32::consts::PI;
 
-use rspice_design::symbol_artwork::{PathCommand, Symbol};
+use rspice_design::symbol_artwork::Symbol;
 
 // =============================================================================
 // Baked symbols — flattened once, painted with one multiply-add per point
@@ -37,109 +36,22 @@ pub fn bake_symbol_with_dimensions(
     mirror_h: bool,
     mirror_v: bool,
 ) -> BakedSymbol {
-    let rotation_rad = (rotation_degrees as f32) * PI / 180.0;
-    let cos_r = rotation_rad.cos();
-    let sin_r = rotation_rad.sin();
-    let (cx, cy) = symbol.center();
-    let view_scale_x = target_width / symbol.width().max(0.001);
-    let view_scale_y = target_height / symbol.height().max(0.001);
-
     let mut baked = BakedSymbol::default();
-
-    for path in &symbol.paths {
-        let mut points: Vec<Vec2> = Vec::new();
-        let mut current_pos = (0.0f32, 0.0f32);
-        let path_filled = path.filled;
-
-        let flush = move |points: &mut Vec<Vec2>, baked: &mut BakedSymbol| {
-            if points.len() >= 2 {
-                if path_filled {
-                    baked.filled.push(std::mem::take(points));
-                } else {
-                    collect_corner_dots(points, &mut baked.corner_dots);
-                    baked.polylines.push(std::mem::take(points));
-                }
-            } else {
-                points.clear();
-            }
-        };
-
-        for cmd in &path.commands {
-            match cmd {
-                PathCommand::MoveTo(x, y) => {
-                    flush(&mut points, &mut baked);
-                    let (tx, ty) = transform_point_nonuniform(
-                        *x,
-                        *y,
-                        cx,
-                        cy,
-                        cos_r,
-                        sin_r,
-                        view_scale_x,
-                        view_scale_y,
-                        mirror_h,
-                        mirror_v,
-                        Pos2::ZERO,
-                    );
-                    points.push(Vec2::new(tx, ty));
-                    current_pos = (*x, *y);
-                }
-                PathCommand::LineTo(x, y) => {
-                    let (tx, ty) = transform_point_nonuniform(
-                        *x,
-                        *y,
-                        cx,
-                        cy,
-                        cos_r,
-                        sin_r,
-                        view_scale_x,
-                        view_scale_y,
-                        mirror_h,
-                        mirror_v,
-                        Pos2::ZERO,
-                    );
-                    points.push(Vec2::new(tx, ty));
-                    current_pos = (*x, *y);
-                }
-                PathCommand::CurveTo { ctrl1, ctrl2, end } => {
-                    let segments = 16;
-                    for i in 0..=segments {
-                        let t = i as f32 / segments as f32;
-                        let (bx, by) = cubic_bezier(current_pos, *ctrl1, *ctrl2, *end, t);
-                        let (tx, ty) = transform_point_nonuniform(
-                            bx,
-                            by,
-                            cx,
-                            cy,
-                            cos_r,
-                            sin_r,
-                            view_scale_x,
-                            view_scale_y,
-                            mirror_h,
-                            mirror_v,
-                            Pos2::ZERO,
-                        );
-                        // Skip a t=0 point that duplicates the previous vertex.
-                        if i == 0 && !points.is_empty() {
-                            let last = points.last().unwrap();
-                            if (last.x - tx).abs() < 0.1 && (last.y - ty).abs() < 0.1 {
-                                continue;
-                            }
-                        }
-                        points.push(Vec2::new(tx, ty));
-                    }
-                    current_pos = *end;
-                }
-                PathCommand::Close => {
-                    if let Some(first) = points.first() {
-                        points.push(*first);
-                    }
-                }
-            }
+    for run in symbol.placed_runs(
+        target_width,
+        target_height,
+        rotation_degrees,
+        mirror_h,
+        mirror_v,
+    ) {
+        let points: Vec<Vec2> = run.points.iter().map(|&(x, y)| Vec2::new(x, y)).collect();
+        if run.filled {
+            baked.filled.push(points);
+        } else {
+            collect_corner_dots(&points, &mut baked.corner_dots);
+            baked.polylines.push(points);
         }
-        flush(&mut points, &mut baked);
     }
-
     baked
 }
 
@@ -243,128 +155,28 @@ pub fn draw_symbol_with_dimensions(
     mirror_v: bool,
     stroke: Stroke,
 ) {
-    let rotation_rad = (rotation_degrees as f32) * PI / 180.0;
-    let cos_r = rotation_rad.cos();
-    let sin_r = rotation_rad.sin();
-
-    // Symbol center for rotation pivot
-    let (cx, cy) = symbol.center();
-
-    // Non-uniform scaling to exactly fill target dimensions:
-    // This ensures terminal leads reach their expected positions on the grid.
-    // For transistors, gate lead must reach -hw and D/S leads must reach ±hh.
-    let view_scale_x = target_width / symbol.width().max(0.001);
-    let view_scale_y = target_height / symbol.height().max(0.001);
-    let total_scale_x = scale * view_scale_x;
-    let total_scale_y = scale * view_scale_y;
-
-    for path in &symbol.paths {
-        let mut points: Vec<Pos2> = Vec::new();
-        let mut current_pos = (0.0f32, 0.0f32);
-
-        for cmd in &path.commands {
-            match cmd {
-                PathCommand::MoveTo(x, y) => {
-                    // Draw accumulated points first
-                    if points.len() >= 2 {
-                        draw_path_segment(painter, &points, stroke);
-                    }
-                    points.clear();
-
-                    // Transform point with non-uniform scaling and mirroring
-                    let (tx, ty) = transform_point_nonuniform(
-                        *x,
-                        *y,
-                        cx,
-                        cy,
-                        cos_r,
-                        sin_r,
-                        total_scale_x,
-                        total_scale_y,
-                        mirror_h,
-                        mirror_v,
-                        center,
-                    );
-                    points.push(Pos2::new(tx, ty));
-                    current_pos = (*x, *y);
-                }
-                PathCommand::LineTo(x, y) => {
-                    let (tx, ty) = transform_point_nonuniform(
-                        *x,
-                        *y,
-                        cx,
-                        cy,
-                        cos_r,
-                        sin_r,
-                        total_scale_x,
-                        total_scale_y,
-                        mirror_h,
-                        mirror_v,
-                        center,
-                    );
-                    points.push(Pos2::new(tx, ty));
-                    current_pos = (*x, *y);
-                }
-                PathCommand::CurveTo { ctrl1, ctrl2, end } => {
-                    // Approximate bezier with line segments
-                    // Start from t=0 to ensure we don't skip the starting connection
-                    let segments = 16; // Use more segments for smoother curves
-                    for i in 0..=segments {
-                        let t = i as f32 / segments as f32;
-                        let (bx, by) = cubic_bezier(current_pos, *ctrl1, *ctrl2, *end, t);
-                        let (tx, ty) = transform_point_nonuniform(
-                            bx,
-                            by,
-                            cx,
-                            cy,
-                            cos_r,
-                            sin_r,
-                            total_scale_x,
-                            total_scale_y,
-                            mirror_h,
-                            mirror_v,
-                            center,
-                        );
-                        // Skip adding t=0 point if it would duplicate the previous MoveTo point
-                        if i == 0 && !points.is_empty() {
-                            // Check if we'd be adding a duplicate
-                            let last = points.last().unwrap();
-                            let new_point = Pos2::new(tx, ty);
-                            if (last.x - new_point.x).abs() < 0.1
-                                && (last.y - new_point.y).abs() < 0.1
-                            {
-                                continue;
-                            }
-                        }
-                        points.push(Pos2::new(tx, ty));
-                    }
-                    current_pos = *end;
-                }
-                PathCommand::Close => {
-                    if let Some(first) = points.first() {
-                        points.push(*first);
-                    }
-                }
-            }
-        }
-
-        // Draw remaining points
-        if points.len() >= 2 {
-            if path.filled {
-                painter.add(Shape::convex_polygon(
-                    points.clone(),
-                    stroke.color,
-                    Stroke::new(stroke.width * 0.5, stroke.color),
-                ));
-            } else {
-                draw_path_segment(painter, &points, stroke);
-            }
+    for run in symbol.placed_runs(
+        target_width,
+        target_height,
+        rotation_degrees,
+        mirror_h,
+        mirror_v,
+    ) {
+        let points: Vec<Pos2> = run
+            .points
+            .iter()
+            .map(|&(x, y)| center + Vec2::new(x, y) * scale)
+            .collect();
+        if run.filled {
+            painter.add(Shape::convex_polygon(
+                points,
+                stroke.color,
+                Stroke::new(stroke.width * 0.5, stroke.color),
+            ));
+        } else {
+            draw_path_segment(painter, &points, stroke);
         }
     }
-
-    // Note: Lead lines are handled by the SVG artwork itself.
-    // The SVG symbols are designed with lead lines that extend to terminal positions.
-    // Uniform scaling preserves these leads proportionally.
 }
 
 /// Draw a sequence of connected line segments using individual line calls
@@ -409,66 +221,4 @@ fn draw_path_segment(painter: &Painter, points: &[Pos2], stroke: Stroke) {
     for pair in points.windows(2) {
         painter.line_segment([pair[0], pair[1]], stroke);
     }
-}
-
-/// Transform a point with rotation around symbol center and non-uniform scale.
-/// Non-uniform scaling is applied BEFORE rotation to ensure the symbol fills
-/// exactly its target dimensions. This guarantees terminals land on grid lines.
-/// Mirroring is applied BEFORE rotation but AFTER scaling.
-#[expect(
-    clippy::too_many_arguments,
-    reason = "precomputed transform factors avoid repeated trigonometry per point"
-)]
-fn transform_point_nonuniform(
-    x: f32,
-    y: f32,
-    cx: f32,
-    cy: f32,
-    cos_r: f32,
-    sin_r: f32,
-    scale_x: f32,
-    scale_y: f32,
-    mirror_h: bool,
-    mirror_v: bool,
-    center: Pos2,
-) -> (f32, f32) {
-    // Translate to symbol origin
-    let dx = x - cx;
-    let dy = y - cy;
-
-    // Apply non-uniform scaling BEFORE rotation
-    // This ensures the symbol exactly fills its target dimensions
-    let sx = dx * scale_x;
-    let sy = dy * scale_y;
-
-    // Apply mirroring BEFORE rotation
-    // mirror_h flips horizontally (negate x), mirror_v flips vertically (negate y)
-    let mx = if mirror_h { -sx } else { sx };
-    let my = if mirror_v { -sy } else { sy };
-
-    // Rotate the mirrored and scaled point
-    let rx = mx * cos_r - my * sin_r;
-    let ry = mx * sin_r + my * cos_r;
-
-    // Translate to screen position
-    (center.x + rx, center.y + ry)
-}
-
-/// Evaluate cubic bezier at parameter t
-fn cubic_bezier(
-    p0: (f32, f32),
-    p1: (f32, f32),
-    p2: (f32, f32),
-    p3: (f32, f32),
-    t: f32,
-) -> (f32, f32) {
-    let t2 = t * t;
-    let t3 = t2 * t;
-    let mt = 1.0 - t;
-    let mt2 = mt * mt;
-    let mt3 = mt2 * mt;
-
-    let x = mt3 * p0.0 + 3.0 * mt2 * t * p1.0 + 3.0 * mt * t2 * p2.0 + t3 * p3.0;
-    let y = mt3 * p0.1 + 3.0 * mt2 * t * p1.1 + 3.0 * mt * t2 * p2.1 + t3 * p3.1;
-    (x, y)
 }

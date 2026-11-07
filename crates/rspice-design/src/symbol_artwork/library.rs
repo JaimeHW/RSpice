@@ -5,10 +5,12 @@
 
 use std::collections::HashMap;
 
+use crate::schematic::component::Component;
 use crate::schematic::component_type::ComponentType;
 
 use super::error::SymbolError;
 use super::parser::parse_svg;
+use super::placement::PlacedRun;
 use super::types::Symbol;
 
 mod embedded_symbols {
@@ -395,6 +397,28 @@ impl SymbolLibrary {
         }
 
         self.get_with_rotation(component_type, rotation_degrees)
+    }
+
+    /// The artwork of a part RSpice draws with its own symbol, placed as the
+    /// canvas places it for `component`: its kind's symbol or the skin it
+    /// names, turned and mirrored with it, in schematic units about its
+    /// position. None for a library cell, whose drawing is its cell's.
+    pub fn placed_artwork(&self, component: &Component) -> Option<Vec<PlacedRun>> {
+        if component.kind == ComponentType::CellInstance {
+            return None;
+        }
+        let (symbol, rotation) = self.get_with_rotation_variant(
+            component.kind,
+            component.rotation.degrees(),
+            component.symbol_variant.as_deref(),
+        )?;
+        Some(symbol.placed_runs(
+            symbol.target_width,
+            symbol.target_height,
+            rotation,
+            component.mirror_h,
+            component.mirror_v,
+        ))
     }
 
     /// Number of loaded symbols

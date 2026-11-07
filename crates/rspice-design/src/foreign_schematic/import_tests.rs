@@ -1237,7 +1237,7 @@ fn a_qspice_value_lettered_in_several_texts_keeps_each_where_the_drawing_set_it(
 /// A part RSpice draws with its own artwork has a body of another size than
 /// the source symbol's. A name or value the drawing stood just beside the
 /// source body keeps its side and its line but moves out along the way it
-/// reads until it clears RSpice's body.
+/// reads until it clears the ink of RSpice's body.
 #[test]
 fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
     use crate::schematic::label_layout::{
@@ -1267,12 +1267,6 @@ fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
             .iter()
             .find(|component| component.name == name)
             .unwrap_or_else(|| panic!("{name} is placed"));
-        let (width, height) = part.symbol_dimensions();
-        let (width, height) = if part.rotation.is_vertical() {
-            (height as f32, width as f32)
-        } else {
-            (width as f32, height as f32)
-        };
         let (x, y) = (part.pos.x as f32, part.pos.y as f32);
         let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
         let reads = if name == "Q2" {
@@ -1290,21 +1284,17 @@ fn a_name_or_value_beside_a_source_body_clears_the_body_rspice_draws() {
                 "{name}: {text:?} keeps its side and its line"
             );
             let text_box = text_box(placed, text, size);
-            let clear = text_box.min.x >= x + width * 0.5
-                || text_box.max.x <= x - width * 0.5
-                || text_box.min.y >= y + height * 0.5
-                || text_box.max.y <= y - height * 0.5;
             assert!(
-                clear,
-                "{name}: {text:?} at {text_box:?} stands on the {width}x{height} body at ({x}, {y})"
+                !meets_drawn_body(part, text_box),
+                "{name}: {text:?} at {text_box:?} stands on the body drawn at ({x}, {y})"
             );
         }
     }
 }
 
 /// A name or value moved off the body RSpice draws goes to the nearest
-/// place where it lands on no body and no other text: a part's name and
-/// value both centred beside a turned body do not move onto each other.
+/// place where it lands on no drawn body and no other text: a part's name
+/// and value both centred beside a turned body do not move onto each other.
 #[test]
 fn a_text_moved_off_a_body_lands_on_no_other_text() {
     use crate::schematic::label_layout::{
@@ -1319,22 +1309,10 @@ fn a_text_moved_off_a_body_lands_on_no_other_text() {
     )
     .expect("the drawing reads");
     let imported = import_foreign_schematic(&drawing, "work", &library());
-    let mut boxes = Vec::new();
-    for part in &imported.document.components {
-        let (width, height) = part.symbol_dimensions();
-        let (width, height) = if part.rotation.is_vertical() {
-            (height as f32, width as f32)
-        } else {
-            (width as f32, height as f32)
-        };
+    let parts = &imported.document.components;
+    let mut boxes: Vec<(String, LayoutRect)> = Vec::new();
+    for part in parts {
         let (x, y) = (part.pos.x as f32, part.pos.y as f32);
-        boxes.push((
-            format!("{} body", part.name),
-            LayoutRect {
-                min: LayoutPoint::new(x - width * 0.5, y - height * 0.5),
-                max: LayoutPoint::new(x + width * 0.5, y + height * 0.5),
-            },
-        ));
         let layout = instance_label_layout(LayoutPoint::new(x, y), 1.0, part);
         boxes.push((
             part.name.clone(),
@@ -1344,6 +1322,15 @@ fn a_text_moved_off_a_body_lands_on_no_other_text() {
             format!("{} value", part.name),
             text_box(layout.value, &part.value, INSTANCE_VALUE_WORLD),
         ));
+    }
+    for (text, text_box) in &boxes {
+        for part in parts {
+            assert!(
+                !meets_drawn_body(part, *text_box),
+                "{text} at {text_box:?} lands on {}'s body",
+                part.name
+            );
+        }
     }
     for (index, (a, first)) in boxes.iter().enumerate() {
         for (b, second) in &boxes[index + 1..] {
@@ -3167,4 +3154,125 @@ fn directive_text_kept_on_the_sheet_is_lettered_as_its_block_was() {
         near(left, x + 3.0) && near(top + line * 0.5, y),
         "{left},{top} against {x},{y}"
     );
+}
+
+/// Whether `text` meets the body RSpice draws for `part`: the strokes of its
+/// artwork, each walked in quarter-unit steps at its drawn width.
+#[cfg(feature = "symbol-artwork")]
+fn meets_drawn_body(
+    part: &crate::schematic::component::Component,
+    text: crate::schematic::label_layout::LayoutRect,
+) -> bool {
+    use crate::schematic::drawing_metrics::SYMBOL_WIDTH_WORLD;
+
+    let artwork = crate::symbol_artwork::SymbolLibrary::load_embedded().expect("the artwork loads");
+    let runs = artwork
+        .placed_artwork(part)
+        .expect("a part RSpice draws has artwork");
+    let half = SYMBOL_WIDTH_WORLD / 2.0;
+    let at = |(x, y): (f32, f32)| (part.pos.x as f32 + x, part.pos.y as f32 + y);
+    runs.iter().any(|run| {
+        run.points.windows(2).any(|piece| {
+            let (start, end) = (at(piece[0]), at(piece[1]));
+            let steps = ((end.0 - start.0).hypot(end.1 - start.1) * 4.0)
+                .ceil()
+                .max(1.0) as usize;
+            (0..=steps).any(|step| {
+                let t = step as f32 / steps as f32;
+                let (x, y) = (
+                    start.0 + (end.0 - start.0) * t,
+                    start.1 + (end.1 - start.1) * t,
+                );
+                x > text.min.x - half
+                    && x < text.max.x + half
+                    && y > text.min.y - half
+                    && y < text.max.y + half
+            })
+        })
+    })
+}
+
+/// Whether `text` meets the body RSpice draws for `part`: its symbol's box,
+/// where the artwork is not built in.
+#[cfg(not(feature = "symbol-artwork"))]
+fn meets_drawn_body(
+    part: &crate::schematic::component::Component,
+    text: crate::schematic::label_layout::LayoutRect,
+) -> bool {
+    let (width, height) = part.symbol_dimensions();
+    let (width, height) = if part.rotation.is_vertical() {
+        (height as f32, width as f32)
+    } else {
+        (width as f32, height as f32)
+    };
+    let (x, y) = (part.pos.x as f32, part.pos.y as f32);
+    text.min.x < x + width * 0.5
+        && text.max.x > x - width * 0.5
+        && text.min.y < y + height * 0.5
+        && text.max.y > y - height * 0.5
+}
+
+/// A part RSpice draws with its own artwork is judged by the ink that
+/// artwork draws, not by the box it stands in. The drawing letters each
+/// transistor beside the small body it drew; RSpice's transistors reach
+/// further. The first one's value lands on its own emitter lead, and along
+/// its line the second transistor and its name leave it no room: it steps
+/// off its line, clear of every lead. The second one's name stands inside
+/// its box between its leads, clear of their ink, where the drawing set it.
+#[cfg(feature = "symbol-artwork")]
+#[test]
+fn a_part_rspice_draws_is_judged_by_the_ink_its_artwork_draws() {
+    use crate::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, instance_label_layout, text_box,
+    };
+    use crate::schematic::label_position::LabelPosition;
+
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol
+      «type: QN»
+      «text (150,150) 1 7 0 0x1000000 -1 -1 \"Q1\"»
+      «text (50,-350) 1 7 0 0x1000000 -1 -1 \"NPN1\"»
+      «pin (100,200) (0,0) 1 0 0 0x0 -1 \"C\"»
+      «pin (-100,0) (0,0) 1 0 0 0x0 -1 \"B\"»
+      «pin (100,-200) (0,0) 1 0 0 0x0 -1 \"E\"»
+    »
+  »
+  «component (600,-300) 0 0
+    «symbol
+      «type: QP»
+      «text (-80,0) 1 7 0 0x1000000 -1 -1 \"Q2\"»
+      «text (150,-150) 1 7 0 0x1000000 -1 -1 \"PNP1\"»
+      «pin (100,-200) (0,0) 1 0 0 0x0 -1 \"C\"»
+      «pin (-100,0) (0,0) 1 0 0 0x0 -1 \"B\"»
+      «pin (100,200) (0,0) 1 0 0 0x0 -1 \"E\"»
+    »
+  »
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let parts = &imported.document.components;
+    for part in parts {
+        let origin = LayoutPoint::new(part.pos.x as f32, part.pos.y as f32);
+        let layout = instance_label_layout(origin, 1.0, part);
+        for (placed, text, size) in [
+            (layout.name, &part.name, INSTANCE_NAME_WORLD),
+            (layout.value, &part.value, INSTANCE_VALUE_WORLD),
+        ] {
+            let text_box = text_box(placed, text, size);
+            assert!(
+                !parts.iter().any(|body| meets_drawn_body(body, text_box)),
+                "{text} at {text_box:?} runs over a transistor's ink"
+            );
+        }
+    }
+    // Q2's name stands where the drawing set it: the drawing's anchor, a
+    // tenth of the source's units, upward.
+    let second = parts.iter().find(|part| part.name == "Q2").expect("Q2");
+    let LabelPosition::Placed { offset, .. } = second.name_label_pos else {
+        panic!("Q2's name is placed");
+    };
+    let anchor = second.pos + offset;
+    assert_eq!((anchor.x, anchor.y), (52, 30), "Q2's name moved");
 }
