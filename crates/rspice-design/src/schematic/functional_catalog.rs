@@ -612,7 +612,7 @@ const TIMER_PARAMETERS: &[FunctionalParameter] = &[
     ),
     number(
         "RDIS",
-        "Discharge on-resistance",
+        "Discharge resistance",
         "Ω",
         "10",
         "Resistance from DIS to GND while the output is low.",
