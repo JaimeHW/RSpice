@@ -41,7 +41,7 @@ pub use rspice_design_model::symbol_geometry::{
 };
 
 use crate::library::View;
-use crate::symbol_generation::generate_symbol_with_roles;
+use crate::symbol_generation::{GeneratedSymbol, generate_symbol_with_roles};
 use rspice_design_model::{
     Point,
     bus::{BusDeclaration, declared_vector, declared_width},
@@ -767,7 +767,11 @@ impl SymbolDocument {
     /// The generated symbol for an interface whose pin roles are known,
     /// parallel to `ports`: an amplifier pin set draws the triangle.
     pub fn generated_from_interface(ports: &[PortSpec], roles: &[PinRole]) -> Self {
-        let generated = generate_symbol_with_roles(ports, roles);
+        Self::from_generated(generate_symbol_with_roles(ports, roles))
+    }
+
+    /// The document of a generated block, pins on the edges it assigns.
+    pub fn from_generated(generated: GeneratedSymbol) -> Self {
         let body = generated
             .body_outline()
             .into_iter()

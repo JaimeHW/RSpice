@@ -941,10 +941,13 @@ impl Component {
         };
 
         if let Some(ports) = cell.interface() {
-            let generated = crate::symbol_generation::generate_symbol_with_roles(
-                &ports,
-                cell.interface_roles(),
-            );
+            let generated = super::functional_catalog::functional_block_symbol(cell)
+                .unwrap_or_else(|| {
+                    crate::symbol_generation::generate_symbol_with_roles(
+                        &ports,
+                        cell.interface_roles(),
+                    )
+                });
             return InstanceBlock {
                 body: generated.body_bounds(),
                 outline: generated.body_outline(),
@@ -1099,11 +1102,14 @@ impl Component {
     pub fn symbol_dimensions(&self) -> (i32, i32) {
         if let Some(cell) = &self.library_cell {
             if let Some(ports) = cell.interface() {
-                return crate::symbol_generation::generate_symbol_with_roles(
-                    &ports,
-                    cell.interface_roles(),
-                )
-                .dimensions();
+                return super::functional_catalog::functional_block_symbol(cell)
+                    .unwrap_or_else(|| {
+                        crate::symbol_generation::generate_symbol_with_roles(
+                            &ports,
+                            cell.interface_roles(),
+                        )
+                    })
+                    .dimensions();
             }
             let pin_count = if cell.terminal_order.is_empty() {
                 2

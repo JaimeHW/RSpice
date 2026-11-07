@@ -7,6 +7,7 @@ use rspice_design_model::port::{PortDirection, PortSpec};
 use rspice_design_model::symbol_pin::SymbolPinSide;
 
 use crate::symbol::{SymbolDocument, SymbolShape};
+use crate::symbol_generation::GeneratedSymbol;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ResolvedSymbolSource {
@@ -193,7 +194,18 @@ impl ResolvedCellSymbol {
         ports: &[PortSpec],
         roles: &[rspice_design_model::port::PinRole],
     ) -> Self {
-        let document = SymbolDocument::generated_from_interface(ports, roles);
+        Self::from_generated_document(
+            SymbolDocument::generated_from_interface(ports, roles),
+            ports,
+        )
+    }
+
+    /// A generated symbol drawn to a block whose pin geometry its part sets.
+    pub fn from_generated_block(block: GeneratedSymbol, ports: &[PortSpec]) -> Self {
+        Self::from_generated_document(SymbolDocument::from_generated(block), ports)
+    }
+
+    fn from_generated_document(document: SymbolDocument, ports: &[PortSpec]) -> Self {
         let pins = ports
             .iter()
             .filter_map(|port| {

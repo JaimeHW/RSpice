@@ -102,7 +102,7 @@ pub fn add_library_cell_component(
     component.name = name;
     component.rotation = placement.rotation;
     component.mirror_h = placement.mirror_h;
-    component.value = library_cell.cell.clone();
+    component.value = super::functional_catalog::placement_value(&library_cell);
     component.library_cell = Some(library_cell);
 
     document.components.push(component);

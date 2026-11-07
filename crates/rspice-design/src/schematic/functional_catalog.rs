@@ -9,11 +9,14 @@
 //! revalidates them here, so a placement whose part has since changed shape
 //! fails closed instead of binding the wrong pins or parameters.
 
+use rspice_design_model::{Point, symbol_pin::SymbolPinSide};
+
 use super::{
     component::{BuiltinFunctionalInstance, LibraryCellInstance},
     component_category::ComponentCategory,
     port::{PortDirection, PortSpec},
 };
+use crate::symbol_generation::{GENERATED_WIDTH, GeneratedBody, GeneratedPin, GeneratedSymbol};
 
 /// One pin of a functional part, in subcircuit port order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +49,15 @@ pub struct FunctionalParameter {
     pub choices: &'static [FunctionalChoice],
 }
 
+/// Pin geometry a part draws instead of the generated block's: the block
+/// height and, in pin order, the edge each pin meets and its terminal
+/// relative to the block's centre. The block is the generated width.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalBlock {
+    pub height: i32,
+    pub pins: &'static [(SymbolPinSide, i32, i32)],
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FunctionalPartDescriptor {
     pub stable_id: &'static str,
@@ -54,6 +66,8 @@ pub struct FunctionalPartDescriptor {
     pub subcircuit: &'static str,
     pub pins: &'static [FunctionalPin],
     pub symbol_asset: &'static str,
+    /// The part's own pin geometry, or None for the generated block.
+    pub block: Option<FunctionalBlock>,
     /// What a reader may type for this part on the Component shelf besides
     /// its display name.
     pub keywords: &'static [&'static str],
@@ -319,6 +333,20 @@ const OTA_PINS: &[FunctionalPin] = &[
     pin("OUT", Out),
 ];
 
+/// The Op-Amp's triangle and pins, with the bias current entering the lower
+/// edge left of V-, as the LM13700 and CA3080 datasheets draw it.
+const OTA_BLOCK: FunctionalBlock = FunctionalBlock {
+    height: 40,
+    pins: &[
+        (SymbolPinSide::Left, -30, -10),
+        (SymbolPinSide::Left, -30, 10),
+        (SymbolPinSide::Bottom, -10, 20),
+        (SymbolPinSide::Top, 0, -20),
+        (SymbolPinSide::Bottom, 0, 20),
+        (SymbolPinSide::Right, 30, 0),
+    ],
+};
+
 /// A bipolar operational transconductance amplifier biased by the current
 /// into its IABC pin.
 const OTA_PARAMETERS: &[FunctionalParameter] = &[
@@ -577,6 +605,7 @@ const fn logic_part(
         subcircuit,
         pins,
         symbol_asset,
+        block: None,
         keywords,
         category: ComponentCategory::LogicTiming,
         parameters,
@@ -590,6 +619,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         subcircuit: "RSPICE_FN_OPAMP",
         pins: AMPLIFIER_PINS,
         symbol_asset: "functional_opamp.svg",
+        block: None,
         keywords: &[
             "op amp",
             "opamp",
@@ -606,6 +636,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         subcircuit: "RSPICE_FN_COMPARATOR",
         pins: AMPLIFIER_PINS,
         symbol_asset: "functional_comparator.svg",
+        block: None,
         keywords: &[
             "comparator",
             "lm393",
@@ -624,6 +655,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         subcircuit: "RSPICE_FN_OTA",
         pins: OTA_PINS,
         symbol_asset: "functional_ota.svg",
+        block: Some(OTA_BLOCK),
         keywords: &[
             "ota",
             "operational transconductance amplifier",
@@ -822,6 +854,47 @@ pub fn functional_library_binding(descriptor: &FunctionalPartDescriptor) -> Libr
     binding
 }
 
+/// The block a functional placement draws when its part sets its own pin
+/// geometry and the placement still has the part's pins; None otherwise, and
+/// the generated block applies.
+pub fn functional_block_symbol(binding: &LibraryCellInstance) -> Option<GeneratedSymbol> {
+    let descriptor = functional_part(&binding.builtin_functional.as_ref()?.stable_id)?;
+    let block = descriptor.block?;
+    let same_pins = binding.terminal_order.len() == descriptor.pins.len()
+        && block.pins.len() == descriptor.pins.len()
+        && binding
+            .terminal_order
+            .iter()
+            .zip(descriptor.pins)
+            .all(|(placed, pin)| placed == pin.name);
+    same_pins.then(|| GeneratedSymbol {
+        pins: descriptor
+            .pins
+            .iter()
+            .zip(block.pins)
+            .map(|(pin, &(side, x, y))| GeneratedPin {
+                name: pin.name.to_owned(),
+                direction: pin.direction,
+                side,
+                offset: Point::new(x, y),
+            })
+            .collect(),
+        width: GENERATED_WIDTH,
+        height: block.height,
+        body: GeneratedBody::Block,
+    })
+}
+
+/// The value a new placement of `binding` shows: a functional part's name,
+/// else the cell it places.
+pub fn placement_value(binding: &LibraryCellInstance) -> String {
+    binding
+        .builtin_functional
+        .as_ref()
+        .and_then(|contract| functional_part(&contract.stable_id))
+        .map_or_else(|| binding.cell.clone(), |part| part.display_name.to_owned())
+}
+
 /// The part a functional placement still is, or why it no longer binds.
 pub fn validate_builtin_functional_binding(
     binding: &LibraryCellInstance,
@@ -1014,6 +1087,74 @@ mod tests {
             let mut renamed = binding;
             renamed.parameter_order.pop();
             assert!(validate_builtin_functional_binding(&renamed).is_err());
+        }
+    }
+
+    #[test]
+    fn a_part_drawing_its_own_block_keeps_every_pin_on_its_edge_and_on_the_grid() {
+        for descriptor in functional_parts() {
+            let binding = functional_library_binding(descriptor);
+            let Some(block) = functional_block_symbol(&binding) else {
+                assert!(descriptor.block.is_none(), "{}", descriptor.display_name);
+                continue;
+            };
+            let (half_width, half_height) = (block.width / 2, block.height / 2);
+            for pin in &block.pins {
+                let Point { x, y } = pin.offset;
+                let on_edge = match pin.side {
+                    SymbolPinSide::Left => x == -half_width,
+                    SymbolPinSide::Right => x == half_width,
+                    SymbolPinSide::Top => y == -half_height,
+                    SymbolPinSide::Bottom => y == half_height,
+                };
+                assert!(
+                    on_edge
+                        && x % 10 == 0
+                        && y % 10 == 0
+                        && x.abs() <= half_width
+                        && y.abs() <= half_height,
+                    "{} pin {} at ({x}, {y})",
+                    descriptor.display_name,
+                    pin.name
+                );
+            }
+            // Connectivity reads pins through the resolver: it must agree.
+            let buffers = std::collections::HashMap::<
+                String,
+                crate::schematic::document::SchematicDocument,
+            >::new();
+            let libraries = crate::library::LibraryCatalog::default();
+            let resolved = crate::symbol_resolver::SymbolResolver::new(&libraries, &buffers)
+                .resolve_binding(&binding)
+                .expect("a functional part resolves");
+            let geometry =
+                |name: &str, side: SymbolPinSide, offset: Point| (name.to_owned(), side, offset);
+            assert_eq!(
+                resolved
+                    .connectable_pins()
+                    .map(|pin| geometry(&pin.name, pin.side, pin.offset))
+                    .collect::<Vec<_>>(),
+                block
+                    .pins
+                    .iter()
+                    .map(|pin| geometry(&pin.name, pin.side, pin.offset))
+                    .collect::<Vec<_>>(),
+                "{}",
+                descriptor.display_name
+            );
+            let mut stale = binding.clone();
+            stale.terminal_order.swap(0, 1);
+            assert!(functional_block_symbol(&stale).is_none());
+        }
+    }
+
+    #[test]
+    fn a_placement_shows_its_part_name() {
+        for descriptor in functional_parts() {
+            assert_eq!(
+                placement_value(&functional_library_binding(descriptor)),
+                descriptor.display_name
+            );
         }
     }
 

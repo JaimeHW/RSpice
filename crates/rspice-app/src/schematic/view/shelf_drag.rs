@@ -7,7 +7,9 @@
 
 use egui::{InputState, Key, Modifiers, Popup, Response};
 
-use crate::state::{ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point};
+use crate::state::{
+    ComponentType, LibraryCellInstance, PendingStimulusPlacement, Point, functional_part,
+};
 use crate::workbench::app_state::AppState;
 
 use super::selection_transform::{SelectionTransform, transform_selection_on_active_sheet};
@@ -62,7 +64,14 @@ impl SchematicShelfDragPayload {
     fn placement_label(&self) -> String {
         match self {
             Self::Primitive(kind) => kind.display_name().to_owned(),
-            Self::LibraryCell(binding) => format!("{}/{}", binding.library, binding.cell),
+            Self::LibraryCell(binding) => binding
+                .builtin_functional
+                .as_ref()
+                .and_then(|contract| functional_part(&contract.stable_id))
+                .map_or_else(
+                    || format!("{}/{}", binding.library, binding.cell),
+                    |part| part.display_name.to_owned(),
+                ),
             Self::Stimulus(placement) => {
                 format!("{} r{}", placement.definition(), placement.revision())
             }

@@ -2,7 +2,10 @@
 
 use crate::library::{Cell, LibraryCatalog, View, ViewType};
 use crate::resolved_symbol::ResolvedCellSymbol;
-use crate::schematic::{component::LibraryCellInstance, document::SchematicDocument};
+use crate::schematic::{
+    component::LibraryCellInstance, document::SchematicDocument,
+    functional_catalog::functional_block_symbol,
+};
 use crate::symbol::{SYMBOL_DOCUMENT_METADATA_KEY, SymbolDocument, generated};
 use rspice_design_model::{
     cell_view::CellViewRef,
@@ -36,6 +39,12 @@ impl<'a, S: AsRef<SchematicDocument>> SymbolResolver<'a, S> {
     }
 
     pub fn resolve_binding(&self, binding: &LibraryCellInstance) -> Option<ResolvedCellSymbol> {
+        // A functional part's pins are drawn where its catalog places them,
+        // whatever any library says about a cell of the same name.
+        if let (Some(block), Some(ports)) = (functional_block_symbol(binding), binding.interface())
+        {
+            return Some(ResolvedCellSymbol::from_generated_block(block, &ports));
+        }
         self.resolve_cell(
             &binding.library,
             &binding.cell,

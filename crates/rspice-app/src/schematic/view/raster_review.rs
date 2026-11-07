@@ -1081,3 +1081,52 @@ fn a_hovered_junction_ring_is_stroked_in_whole_device_pixels() {
         );
     }
 }
+
+/// Where the functional sheet is measured from: its middle.
+const FUNCTIONAL_CENTRE: Point = Point::new(340, 300);
+
+/// Every functional part on the shelf placed the way the shelf places it,
+/// four to a row, 160 by 140 apart from (100, 90).
+fn functional_sheet() -> AppState {
+    let mut state = AppState::default();
+    for (index, descriptor) in crate::state::functional_parts().iter().enumerate() {
+        let (column, row) = (index as i32 % 4, index as i32 / 4);
+        state.model.schematic.add_library_cell_component(
+            Point::new(100 + 160 * column, 90 + 140 * row),
+            crate::state::functional_library_binding(descriptor),
+        );
+    }
+    settle(&mut state);
+    state
+}
+
+/// A functional part placed from the shelf letters its part's name, never
+/// the library subcircuit it netlists as.
+#[test]
+fn a_placed_functional_part_letters_its_name_not_its_subcircuit() {
+    let mut state = functional_sheet();
+    let render = render(
+        &mut state,
+        crate::ui::Theme::default(),
+        at_zoom(1.0, FUNCTIONAL_CENTRE),
+        1.0,
+    );
+    let painted = painted_text(&render.shapes);
+    for descriptor in crate::state::functional_parts() {
+        assert!(
+            painted
+                .iter()
+                .any(|text| text.text == descriptor.display_name),
+            "{} is not lettered",
+            descriptor.display_name
+        );
+        assert!(
+            painted
+                .iter()
+                .all(|text| !text.text.contains(descriptor.subcircuit)),
+            "{} is lettered as {}",
+            descriptor.display_name,
+            descriptor.subcircuit
+        );
+    }
+}
