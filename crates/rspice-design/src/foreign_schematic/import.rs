@@ -258,7 +258,8 @@ pub fn import_foreign_schematic(
         .iter()
         .zip(&resolved)
         .filter(|(symbol, _)| {
-            drawing.tool == ForeignTool::Ltspice && symbol.base_name().eq_ignore_ascii_case("jumper")
+            drawing.tool == ForeignTool::Ltspice
+                && symbol.base_name().eq_ignore_ascii_case("jumper")
         })
         .filter_map(|(symbol, (definition, ..))| {
             let [a, b] = definition.as_ref()?.pins.as_slice() else {
@@ -330,7 +331,11 @@ struct Builder<'a> {
     device_ties: Vec<DeviceTie>,
 }
 
-type Resolved = (Option<ForeignSymbolDefinition>, Option<String>, Option<PathBuf>);
+type Resolved = (
+    Option<ForeignSymbolDefinition>,
+    Option<String>,
+    Option<PathBuf>,
+);
 
 /// A terminal of an LTspice A-device, tied to ground unless its source pin
 /// (`None`: it has none) meets a wire, a flag or another pin.
@@ -1097,7 +1102,11 @@ impl Builder<'_> {
             }
             let away = tie.terminal - tie.center;
             let rotation = if away.x.abs() > away.y.abs() {
-                if away.x > 0 { Rotation::R270 } else { Rotation::R90 }
+                if away.x > 0 {
+                    Rotation::R270
+                } else {
+                    Rotation::R90
+                }
             } else if away.y < 0 {
                 Rotation::R180
             } else {
