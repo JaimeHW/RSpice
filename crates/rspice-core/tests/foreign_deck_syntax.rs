@@ -4,6 +4,8 @@
 //! decks. Where the two disagree QSPICE decides; where QSPICE cannot read a
 //! construct, LTspice does.
 
+use rspice_core::analysis::measure::MeasureResult;
+use rspice_core::analysis::measure_signals::evaluate_ac_measurements;
 use rspice_core::engine::Engine;
 use rspice_core::netlist::Netlist;
 
@@ -275,4 +277,45 @@ E1 3 0 1 2 {G}
     );
     assert_close("V(o1)", op_voltage(&netlist, "o1"), 1000.0, 1e-9);
     assert_close("V(o2)", op_voltage(&netlist, "o2"), 3.0, 1e-9);
+}
+
+fn measurement(results: &[MeasureResult], name: &str) -> f64 {
+    let result = results
+        .iter()
+        .find(|result| result.name.eq_ignore_ascii_case(name))
+        .unwrap_or_else(|| panic!("no measurement {name} in {results:?}"));
+    result
+        .value
+        .unwrap_or_else(|| panic!("{name} failed: {:?}", result.error))
+}
+
+// QSPICE (QPOST): tmp=0.99998, gain=0.998032, ft=2760.03 Hz.
+#[test]
+fn ac_measurements_take_parts_of_a_complex_probe_with_functions() {
+    let netlist = parse(
+        "* meas ac complex functions
+V1 in 0 AC 1
+R1 in out 1k
+C1 out 0 100n
+.ac dec 20 10 1meg
+.MEAS AC tmp max mag(V(out))
+.MEAS AC GAIN FIND mag(V(out)) AT 100
+.MEAS AC FT when mag(V(out)) = 0.5
+.MEAS AC gdb FIND db(V(out)) AT 1k
+.MEAS AC gre FIND re(V(out)) AT 1k
+.MEAS AC gim FIND im(V(out)) AT 1k
+.MEAS AC f3 when db(V(out)) = -3
+.end
+",
+    );
+    let frequencies = (0..=100)
+        .map(|k| 10.0 * 10f64.powf(f64::from(k) / 20.0))
+        .collect::<Vec<_>>();
+    let sweep = Engine::default()
+        .run_ac(&netlist, &frequencies)
+        .expect("AC sweep solves");
+    let results = evaluate_ac_measurements(&netlist, &sweep);
+    assert_close("tmp", measurement(&results, "tmp"), 0.99998, 1e-5);
+    assert_close("gain", measurement(&results, "gain"), 0.998032, 1e-6);
+    assert_close("ft", measurement(&results, "ft"), 2760.03, 5.0);
 }

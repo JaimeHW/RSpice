@@ -924,6 +924,15 @@ impl TokenStream {
         self.tokens.drain(range);
     }
 
+    /// Replace the unconsumed token at `position` (an absolute position).
+    pub(crate) fn replace_token(&mut self, position: usize, token: Token) {
+        assert!(
+            self.pos <= position && position < self.tokens.len() - 1,
+            "only unconsumed tokens before end of input are replaced"
+        );
+        self.tokens[position] = token;
+    }
+
     /// Borrow the unconsumed tokens on the current logical line.
     ///
     /// Parsers that only need to inspect the remainder of a command can use

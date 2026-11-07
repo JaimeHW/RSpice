@@ -3052,6 +3052,74 @@ fn non_finite_fft_qualifier(line_num: usize, key: &str, value: Value) -> ParseEr
     }
 }
 
+/// LTspice and QSPICE take a part of a complex probe in an AC measurement
+/// with a function: `mag(V(out))`, `Phase(V(out))`, `db(V(out))`,
+/// `re(I(R1))`, `im(I(R1))`. Each is the probe's projection accessor
+/// (`VM(out)`, `VP(out)`, `VDB(out)`, `IR(R1)`, `II(R1)`), which reads the
+/// complex point rather than its real part.
+fn project_complex_measure_functions(stream: &mut TokenStream) {
+    let base = stream.checkpoint();
+    let mut index = 0;
+    loop {
+        let tokens = stream.remaining_line_tokens();
+        if index + 4 >= tokens.len() {
+            break;
+        }
+        let projection = match &tokens[index].kind {
+            TokenKind::Ident(function) => match function.to_ascii_uppercase().as_str() {
+                "MAG" => Some("M"),
+                "PH" | "PHASE" => Some("P"),
+                "DB" => Some("DB"),
+                "RE" | "REAL" => Some("R"),
+                "IM" | "IMAG" => Some("I"),
+                _ => None,
+            },
+            _ => None,
+        };
+        let probe = match &tokens[index + 2].kind {
+            TokenKind::Ident(probe)
+                if probe.eq_ignore_ascii_case("V") || probe.eq_ignore_ascii_case("I") =>
+            {
+                Some(probe.to_ascii_uppercase())
+            }
+            _ => None,
+        };
+        let close = tokens[index + 4..]
+            .iter()
+            .position(|token| matches!(token.kind, TokenKind::LParen | TokenKind::RParen))
+            .map(|offset| index + 4 + offset);
+        let (Some(projection), Some(probe), Some(close)) = (projection, probe, close) else {
+            index += 1;
+            continue;
+        };
+        if !matches!(tokens[index + 1].kind, TokenKind::LParen)
+            || !matches!(tokens[index + 3].kind, TokenKind::LParen)
+            || !matches!(tokens[close].kind, TokenKind::RParen)
+            || !matches!(
+                tokens.get(close + 1).map(|token| &token.kind),
+                Some(TokenKind::RParen)
+            )
+        {
+            index += 1;
+            continue;
+        }
+        let accessor = format!("{probe}{projection}");
+        let span = crate::netlist::lexer::Span {
+            end: tokens[index + 3].span.start,
+            ..tokens[index].span
+        };
+        let token = crate::netlist::lexer::Token {
+            kind: TokenKind::Ident(accessor.clone()),
+            span,
+            lexeme: accessor,
+        };
+        stream.remove_tokens(base + close + 1..base + close + 2);
+        stream.remove_tokens(base + index + 1..base + index + 3);
+        stream.replace_token(base + index, token);
+        index += 1;
+    }
+}
+
 pub(super) fn parse_meas_signal(
     stream: &mut TokenStream,
     line_num: usize,
@@ -3330,6 +3398,9 @@ pub(super) fn parse_meas_command(
     // `CONSTANT-AT`) that the general lexer correctly emits as multiple
     // adjacent tokens.
     let name = parse_measure_name(stream, line_num)?;
+    if matches!(analysis.as_str(), "AC" | "AC_CONT" | "NOISE" | "NOISE_CONT") {
+        project_complex_measure_functions(stream);
+    }
 
     // Parse measurement type keyword
     let measure_type_str = expect_ident(stream, line_num)?;
