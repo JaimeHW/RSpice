@@ -2026,33 +2026,27 @@ impl Builder<'_> {
     /// beside them; and a flag on the middle of a wire says nothing of the
     /// side its name reads to.
     fn clear_net_names(&mut self) {
+        // A body RSpice draws is judged whole; a drawn one by its strokes,
+        // so a name beside a slanted edge stands clear of it.
         let natives = self
             .document
             .components
             .iter()
             .filter(|component| component.kind != ComponentType::CellInstance)
-            .map(native_body);
-        let cells = self.document.components.iter().filter_map(|component| {
-            let binding = component.library_cell.as_ref()?;
-            let cell = self.cells.iter().find(|cell| cell.cell == binding.cell)?;
-            cell.symbol.drawn_body_bounds()?;
-            let body = Body::of(&cell.symbol, component, &[]);
-            Some(LayoutRect {
-                min: LayoutPoint::new(
-                    (body.center.x - body.half.x) as f32,
-                    (body.center.y - body.half.y) as f32,
-                ),
-                max: LayoutPoint::new(
-                    (body.center.x + body.half.x) as f32,
-                    (body.center.y + body.half.y) as f32,
-                ),
-            })
+            .map(|component| Ink::Area(native_body(component)));
+        let cells = self.document.components.iter().flat_map(|component| {
+            component
+                .library_cell
+                .as_ref()
+                .and_then(|binding| self.cells.iter().find(|cell| cell.cell == binding.cell))
+                .map(|cell| body_ink(&cell.symbol, component))
+                .unwrap_or_default()
         });
         let bodies = natives.chain(cells).collect::<Vec<_>>();
         let lands = |label: &NetLabel| {
             net_label_boxes(label)
                 .first()
-                .is_some_and(|name| bodies.iter().any(|body| overlaps(*name, *body)))
+                .is_some_and(|name| bodies.iter().any(|body| body.meets(*name)))
         };
         for (index, sides) in std::mem::take(&mut self.free_names) {
             let Some(label) = self.document.net_labels.get(index) else {
@@ -2526,6 +2520,86 @@ fn net_label_boxes(label: &NetLabel) -> Vec<LayoutRect> {
 
 fn overlaps(a: LayoutRect, b: LayoutRect) -> bool {
     a.min.x < b.max.x && b.min.x < a.max.x && a.min.y < b.max.y && b.min.y < a.max.y
+}
+
+/// What a body draws, for a text to keep off: a box it fills, or a
+/// stroke from end to end.
+#[derive(Debug, Clone, Copy)]
+enum Ink {
+    Area(LayoutRect),
+    Stroke(LayoutPoint, LayoutPoint),
+}
+
+impl Ink {
+    /// Whether this ink reaches into `text`'s box.
+    fn meets(self, text: LayoutRect) -> bool {
+        match self {
+            Self::Area(area) => overlaps(text, area),
+            Self::Stroke(start, end) => stroke_meets(start, end, text),
+        }
+    }
+}
+
+/// The ink of a placed part's drawn body, in world units: each straight run
+/// of its lines, and each circle or arc as the box around it.
+fn body_ink(symbol: &SymbolDocument, component: &Component) -> Vec<Ink> {
+    let at = |point: Point| {
+        let point = component.pos + component.transform_point(point);
+        LayoutPoint::new(point.x as f32, point.y as f32)
+    };
+    let mut ink = Vec::new();
+    for shape in &symbol.body {
+        match shape {
+            SymbolShape::Polyline { points, closed } => {
+                let ends = points.iter().copied().map(at).collect::<Vec<_>>();
+                ink.extend(ends.windows(2).map(|run| Ink::Stroke(run[0], run[1])));
+                if let (true, [first, .., last]) = (*closed, ends.as_slice()) {
+                    ink.push(Ink::Stroke(*last, *first));
+                }
+            }
+            SymbolShape::Circle { center, radius }
+            | SymbolShape::Dot { center, radius }
+            | SymbolShape::Arc { center, radius, .. } => {
+                let (center, radius) = (at(*center), *radius as f32);
+                ink.push(Ink::Area(LayoutRect {
+                    min: LayoutPoint::new(center.x - radius, center.y - radius),
+                    max: LayoutPoint::new(center.x + radius, center.y + radius),
+                }));
+            }
+            SymbolShape::Arrow { .. } | SymbolShape::Text { .. } => {}
+        }
+    }
+    ink
+}
+
+/// Whether the stroke from `start` to `end` passes through `text`'s box:
+/// the stroke clipped to the box, edge by edge, leaves something.
+fn stroke_meets(start: LayoutPoint, end: LayoutPoint, text: LayoutRect) -> bool {
+    let (across, down) = (end.x - start.x, end.y - start.y);
+    let (mut from, mut to) = (0.0_f32, 1.0_f32);
+    for (step, room) in [
+        (-across, start.x - text.min.x),
+        (across, text.max.x - start.x),
+        (-down, start.y - text.min.y),
+        (down, text.max.y - start.y),
+    ] {
+        if step == 0.0 {
+            if room <= 0.0 {
+                return false;
+            }
+            continue;
+        }
+        let at = room / step;
+        if step < 0.0 {
+            from = from.max(at);
+        } else {
+            to = to.min(at);
+        }
+        if from >= to {
+            return false;
+        }
+    }
+    true
 }
 
 /// A placed text moved along an axis its box reaches out on to the

@@ -1464,6 +1464,30 @@ fn a_flag_whose_side_rspice_chooses_names_its_net_clear_of_bodies() {
     assert_eq!(label.side, NetLabelSide::Left);
 }
 
+/// A flag on the middle of a wire beside a part's slanted edge, inside the
+/// box around the part but clear of what it draws, names its net on the
+/// side away from the edge: the part's strokes, not its box, are what the
+/// name keeps off.
+#[test]
+fn a_flag_beside_a_slanted_edge_names_its_net_away_from_it() {
+    use crate::schematic::net_label::NetLabelSide;
+
+    let drawing = parse_asc(
+        "Version 4\n\
+         SYMBOL amp 128 0 M0\nSYMATTR InstName X1\n\
+         WIRE 80 -16 120 -16\nFLAG 112 -16 EDGE\n",
+    )
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &library());
+    let label = imported
+        .document
+        .net_labels
+        .iter()
+        .find(|label| label.name == "EDGE")
+        .expect("the flag is placed");
+    assert_eq!(label.side, NetLabelSide::Left);
+}
+
 #[test]
 fn a_jumper_is_a_wire_and_a_named_subcircuit_reads_from_the_deck() {
     let drawing = parse_asc(
