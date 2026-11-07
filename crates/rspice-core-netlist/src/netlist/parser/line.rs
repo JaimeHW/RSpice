@@ -227,6 +227,10 @@ pub(super) fn process_line_with_abort(
     if super::machine::process_machine_line(line, line_num, origin, state)? {
         return Ok(());
     }
+    if let Some((model_card, switch_card)) = super::tlines::inline_switch_model(line) {
+        process_line_with_abort(&model_card, line_num, origin, state, abort)?;
+        return process_line_with_abort(&switch_card, line_num, origin, state, abort);
+    }
     let temperature_depth = state.subckt_stack.len();
     let authored_element_name = line
         .split_whitespace()

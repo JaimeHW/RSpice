@@ -839,3 +839,40 @@ fn a_resistor_current_is_readable_in_expressions() {
         "{error}"
     );
 }
+
+// QSPICE 2026 batch, which alone reads a switch model written on the switch
+// card (LTspice refuses it): V(a)=V(b)=V(g)=0.759746927, V(e)=9.900990e-3,
+// V(f)=1.960784e-2, V(h)=0.999000999.
+#[test]
+fn a_switch_takes_its_model_parameters_on_its_own_card() {
+    let netlist = parse(
+        "inline switch models\n\
+         V1 c 0 0.5\n\
+         V2 s 0 1\n\
+         R1 s a 1k\n\
+         S1 a 0 c 0 Ron=10 Roff=1Meg Vt=.5 Vh=-.4\n\
+         R2 s b 1k\n\
+         S2 b 0 c 0 SWM\n\
+         .model SWM SW(Ron=10 Roff=1Meg Vt=.5 Vh=-.4)\n\
+         V3 d 0 1\n\
+         R3 s e 1k\n\
+         S3 e 0 d 0 Ron=10 Roff=1Meg Vt=.5 Vh=.1\n\
+         X1 s f c sub ron=20\n\
+         .subckt sub p o c ron=1\n\
+         R1 p o 1k\n\
+         S1 o 0 c 0 Ron={ron} Roff=1Meg Vt=.3 Vh=.1\n\
+         .ends\n\
+         R4 s g 1k\n\
+         S4 g 0 c 0 Ron=10 Roff=1Meg Vt=.5 Vh=-.4 OFF ttol=5n\n\
+         R5 s h 1k\n\
+         S5 h 0 c 0 Ron = 10 , Roff = 1Meg , Vt = 1.5 , Vh = .1\n\
+         .op\n\
+         .end\n",
+    );
+    for node in ["a", "b", "g"] {
+        assert_close(node, op_voltage(&netlist, node), 0.759_746_926_6, 1e-9);
+    }
+    assert_close("V(e)", op_voltage(&netlist, "e"), 9.900_990_099e-3, 1e-12);
+    assert_close("V(f)", op_voltage(&netlist, "f"), 1.960_784_314e-2, 1e-11);
+    assert_close("V(h)", op_voltage(&netlist, "h"), 0.999_000_999, 1e-9);
+}

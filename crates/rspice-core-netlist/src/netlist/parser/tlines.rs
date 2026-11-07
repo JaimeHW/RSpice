@@ -219,6 +219,59 @@ pub(super) fn parse_vswitch(
     Ok(())
 }
 
+/// QSPICE writes a voltage-controlled switch's model on the switch's own
+/// card, `S1 n+ n- nc+ nc- Ron=10 Roff=1Meg Vt=.5 Vh=-.4 [ON|OFF]`. Returns
+/// the `.model` card that form stands for, named after the switch, and the
+/// switch card that uses it.
+pub(super) fn inline_switch_model(line: &str) -> Option<(String, String)> {
+    let fields = split_spice_fields(line);
+    let name = fields.first()?;
+    if !name.starts_with(['S', 's']) || fields.len() < 6 {
+        return None;
+    }
+    let tail = &fields[5..];
+    let assigned = |index: usize| {
+        tail[index].contains('=')
+            || tail
+                .get(index + 1)
+                .is_some_and(|next| next.starts_with('='))
+            || index > 0 && tail[index - 1].ends_with('=')
+    };
+    if !assigned(0) {
+        return None;
+    }
+    let mut parameters = Vec::new();
+    let mut state = None;
+    for (index, field) in tail.iter().enumerate() {
+        if !assigned(index)
+            && (field.eq_ignore_ascii_case("ON") || field.eq_ignore_ascii_case("OFF"))
+        {
+            state = Some(field.as_str());
+        } else {
+            parameters.push(field.as_str());
+        }
+    }
+    // Xyce's generic switch writes `CONTROL={expr}` after its model.
+    if parameters.iter().any(|parameter| {
+        parameter
+            .split('=')
+            .next()
+            .is_some_and(|key| key.trim().eq_ignore_ascii_case("CONTROL"))
+    }) {
+        return None;
+    }
+    let model = format!("{name}#SW");
+    let mut element = format!("{} {model}", fields[..5].join(" "));
+    if let Some(state) = state {
+        element.push(' ');
+        element.push_str(state);
+    }
+    Some((
+        format!(".model {model} SW({})", parameters.join(" ")),
+        element,
+    ))
+}
+
 fn looks_like_xyce_generic_switch_control(stream: &TokenStream) -> bool {
     let TokenKind::Ident(_) = &stream.peek().kind else {
         return false;
