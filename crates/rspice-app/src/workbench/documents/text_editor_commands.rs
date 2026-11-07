@@ -319,10 +319,11 @@ pub(crate) fn take_queued_caret_char_index(
     context.data_mut(|data| data.remove_temp::<usize>(editor_id.with("caret-char-index")))
 }
 
-/// Ask the editor to put its caret at a one-based line and column next frame
-/// and bring it into view: left where it is when already on screen, centred
-/// when it is not. Out-of-range positions clamp to the document. This is how
-/// a jump to a diagnostic or a definition lands.
+/// Ask the source editor `editor_id` to put its caret at a one-based line
+/// and column next frame and bring it into view: left where it is when
+/// already on screen, centred when it is not. Out-of-range positions clamp
+/// to the document, and a folded line unfolds. Go to line, a revealed line
+/// and a jump to a diagnostic all land through here.
 pub(crate) fn queue_caret_position(
     context: &egui::Context,
     editor_id: Id,
@@ -345,9 +346,8 @@ pub(crate) fn take_queued_caret_position(
     context.data_mut(|data| data.remove_temp::<(usize, usize)>(editor_id.with("caret-position")))
 }
 
-/// Record the zero-based line of an editor's primary caret, for an editor
-/// that keeps its own selection rather than egui's text state, so Go to line
-/// proposes where the reader is.
+/// Record the zero-based line of a source editor's primary caret, so Go to
+/// line proposes where the reader is.
 pub(crate) fn publish_caret_line(context: &egui::Context, editor_id: Id, line: usize) {
     context.data_mut(|data| data.insert_temp(editor_id.with("caret-line"), line));
 }
@@ -394,7 +394,7 @@ pub(crate) fn take_reveal_line(ui: &Ui, editor_id: Id, source: &str) -> Option<u
         .data_mut(|data| data.remove_temp::<usize>(editor_id.with("reveal-line")))?;
     let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
     let line = line.clamp(1, line_count);
-    place_caret_at_line(ui.ctx(), editor_id, source, line);
+    go_to_line_start(ui.ctx(), editor_id, line);
     Some(line)
 }
 
@@ -418,7 +418,7 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
     }
     let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
     if !state.seeded {
-        state.input = current_one_based_line(ui.ctx(), editor_id, source).to_string();
+        state.input = current_one_based_line(ui.ctx(), editor_id, line_count).to_string();
         state.seeded = true;
     }
     let target = state
@@ -449,7 +449,7 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
             ui.ctx().data_mut(|data| {
                 data.remove_temp::<GoToLineState>(state_id);
             });
-            place_caret_at_line(ui.ctx(), editor_id, source, line);
+            go_to_line_start(ui.ctx(), editor_id, line);
             Some(line)
         }
         (DialogChoice::Ghost | DialogChoice::Cancelled, _) => {
@@ -467,49 +467,19 @@ pub(crate) fn show_go_to_line(ui: &Ui, editor_id: Id, source: &str) -> Option<us
     }
 }
 
-pub(crate) fn place_caret_at_line(
-    context: &egui::Context,
-    editor_id: Id,
-    source: &str,
-    one_based_line: usize,
-) {
-    let char_index = char_index_for_line(source, one_based_line);
-    let mut state = egui::text_edit::TextEditState::load(context, editor_id).unwrap_or_default();
-    state
-        .cursor
-        .set_char_range(Some(CCursorRange::one(CCursor::new(char_index))));
-    state.store(context, editor_id);
+/// Put the editor's caret at the start of a one-based line, in view, and give
+/// it the keyboard.
+fn go_to_line_start(context: &egui::Context, editor_id: Id, one_based_line: usize) {
+    queue_caret_position(context, editor_id, one_based_line, 1);
     context.memory_mut(|memory| memory.request_focus(editor_id));
 }
 
-fn current_one_based_line(context: &egui::Context, editor_id: Id, source: &str) -> usize {
-    if let Some(line) = context.data(|data| data.get_temp::<usize>(editor_id.with("caret-line"))) {
-        let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
-        return (line + 1).min(line_count);
-    }
-    let index = egui::text_edit::TextEditState::load(context, editor_id)
-        .and_then(|state| state.cursor.char_range())
-        .map_or(0, |range| range.primary.index.0);
-    source
-        .chars()
-        .take(index)
-        .filter(|character| *character == '\n')
-        .count()
-        + 1
-}
-
-fn char_index_for_line(source: &str, one_based_line: usize) -> usize {
-    let target = one_based_line.max(1);
-    let mut line = 1;
-    for (index, character) in source.chars().enumerate() {
-        if line == target {
-            return index;
-        }
-        if character == '\n' {
-            line += 1;
-        }
-    }
-    source.chars().count()
+/// The one-based line the editor's caret is on, as it last drew it; the first
+/// line before it has drawn.
+fn current_one_based_line(context: &egui::Context, editor_id: Id, line_count: usize) -> usize {
+    context
+        .data(|data| data.get_temp::<usize>(editor_id.with("caret-line")))
+        .map_or(1, |line| (line + 1).min(line_count))
 }
 
 pub(crate) fn apply_structural_command(
@@ -1033,15 +1003,6 @@ mod tests {
             StructuralCommand::ToggleComment,
         );
         assert_eq!(source, "  * R1 in out 1k\n");
-    }
-
-    #[test]
-    fn go_to_line_character_offsets_are_unicode_safe_and_clamped() {
-        let source = "α first\nβ second\nγ third";
-        assert_eq!(char_index_for_line(source, 1), 0);
-        assert_eq!(char_index_for_line(source, 2), 8);
-        assert_eq!(char_index_for_line(source, 3), 17);
-        assert_eq!(char_index_for_line(source, 99), source.chars().count());
     }
 
     /// Go to line is the kit's command form, centred like every other

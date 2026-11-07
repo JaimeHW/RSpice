@@ -4,7 +4,7 @@
 
 use super::*;
 use crate::workbench::documents::text_editor_commands::{
-    queue_caret_position, queue_go_to_line, show_go_to_line,
+    queue_caret_position, queue_go_to_line, queue_reveal_line, show_go_to_line, take_reveal_line,
 };
 
 const SCREEN: Vec2 = Vec2::new(900.0, 600.0);
@@ -443,6 +443,58 @@ fn go_to_line_proposes_the_caret_line() {
         accepted = show_go_to_line(ui, id, &source);
     });
     assert_eq!(accepted, Some(27), "Enter goes to the line it proposed");
+}
+
+#[test]
+fn a_jump_to_a_line_and_column_lands_the_caret_in_view() {
+    let mut bench = Bench::new(&numbered_lines(400), true);
+    bench.focus();
+    let line_start = |source: &str, line: usize| -> usize {
+        source.lines().take(line).map(|text| text.len() + 1).sum()
+    };
+
+    // A position far below the view: the caret goes there and the view
+    // centres on it.
+    bench.move_caret_to(300, 6);
+    let far = bench.frame(Vec::new());
+    assert_eq!(far.cursor_line, 299);
+    assert_eq!(far.cursor_char_index, line_start(&bench.source, 299) + 5);
+    assert_caret_in_view(&far, "a jump far below");
+    let viewport = bench.session().viewport_size.expect("the view was drawn");
+    let caret_middle = 8.0 + 299.5 * LINE_HEIGHT;
+    let view_middle = bench.scroll_offset().y + viewport.y * 0.5;
+    assert!(
+        (caret_middle - view_middle).abs() <= LINE_HEIGHT,
+        "the view centres on the caret: {caret_middle} against {view_middle}"
+    );
+
+    // A position already in view leaves the view where it is.
+    let before = bench.scroll_offset();
+    bench.move_caret_to(303, 1);
+    assert_eq!(bench.frame(Vec::new()).cursor_line, 302);
+    assert_eq!(bench.scroll_offset(), before);
+
+    // A revealed line lands the same way, at its start.
+    queue_reveal_line(&bench.context, bench.id, 40);
+    let (id, source) = (bench.id, bench.source.clone());
+    let _ = bench.context.run_ui(
+        egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, SCREEN)),
+            time: Some(bench.time),
+            ..Default::default()
+        },
+        |ui| {
+            assert_eq!(take_reveal_line(ui, id, &source), Some(40));
+        },
+    );
+    let revealed = bench.frame(Vec::new());
+    assert_eq!(revealed.cursor_char_index, line_start(&bench.source, 39));
+    let row_top = 8.0 + 39.0 * LINE_HEIGHT;
+    let view = bench.scroll_offset().y..=bench.scroll_offset().y + viewport.y;
+    assert!(
+        view.contains(&row_top) && view.contains(&(row_top + LINE_HEIGHT)),
+        "the revealed line {row_top} is in the view {view:?}"
+    );
 }
 
 /// Pointer events at `at`, with a finger down for the press when `touch`.
