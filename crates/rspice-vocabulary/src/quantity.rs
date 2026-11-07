@@ -17,10 +17,10 @@ pub use engineering::{
     format_engineering_value, format_engineering_value_with, parse_engineering_value,
 };
 pub use layout::LayoutDatabaseUnit;
-pub use standard_series::ESeries;
 pub use parse::{QuantityInputKind, UiNumberLocale, parse_ui_quantity};
 pub use preferences::{
     AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,
     FrequencyDisplay, LayoutCoordinateDisplay, QuantityPresentationPolicy, TemperatureDisplay,
     TimeFrequencyInput, UnitSystem, UnitsPreferences,
 };
+pub use standard_series::ESeries;

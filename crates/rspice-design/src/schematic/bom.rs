@@ -284,11 +284,26 @@ mod tests {
     fn parts_group_by_value_and_mpn_with_reference_ranges() {
         let mut parts = Vec::new();
         for name in ["R7", "R2", "R1", "R4", "R3"] {
-            parts.push(part(ComponentType::Resistor, name, "10k", "RC0603FR-0710KL"));
+            parts.push(part(
+                ComponentType::Resistor,
+                name,
+                "10k",
+                "RC0603FR-0710KL",
+            ));
         }
         parts.push(part(ComponentType::Resistor, "R5", "10k", ""));
-        parts.push(part(ComponentType::Resistor, "R6", "4.7k", "RC0603FR-074K7L"));
-        parts.push(part(ComponentType::Resistor, "R8", "4.7k", "RC0603FR-074K7L"));
+        parts.push(part(
+            ComponentType::Resistor,
+            "R6",
+            "4.7k",
+            "RC0603FR-074K7L",
+        ));
+        parts.push(part(
+            ComponentType::Resistor,
+            "R8",
+            "4.7k",
+            "RC0603FR-074K7L",
+        ));
         parts.push(part(ComponentType::Capacitor, "C1", "1u", ""));
         parts.push(part(ComponentType::Inductor, "L1", "1u", ""));
         parts.push(part(ComponentType::VoltageSource, "V1", "5", ""));

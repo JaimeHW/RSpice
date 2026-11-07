@@ -95,9 +95,14 @@ impl ESeries {
         }
         let members = self.neighbourhood(value);
         if up {
-            members.into_iter().find(|member| *member > value * (1.0 + 1e-9))
+            members
+                .into_iter()
+                .find(|member| *member > value * (1.0 + 1e-9))
         } else {
-            members.into_iter().rev().find(|member| *member < value * (1.0 - 1e-9))
+            members
+                .into_iter()
+                .rev()
+                .find(|member| *member < value * (1.0 - 1e-9))
         }
     }
 
@@ -180,18 +185,33 @@ mod tests {
 
     #[test]
     fn e24_steps_across_decade_boundaries_and_keeps_the_unit() {
-        assert_eq!(walk(ESeries::E24, "8.2kΩ", true, 3), ["9.1kΩ", "10kΩ", "11kΩ"]);
-        assert_eq!(walk(ESeries::E24, "11uF", false, 3), ["10uF", "9.1uF", "8.2uF"]);
+        assert_eq!(
+            walk(ESeries::E24, "8.2kΩ", true, 3),
+            ["9.1kΩ", "10kΩ", "11kΩ"]
+        );
+        assert_eq!(
+            walk(ESeries::E24, "11uF", false, 3),
+            ["10uF", "9.1uF", "8.2uF"]
+        );
         assert_eq!(walk(ESeries::E24, "910m", true, 2), ["1", "1.1"]);
         // A value between members steps to the neighbour on the side asked.
-        assert_eq!(ESeries::E24.step_text("4.6k", true).as_deref(), Some("4.7k"));
-        assert_eq!(ESeries::E24.step_text("4.6k", false).as_deref(), Some("4.3k"));
+        assert_eq!(
+            ESeries::E24.step_text("4.6k", true).as_deref(),
+            Some("4.7k")
+        );
+        assert_eq!(
+            ESeries::E24.step_text("4.6k", false).as_deref(),
+            Some("4.3k")
+        );
     }
 
     #[test]
     fn e96_steps_across_decade_boundaries() {
         assert_eq!(walk(ESeries::E96, "953", true, 3), ["976", "1k", "1.02k"]);
-        assert_eq!(walk(ESeries::E96, "102p", false, 3), ["100p", "97.6p", "95.3p"]);
+        assert_eq!(
+            walk(ESeries::E96, "102p", false, 3),
+            ["100p", "97.6p", "95.3p"]
+        );
     }
 
     #[test]

@@ -177,9 +177,7 @@ pub(super) fn unit_tail(input: &str) -> Option<&str> {
         .map(|(index, c)| index + c.len_utf8())
         .last()?;
     let suffix = trimmed[numeric_end..].trim();
-    let normalized = suffix
-        .to_lowercase()
-        .replace(['\u{00B5}', '\u{03BC}'], "u");
+    let normalized = suffix.to_lowercase().replace(['\u{00B5}', '\u{03BC}'], "u");
     let scale_chars = WORD_SCALE_FACTORS
         .iter()
         .chain(SPICE_SCALE_FACTORS)
