@@ -1784,22 +1784,26 @@ impl<'a> Flattener<'a> {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralVoltage {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
                 tc1: *tc1,
                 tc2: *tc2,
                 multiplicity: multiplicity.clone(),
+                jacobian: *jacobian,
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralCurrent {
                 expression: self.remap_behavioral_expression(expression, prefix, node_map),
                 tc1: *tc1,
                 tc2: *tc2,
                 multiplicity: multiplicity.clone(),
+                jacobian: *jacobian,
             },
             ElementKind::Vcvs {
                 gain,
@@ -2681,6 +2685,7 @@ impl<'a> Flattener<'a> {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralVoltage {
                 expression: self.prepare_scoped_behavioral_expression(
                     expression,
@@ -2697,12 +2702,14 @@ impl<'a> Flattener<'a> {
                     None,
                     abort,
                 )?,
+                jacobian: *jacobian,
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralCurrent {
                 expression: self.prepare_scoped_behavioral_expression(
                     expression,
@@ -2719,6 +2726,7 @@ impl<'a> Flattener<'a> {
                     None,
                     abort,
                 )?,
+                jacobian: *jacobian,
             },
 
             // Controlled sources
@@ -3838,6 +3846,7 @@ impl<'a> Flattener<'a> {
                         tc1: 0.0,
                         tc2: 0.0,
                         multiplicity: SourceMultiplicity::default(),
+                        jacobian: true,
                     })
                 } else {
                     Ok(ElementKind::BehavioralCurrent {
@@ -3845,6 +3854,7 @@ impl<'a> Flattener<'a> {
                         tc1: 0.0,
                         tc2: 0.0,
                         multiplicity: SourceMultiplicity::default(),
+                        jacobian: true,
                     })
                 }
             }

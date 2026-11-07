@@ -3669,6 +3669,7 @@ fn resolve_top_level_source_kind(
                     tc1: 0.0,
                     tc2: 0.0,
                     multiplicity: SourceMultiplicity::default(),
+                    jacobian: true,
                 })
             } else {
                 Ok(ElementKind::BehavioralCurrent {
@@ -3676,6 +3677,7 @@ fn resolve_top_level_source_kind(
                     tc1: 0.0,
                     tc2: 0.0,
                     multiplicity: SourceMultiplicity::default(),
+                    jacobian: true,
                 })
             }
         }

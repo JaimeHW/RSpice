@@ -1229,6 +1229,7 @@ impl NodeUnion {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralVoltage {
                 expression: remap_behavioral_voltage_probes(&expression, |node| {
                     self.remap_node(node)
@@ -1236,12 +1237,14 @@ impl NodeUnion {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             },
             ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             } => ElementKind::BehavioralCurrent {
                 expression: remap_behavioral_voltage_probes(&expression, |node| {
                     self.remap_node(node)
@@ -1249,6 +1252,7 @@ impl NodeUnion {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian,
             },
             ElementKind::Vcvs {
                 gain,

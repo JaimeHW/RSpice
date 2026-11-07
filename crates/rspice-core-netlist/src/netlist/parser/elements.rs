@@ -1686,6 +1686,7 @@ pub(super) fn parse_current_source(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             },
             nodes: vec![node_pos, node_neg],
             provenance: crate::netlist::ElementProvenance::Authored,
@@ -8658,6 +8659,7 @@ fn parse_voltage_controlled_source(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity,
+                jacobian: true,
             }
         } else {
             ElementKind::BehavioralCurrent {
@@ -8665,6 +8667,7 @@ fn parse_voltage_controlled_source(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity,
+                jacobian: true,
             }
         }
     };
@@ -9264,6 +9267,7 @@ fn parse_current_controlled_source(
                     tc1: 0.0,
                     tc2: 0.0,
                     multiplicity: SourceMultiplicity::default(),
+                    jacobian: true,
                 }
             } else {
                 ElementKind::BehavioralCurrent {
@@ -9271,6 +9275,7 @@ fn parse_current_controlled_source(
                     tc1: 0.0,
                     tc2: 0.0,
                     multiplicity: SourceMultiplicity::default(),
+                    jacobian: true,
                 }
             };
             elements.push(Element {
@@ -9528,6 +9533,7 @@ pub(super) fn parse_behavioral(
     let mut tc2 = 0.0;
     let mut multiplicity = SourceMultiplicity::default();
     let mut parallel = Vec::new();
+    let mut jacobian = true;
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -9535,6 +9541,14 @@ pub(super) fn parse_behavioral(
         }
 
         let param_name = expect_ident(stream, line_num)?;
+        // LTspice's and QSPICE's `NoJacob` leaves the source's partials out
+        // of the Jacobian.
+        if param_name.eq_ignore_ascii_case("NOJACOB")
+            && !matches!(stream.peek().kind, TokenKind::Equals)
+        {
+            jacobian = false;
+            continue;
+        }
         if !stream.consume(&TokenKind::Equals) {
             return Err(ParseError::Syntax {
                 line: line_num,
@@ -9609,12 +9623,14 @@ pub(super) fn parse_behavioral(
             tc1,
             tc2,
             multiplicity,
+            jacobian,
         },
         "I" => ElementKind::BehavioralCurrent {
             expression,
             tc1,
             tc2,
             multiplicity,
+            jacobian,
         },
         _ => {
             return Err(ParseError::Syntax {
@@ -9718,15 +9734,23 @@ fn lower_behavioral_table_expression(
     Ok(Some(table_transfer_expression(&input_expr, &pairs)))
 }
 
+/// Whether the stream is at the first instance parameter after a behavioral
+/// source's expression: an assignment such as `Rpar=`, or the bare `NoJacob`
+/// flag ending the card or followed by another parameter.
 pub(super) fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {
-    matches!(
-        &stream.peek().kind,
-        TokenKind::Ident(name)
-            if ["TC1", "TC2", "M", "RPAR", "CPAR"]
+    match &stream.peek().kind {
+        TokenKind::Ident(name) if name.eq_ignore_ascii_case("NOJACOB") => matches!(
+            stream.peek_n(1).kind,
+            TokenKind::Newline | TokenKind::Eof | TokenKind::Ident(_)
+        ),
+        TokenKind::Ident(name) => {
+            ["TC1", "TC2", "M", "RPAR", "CPAR"]
                 .iter()
                 .any(|key| name.eq_ignore_ascii_case(key))
                 && matches!(stream.peek_n(1).kind, TokenKind::Equals)
-    )
+        }
+        _ => false,
+    }
 }
 
 pub(super) fn behavioral_expr_token_fragment(token: &TokenKind) -> Option<String> {
@@ -9861,12 +9885,14 @@ fn take_state_function(
             tc1: 0.0,
             tc2: 0.0,
             multiplicity: SourceMultiplicity::default(),
+            jacobian: true,
         },
         StateFunction::Flux => ElementKind::BehavioralVoltage {
             expression,
             tc1: 0.0,
             tc2: 0.0,
             multiplicity: SourceMultiplicity::default(),
+            jacobian: true,
         },
     };
     elements.push(Element {

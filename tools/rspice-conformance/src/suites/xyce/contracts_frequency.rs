@@ -559,12 +559,14 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 }
                 | ElementKind::BehavioralCurrent {
                     expression,
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 } if tc1.is_finite()
                     && tc2.is_finite()
                     && multiplicity.value.is_finite()

@@ -257,12 +257,14 @@ impl<'a> ElementDetails<'a> {
                 tc1,
                 tc2,
                 multiplicity,
+                ..
             }
             | BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                ..
             } => {
                 let kind = if matches!(&element.kind, BehavioralVoltage { .. }) {
                     "behavioral_voltage"

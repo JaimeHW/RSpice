@@ -305,6 +305,7 @@ pub(super) fn synthesize_freq(
         tc1: 0.0,
         tc2: 0.0,
         multiplicity: SourceMultiplicity::default(),
+        jacobian: true,
     };
     let mut elements = vec![Element {
         name: node("BFIN"),
@@ -371,6 +372,7 @@ pub(super) fn synthesize_freq(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             }
         },
         nodes: vec![node_pos.to_string(), node_neg.to_string()],

@@ -690,12 +690,14 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             }
             | ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } if nodes.len() == 2
                 && tc1.to_bits() == 0.0f64.to_bits()
                 && tc2.to_bits() == 0.0f64.to_bits()

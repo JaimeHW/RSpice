@@ -101,6 +101,7 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } if expression.chars().filter(|character| !character.is_whitespace()).collect::<String>()
                     .eq_ignore_ascii_case("V($g_1)")
                 && tc1.to_bits() == 0.0f64.to_bits()

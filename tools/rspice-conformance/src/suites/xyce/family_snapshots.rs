@@ -1327,6 +1327,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 } => {
                     if tc1.to_bits() != 0.0f64.to_bits()
                         || tc2.to_bits() != 0.0f64.to_bits()
@@ -1663,6 +1664,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 } => {
                     if Self::normalize_device_instance_name(&load.name) != "b1"
                         || tc1.to_bits() != 0.0f64.to_bits()
@@ -2353,6 +2355,7 @@ impl XyceTestRunner {
                         tc1,
                         tc2,
                         multiplicity,
+                        jacobian: _,
                     },
                 ) if nodes == ["1", "0"]
                     && tc1.to_bits() == 0.0f64.to_bits()
@@ -3570,6 +3573,7 @@ impl XyceTestRunner {
                         tc1,
                         tc2,
                         multiplicity,
+                        jacobian: _,
                     },
                 ) if nodes == ["1", "0"]
                     && tc1.to_bits() == 0.0f64.to_bits()
@@ -5908,6 +5912,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 } => {
                     if source.is_some() {
                         return Err("exact SIN/SPICE_SIN parity requires exactly one excitation"
@@ -6148,6 +6153,7 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } if tc1.to_bits() == 0.0f64.to_bits()
                 && tc2.to_bits() == 0.0f64.to_bits()
                 && multiplicity.value.to_bits() == 1.0f64.to_bits()
@@ -6419,6 +6425,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 } if nodes == [signal_nodes[0].clone(), "0".to_string()]
                     && tc1.to_bits() == 0.0f64.to_bits()
                     && tc2.to_bits() == 0.0f64.to_bits()

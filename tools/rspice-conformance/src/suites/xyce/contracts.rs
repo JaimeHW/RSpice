@@ -651,6 +651,7 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } = &behavioral.kind
             else {
                 return Err(format!("ABM_POW {name} is not a behavioral voltage source"));

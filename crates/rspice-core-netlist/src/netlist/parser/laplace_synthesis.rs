@@ -939,6 +939,7 @@ fn pointwise_transfer(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             }
         } else {
             ElementKind::BehavioralCurrent {
@@ -946,6 +947,7 @@ fn pointwise_transfer(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             }
         }
     };
@@ -1077,6 +1079,7 @@ pub(super) fn synthesize_rational_transfer(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             }
         } else {
             ElementKind::BehavioralCurrent {
@@ -1084,6 +1087,7 @@ pub(super) fn synthesize_rational_transfer(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             }
         }
     };
@@ -1175,6 +1179,7 @@ pub(super) fn synthesize_rational_transfer(
                 tc1: 0.0,
                 tc2: 0.0,
                 multiplicity: SourceMultiplicity::default(),
+                jacobian: true,
             },
             nodes: vec!["0".to_string(), state_node(i)],
             provenance: crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative {
@@ -1198,6 +1203,7 @@ pub(super) fn synthesize_rational_transfer(
             tc1: 0.0,
             tc2: 0.0,
             multiplicity: SourceMultiplicity::default(),
+            jacobian: true,
         },
         nodes: vec!["0".to_string(), state_node(n)],
         provenance: crate::netlist::ElementProvenance::GeneratedDynamicStateDerivative {

@@ -265,6 +265,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 },
             ) if Self::issue565566_table_expression_matches(expression)
                 && tc1.to_bits() == 0.0f64.to_bits()
@@ -350,6 +351,7 @@ impl XyceTestRunner {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian: _,
                 },
             ) if Self::issue565566_table_expression_matches(expression)
                 && tc1.to_bits() == 0.0f64.to_bits()

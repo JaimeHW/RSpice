@@ -9520,6 +9520,7 @@ impl Engine {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -9568,6 +9569,7 @@ impl Engine {
                     ));
                     bvs.set_gmin(self.config.convergence_config.junction_gmin_target);
                     bvs.set_expression_dialect(netlist.params.expression_dialect());
+                    bvs.set_jacobian(*jacobian);
                     circuit.behavioral_sources.add_voltage(bvs);
                 }
                 ElementKind::BehavioralCurrent {
@@ -9575,6 +9577,7 @@ impl Engine {
                     tc1,
                     tc2,
                     multiplicity,
+                    jacobian,
                 } => {
                     let np = circuit.get_or_create_node(&element.nodes[0]);
                     let nn = circuit.get_or_create_node(&element.nodes[1]);
@@ -9618,6 +9621,7 @@ impl Engine {
                     ));
                     bcs.set_gmin(self.config.convergence_config.junction_gmin_target);
                     bcs.set_expression_dialect(netlist.params.expression_dialect());
+                    bcs.set_jacobian(*jacobian);
                     circuit.behavioral_sources.add_current(bcs);
                 }
                 // Flattened tree leaves external subcircuit-backed devices here

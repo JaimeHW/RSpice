@@ -921,12 +921,14 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             }
             | ElementKind::BehavioralCurrent {
                 expression,
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } => {
                 let kind = if matches!(&element.kind, ElementKind::BehavioralVoltage { .. }) {
                     "BV"

@@ -252,6 +252,9 @@ pub struct BehavioralVoltageSource {
     constant_partials: ConstantPartials,
     /// Every input's analytic partial in one pass; see `partials.rs`.
     analytic_partials: partials::AnalyticPartials,
+    /// Whether the partials enter the Jacobian and the small-signal matrix;
+    /// see [`Self::set_jacobian`].
+    jacobian: bool,
 }
 
 /// Field by field, so that `clone_from` keeps the destination's name and
@@ -286,6 +289,7 @@ impl Clone for BehavioralVoltageSource {
             transient_voltage_lte_excluded,
             constant_partials,
             analytic_partials,
+            jacobian,
         } = self;
         Self {
             name: name.clone(),
@@ -312,6 +316,7 @@ impl Clone for BehavioralVoltageSource {
             transient_voltage_lte_excluded: *transient_voltage_lte_excluded,
             constant_partials: constant_partials.clone(),
             analytic_partials: analytic_partials.clone(),
+            jacobian: *jacobian,
         }
     }
 
@@ -341,6 +346,7 @@ impl Clone for BehavioralVoltageSource {
             transient_voltage_lte_excluded,
             constant_partials,
             analytic_partials,
+            jacobian,
         } = source;
         self.name.clone_from(name);
         self.node_pos = *node_pos;
@@ -366,6 +372,7 @@ impl Clone for BehavioralVoltageSource {
         self.transient_voltage_lte_excluded = *transient_voltage_lte_excluded;
         self.constant_partials.clone_from(constant_partials);
         self.analytic_partials.clone_from(analytic_partials);
+        self.jacobian = *jacobian;
     }
 }
 
@@ -512,6 +519,7 @@ impl BehavioralVoltageSource {
             transient_voltage_lte_excluded,
             constant_partials: ConstantPartials::default(),
             analytic_partials: partials::AnalyticPartials::default(),
+            jacobian: true,
         })
     }
 
@@ -705,6 +713,15 @@ impl BehavioralVoltageSource {
         self.gmin = gmin;
     }
 
+    /// Leave the expression's partials out of every Jacobian and
+    /// small-signal stamp, as LTspice's `NoJacob` does: the source still
+    /// follows its inputs from one Newton iterate to the next, as a fixed
+    /// point, and small-signal analyses see no response through it.
+    pub fn set_jacobian(&mut self, jacobian: bool) {
+        self.invalidate_cached_exact_constraint();
+        self.jacobian = jacobian;
+    }
+
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
         self.invalidate_cached_exact_constraint();
@@ -783,7 +800,10 @@ impl BehavioralVoltageSource {
             return Err(self.nonfinite_error("expression value", time, f0));
         }
 
-        if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
+        if !self.jacobian {
+            self.node_partials.fill(0.0);
+            self.branch_partials.fill(0.0);
+        } else if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
             self.node_partials.copy_from_slice(node_partials);
             self.branch_partials.copy_from_slice(branch_partials);
         } else {
@@ -1563,6 +1583,9 @@ pub struct BehavioralCurrentSource {
     constant_partials: ConstantPartials,
     /// Every input's analytic partial in one pass; see `partials.rs`.
     analytic_partials: partials::AnalyticPartials,
+    /// Whether the partials enter the Jacobian and the small-signal matrix;
+    /// see [`Self::set_jacobian`].
+    jacobian: bool,
 }
 
 /// Field by field, for the reason given on [`BehavioralVoltageSource`]'s
@@ -1592,6 +1615,7 @@ impl Clone for BehavioralCurrentSource {
             two_terminal_observables,
             constant_partials,
             analytic_partials,
+            jacobian,
         } = self;
         Self {
             name: name.clone(),
@@ -1616,6 +1640,7 @@ impl Clone for BehavioralCurrentSource {
             two_terminal_observables: *two_terminal_observables,
             constant_partials: constant_partials.clone(),
             analytic_partials: analytic_partials.clone(),
+            jacobian: *jacobian,
         }
     }
 
@@ -1643,6 +1668,7 @@ impl Clone for BehavioralCurrentSource {
             two_terminal_observables,
             constant_partials,
             analytic_partials,
+            jacobian,
         } = source;
         self.name.clone_from(name);
         self.node_pos = *node_pos;
@@ -1666,6 +1692,7 @@ impl Clone for BehavioralCurrentSource {
         self.two_terminal_observables = *two_terminal_observables;
         self.constant_partials.clone_from(constant_partials);
         self.analytic_partials.clone_from(analytic_partials);
+        self.jacobian = *jacobian;
     }
 }
 
@@ -1764,6 +1791,7 @@ impl BehavioralCurrentSource {
             two_terminal_observables: false,
             constant_partials: ConstantPartials::default(),
             analytic_partials: partials::AnalyticPartials::default(),
+            jacobian: true,
         })
     }
 
@@ -1928,6 +1956,12 @@ impl BehavioralCurrentSource {
         self.gmin = gmin;
     }
 
+    /// Leave the expression's partials out of every Jacobian and
+    /// small-signal stamp; see [`BehavioralVoltageSource::set_jacobian`].
+    pub fn set_jacobian(&mut self, jacobian: bool) {
+        self.jacobian = jacobian;
+    }
+
     /// Set dialect-specific expression-function semantics.
     pub fn set_expression_dialect(&mut self, dialect: ExpressionDialect) {
         self.constant_partials.forget();
@@ -2017,7 +2051,10 @@ impl BehavioralCurrentSource {
             return Err(self.nonfinite_error("expression value", time, f0));
         }
 
-        if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
+        if !self.jacobian {
+            self.node_partials.fill(0.0);
+            self.branch_partials.fill(0.0);
+        } else if let Some((node_partials, branch_partials)) = self.constant_partials.get() {
             self.node_partials.copy_from_slice(node_partials);
             self.branch_partials.copy_from_slice(branch_partials);
         } else {

@@ -672,6 +672,9 @@ pub enum ElementKind {
         /// Accepted and range-checked for dialect compatibility. Xyce does
         /// not apply this multiplier to the voltage-form behavioral source.
         multiplicity: SourceMultiplicity,
+        /// Whether the expression's partial derivatives enter the Jacobian
+        /// and the small-signal matrix; see [`ElementKind::BehavioralCurrent`].
+        jacobian: bool,
     },
 
     /// Behavioral current source: B1 n+ n- I=expr
@@ -682,6 +685,12 @@ pub enum ElementKind {
         /// Parallel multiplier applied to current, derivatives, and current
         /// observables.
         multiplicity: SourceMultiplicity,
+        /// Whether the expression's partial derivatives enter the Jacobian
+        /// and the small-signal matrix. LTspice's and QSPICE's `NoJacob`
+        /// flag clears it: Newton then iterates the source's value as a
+        /// fixed point, which may settle on another root, and small-signal
+        /// analyses see no response through the source.
+        jacobian: bool,
     },
 
     //-------------------------------------------------------------------------

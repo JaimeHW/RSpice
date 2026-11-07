@@ -258,6 +258,7 @@ impl XyceBug1085UserFunctionSnapshot {
                         tc1,
                         tc2,
                         multiplicity,
+                        jacobian: _,
                     },
                 ) => {
                     let normalized = XyceTestRunner::alpha_normalize_expression(expression, &[]);

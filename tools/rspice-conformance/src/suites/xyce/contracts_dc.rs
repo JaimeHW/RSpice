@@ -3292,6 +3292,7 @@ impl XyceTestRunner {
                 tc1,
                 tc2,
                 multiplicity,
+                jacobian: _,
             } = &element.kind
             else {
                 continue;

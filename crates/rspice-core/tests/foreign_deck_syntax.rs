@@ -1565,3 +1565,52 @@ L1 d 0 Flux=1*x+0.5*x*x*x
         assert_close(&format!("V(d) at {time}"), values[2], d, 2e-4);
     }
 }
+
+// LTspice 26.1.1 and QSPICE 2026 agree. With NoJacob, B1's partials stay out
+// of the Jacobian, so Newton iterates V(b) = 2 - V(b)^2 as a fixed point from
+// 0 and settles on the root -2, where B2, with its Jacobian, finds 1. In AC a
+// NoJacob source answers nothing: V(e) and V(f) are 0 where V(g) is 3.
+#[test]
+fn a_behavioral_source_flagged_nojacob_leaves_its_partials_out() {
+    let netlist = parse(
+        "* nojacob
+         V1 a 0 2 AC 1
+         R1 a b 1k
+         B1 b 0 I=V(b)**2/1k NoJacob
+         R2 a c 1k
+         B2 c 0 I=V(c)**2/1k
+         B3 0 d I=table(V(a), 0, 4.5m, 10, 9m) Rpar=1k Cpar=10n NoJacob
+         B4 e 0 V=V(a)*3 nojacob
+         R4 e 0 1k
+         B5 f 0 I=V(a)*1m NoJacob
+         R5 f 0 1k
+         B6 g 0 V=V(a)*3
+         R6 g 0 1k
+         .end
+",
+    );
+    for (node, want) in [("b", -2.0), ("c", 1.0), ("d", 5.4), ("e", 6.0), ("f", -2.0)] {
+        assert_close(
+            &format!("V({node})"),
+            op_voltage(&netlist, node),
+            want,
+            1e-9,
+        );
+    }
+    let sweep = Engine::default()
+        .run_ac(&netlist, &[1e3])
+        .expect("AC sweep solves");
+    for (node, want) in [("e", 0.0), ("f", 0.0), ("g", 3.0)] {
+        let index = sweep[0]
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("V({node}) is solved"));
+        assert_close(
+            &format!("AC V({node})"),
+            sweep[0].voltages[index].norm(),
+            want,
+            1e-12,
+        );
+    }
+}

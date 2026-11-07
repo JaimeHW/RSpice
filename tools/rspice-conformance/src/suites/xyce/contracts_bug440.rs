@@ -292,6 +292,7 @@ impl XyceTestRunner {
                         tc1,
                         tc2,
                         multiplicity,
+                        jacobian: _,
                     } if expression.split_whitespace().collect::<String>().eq_ignore_ascii_case("sqrt(v(1))")
                         && tc1.to_bits() == 0.0f64.to_bits()
                         && tc2.to_bits() == 0.0f64.to_bits()
