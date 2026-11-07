@@ -1784,12 +1784,23 @@ impl<'a> ScalarDdxBuilder<'a> {
         ))
     }
 
+    /// The slope of `limexp`: `exp(x)` below the threshold, and `exp` of the
+    /// threshold above it, where `limexp` continues as a straight line. Written
+    /// as `limexp(min(x, threshold))`, which is both pieces with no new
+    /// operator, and whose own derivative is `exp(x)` below the threshold and
+    /// zero above it.
+    fn limexp_slope(&mut self, input: ValueId) -> ValueId {
+        let threshold = self.constant(rspice_veriloga_runtime::LIMEXP_THRESHOLD);
+        let knee = self.push_binary(CfgBinaryOp::Min, input, threshold);
+        self.push_unary(CfgUnaryOp::LimExp, knee)
+    }
+
     fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
         match op {
             CfgUnaryOp::FreezeDerivative => self.constant(0.0),
             CfgUnaryOp::Neg => self.constant(-1.0),
             CfgUnaryOp::Exp => self.push_unary(CfgUnaryOp::Exp, input),
-            CfgUnaryOp::LimExp => self.push_unary(CfgUnaryOp::LimExp, input),
+            CfgUnaryOp::LimExp => self.limexp_slope(input),
             CfgUnaryOp::LimitedExp => self.push_unary(CfgUnaryOp::LimitedExpDerivative, input),
             CfgUnaryOp::LimitedExpDerivative => self.constant(0.0),
             CfgUnaryOp::Ln => self.push_binary(CfgBinaryOp::Div, self.one, input),
@@ -3154,15 +3165,24 @@ impl<'a> AdBuilder<'a> {
         ))
     }
 
+    /// The slope of `limexp`: `exp(x)` below the threshold, and `exp` of the
+    /// threshold above it, where `limexp` continues as a straight line. Written
+    /// as `limexp(min(x, threshold))`, which is both pieces with no new
+    /// operator, and whose own derivative is `exp(x)` below the threshold and
+    /// zero above it.
+    fn limexp_slope(&mut self, input: ValueId) -> ValueId {
+        let threshold = self.constant(rspice_veriloga_runtime::LIMEXP_THRESHOLD);
+        let knee = self.push_binary(CfgBinaryOp::Min, input, threshold);
+        self.push_unary(CfgUnaryOp::LimExp, knee)
+    }
+
     /// `d(f(x)) = f'(x) * dx`; this returns `f'(x)`.
     fn unary_factor(&mut self, op: CfgUnaryOp, input: ValueId) -> ValueId {
         match op {
             CfgUnaryOp::FreezeDerivative => self.constant(0.0),
             CfgUnaryOp::Neg => self.constant(-1.0),
             CfgUnaryOp::Exp => self.push_unary(CfgUnaryOp::Exp, input),
-            // Beyond the clamp `limexp` is affine, so its slope is the value at
-            // the clamp — which is what `limexp` returns there.
-            CfgUnaryOp::LimExp => self.push_unary(CfgUnaryOp::LimExp, input),
+            CfgUnaryOp::LimExp => self.limexp_slope(input),
             CfgUnaryOp::LimitedExp => self.push_unary(CfgUnaryOp::LimitedExpDerivative, input),
             // Its own derivative is a step, so second derivatives are zero.
             CfgUnaryOp::LimitedExpDerivative => self.constant(0.0),

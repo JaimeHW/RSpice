@@ -543,7 +543,13 @@ use super::*;
 // statement, never for a conditional inside its value. The serialized form is
 // unchanged, but an earlier record carries activation conditions that opened
 // `V(o) <+ c ? x : 0` whenever `c` was false.
-pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 180;
+//
+// Version 181 differentiates `limexp` past its threshold to the constant
+// slope of the straight line it continues as. The serialized form is
+// unchanged, but an earlier record carries Jacobians that grew with the
+// argument there, which let a junction driven far past its knee report a
+// solution that violates KCL.
+pub(super) const VERILOGA_CACHE_RECORD_VERSION: u32 = 181;
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]
 pub(super) const VERILOGA_CACHE_LOCK_FILE: &str = ".rspice-veriloga-cache.lock";
 #[cfg(all(feature = "veriloga", not(target_arch = "wasm32")))]

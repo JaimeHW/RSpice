@@ -4960,11 +4960,16 @@ pub mod autodiff {
                 arena.push_call(IrFunction::SumProductsDiv, &derivatives)
             }
 
-            // d(limexp(x)) = limexp(x) * x' (same as exp, but clamped). The
-            // primal node itself is the factor the rule names.
+            // d(limexp(x)) = exp(x) * x' below the threshold and exp(threshold)
+            // * x' above it, where limexp is a straight line. That slope is
+            // limexp(min(x, threshold)); the primal itself is not, because past
+            // the threshold it keeps growing while its slope does not.
             Node::Limexp(inner) => {
                 let di = differentiate!(inner);
-                binary!(BinaryOp::Mul, expr, di)
+                let threshold = constant!(rspice_veriloga_runtime::LIMEXP_THRESHOLD);
+                let knee = arena.push_call(IrFunction::Min, &[inner, threshold]);
+                let slope = arena.push(Node::Limexp(knee));
+                binary!(BinaryOp::Mul, slope, di)
             }
 
             // The first candidate's synthetic history follows its input.

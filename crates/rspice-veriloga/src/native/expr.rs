@@ -25,6 +25,7 @@ use crate::integer_runtime::{
     integer_binary, real_to_integer, shift_count,
 };
 use crate::vm::{CURRENT_PAIR_GROUND, terminal_pair_current_index};
+use rspice_veriloga_runtime::{LIMEXP_MAX, LIMEXP_THRESHOLD, LIMITED_EXP_THRESHOLD};
 use smol_str::SmolStr;
 use std::collections::HashMap;
 
@@ -4433,8 +4434,7 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
             "atanh" => self.lower_atanh_derivative(name, args, wrt),
             "limexp" => {
                 self.require_intrinsic_arity(name, args, 1)?;
-                self.lower(args[0])?;
-                self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))?;
+                self.lower_limexp_slope(args[0])?;
                 self.lower_derivative(args[0], wrt)?;
                 self.append_arithmetic("Mul")
             }
@@ -4628,21 +4628,45 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
                     lowerer.append_arithmetic("Mul")
                 },
             ),
-            "exp" | "limexp" | "__rspice_limited_exp" => self
-                .lower_unary_function_second_derivative(
-                    name,
-                    args,
-                    first,
-                    second,
-                    |lowerer, arg| {
-                        lowerer.lower(arg)?;
-                        lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
-                    },
-                    |lowerer, arg| {
-                        lowerer.lower(arg)?;
-                        lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
-                    },
-                ),
+            "exp" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
+                },
+                |lowerer, arg| {
+                    lowerer.lower(arg)?;
+                    lowerer.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))
+                },
+            ),
+            // Past their thresholds both bounded exponentials are straight
+            // lines (or, below the limited one's floor, a constant), so their
+            // curvature there is zero and their slope is held.
+            "limexp" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                Self::lower_limexp_slope,
+                |lowerer, arg| lowerer.lower_exp_inside(arg, Some(LIMEXP_THRESHOLD), None),
+            ),
+            "__rspice_limited_exp" => self.lower_unary_function_second_derivative(
+                name,
+                args,
+                first,
+                second,
+                Self::lower_limited_exp_slope,
+                |lowerer, arg| {
+                    lowerer.lower_exp_inside(
+                        arg,
+                        Some(LIMITED_EXP_THRESHOLD),
+                        Some(-LIMITED_EXP_THRESHOLD),
+                    )
+                },
+            ),
             "ln" => self.lower_unary_function_second_derivative(
                 name,
                 args,
@@ -5370,22 +5394,64 @@ impl<'a, 'limits> MirEquationLowerer<'a, 'limits> {
         wrt: CanonicalDerivativeAxis,
     ) -> JitResult<()> {
         self.require_intrinsic_arity(name, args, 1)?;
-        self.lower(args[0])?;
-        self.push(NativeOp::Const(80.0))?;
-        self.append_compare("Gt")?;
-        self.push(NativeOp::Const(80.0_f64.exp()))?;
-
-        self.lower(args[0])?;
-        self.push(NativeOp::Const(-80.0))?;
-        self.append_compare("Lt")?;
-        self.push(NativeOp::Const(0.0))?;
-        self.lower(args[0])?;
-        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))?;
-        self.append_ifelse()?;
-        self.append_ifelse()?;
-
+        self.lower_limited_exp_slope(args[0])?;
         self.lower_derivative(args[0], wrt)?;
         self.append_arithmetic("Mul")
+    }
+
+    /// The slope of `limexp`: `exp(x)` below the threshold and `exp` of the
+    /// threshold above it, where `limexp` is a straight line. That is
+    /// `limexp(min(x, threshold))`, which reaches the threshold's slope
+    /// bit-exactly rather than through a second `exp`.
+    fn lower_limexp_slope(&mut self, arg: ExprId) -> JitResult<()> {
+        self.lower(arg)?;
+        self.push(NativeOp::Const(LIMEXP_THRESHOLD))?;
+        self.append_extremum(ExtremumOp::Min)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Limexp))
+    }
+
+    /// The slope of the compact-model bounded exponential: `exp(x)` between
+    /// its thresholds, `exp` of the upper one above it and zero below the
+    /// floor, where the function is constant.
+    fn lower_limited_exp_slope(&mut self, arg: ExprId) -> JitResult<()> {
+        self.lower(arg)?;
+        self.push(NativeOp::Const(LIMITED_EXP_THRESHOLD))?;
+        self.append_compare("Gt")?;
+        self.push(NativeOp::Const(LIMEXP_MAX))?;
+        self.lower_exp_inside(arg, None, Some(-LIMITED_EXP_THRESHOLD))?;
+        self.append_ifelse()
+    }
+
+    /// `exp(x)` where `x` lies inside the given bounds and zero outside them:
+    /// the curvature of a bounded exponential, which is that of `exp` inside
+    /// its band and of a line or a constant outside it.
+    fn lower_exp_inside(
+        &mut self,
+        arg: ExprId,
+        ceiling: Option<f64>,
+        floor: Option<f64>,
+    ) -> JitResult<()> {
+        let mut outside = 0;
+        if let Some(ceiling) = ceiling {
+            self.lower(arg)?;
+            self.push(NativeOp::Const(ceiling))?;
+            self.append_compare("Gt")?;
+            self.push(NativeOp::Const(0.0))?;
+            outside += 1;
+        }
+        if let Some(floor) = floor {
+            self.lower(arg)?;
+            self.push(NativeOp::Const(floor))?;
+            self.append_compare("Lt")?;
+            self.push(NativeOp::Const(0.0))?;
+            outside += 1;
+        }
+        self.lower(arg)?;
+        self.append_unary(NativeOp::UnaryMath(UnaryMathOp::Exp))?;
+        for _ in 0..outside {
+            self.append_ifelse()?;
+        }
+        Ok(())
     }
 
     fn lower_ddt_derivative(

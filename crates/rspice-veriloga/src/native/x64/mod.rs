@@ -2883,6 +2883,58 @@ endmodule
         }
     }
 
+    /// Past its threshold `limexp` is a straight line: its slope stays
+    /// `exp(80)` however far the argument goes, and every higher derivative is
+    /// zero. The compact-model bounded exponential is the same above its
+    /// threshold and a constant below its floor. Orders one and two take the
+    /// direct rules and order three the expression algebra, so all three
+    /// routes are pinned at points on both sides of each threshold.
+    #[test]
+    fn bounded_exponentials_hold_their_slope_past_the_threshold() {
+        use rspice_veriloga_runtime::LIMEXP_MAX;
+        let inside = 0.5_f64.exp();
+        let cases = [
+            ("limexp(V(p))", 0.5, [inside, inside, inside]),
+            ("limexp(V(p))", 100.0, [LIMEXP_MAX, 0.0, 0.0]),
+            ("limexp(V(p))", 1.0e6, [LIMEXP_MAX, 0.0, 0.0]),
+            ("limexp(V(p))", -100.0, [(-100.0_f64).exp(); 3]),
+            ("__rspice_limited_exp(V(p))", 0.5, [inside, inside, inside]),
+            ("__rspice_limited_exp(V(p))", 100.0, [LIMEXP_MAX, 0.0, 0.0]),
+            ("__rspice_limited_exp(V(p))", -100.0, [0.0, 0.0, 0.0]),
+        ];
+        for (expression, bias, expected) in cases {
+            let source = format!(
+                "module bounded(p,n); inout p,n; electrical p,n; analog I(p,n)<+{expression}; endmodule"
+            );
+            let artifact = VerilogACompiler::new(CompilerOptions::default())
+                .compile_canonical_ir(&source)
+                .unwrap();
+            for (order, expected) in (1..=3).zip(expected) {
+                let axes = vec![CanonicalDerivativeAxis::Node(NodeId::from(0)); order];
+                let program = NativeProgram::from_mir_expression_mixed_derivative(
+                    "bounded",
+                    EntryKind::Jacobian,
+                    &artifact.mir,
+                    crate::canonical_ir::EquationId::new(0),
+                    artifact.mir.equations[0].expression.id,
+                    &axes,
+                    NativeLoweringLimits::new(2, 0, 0, 0, 0),
+                )
+                .unwrap_or_else(|error| panic!("{expression}, order {order}: {error}"));
+                let bytes = super::codegen::compile_value_function(&program).unwrap();
+                let memory = ExecutableMemory::allocate(&bytes).unwrap();
+                let function: extern "C" fn(*const EvalContext, *const f64) -> f64 =
+                    unsafe { std::mem::transmute(memory.ptr_at(0).unwrap()) };
+                let ctx = eval_context(&[], &[bias, 0.0]);
+                let actual = function(&ctx, std::ptr::null());
+                assert!(
+                    (actual - expected).abs() <= 1e-12 * expected.abs(),
+                    "{expression} at {bias}, order {order}: {actual:e} != {expected:e}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn canonical_abs_second_derivative_preserves_nonlinear_operand() {
         for expression in ["abs(pow(1+V(p),4))", "abs(-pow(1+V(p),4))"] {

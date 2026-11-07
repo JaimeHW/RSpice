@@ -3569,28 +3569,46 @@ endmodule
 "#,
     );
 
-    let bias = 0.6;
-    let delta = 1e-7;
+    let device = |name: &str, bytecode: bool| {
+        if bytecode {
+            model.try_bytecode_device(name, &[1, 0]).unwrap()
+        } else {
+            model.device(name, &[1, 0])
+        }
+    };
+    let bytecode_routes: &[bool] = if cfg!(any(
+        not(feature = "native"),
+        feature = "native-bytecode-contract-tests"
+    )) {
+        &[false, true]
+    } else {
+        &[false]
+    };
+    // 0.6 V sits on the exponential; 3 V puts the argument near 116, past
+    // limexp's threshold, where the current is a straight line whose slope is
+    // that of the exponential at the threshold, not the current itself.
+    for &bytecode in bytecode_routes {
+        for bias in [0.6, 3.0] {
+            let delta = 1e-7;
 
-    let mut device = model.device("D1", &[1, 0]);
-    device.update_voltages(&[bias]);
-    let i0 = device.evaluate()[0];
-    let (matrix, _) = collect_stamps(&mut device, &[bias]);
-    let g_analytic = matrix[&(0, 0)];
+            let mut device1 = device("D1", bytecode);
+            device1.update_voltages(&[bias]);
+            let i0 = device1.evaluate()[0];
+            let (matrix, _) = collect_stamps(&mut device1, &[bias]);
+            let g_analytic = matrix[&(0, 0)];
 
-    let mut device2 = model.device("D2", &[1, 0]);
-    device2.update_voltages(&[bias + delta]);
-    let i1 = device2.evaluate()[0];
+            let mut device2 = device("D2", bytecode);
+            device2.update_voltages(&[bias + delta]);
+            let i1 = device2.evaluate()[0];
 
-    let g_fd = (i1 - i0) / delta;
-    let rel_err = ((g_analytic - g_fd) / g_fd).abs();
-    assert!(
-        rel_err < 1e-3,
-        "analytic {} vs finite-difference {} (rel err {})",
-        g_analytic,
-        g_fd,
-        rel_err
-    );
+            let g_fd = (i1 - i0) / delta;
+            let rel_err = ((g_analytic - g_fd) / g_fd).abs();
+            assert!(
+                rel_err < 1e-3,
+                "bytecode={bytecode}, at {bias} V: analytic {g_analytic} vs finite-difference                  {g_fd} (rel err {rel_err})"
+            );
+        }
+    }
 }
 
 #[test]

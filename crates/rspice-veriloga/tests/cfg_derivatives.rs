@@ -443,6 +443,21 @@ module diode(a, c);
 endmodule
 "#,
         ),
+        // One limexp on its exponential and one driven past its threshold, to
+        // an argument near 130, where it is a straight line: its slope there is
+        // exp(80), not the value the line has reached.
+        (
+            "limexp on both sides of its threshold",
+            r#"
+module limexp_knee(a, c);
+    inout a, c;
+    electrical a, c;
+    parameter real is = 1.0e-40;
+    parameter real vt = 0.02585;
+    analog I(a, c) <+ is * limexp(1000.0 * V(a, c)) + 1.0e-14 * limexp(V(a, c) / vt);
+endmodule
+"#,
+        ),
         (
             "guarded transconductor",
             r#"
