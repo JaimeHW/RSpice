@@ -169,6 +169,17 @@ pub struct ForeignWindow {
     pub hidden: bool,
 }
 
+/// One of the texts a drawing letters an instance's value in, when it
+/// letters it in several: QSPICE draws each of a part's attributes as a
+/// text of its own, and the part's value is those texts joined by spaces.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForeignValuePiece {
+    pub text: String,
+    pub window: ForeignWindow,
+    /// The text's size in hundredths of the tool's standard size.
+    pub size_percent: u16,
+}
+
 /// One electrical pin of a symbol, relative to its origin.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ForeignPin {
@@ -235,6 +246,9 @@ pub struct ForeignSymbol {
     pub orientation: ForeignOrientation,
     pub attributes: Vec<ForeignAttribute>,
     pub windows: Vec<ForeignWindow>,
+    /// The value's texts, each where the drawing letters it, when the
+    /// drawing letters the value in more than one; empty otherwise.
+    pub value_pieces: Vec<ForeignValuePiece>,
     /// The definition the drawing carries itself (QSPICE always does).
     pub embedded: Option<ForeignSymbolDefinition>,
     /// Source line of the record, from 1.

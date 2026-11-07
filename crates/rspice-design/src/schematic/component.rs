@@ -13,7 +13,7 @@ pub use variant::PreparedVariantReplacement;
 pub use written_name::{BehavioralLowering, component_for_engine_device};
 
 use super::component_type::ComponentType;
-use super::label_position::LabelPosition;
+use super::label_position::{LabelPosition, ValuePiece};
 use super::rotation::Rotation;
 use rspice_design_model::Point;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -532,6 +532,13 @@ pub struct Component {
     #[serde(default)]
     pub value_label_pos: LabelPosition,
 
+    /// The value as a drawing imported from another tool letters it, in
+    /// pieces each at its own place and size. Display only, and only while
+    /// the pieces still spell `value`: an edited value letters as one text
+    /// at `value_label_pos` again.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub value_pieces: Vec<ValuePiece>,
+
     /// Durable per-instance label visibility override.
     #[serde(default)]
     pub display_mode: ComponentDisplayMode,
@@ -609,6 +616,8 @@ struct PersistedComponent {
     #[serde(default)]
     value_label_pos: LabelPosition,
     #[serde(default)]
+    value_pieces: Vec<ValuePiece>,
+    #[serde(default)]
     display_mode: ComponentDisplayMode,
     #[serde(default)]
     mirror_h: bool,
@@ -637,6 +646,7 @@ impl From<PersistedComponent> for Component {
             symbol_variant: persisted.symbol_variant,
             name_label_pos: persisted.name_label_pos,
             value_label_pos: persisted.value_label_pos,
+            value_pieces: persisted.value_pieces,
             display_mode: persisted.display_mode,
             mirror_h: persisted.mirror_h,
             mirror_v: persisted.mirror_v,
@@ -671,6 +681,7 @@ impl Component {
             symbol_variant: None,
             name_label_pos: LabelPosition::Auto,
             value_label_pos: LabelPosition::Auto,
+            value_pieces: Vec::new(),
             display_mode: ComponentDisplayMode::Inherit,
             mirror_h: false,
             mirror_v: false,

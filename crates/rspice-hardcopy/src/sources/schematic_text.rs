@@ -12,7 +12,7 @@ use rspice_design::schematic::{
     component_type::ComponentType,
     label_layout::{self, LayoutPoint, LayoutRect, PlacedText, TextEdge, ValueClass},
     net_label::NetLabel,
-    value_label::{cell_instance_value, component_value_label},
+    value_label::{cell_instance_value, component_value_label, value_pieces},
 };
 
 use super::SemanticComponent;
@@ -50,12 +50,20 @@ pub struct SchematicText {
     pub class: SchematicTextClass,
     pub placed: PlacedText,
     pub text: String,
+    /// The run's size in hundredths of its class's: a value a drawing
+    /// lettered in pieces sets each piece as large as the drawing did.
+    pub size_percent: u16,
 }
 
 impl SchematicText {
+    /// The run's type size, in world units.
+    pub fn size_world(&self) -> f32 {
+        self.class.size_world() * f32::from(self.size_percent) / 100.0
+    }
+
     /// The box the run takes, in world units.
     pub fn bounds(&self) -> LayoutRect {
-        label_layout::text_box(self.placed, &self.text, self.class.size_world())
+        label_layout::text_box(self.placed, &self.text, self.size_world())
     }
 }
 
@@ -94,7 +102,27 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             class: SchematicTextClass::Name,
             placed: name,
             text: component.name.clone(),
+            size_percent: 100,
         });
+    }
+    let pieces = value_pieces(component).filter(|_| {
+        semantic.resolved_symbol.is_none()
+            && label_layout::instance_value_class(component) == ValueClass::Value
+    });
+    if let Some(pieces) = pieces {
+        if component.display_mode.show_value(visibility) {
+            let origin = LayoutPoint::new(component.pos.x as f32, component.pos.y as f32);
+            texts.extend(pieces.iter().filter_map(|piece| {
+                Some(SchematicText {
+                    class: SchematicTextClass::Value,
+                    placed: piece.position.placed_text(origin, 1.0)?,
+                    text: piece.text.clone(),
+                    size_percent: piece.size_percent,
+                })
+                .filter(|text| !text.text.trim().is_empty())
+            }));
+        }
+        return texts;
     }
     if component.display_mode.show_value(visibility) && !value_text.trim().is_empty() {
         texts.push(SchematicText {
@@ -104,6 +132,7 @@ pub fn instance_texts(semantic: &SemanticComponent) -> Vec<SchematicText> {
             },
             placed: value,
             text: value_text,
+            size_percent: 100,
         });
     }
     texts
@@ -116,6 +145,7 @@ pub fn bus_declaration_text(bus: &Bus) -> Option<SchematicText> {
         class: SchematicTextClass::Slice,
         placed: label_layout::bus_declaration_placement(bus)?,
         text: bus.declaration.as_ref()?.to_string(),
+        size_percent: 100,
     })
 }
 
@@ -131,6 +161,7 @@ pub fn net_label_text(label: &NetLabel) -> SchematicText {
             vertical: TextEdge::End,
         },
         text: layout.name.to_owned(),
+        size_percent: 100,
     }
 }
 
@@ -158,5 +189,6 @@ pub fn tap_slice_text(tap: &BusTap) -> SchematicText {
         class: SchematicTextClass::Slice,
         placed: label_layout::tap_slice_placement(tap),
         text: tap.slice.to_string(),
+        size_percent: 100,
     }
 }

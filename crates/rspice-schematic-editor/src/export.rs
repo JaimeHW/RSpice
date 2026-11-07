@@ -41,7 +41,8 @@ use super::view::design_view::object_is_on_active_sheet;
 use super::view::drawing::{chain_conductors, compute_label_layout};
 use super::view::lod::{StrokeRole, nominal_wu};
 use super::view::resolved_symbol_render::{
-    InstanceLabel, resolved_symbol_world_bounds, write_resolved_symbol_svg, write_text_svg,
+    InstanceLabel, resolved_symbol_world_bounds, write_resolved_symbol_svg, write_sized_text_svg,
+    write_text_svg,
 };
 
 #[derive(Clone)]
@@ -637,9 +638,7 @@ fn write_component(
 
     if !symbol_wrote_labels {
         for label in primitive_labels(component, config) {
-            label
-                .kind
-                .write(svg, label.at, &label.text, label.align, config);
+            label.write(svg, config);
         }
     }
 
@@ -660,6 +659,31 @@ struct PrimitiveLabel {
     at: (f64, f64),
     align: egui::Align2,
     text: String,
+    /// The label's size in hundredths of its kind's: a value a drawing
+    /// lettered in pieces sets each piece as large as the drawing did.
+    size_percent: u16,
+}
+
+impl PrimitiveLabel {
+    fn size(&self, config: &SvgExportConfig) -> f64 {
+        self.kind.size(config) * f64::from(self.size_percent) / 100.0
+    }
+
+    fn write(&self, svg: &mut String, config: &SvgExportConfig) {
+        if self.size_percent == 100 {
+            self.kind
+                .write(svg, self.at, &self.text, self.align, config);
+        } else {
+            write_sized_text_svg(
+                svg,
+                self.kind.class(),
+                self.at,
+                &self.text,
+                self.align,
+                self.size(config),
+            );
+        }
+    }
 }
 
 /// A primitive's name and value where the canvas puts them, through the
@@ -688,7 +712,40 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             at: at(layout.name_pos),
             align: layout.name_align,
             text: component.name.clone(),
+            size_percent: 100,
         });
+    }
+    let pieces = rspice_design::schematic::value_label::value_pieces(component).filter(|_| {
+        rspice_design::schematic::label_layout::instance_value_class(component)
+            == rspice_design::schematic::label_layout::ValueClass::Value
+    });
+    if let Some(pieces) = pieces {
+        if component
+            .display_mode
+            .show_value(SchematicParameterLabelVisibility::NamesAndValues)
+        {
+            let origin =
+                rspice_design::schematic::label_layout::LayoutPoint::new(cx as f32, cy as f32);
+            for piece in pieces {
+                let Some(placed) = piece
+                    .position
+                    .placed_text(origin, config.units_per_world as f32)
+                else {
+                    continue;
+                };
+                if piece.text.trim().is_empty() {
+                    continue;
+                }
+                labels.push(PrimitiveLabel {
+                    kind: InstanceLabel::Value,
+                    at: at(crate::view::drawing::layout_pos(placed.anchor)),
+                    align: crate::view::drawing::text_align(placed.horizontal, placed.vertical),
+                    text: piece.text.clone(),
+                    size_percent: piece.size_percent,
+                });
+            }
+        }
+        return labels;
     }
     let value = crate::source_labels::component_value_label_cached(component);
     if component
@@ -703,6 +760,7 @@ fn primitive_labels(component: &Component, config: &SvgExportConfig) -> Vec<Prim
             at: at(layout.value_pos),
             align: layout.value_align,
             text: value.to_string(),
+            size_percent: 100,
         });
     }
     labels
@@ -733,7 +791,7 @@ fn include_primitive_label_bounds(
     extent: &mut Extent,
 ) {
     for label in primitive_labels(component, config) {
-        extent.include_text(label.at, label.align, &label.text, label.kind.size(config));
+        extent.include_text(label.at, label.align, &label.text, label.size(config));
     }
 }
 

@@ -1126,7 +1126,9 @@ fn draw_component_labels(
     }
     match label_layout::instance_value_class(component) {
         label_layout::ValueClass::Value => {
-            if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp) {
+            if let Some(pieces) = rspice_design::schematic::value_label::value_pieces(component) {
+                draw_value_pieces(painter, pos, scale, pieces, palette);
+            } else if let Some(size) = lod::annotation_size(INSTANCE_VALUE_WORLD, scale, ppp) {
                 let value_text =
                     super::super::source_labels::component_value_label_cached(component);
                 if !value_text.is_empty() {
@@ -1153,6 +1155,38 @@ fn draw_component_labels(
                     palette.net_label,
                 );
             }
+        }
+    }
+}
+
+/// A value a drawing lettered in several texts, each where and as large as
+/// the drawing set it.
+fn draw_value_pieces(
+    painter: &Painter,
+    pos: Pos2,
+    scale: f32,
+    pieces: &[rspice_design::schematic::label_position::ValuePiece],
+    palette: &Palette,
+) {
+    let ppp = painter.pixels_per_point();
+    for piece in pieces {
+        let Some(placed) = piece
+            .position
+            .placed_text(LayoutPoint::new(pos.x, pos.y), scale)
+        else {
+            continue;
+        };
+        if let Some(size) = lod::annotation_size(piece.size_world(), scale, ppp)
+            && !piece.text.trim().is_empty()
+        {
+            rspice_ui_kit::text::paint_text(
+                painter,
+                layout_pos(placed.anchor),
+                text_align(placed.horizontal, placed.vertical),
+                &piece.text,
+                rspice_ui_kit::theme::sans(size, rspice_ui_kit::theme::FontWeight::Regular),
+                palette.text_dim,
+            );
         }
     }
 }

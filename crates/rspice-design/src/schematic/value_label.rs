@@ -3,7 +3,7 @@
 //! Concise, descriptive source labels for the canvas, the SVG export and the
 //! printed page alike, without changing netlist serialization semantics.
 
-use super::{component::Component, component_type::ComponentType};
+use super::{component::Component, component_type::ComponentType, label_position::ValuePiece};
 use std::borrow::Cow;
 use std::collections::HashMap;
 
@@ -18,6 +18,16 @@ pub fn component_value_label(component: &Component) -> Cow<'_, str> {
     }
 
     Cow::Owned(format_source_label(component))
+}
+
+/// The texts an instance letters its value in, when a drawing lettered it in
+/// several that still spell the value the instance has now.
+pub fn value_pieces(component: &Component) -> Option<&[ValuePiece]> {
+    let pieces = component.value_pieces.as_slice();
+    let spelled = pieces
+        .iter()
+        .flat_map(|piece| piece.text.split_whitespace());
+    (!pieces.is_empty() && spelled.eq(component.value.split_whitespace())).then_some(pieces)
 }
 
 /// The value an instance of an authored cell symbol shows: its own, else

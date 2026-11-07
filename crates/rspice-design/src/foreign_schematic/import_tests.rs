@@ -1085,6 +1085,106 @@ fn a_qspice_value_hung_below_its_anchor_stays_off_the_edge_it_starts_on() {
     );
 }
 
+/// QSPICE letters each of a part's attributes as a text of its own, where
+/// and as large as the drawing set it; the part's value is those texts
+/// joined. Lettering them as one line runs it across whatever stands beside
+/// the part, so each keeps its own place and size, until the value is
+/// edited and letters as one text again.
+#[test]
+fn a_qspice_value_lettered_in_several_texts_keeps_each_where_the_drawing_set_it() {
+    use crate::schematic::label_layout::{
+        INSTANCE_NAME_WORLD, LayoutPoint, LayoutRect, TextEdge, instance_label_layout, text_box,
+    };
+    use crate::schematic::value_label::value_pieces;
+
+    let drawing = parse_qsch(&qsch_bytes(
+        "«schematic
+  «component (0,0) 0 0
+    «symbol SW
+      «type: S»
+      «ellipse (-150,-150) (150,150) 0 0 0 0x1000000 0x1000000 -1 -1»
+      «text (-100,250) 1 7 0 0x1000000 -1 -1 \"S1\"»
+      «text (250,60) 0.5 7 0 0x1000000 -1 -1 \"Ron=1\"»
+      «text (250,-30) 0.5 7 0 0x1000000 -1 -1 \"Roff=1Meg\"»
+      «text (250,-120) 0.5 7 0 0x1000000 -1 -1 \"Vt=1\"»
+      «text (250,-210) 0.5 7 0 0x1000000 -1 -1 \"Vh=-0.5\"»
+      «pin (0,200) (0,0) 1 0 0 0x1000000 -1 \"1\"»
+      «pin (0,-200) (0,0) 1 0 0 0x1000000 -1 \"2\"»
+      «pin (-200,100) (0,0) 1 0 0 0x1000000 -1 \"+\"»
+      «pin (-200,-100) (0,0) 1 0 0 0x1000000 -1 \"-\"»
+    »
+  »
+»
+",
+    ))
+    .expect("the drawing reads");
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    let mut switch = imported
+        .document
+        .components
+        .iter()
+        .find(|component| component.name == "S1")
+        .expect("the switch is placed")
+        .clone();
+    assert_eq!(switch.kind, ComponentType::VSwitch);
+    assert_eq!(switch.value, "Ron=1 Roff=1Meg Vt=1 Vh=-0.5");
+    let origin = LayoutPoint::new(switch.pos.x as f32, switch.pos.y as f32);
+    let pieces = value_pieces(&switch).expect("the value keeps its texts apart");
+    let boxes = pieces
+        .iter()
+        .map(|piece| {
+            let placed = piece
+                .position
+                .placed_text(origin, 1.0)
+                .expect("each text stands where the drawing set it");
+            assert_eq!(
+                (placed.anchor.x, placed.horizontal, placed.vertical),
+                (25.0, TextEdge::Start, TextEdge::Center),
+                "{}",
+                piece.text
+            );
+            (
+                piece.text.as_str(),
+                placed.anchor.y,
+                piece.size_world(),
+                text_box(placed, &piece.text, piece.size_world()),
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        boxes
+            .iter()
+            .map(|(text, line, size, _)| (*text, *line, *size))
+            .collect::<Vec<_>>(),
+        [
+            ("Ron=1", -6.0, 4.5),
+            ("Roff=1Meg", 3.0, 4.5),
+            ("Vt=1", 12.0, 4.5),
+            ("Vh=-0.5", 21.0, 4.5),
+        ]
+    );
+    let name = text_box(
+        instance_label_layout(origin, 1.0, &switch).name,
+        &switch.name,
+        INSTANCE_NAME_WORLD,
+    );
+    let apart = |a: &LayoutRect, b: &LayoutRect| {
+        a.max.x <= b.min.x || b.max.x <= a.min.x || a.max.y <= b.min.y || b.max.y <= a.min.y
+    };
+    for (index, (text, _, _, a)) in boxes.iter().enumerate() {
+        assert!(apart(a, &name), "{text} runs into the name");
+        for (other, _, _, b) in &boxes[index + 1..] {
+            assert!(apart(a, b), "{text} runs into {other}");
+        }
+    }
+
+    switch.value = "Ron=2 Roff=1Meg Vt=1 Vh=-0.5".to_owned();
+    assert!(
+        value_pieces(&switch).is_none(),
+        "an edited value letters as one text"
+    );
+}
+
 /// A part RSpice draws with its own artwork has a body of another size than
 /// the source symbol's. A name or value the drawing stood just beside the
 /// source body keeps its side and its line but moves out along the way it

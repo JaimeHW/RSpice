@@ -41,11 +41,11 @@ use crate::schematic::functional_catalog::{
 use crate::schematic::label_layout::{
     INSTANCE_NAME_WORLD, INSTANCE_VALUE_WORLD, LayoutPoint, LayoutRect, TextEdge, text_box,
 };
-use crate::schematic::label_position::LabelPosition;
+use crate::schematic::label_position::{LabelPosition, ValuePiece};
 use crate::schematic::net_label::{Junction, NetLabel, NetLabelKind, NetLabelSide, SupplyGlyph};
 use crate::schematic::rotation::Rotation;
 use crate::schematic::terminal_connection::rebuild_connections_from_terminals;
-use crate::schematic::value_label::component_value_label;
+use crate::schematic::value_label::{component_value_label, value_pieces};
 use crate::schematic::wire::Wire;
 use crate::symbol::{SymbolDocument, SymbolPin, SymbolShape};
 
@@ -687,6 +687,17 @@ impl Builder<'_> {
                 .map(|window| self.label_position(symbol, window, origin))
         };
         let (name_position, value_position) = (place(name), place(value));
+        let pieces = symbol
+            .value_pieces
+            .iter()
+            .map(|piece| {
+                (
+                    piece.text.clone(),
+                    self.label_position(symbol, &piece.window, origin),
+                    piece.size_percent,
+                )
+            })
+            .collect::<Vec<_>>();
         let hidden = (
             name.is_some_and(|window| window.hidden),
             value.is_some_and(|window| window.hidden),
@@ -708,6 +719,23 @@ impl Builder<'_> {
         }
         if let Some(position) = value_position {
             component.value_label_pos = clear(position, &value_text, INSTANCE_VALUE_WORLD);
+        }
+        // A value the drawing letters in several texts keeps each where the
+        // drawing put it, at its own size, while they spell the part's value.
+        component.value_pieces = pieces
+            .into_iter()
+            .map(|(text, position, size_percent)| {
+                let mut piece = ValuePiece {
+                    text,
+                    position,
+                    size_percent,
+                };
+                piece.position = clear(piece.position, &piece.text, piece.size_world());
+                piece
+            })
+            .collect();
+        if value_pieces(component).is_none() {
+            component.value_pieces.clear();
         }
         component.display_mode = match hidden {
             (true, true) => ComponentDisplayMode::Hidden,

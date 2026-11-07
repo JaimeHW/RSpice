@@ -3,7 +3,7 @@
 use rspice_design_model::Point;
 use serde::{Deserialize, Serialize};
 
-use super::label_layout::{LayoutPoint, PlacedText, TextEdge};
+use super::label_layout::{INSTANCE_VALUE_WORLD, LayoutPoint, PlacedText, TextEdge};
 
 /// Where an instance letters its name or its value.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -19,6 +19,25 @@ pub enum LabelPosition {
         horizontal: TextEdge,
         vertical: TextEdge,
     },
+}
+
+/// One of the texts a drawing letters an instance's value in, when it
+/// letters it in several: QSPICE draws each of a part's attributes as a text
+/// of its own, at its own place and size.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ValuePiece {
+    pub text: String,
+    pub position: LabelPosition,
+    /// The text's size in hundredths of an instance value's.
+    pub size_percent: u16,
+}
+
+impl ValuePiece {
+    /// The piece's type size in world units.
+    #[must_use]
+    pub fn size_world(&self) -> f32 {
+        INSTANCE_VALUE_WORLD * f32::from(self.size_percent) / 100.0
+    }
 }
 
 impl LabelPosition {

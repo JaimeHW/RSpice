@@ -59,7 +59,7 @@ impl SemanticSceneCompiler<'_> {
         &mut self,
         text: &SchematicText,
     ) -> Result<(), HardcopyRenderError> {
-        let size = text.class.size_world();
+        let size = text.size_world();
         let anchor = match text.placed.horizontal {
             TextEdge::Start => TextAnchor::Start,
             TextEdge::Center => TextAnchor::Middle,

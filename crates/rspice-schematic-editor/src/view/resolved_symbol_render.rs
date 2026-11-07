@@ -655,6 +655,26 @@ pub(crate) fn write_text_svg(
     .unwrap();
 }
 
+/// A run of SVG text as [`write_text_svg`] sets it, at a size of its own
+/// rather than its class's.
+pub(crate) fn write_sized_text_svg(
+    svg: &mut String,
+    class: &str,
+    (x, y): (f64, f64),
+    text: &str,
+    align: Align2,
+    size: f64,
+) {
+    writeln!(
+        svg,
+        r#"<text class="{class}" x="{x}" y="{}" text-anchor="{}" style="font-size:{size}px">{}</text>"#,
+        svg_text_baseline(y, align.y(), size),
+        svg_text_anchor(align.x()),
+        escape_xml(text)
+    )
+    .unwrap();
+}
+
 fn write_polygon_svg(
     svg: &mut String,
     component: &Component,

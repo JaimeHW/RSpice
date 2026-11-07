@@ -9,7 +9,7 @@
 use super::{
     ForeignAttribute, ForeignOrientation, ForeignParseError, ForeignPin, ForeignPoint,
     ForeignSchematic, ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignText,
-    ForeignTextKind, ForeignTool, ForeignWindow, decode_foreign_text,
+    ForeignTextKind, ForeignTool, ForeignValuePiece, ForeignWindow, decode_foreign_text,
 };
 use crate::schematic::label_layout::TextEdge;
 
@@ -87,13 +87,7 @@ pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
                     kind,
                     text: quoted(fields).join("\n"),
                     line: node.line,
-                    size_percent: numbers
-                        .first()
-                        .and_then(|size| size.parse::<f64>().ok())
-                        .filter(|size| size.is_finite() && *size > 0.0)
-                        .map_or(100, |size| {
-                            (size * 100.0).round().min(f64::from(u16::MAX)) as u16
-                        }),
+                    size_percent: size_percent(numbers.first().map(String::as_str)),
                     justification: text_justification(numbers.get(1).map(String::as_str)),
                 });
             }
@@ -270,6 +264,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                     text_points.first().copied().unwrap_or_default(),
                     quoted(fields).join(" "),
                     text_reach(flags.get(1).map(String::as_str)),
+                    size_percent(flags.first().map(String::as_str)),
                 ));
             }
             _ => definition
@@ -286,7 +281,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
     }
     let mut windows = Vec::new();
     let mut texts = texts.into_iter();
-    if let Some((offset, name, reach)) = texts.next() {
+    if let Some((offset, name, reach, _)) = texts.next() {
         attributes.push(ForeignAttribute {
             name: "InstName".to_owned(),
             value: name,
@@ -299,7 +294,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
         });
     }
     let rest = texts.collect::<Vec<_>>();
-    if let Some((offset, _, reach)) = rest.first() {
+    if let Some((offset, _, reach, _)) = rest.first() {
         windows.push(ForeignWindow {
             attribute: 3,
             offset: *offset,
@@ -310,20 +305,49 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
             name: "Value".to_owned(),
             value: rest
                 .iter()
-                .map(|(_, text, _)| text.as_str())
+                .map(|(_, text, ..)| text.as_str())
                 .collect::<Vec<_>>()
                 .join(" "),
         });
     }
+    // QSPICE letters each attribute where the drawing put it, at its own
+    // size; a value of several texts keeps them apart.
+    let value_pieces = if rest.len() > 1 {
+        rest.into_iter()
+            .map(|(offset, text, reach, size_percent)| ForeignValuePiece {
+                text,
+                window: ForeignWindow {
+                    attribute: 3,
+                    offset,
+                    reach,
+                    hidden: false,
+                },
+                size_percent,
+            })
+            .collect()
+    } else {
+        Vec::new()
+    };
     Ok(ForeignSymbol {
         symbol: symbol_name.to_owned(),
         position,
         orientation,
         attributes,
         windows,
+        value_pieces,
         embedded: Some(definition),
         line: node.line,
     })
+}
+
+/// A text's size in hundredths of QSPICE's standard size, from the size the
+/// record gives as a multiple of it.
+fn size_percent(size: Option<&str>) -> u16 {
+    size.and_then(|size| size.parse::<f64>().ok())
+        .filter(|size| size.is_finite() && *size > 0.0)
+        .map_or(100, |size| {
+            (size * 100.0).round().min(f64::from(u16::MAX)) as u16
+        })
 }
 
 /// Which way a symbol's text box reaches from its anchor, across and down,

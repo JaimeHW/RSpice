@@ -90,6 +90,7 @@ pub fn parse_asc(source: &str) -> Result<ForeignSchematic, ForeignParseError> {
                     orientation,
                     attributes: Vec::new(),
                     windows: Vec::new(),
+                    value_pieces: Vec::new(),
                     embedded: None,
                     line,
                 });
