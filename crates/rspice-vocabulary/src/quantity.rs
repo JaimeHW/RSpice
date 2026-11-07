@@ -9,6 +9,7 @@ mod format;
 mod layout;
 mod parse;
 mod preferences;
+mod standard_series;
 
 pub use elapsed::format_elapsed;
 pub use engineering::{
@@ -16,6 +17,7 @@ pub use engineering::{
     format_engineering_value, format_engineering_value_with, parse_engineering_value,
 };
 pub use layout::LayoutDatabaseUnit;
+pub use standard_series::ESeries;
 pub use parse::{QuantityInputKind, UiNumberLocale, parse_ui_quantity};
 pub use preferences::{
     AngleDisplay, CopiedValueFormat, DecimalSeparatorInput, EngineeringSuffixPolicy,

@@ -166,6 +166,33 @@ fn scale_factor(suffix: &str) -> Option<f64> {
     is_unit_text(suffix).then_some(1.0)
 }
 
+/// The unit a value text carries after its number and scale factor, as
+/// written: `"Ω"` for `4.7kΩ`, `"F"` for `10uF`, empty for `22k`. `None`
+/// when the text is not one engineering value.
+pub(super) fn unit_tail(input: &str) -> Option<&str> {
+    let trimmed = input.trim();
+    let numeric_end = trimmed
+        .char_indices()
+        .take_while(|(_, c)| c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E'))
+        .map(|(index, c)| index + c.len_utf8())
+        .last()?;
+    let suffix = trimmed[numeric_end..].trim();
+    let normalized = suffix
+        .to_lowercase()
+        .replace(['\u{00B5}', '\u{03BC}'], "u");
+    let scale_chars = WORD_SCALE_FACTORS
+        .iter()
+        .chain(SPICE_SCALE_FACTORS)
+        .find(|(token, _)| normalized.strip_prefix(token).is_some_and(is_unit_text))
+        .map_or(0, |(token, _)| token.chars().count());
+    let unit_start = suffix
+        .char_indices()
+        .nth(scale_chars)
+        .map_or(suffix.len(), |(index, _)| index);
+    let unit = &suffix[unit_start..];
+    is_unit_text(unit).then_some(unit)
+}
+
 /// Whether the text after a scale factor is a unit rather than more value.
 ///
 /// Alphabetic in the Unicode sense, so `1kΩ` reads as a kilohm; a digit,
