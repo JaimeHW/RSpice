@@ -47,12 +47,32 @@ const GATE_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -16 -32 16 0\n\
     PIN -16 16 NONE 0\nPINATTR PinName B\nPINATTR SpiceOrder 2\n\
     PIN 16 0 NONE 0\nPINATTR PinName Y\nPINATTR SpiceOrder 3\n";
 
+/// A symbol whose pins skip place 3 of the instance line, as vendor symbols
+/// over a model with a pin left out do.
+const GAPPED_ASY: &str = "Version 4
+SymbolType CELL
+RECTANGLE Normal -32 -32 32 32
+    SYMATTR Prefix X
+SYMATTR SpiceModel gapped.sub
+SYMATTR Value gapped
+    PIN -32 0 NONE 0
+PINATTR PinName IN
+PINATTR SpiceOrder 1
+    PIN 32 0 NONE 0
+PINATTR PinName OUT
+PINATTR SpiceOrder 2
+    PIN 0 32 NONE 0
+PINATTR PinName REF
+PINATTR SpiceOrder 4
+";
+
 fn library() -> Library {
     let mut library = Library::default();
     for (name, source, schematic) in [
         ("amp", AMPLIFIER_ASY, None),
         ("digital\\and", GATE_ASY, None),
         ("block", AMPLIFIER_ASY, Some(PathBuf::from("block.asc"))),
+        ("gapped", GAPPED_ASY, None),
     ] {
         library.symbols.insert(
             name.to_owned(),
@@ -224,11 +244,14 @@ fn imported_nets(
             ComponentType::Vcvs | ComponentType::Vccs => {
                 vec!["O+".into(), "O-".into(), "C+".into(), "C-".into()]
             }
-            ComponentType::CellInstance => cells[&component.library_cell.as_ref().unwrap().cell]
-                .ports
-                .iter()
-                .map(|port| port.name.clone())
-                .collect(),
+            ComponentType::CellInstance => {
+                let cell = cells[&component.library_cell.as_ref().unwrap().cell];
+                cell.ports
+                    .iter()
+                    .filter(|port| !cell.unconnected.contains(&port.name))
+                    .map(|port| port.name.clone())
+                    .collect()
+            }
             other => panic!("the test does not read {other:?}"),
         };
         let name = drawing
@@ -1061,4 +1084,83 @@ fn a_lead_to_one_pin_never_runs_through_another() {
     let imported = import_foreign_schematic(&drawing, "work", &library);
     assert_same_connectivity(&drawing, &imported, &library);
     assert_on_grid(&imported);
+}
+
+#[test]
+fn a_place_its_symbol_gives_no_pin_is_an_unconnected_terminal() {
+    // LTspice writes a node of its own (`MP_nn`) for each instance-line
+    // place no pin takes, so the model's later nodes keep their places.
+    let drawing = parse_asc(
+        "Version 4
+SHEET 1 800 600
+         WIRE 32 64 -64 64
+WIRE 192 64 96 64
+WIRE 64 192 64 96
+         FLAG -64 64 in
+FLAG 192 64 out
+FLAG 64 192 0
+         SYMBOL gapped 64 64 R0
+SYMATTR InstName U1
+         WIRE 448 0 448 -64
+WIRE 448 160 448 64
+WIRE 320 32 416 32
+         FLAG 448 -64 in
+FLAG 448 160 out
+FLAG 320 32 0
+         SYMBOL gapped 448 32 R90
+SYMATTR InstName U2
+",
+    )
+    .unwrap();
+    let library = library();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_same_connectivity(&drawing, &imported, &library);
+    assert_on_grid(&imported);
+    let cell = &imported.cells[0];
+    let ports = cell
+        .ports
+        .iter()
+        .map(|port| port.name.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(ports, ["IN", "OUT", "NC3", "REF"]);
+    assert_eq!(cell.unconnected, ["NC3"]);
+    let cells = imported
+        .cells
+        .iter()
+        .map(|cell| (cell.cell.clone(), cell))
+        .collect::<HashMap<_, _>>();
+    let connectivity = extract(
+        &imported.document,
+        |binding| {
+            cells.get(&binding.cell).map(|cell| {
+                ResolvedCellSymbol::from_authored_document(cell.symbol.clone(), &cell.ports)
+            })
+        },
+        |_| None,
+    );
+    let parts = imported
+        .document
+        .components
+        .iter()
+        .filter_map(|component| Some((component, component.library_cell.as_ref()?)));
+    for (component, binding) in parts {
+        assert_eq!(binding.terminal_order, ["IN", "OUT", "NC3", "REF"]);
+        let placeholder = connectivity
+            .terminals
+            .iter()
+            .find(|terminal| terminal.component_id == component.id && terminal.pin == "NC3")
+            .unwrap_or_else(|| panic!("{} has no NC3 terminal", component.name));
+        let others = connectivity
+            .terminals
+            .iter()
+            .filter(|terminal| terminal.net_name == placeholder.net_name)
+            .count();
+        assert_eq!(others, 1, "{}'s NC3 touches nothing", component.name);
+    }
+    let notices = imported
+        .notices
+        .iter()
+        .filter(|notice| notice.message.contains("no pin for place 3"))
+        .count();
+    assert_eq!(notices, 1, "one notice per symbol: {:?}", imported.notices);
 }

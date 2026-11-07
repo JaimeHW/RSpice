@@ -21,8 +21,9 @@ use super::mapping::{
     native_mapping, qspice_refusal, source_value, spice_text, spice_tokens,
 };
 use super::{
-    ForeignAttribute, ForeignPoint, ForeignPortDirection, ForeignSchematic, ForeignShape,
-    ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool, ForeignWindow,
+    ForeignAttribute, ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic,
+    ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool,
+    ForeignWindow,
 };
 use crate::schematic::component::{Component, LibraryCellInstance};
 use crate::schematic::component_display::ComponentDisplayMode;
@@ -119,6 +120,10 @@ pub struct ForeignSymbolCell {
     /// The file that defines its model, when one does: the cell then runs
     /// through a `spice` view over that file.
     pub source: Option<ForeignModelSource>,
+    /// Ports for instance-line places the source symbol gives no pin: each
+    /// is a symbol pin that touches nothing, so it writes a node of its own,
+    /// as LTspice writes `MP_nn` there.
+    pub unconnected: Vec<String>,
 }
 
 /// A file, and the `.lib` section of it, that defines a cell's model.
@@ -784,10 +789,12 @@ impl Builder<'_> {
                 .trim()
                 .to_owned();
         }
+        let drawn = |name: &String| !cell.unconnected.contains(name);
         let local = cell
             .symbol
             .pins
             .iter()
+            .filter(|pin| drawn(&pin.name))
             .map(|pin| pin.position.unwrap_or_default())
             .collect::<Vec<_>>();
         let offsets = |candidate: &Component| -> Vec<Point> {
@@ -797,7 +804,12 @@ impl Builder<'_> {
                 .collect()
         };
         let points = self.place_fitted(&mut component, pins, offsets);
-        for (port, point) in cell.ports.iter().zip(points) {
+        for (port, point) in cell
+            .ports
+            .iter()
+            .filter(|port| drawn(&port.name))
+            .zip(points)
+        {
             self.terminals.push((id, port.name.clone(), point));
         }
         self.document.components.push(component);
@@ -834,20 +846,47 @@ impl Builder<'_> {
             name = format!("{}_{suffix}", cell_name(&symbol.symbol));
             suffix += 1;
         }
-        let ports = unique_pin_names(definition);
+        // A hierarchical block's ports are its schematic's; only a symbol
+        // over a model leaves places of its instance line without a pin.
+        let slots = if schematic.is_none() && self.drawing.tool == ForeignTool::Ltspice {
+            spice_order_slots(definition)
+        } else {
+            definition.ordered_pins().into_iter().map(Some).collect()
+        };
+        let ports = unique_pin_names(&slots);
+        let drawn = slots
+            .iter()
+            .flatten()
+            .map(|pin| self.scale(pin.position))
+            .collect::<Vec<_>>();
+        let mut spare = unconnected_pin_points(&drawn);
+        let mut unconnected = Vec::new();
+        let mut gaps = Vec::new();
+        let mut pins = Vec::new();
+        for ((order, slot), port) in (1..).zip(&slots).zip(&ports) {
+            let position = match slot {
+                Some(pin) => self.scale(pin.position),
+                None => {
+                    unconnected.push(port.name.clone());
+                    gaps.push(order.to_string());
+                    spare.next().unwrap_or_default()
+                }
+            };
+            pins.push(SymbolPin::new(
+                port.name.clone(),
+                port.direction,
+                Some(position),
+            ));
+        }
+        if !gaps.is_empty() {
+            self.notice(format!(
+                "{}: its symbol has no pin for place {} of the instance line; RSpice leaves an unconnected terminal there, as LTspice does, so the model's nodes keep their order.",
+                symbol.symbol,
+                gaps.join(", ")
+            ));
+        }
         let mut document = SymbolDocument {
-            pins: definition
-                .ordered_pins()
-                .iter()
-                .zip(&ports)
-                .map(|(pin, port)| {
-                    SymbolPin::new(
-                        port.name.clone(),
-                        port.direction,
-                        Some(self.scale(pin.position)),
-                    )
-                })
-                .collect(),
+            pins,
             body: definition
                 .shapes
                 .iter()
@@ -878,6 +917,7 @@ impl Builder<'_> {
             model: model.map(str::to_owned),
             template: None,
             source: None,
+            unconnected,
         });
         let index = self.cells.len() - 1;
         self.cell_index.insert(key, index);
@@ -1519,18 +1559,52 @@ fn cell_name(symbol: &str) -> String {
     }
 }
 
-/// The definition's pins as ports in instance-line order, each with a name
-/// of its own.
-fn unique_pin_names(definition: &ForeignSymbolDefinition) -> Vec<PortSpec> {
+/// The definition's pins in instance-line order, with `None` at each place
+/// below the last that no pin takes.
+fn spice_order_slots(definition: &ForeignSymbolDefinition) -> Vec<Option<&ForeignPin>> {
+    let mut slots = Vec::new();
+    let mut next = 1;
+    for pin in definition.ordered_pins() {
+        while next < pin.spice_order {
+            slots.push(None);
+            next += 1;
+        }
+        slots.push(Some(pin));
+        next = next.max(pin.spice_order + 1);
+    }
+    slots
+}
+
+/// Places for pins that must touch nothing, near the middle of the drawn
+/// pins: each an odd number of grid steps on both axes, where no wire of a
+/// drawing on LTspice's grid (two RSpice steps) can run, and off every
+/// drawn pin.
+fn unconnected_pin_points(drawn: &[Point]) -> impl Iterator<Item = Point> + '_ {
+    let middle = |values: Vec<i32>| {
+        let (low, high) = (
+            values.iter().copied().min().unwrap_or_default(),
+            values.iter().copied().max().unwrap_or_default(),
+        );
+        ((low + high) / 2).div_euclid(2 * GRID) * 2 * GRID + GRID
+    };
+    let x = middle(drawn.iter().map(|point| point.x).collect());
+    let y = middle(drawn.iter().map(|point| point.y).collect());
+    (0..)
+        .map(move |step| Point::new(x + 2 * GRID * step, y))
+        .filter(|point| !drawn.contains(point))
+}
+
+/// Ports in instance-line order, each with a name of its own; a place no
+/// pin takes is named for its number.
+fn unique_pin_names(slots: &[Option<&ForeignPin>]) -> Vec<PortSpec> {
     let mut seen = BTreeSet::new();
-    definition
-        .ordered_pins()
-        .iter()
-        .map(|pin| {
-            let base = if pin.name.trim().is_empty() {
-                format!("P{}", pin.spice_order)
-            } else {
-                pin.name.trim().to_owned()
+    (1..)
+        .zip(slots)
+        .map(|(order, slot)| {
+            let base = match slot {
+                Some(pin) if !pin.name.trim().is_empty() => pin.name.trim().to_owned(),
+                Some(pin) => format!("P{}", pin.spice_order),
+                None => format!("NC{order}"),
             };
             let mut name = base.clone();
             let mut suffix = 2;
