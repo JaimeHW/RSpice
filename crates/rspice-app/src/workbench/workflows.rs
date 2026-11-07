@@ -10,6 +10,8 @@
 pub(crate) use rspice_app_services::workbench::workflows::export_workflow;
 pub(crate) mod file_actions;
 pub(crate) mod file_workflow;
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) mod foreign_schematic_workflow;
 pub(crate) mod netlist_workflow;
 pub(crate) mod project_workflow;
 #[cfg(any(test, target_arch = "wasm32"))]

@@ -497,3 +497,35 @@ fn publish_reserved_revision(app: &mut RSpiceApp, mutation: ReservedLibraryRevis
         app.state.model.publish_project_library_mutation(mutation);
     }
 }
+
+/// Why the LTspice or QSPICE schematic import cannot run now, if it cannot.
+pub(in crate::workbench) fn foreign_import_refusal(state: &AppState) -> Option<&'static str> {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        crate::workbench::workflows::foreign_schematic_workflow::foreign_import_refusal(state)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = state;
+        Some("the source program's symbol library is read from this computer's disk")
+    }
+}
+
+/// Imports an LTspice or QSPICE schematic, asking for the file.
+pub(in crate::workbench) fn import_foreign_schematic(
+    app: &mut RSpiceApp,
+    tool: rspice_design::foreign_schematic::ForeignTool,
+) {
+    #[cfg(not(target_arch = "wasm32"))]
+    crate::workbench::workflows::foreign_schematic_workflow::import_foreign_schematic_with_dialog(
+        app, tool,
+    );
+    #[cfg(target_arch = "wasm32")]
+    {
+        let _ = tool;
+        if let Some(refusal) = foreign_import_refusal(&app.state) {
+            app.state
+                .prompt(format!("The schematic cannot be imported: {refusal}."));
+        }
+    }
+}

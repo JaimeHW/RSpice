@@ -153,6 +153,16 @@ const OPEN_RECENT_MENU: &[MenuEntry] = &[
 const IMPORT_MENU: &[MenuEntry] = &[
     command_as(Command::ImportNetlist, "SPICE deck\u{2026}").access('S'),
     command_as(Command::ImportVerilogA, "Verilog-A\u{2026}").access('V'),
+    command_as(
+        Command::ImportLtspiceSchematic,
+        "LTspice schematic (.asc)\u{2026}",
+    )
+    .access('L'),
+    command_as(
+        Command::ImportQspiceSchematic,
+        "QSPICE schematic (.qsch)\u{2026}",
+    )
+    .access('Q'),
     MenuEntry::command_as(
         ResultsCommand::ImportResultDataset.key(),
         "Result dataset\u{2026}",

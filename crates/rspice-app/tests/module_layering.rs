@@ -842,6 +842,7 @@ const WORKBENCH_LAYERS: &[&str] = &[
     "workflows/file_workflow",
     "workflows/project_workflow",
     "workflows/netlist_workflow",
+    "workflows/foreign_schematic_workflow",
     "shortcuts/profile_workflow",
     "workflows/file_actions",
     // The shell's transactions over the whole project, run where a feature's

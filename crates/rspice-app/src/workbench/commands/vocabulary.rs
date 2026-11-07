@@ -46,6 +46,8 @@ pub enum Command {
     OpenNetlist,
     ImportNetlist,
     ImportVerilogA,
+    ImportLtspiceSchematic,
+    ImportQspiceSchematic,
     ExportNetlist(crate::io::NetlistFormat),
     ExportBillOfMaterials,
     Exit,
@@ -314,6 +316,16 @@ impl Command {
             Self::OpenNetlist => spec("open-netlist", "Open netlist as project…", "File"),
             Self::ImportNetlist => spec("import-netlist", "Import SPICE deck…", "File"),
             Self::ImportVerilogA => spec("import-veriloga", "Import Verilog-A…", "File"),
+            Self::ImportLtspiceSchematic => spec(
+                "import-ltspice-schematic",
+                "Import LTspice schematic…",
+                "File",
+            ),
+            Self::ImportQspiceSchematic => spec(
+                "import-qspice-schematic",
+                "Import QSPICE schematic…",
+                "File",
+            ),
             Self::ExportNetlist(crate::io::NetlistFormat::Spectre) => {
                 spec("export-netlist-spectre", "Export Spectre netlist…", "File")
             }
@@ -735,6 +747,8 @@ pub const COMMAND_REGISTRY: &[Command] = &[
     Command::OpenNetlist,
     Command::ImportNetlist,
     Command::ImportVerilogA,
+    Command::ImportLtspiceSchematic,
+    Command::ImportQspiceSchematic,
     Command::ExportNetlist(crate::io::NetlistFormat::Spectre),
     Command::ExportNetlist(crate::io::NetlistFormat::Spice),
     Command::ExportBillOfMaterials,
@@ -947,6 +961,8 @@ static COMMAND_ORDER: &[CommandKey] = &[
     Command::OpenNetlist.key(),
     Command::ImportNetlist.key(),
     Command::ImportVerilogA.key(),
+    Command::ImportLtspiceSchematic.key(),
+    Command::ImportQspiceSchematic.key(),
     ResultsCommand::ImportResultDataset.key(),
     CloudCommand::LiveSession.key(),
     CloudCommand::PublishToWeb.key(),

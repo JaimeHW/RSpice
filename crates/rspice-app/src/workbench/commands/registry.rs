@@ -350,6 +350,8 @@ impl Command {
                 | Self::NewVerilogADevice
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportLtspiceSchematic
+                | Self::ImportQspiceSchematic
                 | Self::ExportNetlist(_)
                 | Self::ExportBillOfMaterials
                 | Self::SetStandardValueSeries(_)
@@ -390,6 +392,8 @@ impl Command {
                 | Self::OpenNetlist
                 | Self::ImportNetlist
                 | Self::ImportVerilogA
+                | Self::ImportLtspiceSchematic
+                | Self::ImportQspiceSchematic
                 | Self::ConnectivityManager
                 | Self::SelectionBulkEdit
                 | Self::FindReplace
@@ -876,6 +880,10 @@ impl Command {
             }
             Self::ImportNetlist if app.state.model.safe_mode.project_read_only() => {
                 "the project is open read-only"
+            }
+            Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
+                super::foreign_import_refusal(&app.state)
+                    .unwrap_or("command is unavailable in this context")
             }
             Self::NewVerilogADevice => "no library can be written",
             Self::CompileVerilogA => super::code_context::veriloga_compile_refusal(app),

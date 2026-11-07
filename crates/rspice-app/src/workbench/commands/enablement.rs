@@ -34,6 +34,9 @@ impl Command {
             Self::OpenNetlist => {
                 !state.model.simulation.execution.has_active_execution()
             }
+            Self::ImportLtspiceSchematic | Self::ImportQspiceSchematic => {
+                super::foreign_import_refusal(state).is_none()
+            }
             Self::ImportNetlist => {
                 state.platform.project_lifecycle.is_open()
                     && !state.model.safe_mode.project_read_only()

@@ -1,0 +1,275 @@
+//! An imported LTspice drawing lands as project content a run reads: its
+//! cells, its analyses in a plan, its parameters as design variables, its
+//! model text and included files as model libraries, and what has no place
+//! as text on its sheet.
+
+use rspice_design::foreign_schematic::{ForeignCard, ForeignCardRole, ForeignTool};
+use rspice_design_model::Point;
+use rspice_simulation_contract::analysis_draft::AnalysisDraft;
+use rspice_simulation_contract::config::NoiseSweepType;
+use rspice_simulation_contract::options::IntegrationMethod;
+
+use super::plan::plan_from_cards;
+use super::*;
+
+fn card(role: ForeignCardRole, text: &str) -> ForeignCard {
+    ForeignCard {
+        position: Point::new(10, 20),
+        role,
+        text: text.to_owned(),
+        tokens: rspice_design::netlist_document::card_tokens(text),
+    }
+}
+
+#[test]
+fn analysis_cards_become_the_drafts_of_their_analyses() {
+    use ForeignCardRole::Analysis;
+    let plan = plan_from_cards(vec![
+        card(Analysis, ".tran 0 10m 1m 1u uic startup"),
+        card(Analysis, ".ac oct 20 10 1meg"),
+        card(Analysis, ".dc V1 0 5 0.1 V2 0 1 0.5"),
+        card(Analysis, ".noise V(out) V1 dec 10 1 100k"),
+        card(Analysis, ".tf V(out) Vin"),
+        card(Analysis, ".op"),
+        card(Analysis, ".ac list 1 10 100"),
+    ]);
+    let drafts = plan
+        .analyses
+        .iter()
+        .map(|(_, draft)| draft)
+        .collect::<Vec<_>>();
+    let AnalysisDraft::Transient(tran) = drafts[0] else {
+        panic!("a transient draft, not {:?}", drafts[0]);
+    };
+    // A zero print step is the source program's "choose one".
+    assert_eq!(
+        (
+            tran.stop.as_str(),
+            tran.step.as_str(),
+            tran.start.as_str(),
+            tran.max_step.as_str(),
+            tran.uic
+        ),
+        ("10m", "10u", "1m", "1u", true)
+    );
+    let AnalysisDraft::Ac(ac) = drafts[1] else {
+        panic!("an AC draft");
+    };
+    assert_eq!(
+        (
+            ac.sweep,
+            ac.points.as_str(),
+            ac.fstart.as_str(),
+            ac.fstop.as_str()
+        ),
+        (1, "20", "10", "1meg")
+    );
+    let AnalysisDraft::DcSweep(dc) = drafts[2] else {
+        panic!("a DC draft");
+    };
+    assert_eq!(
+        (
+            dc.source.as_str(),
+            dc.stop.as_str(),
+            dc.step.as_str(),
+            dc.nested
+        ),
+        ("V1", "5", "0.1", true)
+    );
+    assert_eq!((dc.source2.as_str(), dc.step2.as_str()), ("V2", "0.5"));
+    let AnalysisDraft::Noise(noise) = drafts[3] else {
+        panic!("a noise draft");
+    };
+    assert_eq!(
+        (noise.output.as_str(), noise.input.as_str(), noise.sweep),
+        ("V(out)", "V1", NoiseSweepType::Decade)
+    );
+    let AnalysisDraft::TransferFunction(xf) = drafts[4] else {
+        panic!("a transfer-function draft");
+    };
+    assert_eq!(
+        (xf.output_expression.as_str(), xf.input_source.as_str()),
+        ("V(out)", "Vin")
+    );
+    assert!(matches!(drafts[5], AnalysisDraft::OperatingPoint(_)));
+    assert_eq!(drafts.len(), 6);
+    assert_eq!(plan.kept.len(), 1, "the list sweep stays on the sheet");
+    assert!(plan.notices[0].contains("`startup`"), "{:?}", plan.notices);
+
+    let setup = crate::workbench::app_state::AppState::default()
+        .model
+        .sim_setup
+        .clone();
+    for draft in drafts {
+        assert_eq!(
+            setup.analysis_draft_validation_error(draft),
+            None,
+            "{draft:?}"
+        );
+    }
+}
+
+#[test]
+fn parameters_options_and_temperature_find_their_plan_places() {
+    let plan = plan_from_cards(vec![
+        card(ForeignCardRole::Parameter, ".param R=1k Gain={R/100}"),
+        card(
+            ForeignCardRole::Options,
+            ".options reltol=1e-4 method=gear plotwinsize=0 cshunt=1p",
+        ),
+        card(ForeignCardRole::Temperature, ".temp 50"),
+        card(ForeignCardRole::Temperature, ".temp 0 25 50"),
+        card(ForeignCardRole::ModelText, ".model D1N D(Is=1n)"),
+        card(ForeignCardRole::Step, ".step param R 1k 2k 1k"),
+        card(ForeignCardRole::SourceOnly, ".backanno"),
+        card(ForeignCardRole::Other, "K1 L1 L2 1"),
+    ]);
+    assert_eq!(plan.variables, [("R".to_owned(), "1k".to_owned())]);
+    assert_eq!(
+        plan.model_text,
+        [".param Gain={R/100}", ".model D1N D(Is=1n)"]
+    );
+    assert_eq!(plan.options.reltol, 1e-4);
+    assert_eq!(plan.options.method, IntegrationMethod::Gear2);
+    assert_eq!(plan.temperature, Some(50.0));
+    let kept = plan
+        .kept
+        .iter()
+        .map(|(card, _)| card.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(
+        kept,
+        [
+            ".options cshunt=1p",
+            ".temp 0 25 50",
+            ".step param R 1k 2k 1k",
+            "K1 L1 L2 1"
+        ]
+    );
+    assert!(plan.notices[0].contains("plotwinsize=0"));
+}
+
+/// A drawing folder with an LTspice schematic, a symbol RSpice has no part
+/// for beside it, and a model file it includes.
+fn drawing_folder() -> PathBuf {
+    let folder = std::env::temp_dir().join(format!(
+        "rspice-ltspice-import-{}-{}",
+        std::process::id(),
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("system time after epoch")
+            .as_nanos()
+    ));
+    std::fs::create_dir_all(&folder).expect("drawing folder");
+    std::fs::write(
+        folder.join("buffer.asy"),
+        "Version 4\nSymbolType CELL\nRECTANGLE Normal -32 -32 32 32\nSYMATTR Prefix X\n\
+         SYMATTR Value BUF1\nPIN -32 0 NONE 0\nPINATTR PinName IN\nPINATTR SpiceOrder 1\n\
+         PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 2\n",
+    )
+    .expect("symbol");
+    std::fs::write(
+        folder.join("buffers.lib"),
+        ".subckt BUF1 in out\nE1 out 0 in 0 1\n.ends BUF1\n",
+    )
+    .expect("model file");
+    std::fs::write(
+        folder.join("filter.asc"),
+        "Version 4\nSHEET 1 880 680\n\
+         WIRE 96 96 32 96\nWIRE 208 96 176 96\nWIRE 288 96 208 96\n\
+         FLAG 32 176 0\nFLAG 208 160 0\nFLAG 288 96 out\n\
+         SYMBOL voltage 32 80 R0\nSYMATTR InstName V1\nSYMATTR Value PULSE(0 1 0 1n 1n 5m 10m)\n\
+         SYMBOL res 192 80 R90\nSYMATTR InstName R1\nSYMATTR Value {R}\n\
+         SYMBOL cap 192 96 R0\nSYMATTR InstName C1\nSYMATTR Value 1u\n\
+         SYMBOL buffer 352 96 R0\nSYMATTR InstName U1\n\
+         TEXT 32 240 Left 2 !.tran 0 20m 0 10u\\n.param R=1k\\n.include buffers.lib\n\
+         TEXT 32 300 Left 2 !.model D1N D(Is=1n)\\nK1 L1 L2 1\n",
+    )
+    .expect("schematic");
+    folder
+}
+
+#[test]
+fn an_imported_schematic_is_project_content_a_run_reads() {
+    let folder = drawing_folder();
+    let mut app = RSpiceApp::test_instance();
+    app.state.open_project_session();
+    let library = app
+        .state
+        .model
+        .workspace
+        .content
+        .active_view
+        .library
+        .clone();
+
+    let summary =
+        import_foreign_schematic_file(&mut app, &folder.join("filter.asc"), ForeignTool::Ltspice)
+            .expect("the schematic imports");
+    assert!(summary.contains("LTspice"), "{summary}");
+
+    let model = &app.state.model;
+    let cells = model
+        .library_manager
+        .get_library(&library)
+        .expect("the active library")
+        .cells
+        .values()
+        .map(|cell| cell.name.clone())
+        .collect::<Vec<_>>();
+    assert!(cells.iter().any(|cell| cell == "filter"), "{cells:?}");
+    assert!(cells.iter().any(|cell| cell == "buffer"), "{cells:?}");
+    // An empty project simulates what it imported.
+    assert_eq!(model.workspace.content.project.top_cell, "filter");
+    assert_eq!(model.workspace.content.active_view.cell, "filter");
+
+    assert_eq!(model.sim_setup.active_plan_name().as_str(), "filter");
+    let plan = model
+        .sim_setup
+        .stable_analysis_plan()
+        .expect("the imported plan");
+    let [instance] = plan.instances() else {
+        panic!("one analysis, not {}", plan.instances().len());
+    };
+    let AnalysisDraft::Transient(tran) = instance.draft() else {
+        panic!("a transient analysis");
+    };
+    assert_eq!((tran.stop.as_str(), tran.max_step.as_str()), ("20m", "10u"));
+    let variables = &model
+        .workspace
+        .content
+        .plan_data(plan.id())
+        .expect("the imported plan's payload")
+        .design_variables;
+    assert_eq!(
+        variables
+            .iter()
+            .map(|variable| (variable.name.as_str(), variable.expression.as_str()))
+            .collect::<Vec<_>>(),
+        [("R", "1k")]
+    );
+
+    let libraries = model
+        .model_library_manager
+        .libraries_sorted()
+        .into_iter()
+        .map(|library| library.name.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        libraries.iter().any(|name| name == "filter"),
+        "{libraries:?}"
+    );
+    assert!(
+        libraries.iter().any(|name| name == "buffers"),
+        "{libraries:?}"
+    );
+
+    let document = model.schematic.document();
+    let notes = document
+        .design_notes
+        .iter()
+        .map(|note| note.text.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(notes, ["K1 L1 L2 1"]);
+    std::fs::remove_dir_all(&folder).ok();
+}

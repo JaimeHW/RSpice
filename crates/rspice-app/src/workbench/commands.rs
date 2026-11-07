@@ -380,6 +380,8 @@ impl Command {
             | Self::OpenNetlist
             | Self::ImportNetlist
             | Self::ImportVerilogA
+            | Self::ImportLtspiceSchematic
+            | Self::ImportQspiceSchematic
             | Self::ExportNetlist(_)
             | Self::ExportBillOfMaterials
             | Self::GenerateNetlist
@@ -433,6 +435,13 @@ impl Command {
             Self::OpenNetlist => file_action(app, FileMenuAction::OpenNetlist),
             Self::ImportNetlist => file_action(app, FileMenuAction::ImportNetlist),
             Self::ImportVerilogA => file_action(app, FileMenuAction::ImportVerilogA),
+            Self::ImportLtspiceSchematic => import_foreign_schematic(
+                app,
+                rspice_design::foreign_schematic::ForeignTool::Ltspice,
+            ),
+            Self::ImportQspiceSchematic => {
+                import_foreign_schematic(app, rspice_design::foreign_schematic::ForeignTool::Qspice)
+            }
             Self::ExportNetlist(format) => {
                 if netlist_page_is_visible(&app.state) {
                     app.state.code.netlist.export_dialog.open = true;
