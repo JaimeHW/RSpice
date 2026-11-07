@@ -7,11 +7,18 @@
 //! reaches is QSPICE's unused `¥` pin and takes no part.
 //!
 //! A gate's output is QSPICE's: a source between the Vss and Vdd pins, set
-//! by the logic state and ramped over `Trise`/`Tfall`, behind `Rout` (100 Ω
-//! unless stated). Its inputs switch at `Ref` above Vss, the supply midpoint
-//! unless stated. A Gm amplifier sources
-//! `Gm·V(MULT+,MULT−)·V(min(IN+,IN++), max(IN−,IN−−))` from Vdd and sinks it
-//! into Vss, within the current and output-voltage limits it states.
+//! by the logic state and ramped over `Trise` and `Tfall` (which defaults to
+//! `Trise`), behind `Rout` (100 Ω unless stated), an impedance `Zmult` times
+//! higher halfway through an edge. Its inputs switch at `Ref` above Vss, the
+//! supply midpoint unless stated; the native special-function device decides
+//! the state and shapes its edges.
+//!
+//! A Gm amplifier sources `Gm·V(MULT+,MULT−)·V(min(IN+,IN++), max(IN−,IN−−))`
+//! from Vdd and sinks it into Vss. A current limit `L` bends the current `I`
+//! to `I·L/(|I|+L)`, the sinking limit defaulting to the sourcing one. An
+//! output-voltage limit holds the output with the amplifier's own
+//! transconductance, and within `Vdsat` (0.5 V) of a rail the output stage
+//! turns to a resistance, as QSPICE's does.
 
 use std::collections::BTreeMap;
 
@@ -83,7 +90,7 @@ pub(super) fn qspice_behaviour(
                     .reduce(|a, b| format!("(({a})+({b})-2*({a})*({b}))"))
                     .unwrap_or_default(),
             };
-            body.gate(&mut settings, &state, None);
+            body.gate(&mut settings, Decision::Logic(state), None);
             match kind.as_str() {
                 "AND" => "AND gate",
                 "OR" => "OR gate",
@@ -92,14 +99,13 @@ pub(super) fn qspice_behaviour(
         }
         ('¥', "HMITT") => {
             let threshold = body.threshold(&mut settings);
-            let negative = if pin(5) { "V(p6)" } else { "V(p2)" };
-            let vt = settings.remove("vt").unwrap_or_else(|| "0".to_owned());
-            let vh = settings.remove("vh").unwrap_or_else(|| "0".to_owned());
-            // The trip point moves from VT+VH to VT−VH once the output is
-            // high: the ramped state holds the memory.
-            let state = format!("u(V(p5)-{negative}-({vt})-({vh})*(1-2*V(r)))");
-            let enable = pin(6).then(|| (7, threshold));
-            body.gate(&mut settings, &state, enable);
+            let decision = Decision::Schmitt {
+                negative: if pin(5) { "p6" } else { "p2" },
+                vt: settings.remove("vt").unwrap_or_else(|| "0".to_owned()),
+                vh: settings.remove("vh").unwrap_or_else(|| "0".to_owned()),
+            };
+            let enable = pin(6).then_some((7, threshold));
+            body.gate(&mut settings, decision, enable);
             "Schmitt trigger"
         }
         ('Ã', "MULTGMAMP") => {
@@ -160,65 +166,65 @@ impl Body {
         }
     }
 
-    /// A gate's state `s`, enabled by the pin `enable` names where it is
-    /// used, delayed by `Td`, ramped into `r` over `Trise`/`Tfall`, and
-    /// driven onto Q and Q̅ between the supply pins.
+    /// A gate decided by `decision`, enabled by the pin `enable` names where
+    /// it is used, delayed by `Td` and ramped over `Trise`/`Tfall` into `r`,
+    /// and driven onto Q and Q̅ between the supply pins.
     fn gate(
         &mut self,
         settings: &mut BTreeMap<String, String>,
-        state: &str,
+        decision: Decision,
         enable: Option<(usize, String)>,
     ) {
         self.hold_inputs(5);
-        let state = match enable {
-            Some((pin, threshold)) => format!("({state})*u(V(p{pin})-V(p2)-{threshold})"),
-            None => state.to_owned(),
-        };
-        self.line(format!("Bs s 0 V={state}"));
-        let delay = settings
-            .remove("td")
-            .or_else(|| settings.remove("td1"))
-            .filter(|delay| !is_zero(delay));
-        let target = match delay {
-            Some(delay) => {
-                self.line(format!("Bd d 0 V=delay(V(s),{delay})"));
-                "V(d)"
+        let delay = settings.remove("td").or_else(|| settings.remove("td1"));
+        let timing = [
+            ("Td", delay),
+            ("Trise", settings.remove("trise")),
+            ("Tfall", settings.remove("tfall")),
+        ]
+        .into_iter()
+        .filter_map(|(key, time)| time.map(|time| format!(" {key}={}", parameter(&time))))
+        .collect::<String>();
+        let device = match decision {
+            Decision::Logic(state) => {
+                self.line(format!("Bs s 0 V={state}"));
+                "s 0 0 0 0 0 r 0 BUF".to_owned()
             }
-            None => "V(s)",
+            Decision::Schmitt { negative, vt, vh } => format!(
+                "p5 {negative} 0 0 0 0 r 0 SCHMITT Vt={} Vh={}",
+                parameter(&vt),
+                parameter(&vh)
+            ),
         };
-        let rise = settings.remove("trise").filter(|time| !is_zero(time));
-        let fall = settings.remove("tfall").filter(|time| !is_zero(time));
-        // With no stated edge the state still settles through `r`, a
-        // nanosecond integrator, so the Schmitt trigger's memory has a
-        // capacitor to live on.
-        let settle = match (&rise, &fall) {
-            (Some(rise), Some(fall)) => format!("min({rise},{fall})/1000"),
-            (Some(edge), None) | (None, Some(edge)) => format!("({edge})/1000"),
-            (None, None) => "1n".to_owned(),
+        self.line(format!("A1 {device} Vhigh=1 Vlow=0{timing}"));
+        let high = match enable {
+            Some((pin, threshold)) => format!("V(r)*u(V(p{pin})-V(p2)-{threshold})"),
+            None => "V(r)".to_owned(),
         };
-        let slope = |edge: &Option<String>| {
-            edge.as_ref()
-                .map_or_else(|| format!("1/({settle})"), |edge| format!("1/({edge})"))
-        };
-        self.line(format!(
-            "Br 0 r I=limit(({target}-V(r))/({settle}),-{},{})",
-            slope(&fall),
-            slope(&rise)
-        ));
-        self.line("Cr r 0 1");
         let rout = settings
             .remove("rout")
             .or_else(|| settings.remove("rsrc"))
             .unwrap_or_else(|| "100".to_owned());
-        self.line("Bq q p2 V=V(r)*(V(p1)-V(p2))");
-        self.line(format!("Rq q p3 {rout}"));
-        let mut outputs = vec!["p3"];
+        let zmult = settings
+            .remove("zmult")
+            .filter(|zmult| number(zmult) != Some(1.0));
+        let mut outputs = vec![("q", "p3", high.clone())];
         if self.ports >= 4 {
-            self.line("Bqb qb p2 V=(1-V(r))*(V(p1)-V(p2))");
-            self.line(format!("Rqb qb p4 {rout}"));
-            outputs.push("p4");
+            outputs.push(("qb", "p4", format!("(1-{high})")));
         }
-        self.output_capacitance(settings, &outputs);
+        for (source, pin, level) in &outputs {
+            match &zmult {
+                Some(zmult) => self.line(format!(
+                    "B{source} p2 {pin} I=(V(p2)+{level}*(V(p1)-V(p2))-V({pin}))/(({rout})*(1+(({zmult})-1)*4*{level}*(1-{level})))"
+                )),
+                None => {
+                    self.line(format!("B{source} {source} p2 V={level}*(V(p1)-V(p2))"));
+                    self.line(format!("R{source} {source} {pin} {rout}"));
+                }
+            }
+        }
+        let pins = outputs.iter().map(|(_, pin, _)| *pin).collect::<Vec<_>>();
+        self.output_capacitance(settings, &pins);
     }
 
     /// A Gm amplifier's output current, from pins VDD VSS OUT IN− IN+ MULT+
@@ -244,9 +250,9 @@ impl Body {
             settings.remove("ref");
             String::new()
         };
-        let drive = format!("({gm})*({positive}-{negative}{offset}){multiplier}{enable}");
+        let drive = format!("({gm})*({positive}-{negative}{offset}){multiplier}");
         // `Ft` is the transconductance's single-pole bandwidth.
-        let current = match settings.remove("ft") {
+        let mut current = match settings.remove("ft") {
             Some(bandwidth) => {
                 self.line(format!("Bx x 0 V={drive}"));
                 self.line("Rx x xf 1");
@@ -259,23 +265,38 @@ impl Body {
             }
             None => drive,
         };
-        let source = settings
-            .remove("isrc")
-            .or_else(|| settings.remove("iout"))
-            .map_or_else(|| "1e30".to_owned(), |limit| format!("({limit})"));
-        let sink = settings
-            .remove("isnk")
-            .map_or_else(|| "1e30".to_owned(), |limit| format!("({limit})"));
-        self.line(format!("Bi i 0 V=limit({current},-{sink},{source})"));
-        self.line("Bsrc p1 p3 I=uramp(V(i))");
-        self.line("Bsnk p3 p2 I=uramp(-V(i))");
-        // An output voltage limit, from Vss, holds the output as a clamp.
+        let gain = format!("abs(({gm}){multiplier})");
         if let Some(high) = settings.remove("voutmax") {
-            self.line(format!("Bmax p3 p2 I=1k*uramp(V(p3)-V(p2)-({high}))"));
+            current = format!("min({current},{gain}*(({high})-V(p3)+V(p2)))");
         }
         if let Some(low) = settings.remove("voutmin") {
-            self.line(format!("Bmin p2 p3 I=1k*uramp(({low})-V(p3)+V(p2))"));
+            current = format!("max({current},{gain}*(({low})-V(p3)+V(p2)))");
         }
+        let current = format!("{current}{enable}");
+        let source = settings.remove("isrc").or_else(|| settings.remove("iout"));
+        let sink = settings.remove("isnk").or_else(|| source.clone());
+        let current = if source.is_some() || sink.is_some() {
+            self.line(format!("Bc c 0 V={current}"));
+            let bent = |sign: &str, limit: &Option<String>| match limit {
+                Some(limit) => format!("uramp({sign}V(c))*({limit})/(uramp({sign}V(c))+({limit}))"),
+                None => format!("uramp({sign}V(c))"),
+            };
+            format!("{}-{}", bent("", &source), bent("-", &sink))
+        } else {
+            current
+        };
+        self.line(format!("Bi i 0 V={current}"));
+        let vdsat = settings.remove("vdsat").unwrap_or_else(|| "0.5".to_owned());
+        let top = settings.remove("vdsat1").unwrap_or_else(|| vdsat.clone());
+        let bottom = settings.remove("vdsat2").unwrap_or(vdsat);
+        self.line(format!(
+            "Bsrc p1 p3 I=uramp(V(i))*{}",
+            saturation("V(p1)-V(p3)", &top)
+        ));
+        self.line(format!(
+            "Bsnk p3 p2 I=uramp(-V(i))*{}",
+            saturation("V(p3)-V(p2)", &bottom)
+        ));
         if let Some(rout) = settings.remove("rout") {
             let twice = number(&rout).map_or_else(
                 || format!("{{2*({rout})}}"),
@@ -299,11 +320,38 @@ impl Body {
     }
 }
 
+/// What decides a gate's output state.
+enum Decision {
+    /// A logic expression, 1 while the output is high.
+    Logic(String),
+    /// A Schmitt trigger on `V(p5) − V(negative)`, high above `vt + vh` and
+    /// low below `vt − vh`.
+    Schmitt {
+        negative: &'static str,
+        vt: String,
+        vh: String,
+    },
+}
+
+/// The fraction of its current an output transistor carries `across` volts
+/// from its rail: all of it beyond `vdsat`, `x·(2 − x)` of it inside, with
+/// `x = across/vdsat`, and a resistance's current past the rail.
+fn saturation(across: &str, vdsat: &str) -> String {
+    let x = format!("min(({across})/({vdsat}),1)");
+    format!("{x}*(2-max({x},0))")
+}
+
+/// A setting as a special-function device parameter: a number as written,
+/// anything else as an expression.
+fn parameter(text: &str) -> String {
+    if number(text).is_some() || text.starts_with('{') {
+        text.to_owned()
+    } else {
+        format!("{{{text}}}")
+    }
+}
+
 /// A setting written as a number, SPICE's scale suffixes read.
 fn number(text: &str) -> Option<f64> {
     rspice_vocabulary::quantity::parse_engineering_value(text.trim()).ok()
-}
-
-fn is_zero(text: &str) -> bool {
-    number(text) == Some(0.0)
 }

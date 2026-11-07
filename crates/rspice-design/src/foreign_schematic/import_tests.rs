@@ -1625,7 +1625,7 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
       «type: ¥»
       «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
       «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
-      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Trise=10n Zmult=2\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Trise=10n Zmult=2 Td2=5n\"»
       «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
       «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\"»
       «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
@@ -1686,14 +1686,18 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
         gate.contains("Bs s 0 V=u(V(p5)-V(p2)-(V(p1)-V(p2))/2)*u(V(p6)-V(p2)-(V(p1)-V(p2))/2)"),
         "{gate}"
     );
-    assert!(
-        gate.contains("I=limit((V(s)-V(r))/((10n)/1000),-1/((10n)/1000),1/(10n))"),
-        "{gate}"
-    );
+    // The native special-function buffer times the edges; Tfall is Trise.
     assert!(
         gate.contains(
-            "Rq q p3 100
+            "A1 s 0 0 0 0 0 r 0 BUF Vhigh=1 Vlow=0 Trise=10n
 "
+        ),
+        "{gate}"
+    );
+    // Zmult doubles the 100 Ω output impedance halfway through an edge.
+    assert!(
+        gate.contains(
+            "Bq p2 p3 I=(V(p2)+V(r)*(V(p1)-V(p2))-V(p3))/((100)*(1+((2)-1)*4*V(r)*(1-V(r))))"
         ),
         "{gate}"
     );
@@ -1712,20 +1716,30 @@ fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
         ),
         "{amplifier}"
     );
+    // VoutMax holds the output with the amplifier's own transconductance.
     assert!(
-        amplifier.contains("Bi i 0 V=limit(V(xf),-1e30,(10u))"),
+        amplifier.contains("Bc c 0 V=min(V(xf),abs((50u))*((2.5)-V(p3)+V(p2)))"),
+        "{amplifier}"
+    );
+    // Isrc bends the current both ways, the sinking limit defaulting to it.
+    assert!(
+        amplifier.contains(
+            "Bi i 0 V=uramp(V(c))*(10u)/(uramp(V(c))+(10u))-uramp(-V(c))*(10u)/(uramp(-V(c))+(10u))"
+        ),
         "{amplifier}"
     );
     assert!(
-        amplifier.contains("Bmax p3 p2 I=1k*uramp(V(p3)-V(p2)-(2.5))"),
+        amplifier.contains(
+            "Bsnk p3 p2 I=uramp(-V(i))*min((V(p3)-V(p2))/(0.5),1)*(2-max(min((V(p3)-V(p2))/(0.5),1),0))"
+        ),
         "{amplifier}"
     );
-    let zmult = imported
+    let unmodelled = imported
         .notices
         .iter()
         .find(|notice| notice.message.contains("¥1"))
         .expect("the gate's notice");
-    assert!(zmult.message.contains("zmult"), "{}", zmult.message);
+    assert!(unmodelled.message.contains("td2"), "{}", unmodelled.message);
     let parts = imported
         .document
         .components
