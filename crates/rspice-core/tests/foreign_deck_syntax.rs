@@ -588,3 +588,59 @@ Q1 b a 0 QX
     assert_close("Q1", device("Q1"), 5.416_252e-27, 1e-32);
     assert_close("S1", device("S1"), 2.906_043e-28, 1e-33);
 }
+
+// LTspice 26.1.1 batch: V(a)=0.25, V(b)=-0.2, V(c)=1, V(d)=0.3125 (QSPICE
+// ignores `load`). A load is dissipative: full current from 0.5 V across it,
+// I0·u(2-u) with u = V/0.5 below that, and the resistor 2·I0·u under 0 V.
+#[test]
+fn a_current_source_flagged_load_draws_nothing_without_a_supply() {
+    let netlist = parse(
+        "current loads\n\
+         V1 s 0 1\n\
+         R1 s a 1k\n\
+         I1 a 0 1m load\n\
+         V2 t 0 -1\n\
+         R2 t b 1k\n\
+         I2 b 0 DC 1m LOAD\n\
+         R3 s c 1k\n\
+         I3 c 0 -1m load\n\
+         X1 s d sub ib=2m\n\
+         .subckt sub p q ib=1m\n\
+         R1 p q 400\n\
+         I1 q 0 {ib} load\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 0.25, 1e-9);
+    assert_close("V(b)", op_voltage(&netlist, "b"), -0.2, 1e-9);
+    assert_close("V(c)", op_voltage(&netlist, "c"), 1.0, 1e-9);
+    assert_close("V(d)", op_voltage(&netlist, "d"), 0.3125, 1e-8);
+
+    let error =
+        Netlist::parse("waveform load\nI1 a 0 PULSE(0 1 0 1n 1n 1u 2u) load\nR1 a 0 1\n.end\n")
+            .expect_err("a waveform load is refused");
+    assert!(error.to_string().contains("constant current"), "{error}");
+}
+
+// QSPICE 2026 batch: V(a)=2.0, V(b)=6.0e-3 (LTspice 26.1.1 the same).
+#[test]
+fn passive_parasitics_written_as_subcircuit_expressions_follow_the_instance() {
+    let netlist = parse(
+        "parameterized parasitics\n\
+         I1 0 a 1m\n\
+         X1 a 0 cap radj=2k\n\
+         I2 0 b 1m\n\
+         X2 b 0 ind rs=3\n\
+         .subckt cap p n radj=1k\n\
+         C1 p n 1u Rpar={radj}\n\
+         .ends\n\
+         .subckt ind p n rs=1\n\
+         L1 p n 1m Rser={rs*2}\n\
+         .ends\n\
+         .op\n\
+         .end\n",
+    );
+    assert_close("V(a)", op_voltage(&netlist, "a"), 2.0, 1e-9);
+    assert_close("V(b)", op_voltage(&netlist, "b"), 6.0e-3, 1e-12);
+}

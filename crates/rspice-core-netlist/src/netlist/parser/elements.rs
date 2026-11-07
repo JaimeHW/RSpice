@@ -244,18 +244,6 @@ pub(super) fn parse_resistor(
                             if name_upper == "R" || name_upper == "VALUE" {
                                 value_expr = Some(expr);
                                 value = None;
-                            } else if matches!(name_upper.as_str(), "RSER" | "RPAR" | "CPAR") {
-                                // Parasitic expansion happens at parse time, so a
-                                // per-instance value cannot be honored; rejecting
-                                // beats silently dropping the parasitic.
-                                return Err(ParseError::Syntax {
-                                    line: line_num,
-                                    message: format!(
-                                        "parameterized {raw_name} on a passive inside a \
-                                         subcircuit is not supported; declare the parasitic \
-                                         as an explicit element instead"
-                                    ),
-                                });
                             } else if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
                                     ElementParamSink {
@@ -397,7 +385,15 @@ pub(super) fn parse_resistor(
         );
     }
     let mut nodes = vec![node_pos, node_neg];
-    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
+    expand_passive_parasitics(
+        elements,
+        &name,
+        &mut nodes,
+        ElementParamSink {
+            instance_params: &mut instance_params,
+            deferred_params: &mut deferred_params,
+        },
+    );
     elements.push(Element {
         name,
         kind: ElementKind::Resistor {
@@ -633,18 +629,35 @@ fn noiseless_flag() -> (String, Value) {
     ("NOISY".to_owned(), 0.0)
 }
 
+/// One parasitic's value: a positive number, or an expression a subcircuit
+/// instance resolves.
+fn take_parasitic(params: &mut ElementParamSink<'_>, key: &str) -> Option<(Value, Option<String>)> {
+    if let Some(value) =
+        extract_instance_param(params.instance_params, key).filter(|v| v.is_finite() && *v > 0.0)
+    {
+        return Some((value, None));
+    }
+    let index = params
+        .deferred_params
+        .iter()
+        .position(|(name, _)| name.eq_ignore_ascii_case(key))?;
+    Some((Value::NAN, Some(params.deferred_params.remove(index).1)))
+}
+
 /// LTspice-style passive parasitics: peel explicit `Rser`/`Rpar`/`Cpar`
 /// instance parameters off an R/L/C and synthesize them as real elements
 /// (`Rser` inserts an internal series node `NAME#SER`). Only *explicit*
 /// parameters expand — LTspice's implicit defaults are never imposed on
-/// a deck that didn't ask for them.
+/// a deck that didn't ask for them. A value written as an expression inside
+/// a subcircuit stays one on the synthesized element.
 fn expand_passive_parasitics(
     elements: &mut Vec<Element>,
     name: &str,
     nodes: &mut [String],
-    instance_params: &mut Vec<(String, Value)>,
+    mut params: ElementParamSink<'_>,
 ) {
     let tag = name.to_ascii_uppercase();
+    let instance_params = &*params.instance_params;
     // A `noiseless` passive's parasitic resistors are as quiet as it is.
     let helper_params = || {
         instance_params
@@ -656,16 +669,14 @@ fn expand_passive_parasitics(
     let rser_params = helper_params();
     let rpar_params = helper_params();
 
-    if let Some(rser) =
-        extract_instance_param(instance_params, "RSER").filter(|v| v.is_finite() && *v > 0.0)
-    {
+    if let Some((rser, rser_expr)) = take_parasitic(&mut params, "RSER") {
         let internal = format!("{tag}#SER");
         let outer_pos = std::mem::replace(&mut nodes[0], internal.clone());
         elements.push(Element {
             name: format!("R{tag}#SER"),
             kind: ElementKind::Resistor {
                 value: rser,
-                value_expr: None,
+                value_expr: rser_expr,
                 model: None,
                 instance_params: rser_params,
                 deferred_params: Vec::new(),
@@ -678,14 +689,12 @@ fn expand_passive_parasitics(
         });
     }
 
-    if let Some(rpar) =
-        extract_instance_param(instance_params, "RPAR").filter(|v| v.is_finite() && *v > 0.0)
-    {
+    if let Some((rpar, rpar_expr)) = take_parasitic(&mut params, "RPAR") {
         elements.push(Element {
             name: format!("R{tag}#PAR"),
             kind: ElementKind::Resistor {
                 value: rpar,
-                value_expr: None,
+                value_expr: rpar_expr,
                 model: None,
                 instance_params: rpar_params,
                 deferred_params: Vec::new(),
@@ -698,14 +707,12 @@ fn expand_passive_parasitics(
         });
     }
 
-    if let Some(cpar) =
-        extract_instance_param(instance_params, "CPAR").filter(|v| v.is_finite() && *v > 0.0)
-    {
+    if let Some((cpar, cpar_expr)) = take_parasitic(&mut params, "CPAR") {
         elements.push(Element {
             name: format!("C{tag}#PAR"),
             kind: ElementKind::Capacitor {
                 value: cpar,
-                value_expr: None,
+                value_expr: cpar_expr,
                 initial_voltage: None,
                 model: None,
                 instance_params: Vec::new(),
@@ -960,16 +967,6 @@ fn parse_passive_tail(
                                 tail.value = None;
                                 continue;
                             }
-                            if matches!(name_upper.as_str(), "RSER" | "RPAR" | "CPAR") {
-                                return Err(ParseError::Syntax {
-                                    line: line_num,
-                                    message: format!(
-                                        "parameterized {raw_name} on a passive inside a \
-                                         subcircuit is not supported; declare the parasitic \
-                                         as an explicit element instead"
-                                    ),
-                                });
-                            }
                             if matches!(name_upper.as_str(), "TC1" | "TC2") {
                                 upsert_passive_scalar_tc(
                                     ElementParamSink {
@@ -1161,8 +1158,17 @@ pub(super) fn parse_capacitor(
         );
     }
     let mut instance_params = tail.instance_params;
+    let mut deferred_params = tail.deferred_params;
     let mut nodes = vec![node_pos, node_neg];
-    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
+    expand_passive_parasitics(
+        elements,
+        &name,
+        &mut nodes,
+        ElementParamSink {
+            instance_params: &mut instance_params,
+            deferred_params: &mut deferred_params,
+        },
+    );
     elements.push(Element {
         name,
         kind: ElementKind::Capacitor {
@@ -1171,7 +1177,7 @@ pub(super) fn parse_capacitor(
             initial_voltage: tail.ic,
             model: tail.model,
             instance_params,
-            deferred_params: tail.deferred_params,
+            deferred_params,
         },
         nodes,
         provenance: crate::netlist::ElementProvenance::Authored,
@@ -1234,8 +1240,17 @@ pub(super) fn parse_inductor(
         );
     }
     let mut instance_params = tail.instance_params;
+    let mut deferred_params = tail.deferred_params;
     let mut nodes = vec![node_pos, node_neg];
-    expand_passive_parasitics(elements, &name, &mut nodes, &mut instance_params);
+    expand_passive_parasitics(
+        elements,
+        &name,
+        &mut nodes,
+        ElementParamSink {
+            instance_params: &mut instance_params,
+            deferred_params: &mut deferred_params,
+        },
+    );
     elements.push(Element {
         name,
         kind: ElementKind::Inductor {
@@ -1244,7 +1259,7 @@ pub(super) fn parse_inductor(
             initial_current: tail.ic,
             model: tail.model,
             instance_params,
-            deferred_params: tail.deferred_params,
+            deferred_params,
         },
         nodes,
         provenance: crate::netlist::ElementProvenance::Authored,
@@ -1456,6 +1471,27 @@ pub(super) fn parse_current_source(
     let node_pos = expect_node(stream, line_num)?;
     let node_neg = expect_node(stream, line_num)?;
 
+    if let Some(expression) = current_load_expression(
+        &collect_deferred_source_spec(&mut stream.clone()),
+        &node_pos,
+        &node_neg,
+        line_num,
+    )? {
+        stream.collect_line();
+        elements.push(Element {
+            name,
+            kind: ElementKind::BehavioralCurrent {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
+            },
+            nodes: vec![node_pos, node_neg],
+            provenance: crate::netlist::ElementProvenance::Authored,
+        });
+        return Ok(());
+    }
+
     if defer_source_spec {
         let raw_spec = collect_deferred_source_spec(stream);
         elements.push(Element {
@@ -1531,6 +1567,47 @@ fn collect_deferred_source_spec(stream: &mut TokenStream) -> String {
         .filter_map(|token| (!token.lexeme.is_empty()).then_some(token.lexeme))
         .collect::<Vec<_>>()
         .join(" ")
+}
+
+/// LTspice's dissipative current load, `Ixxx n+ n- [DC] <current> load`.
+/// With u = V(n+,n-)/0.5 V the source carries max(I, 0)·g(u), where g is 1
+/// from u = 1 up, u(2 − u) between 0 and 1, and the resistor 2u below 0, so
+/// the load draws nothing when its supply collapses.
+fn current_load_expression(
+    raw_spec: &str,
+    node_pos: &str,
+    node_neg: &str,
+    line_num: usize,
+) -> Result<Option<String>, ParseError> {
+    let mut words = raw_spec.split_whitespace().collect::<Vec<_>>();
+    if !words
+        .last()
+        .is_some_and(|word| word.eq_ignore_ascii_case("LOAD"))
+    {
+        return Ok(None);
+    }
+    words.pop();
+    if words
+        .first()
+        .is_some_and(|word| word.eq_ignore_ascii_case("DC"))
+    {
+        words.remove(0);
+    }
+    let value = words.join(" ");
+    let value = match value.strip_prefix('{').and_then(|v| v.strip_suffix('}')) {
+        Some(expression) if !expression.contains(['{', '}']) => expression.to_string(),
+        _ if words.len() == 1 && !value.contains(['(', ')', '{', '}']) => value,
+        _ => {
+            return Err(ParseError::Syntax {
+                line: line_num,
+                message: format!("`load` applies to a constant current; `{raw_spec}` is not one"),
+            });
+        }
+    };
+    let v = format!("V({node_pos},{node_neg})");
+    Ok(Some(format!(
+        "max(({value}),0)*if({v}>=0.5,1,if({v}>=0,4*{v}*(1-{v}),4*{v}))"
+    )))
 }
 
 pub(super) fn parse_pspice_u_device(
