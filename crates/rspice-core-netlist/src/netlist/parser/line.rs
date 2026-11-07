@@ -387,9 +387,16 @@ pub(super) fn process_line_with_abort(
     // If inside subcircuit, add elements to subcircuit
     if state.subckt_stack.last().is_some() {
         if upper.starts_with(".MODEL") {
+            let enclosing_scopes: Vec<String> = state
+                .subckt_stack
+                .iter()
+                .rev()
+                .map(|frame| frame.qualified_name.clone())
+                .collect();
             let models = &mut state.models;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
             let pending_xyce_diode_model_warnings = &mut state.pending_xyce_diode_model_warnings;
+            let pending_ako_models = &mut state.pending_ako_models;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -407,6 +414,8 @@ pub(super) fn process_line_with_abort(
                 ModelDefinitionDeferrals {
                     bare_ident_deferrals: model_bare_ident_deferrals,
                     pending_xyce_diode_model_warnings,
+                    pending_ako_models,
+                    enclosing_scopes: &enclosing_scopes,
                 },
             )?;
             let local_name = model.name.clone();
@@ -435,6 +444,7 @@ pub(super) fn process_line_with_abort(
             let spef_includes = &mut state.spef_includes;
             let model_bare_ident_deferrals = &mut state.model_bare_ident_deferrals;
             let pending_xyce_diode_model_warnings = &mut state.pending_xyce_diode_model_warnings;
+            let pending_ako_models = &mut state.pending_ako_models;
             let frame = state
                 .subckt_stack
                 .last_mut()
@@ -467,6 +477,7 @@ pub(super) fn process_line_with_abort(
                     models,
                     model_bare_ident_deferrals,
                     pending_xyce_diode_model_warnings,
+                    pending_ako_models,
                     initial_conditions: &mut subckt_initial_conditions,
                     device_initial_conditions,
                     node_sets: &mut subckt_node_sets,
@@ -551,6 +562,7 @@ pub(super) fn process_line_with_abort(
             models: &mut state.models,
             model_bare_ident_deferrals: &mut state.model_bare_ident_deferrals,
             pending_xyce_diode_model_warnings: &mut state.pending_xyce_diode_model_warnings,
+            pending_ako_models: &mut state.pending_ako_models,
             initial_conditions: &mut state.initial_conditions,
             device_initial_conditions: &mut state.device_initial_conditions,
             node_sets: &mut state.node_sets,
@@ -662,6 +674,7 @@ pub(super) fn parse_line(
         deferred_body_params,
         model_bare_ident_deferrals,
         pending_xyce_diode_model_warnings,
+        pending_ako_models,
     } = context;
 
     // Tokenize the line
@@ -713,6 +726,7 @@ pub(super) fn parse_line(
                     models,
                     model_bare_ident_deferrals,
                     pending_xyce_diode_model_warnings,
+                    pending_ako_models,
                     params,
                     initial_conditions,
                     device_initial_conditions,

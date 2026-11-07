@@ -102,6 +102,7 @@ pub(super) struct ParseState {
     /// Unresolved bare model references, retaining their owning model card.
     pub(super) model_bare_ident_deferrals: Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: Vec<PendingXyceDiodeModelWarning>,
+    pub(super) pending_ako_models: Vec<PendingAkoModel>,
     pub(super) subcircuits: Vec<SubcircuitDef>,
     pub(super) params: ParamContext,
     pub(super) spectre_statistics: SpectreStatisticsPlan,
@@ -176,6 +177,7 @@ impl ParseState {
             models: Vec::new(),
             model_bare_ident_deferrals: Vec::new(),
             pending_xyce_diode_model_warnings: Vec::new(),
+            pending_ako_models: Vec::new(),
             subcircuits: Vec::new(),
             params: ParamContext::new(),
             spectre_statistics: SpectreStatisticsPlan::default(),
@@ -586,6 +588,7 @@ pub(super) struct ParseLineContext<'a> {
     /// identifier, carrying the parameter name, the reference, and the line.
     pub(super) model_bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
+    pub(super) pending_ako_models: &'a mut Vec<PendingAkoModel>,
 }
 
 pub(super) struct ParseCommandContext<'a> {
@@ -634,6 +637,7 @@ pub(super) struct ParseCommandContext<'a> {
     /// needs the line to report the second case the way the parser used to.
     pub(super) model_bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub(super) pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
+    pub(super) pending_ako_models: &'a mut Vec<PendingAkoModel>,
 }
 
 #[cfg(test)]

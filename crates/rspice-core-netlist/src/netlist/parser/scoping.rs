@@ -42,12 +42,232 @@ pub(super) struct PendingModelParameterReference {
 /// references until the deck ends and typos afterwards, and only end-of-parse
 /// validation can tell which — see
 /// `resolve_static_model_expression_params_with_abort`.
-/// The two deferral sinks a `.MODEL` line writes into: bare identifiers whose
-/// value is not known until the parameter scope closes, and the Xyce diode
-/// warnings that can only be emitted once the card is complete.
+/// The deferral sinks a `.MODEL` line writes into: bare identifiers whose
+/// value is not known until the parameter scope closes, the Xyce diode
+/// warnings that can only be emitted once the card is complete, and `AKO:`
+/// cards whose base is not yet visible.
 pub(super) struct ModelDefinitionDeferrals<'a> {
     pub bare_ident_deferrals: &'a mut Vec<PendingModelParameterReference>,
     pub pending_xyce_diode_model_warnings: &'a mut Vec<PendingXyceDiodeModelWarning>,
+    pub pending_ako_models: &'a mut Vec<PendingAkoModel>,
+    /// Qualified names of the subcircuits enclosing the card, innermost
+    /// first; empty at the top level.
+    pub enclosing_scopes: &'a [String],
+}
+
+/// An `AKO:` model card whose base is bound once the whole deck has been
+/// read: LTspice and QSPICE find the base wherever the deck defines it,
+/// before or after the derived card.
+#[derive(Debug)]
+pub(super) struct PendingAkoModel {
+    pub(super) model_index: usize,
+    pub(super) base_name: String,
+    /// The type the derived card wrote, which must match its base's.
+    pub(super) explicit_type: Option<String>,
+    pub(super) enclosing_scopes: Vec<String>,
+    pub(super) authored_parameter_order: Vec<String>,
+    pub(super) origin: NetlistSourceLocation,
+}
+
+/// The model a scoped `AKO:` base name names. A subcircuit's own models
+/// shadow its parents', which shadow the top level's. While the deck is
+/// still being read, `local_only` refuses a top-level match from inside a
+/// subcircuit, because a local model of that name may still follow.
+fn find_ako_base(
+    models: &[ModelDef],
+    enclosing_scopes: &[String],
+    base_name: &str,
+    local_only: bool,
+) -> Option<usize> {
+    let find = |name: &str| {
+        models
+            .iter()
+            .rposition(|model| model.name.eq_ignore_ascii_case(name))
+    };
+    enclosing_scopes
+        .iter()
+        .find_map(|scope| find(&qualify_local_model_name(scope, base_name)))
+        .or_else(|| {
+            if enclosing_scopes.is_empty() || !local_only {
+                find(base_name)
+            } else {
+                None
+            }
+        })
+}
+
+/// Give an `AKO:` model its base's type and parameters; the parameters it
+/// writes itself replace the base's of the same name.
+fn inherit_ako_base(
+    model: &mut ModelDef,
+    explicit_type: Option<&str>,
+    base: &ModelDef,
+    base_name: &str,
+    line: usize,
+) -> Result<(), ParseError> {
+    fn overlay<T: Clone>(
+        inherited: &[(String, T)],
+        own: &mut Vec<(String, T)>,
+        written: &HashSet<String>,
+    ) {
+        let mut merged: Vec<(String, T)> = inherited
+            .iter()
+            .filter(|(name, _)| !written.contains(&name.to_ascii_uppercase()))
+            .cloned()
+            .collect();
+        merged.append(own);
+        *own = merged;
+    }
+
+    if let Some(explicit) = explicit_type
+        && !explicit.eq_ignore_ascii_case(&base.model_type)
+    {
+        return Err(ParseError::Syntax {
+            line,
+            message: format!(
+                "AKO model `{}` declares type `{explicit}` but base `{base_name}` is `{}`",
+                model.name, base.model_type
+            ),
+        });
+    }
+    let written: HashSet<String> = model_parameter_names_in_storage_order(model)
+        .into_iter()
+        .collect();
+    overlay(&base.params, &mut model.params, &written);
+    overlay(&base.expr_params, &mut model.expr_params, &written);
+    overlay(&base.string_params, &mut model.string_params, &written);
+    overlay(
+        &base.string_vector_params,
+        &mut model.string_vector_params,
+        &written,
+    );
+    overlay(
+        &base.real_vector_params,
+        &mut model.real_vector_params,
+        &written,
+    );
+    overlay(
+        &base.real_vector_expr_params,
+        &mut model.real_vector_expr_params,
+        &written,
+    );
+    overlay(
+        &base.integer_vector_params,
+        &mut model.integer_vector_params,
+        &written,
+    );
+    model.model_type = explicit_type.map_or_else(|| base.model_type.clone(), str::to_string);
+    Ok(())
+}
+
+/// The user-visible parameter order of an `AKO:` model: its base's, then the
+/// names it writes itself.
+fn ako_parameter_order(
+    base_index: usize,
+    base: &ModelDef,
+    authored_parameter_order: &[String],
+    pending_xyce_diode_model_warnings: &[PendingXyceDiodeModelWarning],
+) -> Vec<String> {
+    let mut parameter_order = pending_xyce_diode_model_warnings
+        .iter()
+        .find(|warning| warning.model_index == base_index)
+        .map(|warning| warning.parameter_order.clone())
+        .unwrap_or_else(|| model_parameter_names_in_storage_order(base));
+    for name in authored_parameter_order {
+        parameter_order.retain(|inherited| !inherited.eq_ignore_ascii_case(name));
+        parameter_order.push(name.clone());
+    }
+    parameter_order
+}
+
+/// Bind every deferred `AKO:` card to its base once the deck has been read.
+/// A chain binds base first whatever order its cards were written in; a base
+/// nothing defines, or a chain that returns to itself, is an error.
+pub(super) fn resolve_pending_ako_models(
+    params: &ParamContext,
+    models: &mut [ModelDef],
+    pending: Vec<PendingAkoModel>,
+    pending_xyce_diode_model_warnings: &mut Vec<PendingXyceDiodeModelWarning>,
+) -> Result<(), ParseError> {
+    let located = |card: &PendingAkoModel, message: String| ParseError::Syntax {
+        line: card.origin.line,
+        message: if card.origin.path.is_some() {
+            format!("{}: {message}", card.origin)
+        } else {
+            message
+        },
+    };
+    let queued_warnings = pending_xyce_diode_model_warnings.len();
+    let mut unresolved = pending;
+    while !unresolved.is_empty() {
+        let before = unresolved.len();
+        let bases = unresolved
+            .iter()
+            .map(|card| {
+                find_ako_base(models, &card.enclosing_scopes, &card.base_name, false).ok_or_else(
+                    || {
+                        located(
+                            card,
+                            format!(
+                                "AKO base model `{}` of `{}` is not defined",
+                                card.base_name, models[card.model_index].name
+                            ),
+                        )
+                    },
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let unbound: HashSet<usize> = unresolved.iter().map(|card| card.model_index).collect();
+        let mut waiting = Vec::new();
+        for (card, base_index) in unresolved.into_iter().zip(bases) {
+            if unbound.contains(&base_index) {
+                waiting.push(card);
+                continue;
+            }
+            let base = models[base_index].clone();
+            let model = &mut models[card.model_index];
+            inherit_ako_base(
+                model,
+                card.explicit_type.as_deref(),
+                &base,
+                &card.base_name,
+                card.origin.line,
+            )
+            .map_err(|error| match error {
+                ParseError::Syntax { message, .. } => located(&card, message),
+                other => other,
+            })?;
+            let parameter_order = ako_parameter_order(
+                base_index,
+                &base,
+                &card.authored_parameter_order,
+                pending_xyce_diode_model_warnings,
+            );
+            queue_unknown_xyce_diode_model_parameter_warnings(
+                params,
+                model,
+                card.model_index,
+                parameter_order,
+                &card.origin,
+                pending_xyce_diode_model_warnings,
+            );
+        }
+        if waiting.len() == before {
+            let card = &waiting[0];
+            return Err(located(
+                card,
+                format!(
+                    "AKO model `{}` inherits from itself through base `{}`",
+                    models[card.model_index].name, card.base_name
+                ),
+            ));
+        }
+        unresolved = waiting;
+    }
+    if pending_xyce_diode_model_warnings.len() > queued_warnings {
+        pending_xyce_diode_model_warnings.sort_by_key(|warning| warning.model_index);
+    }
+    Ok(())
 }
 
 pub(super) fn parse_model_definition(
@@ -62,14 +282,15 @@ pub(super) fn parse_model_definition(
     let ModelDefinitionDeferrals {
         bare_ident_deferrals,
         pending_xyce_diode_model_warnings,
+        pending_ako_models,
+        enclosing_scopes,
     } = deferrals;
     let model_index = known_models.len();
     let name = expect_model_name(stream, line_num)?;
     let second = expect_ident(stream, line_num)?;
 
     // PSpice `AKO:` inheritance: `.model X AKO:BASE [type] (overrides)`.
-    // The base must be defined earlier (PSpice's own in-order rule); the
-    // derived model starts from the base's type and parameters and the
+    // The derived model starts from the base's type and parameters and the
     // overrides replace by name. `AKO: BASE` (split tokens) also parses.
     let (ako_base, model_type) = if second.to_ascii_uppercase().starts_with("AKO:") {
         let base = if second.len() > 4 {
@@ -77,9 +298,10 @@ pub(super) fn parse_model_definition(
         } else {
             expect_ident(stream, line_num)?
         };
-        // An explicit type may follow; otherwise it inherits.
+        // An explicit type may follow; otherwise it inherits. A name followed
+        // by `=` is the first override, not a type.
         let explicit_type = match &stream.peek().kind {
-            TokenKind::Ident(t) => {
+            TokenKind::Ident(t) if !matches!(stream.peek_n(1).kind, TokenKind::Equals) => {
                 let t = t.clone();
                 stream.advance();
                 Some(t)
@@ -110,26 +332,26 @@ pub(super) fn parse_model_definition(
         });
     }
 
-    let ako_base_model = if let Some(base_name) = ako_base.as_ref() {
-        Some(
-            known_models
-                .iter()
-                .rev()
-                .find(|m| m.name.eq_ignore_ascii_case(base_name))
-                .ok_or_else(|| ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "AKO base model `{base_name}` is not defined before `{name}` \
-                         (PSpice requires the base earlier in the deck)"
-                    ),
-                })?,
-        )
-    } else {
-        None
-    };
-    let model_type_hint = model_type
+    // A base already visible from the card's scope, and itself complete,
+    // binds now so the overrides parse against its type; any other binds
+    // once the deck has been read.
+    let visible_base = ako_base
         .as_deref()
-        .or_else(|| ako_base_model.map(|base| base.model_type.as_str()));
+        .and_then(|base_name| find_ako_base(known_models, enclosing_scopes, base_name, true))
+        .filter(|base_index| {
+            !pending_ako_models
+                .iter()
+                .any(|pending| pending.model_index == *base_index)
+        });
+    let model_type_hint = model_type.as_deref().or_else(|| {
+        visible_base
+            .or_else(|| {
+                ako_base.as_deref().and_then(|base_name| {
+                    find_ako_base(known_models, enclosing_scopes, base_name, false)
+                })
+            })
+            .map(|index| known_models[index].model_type.as_str())
+    });
     let mut model_params = parse_model_params(
         stream,
         line_num,
@@ -149,155 +371,46 @@ pub(super) fn parse_model_definition(
         },
     ));
 
-    let Some(base_name) = ako_base else {
-        let model = ModelDef {
-            name,
-            model_type: model_type.expect("non-AKO models carry an explicit type"),
-            params: model_params.numeric,
-            expr_params: model_params.expr,
-            string_params: model_params.string,
-            string_vector_params: model_params.string_vector,
-            real_vector_params: model_params.real_vector,
-            real_vector_expr_params: model_params.real_vector_expr,
-            integer_vector_params: model_params.integer_vector,
-        };
-        queue_unknown_xyce_diode_model_parameter_warnings(
-            params,
-            &model,
-            model_index,
-            authored_parameter_order,
-            origin,
-            pending_xyce_diode_model_warnings,
-        );
-        return Ok(model);
-    };
-
-    let base = ako_base_model.expect("AKO base model was resolved before parsing params");
-
-    let model_type = match model_type {
-        Some(explicit) => {
-            if !explicit.eq_ignore_ascii_case(&base.model_type) {
-                return Err(ParseError::Syntax {
-                    line: line_num,
-                    message: format!(
-                        "AKO model `{name}` declares type `{explicit}` but base \
-                         `{base_name}` is `{}`",
-                        base.model_type
-                    ),
-                });
-            }
-            explicit
-        }
-        None => base.model_type.clone(),
-    };
-
-    // Start from the base's parameters; overrides replace by name.
-    let mut numeric = base.params.clone();
-    let mut expr = base.expr_params.clone();
-    let mut string = base.string_params.clone();
-    let mut string_vector = base.string_vector_params.clone();
-    let mut real_vector = base.real_vector_params.clone();
-    let mut real_vector_expr = base.real_vector_expr_params.clone();
-    let mut integer_vector = base.integer_vector_params.clone();
-    for (key, value) in model_params.numeric {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        numeric.push((key, value));
-    }
-    for (key, value) in model_params.expr {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.push((key, value));
-    }
-    for (key, value) in model_params.string {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.push((key, value));
-    }
-    for (key, value) in model_params.string_vector {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.push((key, value));
-    }
-    for (key, value) in model_params.real_vector {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.push((key, value));
-    }
-    for (key, value) in model_params.real_vector_expr {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.push((key, value));
-    }
-    for (key, value) in model_params.integer_vector {
-        numeric.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        string_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        real_vector_expr.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.retain(|(k, _)| !k.eq_ignore_ascii_case(&key));
-        integer_vector.push((key, value));
-    }
-
-    let mut parameter_order = ako_base_model
-        .and_then(|base| {
-            known_models
-                .iter()
-                .position(|known| std::ptr::eq(known, base))
-        })
-        .and_then(|base_index| {
-            pending_xyce_diode_model_warnings
-                .iter()
-                .find(|warning| warning.model_index == base_index)
-        })
-        .map(|warning| warning.parameter_order.clone())
-        .unwrap_or_else(|| model_parameter_names_in_storage_order(base));
-    for name in &authored_parameter_order {
-        parameter_order.retain(|inherited| !inherited.eq_ignore_ascii_case(name));
-        parameter_order.push(name.clone());
-    }
-
-    let model = ModelDef {
+    let mut model = ModelDef {
         name,
-        model_type,
-        params: numeric,
-        expr_params: expr,
-        string_params: string,
-        string_vector_params: string_vector,
-        real_vector_params: real_vector,
-        real_vector_expr_params: real_vector_expr,
-        integer_vector_params: integer_vector,
+        model_type: model_type_hint.unwrap_or_default().to_string(),
+        params: model_params.numeric,
+        expr_params: model_params.expr,
+        string_params: model_params.string,
+        string_vector_params: model_params.string_vector,
+        real_vector_params: model_params.real_vector,
+        real_vector_expr_params: model_params.real_vector_expr,
+        integer_vector_params: model_params.integer_vector,
+    };
+    let parameter_order = match (ako_base, visible_base) {
+        (None, _) => authored_parameter_order,
+        (Some(base_name), Some(base_index)) => {
+            let base = &known_models[base_index];
+            inherit_ako_base(
+                &mut model,
+                model_type.as_deref(),
+                base,
+                &base_name,
+                line_num,
+            )?;
+            ako_parameter_order(
+                base_index,
+                base,
+                &authored_parameter_order,
+                pending_xyce_diode_model_warnings,
+            )
+        }
+        (Some(base_name), None) => {
+            pending_ako_models.push(PendingAkoModel {
+                model_index,
+                base_name,
+                explicit_type: model_type,
+                enclosing_scopes: enclosing_scopes.to_vec(),
+                authored_parameter_order,
+                origin: origin.clone(),
+            });
+            return Ok(model);
+        }
     };
     queue_unknown_xyce_diode_model_parameter_warnings(
         params,

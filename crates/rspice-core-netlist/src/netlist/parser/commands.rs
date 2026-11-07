@@ -60,6 +60,7 @@ pub(super) fn parse_command(
         deferred_body_params,
         model_bare_ident_deferrals,
         pending_xyce_diode_model_warnings,
+        pending_ako_models,
     } = context;
 
     let cmd = expect_ident(stream, line_num)?;
@@ -124,6 +125,8 @@ pub(super) fn parse_command(
                 ModelDefinitionDeferrals {
                     bare_ident_deferrals: model_bare_ident_deferrals,
                     pending_xyce_diode_model_warnings,
+                    pending_ako_models,
+                    enclosing_scopes: &[],
                 },
             )?;
             models.push(model);

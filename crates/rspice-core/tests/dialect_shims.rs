@@ -51,16 +51,126 @@ fn ako_inherits_type_and_params_with_overrides() {
     assert_eq!(param(derived2, "bf"), 100.0);
 }
 
+fn op_voltage(deck: &str, node: &str) -> f64 {
+    let netlist = parse(deck);
+    let op = Engine::new(SimulationConfig::default())
+        .run_dc_op(&netlist)
+        .expect("op solves");
+    op.node_names
+        .iter()
+        .position(|n| n.eq_ignore_ascii_case(node))
+        .map(|i| op.node_voltages[i])
+        .unwrap_or_else(|| panic!("node {node} missing"))
+}
+
 #[test]
-fn ako_requires_base_defined_earlier() {
-    let err = Netlist::parse(
+fn ako_base_may_follow_the_derived_card() {
+    let netlist = parse(
         "ako forward\n\
-         .model q1 ako:notyet npn bf=250\n\
-         .model notyet npn bf=100\n\
+         .model q1 ako:later bf=250\n\
+         .model later npn bf=100 vaf=80\n\
+         .end\n",
+    );
+    let derived = model(&netlist, "q1");
+    assert!(derived.model_type.eq_ignore_ascii_case("npn"));
+    assert_eq!(param(derived, "bf"), 250.0);
+    assert_eq!(param(derived, "vaf"), 80.0);
+
+    // A chain written derived-first binds base-first: DC keeps its own RS
+    // on top of DB's IS and DA's N.
+    let chained = op_voltage(
+        "ako chain\n\
+         V1 a 0 1\n\
+         R1 a b 1k\n\
+         D1 b 0 DC\n\
+         .model DC AKO:DB D(RS=10)\n\
+         .model DB AKO:DA D(IS=1e-12)\n\
+         .model DA D(IS=1e-14 N=2)\n\
+         .op\n\
+         .end\n",
+        "b",
+    );
+    let direct = op_voltage(
+        "direct\n\
+         V1 a 0 1\n\
+         R1 a b 1k\n\
+         D1 b 0 DC\n\
+         .model DC D(IS=1e-12 N=2 RS=10)\n\
+         .op\n\
+         .end\n",
+        "b",
+    );
+    assert_eq!(chained, direct);
+    // QSPICE 2026 batch: V(b) = 0.9329171736615484.
+    assert!((chained - 0.932_917_173_7).abs() < 2e-6, "V(b) = {chained}");
+}
+
+#[test]
+fn ako_base_resolves_in_the_card_s_subcircuit_first() {
+    // The derived card precedes its local base, and a top-level model of the
+    // same name exists: the subcircuit's own model is the base.
+    let scoped = op_voltage(
+        "ako scope\n\
+         V1 a 0 1\n\
+         R1 a b 1k\n\
+         X1 b 0 sub\n\
+         .subckt sub p n\n\
+         D1 p n DB\n\
+         .model DB AKO:DA D(IS=1e-12)\n\
+         .model DA D(IS=1e-14 N=2)\n\
+         .ends\n\
+         .model DA D(IS=1e-14 N=1)\n\
+         .op\n\
+         .end\n",
+        "b",
+    );
+    // LTspice 26.1.1 batch (QSPICE does not find subcircuit-local AKO bases):
+    // V(b) = 0.9325385160036630, the IS=1e-12 N=2 diode.
+    assert!((scoped - 0.932_538_516).abs() < 2e-6, "V(b) = {scoped}");
+
+    // A local derived card falls back to a top-level base defined later.
+    let global = op_voltage(
+        "ako global base\n\
+         V1 a 0 1\n\
+         R1 a b 1k\n\
+         X1 b 0 sub\n\
+         .subckt sub p n\n\
+         D1 p n DB\n\
+         .model DB AKO:DA D(IS=1e-12)\n\
+         .ends\n\
+         .model DA D(IS=1e-14 N=2)\n\
+         .op\n\
+         .end\n",
+        "b",
+    );
+    assert_eq!(global, scoped);
+}
+
+#[test]
+fn ako_cycle_and_missing_base_are_rejected() {
+    let cycle = Netlist::parse(
+        "ako cycle\n\
+         D1 b 0 DB\n\
+         .model DB AKO:DA D(IS=1e-12)\n\
+         .model DA AKO:DB D(N=2)\n\
          .end\n",
     )
-    .expect_err("forward AKO reference must fail");
-    assert!(err.to_string().to_lowercase().contains("notyet"));
+    .expect_err("an AKO cycle must fail");
+    assert!(
+        cycle.to_string().contains("inherits from itself"),
+        "{cycle}"
+    );
+
+    let missing = Netlist::parse(
+        "ako missing\n\
+         .model q1 ako:nowhere npn bf=250\n\
+         .end\n",
+    )
+    .expect_err("an undefined AKO base must fail");
+    assert!(
+        missing.to_string().to_lowercase().contains("nowhere"),
+        "{missing}"
+    );
 }
 
 #[test]

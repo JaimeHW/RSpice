@@ -957,6 +957,12 @@ fn parse_netlist_impl(
         state.options.seed = Some(seed);
     }
     let completion = (|| -> Result<(), ParseWithAbortError> {
+        resolve_pending_ako_models(
+            &state.params,
+            &mut state.models,
+            std::mem::take(&mut state.pending_ako_models),
+            &mut state.pending_xyce_diode_model_warnings,
+        )?;
         state.temperature_options.resolve_scope(
             &mut state.scopes,
             &mut state.params,
