@@ -9496,6 +9496,7 @@ pub(super) fn parse_behavioral(
     let mut tc1 = 0.0;
     let mut tc2 = 0.0;
     let mut multiplicity = SourceMultiplicity::default();
+    let mut parallel = Vec::new();
     while !stream.is_eof() && !matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
         skip_commas(stream);
         if matches!(stream.peek().kind, TokenKind::Newline | TokenKind::Eof) {
@@ -9510,6 +9511,25 @@ pub(super) fn parse_behavioral(
                     "Unexpected trailing token in behavioral source specification: {param_name}"
                 ),
             });
+        }
+        // LTspice's Rpar and Cpar load the source with a resistor and a
+        // capacitor across its terminals.
+        if param_name.eq_ignore_ascii_case("RPAR") || param_name.eq_ignore_ascii_case("CPAR") {
+            let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
+                .ok_or_else(|| ParseError::Syntax {
+                    line: line_num,
+                    message: format!(
+                        "Behavioral source {param_name} requires a numeric value or expression"
+                    ),
+                })?;
+            let (value, value_expr) = match parsed {
+                DeferrableValue::Resolved(value) => (value, None),
+                DeferrableValue::Deferred(expression) => (Value::NAN, Some(expression)),
+            };
+            if value_expr.is_some() || value.is_finite() && value > 0.0 {
+                parallel.push((param_name.eq_ignore_ascii_case("RPAR"), value, value_expr));
+            }
+            continue;
         }
         if param_name.eq_ignore_ascii_case("M") {
             let parsed = take_deferrable_value(stream, params, defer_simple_param_refs)
@@ -9573,6 +9593,44 @@ pub(super) fn parse_behavioral(
         }
     };
 
+    let tag = name.to_ascii_uppercase();
+    for (resistive, value, value_expr) in parallel {
+        let nodes = vec![node_pos.clone(), node_neg.clone()];
+        elements.push(if resistive {
+            Element {
+                name: format!("R{tag}#PAR"),
+                kind: ElementKind::Resistor {
+                    value,
+                    value_expr,
+                    model: None,
+                    instance_params: Vec::new(),
+                    deferred_params: Vec::new(),
+                },
+                nodes,
+                provenance: ElementProvenance::GeneratedPassiveHelper {
+                    owner: name.clone(),
+                    role: GeneratedPassiveHelperRole::ParallelResistance,
+                },
+            }
+        } else {
+            Element {
+                name: format!("C{tag}#PAR"),
+                kind: ElementKind::Capacitor {
+                    value,
+                    value_expr,
+                    initial_voltage: None,
+                    model: None,
+                    instance_params: Vec::new(),
+                    deferred_params: Vec::new(),
+                },
+                nodes,
+                provenance: ElementProvenance::GeneratedPassiveHelper {
+                    owner: name.clone(),
+                    role: GeneratedPassiveHelperRole::ParallelCapacitance,
+                },
+            }
+        });
+    }
     elements.push(Element {
         name,
         kind,
@@ -9633,9 +9691,9 @@ pub(super) fn behavioral_trailing_assignment(stream: &TokenStream) -> bool {
     matches!(
         &stream.peek().kind,
         TokenKind::Ident(name)
-            if (name.eq_ignore_ascii_case("TC1")
-                || name.eq_ignore_ascii_case("TC2")
-                || name.eq_ignore_ascii_case("M"))
+            if ["TC1", "TC2", "M", "RPAR", "CPAR"]
+                .iter()
+                .any(|key| name.eq_ignore_ascii_case(key))
                 && matches!(stream.peek_n(1).kind, TokenKind::Equals)
     )
 }

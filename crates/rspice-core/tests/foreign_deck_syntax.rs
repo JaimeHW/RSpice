@@ -1405,3 +1405,46 @@ R4 f 0 1k
     assert_close("V(e)", op_voltage(&netlist, "e"), 4.999995e-6, 1e-10);
     assert_close("V(f)", op_voltage(&netlist, "f"), 4.999995e-6, 1e-10);
 }
+
+// QSPICE and LTspice: V(g)=V(h)=1e-3 and V(x1.o2)=2; V(c)=0.632120 at 1 ms
+// (QSPICE 0.6321200, LTspice 0.6321204).
+#[test]
+fn behavioral_sources_take_a_parallel_resistance_and_capacitance() {
+    let netlist = parse(
+        "* B sources with Rpar and Cpar
+V1 a 0 1
+Rs a 0 1k
+B7 0 g I=1m*abs(I(Rs)) Rpar=1k Cpar=10p
+B8 0 h I=1m*abs(I(Rs))
+R8 h 0 1k
+X1 a k sub
+.subckt sub p o
+Rq p 0 1k
+B9 0 o I=1m*abs(I(Rq)) Rpar=1k Cpar=10p
+B10 0 o2 I=2m Rpar={rp}
+.param rp=1k
+.ends sub
+.op
+.end
+",
+    );
+    assert_close("V(g)", op_voltage(&netlist, "g"), 1e-3, 1e-12);
+    assert_close("V(h)", op_voltage(&netlist, "h"), 1e-3, 1e-12);
+    assert_close("V(k)", op_voltage(&netlist, "k"), 1e-3, 1e-12);
+    assert_close("V(x1.o2)", op_voltage(&netlist, "x1.o2"), 2.0, 1e-9);
+
+    let netlist = parse(
+        "* B source Rpar and Cpar in a subcircuit
+V1 a 0 PULSE(0 1 0 1n 1n 1 2)
+X1 a c bload
+.subckt bload in out
+B1 0 out I=1m*V(in) Rpar=1k Cpar={cp}
+.param cp=1u
+.ends bload
+.tran 1u 2m
+.end
+",
+    );
+    let values = tran_voltages(&netlist, 2e-3, 1e-3, &["c"]);
+    assert_close("V(c) at 1 ms", values[0], 0.632_120, 2e-5);
+}
