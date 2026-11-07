@@ -1197,3 +1197,87 @@ fn editor_commit_updates_only_an_existing_owned_source() {
     assert_eq!(state.code.netlist.last_edit_time, 7.25);
     assert!(state.runs.manual_run.edited_lines.contains(&1));
 }
+
+/// The netlist editor is the shared source editor: arrows move its caret
+/// instead of focus, the caret stays in view however far it goes, text input
+/// is asked for on every focused frame, and Escape with nothing to collapse
+/// hands the keyboard back.
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn the_netlist_editor_keeps_its_keys_and_its_caret_in_view() {
+    let deck: String = std::iter::once("keyboard deck\n".to_owned())
+        .chain((1..=300).map(|line| format!("R{line} n{line} 0 1k\n")))
+        .chain(std::iter::once(".end\n".to_owned()))
+        .collect();
+    let mut state = AppState::default();
+    state.model.workspace.content.netlist_source = Some(deck.clone());
+    state.model.simulation.source.netlist_content = deck;
+    state.code.netlist.active_document = super::super::ActiveNetlistDocument::OwnedSource;
+    state.code.netlist.active_document_initialized = true;
+    let editor_id = editor_id(&state);
+
+    let context = egui::Context::default();
+    crate::ui::Theme::default().apply(&context);
+    context.set_os(egui::os::OperatingSystem::Windows);
+    let mut time = 0.0;
+    let mut frame = |state: &mut AppState, events: Vec<egui::Event>| {
+        time += 1.0 / 60.0;
+        let input = egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(900.0, 500.0),
+            )),
+            time: Some(time),
+            events,
+            ..Default::default()
+        };
+        context.run_ui(input, |ui| {
+            let _ = ui.button("Before");
+            show(ui, state);
+        })
+    };
+    let _ = frame(&mut state, Vec::new());
+    context.memory_mut(|memory| memory.request_focus(editor_id));
+    let _ = frame(&mut state, Vec::new());
+    let key = |key| {
+        [true, false].map(|pressed| egui::Event::Key {
+            key,
+            physical_key: Some(key),
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        })
+    };
+
+    for press in 1..=60 {
+        let [down, up] = key(egui::Key::ArrowDown);
+        let output = frame(&mut state, vec![down]);
+        let _ = frame(&mut state, vec![up]);
+        assert!(output.platform_output.ime.is_some(), "press {press}");
+        assert_eq!(context.memory(|memory| memory.focused()), Some(editor_id));
+        assert_eq!(state.code.netlist.cursor_line, press);
+        let editor = context
+            .read_response(editor_id)
+            .expect("the editor is on screen");
+        let caret_top =
+            editor.rect.top() + f32::from(CODE_TOP_PADDING) + press as f32 * LINE_HEIGHT;
+        assert!(
+            editor.interact_rect.y_range().contains(caret_top)
+                && editor
+                    .interact_rect
+                    .y_range()
+                    .contains(caret_top + LINE_HEIGHT),
+            "press {press}: the caret's row {caret_top} left the view {:?}",
+            editor.interact_rect
+        );
+    }
+    let [left, up] = key(egui::Key::ArrowLeft);
+    let _ = frame(&mut state, vec![left]);
+    let _ = frame(&mut state, vec![up]);
+    assert_eq!(context.memory(|memory| memory.focused()), Some(editor_id));
+
+    let [escape, up] = key(egui::Key::Escape);
+    let _ = frame(&mut state, vec![escape]);
+    let _ = frame(&mut state, vec![up]);
+    assert_eq!(context.memory(|memory| memory.focused()), None);
+}

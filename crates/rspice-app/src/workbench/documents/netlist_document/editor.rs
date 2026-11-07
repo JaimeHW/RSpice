@@ -123,6 +123,15 @@ pub fn show(ui: &mut Ui, state: &mut AppState) -> egui::Response {
         state.code.netlist.completion_open = false;
         (0, false, false)
     };
+    // An open signature hint answers Escape too, before the editor would
+    // take the key to let go of focus.
+    if state.code.netlist.signature_help.open
+        && ui
+            .ctx()
+            .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+    {
+        state.code.netlist.signature_help.open = false;
+    }
 
     // Document well backdrop.
     let well = ui.available_rect_before_wrap();
@@ -376,13 +385,6 @@ fn show_signature_help(
     if netlist.signature_help.revision != netlist.revision
         || netlist.signature_help.cursor_char_index != anchor.caret_char_index
         || !anchor.focused
-    {
-        netlist.signature_help.open = false;
-        return;
-    }
-    if ui
-        .ctx()
-        .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
     {
         netlist.signature_help.open = false;
         return;

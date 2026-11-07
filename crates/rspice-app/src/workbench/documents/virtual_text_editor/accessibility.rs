@@ -101,11 +101,11 @@ pub(super) fn consume_accesskit_text_selection(
     editor_id: egui::Id,
     model: &mut TextDocumentModel,
     style: &VirtualEditorStyle<'_>,
-) {
+) -> bool {
     if !ui.input(|input| {
         input.has_accesskit_action_request(editor_id, egui::accesskit::Action::SetTextSelection)
     }) {
-        return;
+        return false;
     }
     let window = accessible_line_window(model);
     let galley = accessible_line_galley(ui, &window, style);
@@ -128,6 +128,7 @@ pub(super) fn consume_accesskit_text_selection(
             cursor: primary,
         }]);
     }
+    changed
 }
 
 pub(super) fn update_accesskit_text_state(
@@ -136,6 +137,7 @@ pub(super) fn update_accesskit_text_state(
     response: &Response,
     model: &TextDocumentModel,
     editable: bool,
+    tab_moves_focus: bool,
     style: &VirtualEditorStyle<'_>,
     line_diagnostic_context: &mut impl FnMut(usize) -> Option<String>,
 ) {
@@ -216,6 +218,12 @@ pub(super) fn update_accesskit_text_state(
                 crate::workbench::MessageId::EditorAccessibleMultipleCursors,
                 &[("count", &cursor_count)],
             ),
+        );
+    }
+    if editable && tab_moves_focus {
+        append_accessible_sentence(
+            &mut description,
+            &tab_mode_sentence(style, ui.ctx().os(), true),
         );
     }
     if style.breakpoints_enabled {

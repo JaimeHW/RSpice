@@ -6,8 +6,11 @@
 //! callers retain application-level document identity and persistence.
 
 mod accessibility;
+mod keymap;
+mod touch;
 
 use accessibility::{consume_accesskit_text_selection, update_accesskit_text_state};
+use keymap::{KeyAction, Motion, Reach};
 
 use std::ops::Range;
 use std::sync::Arc;
@@ -18,8 +21,9 @@ use crate::ui::widgets::{Problem, paint_problem_mark};
 
 use super::text_document_model::{TextDocumentModel, TextSelection};
 use super::text_editor_commands::{
-    ByteSelection, EditorSyntax, apply_structural_command, take_queued_caret_char_index,
-    take_queued_standard_command, take_queued_structural_command, take_queued_view_command,
+    ByteSelection, EditorSyntax, apply_structural_command, publish_caret_line,
+    take_queued_caret_char_index, take_queued_caret_position, take_queued_standard_command,
+    take_queued_structural_command, take_queued_view_command,
 };
 use crate::workbench::framework::requests::{
     EditorViewCommand, StandardCommand, StructuralCommand,
@@ -40,6 +44,11 @@ const CHANGE_BAR_WIDTH: f32 = 2.0;
 /// every caret move rebuild millions of characters of AccessKit state.
 const MAX_ACCESSIBLE_LINE_CHARS: usize = 512;
 const MAX_ACCESSIBLE_DIAGNOSTIC_CHARS: usize = 384;
+/// Rows and columns kept between a caret that moved and the viewport's edge.
+const REVEAL_MARGIN_ROWS: f32 = 2.0;
+const REVEAL_MARGIN_COLUMNS: f32 = 4.0;
+/// How long the announcement of a Tab mode change stays in the tree.
+const TAB_MODE_ANNOUNCEMENT_SECONDS: f64 = 5.0;
 
 #[derive(Clone)]
 struct ImeComposition {
@@ -61,6 +70,42 @@ struct VirtualEditorSession {
     /// An undo or redo this frame asked for that the editor's own history
     /// could not answer, for the owner to step a history of its own.
     unanswered_history: Option<StandardCommand>,
+    /// The scroll area drawn last frame and its viewport's size, so a key
+    /// can move the view in the same frame it moves the caret.
+    scroll_id: Option<egui::Id>,
+    viewport_size: Option<Vec2>,
+    /// When the primary caret last moved. The blink restarts from it, so a
+    /// caret is drawn the moment it arrives.
+    caret_moved_at: f64,
+    touch: touch::TouchGesture,
+}
+
+/// How a caret that moved is brought into view.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum Reveal {
+    /// Scroll as little as keeps the caret a margin inside the viewport.
+    Nearest,
+    /// Leave a caret already in view alone; centre one that is not.
+    CenterIfOutside,
+}
+
+/// What the keyboard and text input of one frame did besides editing.
+#[derive(Default)]
+struct InputOutcome {
+    caret_moved: bool,
+    /// Rows the view scrolls by with the caret, for PageUp and PageDown.
+    page_rows: isize,
+    release_focus: bool,
+    toggle_tab_moves_focus: bool,
+}
+
+/// What a key press needs to know about the editor it lands in.
+struct KeyContext {
+    os: egui::os::OperatingSystem,
+    editable: bool,
+    syntax: EditorSyntax,
+    page_rows: usize,
+    tab_moves_focus: bool,
 }
 
 #[derive(Clone, Copy)]
@@ -82,6 +127,10 @@ impl Default for VirtualEditorSession {
             column_drag: false,
             ime: None,
             unanswered_history: None,
+            scroll_id: None,
+            viewport_size: None,
+            caret_moved_at: 0.0,
+            touch: touch::TouchGesture::default(),
         }
     }
 }
@@ -187,16 +236,21 @@ pub(crate) fn show_virtual_text_editor(
 
     // After source synchronization, so a completion that just spliced text
     // lands its caret on the document the editor now holds.
+    let mut reveal = None;
     if let Some(char_index) = take_queued_caret_char_index(ui.ctx(), editor_id) {
         let char_index = char_index.min(session.model.len_chars());
-        let (line, _) = session.model.line_column_for_char(char_index);
-        session.model.unfold_at_line(line);
-        session
+        place_caret(&mut session, char_index);
+        reveal = Some(Reveal::Nearest);
+    }
+    if let Some((line, column)) = take_queued_caret_position(ui.ctx(), editor_id) {
+        let logical_line = line
+            .saturating_sub(1)
+            .min(session.model.line_count().saturating_sub(1));
+        let index = session
             .model
-            .set_selections(vec![TextSelection::caret(char_index)]);
-        session.maximum_columns = session
-            .maximum_columns
-            .max(session.model.maximum_selected_line_columns());
+            .char_at_line_column(logical_line, column.saturating_sub(1));
+        place_caret(&mut session, index);
+        reveal = Some(Reveal::CenterIfOutside);
     }
 
     advance_maximum_column_scan(&mut session);
@@ -204,89 +258,254 @@ pub(crate) fn show_virtual_text_editor(
     let initial_model_revision = session.model.revision();
     if let Some(command) = take_queued_standard_command(ui.ctx(), editor_id) {
         handle_standard_command(ui, editor_id, &mut session, command, editable);
+        reveal = reveal.or(Some(Reveal::Nearest));
     }
     if let Some(command) = take_queued_structural_command(ui.ctx(), editor_id)
         && (!command.mutates_source() || editable)
     {
         apply_model_structural(&mut session.model, syntax, command);
+        reveal = reveal.or(Some(Reveal::Nearest));
     }
     if let Some(command) = take_queued_view_command(ui.ctx(), editor_id) {
         handle_view_command(&mut session, syntax, command);
+        reveal = reveal.or(Some(Reveal::Nearest));
     }
-    consume_accesskit_text_selection(ui, editor_id, &mut session.model, style);
+    if consume_accesskit_text_selection(ui, editor_id, &mut session.model, style) {
+        reveal = reveal.or(Some(Reveal::Nearest));
+    }
+
+    // Keys act before the view is laid out, so the frame that moves the
+    // caret is the frame that shows it.
+    let char_width = monospace_advance(ui, &style.font).max(1.0);
+    let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
+    let mut input = InputOutcome::default();
+    if ui.memory(|memory| memory.has_focus(editor_id)) {
+        let keys = KeyContext {
+            os: ui.ctx().os(),
+            editable,
+            syntax,
+            page_rows: page_rows(&session, ui, style),
+            tab_moves_focus,
+        };
+        let events = ui.input(|input| input.events.clone());
+        // egui moves focus on arrows and Tab before any widget runs, unless
+        // the focused widget's lock filter claims them; that filter is only
+        // in force from focus's second frame. A key this editor acts on must
+        // never also move focus, so a direction egui took from it is undone.
+        let claims_tab = editable && !tab_moves_focus;
+        if events.iter().any(|event| {
+            matches!(
+                event,
+                egui::Event::Key { key, pressed: true, .. }
+                    if matches!(
+                        key,
+                        Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown
+                    ) || (claims_tab && *key == Key::Tab)
+            )
+        }) {
+            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+        }
+        for event in events {
+            handle_event(ui, &mut session, event, &keys, &mut input);
+        }
+    }
+    if input.toggle_tab_moves_focus {
+        set_tab_moves_focus(ui.ctx(), editor_id, !tab_moves_focus);
+    }
+    if input.caret_moved {
+        reveal = reveal.or(Some(Reveal::Nearest));
+    }
+    // A page moves the view and the caret together, so the caret keeps its
+    // place on screen; it is only brought back if the page could not move
+    // the view as far as the caret went.
+    if input.page_rows != 0 {
+        reveal = reveal.map(|_| Reveal::CenterIfOutside);
+    }
+    if reveal.is_some() || input.page_rows != 0 {
+        session.caret_moved_at = ui.input(|input| input.time);
+    }
+    if input.release_focus {
+        ui.memory_mut(|memory| memory.surrender_focus(editor_id));
+    }
+    let scroll_offset = planned_scroll_offset(
+        ui.ctx(),
+        &session,
+        style,
+        char_width,
+        reveal,
+        input.page_rows,
+    );
+
+    let tab_moves_focus = tab_moves_focus_mode(ui.ctx());
     let mut breakpoint_toggled = None;
     let mut caret_anchor = None;
     let mut hover_char_index = None;
     let mut requested_scroll = requested_line;
     let available = Vec2::new(ui.available_width(), ui.available_height().max(120.0));
     let scroll_output = ui.allocate_ui(available, |ui| {
-        egui::ScrollArea::both()
+        let mut scroll_area = egui::ScrollArea::both()
             .id_salt(editor_id.with("scroll"))
-            .auto_shrink([false, false])
-            .show_viewport(ui, |ui, viewport| {
-                let char_width = monospace_advance(ui, &style.font).max(1.0);
-                let visible_rows = session.model.visible_line_count().max(1);
-                let content_width = (style.gutter_width
-                    + style.code_left_padding
-                    + session.maximum_columns as f32 * char_width
-                    + RIGHT_PADDING)
-                    .max(viewport.width());
-                let content_height =
-                    (style.top_padding + visible_rows as f32 * style.line_height + BOTTOM_PADDING)
-                        .max(viewport.height());
-                ui.set_min_size(Vec2::new(content_width, content_height));
-                let content_rect = egui::Rect::from_min_size(
-                    ui.min_rect().min,
-                    Vec2::new(content_width, content_height),
-                );
-                ui.painter()
-                    .rect_filled(content_rect, 0.0, style.background);
-                let response = ui
-                    .interact(content_rect, editor_id, Sense::click_and_drag())
-                    .on_hover_cursor(egui::CursorIcon::Text);
-                response.widget_info(|| {
-                    egui::WidgetInfo::labeled(
-                        egui::WidgetType::TextEdit,
-                        ui.is_enabled(),
-                        style.accessible_label,
-                    )
-                });
-                if response.clicked() {
-                    response.request_focus();
+            .auto_shrink([false, false]);
+        if let Some(offset) = scroll_offset {
+            scroll_area = scroll_area.scroll_offset(offset);
+        }
+        scroll_area.show_viewport(ui, |ui, viewport| {
+            session.viewport_size = Some(viewport.size());
+            let content_size = content_size(&session, style, char_width).max(viewport.size());
+            let content_width = content_size.x;
+            ui.set_min_size(content_size);
+            let content_rect = egui::Rect::from_min_size(ui.min_rect().min, content_size);
+            ui.painter()
+                .rect_filled(content_rect, 0.0, style.background);
+            let response = ui
+                .interact(content_rect, editor_id, Sense::click_and_drag())
+                .on_hover_cursor(egui::CursorIcon::Text);
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(
+                    egui::WidgetType::TextEdit,
+                    ui.is_enabled(),
+                    style.accessible_label,
+                )
+            });
+            let pressed = response.is_pointer_button_down_on()
+                && ui.input(|input| input.pointer.button_pressed(egui::PointerButton::Primary));
+            if pressed {
+                session
+                    .touch
+                    .begin_press(ui.input(egui::InputState::any_touches));
+            }
+            // A mouse press focuses the editor, so a drag that selects
+            // leaves the keyboard with the selection; a finger focuses it
+            // only with a tap, so scrolling never raises a keyboard.
+            // Focus is asked for only when it is elsewhere: asking again
+            // would drop the key filter below and interrupt a composition.
+            if (response.clicked() || (pressed && !session.touch.is_touch()))
+                && !response.has_focus()
+            {
+                response.request_focus();
+            }
+
+            let origin = content_rect.min;
+            let first_row = ((viewport.top() - style.top_padding).max(0.0) / style.line_height)
+                .floor() as usize;
+            let row_count = (viewport.height() / style.line_height).ceil() as usize + 1;
+            let code_origin_x = origin.x + style.gutter_width + style.code_left_padding;
+            let first_column = ((viewport.left() + style.gutter_width - code_origin_x).max(0.0)
+                / char_width)
+                .floor() as usize;
+            let column_count = (viewport.width() / char_width).ceil() as usize + 1;
+
+            let pointer_position = response.interact_pointer_pos();
+            let hit = |session: &VirtualEditorSession, pointer| {
+                hit_test(&session.model, pointer, origin, viewport, style, char_width)
+            };
+            // A finger may be about to scroll, so only a mouse or a pen
+            // places the caret as it goes down; a tap places it when it
+            // lifts. The gutter's breakpoints and fold marks take their
+            // own clicks, so a press there leaves the caret alone.
+            let gutter_right = origin.x + viewport.left() + style.gutter_width;
+            if pressed
+                && !session.touch.is_touch()
+                && let Some(pointer) = pointer_position
+                && pointer.x > gutter_right
+            {
+                let (line, column) = hit(&session, pointer);
+                let modifiers = ui.input(|input| input.modifiers);
+                session.drag_anchor = Some((line, column));
+                session.column_drag = modifiers.alt && modifiers.shift;
+                let index = session.model.char_at_line_column(line, column);
+                if modifiers.alt && !modifiers.shift {
+                    session.model.add_cursor(index);
+                } else if modifiers.shift {
+                    let anchor = session
+                        .model
+                        .selections()
+                        .last()
+                        .map_or(index, |selection| selection.anchor);
+                    session.model.set_selections(vec![TextSelection {
+                        anchor,
+                        cursor: index,
+                    }]);
+                } else {
+                    session
+                        .model
+                        .set_selections(vec![TextSelection::caret(index)]);
                 }
-
-                let origin = content_rect.min;
-                let first_row = ((viewport.top() - style.top_padding).max(0.0) / style.line_height)
-                    .floor() as usize;
-                let row_count = (viewport.height() / style.line_height).ceil() as usize + 1;
-                let code_origin_x = origin.x + style.gutter_width + style.code_left_padding;
-                let first_column = ((viewport.left() + style.gutter_width - code_origin_x).max(0.0)
-                    / char_width)
-                    .floor() as usize;
-                let column_count = (viewport.width() / char_width).ceil() as usize + 1;
-
-                let pointer_position = response.interact_pointer_pos();
-                if response.drag_started()
+                session.preferred_column = None;
+                session.caret_moved_at = ui.input(|input| input.time);
+            }
+            if session.touch.is_touch() {
+                // One finger dragging scrolls the source under it.
+                if response.dragged() {
+                    ui.scroll_with_delta_animation(
+                        response.drag_delta(),
+                        egui::style::ScrollAnimation::none(),
+                    );
+                }
+                if response.clicked()
                     && let Some(pointer) = pointer_position
                 {
-                    let (line, column) =
-                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                    let modifiers = ui.input(|input| input.modifiers);
-                    session.drag_anchor = Some((line, column));
-                    session.column_drag = modifiers.alt && modifiers.shift;
+                    let (line, column) = hit(&session, pointer);
                     let index = session.model.char_at_line_column(line, column);
-                    if modifiers.alt && !modifiers.shift {
-                        session.model.add_cursor(index);
-                    } else if modifiers.shift {
-                        let anchor = session
+                    session
+                        .model
+                        .set_selections(vec![TextSelection::caret(index)]);
+                    session.preferred_column = None;
+                    session.touch.show_handles(false);
+                }
+            }
+            if response.double_clicked()
+                && let Some(pointer) = pointer_position
+            {
+                let (line, column) = hit(&session, pointer);
+                let index = session.model.char_at_line_column(line, column);
+                select_word_at(&mut session.model, index);
+                session.drag_anchor = None;
+                session.preferred_column = None;
+                session.touch.show_handles(session.touch.is_touch());
+            }
+            if response.dragged()
+                && !session.touch.is_touch()
+                && let Some(pointer) = pointer_position
+                && let Some((anchor_line, anchor_column)) = session.drag_anchor
+            {
+                let (line, column) =
+                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                if session.column_drag {
+                    session
+                        .model
+                        .set_column_selection(anchor_line, anchor_column, line, column);
+                } else {
+                    session.model.set_selections(vec![TextSelection {
+                        anchor: session
                             .model
-                            .selections()
-                            .last()
-                            .map_or(index, |selection| selection.anchor);
-                        session.model.set_selections(vec![TextSelection {
-                            anchor,
-                            cursor: index,
-                        }]);
+                            .char_at_line_column(anchor_line, anchor_column),
+                        cursor: session.model.char_at_line_column(line, column),
+                    }]);
+                }
+            }
+            if response.drag_stopped() {
+                session.drag_anchor = None;
+                session.column_drag = false;
+            }
+            // A right-click (or a long press) opens the context menu on
+            // what it points at: outside the selection it first moves the
+            // caret there, inside it keeps the selection the menu acts on.
+            // A long press selects the word under the finger, with the
+            // handles that adjust it.
+            let long_touched = response.long_touched();
+            if (response.secondary_clicked() || long_touched)
+                && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
+            {
+                let (line, column) = hit(&session, pointer);
+                let index = session.model.char_at_line_column(line, column);
+                let inside_selection = session.model.selections().iter().any(|selection| {
+                    let range = selection.range();
+                    range.start < range.end && range.start <= index && index <= range.end
+                });
+                if !inside_selection {
+                    if long_touched {
+                        select_word_at(&mut session.model, index);
                     } else {
                         session
                             .model
@@ -294,290 +513,265 @@ pub(crate) fn show_virtual_text_editor(
                     }
                     session.preferred_column = None;
                 }
-                if response.dragged()
-                    && let Some(pointer) = pointer_position
-                    && let Some((anchor_line, anchor_column)) = session.drag_anchor
-                {
-                    let (line, column) =
-                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                    if session.column_drag {
-                        session.model.set_column_selection(
-                            anchor_line,
-                            anchor_column,
-                            line,
-                            column,
-                        );
-                    } else {
-                        session.model.set_selections(vec![TextSelection {
-                            anchor: session
-                                .model
-                                .char_at_line_column(anchor_line, anchor_column),
-                            cursor: session.model.char_at_line_column(line, column),
-                        }]);
-                    }
-                }
-                if response.drag_stopped() {
-                    session.drag_anchor = None;
-                    session.column_drag = false;
-                }
-                // A right-click (or a long press) opens the context menu on
-                // what it points at: outside the selection it first moves the
-                // caret there, inside it keeps the selection the menu acts on.
-                if (response.secondary_clicked() || response.long_touched())
-                    && let Some(pointer) = ui.input(|input| input.pointer.interact_pos())
-                {
-                    let (line, column) =
-                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                    let index = session.model.char_at_line_column(line, column);
-                    let inside_selection = session.model.selections().iter().any(|selection| {
-                        let range = selection.range();
-                        range.start < range.end && range.start <= index && index <= range.end
-                    });
-                    if !inside_selection {
-                        session
-                            .model
-                            .set_selections(vec![TextSelection::caret(index)]);
-                        session.preferred_column = None;
-                    }
+                session.touch.show_handles(long_touched);
+                if !response.has_focus() {
                     response.request_focus();
                 }
+            }
+            if let Some(selection) = touch::drag_selection_handles(
+                ui,
+                editor_id,
+                &mut session,
+                response.has_focus(),
+                origin,
+                viewport,
+                style,
+                char_width,
+            ) {
+                session.model.set_selections(vec![selection]);
+                session.preferred_column = None;
+            }
 
-                let events = if response.has_focus() {
-                    ui.input(|input| input.events.clone())
-                } else {
-                    Vec::new()
-                };
-                for event in events {
-                    handle_event(ui, &mut session, event, editable, syntax);
-                }
-                if response.has_focus()
-                    && style.breakpoints_enabled
-                    && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F9))
-                {
-                    let cursor = session
+            if response.has_focus()
+                && style.breakpoints_enabled
+                && ui.input_mut(|input| input.consume_key(Modifiers::NONE, Key::F9))
+            {
+                let cursor = session
+                    .model
+                    .selections()
+                    .last()
+                    .map_or(0, |selection| selection.cursor);
+                breakpoint_toggled = Some(
+                    session
                         .model
-                        .selections()
-                        .last()
-                        .map_or(0, |selection| selection.cursor);
-                    breakpoint_toggled = Some(
-                        session
-                            .model
-                            .line_column_for_char(cursor)
-                            .0
-                            .saturating_add(1),
-                    );
-                }
-
-                let viewport_lines = session.model.viewport(
-                    first_row,
-                    row_count,
-                    first_column,
-                    column_count,
-                    ROW_OVERSCAN,
-                    COLUMN_OVERSCAN,
+                        .line_column_for_char(cursor)
+                        .0
+                        .saturating_add(1),
                 );
-                let sticky_gutter_left = origin.x + viewport.left();
-                let sticky_separator = sticky_gutter_left + style.gutter_width;
-                let code_clip = ui.clip_rect().intersect(egui::Rect::from_min_max(
-                    egui::pos2(sticky_separator + 1.0, ui.clip_rect().top()),
-                    ui.clip_rect().right_bottom(),
-                ));
-                let code_painter = ui.painter().with_clip_rect(code_clip);
-                let gutter_rect = egui::Rect::from_min_max(
-                    egui::pos2(sticky_gutter_left, ui.clip_rect().top()),
-                    egui::pos2(sticky_separator, ui.clip_rect().bottom()),
+            }
+
+            let viewport_lines = session.model.viewport(
+                first_row,
+                row_count,
+                first_column,
+                column_count,
+                ROW_OVERSCAN,
+                COLUMN_OVERSCAN,
+            );
+            let sticky_gutter_left = origin.x + viewport.left();
+            let sticky_separator = sticky_gutter_left + style.gutter_width;
+            let code_clip = ui.clip_rect().intersect(egui::Rect::from_min_max(
+                egui::pos2(sticky_separator + 1.0, ui.clip_rect().top()),
+                ui.clip_rect().right_bottom(),
+            ));
+            let code_painter = ui.painter().with_clip_rect(code_clip);
+            let gutter_rect = egui::Rect::from_min_max(
+                egui::pos2(sticky_gutter_left, ui.clip_rect().top()),
+                egui::pos2(sticky_separator, ui.clip_rect().bottom()),
+            );
+            ui.painter().rect_filled(gutter_rect, 0.0, style.background);
+            ui.painter().vline(
+                sticky_separator,
+                gutter_rect.y_range(),
+                Stroke::new(1.0, style.border),
+            );
+
+            let pointer_hover = ui.input(|input| input.pointer.hover_pos());
+            if let Some(pointer) = pointer_hover
+                .filter(|pointer| ui.clip_rect().contains(*pointer) && pointer.x > sticky_separator)
+            {
+                let (line, column) =
+                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                hover_char_index = Some(session.model.char_at_line_column(line, column));
+            }
+            for line in viewport_lines {
+                let row_top =
+                    origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
+                let row_rect = egui::Rect::from_min_size(
+                    egui::pos2(origin.x + viewport.left(), row_top),
+                    Vec2::new(viewport.width(), style.line_height),
                 );
-                ui.painter().rect_filled(gutter_rect, 0.0, style.background);
-                ui.painter().vline(
-                    sticky_separator,
-                    gutter_rect.y_range(),
-                    Stroke::new(1.0, style.border),
-                );
-
-                let pointer_hover = ui.input(|input| input.pointer.hover_pos());
-                if let Some(pointer) = pointer_hover.filter(|pointer| {
-                    ui.clip_rect().contains(*pointer) && pointer.x > sticky_separator
-                }) {
-                    let (line, column) =
-                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                    hover_char_index = Some(session.model.char_at_line_column(line, column));
+                if !row_rect.intersects(ui.clip_rect()) {
+                    continue;
                 }
-                for line in viewport_lines {
-                    let row_top =
-                        origin.y + style.top_padding + line.visible_row as f32 * style.line_height;
-                    let row_rect = egui::Rect::from_min_size(
-                        egui::pos2(origin.x + viewport.left(), row_top),
-                        Vec2::new(viewport.width(), style.line_height),
-                    );
-                    if !row_rect.intersects(ui.clip_rect()) {
-                        continue;
-                    }
-                    let one_based_line = line.logical_line + 1;
-                    let is_active = session.model.selections().iter().any(|selection| {
-                        session.model.line_column_for_char(selection.cursor).0 == line.logical_line
-                    });
-                    // The debugger's current line and the cross-probed line are
-                    // where the reader is, so they take the active-item accent.
-                    if style.current_line == Some(one_based_line) {
-                        code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.12));
-                    } else if style.cross_probe_line == Some(line.logical_line) {
-                        code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.08));
-                    } else if is_active {
-                        code_painter.rect_filled(row_rect, 0.0, style.active_background);
-                    } else if pointer_hover.is_some_and(|pointer| row_rect.contains(pointer)) {
-                        code_painter.rect_filled(row_rect, 0.0, style.hover_background);
-                    }
-
-                    paint_selections(
-                        &code_painter,
-                        &session.model,
-                        line.logical_line,
-                        row_rect,
-                        code_origin_x,
-                        char_width,
-                        style.selection_background,
-                    );
-                    let galley = layout_line(ui, &line.text, line.logical_line, style.font.clone());
-                    code_painter.galley(
-                        egui::pos2(
-                            code_origin_x + line.first_column as f32 * char_width,
-                            row_top + (style.line_height - galley.size().y) * 0.5,
-                        ),
-                        galley,
-                        style.text,
-                    );
-
-                    // The line number is neutral. A warning or an error on
-                    // the line is a mark between the number and the code; an
-                    // edited line is a change bar at the gutter's edge.
-                    let problem = line_problem(line.logical_line);
-                    let number_color = if is_active {
-                        style.text_dim
-                    } else {
-                        style.text_faint
-                    };
-                    let number_right = sticky_separator - 10.0;
-                    ui.painter().text(
-                        egui::pos2(number_right, row_rect.center().y),
-                        egui::Align2::RIGHT_CENTER,
-                        one_based_line.to_string(),
-                        style.font.clone(),
-                        number_color,
-                    );
-                    if let Some(problem) = problem {
-                        paint_problem_mark(
-                            ui.painter(),
-                            egui::Rect::from_center_size(
-                                egui::pos2(sticky_separator - 4.5, row_rect.center().y),
-                                Vec2::splat(GUTTER_MARK_SIDE),
-                            ),
-                            problem,
-                        );
-                    } else if style.edited_lines.contains(&line.logical_line) {
-                        ui.painter().rect_filled(
-                            egui::Rect::from_min_max(
-                                egui::pos2(sticky_separator - 1.0 - CHANGE_BAR_WIDTH, row_top),
-                                egui::pos2(sticky_separator - 1.0, row_top + style.line_height),
-                            ),
-                            0.0,
-                            style.accent,
-                        );
-                    }
-                    if style.breakpoints.contains(&one_based_line) {
-                        ui.painter().circle_filled(
-                            egui::pos2(sticky_gutter_left + 7.0, row_rect.center().y),
-                            4.0,
-                            style.error,
-                        );
-                    }
-                    if style.current_line == Some(one_based_line) {
-                        ui.painter().circle_filled(
-                            egui::pos2(sticky_gutter_left + 18.0, row_rect.center().y),
-                            4.0,
-                            style.warning,
-                        );
-                    }
-                    if line.folded_line_count > 0 {
-                        let marker = egui::Rect::from_center_size(
-                            egui::pos2(sticky_gutter_left + 28.0, row_rect.center().y),
-                            Vec2::splat(9.0),
-                        );
-                        ui.painter().rect_stroke(
-                            marker,
-                            1.0,
-                            Stroke::new(1.0, style.text_dim),
-                            egui::StrokeKind::Inside,
-                        );
-                        ui.painter().hline(
-                            (marker.left() + 2.0)..=(marker.right() - 2.0),
-                            marker.center().y,
-                            Stroke::new(1.0, style.text_dim),
-                        );
-                    }
+                let one_based_line = line.logical_line + 1;
+                let is_active = session.model.selections().iter().any(|selection| {
+                    session.model.line_column_for_char(selection.cursor).0 == line.logical_line
+                });
+                // The debugger's current line and the cross-probed line are
+                // where the reader is, so they take the active-item accent.
+                if style.current_line == Some(one_based_line) {
+                    code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.12));
+                } else if style.cross_probe_line == Some(line.logical_line) {
+                    code_painter.rect_filled(row_rect, 0.0, style.accent.linear_multiply(0.08));
+                } else if is_active {
+                    code_painter.rect_filled(row_rect, 0.0, style.active_background);
+                } else if pointer_hover.is_some_and(|pointer| row_rect.contains(pointer)) {
+                    code_painter.rect_filled(row_rect, 0.0, style.hover_background);
                 }
 
-                if response.clicked_by(egui::PointerButton::Primary)
-                    && let Some(pointer) = response.interact_pointer_pos()
-                {
-                    let (line, _) =
-                        hit_test(&session.model, pointer, origin, viewport, style, char_width);
-                    let local_x = pointer.x - sticky_gutter_left;
-                    if local_x <= 14.0 && style.breakpoints_enabled {
-                        breakpoint_toggled = Some(line + 1);
-                    } else if (20.0..=36.0).contains(&local_x) {
-                        session.model.unfold_at_line(line);
-                    }
-                }
-
-                caret_anchor =
-                    primary_caret_anchor(&session, origin, code_origin_x, char_width, style);
-                paint_carets_and_ime(
-                    ui,
-                    &session,
-                    response.has_focus(),
-                    origin,
-                    viewport,
+                paint_selections(
+                    &code_painter,
+                    &session.model,
+                    line.logical_line,
+                    row_rect,
                     code_origin_x,
                     char_width,
-                    style,
+                    style.selection_background,
+                );
+                let galley = layout_line(ui, &line.text, line.logical_line, style.font.clone());
+                code_painter.galley(
+                    egui::pos2(
+                        code_origin_x + line.first_column as f32 * char_width,
+                        row_top + (style.line_height - galley.size().y) * 0.5,
+                    ),
+                    galley,
+                    style.text,
                 );
 
-                if let Some(line) = requested_scroll.take() {
-                    let logical_line = line
-                        .saturating_sub(1)
-                        .min(session.model.line_count().saturating_sub(1));
-                    if let Some(visible_row) =
-                        session.model.visible_row_for_logical_line(logical_line)
-                    {
-                        let rect = egui::Rect::from_min_size(
-                            egui::pos2(
-                                origin.x,
-                                origin.y
-                                    + style.top_padding
-                                    + visible_row as f32 * style.line_height,
-                            ),
-                            Vec2::new(content_width, style.line_height),
-                        );
-                        ui.scroll_to_rect(rect, Some(egui::Align::Center));
-                    }
-                }
-                // The editor takes focus on every press, so a press never
-                // frames it: only focus that Tab moved here shows the ring,
-                // and the caret says where typing goes the rest of the time.
-                // Painted last, over the code, and around the visible part of
-                // a document that scrolls past its viewport.
-                if crate::ui::theme::focus_is_visible(ui.ctx(), &response) {
-                    crate::ui::theme::paint_focus_ring(
-                        ui,
-                        &response,
-                        ui.clip_rect().intersect(content_rect),
+                // The line number is neutral. A warning or an error on
+                // the line is a mark between the number and the code; an
+                // edited line is a change bar at the gutter's edge.
+                let problem = line_problem(line.logical_line);
+                let number_color = if is_active {
+                    style.text_dim
+                } else {
+                    style.text_faint
+                };
+                let number_right = sticky_separator - 10.0;
+                ui.painter().text(
+                    egui::pos2(number_right, row_rect.center().y),
+                    egui::Align2::RIGHT_CENTER,
+                    one_based_line.to_string(),
+                    style.font.clone(),
+                    number_color,
+                );
+                if let Some(problem) = problem {
+                    paint_problem_mark(
+                        ui.painter(),
+                        egui::Rect::from_center_size(
+                            egui::pos2(sticky_separator - 4.5, row_rect.center().y),
+                            Vec2::splat(GUTTER_MARK_SIDE),
+                        ),
+                        problem,
+                    );
+                } else if style.edited_lines.contains(&line.logical_line) {
+                    ui.painter().rect_filled(
+                        egui::Rect::from_min_max(
+                            egui::pos2(sticky_separator - 1.0 - CHANGE_BAR_WIDTH, row_top),
+                            egui::pos2(sticky_separator - 1.0, row_top + style.line_height),
+                        ),
+                        0.0,
+                        style.accent,
                     );
                 }
-                response
-            })
-            .inner
+                if style.breakpoints.contains(&one_based_line) {
+                    ui.painter().circle_filled(
+                        egui::pos2(sticky_gutter_left + 7.0, row_rect.center().y),
+                        4.0,
+                        style.error,
+                    );
+                }
+                if style.current_line == Some(one_based_line) {
+                    ui.painter().circle_filled(
+                        egui::pos2(sticky_gutter_left + 18.0, row_rect.center().y),
+                        4.0,
+                        style.warning,
+                    );
+                }
+                if line.folded_line_count > 0 {
+                    let marker = egui::Rect::from_center_size(
+                        egui::pos2(sticky_gutter_left + 28.0, row_rect.center().y),
+                        Vec2::splat(9.0),
+                    );
+                    ui.painter().rect_stroke(
+                        marker,
+                        1.0,
+                        Stroke::new(1.0, style.text_dim),
+                        egui::StrokeKind::Inside,
+                    );
+                    ui.painter().hline(
+                        (marker.left() + 2.0)..=(marker.right() - 2.0),
+                        marker.center().y,
+                        Stroke::new(1.0, style.text_dim),
+                    );
+                }
+            }
+
+            if response.clicked_by(egui::PointerButton::Primary)
+                && let Some(pointer) = response.interact_pointer_pos()
+            {
+                let (line, _) =
+                    hit_test(&session.model, pointer, origin, viewport, style, char_width);
+                let local_x = pointer.x - sticky_gutter_left;
+                if local_x <= 14.0 && style.breakpoints_enabled {
+                    breakpoint_toggled = Some(line + 1);
+                } else if (20.0..=36.0).contains(&local_x) {
+                    session.model.unfold_at_line(line);
+                }
+            }
+
+            caret_anchor = primary_caret_anchor(&session, origin, code_origin_x, char_width, style);
+            let focused = response.has_focus();
+            paint_carets_and_ime(
+                ui,
+                &session,
+                focused,
+                editable,
+                origin,
+                code_origin_x,
+                char_width,
+                style,
+            );
+            touch::paint_selection_handles(
+                &code_painter,
+                &session,
+                focused,
+                origin,
+                style,
+                char_width,
+            );
+            if focused && tab_moves_focus {
+                paint_tab_moves_focus_badge(ui, viewport, origin, style);
+            }
+
+            if let Some(line) = requested_scroll.take() {
+                let logical_line = line
+                    .saturating_sub(1)
+                    .min(session.model.line_count().saturating_sub(1));
+                if let Some(visible_row) = session.model.visible_row_for_logical_line(logical_line)
+                {
+                    let rect = egui::Rect::from_min_size(
+                        egui::pos2(
+                            origin.x,
+                            origin.y + style.top_padding + visible_row as f32 * style.line_height,
+                        ),
+                        Vec2::new(content_width, style.line_height),
+                    );
+                    ui.scroll_to_rect(rect, Some(egui::Align::Center));
+                }
+            }
+            // The editor takes focus on every press, so a press never
+            // frames it: only focus that Tab moved here shows the ring,
+            // and the caret says where typing goes the rest of the time.
+            // Painted last, over the code, and around the visible part of
+            // a document that scrolls past its viewport.
+            if crate::ui::theme::focus_is_visible(ui.ctx(), &response) {
+                crate::ui::theme::paint_focus_ring(
+                    ui,
+                    &response,
+                    ui.clip_rect().intersect(content_rect),
+                );
+            }
+            response
+        })
     });
-    let response = scroll_output.inner;
+    session.scroll_id = Some(scroll_output.inner.id);
+    let response = scroll_output.inner.inner;
+    if response.has_focus() {
+        claim_editing_keys(ui, editor_id, editable && !tab_moves_focus);
+        announce_tab_mode_change(ui, editor_id, &response, tab_moves_focus, style);
+    }
     let changed = session.model.revision() != initial_model_revision;
     if changed {
         *source = session.model.to_source();
@@ -589,6 +783,7 @@ pub(crate) fn show_virtual_text_editor(
     let cursor_line = session.model.selections().last().map_or(0, |selection| {
         session.model.line_column_for_char(selection.cursor).0
     });
+    publish_caret_line(ui.ctx(), editor_id, cursor_line);
     let cursor_char_index = session
         .model
         .selections()
@@ -604,6 +799,7 @@ pub(crate) fn show_virtual_text_editor(
         &response,
         &session.model,
         editable,
+        tab_moves_focus,
         style,
         &mut line_diagnostic_context,
     );
@@ -644,6 +840,236 @@ fn primary_caret_anchor(
         code_origin_x + column as f32 * char_width,
         origin.y + style.top_padding + (visible_row + 1) as f32 * style.line_height + 4.0,
     ))
+}
+
+/// Put a single caret at `char_index`, unfolding its line.
+fn place_caret(session: &mut VirtualEditorSession, char_index: usize) {
+    let (line, _) = session.model.line_column_for_char(char_index);
+    session.model.unfold_at_line(line);
+    session
+        .model
+        .set_selections(vec![TextSelection::caret(char_index)]);
+    session.preferred_column = None;
+    session.maximum_columns = session
+        .maximum_columns
+        .max(session.model.maximum_selected_line_columns());
+}
+
+/// Select the word at `char_index`, or the single character there when it
+/// is not part of a word. A line break is never selected.
+fn select_word_at(model: &mut TextDocumentModel, char_index: usize) {
+    let length = model.len_chars();
+    let is_word = |index: usize| model.char_at(index).is_some_and(is_word_character);
+    let range = if is_word(char_index) || (char_index > 0 && is_word(char_index - 1)) {
+        let mut start = char_index;
+        while start > 0 && is_word(start - 1) {
+            start -= 1;
+        }
+        let mut end = char_index;
+        while end < length && is_word(end) {
+            end += 1;
+        }
+        start..end
+    } else if model
+        .char_at(char_index)
+        .is_some_and(|character| !matches!(character, '\r' | '\n'))
+    {
+        char_index..char_index + 1
+    } else {
+        char_index..char_index
+    };
+    model.set_selections(vec![TextSelection {
+        anchor: range.start,
+        cursor: range.end,
+    }]);
+}
+
+/// Rows one PageUp or PageDown moves: the whole rows the viewport shows.
+fn page_rows(session: &VirtualEditorSession, ui: &Ui, style: &VirtualEditorStyle<'_>) -> usize {
+    let height = session
+        .viewport_size
+        .map_or_else(|| ui.available_height(), |size| size.y);
+    ((height - style.top_padding).max(0.0) / style.line_height).floor() as usize
+}
+
+fn content_size(
+    session: &VirtualEditorSession,
+    style: &VirtualEditorStyle<'_>,
+    char_width: f32,
+) -> Vec2 {
+    let visible_rows = session.model.visible_line_count().max(1);
+    Vec2::new(
+        style.gutter_width
+            + style.code_left_padding
+            + session.maximum_columns as f32 * char_width
+            + RIGHT_PADDING,
+        style.top_padding + visible_rows as f32 * style.line_height + BOTTOM_PADDING,
+    )
+}
+
+/// The primary caret's cell in content coordinates, or `None` when its line
+/// is folded away.
+fn caret_content_rect(
+    session: &VirtualEditorSession,
+    style: &VirtualEditorStyle<'_>,
+    char_width: f32,
+) -> Option<egui::Rect> {
+    let cursor = session.model.selections().last()?.cursor;
+    let (line, column) = session.model.line_column_for_char(cursor);
+    let row = session.model.visible_row_for_logical_line(line)?;
+    Some(egui::Rect::from_min_size(
+        egui::pos2(
+            style.gutter_width + style.code_left_padding + column as f32 * char_width,
+            style.top_padding + row as f32 * style.line_height,
+        ),
+        Vec2::new(char_width, style.line_height),
+    ))
+}
+
+/// The scroll offset this frame should start from, when a key or a command
+/// moved the caret or paged the view. `None` leaves the scroll area where it
+/// was. The offset is set before the view is laid out, so the caret is never
+/// drawn outside it.
+fn planned_scroll_offset(
+    ctx: &egui::Context,
+    session: &VirtualEditorSession,
+    style: &VirtualEditorStyle<'_>,
+    char_width: f32,
+    reveal: Option<Reveal>,
+    page_rows: isize,
+) -> Option<Vec2> {
+    if reveal.is_none() && page_rows == 0 {
+        return None;
+    }
+    let viewport = session.viewport_size?;
+    let mut offset = egui::scroll_area::State::load(ctx, session.scroll_id?)?.offset;
+    offset.y += page_rows as f32 * style.line_height;
+    if let Some(reveal) = reveal
+        && let Some(caret) = caret_content_rect(session, style, char_width)
+    {
+        offset = revealed_offset(offset, viewport, caret, style, char_width, reveal);
+    }
+    let maximum = (content_size(session, style, char_width) - viewport).max(Vec2::ZERO);
+    Some(offset.clamp(Vec2::ZERO, maximum))
+}
+
+/// `offset` moved as little as brings `caret` a margin inside the viewport,
+/// or centred on it for [`Reveal::CenterIfOutside`]. The sticky gutter hides
+/// the viewport's left edge, so the code's visible span starts after it.
+fn revealed_offset(
+    mut offset: Vec2,
+    viewport: Vec2,
+    caret: egui::Rect,
+    style: &VirtualEditorStyle<'_>,
+    char_width: f32,
+    reveal: Reveal,
+) -> Vec2 {
+    let code_left = style.gutter_width + style.code_left_padding;
+    let code_width = (viewport.x - code_left).max(char_width);
+    let margin_x = (REVEAL_MARGIN_COLUMNS * char_width).min(code_width * 0.25);
+    let margin_y = (REVEAL_MARGIN_ROWS * style.line_height)
+        .min(((viewport.y - style.line_height) * 0.5).max(0.0));
+    let outside_vertically = caret.top() < offset.y || caret.bottom() > offset.y + viewport.y;
+    match reveal {
+        Reveal::CenterIfOutside if outside_vertically => {
+            offset.y = caret.center().y - viewport.y * 0.5;
+        }
+        Reveal::CenterIfOutside => {}
+        Reveal::Nearest => {
+            if caret.top() - margin_y < offset.y {
+                offset.y = caret.top() - margin_y;
+            } else if caret.bottom() + margin_y > offset.y + viewport.y {
+                offset.y = caret.bottom() + margin_y - viewport.y;
+            }
+        }
+    }
+    if caret.left() - margin_x < offset.x + code_left {
+        offset.x = caret.left() - margin_x - code_left;
+    } else if caret.right() + margin_x > offset.x + viewport.x {
+        offset.x = caret.right() + margin_x - viewport.x;
+    }
+    offset
+}
+
+/// Claim the keys this editor acts on from egui's focus navigation for the
+/// next frame: arrows and Escape always, and Tab while it indents.
+fn claim_editing_keys(ui: &Ui, editor_id: egui::Id, claim_tab: bool) {
+    ui.memory_mut(|memory| {
+        memory.set_focus_lock_filter(
+            editor_id,
+            egui::EventFilter {
+                tab: claim_tab,
+                horizontal_arrows: true,
+                vertical_arrows: true,
+                escape: true,
+            },
+        );
+    });
+}
+
+/// Whether Tab moves focus out of source editors instead of indenting. One
+/// switch for every editor in the window, as a reader who turns it on to
+/// leave one expects the next one to let them leave too.
+fn tab_moves_focus_mode(ctx: &egui::Context) -> bool {
+    ctx.data(|data| data.get_temp::<bool>(egui::Id::new(TAB_MOVES_FOCUS_ID)))
+        .unwrap_or(false)
+}
+
+const TAB_MOVES_FOCUS_ID: &str = "source-editor-tab-moves-focus";
+
+fn set_tab_moves_focus(ctx: &egui::Context, editor_id: egui::Id, enabled: bool) {
+    let now = ctx.input(|input| input.time);
+    ctx.data_mut(|data| {
+        data.insert_temp(egui::Id::new(TAB_MOVES_FOCUS_ID), enabled);
+        data.insert_temp(editor_id.with("tab-mode-announced-at"), now);
+    });
+}
+
+/// Read the new Tab mode out once it changes, without taking focus: a live
+/// status the editor keeps for a few seconds after the switch.
+fn announce_tab_mode_change(
+    ui: &Ui,
+    editor_id: egui::Id,
+    response: &Response,
+    tab_moves_focus: bool,
+    style: &VirtualEditorStyle<'_>,
+) {
+    let Some(announced_at) = ui
+        .ctx()
+        .data(|data| data.get_temp::<f64>(editor_id.with("tab-mode-announced-at")))
+    else {
+        return;
+    };
+    if ui.input(|input| input.time) - announced_at > TAB_MODE_ANNOUNCEMENT_SECONDS {
+        return;
+    }
+    let status = ui.interact(
+        egui::Rect::from_min_size(response.rect.min, Vec2::splat(1.0)),
+        editor_id.with("tab-mode-status"),
+        Sense::hover(),
+    );
+    let text = tab_mode_sentence(style, ui.ctx().os(), tab_moves_focus);
+    ui.ctx().accesskit_node_builder(status.id, |node| {
+        node.set_role(egui::accesskit::Role::Status);
+        node.set_live(egui::accesskit::Live::Polite);
+        node.set_label(text);
+    });
+}
+
+/// What Tab does in source editors now, and the chord that switches it.
+fn tab_mode_sentence(
+    style: &VirtualEditorStyle<'_>,
+    os: egui::os::OperatingSystem,
+    tab_moves_focus: bool,
+) -> String {
+    style.messages.format(
+        if tab_moves_focus {
+            crate::workbench::MessageId::EditorAccessibleTabMovesFocus
+        } else {
+            crate::workbench::MessageId::EditorAccessibleTabIndents
+        },
+        &[("shortcut", keymap::tab_moves_focus_chord(os))],
+    )
 }
 
 fn restart_maximum_column_scan(session: &mut VirtualEditorSession) {
@@ -713,20 +1139,23 @@ fn handle_event(
     ui: &Ui,
     session: &mut VirtualEditorSession,
     event: egui::Event,
-    editable: bool,
-    syntax: EditorSyntax,
+    keys: &KeyContext,
+    outcome: &mut InputOutcome,
 ) {
+    let editable = keys.editable;
     match event {
         egui::Event::Copy => copy_selection(ui, &session.model),
         egui::Event::Cut if editable => {
             copy_selection(ui, &session.model);
             session.model.insert_at_selections("");
+            outcome.caret_moved = true;
         }
         egui::Event::Paste(text) if editable && !text.is_empty() => {
             let text = normalize_newlines(&text, session.model.preferred_newline());
             grow_maximum_columns_for_insertion(session, &text);
             session.model.insert_at_selections(&text);
             session.preferred_column = None;
+            outcome.caret_moved = true;
         }
         egui::Event::Text(text)
             if editable && !text.is_empty() && !text.chars().any(char::is_control) =>
@@ -734,14 +1163,23 @@ fn handle_event(
             grow_maximum_columns_for_insertion(session, &text);
             session.model.insert_at_selections(&text);
             session.preferred_column = None;
+            outcome.caret_moved = true;
         }
         egui::Event::Key {
             key,
             pressed: true,
             modifiers,
             ..
-        } => handle_key(ui, session, key, modifiers, editable, syntax),
-        egui::Event::Ime(event) if editable => handle_ime(session, event),
+        } => {
+            if let Some(action) = keymap::key_action(keys.os, key, modifiers) {
+                session.touch.show_handles(false);
+                apply_key_action(ui, session, action, keys, outcome);
+            }
+        }
+        egui::Event::Ime(event) if editable => {
+            handle_ime(session, event);
+            outcome.caret_moved = true;
+        }
         _ => {}
     }
 }
@@ -758,105 +1196,198 @@ fn grow_maximum_columns_for_insertion(session: &mut VirtualEditorSession, insert
         .max(existing_columns.saturating_add(inserted_columns));
 }
 
-fn handle_key(
+fn apply_key_action(
     ui: &Ui,
     session: &mut VirtualEditorSession,
-    key: Key,
-    modifiers: Modifiers,
-    editable: bool,
-    syntax: EditorSyntax,
+    action: KeyAction,
+    keys: &KeyContext,
+    outcome: &mut InputOutcome,
 ) {
-    let command = modifiers.command;
-    if command {
-        match key {
-            Key::A => {
-                session.model.set_selections(vec![TextSelection {
-                    anchor: 0,
-                    cursor: session.model.len_chars(),
-                }]);
-                return;
+    let editable = keys.editable;
+    match action {
+        KeyAction::SelectAll => {
+            session.model.set_selections(vec![TextSelection {
+                anchor: 0,
+                cursor: session.model.len_chars(),
+            }]);
+        }
+        KeyAction::Undo | KeyAction::Redo if editable => {
+            step_history(
+                session,
+                if action == KeyAction::Undo {
+                    StandardCommand::Undo
+                } else {
+                    StandardCommand::Redo
+                },
+            );
+            outcome.caret_moved = true;
+        }
+        KeyAction::Copy => copy_selection(ui, &session.model),
+        KeyAction::Cut if editable => {
+            copy_selection(ui, &session.model);
+            session.model.insert_at_selections("");
+            outcome.caret_moved = true;
+        }
+        KeyAction::Move { motion, extend } => {
+            let rows = keys.page_rows.max(1) as isize;
+            match motion {
+                Motion::Backward(reach) | Motion::Forward(reach) => {
+                    let forward = matches!(motion, Motion::Forward(_));
+                    match reach {
+                        Reach::Character => {
+                            move_horizontal(&mut session.model, forward, extend, false);
+                        }
+                        Reach::Word => move_horizontal(&mut session.model, forward, extend, true),
+                        Reach::LineEdge => {
+                            move_line_edge(&mut session.model, forward, extend, false);
+                        }
+                    }
+                    session.preferred_column = None;
+                }
+                Motion::Up => move_vertical(session, -1, extend),
+                Motion::Down => move_vertical(session, 1, extend),
+                Motion::PageUp => {
+                    move_vertical(session, -rows, extend);
+                    outcome.page_rows -= rows;
+                }
+                Motion::PageDown => {
+                    move_vertical(session, rows, extend);
+                    outcome.page_rows += rows;
+                }
+                Motion::DocumentStart | Motion::DocumentEnd => {
+                    let end = motion == Motion::DocumentEnd;
+                    move_line_edge(&mut session.model, end, extend, true);
+                    session.preferred_column = None;
+                }
             }
-            Key::Z if editable && modifiers.shift => {
-                step_history(session, StandardCommand::Redo);
-                return;
+            outcome.caret_moved = true;
+        }
+        KeyAction::Delete { forward, reach } if editable => {
+            match (reach, forward) {
+                (Reach::Character, false) => {
+                    session.model.delete_backward();
+                }
+                (Reach::Character, true) => {
+                    session.model.delete_forward();
+                }
+                (Reach::Word | Reach::LineEdge, _) => {
+                    delete_to(&mut session.model, forward, reach);
+                }
             }
-            Key::Z if editable => {
-                step_history(session, StandardCommand::Undo);
-                return;
-            }
-            Key::Y if editable => {
-                step_history(session, StandardCommand::Redo);
-                return;
-            }
-            Key::C => {
-                copy_selection(ui, &session.model);
-                return;
-            }
-            Key::X if editable => {
-                copy_selection(ui, &session.model);
-                session.model.insert_at_selections("");
-                return;
-            }
-            // Line, bracket and fold commands are application commands with
-            // rebindable shortcuts; they arrive queued, never as raw keys.
-            Key::ArrowLeft | Key::ArrowRight => {
-                move_horizontal(
-                    &mut session.model,
-                    key == Key::ArrowRight,
-                    modifiers.shift,
-                    true,
-                );
-                session.preferred_column = None;
-                return;
-            }
-            _ => {}
-        }
-    }
-    match key {
-        Key::ArrowLeft => {
-            move_horizontal(&mut session.model, false, modifiers.shift, false);
             session.preferred_column = None;
+            outcome.caret_moved = true;
         }
-        Key::ArrowRight => {
-            move_horizontal(&mut session.model, true, modifiers.shift, false);
+        KeyAction::Newline if editable => {
+            insert_smart_newline(&mut session.model, keys.syntax);
             session.preferred_column = None;
+            outcome.caret_moved = true;
         }
-        Key::ArrowUp if !modifiers.alt => move_vertical(session, -1, modifiers.shift),
-        Key::ArrowDown if !modifiers.alt => move_vertical(session, 1, modifiers.shift),
-        Key::Home => move_line_edge(&mut session.model, false, modifiers.shift, command),
-        Key::End => move_line_edge(&mut session.model, true, modifiers.shift, command),
-        Key::Backspace if editable => {
-            session.model.delete_backward();
+        KeyAction::Indent | KeyAction::Outdent if editable && !keys.tab_moves_focus => {
+            let command = if action == KeyAction::Indent {
+                StructuralCommand::Indent
+            } else {
+                StructuralCommand::Outdent
+            };
+            apply_model_structural(&mut session.model, keys.syntax, command);
             session.preferred_column = None;
+            outcome.caret_moved = true;
         }
-        Key::Delete if editable => {
-            session.model.delete_forward();
-            session.preferred_column = None;
-        }
-        Key::Enter if editable => {
-            insert_smart_newline(&mut session.model, syntax);
-            session.preferred_column = None;
-        }
-        Key::Tab if editable && !modifiers.shift => {
-            apply_model_structural(&mut session.model, syntax, StructuralCommand::Indent);
-            session.preferred_column = None;
-        }
-        Key::Tab if editable && modifiers.shift => {
-            apply_model_structural(&mut session.model, syntax, StructuralCommand::Outdent);
-            session.preferred_column = None;
-        }
-        Key::Escape => {
-            if session.model.selections().len() > 1 {
-                let primary = session
-                    .model
-                    .selections()
+        KeyAction::Escape => {
+            // Escape takes back the last thing a press added: extra carets,
+            // then the selection. With nothing left to collapse it hands
+            // the keyboard back, as it does everywhere else.
+            let selections = session.model.selections();
+            if selections.len() > 1 {
+                let primary = selections
                     .last()
                     .copied()
                     .unwrap_or(TextSelection::caret(0));
                 session.model.set_selections(vec![primary]);
+            } else if let Some(primary) = selections.last().copied()
+                && !primary.range().is_empty()
+            {
+                session
+                    .model
+                    .set_selections(vec![TextSelection::caret(primary.cursor)]);
+            } else {
+                outcome.release_focus = true;
             }
         }
+        KeyAction::ToggleTabMovesFocus => {
+            outcome.toggle_tab_moves_focus = !outcome.toggle_tab_moves_focus;
+        }
         _ => {}
+    }
+}
+
+/// Delete from each caret to the word boundary or the line edge in the
+/// direction asked. A caret already on the line edge deletes the line break
+/// instead, so the key keeps working across lines. Selections delete
+/// themselves.
+fn delete_to(model: &mut TextDocumentModel, forward: bool, reach: Reach) {
+    let length = model.len_chars();
+    let selections = model
+        .selections()
+        .iter()
+        .copied()
+        .map(|selection| {
+            if !selection.range().is_empty() {
+                return selection;
+            }
+            let cursor = selection.cursor;
+            let line = model.line_column_for_char(cursor).0;
+            let line_range = model
+                .line_content_char_range(line)
+                .unwrap_or(cursor..cursor);
+            let target = if forward {
+                if cursor >= line_range.end {
+                    line_break_end(model, cursor, length)
+                } else if reach == Reach::Word {
+                    next_boundary(model, cursor, length, true).min(line_range.end)
+                } else {
+                    line_range.end
+                }
+            } else if cursor <= line_range.start {
+                line_break_start(model, cursor)
+            } else if reach == Reach::Word {
+                previous_boundary(model, cursor, true).max(line_range.start)
+            } else {
+                line_range.start
+            };
+            TextSelection {
+                anchor: target,
+                cursor,
+            }
+        })
+        .collect();
+    model.set_selections(selections);
+    model.insert_at_selections("");
+}
+
+/// The end of the line break that starts at `cursor`: past `\r\n` whole.
+fn line_break_end(model: &TextDocumentModel, cursor: usize, length: usize) -> usize {
+    if cursor >= length {
+        return cursor;
+    }
+    if model.char_at(cursor) == Some('\r') && model.char_at(cursor + 1) == Some('\n') {
+        cursor + 2
+    } else {
+        cursor + 1
+    }
+}
+
+/// The start of the line break that ends at `cursor`: before `\r\n` whole.
+fn line_break_start(model: &TextDocumentModel, cursor: usize) -> usize {
+    if cursor == 0 {
+        return 0;
+    }
+    if cursor >= 2
+        && model.char_at(cursor - 1) == Some('\n')
+        && model.char_at(cursor - 2) == Some('\r')
+    {
+        cursor - 2
+    } else {
+        cursor - 1
     }
 }
 
@@ -889,8 +1420,12 @@ fn handle_standard_command(
         }]),
         _ => {}
     }
-    ui.ctx()
-        .memory_mut(|memory| memory.request_focus(editor_id));
+    // Asking again while focused would drop the key filter and interrupt a
+    // composition.
+    if !ui.memory(|memory| memory.has_focus(editor_id)) {
+        ui.ctx()
+            .memory_mut(|memory| memory.request_focus(editor_id));
+    }
 }
 
 /// Undo or redo one step of the editor's own history, or say that it had
@@ -1183,15 +1718,27 @@ fn is_word_character(character: char) -> bool {
     character.is_alphanumeric() || matches!(character, '_' | '$')
 }
 
+/// Move every caret `delta` rows on screen, so a folded region counts as the
+/// one row it shows.
 fn move_vertical(session: &mut VirtualEditorSession, delta: isize, extend: bool) {
     let selections = session.model.selections().to_vec();
     let mut moved = Vec::with_capacity(selections.len());
+    let last_row = session.model.visible_line_count().saturating_sub(1);
     for selection in selections {
         let (line, column) = session.model.line_column_for_char(selection.cursor);
         let preferred = *session.preferred_column.get_or_insert(column);
-        let target_line = line
-            .saturating_add_signed(delta)
-            .min(session.model.line_count().saturating_sub(1));
+        let target_line = session
+            .model
+            .visible_row_for_logical_line(line)
+            .and_then(|row| {
+                session
+                    .model
+                    .logical_line_for_visible_row(row.saturating_add_signed(delta).min(last_row))
+            })
+            .unwrap_or_else(|| {
+                line.saturating_add_signed(delta)
+                    .min(session.model.line_count().saturating_sub(1))
+            });
         let cursor = session.model.char_at_line_column(target_line, preferred);
         moved.push(TextSelection {
             anchor: if extend { selection.anchor } else { cursor },
@@ -1481,8 +2028,8 @@ fn paint_carets_and_ime(
     ui: &Ui,
     session: &VirtualEditorSession,
     focused: bool,
+    editable: bool,
     origin: egui::Pos2,
-    viewport: egui::Rect,
     code_origin_x: f32,
     char_width: f32,
     style: &VirtualEditorStyle<'_>,
@@ -1490,24 +2037,27 @@ fn paint_carets_and_ime(
     if !focused {
         return;
     }
-    let time = ui.input(|input| input.time);
-    let caret_visible = (time * 2.0).fract() < 0.62;
+    // Reduced motion holds the caret steady; otherwise it blinks from the
+    // moment it last moved.
+    let blinking = ui.style().animation_time > 0.0;
+    let since_moved = (ui.input(|input| input.time) - session.caret_moved_at).max(0.0);
+    let caret_visible = !blinking || (since_moved * 2.0).fract() < 0.62;
     let mut primary_caret_rect = None;
-    if caret_visible {
-        for selection in session.model.selections() {
-            let (line, column) = session.model.line_column_for_char(selection.cursor);
-            let Some(visible_row) = session.model.visible_row_for_logical_line(line) else {
-                continue;
-            };
-            let x = code_origin_x + column as f32 * char_width;
-            let y = origin.y + style.top_padding + visible_row as f32 * style.line_height;
-            let rect = egui::Rect::from_min_size(
-                egui::pos2(x, y + 1.0),
-                Vec2::new(1.25, style.line_height - 2.0),
-            );
+    for selection in session.model.selections() {
+        let (line, column) = session.model.line_column_for_char(selection.cursor);
+        let Some(visible_row) = session.model.visible_row_for_logical_line(line) else {
+            continue;
+        };
+        let x = code_origin_x + column as f32 * char_width;
+        let y = origin.y + style.top_padding + visible_row as f32 * style.line_height;
+        let rect = egui::Rect::from_min_size(
+            egui::pos2(x, y + 1.0),
+            Vec2::new(1.25, style.line_height - 2.0),
+        );
+        if caret_visible {
             ui.painter().rect_filled(rect, 0.0, style.text);
-            primary_caret_rect = Some(rect);
         }
+        primary_caret_rect = Some(rect);
     }
     if let Some(composition) = &session.ime {
         for range in &composition.preedit_ranges {
@@ -1536,744 +2086,68 @@ fn paint_carets_and_ime(
             }
         }
     }
-    if let Some(cursor_rect) = primary_caret_rect
-        && cursor_rect.intersects(ui.clip_rect())
-    {
+    // Text input is wanted on every frame an editable view holds focus,
+    // whatever the blink shows: a frame without it ends a composition and
+    // drops a tablet's keyboard. A caret scrolled or folded out of view
+    // anchors the candidate window to the nearest edge of the view instead.
+    if editable {
+        let clip = ui.clip_rect();
+        let cursor_rect = primary_caret_rect.map_or_else(
+            || egui::Rect::from_min_size(clip.min, Vec2::new(1.25, style.line_height - 2.0)),
+            |rect| {
+                let min = rect
+                    .min
+                    .clamp(clip.min, (clip.max - rect.size()).max(clip.min));
+                egui::Rect::from_min_size(min, rect.size())
+            },
+        );
         let to_global = ui
             .ctx()
             .layer_transform_to_global(ui.layer_id())
             .unwrap_or_default();
         ui.output_mut(|output| {
             output.ime = Some(egui::output::IMEOutput {
-                rect: to_global * ui.clip_rect(),
+                rect: to_global * clip,
                 cursor_rect: to_global * cursor_rect,
                 should_interrupt_composition: false,
             });
         });
     }
-    let _ = viewport;
-    ui.ctx()
-        .request_repaint_after(std::time::Duration::from_millis(250));
+    if blinking {
+        ui.ctx()
+            .request_repaint_after(std::time::Duration::from_millis(250));
+    }
+}
+
+/// A small mark in the view's lower right while Tab moves focus, so a
+/// sighted keyboard user can tell why Tab no longer indents.
+fn paint_tab_moves_focus_badge(
+    ui: &Ui,
+    viewport: egui::Rect,
+    origin: egui::Pos2,
+    style: &VirtualEditorStyle<'_>,
+) {
+    let text = style
+        .messages
+        .text(crate::workbench::MessageId::EditorTabMovesFocusBadge);
+    let font = FontId::proportional(style.font.size * 0.9);
+    let galley = ui.fonts_mut(|fonts| fonts.layout_no_wrap(text, font, style.text_dim));
+    let inset = Vec2::new(14.0, 14.0);
+    let size = galley.size() + Vec2::new(12.0, 6.0);
+    let bottom_right = origin + viewport.max.to_vec2() - inset;
+    let rect = egui::Rect::from_min_max(bottom_right - size, bottom_right);
+    let painter = ui.painter();
+    painter.rect(
+        rect,
+        3.0,
+        style.background,
+        Stroke::new(1.0, style.border),
+        egui::StrokeKind::Inside,
+    );
+    painter.galley(rect.min + Vec2::new(6.0, 3.0), galley, style.text_dim);
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn test_style<'a>(edited: &'a std::collections::HashSet<usize>) -> VirtualEditorStyle<'a> {
-        VirtualEditorStyle {
-            accessible_label: "Test source editor",
-            messages: crate::workbench::MessageCatalog::new(
-                crate::workbench::UiTextLocale::EnglishUnitedStates,
-            ),
-            font: FontId::monospace(11.0),
-            line_height: 17.0,
-            gutter_width: 47.0,
-            code_left_padding: 12.0,
-            top_padding: 8.0,
-            background: Color32::BLACK,
-            hover_background: Color32::from_gray(24),
-            active_background: Color32::from_gray(28),
-            selection_background: Color32::from_rgb(32, 64, 96),
-            text: Color32::WHITE,
-            text_dim: Color32::LIGHT_GRAY,
-            text_faint: Color32::GRAY,
-            border: Color32::DARK_GRAY,
-            accent: Color32::LIGHT_BLUE,
-            error: Color32::RED,
-            warning: Color32::YELLOW,
-            edited_lines: edited,
-            breakpoints: &[],
-            breakpoints_enabled: false,
-            current_line: None,
-            cross_probe_line: None,
-        }
-    }
-
-    #[test]
-    fn newline_normalization_respects_document_policy() {
-        assert_eq!(normalize_newlines("a\r\nb\rc\n", "\n"), "a\nb\nc\n");
-        assert_eq!(normalize_newlines("a\r\nb\rc\n", "\r\n"), "a\r\nb\r\nc\r\n");
-    }
-
-    #[test]
-    fn accessible_text_is_whitespace_normalized_and_strictly_bounded() {
-        assert_eq!(
-            accessibility::bounded_accessible_text(" alpha\n\tbeta ", 32),
-            "alpha beta"
-        );
-        let bounded = accessibility::bounded_accessible_text(&"x".repeat(10_000), 64);
-        assert_eq!(bounded.chars().count(), 64);
-        assert!(bounded.ends_with('…'));
-    }
-
-    #[test]
-    fn ime_preedit_is_replaced_instead_of_accumulated() {
-        let mut session = VirtualEditorSession::default();
-        handle_ime(
-            &mut session,
-            egui::ImeEvent::Preedit {
-                text: "k".to_owned(),
-                active_range_chars: Some(0..1),
-            },
-        );
-        handle_ime(
-            &mut session,
-            egui::ImeEvent::Preedit {
-                text: "ka".to_owned(),
-                active_range_chars: Some(0..2),
-            },
-        );
-        assert_eq!(session.model.to_source(), "ka");
-        handle_ime(&mut session, egui::ImeEvent::Commit("か".to_owned()));
-        assert_eq!(session.model.to_source(), "か");
-        assert!(session.model.undo());
-        assert_eq!(session.model.to_source(), "");
-    }
-
-    #[test]
-    fn release_text_fidelity_matrix_preserves_large_unicode_ime_clipboard_and_paste_content() {
-        let mut large_bytes = Vec::with_capacity(1_000_010);
-        large_bytes.extend_from_slice(&[0xEF, 0xBB, 0xBF]);
-        large_bytes.extend_from_slice(b"* ");
-        large_bytes.extend(std::iter::repeat_n(b'R', 1_000_000));
-        large_bytes.extend_from_slice(b"\r\n.end\r\n");
-        let large = TextDocumentModel::from_bytes(&large_bytes).expect("large source is valid");
-        assert_eq!(
-            large.encoding(),
-            super::super::text_document_model::TextEncoding::Utf8Bom
-        );
-        assert_eq!(large.preferred_newline(), "\r\n");
-        assert_eq!(large.encoded_bytes(), large_bytes);
-        let far_right = large.viewport(0, 1, 999_980, 32, 0, 0);
-        assert_eq!(far_right.len(), 1);
-        assert!(far_right[0].text.chars().count() <= 32);
-        assert_eq!(far_right[0].first_column, 999_980);
-
-        let alpha = '\u{03B1}';
-        let beta = '\u{03B2}';
-        let mut selected = TextDocumentModel::from_source(&format!("{alpha}\r\n{beta}\r\n"));
-        selected.set_selections(vec![
-            TextSelection {
-                anchor: 0,
-                cursor: 1,
-            },
-            TextSelection {
-                anchor: 3,
-                cursor: 4,
-            },
-        ]);
-        let context = egui::Context::default();
-        let output = context.run_ui(Default::default(), |ui| copy_selection(ui, &selected));
-        let expected_copy = format!("{alpha}\r\n{beta}");
-        assert!(output.platform_output.commands.iter().any(|command| {
-            matches!(
-                command,
-                egui::OutputCommand::CopyText(text) if text.as_str() == expected_copy
-            )
-        }));
-
-        let mut session = VirtualEditorSession {
-            model: TextDocumentModel::from_source("prefix\r\n"),
-            ..VirtualEditorSession::default()
-        };
-        session
-            .model
-            .set_selections(vec![TextSelection::caret(session.model.len_chars())]);
-        let paste = "\u{4E00}\n\u{4E8C}\r\u{4E09}";
-        let _ = context.run_ui(Default::default(), |ui| {
-            handle_event(
-                ui,
-                &mut session,
-                egui::Event::Paste(paste.to_owned()),
-                true,
-                EditorSyntax::Python,
-            );
-        });
-        assert_eq!(
-            session.model.to_source(),
-            "prefix\r\n\u{4E00}\r\n\u{4E8C}\r\n\u{4E09}"
-        );
-
-        let before_ime = session.model.to_source();
-        handle_ime(
-            &mut session,
-            egui::ImeEvent::Preedit {
-                text: "\u{65E5}".to_owned(),
-                active_range_chars: Some(0..1),
-            },
-        );
-        handle_ime(
-            &mut session,
-            egui::ImeEvent::Preedit {
-                text: "\u{65E5}\u{672C}".to_owned(),
-                active_range_chars: Some(0..2),
-            },
-        );
-        handle_ime(
-            &mut session,
-            egui::ImeEvent::Commit("\u{65E5}\u{672C}\u{8A9E}\u{1F9EA}".to_owned()),
-        );
-        assert_eq!(
-            session.model.to_source(),
-            format!("{before_ime}\u{65E5}\u{672C}\u{8A9E}\u{1F9EA}")
-        );
-        assert!(session.model.undo());
-        assert_eq!(session.model.to_source(), before_ime);
-
-        let invalid = [b'o', b'k', 0xF0, 0x28, 0x8C, 0x28];
-        assert_eq!(
-            TextDocumentModel::from_bytes(&invalid).unwrap_err(),
-            super::super::text_document_model::SourceTextError::InvalidUtf8 { valid_up_to: 2 }
-        );
-    }
-
-    #[test]
-    fn word_navigation_is_unicode_safe() {
-        let mut model = TextDocumentModel::from_source("αβ gamma");
-        model.set_selections(vec![TextSelection::caret(model.len_chars())]);
-        move_horizontal(&mut model, false, false, true);
-        assert_eq!(model.selections(), &[TextSelection::caret(3)]);
-        move_horizontal(&mut model, false, false, true);
-        assert_eq!(model.selections(), &[TextSelection::caret(0)]);
-    }
-
-    #[test]
-    fn disjoint_multicursor_structural_edit_is_one_transaction() {
-        let mut model = TextDocumentModel::from_source("a\nb\nc\n");
-        model.set_selections(vec![TextSelection::caret(0), TextSelection::caret(4)]);
-        assert!(apply_model_structural(
-            &mut model,
-            EditorSyntax::Spice,
-            StructuralCommand::ToggleComment,
-        ));
-        assert_eq!(model.to_source(), "* a\nb\n* c\n");
-        assert_eq!(model.selections().len(), 2);
-        assert!(model.undo());
-        assert_eq!(model.to_source(), "a\nb\nc\n");
-    }
-
-    #[test]
-    fn smart_newline_preserves_line_endings_and_indents_language_blocks() {
-        let mut model = TextDocumentModel::from_source("    if ready:\r\n");
-        model.set_selections(vec![TextSelection::caret(13)]);
-        assert!(insert_smart_newline(&mut model, EditorSyntax::Python));
-        assert_eq!(model.to_source(), "    if ready:\r\n        \r\n");
-    }
-
-    #[test]
-    fn fold_all_discovers_language_regions_and_unfold_all_restores_every_line() {
-        let mut session = VirtualEditorSession {
-            model: TextDocumentModel::from_source(
-                "module gain(in, out);\n  analog begin\n    V(out) <+ V(in);\n  end\nendmodule\nmodule other;\nendmodule\n",
-            ),
-            ..VirtualEditorSession::default()
-        };
-        handle_view_command(
-            &mut session,
-            EditorSyntax::VerilogA,
-            EditorViewCommand::FoldAll,
-        );
-        assert_eq!(session.model.folds().len(), 2);
-        assert!(session.model.visible_line_count() < session.model.line_count());
-        handle_view_command(
-            &mut session,
-            EditorSyntax::VerilogA,
-            EditorViewCommand::UnfoldAll,
-        );
-        assert!(session.model.folds().is_empty());
-        assert_eq!(
-            session.model.visible_line_count(),
-            session.model.line_count()
-        );
-    }
-
-    #[test]
-    fn requested_line_unfolds_and_reveals_a_collapsed_target() {
-        let context = egui::Context::default();
-        let editor_id = egui::Id::new("folded-reveal-editor-test");
-        let mut source = ".subckt amp in out\nR1 in out 1k\n.ends\n.end\n".to_owned();
-        let mut session = VirtualEditorSession {
-            model: TextDocumentModel::from_source(&source),
-            ..Default::default()
-        };
-        assert!(session.model.fold_lines(0, 3));
-        session.bound_revision = 1;
-        session.maximum_columns = session.model.maximum_line_columns();
-        context.data_mut(|data| {
-            data.insert_temp(editor_id.with("virtual-session"), session);
-        });
-        let edited = std::collections::HashSet::new();
-        let style = test_style(&edited);
-        let _ = context.run_ui(Default::default(), |ui| {
-            let _ = show_virtual_text_editor(
-                ui,
-                editor_id,
-                &mut source,
-                1,
-                true,
-                EditorSyntax::Spice,
-                Some(2),
-                &style,
-                |ui, text, _line, font| {
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                    })
-                },
-                |_| None,
-                |_| None,
-            );
-        });
-        let session = context
-            .data_mut(|data| {
-                data.remove_temp::<VirtualEditorSession>(editor_id.with("virtual-session"))
-            })
-            .expect("retained virtual-editor session");
-        assert!(session.model.folds().is_empty());
-        assert_eq!(
-            session
-                .model
-                .line_column_for_char(session.model.selections()[0].cursor),
-            (1, 0)
-        );
-    }
-
-    #[test]
-    fn indentation_and_toml_fold_discovery_are_deterministic() {
-        let python = TextDocumentModel::from_source(
-            "def outer():\n    if ready:\n        return 1\n    return 0\nnext_value = 2\n",
-        );
-        assert_eq!(
-            discover_fold_regions(&python, EditorSyntax::Python),
-            vec![(0, 4), (1, 3)]
-        );
-        let toml =
-            TextDocumentModel::from_source("title = 'x'\n[first]\na = 1\nb = 2\n[second]\nc = 3\n");
-        assert_eq!(
-            discover_fold_regions(&toml, EditorSyntax::Toml),
-            vec![(1, 4), (4, 7)]
-        );
-    }
-
-    #[test]
-    fn five_million_line_fold_discovery_streams_without_a_line_vector() {
-        let source = "x\n".repeat(5_000_000);
-        let model = TextDocumentModel::from_source(&source);
-        assert!(discover_fold_regions(&model, EditorSyntax::Python).is_empty());
-        assert!(discover_fold_regions(&model, EditorSyntax::Spice).is_empty());
-    }
-
-    #[test]
-    fn widget_lays_out_only_a_bounded_large_document_viewport() {
-        let context = egui::Context::default();
-        let mut source = (0..100_000)
-            .map(|line| format!("R{line} n{line} 0 1k\n"))
-            .collect::<String>();
-        let original = source.clone();
-        let edited = std::collections::HashSet::new();
-        let style = test_style(&edited);
-        let mut laid_out = 0_usize;
-        let mut changed = true;
-        let raw_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(900.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let _ = context.run_ui(raw_input, |ui| {
-            let output = show_virtual_text_editor(
-                ui,
-                egui::Id::new("large-editor-test"),
-                &mut source,
-                1,
-                true,
-                EditorSyntax::Spice,
-                None,
-                &style,
-                |ui, text, _line, font| {
-                    laid_out += 1;
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                    })
-                },
-                |_| None,
-                |_| None,
-            );
-            changed = output.changed;
-        });
-
-        assert!(!changed);
-        assert_eq!(source, original);
-        assert!(laid_out > 0);
-        assert!(laid_out < 80, "laid out {laid_out} rows");
-    }
-
-    #[test]
-    fn maximum_column_reconciliation_is_revision_bound_and_chunked() {
-        let mut source = "x\n".repeat(MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME + 2);
-        source.push_str(&"z".repeat(1_000));
-        let mut session = VirtualEditorSession {
-            model: TextDocumentModel::from_source(&source),
-            maximum_columns: 0,
-            ..VirtualEditorSession::default()
-        };
-        restart_maximum_column_scan(&mut session);
-        advance_maximum_column_scan(&mut session);
-        let first = session
-            .maximum_column_scan
-            .expect("large document scan remains pending");
-        assert_eq!(first.next_line, MAXIMUM_COLUMN_SCAN_LINES_PER_FRAME);
-        assert_eq!(session.maximum_columns, 1);
-        advance_maximum_column_scan(&mut session);
-        assert!(session.maximum_column_scan.is_none());
-        assert_eq!(session.maximum_columns, 1_000);
-
-        assert!(session.model.synchronize_source("a\n"));
-        restart_maximum_column_scan(&mut session);
-        assert_eq!(
-            session.maximum_columns, 1_000,
-            "the old extent remains usable until the bounded scan completes"
-        );
-        advance_maximum_column_scan(&mut session);
-        assert!(session.maximum_column_scan.is_none());
-        assert_eq!(session.maximum_columns, 1);
-
-        let inserted = format!("short\n{}\nend", "q".repeat(2_000));
-        grow_maximum_columns_for_insertion(&mut session, &inserted);
-        assert!(
-            session.maximum_columns >= 2_000,
-            "a long intermediate pasted line must grow the canvas immediately"
-        );
-    }
-
-    #[test]
-    fn focused_debug_editor_exposes_f9_breakpoint_toggle() {
-        let context = egui::Context::default();
-        let mut source = "print('ready')\n".to_owned();
-        let edited = std::collections::HashSet::new();
-        let mut style = test_style(&edited);
-        style.breakpoints_enabled = true;
-        let editor_id = egui::Id::new("breakpoint-shortcut-editor-test");
-        let raw_input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(900.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let _ = context.run_ui(raw_input(), |ui| {
-            let output = show_virtual_text_editor(
-                ui,
-                editor_id,
-                &mut source,
-                1,
-                true,
-                EditorSyntax::Python,
-                None,
-                &style,
-                |ui, text, _line, font| {
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                    })
-                },
-                |_| None,
-                |_| None,
-            );
-            output.response.request_focus();
-        });
-
-        let mut input = raw_input();
-        input.events.push(egui::Event::Key {
-            key: Key::F9,
-            physical_key: Some(Key::F9),
-            pressed: true,
-            repeat: false,
-            modifiers: Modifiers::NONE,
-        });
-        let mut toggled = None;
-        let _ = context.run_ui(input, |ui| {
-            toggled = show_virtual_text_editor(
-                ui,
-                editor_id,
-                &mut source,
-                1,
-                true,
-                EditorSyntax::Python,
-                None,
-                &style,
-                |ui, text, _line, font| {
-                    ui.fonts_mut(|fonts| {
-                        fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                    })
-                },
-                |_| None,
-                |_| None,
-            )
-            .breakpoint_toggled;
-        });
-        assert_eq!(toggled, Some(1));
-    }
-
-    /// The editor takes focus on every press, so a focus ring would frame the
-    /// source for as long as anyone worked in it.
-    #[test]
-    fn a_focused_editor_draws_no_focus_ring() {
-        let context = egui::Context::default();
-        crate::ui::Theme::default().apply(&context);
-        let accent = crate::ui::tokens::Tokens::get(&context).color.accent;
-        let mut source = "print('ready')\n".to_owned();
-        let edited = std::collections::HashSet::new();
-        let style = test_style(&edited);
-        let editor_id = egui::Id::new("focus-ring-editor-test");
-        let raw_input = || egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(900.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let mut focused = false;
-        let mut output = None;
-        for _ in 0..2 {
-            output = Some(context.run_ui(raw_input(), |ui| {
-                let shown = show_virtual_text_editor(
-                    ui,
-                    editor_id,
-                    &mut source,
-                    1,
-                    true,
-                    EditorSyntax::Python,
-                    None,
-                    &style,
-                    |ui, text, _line, font| {
-                        ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                        })
-                    },
-                    |_| None,
-                    |_| None,
-                );
-                focused = shown.response.has_focus();
-                shown.response.request_focus();
-            }));
-        }
-        assert!(focused, "the editor held focus while it was drawn");
-        let ring = output
-            .expect("a frame")
-            .shapes
-            .iter()
-            .any(|clipped| match &clipped.shape {
-                egui::Shape::Rect(rect) => rect.stroke.width >= 2.0 && rect.stroke.color == accent,
-                _ => false,
-            });
-        assert!(!ring, "no focus ring around the source");
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn widget_exposes_active_line_read_only_and_diagnostic_context_to_accesskit() {
-        let context = egui::Context::default();
-        context.enable_accesskit();
-        crate::ui::Theme::default().apply(&context);
-        let mut source = "R1 input output 1k\nV1 input 0 1\n".to_owned();
-        let mut edited = std::collections::HashSet::new();
-        edited.insert(1);
-        let breakpoints = [2];
-        let mut style = test_style(&edited);
-        style.accessible_label = "Generated SPICE netlist viewer";
-        style.breakpoints = &breakpoints;
-        style.current_line = Some(2);
-        let raw_input = egui::RawInput {
-            screen_rect: Some(egui::Rect::from_min_size(
-                egui::Pos2::ZERO,
-                Vec2::new(900.0, 600.0),
-            )),
-            ..Default::default()
-        };
-        let nodes = context
-            .run_ui(raw_input, |ui| {
-                let _ = show_virtual_text_editor(
-                    ui,
-                    egui::Id::new("accessible-editor-test"),
-                    &mut source,
-                    1,
-                    false,
-                    EditorSyntax::Spice,
-                    Some(2),
-                    &style,
-                    |ui, text, _line, font| {
-                        ui.fonts_mut(|fonts| {
-                            fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                        })
-                    },
-                    |_| None,
-                    |line| {
-                        (line == 1).then(|| {
-                            "One warning diagnostic on this line, TEST-001: Check the source."
-                                .to_owned()
-                        })
-                    },
-                );
-            })
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit editor tree")
-            .nodes;
-
-        let editor = nodes
-            .iter()
-            .find_map(|(_, node)| {
-                (node.role() == egui::accesskit::Role::MultilineTextInput
-                    && node.label() == Some("Generated SPICE netlist viewer"))
-                .then_some(node)
-            })
-            .expect("named multiline editor node");
-        let description = editor.description().expect("editor description");
-        assert!(description.contains("Line 2 of 3, column 1. Read-only."));
-        assert!(description.contains("One warning diagnostic on this line"));
-        assert!(description.contains("TEST-001"));
-        assert!(description.contains("Breakpoint on this line"));
-        assert!(description.contains("Current debugger statement"));
-        assert!(description.contains("Modified line"));
-        assert!(editor.is_read_only());
-        assert!(editor.text_selection().is_some());
-        let active_text = nodes
-            .iter()
-            .find_map(|(_, node)| {
-                (node.role() == egui::accesskit::Role::TextRun
-                    && node.value() == Some("V1 input 0 1"))
-                .then_some(node)
-            })
-            .expect("active-line TextRun");
-        let bounds = active_text.bounds().expect("active-line bounds");
-        assert!(
-            bounds.y0 >= f64::from(style.top_padding + style.line_height),
-            "line-two accessibility geometry must not overlap line one: {bounds:?}"
-        );
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn accesskit_active_line_payload_is_bounded_for_extreme_source_lines() {
-        let context = egui::Context::default();
-        context.enable_accesskit();
-        crate::ui::Theme::default().apply(&context);
-        let mut source = "x".repeat(50_000);
-        let edited = std::collections::HashSet::new();
-        let style = test_style(&edited);
-        let nodes = context
-            .run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(900.0, 600.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    let _ = show_virtual_text_editor(
-                        ui,
-                        egui::Id::new("bounded-accessible-editor-test"),
-                        &mut source,
-                        1,
-                        true,
-                        EditorSyntax::Spice,
-                        None,
-                        &style,
-                        |ui, text, _line, font| {
-                            ui.fonts_mut(|fonts| {
-                                fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                            })
-                        },
-                        |_| None,
-                        |_| None,
-                    );
-                },
-            )
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit editor tree")
-            .nodes;
-        let exposed_characters = nodes
-            .iter()
-            .filter(|(_, node)| node.role() == egui::accesskit::Role::TextRun)
-            .map(|(_, node)| node.value().unwrap_or_default().chars().count())
-            .sum::<usize>();
-        assert_eq!(exposed_characters, MAX_ACCESSIBLE_LINE_CHARS);
-        assert!(nodes.iter().any(|(_, node)| {
-            node.description()
-                .is_some_and(|description| description.contains("of 50000"))
-        }));
-    }
-
-    #[cfg(not(target_arch = "wasm32"))]
-    #[test]
-    fn accesskit_excerpt_geometry_tracks_the_real_horizontal_source_column() {
-        let context = egui::Context::default();
-        context.enable_accesskit();
-        crate::ui::Theme::default().apply(&context);
-        let editor_id = egui::Id::new("horizontal-accessible-editor-test");
-        let mut source = "x".repeat(2_000);
-        let mut session = VirtualEditorSession {
-            model: TextDocumentModel::from_source(&source),
-            ..Default::default()
-        };
-        session
-            .model
-            .set_selections(vec![TextSelection::caret(1_500)]);
-        session.bound_revision = 1;
-        session.maximum_columns = session.model.maximum_line_columns();
-        context.data_mut(|data| {
-            data.insert_temp(editor_id.with("virtual-session"), session);
-        });
-        let edited = std::collections::HashSet::new();
-        let style = test_style(&edited);
-        let nodes = context
-            .run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        Vec2::new(900.0, 600.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    let _ = show_virtual_text_editor(
-                        ui,
-                        editor_id,
-                        &mut source,
-                        1,
-                        true,
-                        EditorSyntax::Spice,
-                        None,
-                        &style,
-                        |ui, text, _line, font| {
-                            ui.fonts_mut(|fonts| {
-                                fonts.layout_no_wrap(text.to_owned(), font, Color32::WHITE)
-                            })
-                        },
-                        |_| None,
-                        |_| None,
-                    );
-                },
-            )
-            .platform_output
-            .accesskit_update
-            .expect("AccessKit editor tree")
-            .nodes;
-        let text_run = nodes
-            .iter()
-            .find_map(|(_, node)| (node.role() == egui::accesskit::Role::TextRun).then_some(node))
-            .expect("active-line excerpt TextRun");
-        let bounds = text_run.bounds().expect("active-line excerpt bounds");
-        assert!(
-            bounds.x0 > 1_000.0,
-            "far-right source text must retain far-right geometry: {bounds:?}"
-        );
-        assert!(nodes.iter().any(|(_, node)| {
-            node.description()
-                .is_some_and(|description| description.contains("Source excerpt columns"))
-        }));
-    }
-}
+mod input_tests;
+#[cfg(test)]
+mod tests;

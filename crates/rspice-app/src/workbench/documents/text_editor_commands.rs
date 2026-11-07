@@ -319,6 +319,39 @@ pub(crate) fn take_queued_caret_char_index(
     context.data_mut(|data| data.remove_temp::<usize>(editor_id.with("caret-char-index")))
 }
 
+/// Ask the editor to put its caret at a one-based line and column next frame
+/// and bring it into view: left where it is when already on screen, centred
+/// when it is not. Out-of-range positions clamp to the document. This is how
+/// a jump to a diagnostic or a definition lands.
+pub(crate) fn queue_caret_position(
+    context: &egui::Context,
+    editor_id: Id,
+    one_based_line: usize,
+    one_based_column: usize,
+) {
+    context.data_mut(|data| {
+        data.insert_temp(
+            editor_id.with("caret-position"),
+            (one_based_line.max(1), one_based_column.max(1)),
+        );
+    });
+    context.request_repaint();
+}
+
+pub(crate) fn take_queued_caret_position(
+    context: &egui::Context,
+    editor_id: Id,
+) -> Option<(usize, usize)> {
+    context.data_mut(|data| data.remove_temp::<(usize, usize)>(editor_id.with("caret-position")))
+}
+
+/// Record the zero-based line of an editor's primary caret, for an editor
+/// that keeps its own selection rather than egui's text state, so Go to line
+/// proposes where the reader is.
+pub(crate) fn publish_caret_line(context: &egui::Context, editor_id: Id, line: usize) {
+    context.data_mut(|data| data.insert_temp(editor_id.with("caret-line"), line));
+}
+
 pub(crate) fn queue_format_document(context: &egui::Context, editor_id: Id) {
     context.data_mut(|data| {
         data.insert_temp(editor_id.with("format-document"), true);
@@ -450,6 +483,10 @@ pub(crate) fn place_caret_at_line(
 }
 
 fn current_one_based_line(context: &egui::Context, editor_id: Id, source: &str) -> usize {
+    if let Some(line) = context.data(|data| data.get_temp::<usize>(editor_id.with("caret-line"))) {
+        let line_count = source.lines().count().max(1) + usize::from(source.ends_with('\n'));
+        return (line + 1).min(line_count);
+    }
     let index = egui::text_edit::TextEditState::load(context, editor_id)
         .and_then(|state| state.cursor.char_range())
         .map_or(0, |range| range.primary.index.0);
