@@ -1653,6 +1653,32 @@ mod tests {
         );
     }
 
+    /// Every functional part is drawn from its own artwork, undistorted, with
+    /// each lead ending on a terminal.
+    #[test]
+    fn every_functional_part_draws_its_artwork_on_its_terminals() {
+        use rspice_design::schematic::functional_catalog::{
+            functional_library_binding, functional_parts,
+        };
+        let library = SymbolLibrary::load_embedded().expect("symbol library");
+        for descriptor in functional_parts() {
+            let component = Component::new(1, ComponentType::CellInstance, Point::origin())
+                .with_library_cell(functional_library_binding(descriptor));
+            assert!(
+                compatible_builtin_xspice_asset(&component, &library).is_some(),
+                "{} artwork must end its leads on the part's terminals",
+                descriptor.display_name
+            );
+            let (_, height) = component.symbol_dimensions();
+            assert_eq!(
+                component.artwork_dimensions(),
+                (rspice_design::symbol_generation::GENERATED_WIDTH, height),
+                "{} artwork must be drawn in the box it was authored for",
+                descriptor.display_name
+            );
+        }
+    }
+
     /// A block widened for its pin names still carries its artwork out to the
     /// terminals, so nothing is left floating off the drawing.
     #[test]
