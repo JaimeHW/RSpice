@@ -138,18 +138,17 @@ A1 A 0 0 0 0 0 Y 0 SCHMITT VT={VT} VH={HYST/2} VHIGH={VHIGH} VLOW={VLOW} TD={TD}
 .ends RSPICE_FN_SCHMITT_BUF
 
 * 555 timer. Pins: TRIG THR RESET OUT DIS CTRL VCC GND.
-* The classic block diagram: three equal resistors put CTRL at 2/3 of the
-* supply and the trigger reference at 1/3 (half of CTRL when CTRL is driven).
-* THR above CTRL sets the latch and TRIG below the reference clears it, the
-* trigger winning when both act; RESET below 0.7 V sets it and holds it set.
-* The set latch drives OUT low and turns the DIS transistor on. TECH selects
-* the process: 0 bipolar (5 kOhm divider resistors, output high 1.4 V below
-* VCC, 5 Ohm, 200 mA, 100 ns edges, 3 mA quiescent) or 1 CMOS (100 kOhm
-* divider resistors, rail-to-rail, 50 Ohm, 10 mA source and 100 mA sink, 20 ns
-* edges, 100 uA quiescent). The quiescent current is besides the divider's.
-.subckt RSPICE_FN_555 TRIG THR RESET OUT DIS CTRL VCC GND TECH=0
-.param DROP={1.4*(1-TECH)} ROUT={5+45*TECH} ISRC={200m-190m*TECH} ISNK={200m-100m*TECH}
-+ TEDGE={100n-80n*TECH} IQ={3m-2.9m*TECH} RDIV={5k+95k*TECH}
+* The classic block diagram: three equal RDIV resistors put CTRL at 2/3 of
+* the supply and the trigger reference at 1/3 (half of CTRL when CTRL is
+* driven). THR above CTRL sets the latch and TRIG below the reference clears
+* it, the trigger winning when both act; RESET below 0.7 V sets it and holds
+* it set. The set latch drives OUT low and turns the DIS switch on: RDIS to
+* GND, passing at most IDIS. OUT swings from GND to DROP below VCC behind
+* ROUT, sourcing at most ISRC and sinking at most ISNK, its edges TEDGE long.
+* IQ is the quiescent current besides the divider's. The defaults are a
+* bipolar 555; the part's Process preset fills in a CMOS one.
+.subckt RSPICE_FN_555 TRIG THR RESET OUT DIS CTRL VCC GND
++ DROP=1.4 ROUT=5 ISRC=200m ISNK=200m TEDGE=100n IQ=3m RDIV=5k RDIS=10 IDIS=50m
 R1 VCC CTRL {RDIV}
 R2 CTRL NREF {RDIV}
 R3 NREF GND {RDIV}
@@ -168,7 +167,7 @@ A8 OUT NT 0 0 0 0 NO 0 OTA G={1/ROUT} IOUT={ISRC} ISINK={-ISNK} ASYM VHIGH=1e9 V
 VSNS NO OUT 0
 BSRC VCC 0 I=0.5*(I(VSNS)+sqrt(I(VSNS)*I(VSNS)+1e-18))
 BSNK 0 GND I=0.5*(sqrt(I(VSNS)*I(VSNS)+1e-18)-I(VSNS))
-A9 DIS GND NQ GND GND GND DIS GND OTA G=0.1 IOUT=50m ISINK=-50m VHIGH=1e9 VLOW=-1e9
+A9 DIS GND NQ GND GND GND DIS GND OTA G={1/RDIS} IOUT={IDIS} ISINK={-IDIS} VHIGH=1e9 VLOW=-1e9
 IQ VCC GND {IQ}
 .ends RSPICE_FN_555
 

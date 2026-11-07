@@ -600,19 +600,23 @@ fn rising_crossings(time: &[f64], wave: &[f64], level: f64) -> Vec<f64> {
         .collect()
 }
 
+/// The values the 555's Process preset fills in for a CMOS part; the
+/// subcircuit's own defaults are the bipolar part.
+const CMOS_555: &str = "DROP=0 ROUT=50 ISRC=10m ISNK=100m TEDGE=20n IQ=100u RDIV=100k";
+
 #[test]
 fn timer_555_astable_runs_at_its_textbook_frequency_and_duty_cycle_in_both_processes() {
     // RA=1k, RB=10k, C=10n: f = 1.44/((RA+2RB)C) = 6857 Hz, high for
     // (RA+RB)/(RA+2RB) = 52.4% of each period. The discharge transistor's
     // saturation stretches the low time by about 2%.
-    for (tech, value) in [("Bipolar", 0), ("CMOS", 1)] {
+    for (tech, params) in [("Bipolar", ""), ("CMOS", CMOS_555)] {
         let deck = format!(
             "* 555 astable
 VCC vcc 0 5
 RA vcc dis 1k
 RB dis thr 10k
 C1 thr 0 10n
-X1 thr thr vcc out dis ctl vcc 0 RSPICE_FN_555 TECH={value}
+X1 thr thr vcc out dis ctl vcc 0 RSPICE_FN_555 {params}
 CC ctl 0 10n
 RL out 0 10k
 .end
@@ -647,14 +651,14 @@ RL out 0 10k
 #[test]
 fn timer_555_monostable_pulse_is_one_point_one_rc_in_both_processes() {
     // R=10k, C=10n: a 1 us trigger at 20 us starts a 110 us pulse.
-    for tech in [0, 1] {
+    for (tech, params) in [("Bipolar", ""), ("CMOS", CMOS_555)] {
         let deck = format!(
             "* 555 monostable
 VCC vcc 0 5
 VTR trig 0 PULSE(5 0 20u 10n 10n 1u 1)
 R1 vcc cap 10k
 C1 cap 0 10n
-X1 trig cap vcc out cap ctl vcc 0 RSPICE_FN_555 TECH={tech}
+X1 trig cap vcc out cap ctl vcc 0 RSPICE_FN_555 {params}
 CC ctl 0 10n
 RL out 0 10k
 .end
@@ -667,12 +671,12 @@ RL out 0 10k
         let fall = falling_crossing(&tran.time[start..], &out[start..], 1.5);
         assert!(
             (rise - 20e-6).abs() < 0.2e-6,
-            "TECH={tech}: triggered at {rise}"
+            "{tech}: triggered at {rise}"
         );
         let width = fall - rise;
         assert!(
             (width / 110e-6 - 1.0).abs() < 0.01,
-            "TECH={tech}: pulse {width} s"
+            "{tech}: pulse {width} s"
         );
     }
 }

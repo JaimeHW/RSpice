@@ -49,6 +49,24 @@ pub struct FunctionalParameter {
     pub choices: &'static [FunctionalChoice],
 }
 
+/// One setting of a preset and the parameter values it fills in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalPresetChoice {
+    pub label: &'static str,
+    pub values: &'static [(&'static str, &'static str)],
+}
+
+/// A sheet setting that is no subcircuit parameter: choosing one of its
+/// settings fills parameters in, and each stays editable afterwards. The
+/// instance keeps the setting it was given, and its card never carries it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FunctionalPreset {
+    pub name: &'static str,
+    pub label: &'static str,
+    pub description: &'static str,
+    pub choices: &'static [FunctionalPresetChoice],
+}
+
 /// Pin geometry a part draws instead of the generated block's: the block
 /// height and, in pin order, the edge each pin meets and its terminal
 /// relative to the block's centre. The block is the generated width.
@@ -73,6 +91,8 @@ pub struct FunctionalPartDescriptor {
     pub keywords: &'static [&'static str],
     pub category: ComponentCategory,
     pub parameters: &'static [FunctionalParameter],
+    /// A setting that fills parameters in, shown above them.
+    pub preset: Option<FunctionalPreset>,
 }
 
 const fn pin(name: &'static str, direction: PortDirection) -> FunctionalPin {
@@ -491,13 +511,108 @@ const TIMER_PINS: &[FunctionalPin] = &[
     pin("GND", Supply),
 ];
 
-const TIMER_PARAMETERS: &[FunctionalParameter] = &[selector(
-    "TECH",
-    "Process",
-    "Bipolar",
-    "Bipolar: 5 kOhm divider, output high 1.4 V below VCC, 200 mA drive, 3 mA quiescent. CMOS: 100 kOhm divider, rail-to-rail output, 10 mA source and 100 mA sink, 100 uA quiescent.",
-    &[choice("Bipolar", "0"), choice("CMOS", "1")],
-)];
+/// A bipolar 555; the Process preset fills in a CMOS one.
+const TIMER_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "DROP",
+        "Output high drop",
+        "V",
+        "1.4",
+        "How far below VCC the output stands when high.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "5",
+        "Resistance the output drives through.",
+    ),
+    number(
+        "ISRC",
+        "Output source limit",
+        "A",
+        "200m",
+        "Most current the output sources when high.",
+    ),
+    number(
+        "ISNK",
+        "Output sink limit",
+        "A",
+        "200m",
+        "Most current the output sinks when low.",
+    ),
+    number(
+        "TEDGE",
+        "Output edge time",
+        "s",
+        "100n",
+        "Time the output takes to cross its full swing.",
+    ),
+    number(
+        "IQ",
+        "Quiescent current",
+        "A",
+        "3m",
+        "Supply current from VCC to GND besides the divider's.",
+    ),
+    number(
+        "RDIV",
+        "Divider resistors",
+        "Ω",
+        "5k",
+        "Each of the three equal resistors that set the thresholds at 1/3 and 2/3 of VCC.",
+    ),
+    number(
+        "RDIS",
+        "Discharge on-resistance",
+        "Ω",
+        "10",
+        "Resistance from DIS to GND while the output is low.",
+    ),
+    number(
+        "IDIS",
+        "Discharge current limit",
+        "A",
+        "50m",
+        "Most current DIS sinks while the output is low.",
+    ),
+];
+
+const TIMER_PRESET: FunctionalPreset = FunctionalPreset {
+    name: "PROCESS",
+    label: "Process",
+    description: "Fills the parameters below with a bipolar 555's or a CMOS 555's values; each stays editable.",
+    choices: &[
+        FunctionalPresetChoice {
+            label: "Bipolar",
+            values: &[
+                ("DROP", "1.4"),
+                ("ROUT", "5"),
+                ("ISRC", "200m"),
+                ("ISNK", "200m"),
+                ("TEDGE", "100n"),
+                ("IQ", "3m"),
+                ("RDIV", "5k"),
+                ("RDIS", "10"),
+                ("IDIS", "50m"),
+            ],
+        },
+        FunctionalPresetChoice {
+            label: "CMOS",
+            values: &[
+                ("DROP", "0"),
+                ("ROUT", "50"),
+                ("ISRC", "10m"),
+                ("ISNK", "100m"),
+                ("TEDGE", "20n"),
+                ("IQ", "100u"),
+                ("RDIV", "100k"),
+                ("RDIS", "10"),
+                ("IDIS", "50m"),
+            ],
+        },
+    ],
+};
 
 const PHASE_DETECTOR_PINS: &[FunctionalPin] = &[pin("A", In), pin("B", In), pin("OUT", Out)];
 
@@ -609,6 +724,7 @@ const fn logic_part(
         keywords,
         category: ComponentCategory::LogicTiming,
         parameters,
+        preset: None,
     }
 }
 
@@ -629,6 +745,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         ],
         category: ComponentCategory::AmplifiersComparators,
         parameters: OP_AMP_PARAMETERS,
+        preset: None,
     },
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.comparator",
@@ -648,6 +765,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         ],
         category: ComponentCategory::AmplifiersComparators,
         parameters: COMPARATOR_PARAMETERS,
+        preset: None,
     },
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.ota",
@@ -667,6 +785,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         ],
         category: ComponentCategory::AmplifiersComparators,
         parameters: OTA_PARAMETERS,
+        preset: None,
     },
     logic_part(
         "rspice.functional.and2",
@@ -755,25 +874,28 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         &["schmitt", "schmitt trigger", "buffer", "hysteresis"],
         SCHMITT_PARAMETERS,
     ),
-    logic_part(
-        "rspice.functional.timer555",
-        "555 Timer",
-        "RSPICE_FN_555",
-        TIMER_PINS,
-        "functional_555.svg",
-        &[
-            "555",
-            "timer",
-            "ne555",
-            "lm555",
-            "tlc555",
-            "icm7555",
-            "astable",
-            "monostable",
-            "oscillator",
-        ],
-        TIMER_PARAMETERS,
-    ),
+    FunctionalPartDescriptor {
+        preset: Some(TIMER_PRESET),
+        ..logic_part(
+            "rspice.functional.timer555",
+            "555 Timer",
+            "RSPICE_FN_555",
+            TIMER_PINS,
+            "functional_555.svg",
+            &[
+                "555",
+                "timer",
+                "ne555",
+                "lm555",
+                "tlc555",
+                "icm7555",
+                "astable",
+                "monostable",
+                "oscillator",
+            ],
+            TIMER_PARAMETERS,
+        )
+    },
     logic_part(
         "rspice.functional.phase_detector",
         "Phase Detector",
@@ -992,11 +1114,32 @@ pub fn functional_instance_parameters(
         };
         written.push(format!("{}={value}", parameter.name));
     }
+    if let Some(preset) = descriptor.preset
+        && let Some((_, value)) = parsed
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case(preset.name))
+        && preset_choice(&preset, value).is_none()
+    {
+        return Err(format!(
+            "{} is '{}'; it takes {}",
+            preset.label,
+            value.trim(),
+            preset
+                .choices
+                .iter()
+                .map(|choice| choice.label)
+                .collect::<Vec<_>>()
+                .join(" or ")
+        ));
+    }
     if let Some((key, _)) = parsed.iter().find(|(key, _)| {
         !descriptor
             .parameters
             .iter()
             .any(|parameter| parameter.name.eq_ignore_ascii_case(key))
+            && descriptor
+                .preset
+                .is_none_or(|preset| !preset.name.eq_ignore_ascii_case(key))
     }) {
         return Err(format!(
             "{} has no parameter '{}'",
@@ -1008,6 +1151,39 @@ pub fn functional_instance_parameters(
         .into_iter()
         .map(|parameter| format!(" {parameter}"))
         .collect())
+}
+
+/// The setting of `preset` that `value` names, quoted or not.
+fn preset_choice(preset: &FunctionalPreset, value: &str) -> Option<FunctionalPresetChoice> {
+    let value = value.trim();
+    let setting = ['"', '\'']
+        .into_iter()
+        .find_map(|quote| value.strip_prefix(quote)?.strip_suffix(quote))
+        .unwrap_or(value);
+    preset
+        .choices
+        .iter()
+        .find(|choice| choice.label.eq_ignore_ascii_case(setting))
+        .copied()
+}
+
+/// `params` after choosing `setting` of the part's preset: the setting is
+/// recorded, and every parameter it fills is written over.
+pub fn apply_functional_preset(
+    descriptor: &FunctionalPartDescriptor,
+    params: &str,
+    setting: &str,
+) -> Result<String, String> {
+    let preset = descriptor
+        .preset
+        .ok_or_else(|| format!("{} has no preset", descriptor.display_name))?;
+    let choice = preset_choice(&preset, setting)
+        .ok_or_else(|| format!("{} has no {} '{setting}'", descriptor.display_name, preset.label))?;
+    let mut params = crate::parameters::set_parameter_value(params, preset.name, choice.label)?;
+    for (name, value) in choice.values {
+        params = crate::parameters::set_parameter_value(&params, name, value)?;
+    }
+    Ok(params)
 }
 
 #[cfg(test)]
@@ -1209,5 +1385,55 @@ mod tests {
                 .unwrap_err()
                 .contains("takes Push-pull or Open collector")
         );
+    }
+
+    #[test]
+    fn a_preset_fills_its_parameters_and_never_reaches_the_card() {
+        let library =
+            parse_netlist(rspice_core_base::builtin_lib::FUNCTIONAL_LIB).expect("library parses");
+        let value = |text: &str| parse_spice_value_complete(text).expect("a number");
+        for descriptor in functional_parts() {
+            let Some(preset) = descriptor.preset else {
+                continue;
+            };
+            let subcircuit = library
+                .subcircuits
+                .iter()
+                .find(|subcircuit| subcircuit.name.eq_ignore_ascii_case(descriptor.subcircuit))
+                .expect("subcircuit");
+            // The first setting is the subcircuit's own defaults, and every
+            // setting fills the same parameters.
+            for (name, filled) in preset.choices[0].values {
+                let default = subcircuit
+                    .params
+                    .iter()
+                    .find(|(declared, _)| declared.eq_ignore_ascii_case(name))
+                    .map(|(_, default)| *default)
+                    .unwrap_or_else(|| panic!("{} has no {name}", descriptor.subcircuit));
+                assert_eq!(value(filled), default, "{}.{name}", descriptor.subcircuit);
+            }
+            for choice in preset.choices {
+                let names = |choice: &FunctionalPresetChoice| {
+                    choice.values.iter().map(|(name, _)| *name).collect::<Vec<_>>()
+                };
+                assert_eq!(names(choice), names(&preset.choices[0]), "{}", choice.label);
+            }
+        }
+
+        let timer = functional_part("rspice.functional.timer555").expect("555");
+        let cmos = apply_functional_preset(timer, "ROUT=7 IDIS=20m", "cmos").expect("applies");
+        assert_eq!(
+            cmos,
+            "ROUT=50 IDIS=50m PROCESS=CMOS DROP=0 ISRC=10m ISNK=100m TEDGE=20n IQ=100u RDIV=100k RDIS=10"
+        );
+        // The setting is kept on the instance and left off its card.
+        let card = functional_instance_parameters(timer, &cmos).expect("a valid card");
+        assert!(!card.contains("PROCESS") && card.contains(" DROP=0 ROUT=50"), "{card}");
+        assert!(
+            functional_instance_parameters(timer, "PROCESS=GaAs")
+                .unwrap_err()
+                .contains("takes Bipolar or CMOS")
+        );
+        assert!(apply_functional_preset(timer, "", "GaAs").is_err());
     }
 }

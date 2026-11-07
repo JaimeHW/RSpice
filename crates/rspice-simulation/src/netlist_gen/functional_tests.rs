@@ -10,7 +10,9 @@ use rspice_design::hierarchy::HierarchySource;
 use rspice_design::library::LibraryCatalog;
 use rspice_design::schematic::component::Component;
 use rspice_design::schematic::component_type::ComponentType;
-use rspice_design::schematic::functional_catalog::{functional_library_binding, functional_part};
+use rspice_design::schematic::functional_catalog::{
+    apply_functional_preset, functional_library_binding, functional_part,
+};
 use rspice_design::schematic::net_label::NetLabel;
 use rspice_design::schematic::owned::Schematic;
 use rspice_design_model::Point;
@@ -203,6 +205,8 @@ fn placed_logic_parts_settle_at_their_truth_table_levels() {
 #[test]
 fn a_placed_cmos_555_astable_oscillates_at_its_textbook_frequency() {
     // RA=1k, RB=10k, C=10n with the CMOS preset chosen by its label.
+    let timer = functional_part("rspice.functional.timer555").expect("555");
+    let cmos = apply_functional_preset(timer, "", "CMOS").expect("the CMOS preset");
     let mut bench = Bench::default();
     bench.primitive(ComponentType::VoltageSource, "VCC", "5", &["vcc", "0"]);
     bench.primitive(ComponentType::Resistor, "RA", "1k", &["vcc", "dis"]);
@@ -211,7 +215,7 @@ fn a_placed_cmos_555_astable_oscillates_at_its_textbook_frequency() {
     bench.part(
         "rspice.functional.timer555",
         "X1",
-        "TECH=CMOS",
+        &cmos,
         &["thr", "thr", "vcc", "out", "dis", "ctl", "vcc", "0"],
     );
     bench.primitive(ComponentType::Capacitor, "CC", "10n", &["ctl", "0"]);
