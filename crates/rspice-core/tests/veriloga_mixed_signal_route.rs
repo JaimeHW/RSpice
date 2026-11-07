@@ -4802,11 +4802,14 @@ endmodule
 /// The hold lags `V(input)` by at most a step `h`, so it is off by at most
 /// `w h` (1 V amplitude), and `p`, which follows the mean of the two sources,
 /// by at most half that: the error is of the order of the step, and halving
-/// the maximum step halves it. Each new sample restarts integration from its
-/// point, but it is no edge: the step after it is the truncation error's. As
-/// an edge, every sample asked for a completion a picosecond later, where the
-/// next sample was taken, and the run stopped at 4.991 ns on the delta-cycle
-/// limit with the step under a picosecond.
+/// the maximum step halves it. Read the native way, the 50 MHz source is
+/// resolved every 0.49 ns whatever the maximum step asks, so the pair halved
+/// is a quarter and an eighth of a nanosecond, both below that. Each new
+/// sample restarts integration from its point, but it is no edge: the step
+/// after it is the truncation error's. As an edge, every sample asked for a
+/// completion a picosecond later, where the next sample was taken, and the
+/// run stopped at 4.991 ns on the delta-cycle limit with the step under a
+/// picosecond.
 #[test]
 fn a_sampled_real_a_contribution_reads_is_held_between_samples() {
     let model = ModelFile::new(
@@ -4885,8 +4888,8 @@ endmodule
         );
         worst
     };
-    let coarse = worst_error(1.0e-9);
-    let fine = worst_error(0.5e-9);
+    let coarse = worst_error(0.25e-9);
+    let fine = worst_error(0.125e-9);
     let ratio = coarse / fine;
     assert!(
         (1.6..=2.4).contains(&ratio),
