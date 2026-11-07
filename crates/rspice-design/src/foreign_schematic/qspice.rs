@@ -23,6 +23,9 @@ const COMMENT_TEXT_FLAG: &str = "1";
 /// A text QSPICE draws on a symbol without putting it on the instance line,
 /// unless it is the symbol's first text, its instance name.
 const GRAPHIC_TEXT_FLAG: &str = "2";
+/// The attribute holding a symbol's first drawn text after its name: a
+/// QSPICE behavioural device's type (`AND`, `MultGmAmp`).
+pub(super) const DEVICE_TYPE: &str = "DeviceType";
 
 /// Reads a `.qsch` schematic from its bytes.
 pub fn parse_qsch(bytes: &[u8]) -> Result<ForeignSchematic, ForeignParseError> {
@@ -197,6 +200,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
     let (_, symbol_name) = symbol_node.keyword();
     let mut definition = ForeignSymbolDefinition::default();
     let mut texts = Vec::new();
+    let mut device_type = None;
     for child in &symbol_node.children {
         let (keyword, fields) = child.keyword();
         match keyword {
@@ -229,7 +233,13 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                 let flags = numbers_after_points(fields);
                 match flags.get(2).map(String::as_str) {
                     Some(COMMENT_TEXT_FLAG) => continue,
-                    Some(GRAPHIC_TEXT_FLAG) if !texts.is_empty() => continue,
+                    Some(GRAPHIC_TEXT_FLAG) if !texts.is_empty() => {
+                        // A behavioural device draws its type this way.
+                        if device_type.is_none() {
+                            device_type = Some(quoted(fields).join(" "));
+                        }
+                        continue;
+                    }
                     _ => {}
                 }
                 texts.push((
@@ -243,6 +253,12 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
         }
     }
     let mut attributes = Vec::new();
+    if let Some(device_type) = device_type {
+        attributes.push(ForeignAttribute {
+            name: DEVICE_TYPE.to_owned(),
+            value: device_type,
+        });
+    }
     let mut windows = Vec::new();
     let mut texts = texts.into_iter();
     if let Some((offset, name)) = texts.next() {

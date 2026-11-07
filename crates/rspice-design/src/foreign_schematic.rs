@@ -7,6 +7,7 @@
 
 use std::fmt;
 
+mod behaviour;
 mod directives;
 mod functional;
 mod import;

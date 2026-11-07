@@ -723,6 +723,9 @@ fn qsch_bytes(text: &str) -> Vec<u8> {
             '«' => bytes.push(0xAB),
             '»' => bytes.push(0xBB),
             'Ø' => bytes.push(0xD8),
+            '¥' => bytes.push(0xA5),
+            'Ã' => bytes.push(0xC3),
+            'µ' => bytes.push(0xB5),
             other => bytes.extend_from_slice(other.to_string().as_bytes()),
         }
     }
@@ -1609,6 +1612,129 @@ fn an_ltspice_frequency_response_probe_is_refused_by_name() {
         refusals[0].message
     );
     assert!(imported.document.components.is_empty());
+}
+
+/// QSPICE's ¥-device gate and Ã-device Gm amplifier: each comes across as a
+/// behavioural subcircuit written for it, its pins in the symbol's order,
+/// with the settings it states, and a notice naming it.
+#[test]
+fn qspice_gates_and_gm_amplifiers_come_across_as_behavioural_subcircuits() {
+    const DRAWING: &str = "«schematic
+  «component (0,0) 0 0
+    «symbol AND2Q
+      «type: ¥»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"¥1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"AND\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Trise=10n Zmult=2\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"Q\"»
+      «pin (400,-200) (0,0) 1 0 0 0x1000000 -1 \"Qb\" \"¥\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"b0\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"b1\"»
+    »
+  »
+  «component (2000,0) 0 0
+    «symbol Gm
+      «type: Ã»
+      «text (0,300) 1 7 0 0x1000000 -1 -1 \"Ã1\"»
+      «text (0,-200) 0.5 0 2 0x1000000 -1 -1 \"MultGmAmp\"»
+      «text (0,-300) 1 7 0 0x1000000 -1 -1 \"Gm=<50µ> Isrc=10µ VoutMax=2.5 Ft=1Meg\"»
+      «pin (0,400) (0,0) 1 0 0 0x1000000 -1 \"Vdd\"»
+      «pin (0,-400) (0,0) 1 0 0 0x1000000 -1 \"Vss\"»
+      «pin (400,0) (0,0) 1 0 0 0x1000000 -1 \"OUT\"»
+      «pin (-400,200) (0,0) 1 0 0 0x1000000 -1 \"IN-\"»
+      «pin (-400,-200) (0,0) 1 0 0 0x1000000 -1 \"IN+\"»
+      «pin (-400,100) (0,0) 1 0 0 0x1000000 -1 \"MULT+\" \"¥\"»
+      «pin (-400,-100) (0,0) 1 0 0 0x1000000 -1 \"MULT-\" \"¥\"»
+    »
+  »
+  «net (0,400) 1 13 0 \"VDD\"»
+  «net (0,-400) 1 13 0 \"GND\"»
+  «net (400,0) 1 13 0 \"y\"»
+  «net (-400,200) 1 13 0 \"a\"»
+  «net (-400,-200) 1 13 0 \"b\"»
+  «net (2000,400) 1 13 0 \"VDD\"»
+  «net (2000,-400) 1 13 0 \"GND\"»
+  «net (2400,0) 1 13 0 \"out\"»
+  «net (1600,200) 1 13 0 \"out\"»
+  «net (1600,-200) 1 13 0 \"a\"»
+»
+";
+    let drawing = parse_qsch(&qsch_bytes(DRAWING)).unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &Library::default());
+    assert!(
+        imported
+            .notices
+            .iter()
+            .all(|notice| notice.severity == ForeignNoticeSeverity::Notice),
+        "{:#?}",
+        imported.notices
+    );
+    let [gate, amplifier] = imported.model_cards.as_slice() else {
+        panic!("{:#?}", imported.model_cards);
+    };
+    assert!(
+        gate.contains(
+            ".subckt AND2Q_1 p1 p2 p3 p4 p5 p6
+"
+        ),
+        "{gate}"
+    );
+    // Both inputs are used; the threshold is the supply midpoint above Vss.
+    assert!(
+        gate.contains("Bs s 0 V=u(V(p5)-V(p2)-(V(p1)-V(p2))/2)*u(V(p6)-V(p2)-(V(p1)-V(p2))/2)"),
+        "{gate}"
+    );
+    assert!(
+        gate.contains("I=limit((V(s)-V(r))/((10n)/1000),-1/((10n)/1000),1/(10n))"),
+        "{gate}"
+    );
+    assert!(
+        gate.contains(
+            "Rq q p3 100
+"
+        ),
+        "{gate}"
+    );
+    assert!(
+        amplifier.contains(
+            ".subckt Gm_2 p1 p2 p3 p4 p5 p6 p7
+"
+        ),
+        "{amplifier}"
+    );
+    // The unused multiplier pins leave the gain as it is.
+    assert!(
+        amplifier.contains(
+            "Bx x 0 V=(50u)*(V(p5)-V(p4))
+"
+        ),
+        "{amplifier}"
+    );
+    assert!(
+        amplifier.contains("Bi i 0 V=limit(V(xf),-1e30,(10u))"),
+        "{amplifier}"
+    );
+    assert!(
+        amplifier.contains("Bmax p3 p2 I=1k*uramp(V(p3)-V(p2)-(2.5))"),
+        "{amplifier}"
+    );
+    let zmult = imported
+        .notices
+        .iter()
+        .find(|notice| notice.message.contains("¥1"))
+        .expect("the gate's notice");
+    assert!(zmult.message.contains("zmult"), "{}", zmult.message);
+    let parts = imported
+        .document
+        .components
+        .iter()
+        .filter(|component| component.kind == ComponentType::CellInstance)
+        .map(|component| (component.name.as_str(), component.value.as_str()))
+        .collect::<Vec<_>>();
+    assert_eq!(parts, [("X1", "AND2Q_1"), ("X2", "Gm_2")]);
+    assert_on_grid(&imported);
 }
 
 /// LTspice's UniversalOpAmp2 at level2 is RSpice's Op-Amp with its settings

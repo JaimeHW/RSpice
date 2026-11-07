@@ -15,12 +15,14 @@ use std::path::PathBuf;
 use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 
+use super::behaviour::qspice_behaviour;
 use super::directives::{defined_model_names, foreign_directive_cards};
 use super::functional::{Functional, FunctionalPlan, SourceNets, ltspice_gate, ltspice_opamp};
 use super::mapping::{
     LTSPICE_AWAITING_NATIVE_PARTS, NativeKind, NativeMapping, ltspice_builtin_definition,
     native_mapping, qspice_refusal, source_value, spice_text, spice_tokens,
 };
+use super::qspice::DEVICE_TYPE;
 use super::{
     ForeignAttribute, ForeignPin, ForeignPoint, ForeignPortDirection, ForeignSchematic,
     ForeignShape, ForeignSymbol, ForeignSymbolDefinition, ForeignTextKind, ForeignTool,
@@ -246,6 +248,7 @@ pub fn import_foreign_schematic(
         models: BTreeSet::new(),
         pin_points: HashMap::new(),
         device_ties: Vec::new(),
+        behaviours: Vec::new(),
     };
     let resolved = drawing
         .symbols
@@ -329,6 +332,8 @@ struct Builder<'a> {
     /// Terminals of LTspice A-devices that LTspice grounds when nothing
     /// else reaches them.
     device_ties: Vec<DeviceTie>,
+    /// The subcircuits written for QSPICE's behavioural devices.
+    behaviours: Vec<String>,
 }
 
 type Resolved = (
@@ -417,6 +422,12 @@ impl Builder<'_> {
         let tool = self.drawing.tool;
         let label = self.symbol_label(symbol);
         if tool == ForeignTool::Qspice
+            && let Some(definition) = &symbol.embedded
+            && self.place_behaviour(symbol, definition)
+        {
+            return;
+        }
+        if tool == ForeignTool::Qspice
             && let Some(reason) = symbol
                 .embedded
                 .as_ref()
@@ -496,6 +507,87 @@ impl Builder<'_> {
         if self.document.components.len() > placed {
             self.letter_like_the_drawing(symbol, &definition);
         }
+    }
+
+    /// Places a QSPICE ¥-device gate or Ã-device Gm amplifier as the
+    /// behavioural subcircuit written for it, which goes into the project's
+    /// model library. Returns whether it did.
+    fn place_behaviour(
+        &mut self,
+        symbol: &ForeignSymbol,
+        definition: &ForeignSymbolDefinition,
+    ) -> bool {
+        let Some(device) = definition.symbol_type.trim().chars().next() else {
+            return false;
+        };
+        let value = format!(
+            "{} {}",
+            symbol.attribute(DEVICE_TYPE).unwrap_or_default(),
+            symbol.attribute("Value").unwrap_or_default()
+        );
+        let pins = definition
+            .ordered_pins()
+            .into_iter()
+            .map(|pin| {
+                self.scale(
+                    symbol
+                        .position
+                        .offset(symbol.orientation.apply(pin.position)),
+                )
+            })
+            .collect::<Vec<_>>();
+        let reached = pins
+            .iter()
+            .map(|point| {
+                self.source_nets.net(*point).is_some()
+                    || self.pin_points.get(point).copied().unwrap_or_default() > 1
+            })
+            .collect::<Vec<_>>();
+        let model = format!(
+            "{}_{}",
+            cell_name(&symbol.symbol),
+            self.behaviours.len() + 1
+        );
+        let Some(behaviour) = qspice_behaviour(device, &value, &reached, &model) else {
+            return false;
+        };
+        let label = self.symbol_label(symbol);
+        let unmodelled = if behaviour.unmodelled.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "; its {} setting(s) are not modelled",
+                behaviour.unmodelled.join(", ")
+            )
+        };
+        self.notice(format!(
+            "{label} is QSPICE's {device}-device {}; it comes across as the behavioural subcircuit `{model}`, written into the project's model library, with its outputs between its Vdd and Vss pins{unmodelled}.",
+            behaviour.kind
+        ));
+        self.behaviours.push(behaviour.card);
+        // The device letter is QSPICE's; RSpice names the part as a
+        // subcircuit.
+        let name = symbol
+            .attribute("InstName")
+            .unwrap_or_default()
+            .trim_start_matches(device);
+        let attributes = [
+            ForeignAttribute {
+                name: "InstName".to_owned(),
+                value: format!("X{name}"),
+            },
+            ForeignAttribute {
+                name: "Value".to_owned(),
+                value: model,
+            },
+        ];
+        self.anchors.extend(pins.iter().copied());
+        let placed = self.document.components.len();
+        self.place_cell(symbol, definition, &attributes, None, None, &pins);
+        if self.document.components.len() > placed {
+            self.letter_like_the_drawing(symbol, definition);
+        }
+        true
     }
 
     /// Puts the last placed part's name and value where the drawing
@@ -755,6 +847,8 @@ impl Builder<'_> {
         attributes: &[ForeignAttribute],
         pins: &[Point],
     ) -> Option<FunctionalPlan> {
+        let opamp = symbol.base_name().eq_ignore_ascii_case("UniversalOpAmp2")
+            && definition.pins.len() == 5;
         if self.drawing.tool != ForeignTool::Ltspice
             || !opamp
                 && !attribute(attributes, "Prefix")
@@ -853,8 +947,6 @@ impl Builder<'_> {
         definition: &ForeignSymbolDefinition,
         attributes: &[ForeignAttribute],
         location: Option<String>,
-        let opamp = symbol.base_name().eq_ignore_ascii_case("UniversalOpAmp2")
-            && definition.pins.len() == 5;
         schematic: Option<PathBuf>,
         pins: &[Point],
     ) {
@@ -1813,6 +1905,7 @@ impl Builder<'_> {
             .iter()
             .filter(|model| !defined.contains(&model.to_ascii_lowercase()))
             .filter_map(|model| self.access.model_card(model))
+            .chain(self.behaviours)
             .collect();
         ForeignImport {
             document: self.document,
