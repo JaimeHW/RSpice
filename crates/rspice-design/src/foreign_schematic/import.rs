@@ -16,7 +16,7 @@ use rspice_design_model::Point;
 use rspice_design_model::port::{PortDirection, PortSpec};
 
 use super::directives::{defined_model_names, foreign_directive_cards};
-use super::functional::{Functional, FunctionalPlan, SourceNets, ltspice_gate};
+use super::functional::{Functional, FunctionalPlan, SourceNets, ltspice_gate, ltspice_opamp};
 use super::mapping::{
     LTSPICE_AWAITING_NATIVE_PARTS, NativeKind, NativeMapping, ltspice_builtin_definition,
     native_mapping, qspice_refusal, source_value, spice_text, spice_tokens,
@@ -756,8 +756,9 @@ impl Builder<'_> {
         pins: &[Point],
     ) -> Option<FunctionalPlan> {
         if self.drawing.tool != ForeignTool::Ltspice
-            || !attribute(attributes, "Prefix")
-                .is_some_and(|prefix| prefix.trim().eq_ignore_ascii_case("A"))
+            || !opamp
+                && !attribute(attributes, "Prefix")
+                    .is_some_and(|prefix| prefix.trim().eq_ignore_ascii_case("A"))
         {
             return None;
         }
@@ -781,7 +782,12 @@ impl Builder<'_> {
         let nets = &self.source_nets;
         let net = |index: usize| pins.get(index).and_then(|point| nets.net(*point));
         let is_ground = |net: usize| nets.is_ground(net);
-        match ltspice_gate(&model, &definition.ordered_pins(), &net, &is_ground, &words)? {
+        let functional = if opamp {
+            ltspice_opamp(&model, &words)
+        } else {
+            ltspice_gate(&model, &definition.ordered_pins(), &net, &is_ground, &words)?
+        };
+        match functional {
             Functional::Part(plan) => Some(plan),
             Functional::Kept(reason) => {
                 let label = self.symbol_label(symbol);
@@ -847,6 +853,8 @@ impl Builder<'_> {
         definition: &ForeignSymbolDefinition,
         attributes: &[ForeignAttribute],
         location: Option<String>,
+        let opamp = symbol.base_name().eq_ignore_ascii_case("UniversalOpAmp2")
+            && definition.pins.len() == 5;
         schematic: Option<PathBuf>,
         pins: &[Point],
     ) {

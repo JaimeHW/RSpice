@@ -1610,3 +1610,82 @@ fn an_ltspice_frequency_response_probe_is_refused_by_name() {
     );
     assert!(imported.document.components.is_empty());
 }
+
+/// LTspice's UniversalOpAmp2 at level2 is RSpice's Op-Amp with its settings
+/// on the sheet; another level, or a setting the Op-Amp has no field for,
+/// keeps LTspice's part with a notice.
+#[test]
+fn an_ltspice_universal_opamp_at_level2_is_the_functional_op_amp() {
+    const OPAMP_ASY: &str = "Version 4\nSymbolType CELL\nLINE Normal -32 -32 32 0\n\
+        LINE Normal -32 32 32 0\nLINE Normal -32 -32 -32 32\nSYMATTR Prefix X\n\
+        SYMATTR SpiceModel level2\nSYMATTR Value2 Avol=1Meg GBW=10Meg Slew=10Meg\n\
+        SYMATTR SpiceLine Ilimit=25m Rail=0 Vos=0\n\
+        SYMATTR SpiceLine2 En=0 Enk=0 In=0 Ink=0 Rin=500Meg\n\
+        SYMATTR ModelFile UniversalOpAmp2.lib\n\
+        PIN -32 16 NONE 0\nPINATTR PinName In+\nPINATTR SpiceOrder 1\n\
+        PIN -32 -16 NONE 0\nPINATTR PinName In-\nPINATTR SpiceOrder 2\n\
+        PIN 0 -32 NONE 0\nPINATTR PinName V+\nPINATTR SpiceOrder 3\n\
+        PIN 0 32 NONE 0\nPINATTR PinName V-\nPINATTR SpiceOrder 4\n\
+        PIN 32 0 NONE 0\nPINATTR PinName OUT\nPINATTR SpiceOrder 5\n";
+    let mut library = Library::default();
+    library.symbols.insert(
+        "opamps\\universalopamp2".to_owned(),
+        ForeignSymbolSource {
+            definition: parse_asy(OPAMP_ASY).expect("the test symbol reads"),
+            location: "opamps/UniversalOpAmp2.asy".to_owned(),
+            schematic: None,
+        },
+    );
+    let drawing = parse_asc(
+        "Version 4\nSHEET 1 1600 400\n\
+         FLAG -32 16 in\nFLAG -32 -16 out\nFLAG 0 -32 vcc\nFLAG 0 32 vee\nFLAG 32 0 out\n\
+         SYMBOL Opamps\\UniversalOpAmp2 0 0 R0\nSYMATTR InstName U1\nSYMATTR SpiceLine Ilimit=10m Rail=0.1\n\
+         FLAG 288 16 in\nFLAG 288 -16 out2\nFLAG 320 -32 vcc\nFLAG 320 32 vee\nFLAG 352 0 out2\n\
+         SYMBOL Opamps\\UniversalOpAmp2 320 0 R0\nSYMATTR InstName U2\nSYMATTR SpiceModel level3a\n\
+         FLAG 608 16 in\nFLAG 608 -16 out3\nFLAG 640 -32 vcc\nFLAG 640 32 vee\nFLAG 672 0 out3\n\
+         SYMBOL Opamps\\UniversalOpAmp2 640 0 R0\nSYMATTR InstName U3\nSYMATTR SpiceLine2 Phimargin=45\n",
+    )
+    .unwrap();
+    let imported = import_foreign_schematic(&drawing, "work", &library);
+    assert_on_grid(&imported);
+    let part = |name: &str| {
+        imported
+            .document
+            .components
+            .iter()
+            .find(|component| component.name == name)
+            .unwrap_or_else(|| panic!("{name} was placed"))
+    };
+    let functional = |name: &str| {
+        part(name)
+            .library_cell
+            .as_ref()
+            .and_then(|binding| binding.builtin_functional.as_ref())
+            .map(|contract| contract.stable_id.as_str())
+    };
+    assert_eq!(functional("U1"), Some("rspice.functional.opamp"));
+    let params = part("U1").params.split_whitespace().collect::<Vec<_>>();
+    for setting in [
+        "AVOL=1Meg",
+        "GBW=10Meg",
+        "SLEW=10Meg",
+        "ISRC=10m",
+        "ISNK=10m",
+        "HEADROOM=0.1",
+        "RIN=500Meg",
+    ] {
+        assert!(params.contains(&setting), "{setting} in {params:?}");
+    }
+    for kept in ["U2", "U3"] {
+        assert_eq!(functional(kept), None);
+        assert!(
+            imported
+                .notices
+                .iter()
+                .any(|notice| notice.message.starts_with(kept)
+                    && notice.message.contains("keeps LTspice's own part")),
+            "{kept}: {:#?}",
+            imported.notices
+        );
+    }
+}

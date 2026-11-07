@@ -285,3 +285,54 @@ pub(super) fn ltspice_gate(
         params,
     }))
 }
+
+/// What LTspice's `UniversalOpAmp2` becomes: at `level2`, its single-pole
+/// model with slew, output current and rail limits, RSpice's Op-Amp with the
+/// settings `words` give it, pins In+ In- V+ V- OUT in that order. Any other
+/// level, or a setting the Op-Amp has no field for, keeps LTspice's part.
+pub(super) fn ltspice_opamp(model: &str, words: &[String]) -> Functional {
+    if !model.eq_ignore_ascii_case("level2") {
+        return Functional::Kept(format!(
+            "is LTspice's UniversalOpAmp2 at `{model}`, which RSpice's Op-Amp does not model (it models level2), so it keeps LTspice's own part"
+        ));
+    }
+    let mut params = Vec::new();
+    for word in words {
+        let Some((key, value)) = word
+            .split_once('=')
+            .filter(|(key, value)| !key.is_empty() && !value.is_empty())
+        else {
+            return Functional::Kept(format!(
+                "has `{word}` on its line, which RSpice's Op-Amp has no setting for, so it keeps LTspice's own part"
+            ));
+        };
+        let fields: &[&str] = match key.to_ascii_lowercase().as_str() {
+            "avol" => &["AVOL"],
+            "gbw" => &["GBW"],
+            "slew" => &["SLEW"],
+            "vos" => &["VOS"],
+            "rin" => &["RIN"],
+            "en" => &["EN"],
+            "enk" => &["ENK"],
+            "in" => &["IN"],
+            "ink" => &["INK"],
+            // LTspice's one output current limit holds both ways.
+            "ilimit" => &["ISRC", "ISNK"],
+            "rail" => &["HEADROOM"],
+            _ => {
+                return Functional::Kept(format!(
+                    "sets `{word}`, which RSpice's Op-Amp has no setting for, so it keeps LTspice's own part"
+                ));
+            }
+        };
+        for field in fields {
+            params.retain(|(name, _): &(String, String)| name != field);
+            params.push(((*field).to_owned(), value.to_owned()));
+        }
+    }
+    Functional::Part(FunctionalPlan {
+        stable_id: "rspice.functional.opamp",
+        pins: vec![0, 1, 2, 3, 4],
+        params,
+    })
+}
