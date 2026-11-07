@@ -214,12 +214,13 @@ pub enum ElementProvenance {
         form: SynthesizedTransferForm,
     },
     /// Behavioral voltage source driving the private input node of a source
-    /// known by a measured frequency response.
+    /// known by its frequency response: a measured `FREQ` table, or a
+    /// LAPLACE expression with a factor that is not rational in `s`.
     ///
-    /// The owner's other elements realize a rational fit of `response` for
-    /// the transient. Small-signal analyses use the response itself: there
-    /// the owner's output is `response` times the small-signal voltage of
-    /// `node`.
+    /// For a table, the owner's other elements realize a rational fit of
+    /// `response` for the transient. Small-signal analyses use the response
+    /// itself: there the owner's output is `response` times the small-signal
+    /// voltage of `node`.
     GeneratedFrequencyResponseInput {
         owner: String,
         node: String,
@@ -291,32 +292,74 @@ impl SynthesizedTransferForm {
     }
 }
 
-/// A small-signal transfer known as gains measured at increasing
-/// frequencies, as an E/G `FREQ` table gives it.
+/// A small-signal transfer known by its gain at each frequency.
 ///
-/// The end gains hold below the first entry and above the last. Between two
+/// An E/G `FREQ` table gives gains measured at increasing frequencies. The
+/// end gains hold below the first entry and above the last. Between two
 /// entries whose phases differ by at most a quarter turn, the magnitude in dB
 /// and the phase are linear in log frequency; from a 0 Hz entry, or across a
 /// wider turn, the real and imaginary parts are linear in frequency. That is
 /// how QSPICE reads the table.
+///
+/// A LAPLACE expression with a factor that is not rational in `s` gives its
+/// gain exactly, evaluated at `s = j·2π·frequency`.
 #[derive(Debug, Clone)]
 pub struct FrequencyResponse {
+    kind: ResponseKind,
+}
+
+#[derive(Debug, Clone)]
+enum ResponseKind {
     /// `(frequency in hertz, gain)`: at least one, frequencies non-negative
     /// and strictly increasing.
-    entries: Vec<(Value, num_complex::Complex64)>,
+    Table(Vec<(Value, num_complex::Complex64)>),
+    Transfer(std::sync::Arc<super::parser::TransferExpression>),
 }
 
 impl FrequencyResponse {
     pub(crate) fn new(entries: Vec<(Value, num_complex::Complex64)>) -> Self {
         debug_assert!(!entries.is_empty());
         debug_assert!(entries.windows(2).all(|pair| pair[0].0 < pair[1].0));
-        Self { entries }
+        Self {
+            kind: ResponseKind::Table(entries),
+        }
+    }
+
+    pub(crate) fn transfer(transfer: super::parser::TransferExpression) -> Self {
+        Self {
+            kind: ResponseKind::Transfer(std::sync::Arc::new(transfer)),
+        }
+    }
+
+    /// How the source was written: `FREQ` or `LAPLACE`.
+    #[must_use]
+    pub fn form(&self) -> SynthesizedTransferForm {
+        match self.kind {
+            ResponseKind::Table(_) => SynthesizedTransferForm::Frequency,
+            ResponseKind::Transfer(_) => SynthesizedTransferForm::Laplace,
+        }
+    }
+
+    /// For a LAPLACE expression, its first factor that is not rational in
+    /// `s`, as written: the source has no response in time.
+    #[must_use]
+    pub fn non_rational_factor(&self) -> Option<&str> {
+        match &self.kind {
+            ResponseKind::Table(_) => None,
+            ResponseKind::Transfer(transfer) => Some(transfer.factor()),
+        }
     }
 
     /// The gain at `frequency` hertz.
     #[must_use]
     pub fn gain(&self, frequency: Value) -> num_complex::Complex64 {
-        let entries = &self.entries;
+        let entries = match &self.kind {
+            ResponseKind::Table(entries) => entries,
+            ResponseKind::Transfer(transfer) => {
+                let omega = 2.0 * std::f64::consts::PI * frequency;
+                return transfer.at(num_complex::Complex64::new(0.0, omega));
+            }
+        };
         let upper = entries.partition_point(|&(at, _)| at <= frequency);
         if upper == 0 {
             return entries[0].1;
@@ -346,12 +389,13 @@ impl PartialEq for FrequencyResponse {
         let bits = |&(frequency, gain): &(Value, num_complex::Complex64)| {
             [frequency.to_bits(), gain.re.to_bits(), gain.im.to_bits()]
         };
-        self.entries.len() == other.entries.len()
-            && self
-                .entries
-                .iter()
-                .zip(&other.entries)
-                .all(|(a, b)| bits(a) == bits(b))
+        match (&self.kind, &other.kind) {
+            (ResponseKind::Table(a), ResponseKind::Table(b)) => {
+                a.len() == b.len() && a.iter().zip(b).all(|(a, b)| bits(a) == bits(b))
+            }
+            (ResponseKind::Transfer(a), ResponseKind::Transfer(b)) => a.same(b),
+            _ => false,
+        }
     }
 }
 

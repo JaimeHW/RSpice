@@ -23,9 +23,16 @@
 //! denominator is then made monic and the realization is frequency-scaled
 //! by `ω₀ = a₀^(1/n)` (the geometric mean of the pole magnitudes) so state
 //! magnitudes and stamped conductances stay O(1) wherever the poles live.
+//!
+//! An expression with a factor that is not rational in `s`, such as
+//! `1/sqrt(1+s*tau)`, has no such realization. As QSPICE does, small-signal
+//! analyses evaluate it exactly at `s = jω` and the operating point takes its
+//! value at `s = 0`; analyses that need its response in time refuse it.
 
 use super::{DelayTime, Element, ElementKind, ParseError, SourceMultiplicity, delay_line};
 use crate::Value;
+use crate::netlist::{ElementProvenance, FrequencyResponse};
+use num_complex::Complex64;
 
 //=============================================================================
 // Polynomials and rational functions in s
@@ -108,6 +115,20 @@ impl Rational {
             den: vec![1.0],
             delay: 0.0,
         }
+    }
+
+    /// The value of a rational that does not depend on `s`.
+    fn constant_value(&self) -> Option<Value> {
+        let num = poly_trim(self.num.clone());
+        let den = poly_trim(self.den.clone());
+        (num.len() == 1 && den.len() == 1 && self.delay == 0.0).then(|| num[0] / den[0])
+    }
+
+    /// Whether the rational is `c - s·T`, the argument a delay factor takes.
+    fn is_affine(&self) -> bool {
+        let num = poly_trim(self.num.clone());
+        let den = poly_trim(self.den.clone());
+        den.len() == 1 && num.len() <= 2 && self.delay == 0.0
     }
 
     /// `exp(argument)`, which is realizable only for an argument `c - s·T`.
@@ -207,7 +228,8 @@ enum RatTok {
     Caret,
     LParen,
     RParen,
-    /// A named function, applied to the parenthesized argument that follows.
+    Comma,
+    /// A named function, applied to the parenthesized arguments that follow.
     Function(String),
 }
 
@@ -227,16 +249,20 @@ fn suffix_multiplier(suffix: &str) -> Option<Value> {
     }
 }
 
+/// The tokens of `text`, and the characters each was read from.
 fn tokenize_rational(
     parameter: &dyn Fn(&str) -> Option<Value>,
     text: &str,
-) -> Result<Vec<RatTok>, String> {
+) -> Result<(Vec<RatTok>, Vec<(usize, usize)>), String> {
     let mut tokens = Vec::new();
+    let mut spans = Vec::new();
     let chars: Vec<char> = text.chars().collect();
     let mut i = 0;
 
     while i < chars.len() {
         let c = chars[i];
+        let start = i;
+        let read = tokens.len();
         match c {
             ' ' | '\t' | '{' | '}' => i += 1,
             '+' => {
@@ -272,6 +298,10 @@ fn tokenize_rational(
                 tokens.push(RatTok::RParen);
                 i += 1;
             }
+            ',' => {
+                tokens.push(RatTok::Comma);
+                i += 1;
+            }
             's' | 'S' if !chars.get(i + 1).is_some_and(|c| c.is_ascii_alphanumeric()) => {
                 tokens.push(RatTok::S);
                 i += 1;
@@ -291,7 +321,7 @@ fn tokenize_rational(
                 } else {
                     return Err(format!(
                         "unknown symbol '{name}' in LAPLACE expression \
-                         (allowed: numbers, parameters, s, + - * / ^, parentheses and exp(-s*T))"
+                         (allowed: numbers, parameters, s, + - * / ^, parentheses and functions)"
                     ));
                 }
             }
@@ -337,20 +367,262 @@ fn tokenize_rational(
             other => {
                 return Err(format!(
                     "unsupported symbol '{other}' in LAPLACE expression \
-                     (allowed: numbers, s, + - * / ^ and parentheses)"
+                     (allowed: numbers, s, + - * / ^, parentheses and functions)"
                 ));
             }
         }
+        if tokens.len() > read {
+            spans.push((start, i));
+        }
     }
-    Ok(tokens)
+    Ok((tokens, spans))
 }
 
-struct RatParser {
+/// A function a LAPLACE expression may apply. Each is read over the complex
+/// numbers on its principal branch, as QSPICE and LTspice read it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TransferFunction {
+    Sqrt,
+    Exp,
+    Ln,
+    Log10,
+    Abs,
+    Pow,
+    Sin,
+    Cos,
+    Tan,
+    Sinh,
+    Cosh,
+    Tanh,
+}
+
+impl TransferFunction {
+    const NAMES: &'static str =
+        "sqrt, exp, ln, log, log10, abs, pow, sin, cos, tan, sinh, cosh and tanh";
+
+    fn named(name: &str) -> Option<Self> {
+        Some(match name.to_ascii_lowercase().as_str() {
+            "sqrt" => Self::Sqrt,
+            "exp" => Self::Exp,
+            "ln" | "log" => Self::Ln,
+            "log10" => Self::Log10,
+            "abs" => Self::Abs,
+            "pow" => Self::Pow,
+            "sin" => Self::Sin,
+            "cos" => Self::Cos,
+            "tan" => Self::Tan,
+            "sinh" => Self::Sinh,
+            "cosh" => Self::Cosh,
+            "tanh" => Self::Tanh,
+            _ => return None,
+        })
+    }
+
+    const fn arity(self) -> usize {
+        if matches!(self, Self::Pow) { 2 } else { 1 }
+    }
+}
+
+/// A LAPLACE expression as written: numbers, `s`, arithmetic, powers and
+/// functions. A power and a function call keep the text they were written
+/// as, to name a factor that has no rational realization.
+#[derive(Debug, Clone)]
+enum Term {
+    Number(Value),
+    S,
+    Negate(Box<Term>),
+    Sum(Box<Term>, Box<Term>),
+    Difference(Box<Term>, Box<Term>),
+    Product(Box<Term>, Box<Term>),
+    Quotient(Box<Term>, Box<Term>),
+    Power(Box<Term>, Box<Term>, String),
+    Call(TransferFunction, Vec<Term>, String),
+}
+
+/// Why a term has no state-space realization.
+enum Unrealizable {
+    /// A factor, as written, that is not rational in `s`; the expression is
+    /// still defined at every `s = jω`.
+    Factor(String),
+    /// The expression is not a transfer at all.
+    Error(String),
+}
+
+/// `base ** exponent` on the principal branch; a small integer exponent is
+/// an exact product.
+fn complex_power(base: Complex64, exponent: Complex64) -> Complex64 {
+    if exponent.im != 0.0 {
+        return base.powc(exponent);
+    }
+    let n = exponent.re;
+    if n.fract() == 0.0 && n.abs() <= 64.0 {
+        base.powi(n as i32)
+    } else {
+        base.powf(n)
+    }
+}
+
+impl Term {
+    /// The value at the complex frequency `s`.
+    fn at(&self, s: Complex64) -> Complex64 {
+        match self {
+            Self::Number(value) => Complex64::new(*value, 0.0),
+            Self::S => s,
+            Self::Negate(term) => -term.at(s),
+            Self::Sum(a, b) => a.at(s) + b.at(s),
+            Self::Difference(a, b) => a.at(s) - b.at(s),
+            Self::Product(a, b) => a.at(s) * b.at(s),
+            Self::Quotient(a, b) => a.at(s) / b.at(s),
+            Self::Power(base, exponent, _) => complex_power(base.at(s), exponent.at(s)),
+            Self::Call(function, args, _) => {
+                let x = args[0].at(s);
+                match function {
+                    TransferFunction::Sqrt => x.sqrt(),
+                    TransferFunction::Exp => x.exp(),
+                    TransferFunction::Ln => x.ln(),
+                    TransferFunction::Log10 => x.log10(),
+                    TransferFunction::Abs => Complex64::new(x.norm(), 0.0),
+                    TransferFunction::Pow => complex_power(x, args[1].at(s)),
+                    TransferFunction::Sin => x.sin(),
+                    TransferFunction::Cos => x.cos(),
+                    TransferFunction::Tan => x.tan(),
+                    TransferFunction::Sinh => x.sinh(),
+                    TransferFunction::Cosh => x.cosh(),
+                    TransferFunction::Tanh => x.tanh(),
+                }
+            }
+        }
+    }
+
+    /// The exact rational function in `s` the term is, times a delay.
+    fn rational(&self) -> Result<Rational, Unrealizable> {
+        use Unrealizable::Error;
+        match self {
+            Self::Number(value) => Ok(Rational::constant(*value)),
+            Self::S => Ok(Rational::s()),
+            Self::Negate(term) => Rational::constant(0.0)
+                .sub(&term.rational()?)
+                .map_err(Error),
+            Self::Sum(a, b) => {
+                let (a, b) = Self::both(a, b)?;
+                a.add(&b).map_err(Error)
+            }
+            Self::Difference(a, b) => {
+                let (a, b) = Self::both(a, b)?;
+                a.sub(&b).map_err(Error)
+            }
+            Self::Product(a, b) => {
+                let (a, b) = Self::both(a, b)?;
+                Ok(a.mul(&b))
+            }
+            Self::Quotient(a, b) => {
+                let (a, b) = Self::both(a, b)?;
+                a.div(&b).map_err(Error)
+            }
+            Self::Power(base, exponent, text) => {
+                let (base, exponent) = Self::both(base, exponent)?;
+                match exponent.constant_value() {
+                    Some(n) if n.fract() == 0.0 && n.abs() <= 16.0 => {
+                        let power = base.powi(n.abs() as u32);
+                        if n < 0.0 {
+                            Rational::constant(1.0).div(&power).map_err(Error)
+                        } else {
+                            Ok(power)
+                        }
+                    }
+                    _ => Err(Unrealizable::Factor(text.clone())),
+                }
+            }
+            Self::Call(TransferFunction::Exp, args, text) => {
+                let argument = args[0].rational()?;
+                if !argument.is_affine() {
+                    return Err(Unrealizable::Factor(text.clone()));
+                }
+                Rational::exp(&argument).map_err(Error)
+            }
+            Self::Call(_, _, text) => Err(Unrealizable::Factor(text.clone())),
+        }
+    }
+
+    /// Both operands as rationals; a factor with no realization in either is
+    /// named before any other failure.
+    fn both(a: &Self, b: &Self) -> Result<(Rational, Rational), Unrealizable> {
+        match (a.rational(), b.rational()) {
+            (Ok(a), Ok(b)) => Ok((a, b)),
+            (Err(factor @ Unrealizable::Factor(_)), _)
+            | (_, Err(factor @ Unrealizable::Factor(_))) => Err(factor),
+            (Err(error), _) | (_, Err(error)) => Err(error),
+        }
+    }
+
+    /// Structure and numbers bit for bit.
+    fn same(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Number(a), Self::Number(b)) => a.to_bits() == b.to_bits(),
+            (Self::S, Self::S) => true,
+            (Self::Negate(a), Self::Negate(b)) => a.same(b),
+            (Self::Sum(a, b), Self::Sum(c, d))
+            | (Self::Difference(a, b), Self::Difference(c, d))
+            | (Self::Product(a, b), Self::Product(c, d))
+            | (Self::Quotient(a, b), Self::Quotient(c, d))
+            | (Self::Power(a, b, _), Self::Power(c, d, _)) => a.same(c) && b.same(d),
+            (Self::Call(f, a, _), Self::Call(g, b, _)) => {
+                f == g && a.len() == b.len() && a.iter().zip(b).all(|(a, b)| a.same(b))
+            }
+            _ => false,
+        }
+    }
+}
+
+/// A LAPLACE expression with a factor that is not rational in `s`, such as
+/// `1/sqrt(1+s*tau)`. It has no state-space realization, so it is known only
+/// where small-signal analyses ask for it: exactly at `s = jω`.
+#[derive(Debug, Clone)]
+pub(crate) struct TransferExpression {
+    term: Term,
+    /// The first factor with no rational realization, as written.
+    factor: String,
+}
+
+impl TransferExpression {
+    /// The transfer at the complex frequency `s`.
+    pub(crate) fn at(&self, s: Complex64) -> Complex64 {
+        self.term.at(s)
+    }
+
+    /// The first factor with no rational realization, as written.
+    pub(crate) fn factor(&self) -> &str {
+        &self.factor
+    }
+
+    /// The same expression, numbers bit for bit.
+    pub(crate) fn same(&self, other: &Self) -> bool {
+        self.term.same(&other.term)
+    }
+}
+
+/// What a LAPLACE expression parses to.
+pub(super) enum LaplaceTransfer {
+    /// `N(s)/D(s)·e^(-s·T)`: ascending numerator and denominator
+    /// coefficients, and the delay `T`.
+    Rational {
+        num: Vec<Value>,
+        den: Vec<Value>,
+        delay: Value,
+    },
+    /// An expression with a factor that is not rational in `s`.
+    Pointwise(TransferExpression),
+}
+
+struct TermParser {
+    text: Vec<char>,
     tokens: Vec<RatTok>,
+    /// The characters of `text` each token was read from.
+    spans: Vec<(usize, usize)>,
     pos: usize,
 }
 
-impl RatParser {
+impl TermParser {
     fn peek(&self) -> Option<&RatTok> {
         self.tokens.get(self.pos)
     }
@@ -363,17 +635,34 @@ impl RatParser {
         tok
     }
 
-    fn parse_expr(&mut self) -> Result<Rational, String> {
+    /// The text of the tokens from `first` to the last one read, in lower
+    /// case: the netlist reader may have folded it to upper.
+    fn written_since(&self, first: usize) -> String {
+        let start = self.spans[first].0;
+        let end = self.spans[self.pos - 1].1;
+        let text: String = self.text[start..end].iter().collect();
+        text.trim().to_ascii_lowercase()
+    }
+
+    fn expect_close(&mut self) -> Result<(), String> {
+        if self.next() == Some(RatTok::RParen) {
+            Ok(())
+        } else {
+            Err("unbalanced parentheses in LAPLACE expression".to_string())
+        }
+    }
+
+    fn parse_expr(&mut self) -> Result<Term, String> {
         let mut value = self.parse_term()?;
         while let Some(op) = self.peek() {
             match op {
                 RatTok::Plus => {
                     self.next();
-                    value = value.add(&self.parse_term()?)?;
+                    value = Term::Sum(Box::new(value), Box::new(self.parse_term()?));
                 }
                 RatTok::Minus => {
                     self.next();
-                    value = value.sub(&self.parse_term()?)?;
+                    value = Term::Difference(Box::new(value), Box::new(self.parse_term()?));
                 }
                 _ => break,
             }
@@ -381,17 +670,17 @@ impl RatParser {
         Ok(value)
     }
 
-    fn parse_term(&mut self) -> Result<Rational, String> {
+    fn parse_term(&mut self) -> Result<Term, String> {
         let mut value = self.parse_power()?;
         while let Some(op) = self.peek() {
             match op {
                 RatTok::Star => {
                     self.next();
-                    value = value.mul(&self.parse_power()?);
+                    value = Term::Product(Box::new(value), Box::new(self.parse_power()?));
                 }
                 RatTok::Slash => {
                     self.next();
-                    value = value.div(&self.parse_power()?)?;
+                    value = Term::Quotient(Box::new(value), Box::new(self.parse_power()?));
                 }
                 _ => break,
             }
@@ -399,35 +688,23 @@ impl RatParser {
         Ok(value)
     }
 
-    fn parse_power(&mut self) -> Result<Rational, String> {
+    fn parse_power(&mut self) -> Result<Term, String> {
+        let first = self.pos;
         let base = self.parse_unary()?;
-        if self.peek() == Some(&RatTok::Caret) {
-            self.next();
-            let negative = self.peek() == Some(&RatTok::Minus);
-            if negative {
-                self.next();
-            }
-            match self.next() {
-                Some(RatTok::Num(v)) if v.fract() == 0.0 && v <= 16.0 && !negative => {
-                    Ok(base.powi(v as u32))
-                }
-                Some(RatTok::Num(v)) if v.fract() == 0.0 && v <= 16.0 => {
-                    Rational::constant(1.0).div(&base.powi(v as u32))
-                }
-                _ => Err("a power in a LAPLACE expression requires a small integer \
-                          exponent"
-                    .to_string()),
-            }
-        } else {
-            Ok(base)
+        if self.peek() != Some(&RatTok::Caret) {
+            return Ok(base);
         }
+        self.next();
+        let exponent = self.parse_unary()?;
+        let text = self.written_since(first);
+        Ok(Term::Power(Box::new(base), Box::new(exponent), text))
     }
 
-    fn parse_unary(&mut self) -> Result<Rational, String> {
+    fn parse_unary(&mut self) -> Result<Term, String> {
         match self.peek() {
             Some(RatTok::Minus) => {
                 self.next();
-                Rational::constant(0.0).sub(&self.parse_unary()?)
+                Ok(Term::Negate(Box::new(self.parse_unary()?)))
             }
             Some(RatTok::Plus) => {
                 self.next();
@@ -437,30 +714,40 @@ impl RatParser {
         }
     }
 
-    fn parse_primary(&mut self) -> Result<Rational, String> {
+    fn parse_primary(&mut self) -> Result<Term, String> {
+        let first = self.pos;
         match self.next() {
-            Some(RatTok::Num(v)) => Ok(Rational::constant(v)),
-            Some(RatTok::S) => Ok(Rational::s()),
+            Some(RatTok::Num(v)) => Ok(Term::Number(v)),
+            Some(RatTok::S) => Ok(Term::S),
             Some(RatTok::Function(name)) => {
-                if !name.eq_ignore_ascii_case("exp") {
-                    let name = name.to_ascii_lowercase();
+                let function = TransferFunction::named(&name).ok_or_else(|| {
+                    format!(
+                        "{}() is not a function a LAPLACE expression can use; it can use {}",
+                        name.to_ascii_lowercase(),
+                        TransferFunction::NAMES
+                    )
+                })?;
+                // The tokenizer reads a name as a function only before `(`.
+                self.next();
+                let mut args = vec![self.parse_expr()?];
+                while self.peek() == Some(&RatTok::Comma) {
+                    self.next();
+                    args.push(self.parse_expr()?);
+                }
+                self.expect_close()?;
+                if args.len() != function.arity() {
                     return Err(format!(
-                        "{name}() is not realizable in a LAPLACE expression; only \
-                         polynomials in s and exp(-s*T) delay factors are"
+                        "{}() in a LAPLACE expression takes {} argument(s), not {}",
+                        name.to_ascii_lowercase(),
+                        function.arity(),
+                        args.len()
                     ));
                 }
-                self.next();
-                let argument = self.parse_expr()?;
-                if self.next() != Some(RatTok::RParen) {
-                    return Err("unbalanced parentheses in LAPLACE expression".to_string());
-                }
-                Rational::exp(&argument)
+                Ok(Term::Call(function, args, self.written_since(first)))
             }
             Some(RatTok::LParen) => {
                 let inner = self.parse_expr()?;
-                if self.next() != Some(RatTok::RParen) {
-                    return Err("unbalanced parentheses in LAPLACE expression".to_string());
-                }
+                self.expect_close()?;
                 Ok(inner)
             }
             other => Err(format!(
@@ -471,23 +758,38 @@ impl RatParser {
     }
 }
 
-/// Parse a rational transfer function in `s` into ascending-coefficient
-/// numerator and denominator polynomials.
-/// Parse `N(s)/D(s)·e^(-s·T)`, returning the numerator, denominator and `T`.
-/// `parameter` gives the value of a name the expression uses, if it has one.
-pub(super) fn parse_rational_in_s(
+/// Parse a LAPLACE expression: exactly as `N(s)/D(s)·e^(-s·T)` when it is
+/// one, and as an expression known pointwise when a factor is not rational
+/// in `s`. `parameter` gives the value of a name the expression uses, if it
+/// has one.
+pub(super) fn parse_laplace(
     parameter: &dyn Fn(&str) -> Option<Value>,
     text: &str,
-) -> Result<(Vec<Value>, Vec<Value>, Value), String> {
-    let tokens = tokenize_rational(parameter, text)?;
+) -> Result<LaplaceTransfer, String> {
+    let (tokens, spans) = tokenize_rational(parameter, text)?;
     if tokens.is_empty() {
         return Err("empty LAPLACE transfer function".to_string());
     }
-    let mut parser = RatParser { tokens, pos: 0 };
-    let rational = parser.parse_expr()?;
+    let mut parser = TermParser {
+        text: text.chars().collect(),
+        tokens,
+        spans,
+        pos: 0,
+    };
+    let term = parser.parse_expr()?;
     if parser.pos != parser.tokens.len() {
         return Err("trailing input after LAPLACE transfer function".to_string());
     }
+    let rational = match term.rational() {
+        Ok(rational) => rational,
+        Err(Unrealizable::Factor(factor)) => {
+            return Ok(LaplaceTransfer::Pointwise(TransferExpression {
+                term,
+                factor,
+            }));
+        }
+        Err(Unrealizable::Error(message)) => return Err(message),
+    };
 
     if !(rational.delay.is_finite() && rational.delay >= 0.0) {
         return Err("LAPLACE expression divides by exp(-s*T), a time advance".to_string());
@@ -513,7 +815,11 @@ pub(super) fn parse_rational_in_s(
         den.drain(0..common);
     }
 
-    Ok((num, den, rational.delay))
+    Ok(LaplaceTransfer::Rational {
+        num,
+        den,
+        delay: rational.delay,
+    })
 }
 
 //=============================================================================
@@ -535,7 +841,9 @@ fn fmt_value(v: Value) -> String {
 /// Returns the replacement elements: `n` grounded capacitors (one per
 /// state), `n` behavioral current sources implementing the controller-
 /// canonical state derivatives, and the behavioral output source (voltage
-/// for E forms, current for G forms) on the original output nodes.
+/// for E forms, current for G forms) on the original output nodes. An
+/// expression with a factor that is not rational in `s` becomes the source
+/// [`pointwise_transfer`] builds instead.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn synthesize_laplace(
     parameter: &dyn Fn(&str) -> Option<Value>,
@@ -547,11 +855,23 @@ pub(super) fn synthesize_laplace(
     voltage_output: bool,
     line_num: usize,
 ) -> Result<Vec<Element>, ParseError> {
-    let (num, den, delay) =
-        parse_rational_in_s(parameter, rational_text).map_err(|message| ParseError::Syntax {
-            line: line_num,
-            message: format!("LAPLACE source '{name}': {message}"),
-        })?;
+    let fail = |message: String| ParseError::Syntax {
+        line: line_num,
+        message: format!("LAPLACE source '{name}': {message}"),
+    };
+    let (num, den, delay) = match parse_laplace(parameter, rational_text).map_err(fail)? {
+        LaplaceTransfer::Rational { num, den, delay } => (num, den, delay),
+        LaplaceTransfer::Pointwise(transfer) => {
+            return pointwise_transfer(
+                name,
+                (node_pos, node_neg),
+                input_expr,
+                transfer,
+                voltage_output,
+            )
+            .map_err(fail);
+        }
+    };
     let form = crate::netlist::SynthesizedTransferForm::Laplace;
     let mut elements = Vec::new();
     let delayed;
@@ -580,6 +900,76 @@ pub(super) fn synthesize_laplace(
         line_num,
     )?);
     Ok(elements)
+}
+
+/// The source a LAPLACE expression with a factor that is not rational in `s`
+/// stands for.
+///
+/// A behavioral source drives the input onto a private node, and the owner's
+/// output is the transfer's value at `s = 0` times that node: the operating
+/// point. Small-signal analyses answer the owner with the transfer itself,
+/// evaluated at `s = jω`, through the response the input source carries.
+/// The transfer has no response in time, so the analyses that need one refuse
+/// the owner; and a transfer with no finite real value at `s = 0` has no
+/// operating point, so it is refused here.
+fn pointwise_transfer(
+    name: &str,
+    (node_pos, node_neg): (&str, &str),
+    input_expr: &str,
+    transfer: TransferExpression,
+    voltage_output: bool,
+) -> Result<Vec<Element>, String> {
+    let dc = transfer.at(Complex64::new(0.0, 0.0));
+    if !(dc.re.is_finite() && dc.im == 0.0) {
+        return Err(format!(
+            "the transfer has no finite real value at s = 0 ({}), so the source has no \
+             operating point",
+            if dc.re.is_finite() && dc.im.is_finite() {
+                format!("{}{:+}j", dc.re, dc.im)
+            } else {
+                "unbounded".to_string()
+            }
+        ));
+    }
+    let input_node = format!("{name}.__FIN");
+    let behavioral = |expression: String, voltage: bool| {
+        if voltage {
+            ElementKind::BehavioralVoltage {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
+            }
+        } else {
+            ElementKind::BehavioralCurrent {
+                expression,
+                tc1: 0.0,
+                tc2: 0.0,
+                multiplicity: SourceMultiplicity::default(),
+            }
+        }
+    };
+    Ok(vec![
+        Element {
+            name: format!("{name}.__BFIN"),
+            kind: behavioral(input_expr.to_string(), true),
+            nodes: vec![input_node.clone(), "0".to_string()],
+            provenance: ElementProvenance::GeneratedFrequencyResponseInput {
+                owner: name.to_string(),
+                node: input_node.clone(),
+                response: FrequencyResponse::transfer(transfer),
+            },
+        },
+        Element {
+            name: name.to_string(),
+            kind: behavioral(
+                format!("{}*V({input_node})", fmt_value(dc.re)),
+                voltage_output,
+            ),
+            nodes: vec![node_pos.to_string(), node_neg.to_string()],
+            provenance: ElementProvenance::Authored,
+        },
+    ])
 }
 
 /// Realize a real rational transfer function as circuit elements.
@@ -842,6 +1232,19 @@ pub(super) fn synthesize_rational_transfer(
 mod tests {
     use super::*;
 
+    /// The rational a LAPLACE expression is, or why it is not one.
+    fn parse_rational_in_s(
+        parameter: &dyn Fn(&str) -> Option<Value>,
+        text: &str,
+    ) -> Result<(Vec<Value>, Vec<Value>, Value), String> {
+        match parse_laplace(parameter, text)? {
+            LaplaceTransfer::Rational { num, den, delay } => Ok((num, den, delay)),
+            LaplaceTransfer::Pointwise(transfer) => {
+                Err(format!("{} has no rational realization", transfer.factor()))
+            }
+        }
+    }
+
     /// Rational equality up to scaling: `got_n/got_d == want_n/want_d`
     /// iff `got_n·want_d == want_n·got_d` as polynomials.
     fn no_parameter(_: &str) -> Option<Value> {
@@ -932,8 +1335,11 @@ mod tests {
 
         assert!(parse_rational_in_s(&no_parameter, "1/(1+q)").is_err());
         for (text, needle) in [
-            ("sqrt(s)/(1+s)", "sqrt() is not realizable"),
-            ("exp(-s*s)/(1+s)", "must be a delay"),
+            ("sqrt(s)/(1+s)", "sqrt(s) has no rational realization"),
+            ("exp(-s*s)/(1+s)", "exp(-s*s) has no rational realization"),
+            ("(1+s)**0.5/(1+s)", "(1+s)**0.5 has no rational realization"),
+            ("erf(s)/(1+s)", "erf() is not a function"),
+            ("pow(s)/(1+s)", "takes 2 argument(s), not 1"),
             ("exp(s*1m)", "must be a delay"),
             ("1/exp(-s*1m)", "time advance"),
             ("exp(-s*1m)+exp(-s*2m)", "different exp(-s*T) delays"),

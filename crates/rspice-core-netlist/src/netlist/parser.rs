@@ -209,6 +209,7 @@ use dynamic_operators::*;
 pub(in crate::netlist) use elements::lower_deferred_rf_port;
 use elements::*;
 use freq_synthesis::*;
+pub(in crate::netlist) use laplace_synthesis::TransferExpression;
 use laplace_synthesis::*;
 use line::*;
 use pspice_stim::*;

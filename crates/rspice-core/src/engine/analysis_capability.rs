@@ -746,6 +746,51 @@ fn retained_state_refusal(
     None
 }
 
+/// The token of [`non_rational_transfer_refusal`].
+const NON_RATIONAL_LAPLACE: &str = "analysis.laplace.non_rational";
+
+/// An analysis that needs a source's response anywhere but at `s = jω` and
+/// `s = 0` refuses a LAPLACE source with a factor that is not rational in
+/// `s`, as QSPICE does: the source has no state-space realization, so it has
+/// no response in time, no poles and zeros, and no harmonics to mix.
+fn non_rational_transfer_refusal(
+    circuit: &CircuitData,
+    analysis: CapabilityAnalysis,
+) -> Option<UnsupportedCapabilityError> {
+    use CapabilityAnalysis as A;
+    if matches!(
+        analysis,
+        A::Op | A::Dc | A::Ac | A::Noise | A::Tf | A::Sp | A::Stb | A::Sens | A::Sweep
+    ) {
+        return None;
+    }
+    circuit.frequency_responses.iter().find_map(|source| {
+        let factor = source.response.non_rational_factor()?;
+        let sources = &circuit.behavioral_sources;
+        let owner = match source.output {
+            crate::circuit::BehavioralOutput::Voltage(index) => {
+                &sources.voltage_sources[index].name
+            }
+            crate::circuit::BehavioralOutput::Current(index) => {
+                &sources.current_sources[index].name
+            }
+        };
+        Some(
+            UnsupportedCapabilityError::new(
+                NON_RATIONAL_LAPLACE,
+                format!(
+                    "LAPLACE source '{owner}' cannot take part in {}: its factor {factor} is not \
+                     rational in s, so the source is known only at s = jω, where AC and noise \
+                     analyses evaluate it",
+                    analysis.label()
+                ),
+            )
+            .for_analysis_kind(analysis.kind())
+            .for_instance(owner.clone()),
+        )
+    })
+}
+
 /// The order the gate checks families in: the author's own constructs before
 /// what elaboration inserted for them. A mixed module's built-in converters
 /// are XSPICE event models the deck never names, so a refusal that reached
@@ -765,7 +810,9 @@ impl Engine {
     /// The dispatch gate every analysis asks before solver work.
     ///
     /// A Verilog-A variable retained between accepted points refuses every
-    /// periodic analysis first; see [`retained_state_refusal`]. Then families
+    /// periodic analysis first; see [`retained_state_refusal`]. A LAPLACE
+    /// source known only at `s = jω` refuses every analysis that needs more;
+    /// see [`non_rational_transfer_refusal`]. Then families
     /// are checked in [`REFUSAL_ORDER`], and the first failing cell decides the
     /// refusal. A refusal always records the analysis kind, and the instance
     /// and module it declined.
@@ -773,7 +820,9 @@ impl Engine {
         circuit: &CircuitData,
         analysis: CapabilityAnalysis,
     ) -> Result<(), SimulationError> {
-        if let Some(refusal) = retained_state_refusal(circuit, analysis) {
+        if let Some(refusal) = retained_state_refusal(circuit, analysis)
+            .or_else(|| non_rational_transfer_refusal(circuit, analysis))
+        {
             return Err(refusal.into());
         }
         for family in REFUSAL_ORDER {

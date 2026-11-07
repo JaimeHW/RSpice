@@ -4553,8 +4553,9 @@ fn holds_integral_initial_condition(element: &Element) -> bool {
     )
 }
 
-/// Hands each measured frequency response to the behavioral source that owns
-/// it, with the node its generated input source drives.
+/// Hands each frequency response, measured or a LAPLACE expression known only
+/// at s = jω, to the behavioral source that owns it, with the node its
+/// generated input source drives.
 fn attach_frequency_responses(
     circuit: &mut CircuitData,
     elements: &[Element],
@@ -4584,7 +4585,8 @@ fn attach_frequency_responses(
             })
             .ok_or_else(|| {
                 SimulationError::Circuit(format!(
-                    "FREQ source '{owner}' has no output source for its frequency response"
+                    "{} source '{owner}' has no output source for its frequency response",
+                    response.form().label()
                 ))
             })?;
         let input = circuit.get_or_create_node(node);

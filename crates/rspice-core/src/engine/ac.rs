@@ -101,7 +101,8 @@ fn try_stamp_measured_response(
         .try_add(row, measured.input - 1, gain)
         .map_err(|error| {
             SimulationError::Circuit(format!(
-                "FREQ source '{source_name}' stamp failed at frequency {frequency:.17e} Hz while adding gain {gain}: {error}"
+                "{} source '{source_name}' stamp failed at frequency {frequency:.17e} Hz while adding gain {gain}: {error}",
+                measured.response.form().label()
             ))
         })
 }

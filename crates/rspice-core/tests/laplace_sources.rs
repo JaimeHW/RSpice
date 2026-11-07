@@ -270,14 +270,107 @@ fn delay_factor_shifts_the_step_response() {
     }
 }
 
-#[test]
-fn irrational_laplace_forms_are_refused_by_name() {
-    for (transfer, needle) in [
-        ("sqrt(s)/(1+s)", "sqrt() is not realizable"),
-        ("exp(-s*s*1m)", "must be a delay"),
-    ] {
-        let deck = format!("* refusal\nvin in 0 1\nE1 out 0 in 0 Laplace={transfer}\n.end\n");
-        let error = Netlist::parse(&deck).expect_err("refused").to_string();
-        assert!(error.contains(needle), "{transfer}: {error}");
+/// LTspice's HalfSlope example: the square root has no rational realization.
+const HALF_SLOPE: &str = "G2 0 b a 0 Laplace=1/sqrt(1+1u*s)/(1+5n*s)**2\nR1 b 0 1";
+
+fn assert_gains(deck: &str, frequency: f64, gains: &[(&str, f64, f64)]) {
+    for &(node, re, im) in gains {
+        let want = num_complex::Complex64::new(re, im);
+        let got = delayed_lowpass_value(deck, node, frequency);
+        assert!(
+            (got - want).norm() <= 1e-12 * want.norm(),
+            "V({node}) at {frequency} Hz: got {got}, want {want}"
+        );
     }
+}
+
+#[test]
+fn a_non_rational_laplace_is_evaluated_exactly_at_s_equal_j_omega() {
+    // QSPICE 2026: the operating point takes H(0), and AC evaluates the
+    // expression at s = jw on the principal branch; LTspice 26.1.1 agrees.
+    let deck = format!(
+        "* half slope\nV1 a 0 2 AC 1\n{HALF_SLOPE}\nE3 c 0 a 0 Laplace=sqrt(1+1u*s)\nR3 c 0 1\n.end\n"
+    );
+    assert!((op_voltage(&deck, "b") - 2.0).abs() < 1e-12);
+    assert!((op_voltage(&deck, "c") - 2.0).abs() < 1e-12);
+    for (frequency, re, im) in [
+        (1e3, 9.999849956714946e-01, -3.204346053792511e-03),
+        (
+            159.15494309189535e3,
+            7.736109125466814e-01,
+            -3.295414741151110e-01,
+        ),
+        (1e6, 2.845334356575591e-01, -2.755134366229036e-01),
+        (
+            31.830988618379067e6,
+            -2.493726660581564e-02,
+            -2.506226465272908e-02,
+        ),
+    ] {
+        assert_gains(&deck, frequency, &[("b", re, im)]);
+    }
+
+    // Every function, at w = 1e6 rad/s where 1u*s = j (QSPICE 2026).
+    let deck = "* functions\nV1 a 0 AC 1\n\
+        E1 b1 0 a 0 Laplace=(1+1u*s)**0.5\n\
+        E2 b2 0 a 0 Laplace=exp(-sqrt(1u*s))\n\
+        E3 b3 0 a 0 Laplace=log(1+1u*s)\n\
+        E4 b4 0 a 0 Laplace=tanh(1u*s)\n\
+        E5 b5 0 a 0 Laplace=pow(1+1u*s,0.5)\n\
+        E6 b6 0 a 0 Laplace=cosh(sqrt(1u*s))\n\
+        E7 b7 0 a 0 Laplace=1/(1+sqrt(1u*s))\n\
+        E8 b8 0 a 0 Laplace=exp(-1u*s)*sqrt(1+1u*s)\n\
+        E9 b9 0 a 0 Laplace=abs(1+1u*s)\n\
+        E10 b10 0 a 0 Laplace=log10(1+1u*s)\n\
+        E11 b11 0 a 0 Laplace=sin(1u*s)\n\
+        E12 b12 0 a 0 Laplace=s**1.5/(1+1u*s)**2\n\
+        .end\n";
+    assert_gains(
+        deck,
+        159.15494309189535e3,
+        &[
+            ("b1", 1.098684113467810e+00, 4.550898605622273e-01),
+            ("b2", 3.748528086203823e-01, -3.203156354342155e-01),
+            ("b3", 3.465735902799727e-01, 7.853981633974483e-01),
+            ("b4", 0.0, 1.557407724654902e+00),
+            ("b5", 1.098684113467810e+00, 4.550898605622273e-01),
+            ("b6", 9.583581328330072e-01, 4.986113866728327e-01),
+            ("b7", 5.000000000000000e-01, -2.071067811865475e-01),
+            ("b8", 9.765664730707363e-01, -6.786247019135669e-01),
+            ("b9", 1.414213562373095e+00, 0.0),
+            ("b10", 1.505149978319906e-01, 3.410940884604603e-01),
+            ("b11", 0.0, 1.175201193643801e+00),
+            ("b12", 3.535533905932735e+08, 3.535533905932735e+08),
+        ],
+    );
+}
+
+#[test]
+fn a_non_rational_laplace_refuses_the_transient_by_name() {
+    // QSPICE 2026: "G2: Can't numerically factor this Laplace expression."
+    let deck = format!("* half slope\nV1 a 0 PULSE(0 1 0 1n 1n 5u 10u)\n{HALF_SLOPE}\n.end\n");
+    let netlist = Netlist::parse(&deck).expect("deck parses");
+    let error = Engine::new(SimulationConfig::default())
+        .run_tran(&netlist, 30e-6, 30e-9)
+        .expect_err("the transient is refused");
+    match &error {
+        rspice_core::SimulationError::UnsupportedCapability(refusal) => {
+            assert_eq!(refusal.capability, "analysis.laplace.non_rational");
+        }
+        other => panic!("expected a capability refusal, got {other}"),
+    }
+    let text = error.to_string();
+    assert!(
+        text.contains("'G2'") && text.contains("sqrt(1+1u*s)"),
+        "{text}"
+    );
+
+    // Unbounded at s = 0: no operating point, as for the integrator 1/s.
+    // (QSPICE answers NaN, LTspice 0.)
+    let deck = "* inverse root\nV1 a 0 2 AC 1\nE2 b 0 a 0 Laplace=1/sqrt(s)\nR1 b 0 1\n.end\n";
+    let error = Netlist::parse(deck).expect_err("refused").to_string();
+    assert!(
+        error.contains("LAPLACE source 'E2'") && error.contains("s = 0"),
+        "{error}"
+    );
 }
