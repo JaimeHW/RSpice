@@ -218,3 +218,26 @@ EO NO 0 NH ND 1
 RO NO OUT {ROUT} NOISY=0
 COUT OUT 0 {COUT}
 .ends RSPICE_FN_SAMPLEHOLD
+
+* Crystal. Pins: A B.
+* The Butterworth-Van Dyke equivalent: a motional arm resonating in series
+* at FS through ESR, across the electrode capacitance C0. The motional
+* capacitance is C1, or 1/(2 pi FS Q ESR) when Q is positive, and the
+* motional inductance resonates with it at FS. An overtone crystal is marked
+* at its overtone OVERTONE (3, 5, ...); a second arm of the same inductance
+* then holds its fundamental mode at FS/OVERTONE, with OVERTONE^2 times the
+* motional capacitance and 1/OVERTONE^2 of the resistance. That arm runs on
+* a copy of the terminal voltage and its current reaches the terminals only
+* for an overtone crystal. The defaults are a 10 MHz AT-cut fundamental.
+.subckt RSPICE_FN_CRYSTAL A B FS=10Meg ESR=25 C0=4p C1=15f Q=0 OVERTONE=1
+LM A NM1 {1/((2*pi*FS)^2*if(Q>0, 1/(2*pi*FS*Q*ESR), C1))}
+CM NM1 NM2 {if(Q>0, 1/(2*pi*FS*Q*ESR), C1)}
+RM NM2 B {ESR}
+CP A B {C0}
+EF NF0 0 A B 1
+LF NF0 NF1 {1/((2*pi*FS)^2*if(Q>0, 1/(2*pi*FS*Q*ESR), C1))}
+CF NF1 NF2 {OVERTONE^2*if(Q>0, 1/(2*pi*FS*Q*ESR), C1)}
+RF NF2 NF3 {ESR/OVERTONE^2}
+VF NF3 0 0
+FF A B VF {if(OVERTONE>1, 1, 0)}
+.ends RSPICE_FN_CRYSTAL

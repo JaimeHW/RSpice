@@ -908,3 +908,84 @@ X1 in s sh RSPICE_FN_SAMPLEHOLD VOS=10m DROOP=10k
         5e-4,
     );
 }
+
+/// The magnitude of the impedance a crystal with `parameters` presents at
+/// each frequency, measured as the voltage an AC unit current develops.
+fn crystal_impedance(parameters: &str, frequencies: &[f64]) -> Vec<f64> {
+    let deck = format!(
+        "* crystal impedance\nI1 0 a AC 1\nRDC a 0 1T\nX1 a 0 RSPICE_FN_CRYSTAL {parameters}\n.end\n"
+    );
+    Engine::default()
+        .run_ac(&parse(&deck), frequencies)
+        .expect("AC solves")
+        .iter()
+        .map(|point| {
+            let node = point
+                .node_names
+                .iter()
+                .position(|name| name.eq_ignore_ascii_case("a"))
+                .expect("a solved");
+            point.voltages[node].norm()
+        })
+        .collect()
+}
+
+/// The frequency within `span` (relative) of `centre` at which the crystal's
+/// impedance is least, or greatest, on a grid of `span`/200 steps, and that
+/// impedance.
+fn crystal_extremum(parameters: &str, centre: f64, span: f64, least: bool) -> (f64, f64) {
+    let frequencies = (-200..=200)
+        .map(|step| centre * (1.0 + span * f64::from(step) / 200.0))
+        .collect::<Vec<_>>();
+    let impedance = crystal_impedance(parameters, &frequencies);
+    let order = |a: &usize, b: &usize| impedance[*a].total_cmp(&impedance[*b]);
+    let index = if least {
+        (0..impedance.len()).min_by(order)
+    } else {
+        (0..impedance.len()).max_by(order)
+    }
+    .expect("a sweep");
+    (frequencies[index], impedance[index])
+}
+
+#[test]
+fn crystal_resonates_in_series_at_fs_through_its_esr_and_in_parallel_above_it() {
+    // fs = 1/(2 pi sqrt(L1 C1)) and fp = fs sqrt(1 + C1/C0), with the
+    // impedance at fs equal to ESR; the second case sets C1 through Q.
+    // QSPICE batch with gmin=0, the same arm from its own L, C and R on a
+    // 5 Hz grid: fs 10.000000 MHz, |Z(fs)| 24.9995 Ohm, fp 10.018735 MHz.
+    let watch_c1 = 1.0 / (2.0 * std::f64::consts::PI * 32.768e3 * 50e3 * 35e3);
+    for (parameters, fs, esr, c1, c0) in [
+        ("", 10e6, 25.0, 15e-15, 4e-12),
+        (
+            "FS=32.768k ESR=35k C0=1.3p Q=50k",
+            32.768e3,
+            35e3,
+            watch_c1,
+            1.3e-12,
+        ),
+    ] {
+        let (series, at_series) = crystal_extremum(parameters, fs, 1e-4, true);
+        assert_close("fs", series, fs, 1e-6 * fs);
+        assert_close("|Z(fs)|", at_series, esr, 1e-3 * esr);
+        let fp = fs * (1.0 + c1 / c0).sqrt();
+        let (parallel, _) = crystal_extremum(parameters, fp, 1e-4, false);
+        assert_close("fp", parallel, fp, 1e-6 * fp);
+    }
+}
+
+#[test]
+fn an_overtone_crystal_also_resonates_at_its_fundamental() {
+    // Marked at its third overtone: the fundamental resonates at FS/3
+    // through ESR/9, and the marked mode keeps its own FS and ESR.
+    let parameters = "FS=30Meg ESR=40 C0=4p C1=1.6f OVERTONE=3";
+    let (fundamental, at_fundamental) = crystal_extremum(parameters, 10e6, 1e-4, true);
+    assert_close("fs/3", fundamental, 10e6, 1e-6 * 10e6);
+    assert_close("|Z(fs/3)|", at_fundamental, 40.0 / 9.0, 1e-3 * 40.0 / 9.0);
+    let (series, at_series) = crystal_extremum(parameters, 30e6, 1e-4, true);
+    assert_close("fs", series, 30e6, 1e-6 * 30e6);
+    assert_close("|Z(fs)|", at_series, 40.0, 1e-3 * 40.0);
+    // A fundamental crystal has no second resonance.
+    let (_, below) = crystal_extremum("FS=30Meg ESR=40 C0=4p C1=1.6f", 10e6, 1e-4, true);
+    assert!(below > 1e3, "{below}");
+}

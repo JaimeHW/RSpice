@@ -18,6 +18,8 @@ use super::{
 };
 use crate::symbol_generation::{GENERATED_WIDTH, GeneratedBody, GeneratedPin, GeneratedSymbol};
 
+mod discrete;
+
 /// One pin of a functional part, in subcircuit port order.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct FunctionalPin {
@@ -1013,6 +1015,7 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         &["sample and hold", "track and hold", "s/h", "sampler"],
         SAMPLE_HOLD_PARAMETERS,
     ),
+    discrete::CRYSTAL,
 ];
 
 /// Every functional part, in catalog order.

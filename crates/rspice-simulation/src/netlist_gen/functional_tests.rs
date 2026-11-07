@@ -95,6 +95,18 @@ impl Bench {
     fn operating_point(&self, node: &str) -> f64 {
         self.operating_points(&[node])[0]
     }
+
+    fn ac_magnitude(&self, node: &str, frequency: f64) -> f64 {
+        let ac = Engine::default()
+            .run_ac(&self.deck(), &[frequency])
+            .expect("AC solves");
+        let index = ac[0]
+            .node_names
+            .iter()
+            .position(|name| name.eq_ignore_ascii_case(node))
+            .unwrap_or_else(|| panic!("no node {node}"));
+        ac[0].voltages[index].norm()
+    }
 }
 
 fn supplies(bench: &mut Bench, positive: &str, negative: &str) {
@@ -315,4 +327,17 @@ fn placed_sequential_parts_count_divide_and_hold() {
         "{}",
         at("held", 4.9e-6)
     );
+}
+
+#[test]
+fn a_placed_crystal_passes_its_series_resonance_and_blocks_beside_it() {
+    // In series with 25 Ohm, a 10 MHz crystal of ESR 25 halves the source
+    // at fs and passes almost nothing 1% away.
+    let mut bench = Bench::default();
+    bench.primitive(ComponentType::VoltageSource, "V1", "AC 1", &["in", "0"]);
+    bench.part("rspice.functional.crystal", "Y1", "", &["in", "out"]);
+    bench.primitive(ComponentType::Resistor, "RL", "25", &["out", "0"]);
+    let at = |frequency: f64| bench.ac_magnitude("out", frequency);
+    assert!((at(10e6) - 0.5).abs() < 1e-3, "{}", at(10e6));
+    assert!(at(9.9e6) < 0.01, "{}", at(9.9e6));
 }
