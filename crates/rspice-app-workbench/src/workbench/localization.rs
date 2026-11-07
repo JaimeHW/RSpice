@@ -562,7 +562,7 @@ define_messages! {
     VerilogANoSource => "No Verilog-A/AMS source",
     VerilogAImportTitle => "Import Verilog-A/AMS",
     VerilogAImportPrimary => "Create cells",
-    VerilogAImportDescription => "Each chosen top module becomes a cell with a veriloga view that owns a copy of the file and every file it includes.",
+    VerilogAImportDescription => "The file and every file it includes become one source. Each chosen top module becomes a cell whose veriloga view selects it.",
     VerilogAImportFile => "File",
     VerilogAImportLibrary => "Library",
     VerilogAImportCreates => "Creates",

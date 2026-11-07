@@ -323,6 +323,7 @@ impl CheckAndSaveValidationReport {
             crate::workbench::documents::code_workspace::interface_check_finding(
                 &state.code.code_workspace.veriloga,
                 &state.model.workspace.content.project_sources,
+                &state.model.library_manager,
             )
         {
             insert_finding(

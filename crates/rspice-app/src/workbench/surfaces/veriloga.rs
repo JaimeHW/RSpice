@@ -413,9 +413,7 @@ fn interface_strip(
         VerilogAInterfaceFinding, interface_finding, symbol_drift_text, veriloga_receipt,
     };
 
-    let crate::state::ProjectSourceOwner::CellView { reference } = selected.bundle().owner() else {
-        return;
-    };
+    let reference = selected.view();
     let t = Tokens::get(ui.ctx());
     let messages = state.workbench.messages();
     let veriloga = &state.code.code_workspace.veriloga;

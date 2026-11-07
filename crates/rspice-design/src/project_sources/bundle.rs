@@ -89,6 +89,7 @@ impl ProjectSourceBundle {
         let mut bundle = Self {
             id,
             owner,
+            shared_with: Vec::new(),
             language,
             root: ProjectSourceDocument::try_new_with_id(
                 ProjectSourceDocumentId::migrated(id, &root_path),
@@ -122,6 +123,7 @@ impl ProjectSourceBundle {
         let mut bundle = Self {
             id,
             owner: ProjectSourceOwner::code_workspace(document.language),
+            shared_with: Vec::new(),
             language: document.language,
             roles: default_source_roles(document.language, document.logical_path())?,
             root: document,
@@ -150,6 +152,78 @@ impl ProjectSourceBundle {
     #[must_use]
     pub fn owner(&self) -> &ProjectSourceOwner {
         &self.owner
+    }
+
+    /// The Verilog-A cell views beside the owner's that each select a module
+    /// of this source.
+    #[must_use]
+    pub fn shared_with(&self) -> &[CellViewRef] {
+        &self.shared_with
+    }
+
+    /// Every cell view this source serves: the owner's, when the owner is a
+    /// cell view, then each view it is shared with.
+    pub fn cell_views(&self) -> impl Iterator<Item = &CellViewRef> {
+        let owner = match &self.owner {
+            ProjectSourceOwner::CellView { reference } => Some(reference),
+            ProjectSourceOwner::CodeWorkspace { .. } => None,
+        };
+        owner.into_iter().chain(&self.shared_with)
+    }
+
+    /// Share this source with the Verilog-A cell view `reference`, which
+    /// selects a module of it the way the owner's view does. An edit through
+    /// any of the views is an edit of the one source each of them compiles.
+    pub fn share_with(&mut self, reference: CellViewRef) -> Result<(), ProjectSourceError> {
+        let mut shared = self.clone();
+        shared.shared_with.push(reference);
+        shared.canonicalize();
+        shared.validate()?;
+        *self = shared;
+        Ok(())
+    }
+
+    /// Whether this source serves the holder `key`: it is the owner, or one
+    /// of the views the source is shared with.
+    pub(super) fn serves(&self, key: &CanonicalProjectSourceOwnerKey) -> bool {
+        self.served_keys().any(|served| &served == key)
+    }
+
+    /// The owner key of every holder this source serves.
+    pub(super) fn served_keys(&self) -> impl Iterator<Item = CanonicalProjectSourceOwnerKey> + '_ {
+        std::iter::once(self.owner.canonical_key()).chain(
+            self.shared_with
+                .iter()
+                .map(|reference| ProjectSourceOwner::cell_view(reference.clone()).canonical_key()),
+        )
+    }
+
+    /// Stop serving the views `matches` names. When that takes the owner's
+    /// view while the source is still shared, the first view it is shared
+    /// with owns it now. Returns whether the source still serves a view.
+    pub(super) fn release_cell_views(&mut self, matches: impl Fn(&CellViewRef) -> bool) -> bool {
+        self.shared_with.retain(|reference| !matches(reference));
+        let ProjectSourceOwner::CellView { reference } = &self.owner else {
+            return true;
+        };
+        if !matches(reference) {
+            return true;
+        }
+        if self.shared_with.is_empty() {
+            return false;
+        }
+        // The owner is framed into the closure digest, so evidence for the
+        // old owner no longer speaks for the source. Like a move, the change
+        // is a revision that keeps the old owner's graph in the history; a
+        // source with no revision number left keeps its last.
+        let original = self.clone();
+        self.owner = ProjectSourceOwner::cell_view(self.shared_with.remove(0));
+        if let Ok(revision) = next_revision(self.revision, self.root.file_name()) {
+            self.record_revision_snapshot(&original);
+            self.revision = revision;
+        }
+        self.invalidate_validation();
+        true
     }
 
     #[must_use]
@@ -979,6 +1053,7 @@ impl ProjectSourceBundle {
 
     pub fn validate(&self) -> Result<(), ProjectSourceError> {
         self.owner.validate(self.language)?;
+        self.validate_shared_views()?;
         if self.root.language != self.language {
             return Err(ProjectSourceError::BundleLanguageMismatch {
                 bundle: self.language,
@@ -1171,6 +1246,7 @@ impl ProjectSourceBundle {
             let historical = ProjectSourceBundle {
                 id: self.id,
                 owner: snapshot.owner.clone(),
+                shared_with: Vec::new(),
                 language: self.language,
                 root: snapshot.root.clone(),
                 files: snapshot.files.clone(),
@@ -1195,7 +1271,42 @@ impl ProjectSourceBundle {
         Ok(())
     }
 
+    /// A source is shared only by a cell view's, each view once, and never
+    /// with the view that owns it.
+    fn validate_shared_views(&self) -> Result<(), ProjectSourceError> {
+        let Some(first) = self.shared_with.first() else {
+            return Ok(());
+        };
+        let ProjectSourceOwner::CellView { reference } = &self.owner else {
+            return Err(ProjectSourceError::InvalidCellViewOwner {
+                reference: first.display_path(),
+                message: "only a cell view's source can be shared".to_owned(),
+            });
+        };
+        let mut served = BTreeSet::from([canonical_cell_view_owner_key(
+            &reference.library,
+            &reference.cell,
+            &reference.view,
+        )]);
+        for shared in &self.shared_with {
+            ProjectSourceOwner::cell_view(shared.clone()).validate(self.language)?;
+            if !served.insert(canonical_cell_view_owner_key(
+                &shared.library,
+                &shared.cell,
+                &shared.view,
+            )) {
+                return Err(ProjectSourceError::DuplicateOwner {
+                    owner: shared.display_path(),
+                });
+            }
+        }
+        Ok(())
+    }
+
     pub(super) fn canonicalize(&mut self) {
+        self.shared_with.sort_by_cached_key(|reference| {
+            canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+        });
         self.files.sort_by(|left, right| {
             path_key(&left.logical_path)
                 .cmp(&path_key(&right.logical_path))

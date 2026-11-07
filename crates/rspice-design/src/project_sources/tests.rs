@@ -1073,3 +1073,88 @@ fn a_veriloga_root_may_be_a_va_or_a_vams_file() {
         );
     }
 }
+
+/// One source, two views: each module of a two-module file is a view of its
+/// own cell, both served by the same bundle. The views find it as their own,
+/// no other source may claim either, sharing is outside the digest and
+/// survives a save, and the source outlives its owner's view while another
+/// view still uses it.
+#[test]
+fn a_shared_source_serves_each_of_its_views_and_outlives_its_owner() {
+    let first = CellViewRef::new("lib", "first", "veriloga");
+    let second = CellViewRef::new("lib", "second", "veriloga");
+    let mut bundle = owned_bundle("lib", "first", "veriloga");
+    let digest = bundle.closure_digest();
+    let revision = bundle.revision();
+    bundle.share_with(second.clone()).unwrap();
+    assert_eq!(
+        bundle.closure_digest(),
+        digest,
+        "sharing changes no source byte"
+    );
+    assert!(matches!(
+        bundle.clone().share_with(first.clone()),
+        Err(ProjectSourceError::DuplicateOwner { .. })
+    ));
+    let id = bundle.id();
+    let mut registry = ProjectSourceRegistry::try_from_bundles([bundle]).unwrap();
+
+    for view in [&first, &second] {
+        assert_eq!(
+            registry
+                .bundle_for_owner(&ProjectSourceOwner::cell_view(view.clone()))
+                .map(ProjectSourceBundle::id),
+            Some(id),
+            "{}",
+            view.display_path()
+        );
+    }
+    assert!(matches!(
+        registry
+            .clone()
+            .insert_bundle(owned_bundle("lib", "second", "veriloga")),
+        Err(ProjectSourceError::DuplicateOwner { .. })
+    ));
+    let restored: ProjectSourceRegistry =
+        serde_json::from_slice(&serde_json::to_vec(&registry).unwrap()).unwrap();
+    assert_eq!(restored, registry, "the views a source serves are saved");
+
+    let renamed = CellViewRef::new("lib", "renamed", "veriloga");
+    assert_eq!(
+        registry
+            .rename_cell_view_bundles("lib", "second", "renamed")
+            .unwrap(),
+        Vec::<ProjectSourceId>::new(),
+        "renaming a view the source is shared with changes no evidence"
+    );
+    let copied = registry
+        .clone_cell_view_bundles("lib", "renamed", "lib", "copy")
+        .unwrap();
+    assert_eq!(copied.len(), 1, "a copy of a sharing cell owns a source");
+    assert_ne!(copied[0], id);
+
+    assert_eq!(
+        registry.remove_cell_view_bundles("lib", "first", None),
+        [id]
+    );
+    let survivor = registry
+        .bundle_for_owner(&ProjectSourceOwner::cell_view(renamed.clone()))
+        .expect("the source outlives its owner's view");
+    assert_eq!(survivor.id(), id);
+    assert_eq!(survivor.owner(), &ProjectSourceOwner::cell_view(renamed));
+    assert!(survivor.shared_with().is_empty());
+    assert!(
+        survivor.revision() > revision,
+        "passing the source on is a revision"
+    );
+    assert_ne!(survivor.closure_digest(), digest);
+    assert!(
+        survivor.digest_names_current_graph(digest),
+        "a reference made under the old owner still names the source"
+    );
+    assert_eq!(
+        registry.remove_cell_view_bundles("lib", "renamed", None),
+        [id]
+    );
+    assert!(registry.get_bundle(id).is_none());
+}

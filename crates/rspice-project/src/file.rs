@@ -1036,12 +1036,18 @@ impl ProjectFile {
         view_index: &ValidatedLibraryIndex,
     ) -> Result<(), ProjectIoError> {
         let mut owned_veriloga_views = HashSet::new();
-        for bundle in self.workspace.project_sources.iter_bundles() {
-            let rspice_design::project_sources::ProjectSourceOwner::CellView { reference } =
-                bundle.owner()
-            else {
-                continue;
-            };
+        // A shared source serves each of its views as it serves its owner's,
+        // so each must be a Verilog-A view of the library like the owner's.
+        for (bundle, reference) in
+            self.workspace
+                .project_sources
+                .iter_bundles()
+                .flat_map(|bundle| {
+                    bundle
+                        .cell_views()
+                        .map(move |reference| (bundle, reference))
+                })
+        {
             let view = view_index.get_owner(reference).ok_or_else(|| {
                 ProjectIoError::InvalidData(format!(
                     "project source bundle {} owns missing cell view '{}'",

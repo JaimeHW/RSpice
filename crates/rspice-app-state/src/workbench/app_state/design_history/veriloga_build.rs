@@ -231,19 +231,16 @@ fn restore_bundle(
     let restored = bundle_revision(state, bundle)
         .ok_or_else(|| "The Verilog-A source no longer exists.".to_owned())?;
     effects.void_veriloga_evidence = true;
-    let owner = state
-        .workspace
-        .content
+    let content = &mut state.workspace.content;
+    let views = content
         .project_sources
         .get_bundle(bundle)
-        .map(|bundle| bundle.owner().clone());
-    if let Some(crate::state::ProjectSourceOwner::CellView { reference }) = owner
-        && let Some(open) = state
-            .workspace
-            .content
-            .open_views
-            .iter_mut()
-            .find(|open| open.reference == reference)
+        .map(|bundle| bundle.cell_views().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for open in content
+        .open_views
+        .iter_mut()
+        .filter(|open| views.contains(&open.reference))
     {
         open.dirty = true;
     }

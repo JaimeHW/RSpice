@@ -30,10 +30,12 @@ use super::{
 use crate::state::code_diagnostics::CodeDiagnosticCollection;
 
 /// The exact project-owned Verilog-A closure selected by the current editor:
-/// the bundle the active Verilog-A cell view owns, and the module that view
-/// binds.
+/// the active Verilog-A cell view, the bundle that serves it, which it owns
+/// or shares with the views of the file's other modules, and the module that
+/// view binds.
 #[derive(Debug, Clone)]
 pub(crate) struct SelectedVerilogASource {
+    pub(super) view: crate::state::CellViewRef,
     pub(super) bundle: ProjectSourceBundle,
     pub(super) selected_module: Option<String>,
 }
@@ -60,6 +62,12 @@ impl SelectedVerilogAEditorSnapshot {
 }
 
 impl SelectedVerilogASource {
+    /// The cell view the source is selected for: its module's view, which
+    /// for a shared source need not be the bundle's owner.
+    pub(crate) fn view(&self) -> &crate::state::CellViewRef {
+        &self.view
+    }
+
     pub(crate) fn bundle(&self) -> &ProjectSourceBundle {
         &self.bundle
     }
@@ -128,6 +136,7 @@ pub(crate) fn selected_veriloga_source(app: &RSpiceApp) -> Result<SelectedVerilo
         .validate()
         .map_err(|error| format!("The selected Verilog-A source bundle is invalid: {error}"))?;
     Ok(SelectedVerilogASource {
+        view: reference.clone(),
         bundle,
         selected_module,
     })
@@ -244,26 +253,19 @@ pub(crate) fn invalidate_veriloga_evidence(app: &mut RSpiceApp, bundle_id: Proje
 }
 
 /// The persisted bundle changed: the project has unsaved source, and so does
-/// the cell view that owns the bundle, whose tab says so.
+/// each cell view the bundle serves, whose tab says so.
 fn mark_bundle_unsaved(app: &mut RSpiceApp, bundle_id: ProjectSourceId) {
-    app.state.model.workspace.content.project_sources_dirty = true;
-    let owner = app
-        .state
-        .model
-        .workspace
-        .content
+    let content = &mut app.state.model.workspace.content;
+    content.project_sources_dirty = true;
+    let views = content
         .project_sources
         .get_bundle(bundle_id)
-        .map(|bundle| bundle.owner().clone());
-    if let Some(ProjectSourceOwner::CellView { reference }) = owner
-        && let Some(open) = app
-            .state
-            .model
-            .workspace
-            .content
-            .open_views
-            .iter_mut()
-            .find(|open| open.reference == reference)
+        .map(|bundle| bundle.cell_views().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    for open in content
+        .open_views
+        .iter_mut()
+        .filter(|open| views.contains(&open.reference))
     {
         open.dirty = true;
     }
@@ -637,8 +639,18 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                     {
                         app.state.model.workspace.content.project_sources_dirty = true;
                     }
-                    let receipt = match receipt_bundle.as_ref().map(ProjectSourceBundle::owner) {
-                        Some(ProjectSourceOwner::CellView { reference }) => {
+                    // The ports become the interface of the view that selects
+                    // the module: for a shared source, that module's cell.
+                    let selecting = receipt_bundle.as_ref().and_then(|bundle| {
+                        super::veriloga_interface::view_selecting_module(
+                            &app.state.model.library_manager,
+                            bundle,
+                            &report.abi.module_name.to_string(),
+                        )
+                        .cloned()
+                    });
+                    let receipt = match &selecting {
+                        Some(reference) => {
                             let applied = apply_compiled_interface(
                                 &mut app.state.model.library_manager,
                                 &app.state.model.workspace.content.schematic_buffers,
@@ -668,7 +680,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                                 report.abi.formal_ports.len(),
                             )
                         }
-                        _ => receipt,
+                        None => receipt,
                     };
                     Arc::make_mut(&mut app.state.code.code_workspace.veriloga.last_failure).clear();
                     app.state.code.code_workspace.veriloga.last_failure_token = None;

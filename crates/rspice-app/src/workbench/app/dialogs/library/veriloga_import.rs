@@ -419,21 +419,29 @@ impl RSpiceApp {
             .ok_or_else(|| format!("{} is not in the import.", form.file_name))?;
         let mut libraries = self.state.model.library_manager.clone();
         let mut sources = self.state.model.workspace.content.project_sources.clone();
+        // One source for every module: the first cell's view owns it, and
+        // each other cell's view shares it, so an edit made through any of
+        // them is the source all of them compile.
+        let mut bundle = ProjectSourceBundle::try_new(
+            ProjectSourceOwner::cell_view(first.clone()),
+            ProjectSourceLanguage::VerilogA,
+            form.file_name.as_str(),
+            root.as_str(),
+            imported_files(&form)?,
+            imported_edges(&form)?,
+        )
+        .map_err(|error| error.to_string())?;
         for (module, reference, _) in &plan {
-            let bundle = ProjectSourceBundle::try_new(
-                ProjectSourceOwner::cell_view(reference.clone()),
-                ProjectSourceLanguage::VerilogA,
-                form.file_name.as_str(),
-                root.as_str(),
-                imported_files(&form)?,
-                imported_edges(&form)?,
-            )
-            .map_err(|error| error.to_string())?;
-            sources
-                .insert_bundle(bundle)
-                .map_err(|error| error.to_string())?;
+            if *reference != first {
+                bundle
+                    .share_with(reference.clone())
+                    .map_err(|error| error.to_string())?;
+            }
             place_veriloga_view(&mut libraries, reference, veriloga_view(Some(module))?)?;
         }
+        sources
+            .insert_bundle(bundle)
+            .map_err(|error| error.to_string())?;
         let mutation = if first_is_new {
             crate::state::ProjectLibraryMutation::CreateCell {
                 library: first.library.clone(),

@@ -585,9 +585,10 @@ fn a_migrated_source_whose_name_is_taken_lands_at_the_suffixed_cell() {
 const TWO_TOP_MODULES: &str = "`include \"disciplines.vams\"\nmodule child(p, n);\n  inout p, n;\n  electrical p, n;\n  analog I(p, n) <+ V(p, n);\nendmodule\nmodule first(a, b);\n  inout a, b;\n  electrical a, b;\n  child c1(a, b);\nendmodule\nmodule second(x, y);\n  inout x, y;\n  electrical x, y;\n  analog I(x, y) <+ V(x, y) / 1k;\nendmodule\n";
 
 /// With no Verilog-A tab in front, an imported file is read into the form,
-/// and committing it makes one cell view per top module, each owning a
-/// bundle of the file, and opens the first in Design. A module the file only
-/// instantiates is not a top and gets no cell.
+/// and committing it makes one cell view per top module, all served by one
+/// source, and opens the first in Design. A module the file only
+/// instantiates is not a top and gets no cell. An edit made through one
+/// module's view is the source the other module's view compiles.
 #[test]
 fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let mut app = open_project_app();
@@ -628,8 +629,8 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
     let first = app.commit_veriloga_import().expect("the cells are created");
 
     assert_eq!(first, CellViewRef::new(&library, "first", "veriloga"));
-    for (cell, module) in [("first", "first"), ("second", "second")] {
-        let reference = CellViewRef::new(&library, cell, "veriloga");
+    let second = CellViewRef::new(&library, "second", "veriloga");
+    let served = |app: &RSpiceApp, reference: &CellViewRef| {
         let bundle = app
             .state
             .model
@@ -637,17 +638,58 @@ fn import_with_no_veriloga_tab_creates_the_cells_and_opens_the_first() {
             .content
             .project_sources
             .bundle_for_owner(&ProjectSourceOwner::cell_view(reference.clone()))
-            .expect("each module's view owns a bundle");
-        assert_eq!(bundle.root().logical_path(), "pair.va");
-        assert_eq!(bundle.root().content(), TWO_TOP_MODULES);
-        let binding = crate::state::workspace::project_veriloga_binding_for_view(
+            .expect("each module's view is served by the source");
+        (bundle.id(), bundle.root().content().to_owned())
+    };
+    let (shared, text) = served(&app, &first);
+    assert_eq!(served(&app, &second), (shared, text.clone()), "one source");
+    assert_eq!(text, TWO_TOP_MODULES);
+    assert_eq!(
+        app.state
+            .model
+            .workspace
+            .content
+            .project_sources
+            .iter_bundles()
+            .filter(|bundle| bundle.root().logical_path() == "pair.va")
+            .count(),
+        1,
+        "the file is held once"
+    );
+    let binds = |app: &RSpiceApp, reference: &CellViewRef| {
+        crate::state::workspace::project_veriloga_binding_for_view(
             &app.state.model.workspace,
             &app.state.model.library_manager,
-            &reference,
+            reference,
         )
-        .expect("each view binds its module");
-        assert_eq!(binding.selected_module(), module);
-    }
+        .expect("each view binds its module")
+        .selected_module()
+        .to_owned()
+    };
+    assert_eq!(binds(&app, &first), "first");
+    assert_eq!(binds(&app, &second), "second");
+
+    open_in_design(&mut app.state, &second);
+    let selected = code_workspace::selected_veriloga_source(&app).expect("second's source");
+    assert_eq!(selected.view(), &second);
+    assert_eq!(selected.selected_module(), Some("second"));
+    let edited = TWO_TOP_MODULES.replace("/ 1k", "/ 2k");
+    assert!(
+        code_workspace::replace_selected_veriloga_file(
+            &mut app,
+            &selected,
+            "pair.va",
+            edited.clone()
+        )
+        .expect("the edit applies")
+    );
+    assert_eq!(
+        served(&app, &first),
+        (shared, edited),
+        "first sees the edit"
+    );
+    assert_eq!(binds(&app, &first), "first", "and still selects its module");
+    open_in_design(&mut app.state, &first);
     assert!(
         app.state
             .model

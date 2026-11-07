@@ -463,10 +463,7 @@ fn module_section(
                     &messages.text(MessageId::VerilogANoBytecode),
                 );
             }
-            if let crate::state::ProjectSourceOwner::CellView { reference } =
-                selected.bundle().owner()
-                && interface_rows(ui, state, receipt, reference, messages)
-            {
+            if interface_rows(ui, state, receipt, selected.view(), messages) {
                 action = Some(VerilogAInspectorAction::UpdateSymbol);
             }
         },

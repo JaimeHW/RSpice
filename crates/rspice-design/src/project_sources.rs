@@ -780,6 +780,11 @@ impl ProjectSourceDependency {
 pub struct ProjectSourceBundle {
     id: ProjectSourceId,
     owner: ProjectSourceOwner,
+    /// Further Verilog-A cell views that each select a module of this source,
+    /// one module per view, beside the owner's. Sharing changes no source
+    /// byte, so it is outside the closure digest and the revision history.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shared_with: Vec<CellViewRef>,
     language: ProjectSourceLanguage,
     root: ProjectSourceDocument,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -1032,11 +1037,9 @@ impl ProjectSourceRegistry {
         if self.bundles.iter().any(|current| current.id == bundle.id) {
             return Err(ProjectSourceError::DuplicateIdentity { id: bundle.id });
         }
-        let owner_key = bundle.owner.canonical_key();
-        if self
-            .bundles
-            .iter()
-            .any(|current| current.owner.canonical_key() == owner_key)
+        if let Some(owner_key) = bundle
+            .served_keys()
+            .find(|key| self.bundles.iter().any(|current| current.serves(key)))
         {
             if let ProjectSourceOwner::CodeWorkspace { language } = bundle.owner {
                 return Err(ProjectSourceError::DuplicateLanguage { language });
@@ -1074,12 +1077,12 @@ impl ProjectSourceRegistry {
             .restore_revision(expected_current, retained_revision)
     }
 
+    /// The bundle that serves `owner`: the one it owns, or for a cell view,
+    /// the one shared with it.
     #[must_use]
     pub fn bundle_for_owner(&self, owner: &ProjectSourceOwner) -> Option<&ProjectSourceBundle> {
         let owner_key = owner.canonical_key();
-        self.bundles
-            .iter()
-            .find(|bundle| bundle.owner.canonical_key() == owner_key)
+        self.bundles.iter().find(|bundle| bundle.serves(&owner_key))
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &ProjectSourceDocument> {
@@ -1105,8 +1108,10 @@ impl ProjectSourceRegistry {
         Some(self.bundles.remove(index))
     }
 
-    /// Remove every cell-view source owned by the exact library/cell scope.
-    /// Supplying a view narrows the operation to that one view. The returned
+    /// Release every cell view in the exact library/cell scope from the
+    /// sources that serve it. Supplying a view narrows the operation to that
+    /// one view. A source no view uses any more is removed, and a shared
+    /// source whose owner goes passes to its next view. The returned
     /// identities let callers invalidate transient receipts without guessing.
     pub fn remove_cell_view_bundles(
         &mut self,
@@ -1114,27 +1119,10 @@ impl ProjectSourceRegistry {
         cell: &str,
         view: Option<&str>,
     ) -> Vec<ProjectSourceId> {
-        let mut removed = Vec::new();
-        self.bundles.retain(|bundle| {
-            let matches = matches!(
-                bundle.owner(),
-                ProjectSourceOwner::CellView { reference }
-                    if canonical_cell_view_owner_key(
-                        &reference.library,
-                        &reference.cell,
-                        &reference.view,
-                    ) == canonical_cell_view_owner_key(
-                        library,
-                        cell,
-                        view.unwrap_or(&reference.view),
-                    )
-            );
-            if matches {
-                removed.push(bundle.id());
-            }
-            !matches
-        });
-        removed
+        self.release_cell_views(|reference| {
+            canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
+                == canonical_cell_view_owner_key(library, cell, view.unwrap_or(&reference.view))
+        })
     }
 
     /// Remove cell-view bundles whose owner no longer exists in the project
@@ -1151,24 +1139,34 @@ impl ProjectSourceRegistry {
                 canonical_cell_view_owner_key(&reference.library, &reference.cell, &reference.view)
             })
             .collect::<BTreeSet<_>>();
-        let mut removed = Vec::new();
-        self.bundles.retain(|bundle| {
-            let keep = match bundle.owner() {
-                ProjectSourceOwner::CodeWorkspace { .. } => true,
-                ProjectSourceOwner::CellView { reference } => {
-                    retained.contains(&canonical_cell_view_owner_key(
-                        &reference.library,
-                        &reference.cell,
-                        &reference.view,
-                    ))
-                }
-            };
-            if !keep {
-                removed.push(bundle.id());
+        self.release_cell_views(|reference| {
+            !retained.contains(&canonical_cell_view_owner_key(
+                &reference.library,
+                &reference.cell,
+                &reference.view,
+            ))
+        })
+    }
+
+    /// Stop serving every cell view `matches` names. A source no view uses
+    /// any more is removed; a shared source whose owner's view goes passes
+    /// to the next view that shares it. Returns the identity of every source
+    /// removed or re-owned, whose compiler evidence no longer holds.
+    fn release_cell_views(
+        &mut self,
+        matches: impl Fn(&CellViewRef) -> bool,
+    ) -> Vec<ProjectSourceId> {
+        let mut released = Vec::new();
+        self.bundles.retain_mut(|bundle| {
+            let owner = bundle.owner.clone();
+            let kept = bundle.release_cell_views(&matches);
+            if !kept || bundle.owner != owner {
+                released.push(bundle.id());
             }
-            keep
+            kept
         });
-        removed
+        self.canonicalize();
+        released
     }
 
     /// Clone every project-owned source associated with one cell into a new
@@ -1182,24 +1180,26 @@ impl ProjectSourceRegistry {
         target_library: &str,
         target_cell: &str,
     ) -> Result<Vec<ProjectSourceId>, ProjectSourceError> {
+        // A copy of a cell owns a copy of each source a view of it uses,
+        // shared or not: the copy is a cell of its own.
         let originals = self
             .bundles
             .iter()
-            .filter_map(|bundle| match bundle.owner() {
-                ProjectSourceOwner::CellView { reference }
-                    if canonical_cell_view_owner_key(
-                        &reference.library,
-                        &reference.cell,
-                        &reference.view,
-                    ) == canonical_cell_view_owner_key(
-                        source_library,
-                        source_cell,
-                        &reference.view,
-                    ) =>
-                {
-                    Some((bundle, reference.view.clone()))
-                }
-                _ => None,
+            .flat_map(|bundle| {
+                bundle
+                    .cell_views()
+                    .filter(|reference| {
+                        canonical_cell_view_owner_key(
+                            &reference.library,
+                            &reference.cell,
+                            &reference.view,
+                        ) == canonical_cell_view_owner_key(
+                            source_library,
+                            source_cell,
+                            &reference.view,
+                        )
+                    })
+                    .map(move |reference| (bundle, reference.view.clone()))
             })
             .collect::<Vec<_>>();
         let mut candidate = self.clone();
@@ -1298,6 +1298,13 @@ impl ProjectSourceRegistry {
             .collect::<BTreeMap<_, _>>();
         let mut changed = Vec::new();
         for bundle in &mut candidate.bundles {
+            // A view the source is shared with is not framed into its
+            // digest: renaming it changes no evidence.
+            for shared in &mut bundle.shared_with {
+                if matches(shared) {
+                    rename(shared);
+                }
+            }
             let matched = match &bundle.owner {
                 ProjectSourceOwner::CellView { reference } => matches(reference),
                 ProjectSourceOwner::CodeWorkspace { .. } => false,
@@ -1413,11 +1420,18 @@ impl ProjectSourceRegistry {
         let owner = ProjectSourceOwner::cell_view(reference.clone());
         let replacement = source.bundle_for_owner(&owner).cloned();
         let mut candidate = self.clone();
-        candidate.remove_cell_view_bundles(
-            &reference.library,
-            &reference.cell,
-            Some(&reference.view),
-        );
+        // A shared source is one document whichever of its views is saved or
+        // reverted: the bundle that serves the view goes whole, and so does
+        // the one that carries the replacement's identity.
+        let current = candidate
+            .bundle_for_owner(&owner)
+            .map(ProjectSourceBundle::id);
+        for id in current
+            .into_iter()
+            .chain(replacement.as_ref().map(ProjectSourceBundle::id))
+        {
+            candidate.remove_bundle(id);
+        }
         if let Some(bundle) = replacement {
             candidate.insert_bundle(bundle)?;
         }
@@ -1635,14 +1649,15 @@ impl ProjectSourceRegistry {
             if !ids.insert(bundle.id) {
                 return Err(ProjectSourceError::DuplicateIdentity { id: bundle.id });
             }
-            let owner = bundle.owner.canonical_key();
-            if !owners.insert(owner.clone()) {
-                if let ProjectSourceOwner::CodeWorkspace { language } = bundle.owner {
-                    return Err(ProjectSourceError::DuplicateLanguage { language });
+            for owner in bundle.served_keys() {
+                if !owners.insert(owner.clone()) {
+                    if let ProjectSourceOwner::CodeWorkspace { language } = bundle.owner {
+                        return Err(ProjectSourceError::DuplicateLanguage { language });
+                    }
+                    return Err(ProjectSourceError::DuplicateOwner {
+                        owner: owner.to_string(),
+                    });
                 }
-                return Err(ProjectSourceError::DuplicateOwner {
-                    owner: owner.to_string(),
-                });
             }
         }
         Ok(())

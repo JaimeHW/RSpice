@@ -17,7 +17,7 @@ use rspice_design::library::metadata::{
 use rspice_design::symbol::generated::{GENERATED_SYMBOL_VIEW, is_generated_symbol};
 
 use crate::state::{
-    CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceOwner,
+    CellViewRef, LibraryManager, PortDirection, PortSpec, ProjectSourceBundle,
     ProjectSourceRegistry, SymbolDocument, ViewType,
 };
 
@@ -270,11 +270,38 @@ pub(crate) fn interface_finding<'a>(
     }
 }
 
+/// The view of `bundle` that selects `module`: for a source shared by the
+/// cells of a file's modules, that module's cell, otherwise the owner's view.
+pub(crate) fn view_selecting_module<'a>(
+    libraries: &LibraryManager,
+    bundle: &'a ProjectSourceBundle,
+    module: &str,
+) -> Option<&'a CellViewRef> {
+    let selects = |reference: &&CellViewRef| {
+        libraries
+            .get_library(&reference.library)
+            .and_then(|library| library.get_cell(&reference.cell))
+            .and_then(|cell| Some((cell, cell.get_view(&reference.view)?)))
+            .and_then(|(cell, view)| {
+                crate::state::workspace::metadata_value(
+                    [&view.metadata, &cell.metadata],
+                    &["veriloga.module", "netlist.module"],
+                )
+            })
+            .is_some_and(|selected| selected.trim().eq_ignore_ascii_case(module))
+    };
+    bundle
+        .cell_views()
+        .find(selects)
+        .or_else(|| bundle.cell_views().next())
+}
+
 /// The design check's finding for a retained compile whose module disagrees
 /// with its cell's schematic: the view it names, and what to tell the reader.
 pub(crate) fn interface_check_finding(
     state: &VerilogAWorkbenchState,
     sources: &ProjectSourceRegistry,
+    libraries: &LibraryManager,
 ) -> Option<(CellViewRef, String)> {
     let receipt = state.receipt.as_ref()?;
     let Some(VerilogAInterfaceOutcome::SchematicMismatch { schematic, module }) =
@@ -288,9 +315,8 @@ pub(crate) fn interface_check_finding(
     let bundle = sources.get_bundle(token.bundle_id).filter(|bundle| {
         bundle.revision().get() == token.revision && bundle.closure_digest() == token.closure_digest
     })?;
-    let ProjectSourceOwner::CellView { reference } = bundle.owner() else {
-        return None;
-    };
+    let compiled = receipt.compilation.report().abi.module_name.to_string();
+    let reference = view_selecting_module(libraries, bundle, &compiled)?;
     Some((
         reference.clone(),
         format!(

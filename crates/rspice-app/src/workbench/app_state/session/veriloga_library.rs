@@ -348,26 +348,30 @@ fn validate_global_library_contract(
                 bundle.language()
             ));
         }
-        let ProjectSourceOwner::CellView { reference } = bundle.owner() else {
+        if !matches!(bundle.owner(), ProjectSourceOwner::CellView { .. }) {
             return Err(format!(
                 "global Verilog-A source bundle '{}' is not owned by a cell view",
                 bundle.id()
             ));
-        };
-        if reference.library != VERILOGA_LIBRARY_NAME {
-            return Err(format!(
-                "global Verilog-A source bundle '{}' is owned by '{}'",
-                bundle.id(),
-                reference.display_path()
-            ));
         }
-        if !expected.contains(&reference.key()) {
-            return Err(format!(
-                "global Verilog-A source owner '{}' is not a Verilog-A view in the library",
-                reference.display_path()
-            ));
+        // A source shared by the cells of a file's modules serves each of
+        // their views, all of them in the library.
+        for reference in bundle.cell_views() {
+            if reference.library != VERILOGA_LIBRARY_NAME {
+                return Err(format!(
+                    "global Verilog-A source bundle '{}' is owned by '{}'",
+                    bundle.id(),
+                    reference.display_path()
+                ));
+            }
+            if !expected.contains(&reference.key()) {
+                return Err(format!(
+                    "global Verilog-A source owner '{}' is not a Verilog-A view in the library",
+                    reference.display_path()
+                ));
+            }
+            found.insert(reference.key());
         }
-        found.insert(reference.key());
     }
     if let Some(missing) = expected.difference(&found).next() {
         return Err(format!(

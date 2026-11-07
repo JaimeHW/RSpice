@@ -30,7 +30,7 @@ use rspice_simulation::project_veriloga::build_profile::{
 };
 
 use crate::state::workspace::VERILOGA_LIBRARY_NAME;
-use crate::state::{ProjectSourceLanguage, ProjectSourceOwner, ViewType};
+use crate::state::{ProjectSourceLanguage, ViewType};
 use crate::ui::widgets::{CommandForm, DialogChoice, FieldLine, FormRows, ListWords};
 use crate::workbench::app::RSpiceApp;
 use crate::workbench::app_state::session::veriloga_library::persist_global_veriloga_library;
@@ -371,9 +371,7 @@ fn module_rebind(
     if draft.modules.len() < 2 || bound.is_none_or(|bound| bound == draft.entry_module) {
         return Ok(None);
     }
-    let ProjectSourceOwner::CellView { reference } = draft.source.bundle().owner() else {
-        return Ok(None);
-    };
+    let reference = draft.source.view();
     let library = app
         .state
         .model
