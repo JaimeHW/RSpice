@@ -689,25 +689,47 @@ impl<'a> Parser<'a> {
         }
     }
 
+    /// The node or element a probe names, left as the current token. A sign
+    /// written against a name is part of it: LTspice's supply nodes are
+    /// commonly `+V` and `-V`, and `V(x,+V)` reads node `+V`.
+    fn probe_reference(&mut self) -> Option<String> {
+        let sign = match &self.current {
+            Token::Ident(arg) => return Some(arg.clone()),
+            Token::Number { lexeme, .. } => return Some(lexeme.clone()),
+            Token::Plus => '+',
+            Token::Minus => '-',
+            _ => return None,
+        };
+        let written_against_a_name = self
+            .lexer
+            .chars
+            .peek()
+            .is_some_and(|next| next.is_alphanumeric() || matches!(next, '_' | '$'));
+        if !written_against_a_name {
+            return None;
+        }
+        self.advance();
+        match &self.current {
+            Token::Ident(name) => Some(format!("{sign}{name}")),
+            Token::Number { lexeme, .. } => Some(format!("{sign}{lexeme}")),
+            _ => None,
+        }
+    }
+
     fn parse_ident_or_call(&mut self, name: &str) -> Expr {
         let upper = name.to_uppercase();
 
         // Check for V(node) or I(element)
         if (upper == "V" || upper == "I") && self.current == Token::LParen {
             self.advance(); // consume (
-            let parse_ref_arg = |token: &Token| match token {
-                Token::Ident(arg) => Some(arg.clone()),
-                Token::Number { lexeme, .. } => Some(lexeme.clone()),
-                _ => None,
-            };
 
-            if let Some(first_arg) = parse_ref_arg(&self.current) {
+            if let Some(first_arg) = self.probe_reference() {
                 self.advance();
 
                 // Differential voltage probe form: V(node_pos, node_neg)
                 if upper == "V" && self.current == Token::Comma {
                     self.advance();
-                    if let Some(second_arg) = parse_ref_arg(&self.current) {
+                    if let Some(second_arg) = self.probe_reference() {
                         self.advance();
                         self.expect(Token::RParen);
                         return Expr::sub(

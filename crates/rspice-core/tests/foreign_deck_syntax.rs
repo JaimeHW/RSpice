@@ -354,3 +354,26 @@ C1 out 0 100n
     assert_close("vin", measurement(&results, "vin"), 0.0657325, 1e-4);
     assert_close("slope", measurement(&results, "slope"), -6269.56, 2.0);
 }
+
+// LTspice and QSPICE: V(o1)=-10.75 and V(o2)=-1.47.
+#[test]
+fn a_probe_reads_a_node_whose_name_starts_with_a_sign() {
+    let netlist = parse(
+        "* probes of +V and -V
+V1 +V 0 DC 15
+V2 -V 0 DC -15
+V3 in 0 DC 2
+X1 in o1 +V -V clampy
+R1 o1 0 1k
+B2 o2 0 V=V(in,+V)*0.1+V(-V,in)*0.01
+R2 o2 0 1k
+.subckt clampy a o p n
+B1 o 0 V=V(a,p)*0.5+V(n,a)*0.25
+.ends clampy
+.op
+.end
+",
+    );
+    assert_close("V(o1)", op_voltage(&netlist, "o1"), -10.75, 1e-9);
+    assert_close("V(o2)", op_voltage(&netlist, "o2"), -1.47, 1e-9);
+}
