@@ -2164,15 +2164,16 @@ fn centre(terminals: &[Point]) -> Point {
 }
 
 /// The type a QSPICE behavioural device states (`D-FLOP`, `RROPAMP`): the
-/// first word of the type its symbol draws, else of its value.
+/// first word of the type its symbol draws, else of its value, that is a
+/// name and not a setting or a number.
 fn qspice_kind(symbol: &ForeignSymbol) -> String {
     [symbol.attribute(DEVICE_TYPE), symbol.attribute("Value")]
         .into_iter()
         .flatten()
         .find_map(|text| {
-            spice_tokens(&spice_text(text))
-                .into_iter()
-                .find(|word| !word.contains('='))
+            spice_tokens(&spice_text(text)).into_iter().find(|word| {
+                !word.contains('=') && word.chars().next().is_some_and(char::is_alphabetic)
+            })
         })
         .unwrap_or_default()
 }

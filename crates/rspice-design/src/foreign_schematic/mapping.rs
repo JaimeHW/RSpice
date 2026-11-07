@@ -163,7 +163,8 @@ pub(super) fn qspice_refusal(device_type: &str, kind: &str) -> Option<String> {
             "CLOCKSYNC" => "clock synchronizer",
             "MONOSTABLE" => "monostable",
             "ULATOR" => "AM/FM modulator",
-            "Φ-DET" => "phase/frequency detector",
+            // QSPICE's drawings write the Φ of its type as Ø.
+            "Φ-DET" | "Ø-DET" => "phase/frequency detector",
             oscillator if oscillator.contains("OSC") || oscillator == "VCO" => "oscillator",
             _ => "digital device",
         },
