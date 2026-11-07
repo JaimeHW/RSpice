@@ -431,7 +431,7 @@ fn collect_runtime_device(
             module: module.clone(),
             route,
             process_id: process.process_id,
-            mechanism: canonical_mechanism(&process.name),
+            mechanism: veriloga_noise_mechanism(&process.name),
             spectrum,
             psd: process.psd,
             injections: process
@@ -642,20 +642,23 @@ fn generated_process(
     }))
 }
 
-/// Canonical mechanism name for a Verilog-A noise label.
+/// The mechanism a runtime Verilog-A noise source reports under: the label
+/// the module gave it, as written.
 ///
 /// The label is whatever string literal the module passed to the noise
 /// function, so it may carry spaces and punctuation no saved result can be
-/// written with. Every byte outside the persistable shape becomes `_` and the
-/// rest is upper-cased, which is how the code generator composes the compiled
-/// catalog's own mechanism names and how `.NOISE` names the contribution.
+/// written with; every byte outside the persistable shape becomes `_`. A
+/// source the module left unlabeled arrives named after its position
+/// (`noise2`). Every route that reports a runtime module's noise (the scalar
+/// sources, the grouped processes and their catalog) names it here, so the
+/// ranked table, `DNO()` and a transient-noise run agree on the name.
 #[cfg(feature = "veriloga")]
-fn canonical_mechanism(label: &str) -> String {
+pub(in crate::engine) fn veriloga_noise_mechanism(label: &str) -> String {
     let mut mechanism = label
         .bytes()
         .map(|byte| {
             if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'#') {
-                byte.to_ascii_uppercase() as char
+                byte as char
             } else {
                 '_'
             }
@@ -663,7 +666,7 @@ fn canonical_mechanism(label: &str) -> String {
         .collect::<String>();
     mechanism.truncate(crate::analysis::NOISE_MECHANISM_MAX_BYTES);
     if mechanism.is_empty() {
-        mechanism.push_str("NOISE");
+        mechanism.push_str("noise");
     }
     mechanism
 }

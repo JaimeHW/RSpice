@@ -1480,12 +1480,13 @@ fn print_noise_contribution_summary(
     ))?;
     for contribution in summary.iter().take(cap) {
         // The mechanism tells a device's sources apart: a diode's RS and RSW
-        // are both thermal, its ID and IDSW both shot.
+        // are both thermal, its ID and IDSW both shot. A Verilog-A source
+        // shows its module's label even when that is its type's name.
         let label = contribution.noise_type.label();
-        let source = if contribution.mechanism.eq_ignore_ascii_case(label) {
-            "-"
-        } else {
+        let source = if contribution.mechanism_declared {
             contribution.mechanism.as_str()
+        } else {
+            "-"
         };
         crate::console::line(format_args!(
             "    {:<20} {:<8} {:<9} {:>14.4e} {:>7.2}%",

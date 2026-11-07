@@ -1269,16 +1269,16 @@ fn stream_seed(
 
 /// The stream seed of one Verilog-A process.
 ///
-/// The same key shape as a native mechanism's: the instance, the canonical
-/// mechanism, the noise-function family and the call's own `process_id`,
-/// which is what keeps two calls with one name independent. Nothing in it
-/// depends on node numbering, thread count or whether the module runs on the
-/// interpreter or a compiled route.
+/// The same key shape as a native mechanism's: the instance, the mechanism
+/// (both case-folded, as names are matched), the noise-function family and
+/// the call's own `process_id`, which is what keeps two calls with one name
+/// independent. Nothing in it depends on node numbering, thread count or
+/// whether the module runs on the interpreter or a compiled route.
 fn process_stream_seed(run_seed: u64, process: &CollectedNoiseProcess) -> u64 {
     let key = format!(
         "{}|{}|{}|{}",
         process.instance.to_ascii_uppercase(),
-        process.mechanism,
+        process.mechanism.to_ascii_uppercase(),
         process.spectrum.kind_label(),
         process.process_id,
     );

@@ -1354,6 +1354,10 @@ pub struct IntegratedContribution {
     /// Canonical device-model mechanism name, falling back to the broad
     /// source type only when the model did not declare a mechanism identity.
     pub mechanism: String,
+    /// Whether the device declared `mechanism` (a built-in model's mechanism
+    /// or a Verilog-A module's label, even one that reads like its type),
+    /// rather than `mechanism` being the broad source type's label.
+    pub mechanism_declared: bool,
     /// Broad physical noise class.
     pub noise_type: NoiseSourceType,
     /// Output-referred noise power integrated over the band (V²). Positive
@@ -2036,18 +2040,24 @@ impl IntegratedNoise {
                             contribution.identity.device.clone(),
                             contribution_mechanism(contribution).to_string(),
                         ))
-                        .or_insert(contribution.noise_type);
+                        .or_insert((
+                            contribution.noise_type,
+                            contribution.identity.mechanism.is_some(),
+                        ));
                 }
             }
             let mut invalid = invalid
                 .into_iter()
                 .map(
-                    |((device_name, mechanism), noise_type)| IntegratedContribution {
-                        device_name,
-                        mechanism,
-                        noise_type,
-                        integrated_power: Value::NAN,
-                        percentage: Value::NAN,
+                    |((device_name, mechanism), (noise_type, mechanism_declared))| {
+                        IntegratedContribution {
+                            device_name,
+                            mechanism,
+                            mechanism_declared,
+                            noise_type,
+                            integrated_power: Value::NAN,
+                            percentage: Value::NAN,
+                        }
                     },
                 )
                 .collect::<Vec<_>>();
@@ -2059,7 +2069,7 @@ impl IntegratedNoise {
             });
             return invalid;
         }
-        let mut totals: HashMap<(String, String), (NoiseSourceType, ScaledPositiveSum)> =
+        let mut totals: HashMap<(String, String), (NoiseSourceType, bool, ScaledPositiveSum)> =
             HashMap::new();
 
         for window in self.results.windows(2) {
@@ -2075,9 +2085,13 @@ impl IntegratedNoise {
                         contribution.identity.device.clone(),
                         contribution_mechanism(contribution).to_string(),
                     ))
-                    .or_insert((contribution.noise_type, ScaledPositiveSum::default()));
+                    .or_insert((
+                        contribution.noise_type,
+                        contribution.identity.mechanism.is_some(),
+                        ScaledPositiveSum::default(),
+                    ));
                 add_noise_step(
-                    &mut entry.1,
+                    &mut entry.2,
                     (a.frequency, left_density),
                     (b.frequency, right_density),
                 );
@@ -2089,14 +2103,14 @@ impl IntegratedNoise {
         // identity tie-breaking also makes the percentage sum deterministic.
         let mut totals = totals.into_iter().collect::<Vec<_>>();
         totals.sort_by(
-            |(left_name, (_, left_power)), (right_name, (_, right_power))| {
+            |(left_name, (_, _, left_power)), (right_name, (_, _, right_power))| {
                 right_power.compare_power(*left_power).then_with(|| {
                     compare_identity((&left_name.0, &left_name.1), (&right_name.0, &right_name.1))
                 })
             },
         );
         let mut total_scaled = ScaledPositiveSum::default();
-        for (_, (_, power)) in &totals {
+        for (_, (_, _, power)) in &totals {
             if let Some((significand, exponent)) = power.parts() {
                 total_scaled.add_scaled(significand, exponent);
             }
@@ -2104,12 +2118,15 @@ impl IntegratedNoise {
         totals
             .into_iter()
             .map(
-                |((device_name, mechanism), (noise_type, power))| IntegratedContribution {
-                    device_name,
-                    mechanism,
-                    noise_type,
-                    integrated_power: power.value(),
-                    percentage: power.percentage_of(total_scaled),
+                |((device_name, mechanism), (noise_type, mechanism_declared, power))| {
+                    IntegratedContribution {
+                        device_name,
+                        mechanism,
+                        mechanism_declared,
+                        noise_type,
+                        integrated_power: power.value(),
+                        percentage: power.percentage_of(total_scaled),
+                    }
                 },
             )
             .collect()

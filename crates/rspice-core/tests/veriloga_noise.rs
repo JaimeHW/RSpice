@@ -510,6 +510,73 @@ fn a_negative_noise_power_contributes_nothing_and_warns_once() {
     );
 }
 
+const LABELLED_NOISE: &str = r#"
+`include "disciplines.vams"
+`include "constants.vams"
+module labelled_noise(p, n);
+    inout p, n;
+    electrical p, n;
+    real id, gd;
+    analog begin
+        id = V(p, n) / 1000.0;
+        gd = ddx(id, V(p));
+        I(p, n) <+ id;
+        I(p, n) <+ white_noise(2.0 * `P_Q * abs(id), "shot");
+        I(p, n) <+ flicker_noise(1e-12 * abs(id), 1.0, "flicker");
+        I(p, n) <+ white_noise(4.0 * `P_K * $temperature * gd, "Conductance");
+        I(p, n) <+ white_noise(1e-24);
+    end
+endmodule
+"#;
+
+/// The ranked table names a module's noise sources by the labels the module
+/// wrote, as written, for white, flicker and ddx-derived powers alike, and
+/// names an unlabeled source after its position. Every one of them is the
+/// device's own, even "shot" and "flicker", which read like their types; a
+/// resistor declares none and is named after its type.
+#[test]
+fn ranked_contributions_name_sources_by_their_module_labels() {
+    let model = write_model("labelled_noise.va", LABELLED_NOISE);
+    let netlist = Netlist::parse(&format!(
+        "* labelled noise\n\
+         v1 in 0 dc 1 ac 1\n\
+         r1 in out 1k\n\
+         XL out 0 labelled_noise\n\
+         .va \"{model}\" labelled_noise\n\
+         .end\n"
+    ))
+    .expect("deck parses");
+    let results = Engine::new(SimulationConfig::default())
+        .run_noise_named_with_input_source(&netlist, "out", None, "v1", &[1.0, 1e3, 1e6], T_NOM)
+        .expect("noise analysis");
+    let summary = rspice_core::analysis::IntegratedNoise::new(results).contribution_summary();
+
+    let mut module = summary
+        .iter()
+        .filter(|row| row.device_name.eq_ignore_ascii_case("xl"))
+        .map(|row| (row.mechanism.as_str(), row.mechanism_declared))
+        .collect::<Vec<_>>();
+    module.sort_unstable();
+    assert_eq!(
+        module,
+        [
+            ("Conductance", true),
+            ("flicker", true),
+            ("noise3", true),
+            ("shot", true)
+        ],
+        "{summary:?}"
+    );
+    let resistor = summary
+        .iter()
+        .find(|row| row.device_name.eq_ignore_ascii_case("r1"))
+        .expect("the resistor has a row");
+    assert_eq!(
+        (resistor.mechanism.as_str(), resistor.mechanism_declared),
+        ("thermal", false)
+    );
+}
+
 #[test]
 fn va_white_noise_matches_native_resistor_thermal() {
     let model = write_model("nres.va", NOISY_RES);

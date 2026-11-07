@@ -11,6 +11,8 @@ use super::{Engine, SimulationError};
 /// A probed noise-source set: one source per contribution, and the absolute
 /// temperature each was evaluated at where the model reports one.
 type ProbedNoiseSources = (Vec<NoiseSource>, Vec<Option<Value>>);
+#[cfg(feature = "veriloga")]
+use super::transient::device_noise::processes::veriloga_noise_mechanism;
 #[cfg(any(feature = "veriloga", feature = "veriloga-builtins-base"))]
 use super::transient::device_noise::processes::{
     CollectedNoiseProcess, NoiseProcessSpectrum, collect_noise_processes,
@@ -1031,33 +1033,6 @@ impl Engine {
         )
     }
 
-    /// Canonical mechanism name for an interpreted Verilog-A noise source.
-    ///
-    /// The label is whatever string literal the module passed to
-    /// `white_noise()`/`flicker_noise()`, so it may carry spaces and
-    /// punctuation no saved result can be written with. Every byte outside the
-    /// persistable shape becomes `_` and the rest is upper-cased, which is how
-    /// the code generator composes the compiled catalog's own mechanism names,
-    /// so a ranked contributor row can always carry what this names.
-    #[cfg(feature = "veriloga")]
-    fn canonical_veriloga_noise_mechanism(label: &str) -> String {
-        let mut mechanism = label
-            .bytes()
-            .map(|byte| {
-                if byte.is_ascii_alphanumeric() || matches!(byte, b'_' | b'-' | b'#') {
-                    byte.to_ascii_uppercase() as char
-                } else {
-                    '_'
-                }
-            })
-            .collect::<String>();
-        mechanism.truncate(crate::analysis::NOISE_MECHANISM_MAX_BYTES);
-        if mechanism.is_empty() {
-            mechanism.push_str("NOISE");
-        }
-        mechanism
-    }
-
     /// Generated Verilog-A instances this build compiled without their noise
     /// schedules.
     ///
@@ -1732,7 +1707,7 @@ impl Engine {
                 ))
             })?;
             for source in sources {
-                let mechanism = Self::canonical_veriloga_noise_mechanism(&source.name);
+                let mechanism = veriloga_noise_mechanism(&source.name);
                 let device = instance.to_string();
                 let identity =
                     crate::analysis::NoiseSourceIdentity::mechanism(device.clone(), mechanism);
@@ -2119,7 +2094,7 @@ impl Engine {
                 for (_, label) in device.grouped_noise_process_catalog() {
                     catalog.push(crate::analysis::NoiseSourceIdentity::mechanism(
                         instance.to_owned(),
-                        Self::canonical_veriloga_noise_mechanism(&label),
+                        veriloga_noise_mechanism(&label),
                     ));
                 }
             };
