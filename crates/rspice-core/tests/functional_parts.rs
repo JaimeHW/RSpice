@@ -410,3 +410,58 @@ RPU pu out 10k
     assert_close("I(V+)", -currents[0], 500e-6, 1e-9);
     assert_close("I(V-)", currents[1], 500e-6 + sunk, 1e-9);
 }
+
+/// An OTA with 100 uA into IABC between +-5 V supplies, its output held at
+/// ground by a 0 V source or left open, as `output` says.
+fn ota_deck(input: f64, parameters: &str, output: &str) -> String {
+    format!(
+        "* ota
+{SUPPLIES}IB vp iabc 100u
+VIN in 0 {input}
+X1 in 0 iabc vp vn out RSPICE_FN_OTA {parameters}
+{output}
+.end
+"
+    )
+}
+
+#[test]
+fn ota_output_current_is_its_bias_current_times_tanh_of_the_input_over_its_linear_range() {
+    for input in [-0.2, -0.05, 1e-3, 0.05, 0.2] {
+        let current = op_currents(&ota_deck(input, "", "VO out 0 0"), &["vo"])[0];
+        let expected = 100e-6 * (input / 51.7e-3).tanh();
+        assert_close("I(OUT)", current, expected, 1e-12 + 1e-6 * expected.abs());
+    }
+    // Small-signal transconductance IABC/VLIN, here 1 mS.
+    let current = op_currents(&ota_deck(1e-4, "VLIN=0.1", "VO out 0 0"), &["vo"])[0];
+    assert_close("gm", current / 1e-4, 1e-3, 1e-6);
+    // VOS cancels an equal and opposite input.
+    let current = op_currents(&ota_deck(-10e-3, "VOS=10m", "VO out 0 0"), &["vo"])[0];
+    assert_close("offset", current, 0.0, 1e-12);
+}
+
+#[test]
+fn ota_output_stops_its_headroom_inside_the_supply_pins() {
+    // Open, the 100 uA output current would drive ROUT to 1 kV; the clamp
+    // holds it HEADROOM inside each supply pin, plus 100 uA across 1 Ohm.
+    for (parameters, headroom) in [("", 1.0), ("HEADROOM=0.25", 0.25)] {
+        let high = op_voltages(&ota_deck(0.2, parameters, ""), &["out"])[0];
+        assert_close("high", high, 5.0 - headroom, 0.2e-3);
+        let low = op_voltages(&ota_deck(-0.2, parameters, ""), &["out"])[0];
+        assert_close("low", low, -5.0 + headroom, 0.2e-3);
+    }
+}
+
+#[test]
+fn ota_bias_input_sits_above_v_minus_and_its_current_returns_there() {
+    // 0.65 V plus 100 uA across 10 Ohm.
+    let deck = ota_deck(0.2, "", "VO out 0 0");
+    let bias = op_voltages(&deck, &["iabc"])[0];
+    assert_close("IABC", bias, -5.0 + 0.65 + 100e-6 * 10.0, 1e-6);
+    // The bias current and the sourced output current come from V+ (the
+    // bias through IB); V- returns the bias current and the quiescent one.
+    let sourced = 100e-6 * (0.2_f64 / 51.7e-3).tanh();
+    let currents = op_currents(&deck, &["vp", "vn"]);
+    assert_close("I(V+)", -currents[0], 1e-3 + 100e-6 + sourced, 1e-9);
+    assert_close("I(V-)", currents[1], 1e-3 + 100e-6, 1e-9);
+}

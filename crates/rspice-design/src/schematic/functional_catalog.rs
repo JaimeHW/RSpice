@@ -310,6 +310,62 @@ const COMPARATOR_PARAMETERS: &[FunctionalParameter] = &[
     ),
 ];
 
+const OTA_PINS: &[FunctionalPin] = &[
+    pin("IN+", In),
+    pin("IN-", In),
+    pin("IABC", In),
+    pin("V+", Supply),
+    pin("V-", Supply),
+    pin("OUT", Out),
+];
+
+/// A bipolar operational transconductance amplifier biased by the current
+/// into its IABC pin.
+const OTA_PARAMETERS: &[FunctionalParameter] = &[
+    number(
+        "VLIN",
+        "Input linear range",
+        "V",
+        "51.7m",
+        "The output current is IABC·tanh(vd/VLIN), so the transconductance is IABC/VLIN; 51.7 mV is a bipolar pair's 2kT/q.",
+    ),
+    number(
+        "VOS",
+        "Input offset voltage",
+        "V",
+        "0",
+        "Added to the non-inverting input.",
+    ),
+    number(
+        "ROUT",
+        "Output resistance",
+        "Ω",
+        "10Meg",
+        "Resistance from the output to ground.",
+    ),
+    number(
+        "COUT",
+        "Output capacitance",
+        "F",
+        "5p",
+        "Capacitance from the output to ground.",
+    ),
+    number(
+        "HEADROOM",
+        "Rail headroom",
+        "V",
+        "1",
+        "How far inside each supply pin the output voltage stops.",
+    ),
+    number(
+        "IQ",
+        "Quiescent current",
+        "A",
+        "1m",
+        "Supply current from V+ to V- besides the bias current.",
+    ),
+];
+
 static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
     FunctionalPartDescriptor {
         stable_id: "rspice.functional.opamp",
@@ -344,6 +400,24 @@ static FUNCTIONAL_PARTS: &[FunctionalPartDescriptor] = &[
         ],
         category: ComponentCategory::AmplifiersComparators,
         parameters: COMPARATOR_PARAMETERS,
+    },
+    FunctionalPartDescriptor {
+        stable_id: "rspice.functional.ota",
+        display_name: "OTA",
+        subcircuit: "RSPICE_FN_OTA",
+        pins: OTA_PINS,
+        symbol_asset: "functional_ota.svg",
+        keywords: &[
+            "ota",
+            "operational transconductance amplifier",
+            "transconductance amplifier",
+            "lm13700",
+            "ca3080",
+            "gm",
+            "vca",
+        ],
+        category: ComponentCategory::AmplifiersComparators,
+        parameters: OTA_PARAMETERS,
     },
 ];
 

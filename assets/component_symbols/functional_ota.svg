@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- OTA with supply pins and a bias-current input: IEEE triangle.
+     Box 60x60, pins in+(0,10), in-(0,30), iabc(0,50), v+(30,0), v-(30,60), out(60,30). -->
+<svg viewBox="0 0 60 60" xmlns="http://www.w3.org/2000/svg">
+  <path d="M 0,10 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,30 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 0,50 H 12" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 30,0 V 17.368" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 30,60 V 42.632" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 50,30 H 60" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 12,6 L 50,30 L 12,54 Z" fill="none" stroke="#000000" stroke-width="1" stroke-linejoin="round"/>
+  <path d="M 15,10 H 19.4 M 17.2,7.8 V 12.2" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 15,30 H 19.4" fill="none" stroke="#000000" stroke-width="1" stroke-linecap="round"/>
+  <path d="M 3.5,47.6 L 8.3,50 L 3.5,52.4 Z" fill="#000000" stroke="none"/>
+</svg>

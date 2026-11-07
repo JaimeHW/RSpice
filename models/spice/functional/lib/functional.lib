@@ -67,3 +67,33 @@ BSRC VP 0 I=0.5*(I(VSNS)+sqrt(I(VSNS)*I(VSNS)+1e-18))
 BSNK 0 VN I=0.5*(sqrt(I(VSNS)*I(VSNS)+1e-18)-I(VSNS))
 IQ VP VN {IQ}
 .ends RSPICE_FN_COMPARATOR
+
+* Operational transconductance amplifier. Pins: IN+ IN- IABC V+ V- OUT.
+* The current into IABC biases a differential pair: the output current is
+* IABC*tanh((V(IN+)-V(IN-)+VOS)/VLIN), so the transconductance is IABC/VLIN
+* and the output saturates at +-IABC. IABC sits 0.65 V above V-, rising 10 mV
+* per mA beyond that, and takes no current below it. The output is a current
+* loaded by ROUT and COUT, held HEADROOM inside the supply pins.
+.subckt RSPICE_FN_OTA INP INN IABC VP VN OUT
++ VLIN=51.7m VOS=0 ROUT=10Meg COUT=5p HEADROOM=1 IQ=1m
+VOS NP INP {VOS}
+VIA IABC NIA 0
+A0 VN VN VN VN VN VN NIA VN OTA G=0 LINEAR VHIGH=0.65 VLOW=-1e9 RCLAMP=10
+FIA 0 NIB VIA 1
+RIB NIB 0 1 NOISY=0
+A1 INN NP 0 0 0 0 NTH 0 OTA G={1/VLIN} IOUT=1 ISINK=-1 VHIGH=1e9 VLOW=-1e9
+RTH NTH 0 1 NOISY=0
+A2 0 NTH NIB 0 0 0 NO 0 OTA G=1 LINEAR VHIGH=1e9 VLOW=-1e9
+VSNS NO OUT 0
+ROUT OUT 0 {ROUT}
+COUT OUT 0 {COUT}
+EHI NXH 0 VP 0 1
+VHI NXH NHI {HEADROOM}
+ELO NXL 0 VN 0 1
+VLO NLO NXL {HEADROOM}
+A3 NHI NHI NHI NHI NHI NHI OUT NHI OTA G=0 LINEAR VHIGH=0 VLOW=-1e9 RCLAMP=1
+A4 NLO NLO NLO NLO NLO NLO OUT NLO OTA G=0 LINEAR VHIGH=1e9 VLOW=0 RCLAMP=1
+BSRC VP 0 I=0.5*(I(VSNS)+sqrt(I(VSNS)*I(VSNS)+1e-18))
+BSNK 0 VN I=0.5*(sqrt(I(VSNS)*I(VSNS)+1e-18)-I(VSNS))
+IQ VP VN {IQ}
+.ends RSPICE_FN_OTA

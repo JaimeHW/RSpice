@@ -75,12 +75,21 @@ impl Bench {
             .unwrap_or_else(|error| panic!("{error}\n{}", generated.netlist))
     }
 
-    fn operating_point(&self, node: &str) -> f64 {
-        Engine::default()
+    fn operating_points(&self, nodes: &[&str]) -> Vec<f64> {
+        let op = Engine::default()
             .run_dc_op(&self.deck())
-            .expect("operating point solves")
-            .try_voltage_named(node)
-            .unwrap_or_else(|| panic!("no node {node}"))
+            .expect("operating point solves");
+        nodes
+            .iter()
+            .map(|node| {
+                op.try_voltage_named(node)
+                    .unwrap_or_else(|| panic!("no node {node}"))
+            })
+            .collect()
+    }
+
+    fn operating_point(&self, node: &str) -> f64 {
+        self.operating_points(&[node])[0]
     }
 }
 
@@ -125,4 +134,24 @@ fn a_placed_open_collector_comparator_releases_its_output_to_the_pull_up() {
     bench.primitive(ComponentType::Resistor, "RPU", "10k", &["pu", "out"]);
     let out = bench.operating_point("out");
     assert!((out - 12.0).abs() < 1e-6, "{out}");
+}
+
+#[test]
+fn a_placed_ota_drives_its_bias_current_times_tanh_into_a_load() {
+    let mut bench = Bench::default();
+    supplies(&mut bench, "5", "-5");
+    bench.primitive(ComponentType::CurrentSource, "IB", "100u", &["vp", "iabc"]);
+    bench.primitive(ComponentType::VoltageSource, "VIN", "10m", &["in", "0"]);
+    bench.part(
+        "rspice.functional.ota",
+        "X1",
+        "",
+        &["in", "0", "iabc", "vp", "vn", "out"],
+    );
+    bench.primitive(ComponentType::Resistor, "RL", "10k", &["out", "0"]);
+    // The load in parallel with the 10 MOhm ROUT.
+    let load = 1.0 / (1.0 / 10e3 + 1.0 / 10e6);
+    let expected = 100e-6 * (10e-3_f64 / 51.7e-3).tanh() * load;
+    let out = bench.operating_point("out");
+    assert!((out - expected).abs() < 1e-6 * expected, "{out} vs {expected}");
 }
