@@ -2254,10 +2254,7 @@ mod tests {
         contract.validate().unwrap();
         let result = generate(&contract);
         assert!(
-            result.netlist.contains(
-                ".GLOBAL VDD
-"
-            ),
+            result.netlist.contains(".GLOBAL VDD\n"),
             "{}",
             result.netlist
         );
@@ -2391,6 +2388,94 @@ mod tests {
                     result.netlist
                 );
             }
+        }
+    }
+
+    /// A supply symbol drawn inside a child cell is the design's rail: the
+    /// deck declares it once with `.GLOBAL`, the cell's subcircuit reaches it
+    /// without a port, and the top drives the same node.
+    #[test]
+    fn a_supply_symbol_in_a_child_cell_is_the_top_level_rail() {
+        use rspice_design::schematic::net_label::SupplyGlyph;
+        let mut libraries = LibraryCatalog::default();
+        let mut library = Library::new("work");
+        let mut cell = Cell::new("rail");
+        cell.add_view(View::new("schematic", ViewType::Schematic));
+        library.add_cell(cell);
+        libraries.add_library(library);
+
+        let supplied = |components: Vec<(Component, [&str; 2])>| {
+            let mut schematic = Schematic::default();
+            let mut labels = Vec::new();
+            for (component, nodes) in &components {
+                for ((_, point), node) in component.terminal_positions().into_iter().zip(nodes) {
+                    let id = labels.len() as u64 + 10;
+                    labels.push(if *node == "VDD" {
+                        NetLabel::supply(id, point, *node, SupplyGlyph::Bar)
+                    } else {
+                        NetLabel::new(id, point, *node)
+                    });
+                }
+            }
+            let document = schematic.document_mut_for_test();
+            document.components = components
+                .into_iter()
+                .map(|(component, _)| component)
+                .collect();
+            document.net_labels = labels;
+            schematic
+        };
+        let child = supplied(vec![(
+            Component::new(1, ComponentType::Resistor, Point::new(0, 0))
+                .with_name_value("R1", "1k"),
+            ["VDD", "0"],
+        )]);
+        let mut top = supplied(vec![
+            (
+                Component::new(1, ComponentType::VoltageSource, Point::new(0, 0))
+                    .with_name_value("V1", "5"),
+                ["VDD", "0"],
+            ),
+            (
+                Component::new(2, ComponentType::Resistor, Point::new(200, 0))
+                    .with_name_value("RL", "2k"),
+                ["VDD", "0"],
+            ),
+        ]);
+        let mut binding = LibraryCellInstance::new("work", "rail", "schematic");
+        binding.bind_interface(&[]);
+        top.document_mut_for_test().components.push(
+            Component::new(9, ComponentType::CellInstance, Point::new(600, 0))
+                .with_library_cell(binding)
+                .with_name_value("X1", "rail"),
+        );
+        let mut buffers = HashMap::new();
+        buffers.insert(CellViewRef::new("work", "rail", "schematic").key(), child);
+        buffers.insert("user/top/schematic".to_owned(), top.clone());
+        let contract = ConnectivityContract::default();
+        let hierarchy =
+            HierarchySource::from_workspace(&libraries, &buffers).with_connectivity(&contract);
+        let result = generate_netlist_hierarchical(
+            &top,
+            &[],
+            &hierarchy,
+            &crate::netlist_gen::NetlistSourceData::new(&crate::netlist_gen::FixtureSourceFiles),
+        );
+
+        assert!(result.errors.is_empty(), "{:?}", result.errors);
+        let deck = &result.netlist;
+        assert_eq!(deck.matches(".GLOBAL VDD!").count(), 1, "{deck}");
+        let subckt = deck
+            .lines()
+            .find(|line| line.to_ascii_lowercase().starts_with(".subckt"))
+            .unwrap_or_else(|| panic!("the child cell is a subcircuit:\n{deck}"));
+        assert!(!subckt.contains("VDD"), "the rail is not a port: {subckt}");
+        for card in ["V1", "RL", "R1"] {
+            let line = deck
+                .lines()
+                .find(|line| line.split_whitespace().next() == Some(card))
+                .unwrap_or_else(|| panic!("{card} is written:\n{deck}"));
+            assert_eq!(line.split_whitespace().nth(1), Some("VDD!"), "{line}");
         }
     }
 }
