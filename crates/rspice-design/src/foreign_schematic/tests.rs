@@ -244,6 +244,16 @@ fn a_qsch_drawing_reads_its_components_nets_and_texts() {
     // Code 6 turns the source three quarters counter-clockwise: its `+` pin,
     // above its origin, lands to the right.
     assert_eq!(source.orientation, ForeignOrientation::new(1, false));
+    // QSPICE turns a turned symbol's texts back upright: the name, left of
+    // the body, runs leftwards and the value, right of it, rightwards, so
+    // once the source is turned the name stands above it and the value
+    // hangs below.
+    let runs = source
+        .windows
+        .iter()
+        .map(|window| window.alignment.as_str())
+        .collect::<Vec<_>>();
+    assert_eq!(runs, ["Right", "Left"]);
     let definition = source.embedded.as_ref().expect("QSPICE embeds the symbol");
     assert_eq!(definition.symbol_type, "V");
     assert_eq!(

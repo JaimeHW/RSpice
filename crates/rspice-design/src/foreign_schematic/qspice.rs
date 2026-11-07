@@ -253,6 +253,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
                 texts.push((
                     text_points.first().copied().unwrap_or_default(),
                     quoted(fields).join(" "),
+                    text_alignment(flags.get(1).map(String::as_str)),
                 ));
             }
             _ => definition
@@ -269,7 +270,7 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
     }
     let mut windows = Vec::new();
     let mut texts = texts.into_iter();
-    if let Some((offset, name)) = texts.next() {
+    if let Some((offset, name, alignment)) = texts.next() {
         attributes.push(ForeignAttribute {
             name: "InstName".to_owned(),
             value: name,
@@ -277,21 +278,21 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
         windows.push(ForeignWindow {
             attribute: 0,
             offset,
-            alignment: "Left".to_owned(),
+            alignment,
         });
     }
     let rest = texts.collect::<Vec<_>>();
-    if let Some((offset, _)) = rest.first() {
+    if let Some((offset, _, alignment)) = rest.first() {
         windows.push(ForeignWindow {
             attribute: 3,
             offset: *offset,
-            alignment: "Left".to_owned(),
+            alignment: alignment.clone(),
         });
         attributes.push(ForeignAttribute {
             name: "Value".to_owned(),
             value: rest
                 .iter()
-                .map(|(_, text)| text.as_str())
+                .map(|(_, text, _)| text.as_str())
                 .collect::<Vec<_>>()
                 .join(" "),
         });
@@ -305,6 +306,43 @@ fn component(node: &Node) -> Result<ForeignSymbol, ForeignParseError> {
         embedded: Some(definition),
         line: node.line,
     })
+}
+
+/// The way a symbol's text runs from its anchor, named as LTspice names it in
+/// the symbol's own frame. QSPICE's text code keeps the run in its low four
+/// bits: bits 2 and 3 say where it lies across (1 starts at the anchor, 2
+/// ends there, 3 centres on it) and bits 0 and 1 where it lies down (1 hangs
+/// below the anchor, 2 stands on it, 3 centres on it). Bits 5 and 6 turn the
+/// text counter-clockwise in quarters, which keeps it upright on a turned
+/// symbol.
+fn text_alignment(code: Option<&str>) -> String {
+    let code = code.and_then(|code| code.parse::<u8>().ok()).unwrap_or(7);
+    let across = match (code >> 2) & 3 {
+        1 => 1,
+        2 => -1,
+        _ => 0,
+    };
+    let down = match code & 3 {
+        1 => 1,
+        2 => -1,
+        _ => 0,
+    };
+    let mut run = if across == 0 {
+        ForeignPoint::new(0, down)
+    } else {
+        ForeignPoint::new(across, 0)
+    };
+    for _ in 0..(code >> 5) & 3 {
+        run = ForeignPoint::new(run.y, -run.x);
+    }
+    match (run.x, run.y) {
+        (1, _) => "Left",
+        (-1, _) => "Right",
+        (_, 1) => "Top",
+        (_, -1) => "Bottom",
+        _ => "Center",
+    }
+    .to_owned()
 }
 
 /// QSPICE's orientation code: the low three bits turn the symbol
