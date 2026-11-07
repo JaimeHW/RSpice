@@ -43,7 +43,9 @@ fn probe_bias(model: &ModelDef) -> Option<String> {
     let name = &model.name;
     let level = declared_level(model);
     let body = match model.model_type.to_ascii_uppercase().as_str() {
-        "D" => format!("V1 a 0 0.6\nD1 a 0 {name}\n"),
+        // A source behind a resistor forward-biases every diode card, the
+        // LEDs too, whose knee sits near 2-3 V.
+        "D" => format!("V1 a 0 5\nR1 a k 1k\nD1 k 0 {name}\n"),
         // VBIC's thermal node is optional on a three-terminal placement, so
         // one collector/base bias exercises both bipolar levels.
         "NPN" => format!("V1 c 0 5\nV2 b 0 0.65\nQ1 c b 0 {name}\n"),
@@ -82,6 +84,10 @@ fn fallback_probe_deck(model: &ModelDef) -> Option<String> {
 /// sense: an off device leaks at saturation-current scale, several decades
 /// under this, while every card here is biased hard on.
 const CONDUCTION_FLOOR_AMPS: f64 = 1.0e-9;
+
+/// Foundation cards the component shelf places by name that are no device
+/// family's fallback: the Zener, the Schottky and the four LEDs.
+const CATALOG_CARDS: usize = 6;
 
 /// Solve one probe deck and report the magnitude of the current it draws.
 fn probed_current(deck: &str) -> Result<f64, String> {
@@ -127,11 +133,11 @@ fn every_foundation_model_card_solves_and_conducts() {
         failures.len(),
         failures.join("\n  ")
     );
-    // The fifteen unbound-device family defaults plus the Zener, which is a
-    // catalog card rather than any family's fallback.
+    // The fifteen unbound-device family defaults plus the catalog cards,
+    // which are no family's fallback.
     assert_eq!(
         probed,
-        FoundationDeviceFamily::ALL.len() + 1,
+        FoundationDeviceFamily::ALL.len() + CATALOG_CARDS,
         "expected one probe per foundation model card"
     );
 }
@@ -232,7 +238,7 @@ fn every_fallback_card_binds_and_conducts_without_a_model_line() {
     );
     assert_eq!(
         probed,
-        FoundationDeviceFamily::ALL.len() + 1,
+        FoundationDeviceFamily::ALL.len() + CATALOG_CARDS,
         "expected one card-less probe per foundation card"
     );
 }
@@ -243,10 +249,13 @@ fn foundation_library_is_small_and_indexed() {
     Netlist::parse(content).expect("foundation library parses");
     let indexed = LibParser::new(".").parse_string(content);
     assert!(indexed.is_ok(), "{:?}", indexed.errors);
-    assert_eq!(indexed.top_level_models.len(), 16);
+    assert_eq!(
+        indexed.top_level_models.len(),
+        FoundationDeviceFamily::ALL.len() + CATALOG_CARDS
+    );
     assert_eq!(indexed.top_level_subcircuits.len(), 1);
     assert!(
-        content.len() < 4096,
+        content.len() < 4608,
         "foundation library unexpectedly grew to {} bytes",
         content.len()
     );
