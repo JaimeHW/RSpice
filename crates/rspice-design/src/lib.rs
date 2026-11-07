@@ -5,6 +5,7 @@ pub mod connectivity;
 pub mod connectivity_contract;
 pub mod drc;
 pub mod fast_hash;
+pub mod foreign_schematic;
 pub mod hierarchy;
 pub mod library;
 pub mod model_bound_symbol;
