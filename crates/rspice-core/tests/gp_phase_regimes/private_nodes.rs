@@ -232,11 +232,19 @@ fn gp_exact_delay_solves_biased_charge_through_private_terminal_resistances() {
         for polarity in [1.0, -1.0] {
             for regime in REGIMES {
                 let coarse = run_private(regime, polarity, dialect, 4e-11);
-                let fine = run_private(regime, polarity, dialect, 4e-12);
                 // The refinement gates below need a genuinely finer accepted
-                // grid. Every dialect's 40 ps run now keeps at most 281
-                // samples against about 1,350 at 4 ps, so the same pair
-                // qualifies BestAvailable as well.
+                // grid. Read the ngspice or Xyce way, the 40 ps run keeps at
+                // most 281 samples against about 1,350 at 4 ps. Read the
+                // native way, every sine source is resolved whatever TSTEP
+                // says, and the 9.6 GHz harmonic holds the 40 ps run and a
+                // 4 ps one alike to about 2.6 ps, some 1,930 samples; its
+                // finer run asks for 1 ps.
+                let fine_step = if dialect == SpiceDialect::BestAvailable {
+                    1e-12
+                } else {
+                    4e-12
+                };
+                let fine = run_private(regime, polarity, dialect, fine_step);
                 assert!(
                     fine.samples >= 2 * coarse.samples,
                     "coarse={coarse:?}, fine={fine:?}"
