@@ -645,7 +645,7 @@ pub fn poll_veriloga_compile(app: &mut RSpiceApp) {
                         super::veriloga_interface::view_selecting_module(
                             &app.state.model.library_manager,
                             bundle,
-                            &report.abi.module_name.to_string(),
+                            report.abi.module_name.as_ref(),
                         )
                         .cloned()
                     });
